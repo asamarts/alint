@@ -1,0 +1,27 @@
+name: dir_create makes a required directory that is missing
+# dir_create is Safe, so a bare `alint fix` applies it. `dir_exists` fires a
+# PATH-LESS violation (no matching directory exists); the fixer creates the
+# literal `paths` directory (recursively), and the re-walk then sees it -> the
+# tree converges.
+tags: [fix, dir_exists, dir_create]
+
+given:
+  tree:
+    README.md: "# hi\n"
+  config: |
+    version: 1
+    rules:
+      - id: needs-adr-dir
+        kind: dir_exists
+        paths: "docs/adr"
+        level: error
+        fix:
+          dir_create: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: needs-adr-dir, level: error}
+  - applied: [needs-adr-dir]
+  - violations: []

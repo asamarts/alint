@@ -816,6 +816,20 @@ fn rule_git_untrack() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `dir_exists` rule fixed via `dir_create` (Phase 3): the required literal
+/// directory `_reqdir` is absent from every generated tree (the dir generator
+/// never emits that name), so `dir_exists` fires and `dir_create` makes it -- a
+/// Safe fix that converges (the re-walk then sees the dir) and is idempotent (a
+/// second pass finds it already present). No planted trigger needed (the ABSENCE
+/// of `_reqdir` is the trigger, like `file_create`'s absent target).
+fn rule_dir_create() -> impl Strategy<Value = String> {
+    rule_id("dc").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: dir_exists\n    paths: \"_reqdir\"\n    level: error\n    fix:\n      dir_create: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -863,6 +877,8 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // the spawning `git_untrack` op (Phase 3): a no-op on the non-git property
         // trees (git_tracked_only), so it only exercises the op-coverage gate.
         rule_git_untrack(),
+        // the `dir_create` op (Phase 3): creates the absent `_reqdir` -> converges.
+        rule_dir_create(),
     ]
 }
 

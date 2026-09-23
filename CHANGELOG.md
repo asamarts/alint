@@ -71,6 +71,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `applicability: safe` opts a specific rule into running on a bare fix). Its
   idempotence is the command author's business, so it is exempt from the harness's
   convergence requirement.
+- New `dir_create` auto-fix op for `dir_exists` (`fix: { dir_create: {} }`):
+  creates the required directory (recursively) when it is missing. `Safe` by
+  default (an empty directory is benign). The rule's `paths` must be one literal
+  directory (a glob or multiple patterns is ambiguous and rejected at load). Note
+  that git does not track an empty directory, so pair it with a `file_create` of a
+  `.gitkeep` if the directory must persist in the repo.
 
 ### Changed
 

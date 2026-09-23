@@ -256,6 +256,7 @@ DirExistsRule {
     ],
     root_only: false,
     git_tracked_only: false,
+    fixer: None,
 }
 
 === kind: dir_only_contains | id: src-only-rs ===

@@ -424,6 +424,73 @@ impl Fixer for ChmodFixer {
     }
 }
 
+/// Creates the (single, literal) directory a `dir_exists` rule requires, when it
+/// is missing. The target comes from the RULE (`dir_exists` fires a path-less
+/// violation), so the fixer carries it. `Safe` by default (an empty directory is
+/// benign). Creating an empty dir has no worktree-diff form (git does not track
+/// empty directories), so like `git_untrack` it stages/previews as "would create"
+/// and offers no `fix_edit`.
+#[derive(Debug)]
+pub struct DirCreateFixer {
+    dir: PathBuf,
+    applicability: Applicability,
+}
+
+impl DirCreateFixer {
+    #[must_use]
+    pub fn new(dir: PathBuf, applicability: Applicability) -> Self {
+        Self { dir, applicability }
+    }
+}
+
+impl Fixer for DirCreateFixer {
+    fn describe(&self) -> String {
+        format!("create the directory {}", self.dir.display())
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn apply(&self, _violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        // `dir_exists`'s violation carries no path (it fires when NO matching dir
+        // exists), so the fixer creates its own configured target.
+        let abs = ctx.root.join(&self.dir);
+        if abs.is_dir() {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is already a directory",
+                self.dir.display()
+            )));
+        }
+        if abs.exists() {
+            // A non-directory (file / symlink) already occupies the path -- do NOT
+            // clobber it; the mismatch is a human call.
+            return Ok(FixOutcome::Skipped(format!(
+                "{} exists but is not a directory",
+                self.dir.display()
+            )));
+        }
+        // A dir creation has no worktree hunk to stage; dry-run / `--diff` report
+        // the intent and return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            return Ok(FixOutcome::Applied(format!(
+                "would create directory {}",
+                self.dir.display()
+            )));
+        }
+        std::fs::create_dir_all(&abs).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "created directory {}",
+            self.dir.display()
+        )))
+    }
+
+    // No `fix_edit`: an empty directory has no editor/worktree-edit form.
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1006,6 +1073,64 @@ mod tests {
                 from: PathBuf::from("FooBar.rs"),
                 to: PathBuf::from("foo_bar.rs"),
             }]
+        );
+    }
+
+    #[test]
+    fn dir_create_makes_the_missing_directory_recursively() {
+        let tmp = TempDir::new().unwrap();
+        // dir_exists fires a PATH-LESS violation, so the fixer uses its own target.
+        let v = Violation::new("missing dir");
+        let out = DirCreateFixer::new(PathBuf::from("docs/adr"), Applicability::Safe)
+            .apply(&v, &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "got {out:?}");
+        assert!(
+            tmp.path().join("docs/adr").is_dir(),
+            "creates the directory (and its parents)"
+        );
+    }
+
+    #[test]
+    fn dir_create_is_idempotent_when_the_dir_already_exists() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("docs")).unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("already")),
+            "an existing dir is a no-op skip, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn dir_create_does_not_clobber_a_non_directory() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("docs"), b"a file, not a dir\n").unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("not a directory")),
+            "got {out:?}"
+        );
+        assert!(tmp.path().join("docs").is_file(), "the file is untouched");
+    }
+
+    #[test]
+    fn dir_create_dry_run_does_not_create() {
+        let tmp = TempDir::new().unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, true))
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => assert!(s.starts_with("would create"), "{s}"),
+            FixOutcome::Skipped(s) => panic!("expected a would-create report, got Skipped({s})"),
+        }
+        assert!(
+            !tmp.path().join("docs").exists(),
+            "dry-run must not create the directory"
         );
     }
 }

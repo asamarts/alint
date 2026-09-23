@@ -1079,7 +1079,9 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         "remove_value",
         // `chmod` sets/clears a permission bit -- no ruleset bytes, no injection.
         "chmod",
-        // NOTE: `git_untrack` is NOT here -- it SPAWNS (`git rm --cached`), so it is
+        // `dir_create` makes an empty directory -- no ruleset bytes, no spawn.
+        "dir_create",
+        // NOTE: `git_untrack` and `command` are NOT here -- they SPAWN, so they are
         // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
         // a strictly stronger gate than the content demotion.
     ];

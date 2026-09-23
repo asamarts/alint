@@ -1,7 +1,12 @@
 //! `dir_exists` — at least one directory matching `paths` must exist.
 
-use alint_core::{Context, Error, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Applicability, Context, Error, FixSpec, Fixer, Level, PathsSpec, Result, Rule, RuleSpec, Scope,
+    Violation,
+};
 use serde::Deserialize;
+
+use crate::fixers::DirCreateFixer;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -32,10 +37,17 @@ pub struct DirExistsRule {
     /// tracked set is empty, so the rule reports the "missing"
     /// violation as if no matching directory existed.
     git_tracked_only: bool,
+    /// The optional `dir_create` fix (creates the missing literal directory).
+    fixer: Option<DirCreateFixer>,
 }
 
 impl Rule for DirExistsRule {
     alint_core::rule_common_impl!();
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
     fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
         if self.git_tracked_only {
             alint_core::GitTrackedMode::DirAware
@@ -106,6 +118,34 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         ));
     };
     let opts: Options = spec.deserialize_options()?;
+    // The only supported fix op is `dir_create`, which creates the required
+    // directory -- so `paths` must name ONE literal directory (a glob or multiple
+    // patterns is ambiguous: which directory would we create?).
+    let fixer = match &spec.fix {
+        None => None,
+        Some(FixSpec::DirCreate { dir_create }) => {
+            let dir = single_literal_dir(paths).ok_or_else(|| {
+                Error::rule_config(
+                    &spec.id,
+                    "dir_create requires `paths` to be a single literal directory \
+                     (no glob metacharacters, no `..`)",
+                )
+            })?;
+            Some(DirCreateFixer::new(
+                dir,
+                dir_create.applicability.unwrap_or(Applicability::Safe),
+            ))
+        }
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with dir_exists (only `dir_create`)",
+                    other.op_name()
+                ),
+            ));
+        }
+    };
     Ok(Box::new(DirExistsRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -115,7 +155,27 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         patterns: patterns_of(paths),
         root_only: opts.root_only,
         git_tracked_only: opts.git_tracked_only,
+        fixer,
     }))
+}
+
+/// The single, literal directory `paths` names, or `None` if it is a glob,
+/// multiple patterns, or contains a `..` component -- any of which makes
+/// "the directory to create" ambiguous or out-of-tree, so `dir_create` rejects it.
+fn single_literal_dir(paths: &PathsSpec) -> Option<std::path::PathBuf> {
+    let PathsSpec::Single(s) = paths else {
+        return None;
+    };
+    if s.contains(['*', '?', '[', ']', '{', '}']) {
+        return None;
+    }
+    let p = std::path::PathBuf::from(s);
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    Some(p)
 }
 
 fn patterns_of(spec: &PathsSpec) -> Vec<String> {
@@ -278,5 +338,44 @@ scope_filter:
             ))
             .is_err()
         );
+    }
+
+    #[test]
+    fn build_accepts_dir_create_for_a_single_literal_dir() {
+        let rule = build(&spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"docs/adr\"\nlevel: error\nfix:\n  dir_create: {}\n",
+        ))
+        .expect("dir_create builds for a literal directory");
+        assert!(rule.fixer().is_some(), "the dir_create fixer attaches");
+    }
+
+    #[test]
+    fn build_rejects_dir_create_on_a_glob_or_multiple_paths() {
+        // A glob or multiple patterns is ambiguous: which directory would we create?
+        for paths in [
+            "\"**/generated\"",
+            "\"gen*\"",
+            "[\"a\", \"b\"]",
+            "\"../up\"",
+        ] {
+            let spec = spec_yaml(&format!(
+                "id: t\nkind: dir_exists\npaths: {paths}\nlevel: error\nfix:\n  dir_create: {{}}\n",
+            ));
+            let err = build(&spec).unwrap_err().to_string();
+            assert!(
+                err.contains("single literal"),
+                "{paths} must be rejected: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_rejects_an_incompatible_fix_op() {
+        let spec = spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"docs\"\nlevel: error\nfix:\n  file_remove: {}\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("file_remove"), "{err}");
+        assert!(err.contains("not compatible with dir_exists"), "{err}");
     }
 }

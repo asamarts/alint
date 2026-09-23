@@ -444,6 +444,9 @@ pub enum FixSpec {
     Command {
         command: CommandFixSpec,
     },
+    DirCreate {
+        dir_create: DirCreateFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -530,6 +533,7 @@ impl FixSpec {
         "chmod",
         "git_untrack",
         "command",
+        "dir_create",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -553,6 +557,7 @@ impl FixSpec {
             Self::Chmod { .. } => "chmod",
             Self::GitUntrack { .. } => "git_untrack",
             Self::Command { .. } => "command",
+            Self::DirCreate { .. } => "dir_create",
         }
     }
 }
@@ -847,6 +852,20 @@ pub struct GitUntrackFixSpec {
 /// like the `command` rule kind itself) and is **`Unsafe` by default** (running an
 /// arbitrary command on a bare `alint fix` is opt-in). A user may promote a
 /// specific rule to `Safe` in their OWN top-level config.
+/// `dir_create`: create the (single, literal) directory the host `dir_exists`
+/// rule requires. A **fixed-behavior** op: it writes no ruleset bytes and does not
+/// spawn, so it is honored at its tier from any source. **`Safe` by default** (an
+/// empty directory is benign and easily removed). Only valid when the rule's
+/// `paths` is one literal directory (a glob or multiple patterns is ambiguous and
+/// rejected at load). Note: git does not track an empty directory, so this creates
+/// it for local tooling; pair with a `file_create` of a `.gitkeep` to persist it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirCreateFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandFixSpec {
@@ -1304,6 +1323,7 @@ mod tests {
             ("chmod: {}", "chmod"),
             ("git_untrack: {}", "git_untrack"),
             ("command:\n  run: [\"x\"]\n", "command"),
+            ("dir_create: {}", "dir_create"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

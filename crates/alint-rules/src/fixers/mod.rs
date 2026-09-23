@@ -36,7 +36,7 @@ pub mod structured;
 
 pub use command_ops::CommandFixFixer;
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
-pub use file_ops::{ChmodFixer, FileRemoveFixer, FileRenameFixer};
+pub use file_ops::{ChmodFixer, DirCreateFixer, FileRemoveFixer, FileRenameFixer};
 pub use git_ops::GitUntrackFixer;
 pub(crate) use hygiene::line_is_blank;
 pub use hygiene::{
