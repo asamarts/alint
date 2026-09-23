@@ -58,10 +58,10 @@ fn canonical_fix_report() -> FixReport {
                     // `suggested` status enum value and summary count.
                     status: FixStatus::Suggested {
                         summary: "would set $.license to \"Apache-2.0\"".into(),
-                        edit: FixEdit::SetContent {
+                        edit: Some(FixEdit::SetContent {
                             path: std::path::PathBuf::from("package.json"),
                             content: Vec::new(),
-                        },
+                        }),
                     },
                 }],
             },

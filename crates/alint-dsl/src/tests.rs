@@ -1437,6 +1437,28 @@ fn finalize_rejects_a_top_level_git_untrack_template() {
 }
 
 #[test]
+fn finalize_rejects_a_require_nested_git_untrack_in_a_top_level_template() {
+    // Defense-in-depth (audit A1): the finalize template backstop must recurse
+    // `require:`, matching the per-source gate. A spawning fix buried in a
+    // top-level template's `require:` block would otherwise LOAD (the backstop
+    // scanned only the template's top-level `fix:`), leaving the "no spawning fix
+    // in ANY template, EVERY source" invariant enforced non-uniformly.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\ntemplates:\n  - id: t\n    kind: for_each_dir\n    select: \"**/\"\n    require:\n      - id: inner\n        kind: file_absent\n        paths: \"*\"\n        git_tracked_only: true\n        fix:\n          git_untrack: {}\nrules:\n  - id: x\n    level: error\n    extends_template: t\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(
+        err.contains("git_untrack"),
+        "require-nested op not gated: {err}"
+    );
+    assert!(err.contains("templates"), "{err}");
+}
+
+#[test]
 fn load_allows_git_untrack_in_the_users_top_level_config() {
     // No over-rejection: the whole point of the gate is that a `git_untrack` fix
     // in the USER'S OWN top-level `rules:` is allowed (it is their explicit call

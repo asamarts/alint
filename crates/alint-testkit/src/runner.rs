@@ -473,10 +473,10 @@ mod tests {
                     violation: Violation::new("v"),
                     status: FixStatus::Suggested {
                         summary: "would edit x".into(),
-                        edit: FixEdit::SetContent {
+                        edit: Some(FixEdit::SetContent {
                             path: std::path::PathBuf::from("x"),
                             content: Vec::new(),
-                        },
+                        }),
                     },
                 }],
             }],

@@ -13,7 +13,7 @@
 
 use std::path::Path;
 
-use alint_core::git::{UntrackOutcome, collect_tracked_paths, untrack_path};
+use alint_core::git::{UntrackOutcome, untrack_path};
 use alint_core::{Applicability, Error, FixContext, FixOutcome, Fixer, Result, Violation};
 
 /// Untracks the violating file from git's index (`git rm --cached`), leaving it
@@ -46,33 +46,21 @@ impl Fixer for GitUntrackFixer {
                 "violation did not carry a path".to_string(),
             ));
         };
-        // `&PathBuf` -> `&Path` once, so the tracked-set lookup and the untrack
-        // call both take a plain `&Path` (no method-resolution ambiguity).
+        // `&PathBuf` -> `&Path` once (no method-resolution ambiguity).
         let rel: &Path = path;
         // Dry-run / stage (`--diff`): a git-untrack changes the INDEX, not the
         // working tree, so there is NO worktree hunk to stage -- nothing is pushed
-        // to `stage_ops`. We still classify read-only (never spawning `git rm`) so
-        // the report is faithful: a not-a-repo or already-untracked path is a Skip
-        // in every mode, never a spurious "would untrack" (round-4 dry-run
-        // faithfulness). `collect_tracked_paths` is the same advisory reader the
-        // host rule uses; it mutates nothing.
-        if ctx.dry_run || ctx.stage_ops.is_some() {
-            return Ok(match collect_tracked_paths(ctx.root) {
-                None => {
-                    FixOutcome::Skipped(format!("{} is not in a git repository", path.display()))
-                }
-                Some(tracked) if !tracked.contains(rel) => {
-                    FixOutcome::Skipped(format!("{} is already untracked", path.display()))
-                }
-                Some(_) => FixOutcome::Applied(format!(
-                    "would untrack {} from git (git rm --cached)",
-                    rel.display()
-                )),
-            });
-        }
-        // Real pass: `untrack_path` classifies (outside a repo / already untracked
-        // -> a clean skip) and only then runs `git rm --cached -- <path>`.
-        match untrack_path(ctx.root, rel) {
+        // to `stage_ops`. The preview routes through git's OWN `--dry-run` (via
+        // `untrack_path(.., true)`), so it can NEVER diverge from the real run: a
+        // path git would refuse (staged content differs from HEAD + worktree) is
+        // predicted as a skip, never a false "would untrack" (round-4 dry-run
+        // faithfulness). `--dry-run` mutates nothing.
+        let dry = ctx.dry_run || ctx.stage_ops.is_some();
+        match untrack_path(ctx.root, rel, dry) {
+            UntrackOutcome::Untracked if dry => Ok(FixOutcome::Applied(format!(
+                "would untrack {} from git (git rm --cached)",
+                rel.display()
+            ))),
             UntrackOutcome::Untracked => Ok(FixOutcome::Applied(format!(
                 "untracked {} from git (git rm --cached)",
                 rel.display()
@@ -83,6 +71,12 @@ impl Fixer for GitUntrackFixer {
             ))),
             UntrackOutcome::NotTracked => Ok(FixOutcome::Skipped(format!(
                 "{} is already untracked",
+                rel.display()
+            ))),
+            // A real failure is a fix error (exit 1); the same failure PREDICTED by
+            // the dry-run is a benign "would fail" skip (a preview must not error).
+            UntrackOutcome::Failed(stderr) if dry => Ok(FixOutcome::Skipped(format!(
+                "git rm --cached {} would fail: {stderr}",
                 rel.display()
             ))),
             UntrackOutcome::Failed(stderr) => Err(Error::Other(format!(
@@ -104,6 +98,11 @@ mod tests {
     use super::*;
     use std::path::Path;
     use std::process::Command;
+
+    // The tracked-set reader used only by the test helper `is_tracked` (the fixer
+    // itself now reaches it via `untrack_path`), so it is imported here, not at the
+    // module level, to avoid an unused import in non-test builds.
+    use alint_core::git::collect_tracked_paths;
     use tempfile::TempDir;
 
     /// Is `git` on PATH? The untrack tests genuinely shell out, so skip cleanly
@@ -149,6 +148,97 @@ mod tests {
 
     fn is_tracked(tmp: &TempDir, name: &str) -> bool {
         collect_tracked_paths(tmp.path()).is_some_and(|t| t.contains(Path::new(name)))
+    }
+
+    /// A git repo with `name` committed (HEAD holds `content`).
+    fn repo_with_committed(name: &str, content: &[u8]) -> TempDir {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(name), content).unwrap();
+        git(tmp.path(), &["init", "-q", "-b", "main"]);
+        git(tmp.path(), &["add", "--", name]);
+        git(
+            tmp.path(),
+            &[
+                "-c",
+                "user.name=t",
+                "-c",
+                "user.email=t@t",
+                "commit",
+                "-q",
+                "-m",
+                "init",
+            ],
+        );
+        tmp
+    }
+
+    #[test]
+    fn untracks_a_path_with_glob_metachars_without_collateral() {
+        // SECURITY (audit CRITICAL): a violation path containing git pathspec
+        // metacharacters (`[`, `]`, `*`) must be untracked LITERALLY. `--` ends
+        // OPTION parsing only, not globbing -- without GIT_LITERAL_PATHSPECS a
+        // `[id].tsx` route reads as a char class (matching `i.tsx`/`d.tsx`) and a
+        // file named `*` empties the whole index, all silently. git_untrack must
+        // remove ONLY the named file.
+        if !git_available() {
+            return;
+        }
+        let tmp = TempDir::new().unwrap();
+        for n in ["[id].tsx", "i.tsx", "d.tsx"] {
+            std::fs::write(tmp.path().join(n), b"x\n").unwrap();
+        }
+        git(tmp.path(), &["init", "-q", "-b", "main"]);
+        git(tmp.path(), &["add", "-A"]);
+        let v = Violation::new("x").with_path(Path::new("[id].tsx"));
+        let out = GitUntrackFixer::new(Applicability::Unsafe)
+            .apply(&v, &ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "got {out:?}");
+        assert!(!is_tracked(&tmp, "[id].tsx"), "the named file is untracked");
+        assert!(
+            is_tracked(&tmp, "i.tsx"),
+            "sibling i.tsx must NOT be collaterally untracked"
+        );
+        assert!(
+            is_tracked(&tmp, "d.tsx"),
+            "sibling d.tsx must NOT be collaterally untracked"
+        );
+    }
+
+    #[test]
+    fn dry_run_faithfully_predicts_a_staged_differs_failure() {
+        // Round-4 faithfulness: `git rm --cached` refuses (without -f) when a path's
+        // staged content differs from BOTH HEAD and the worktree. The dry-run/stage
+        // preview must predict that (it routes through git's own `--dry-run`), never
+        // a false "would untrack"; the real run then errors.
+        if !git_available() {
+            return;
+        }
+        let tmp = repo_with_committed("f.log", b"v1\n"); // HEAD = v1
+        std::fs::write(tmp.path().join("f.log"), b"v2\n").unwrap();
+        git(tmp.path(), &["add", "--", "f.log"]); // index = v2 (differs from HEAD)
+        std::fs::write(tmp.path().join("f.log"), b"v3\n").unwrap(); // worktree = v3
+        let v = Violation::new("x").with_path(Path::new("f.log"));
+        // Dry-run must NOT claim "would untrack" -- it must predict the failure.
+        let dry = GitUntrackFixer::new(Applicability::Unsafe)
+            .apply(&v, &ctx(&tmp, true))
+            .unwrap();
+        match dry {
+            FixOutcome::Skipped(reason) => assert!(reason.contains("would fail"), "{reason}"),
+            FixOutcome::Applied(s) => {
+                panic!("dry-run falsely predicted success: {s}")
+            }
+        }
+        // The real run surfaces the same failure as a fix error (not a force-remove).
+        let real = GitUntrackFixer::new(Applicability::Unsafe).apply(&v, &ctx(&tmp, false));
+        assert!(
+            real.is_err(),
+            "real run must error on staged-differs, got {real:?}"
+        );
+        assert!(
+            is_tracked(&tmp, "f.log"),
+            "the file is left tracked, never force-removed"
+        );
     }
 
     #[test]

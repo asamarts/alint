@@ -682,8 +682,8 @@ template expansion) closes it, and closing it flips that test.
   | `remove_value` | 3 | `*_path_absent` | target `path:` (the node to delete) | none | Unsafe |
   | `sort` | 6 | `ordered_block` | `comparator` / `start` / `end` / `select` / `unique` | none | Safe |
   | `dedup` | 6 | `ordered_block` only | the marked-block bounds | none | Safe |
-  | `chmod` | metadata | `executable_bit`, `shebang_has_executable`, `executable_has_shebang` | the desired bit (`require:`) | none (mode derived from `require:`) | Unsafe (Safe for shebang add-+x) |
-  | `git_untrack` | VCS | `file_absent` (and `no_committed_binaries` once built) | the violating path | `gitignore` (also append a `.gitignore` line; default true) | Unsafe, spawning (top-level-only, 5.5) |
+  | `chmod` | metadata | `executable_bit`, `shebang_has_executable` (NOT `executable_has_shebang`: ambiguous, fix-less) | the desired bit (`require:`; `shebang_has_executable` always +x) | none (mode derived; only `0o111` changes) | Safe (both hosts: the rule requires the state, reversible, touches only `0o111`) |
+  | `git_untrack` | VCS | `file_absent` (and `no_committed_binaries` once built) | the violating path | none as shipped (the optional `gitignore:` `.gitignore`-append, default true, is a deferred fast-follow) | Unsafe, spawning (top-level-only, 5.5) |
   | `sync_from` | 2.2 | `cross_file` (`identical` / `equals`) | the canonical `source:` file | none | Unsafe |
   | `insert_header` | 6 | `file_header` | (nothing: `pattern:` is a regex, unusable as literal bytes) | `text` (literal header) + `comment_style` (`line` / `block` / `auto`) | Safe (presence-guarded) |
   | `dir_create` | presence | `dir_exists` | the missing directory path | none | Safe |

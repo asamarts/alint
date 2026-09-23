@@ -39,6 +39,18 @@ const EMPTY_BLOB_OID: &str = "e69de29";
 pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Result<()> {
     for fix in staged {
         let path = fix.path.display().to_string();
+        // A permission change carries NO content diff, so it renders its git
+        // mode-change stanza REGARDLESS of whether the (unchanged) file content is
+        // UTF-8 or binary -- the UTF-8 / terminal-control gates below govern a text
+        // HUNK, which a chmod has none of. Handled FIRST so a chmod on a binary file
+        // still previews as a valid mode change rather than a non-apply-able binary
+        // summary, and always with a canonical git mode (`git_mode`).
+        if let StagedKind::Chmod { old_mode, new_mode } = fix.kind {
+            writeln!(w, "diff --git {} {}", a(&path), b(&path))?;
+            writeln!(w, "old mode {:06o}", git_mode(old_mode))?;
+            writeln!(w, "new mode {:06o}", git_mode(new_mode))?;
+            continue;
+        }
         // Non-UTF-8 on either side: a line diff isn't meaningful, so summarize.
         let (Ok(old), Ok(new)) = (std::str::from_utf8(&fix.old), std::str::from_utf8(&fix.new))
         else {
@@ -115,17 +127,27 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
                     write_hunks(&a(&from), &b(&path), old, new, w)?;
                 }
             }
-            // A permission change: git's `old mode`/`new mode` pair (6-octal,
-            // including the file-type bits, e.g. 100644 -> 100755). Content is
-            // unchanged, so there is no hunk.
-            StagedKind::Chmod { old_mode, new_mode } => {
-                writeln!(w, "diff --git {} {}", a(&path), b(&path))?;
-                writeln!(w, "old mode {old_mode:06o}")?;
-                writeln!(w, "new mode {new_mode:06o}")?;
+            // A permission change is rendered BEFORE the content gates above (it
+            // has no content diff), so it never reaches this match.
+            StagedKind::Chmod { .. } => {
+                unreachable!("StagedKind::Chmod is rendered before the content gates")
             }
         }
     }
     Ok(())
+}
+
+/// Canonicalize a raw Unix `st_mode` to the git tree mode a diff header must use.
+/// git encodes only `100644` (regular file) / `100755` (regular +x) for a blob --
+/// it does NOT track setuid/setgid/sticky -- so a raw `st_mode` like `0o104755`
+/// (setuid) is not a valid git mode and would make `git apply` misparse or drop the
+/// change. We emit the exec bit git tracks. The high bits (setuid/setgid/sticky)
+/// that `alint fix`'s own `set_permissions` preserves cannot be expressed in a git
+/// mode line, so `--diff | git apply` drops them for such a file -- an inherent,
+/// privilege-only-dropping limitation of git's diff format (documented, never a
+/// silent content corruption), and vanishingly rare (a setuid file alint chmods).
+fn git_mode(st_mode: u32) -> u32 {
+    0o100_000 | if st_mode & 0o111 != 0 { 0o755 } else { 0o644 }
 }
 
 /// Whether `bytes` contain a raw terminal-control byte that must not be echoed
@@ -218,8 +240,10 @@ fn write_binary_summary(fix: &StagedFix, w: &mut dyn Write) -> std::io::Result<(
             fix.old.len(),
             fix.new.len()
         ),
-        StagedKind::Chmod { old_mode, new_mode } => {
-            writeln!(w, "mode change {path} ({old_mode:06o} -> {new_mode:06o})")
+        // A chmod is rendered by `write_fix_diff` before either binary-summary
+        // fallback (UTF-8 / terminal-control), so it never reaches here.
+        StagedKind::Chmod { .. } => {
+            unreachable!("StagedKind::Chmod is rendered before the binary-summary fallback")
         }
     }
 }
@@ -251,6 +275,74 @@ mod tests {
         assert!(out.contains("--- a/src/x.rs"), "{out}");
         assert!(out.contains("+++ b/src/x.rs"), "{out}");
         assert!(out.contains("-b") && out.contains("+B"), "{out}");
+    }
+
+    #[test]
+    fn chmod_renders_a_canonical_git_mode_change_for_a_plain_file() {
+        // A mode-only change: a `diff --git` envelope + `old mode`/`new mode`, no hunk.
+        let out = render(&[fix(
+            "run.sh",
+            "#!/bin/sh\n",
+            "#!/bin/sh\n",
+            StagedKind::Chmod {
+                old_mode: 0o100_644,
+                new_mode: 0o100_755,
+            },
+        )]);
+        assert!(out.contains("diff --git a/run.sh b/run.sh"), "{out}");
+        assert!(out.contains("old mode 100644"), "{out}");
+        assert!(out.contains("new mode 100755"), "{out}");
+        assert!(!out.contains("@@"), "a mode-only change has no hunk: {out}");
+    }
+
+    #[test]
+    fn chmod_canonicalizes_a_setuid_mode_to_a_valid_git_mode() {
+        // Audit F3-1: a setuid file (0o104755) clearing +x -> 0o104644. git has no
+        // encoding for the setuid bit, so the header must use the CANONICAL git mode
+        // (100755 -> 100644), NOT the raw st_mode `104755`/`104644` -- which is not a
+        // valid git mode and makes `git apply` misparse or silently drop the change.
+        let out = render(&[fix(
+            "tool",
+            "x",
+            "x",
+            StagedKind::Chmod {
+                old_mode: 0o104_755,
+                new_mode: 0o104_644,
+            },
+        )]);
+        assert!(out.contains("old mode 100755"), "{out}");
+        assert!(out.contains("new mode 100644"), "{out}");
+        assert!(
+            !out.contains("104755") && !out.contains("104644"),
+            "raw st_mode must never leak into a git mode line: {out}"
+        );
+    }
+
+    #[test]
+    fn chmod_on_binary_content_still_renders_a_mode_diff() {
+        // Audit F3-1: a chmod's content is unchanged; even when that content is
+        // BINARY (a NUL / 0xFF), the preview must be a valid git mode change, NOT a
+        // "mode change ..." binary summary (which `git apply` cannot consume). The
+        // chmod is rendered BEFORE the UTF-8/terminal-control gates for this reason.
+        let staged = StagedFix {
+            path: PathBuf::from("blob.bin"),
+            old: vec![0u8, 1, 2, 0xff],
+            new: vec![0u8, 1, 2, 0xff],
+            kind: StagedKind::Chmod {
+                old_mode: 0o100_755,
+                new_mode: 0o100_644,
+            },
+        };
+        let out = render(&[staged]);
+        assert!(out.contains("diff --git a/blob.bin b/blob.bin"), "{out}");
+        assert!(
+            out.contains("old mode 100755") && out.contains("new mode 100644"),
+            "{out}"
+        );
+        assert!(
+            !out.contains("mode change"),
+            "a chmod must not downgrade to a binary summary: {out}"
+        );
     }
 
     #[test]

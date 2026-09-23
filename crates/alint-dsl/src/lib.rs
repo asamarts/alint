@@ -290,24 +290,22 @@ impl RawConfig {
                      command rule directly in your top-level `rules:`."
                 )));
             }
-            // The same backstop for a spawning FIX op (see `SPAWNING_FIX_OPS`): a
-            // template's `fix:` block splices into its referencing rule at finalize
+            // The same backstop for a spawning FIX op (see `SPAWNING_FIX_OPS`), at
+            // EVERY `require:` depth (audit A1): a template's `fix:` -- or one buried
+            // in its `require:` -- splices into its referencing rule at finalize
             // (below), after the extends/nested fix-op spawn gate, so a spawning
-            // fixer in a template would smuggle code execution past it. Confined to
-            // a top-level `rules:` entry like a spawning kind, for EVERY source.
-            if let Some(fix) = t.get("fix").and_then(|v| v.as_mapping()) {
-                for (op, _args) in fix {
-                    if op.as_str().is_some_and(|o| SPAWNING_FIX_OPS.contains(&o)) {
-                        let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
-                        let op = op.as_str().unwrap_or("<fix>");
-                        return Err(Error::Other(format!(
-                            "template {id:?}: `fix.{op}` spawns a process and is not allowed \
-                             in a `templates:` block - a template is expanded after the spawn \
-                             gate, so this would let a ruleset run arbitrary code. Declare the \
-                             fix directly on a rule in your top-level `rules:`."
-                        )));
-                    }
-                }
+            // fixer in a template would smuggle code execution past it. `find_spawning
+            // _fix_op` recurses, matching the per-source gate, so a require-nested
+            // spawning fix in a top-level template is refused too. Confined to a
+            // top-level `rules:` entry like a spawning kind, for EVERY source.
+            if let Some(op) = find_spawning_fix_op(t) {
+                let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
+                return Err(Error::Other(format!(
+                    "template {id:?}: `fix.{op}` spawns a process and is not allowed \
+                     in a `templates:` block - a template is expanded after the spawn \
+                     gate, so this would let a ruleset run arbitrary code. Declare the \
+                     fix directly on a rule in your top-level `rules:`."
+                )));
             }
         }
         let templates_by_id: std::collections::HashMap<String, &Mapping> = self
@@ -752,31 +750,46 @@ pub fn reject_spawning_fix_ops_in(rules: &[Mapping], source: &str) -> Result<()>
 }
 
 fn reject_spawning_fix_op_in_rule(rule: &Mapping, source: &str) -> Result<()> {
+    if let Some(op) = find_spawning_fix_op(rule) {
+        let id = rule
+            .get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(unknown)");
+        return Err(Error::Other(format!(
+            "rule {id:?}: `fix.{op}` spawns a process and is only allowed in the \
+             user's top-level config; declaring one in an extended config ({source}) - \
+             including inside a `require:` block or a `templates:` entry - is refused \
+             because it would let a ruleset run arbitrary code on a bare `alint fix`"
+        )));
+    }
+    Ok(())
+}
+
+/// The name of a spawning fix op (see [`SPAWNING_FIX_OPS`]) declared in `rule`'s
+/// `fix:` block or any nested `require:` (recursively), if any. Shared by the
+/// per-source refusal ([`reject_spawning_fix_op_in_rule`]) and the `finalize`
+/// template backstop so both scan to the SAME depth: a spawning fix must be
+/// refused whether it sits at a rule/template's top level OR inside its `require:`.
+fn find_spawning_fix_op(rule: &Mapping) -> Option<&str> {
     if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
         for (op, _args) in fix {
-            let Some(op) = op.as_str() else { continue };
-            if SPAWNING_FIX_OPS.contains(&op) {
-                let id = rule
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                return Err(Error::Other(format!(
-                    "rule {id:?}: `fix.{op}` spawns a process and is only allowed in the \
-                     user's top-level config; declaring one in an extended config ({source}) - \
-                     including inside a `require:` block or a `templates:` entry - is refused \
-                     because it would let a ruleset run arbitrary code on a bare `alint fix`"
-                )));
+            if let Some(op) = op.as_str()
+                && SPAWNING_FIX_OPS.contains(&op)
+            {
+                return Some(op);
             }
         }
     }
     if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
         for nested in require {
-            if let Some(nested_map) = nested.as_mapping() {
-                reject_spawning_fix_op_in_rule(nested_map, source)?;
+            if let Some(nested_map) = nested.as_mapping()
+                && let Some(op) = find_spawning_fix_op(nested_map)
+            {
+                return Some(op);
             }
         }
     }
-    Ok(())
+    None
 }
 
 /// Reject a spawning fix op declared inside a `templates:` block of an inherited

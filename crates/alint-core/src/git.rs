@@ -97,19 +97,33 @@ pub enum UntrackOutcome {
 /// Remove `rel_path` from git's index WITHOUT deleting it from the working tree
 /// (`git rm --cached -- <path>`), running in `root`. `rel_path` is
 /// root-relative (a rule's violation path). Unlike the advisory readers above,
-/// this MUTATES the repo, so the caller (the `git_untrack` fixer) reports
-/// Applied / Skipped / error from the returned [`UntrackOutcome`].
+/// this MUTATES the repo (unless `dry_run`), so the caller (the `git_untrack`
+/// fixer) reports Applied / Skipped / error from the returned [`UntrackOutcome`].
+///
+/// `dry_run` adds git's own `--dry-run`: git runs its FULL safety check (incl.
+/// refusing a path whose staged content differs from both HEAD and the worktree)
+/// but changes nothing, so the fixer's dry-run / `--diff` preview predicts EXACTLY
+/// what a real run would do -- `Untracked` = "would untrack", `Failed` = "would
+/// fail". The round-4 dry-run-faithfulness invariant then holds by construction
+/// (the preview and the real run are the same code path with the same git checks),
+/// rather than via a separately-maintained prediction that could drift.
 ///
 /// Safety and idempotence:
-/// - the path is passed after `--`, never as an option, so a path beginning
-///   with `-` can never be read as a git flag (option-injection guard, matching
-///   the `-`-rejection in the diff readers below);
-/// - outside a repo it returns `NotAGitRepo` and an already-untracked path
-///   returns `NotTracked` (both no-ops), so a second run is a clean skip rather
-///   than a `git` error;
-/// - it does NOT pass `-f`: a path with staged content differing from HEAD is
-///   left untouched and reported as `Failed`, never force-removed.
-pub fn untrack_path(root: &Path, rel_path: &Path) -> UntrackOutcome {
+/// - `GIT_LITERAL_PATHSPECS=1` disables git's pathspec globbing/magic, so a path
+///   containing `*` / `?` / `[` / `]` (a Next.js `[id].tsx` route, or a file
+///   literally named `*`) is matched LITERALLY. `--` only ends OPTION parsing, NOT
+///   globbing, so without this a single flagged path would collaterally untrack
+///   every sibling git globs it against -- up to the WHOLE index for a `*` -- all
+///   hidden behind a "1 applied" report. Preferred over a `:(literal)` prefix: it
+///   needs no UTF-8 round-trip, so a non-UTF-8 path (which this module preserves)
+///   stays intact. `collect_tracked_paths` takes no pathspec, so it is unaffected.
+/// - the path is passed after `--`, never as an option, so a path beginning with
+///   `-` can never be read as a git flag (option-injection guard);
+/// - outside a repo it returns `NotAGitRepo` and an already-untracked path returns
+///   `NotTracked` (both no-ops), so a second run is a clean skip, not a `git` error;
+/// - it does NOT pass `-f`: a path with staged content differing from HEAD is left
+///   untouched and reported as `Failed`, never force-removed.
+pub fn untrack_path(root: &Path, rel_path: &Path, dry_run: bool) -> UntrackOutcome {
     // Pre-classify by reusing the advisory reader: outside a repo -> NotAGitRepo;
     // not in the index -> NotTracked (the idempotent no-op). This also means the
     // real `git rm` only runs on a path we have already confirmed is tracked.
@@ -118,13 +132,16 @@ pub fn untrack_path(root: &Path, rel_path: &Path) -> UntrackOutcome {
         Some(tracked) if !tracked.contains(rel_path) => return UntrackOutcome::NotTracked,
         Some(_) => {}
     }
-    let output = Command::new("git")
-        .arg("-C")
+    let mut cmd = Command::new("git");
+    cmd.arg("-C")
         .arg(root)
-        .args(["rm", "--cached", "--quiet", "--"])
-        .arg(rel_path)
-        .output();
-    match output {
+        .env("GIT_LITERAL_PATHSPECS", "1")
+        .args(["rm", "--cached", "--quiet"]);
+    if dry_run {
+        cmd.arg("--dry-run");
+    }
+    cmd.arg("--").arg(rel_path);
+    match cmd.output() {
         Ok(o) if o.status.success() => UntrackOutcome::Untracked,
         Ok(o) => UntrackOutcome::Failed(String::from_utf8_lossy(&o.stderr).trim().to_string()),
         Err(e) => UntrackOutcome::Failed(e.to_string()),

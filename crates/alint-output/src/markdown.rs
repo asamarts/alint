@@ -678,10 +678,10 @@ mod tests {
                     },
                     status: FixStatus::Suggested {
                         summary: "would set $.debug to false".into(),
-                        edit: FixEdit::SetContent {
+                        edit: Some(FixEdit::SetContent {
                             path: Path::new("app.json").into(),
                             content: Vec::new(),
-                        },
+                        }),
                     },
                 }],
             }],

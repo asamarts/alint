@@ -941,10 +941,10 @@ mod tests {
                         .with_path(PathBuf::from("app.json")),
                     status: FixStatus::Suggested {
                         summary: "would set $.debug to false".into(),
-                        edit: alint_core::FixEdit::SetContent {
+                        edit: Some(alint_core::FixEdit::SetContent {
                             path: PathBuf::from("app.json"),
                             content: Vec::new(),
-                        },
+                        }),
                     },
                 }],
             }],

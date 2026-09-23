@@ -330,10 +330,10 @@ mod tests {
                     violation: Violation::new("v").with_path(PathBuf::from("a.txt")),
                     status: FixStatus::Suggested {
                         summary: "would set $.x to 1".into(),
-                        edit: FixEdit::SetContent {
+                        edit: Some(FixEdit::SetContent {
                             path: PathBuf::from("a.txt"),
                             content: Vec::new(),
-                        },
+                        }),
                     },
                 }],
             }],

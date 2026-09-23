@@ -110,14 +110,19 @@ pub enum FixStatus {
     /// A fix is available but was NOT applied, so the violation stands: an
     /// `Unsafe` edit without `--unsafe-fixes`, a `Suggestion`-tier edit, or
     /// an edit whose post-edit verification failed (the engine declined to
-    /// write rather than corrupt the file). `summary` is the human
-    /// one-liner; `edit` is the proposed change, carried so `fix --diff
-    /// --unsafe-fixes` can preview it and the check-side finding formats can
-    /// emit it. Produced whenever a fixer's tier is below the run's threshold --
-    /// in Phase 0 that is the `Unsafe` `file_remove` (for `file_absent` /
-    /// `no_empty_files` / `no_submodules` / `no_symlinks`) under a bare
+    /// write rather than corrupt the file). `summary` is the human one-liner.
+    /// `edit` is the proposed change when the fixer has an editor-expressible
+    /// form, carried so `fix --diff --unsafe-fixes` can preview it; it is `None`
+    /// for a fixer with no `fix_edit` -- a spawning/side-effect op such as
+    /// `git_untrack` (`git rm --cached` has no worktree edit), which is still a
+    /// genuine withheld suggestion (`requires --unsafe-fixes`), NOT a decline.
+    /// Produced whenever a fixer's tier is below the run's threshold -- the
+    /// `Unsafe` `file_remove` / `git_untrack` (on `file_absent` etc.) under a bare
     /// `alint fix`, or any fixer a user demotes to `suggestion`.
-    Suggested { summary: String, edit: FixEdit },
+    Suggested {
+        summary: String,
+        edit: Option<FixEdit>,
+    },
     /// The rule has no fixer; violation stands.
     Unfixable,
 }
@@ -417,10 +422,10 @@ mod tests {
         // counted apart from applied/skipped/unfixable.
         let sugg = || FixStatus::Suggested {
             summary: "would set $.x".into(),
-            edit: FixEdit::SetContent {
+            edit: Some(FixEdit::SetContent {
                 path: std::path::PathBuf::from("f"),
                 content: Vec::new(),
-            },
+            }),
         };
         let r = FixReport {
             non_convergent: false,

@@ -953,11 +953,11 @@ mod tests {
 
     #[test]
     fn single_fixable_scenario_tree_covers_all_fix_ops() {
-        // The whole point of the single-rule strategy is that it exercises
-        // EVERY fixer (the multi-rule catalogue covers only 4 of 12). Draw
-        // enough scenarios that each of the 12 uniform arms is overwhelmingly
-        // likely to appear (P(miss) ~ 12 * (11/12)^1500 ~ 1e-53), and assert we
-        // saw the whole `FixSpec::ALL_OP_NAMES` set.
+        // The whole point of the single-rule strategy is that it exercises EVERY
+        // fixer (the multi-rule catalogue covers only 4). Draw enough scenarios that
+        // each of the ~17 uniform arms is overwhelmingly likely to appear (P(miss) ~
+        // 17 * (16/17)^1500 ~ 1e-38), and assert we saw the whole, dynamically-read
+        // `FixSpec::ALL_OP_NAMES` set (so the count stays correct as ops are added).
         use std::collections::BTreeSet;
         let mut runner = TestRunner::default();
         let mut seen: BTreeSet<&'static str> = BTreeSet::new();

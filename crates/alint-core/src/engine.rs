@@ -1776,18 +1776,16 @@ impl Engine {
                     Some(f)
                         if self.writes_outside_changed(entry.rule.as_ref(), &v, index, created) =>
                     {
-                        match f.fix_edit(&v, &[], fix_ctx.root) {
-                            Some(edit) => FixStatus::Suggested {
-                                summary: format!(
-                                    "{} (outside --changed scope; not auto-applied)",
-                                    f.describe()
-                                ),
-                                edit,
-                            },
-                            None => FixStatus::declined(format!(
-                                "{} skipped: target is outside the --changed set",
+                        // A withheld fix (its target is outside the --changed set) is
+                        // a Suggestion carrying the proposed edit when the fixer has
+                        // one; an editless op (`git_untrack`, no `fix_edit`) still
+                        // suggests with `edit: None`, not a decline.
+                        FixStatus::Suggested {
+                            summary: format!(
+                                "{} (outside --changed scope; not auto-applied)",
                                 f.describe()
-                            )),
+                            ),
+                            edit: f.fix_edit(&v, &[], fix_ctx.root),
                         }
                     }
                     // Applied tier at the current threshold: run the fixer.
@@ -1798,32 +1796,28 @@ impl Engine {
                             Err(e) => FixStatus::errored(format!("{FIX_ERROR_PREFIX} {e}")),
                         }
                     }
-                    // Available but not applied at this threshold: surface it
-                    // as a Suggestion carrying the proposed edit (so
-                    // `fix --diff --unsafe-fixes` can preview it and the
-                    // check-side finding formats can emit it) rather than
-                    // silently applying a destructive fix. The hint is
-                    // tier-specific: an `Unsafe` fixer below the threshold IS
-                    // applied by `--unsafe-fixes`, but a `Suggestion`-tier
-                    // fixer never auto-applies, so telling the user to pass
-                    // `--unsafe-fixes` would be wrong. `fix_edit` supplies the
-                    // edit; the only Phase-0 op that reaches here is the
-                    // whole-file `file_remove`, which ignores the bytes.
+                    // Available but not applied at this threshold: surface it as a
+                    // Suggestion (so `fix --diff --unsafe-fixes` can preview it and
+                    // the check-side formats can emit it) rather than silently
+                    // applying a destructive fix. The hint is tier-specific: an
+                    // `Unsafe` fixer below the threshold IS applied by
+                    // `--unsafe-fixes`, but a `Suggestion`-tier fixer never
+                    // auto-applies, so telling the user to pass `--unsafe-fixes`
+                    // would be wrong. `fix_edit` supplies the edit when the fixer has
+                    // one (`file_remove` ignores the bytes); an editless op
+                    // (`git_untrack`: `git rm --cached` has no worktree edit) still
+                    // suggests with `edit: None` and the tier hint -- NOT a
+                    // misleading "not applicable here" decline, since it IS
+                    // applicable via `--unsafe-fixes` (F1 audit).
                     Some(f) if f.applicability().suggested_at(threshold) => {
                         let hint = if f.applicability() == Applicability::Unsafe {
                             " (requires --unsafe-fixes)"
                         } else {
                             " (suggestion only; not auto-applied)"
                         };
-                        match f.fix_edit(&v, &[], fix_ctx.root) {
-                            Some(edit) => FixStatus::Suggested {
-                                summary: format!("{}{hint}", f.describe()),
-                                edit,
-                            },
-                            None => FixStatus::declined(format!(
-                                "{} is available but not applicable here",
-                                f.describe()
-                            )),
+                        FixStatus::Suggested {
+                            summary: format!("{}{hint}", f.describe()),
+                            edit: f.fix_edit(&v, &[], fix_ctx.root),
                         }
                     }
                     // A fixer whose tier neither applies nor is suggested here
@@ -2522,7 +2516,9 @@ fn located_status(
             } else {
                 format!("rewrite {path} (suggestion only; not auto-applied)")
             },
-            edit: edit.clone(),
+            // A located edit always has an editor-expressible form (a byte-range
+            // ReplaceRange), so the suggestion always carries it.
+            edit: Some(edit.clone()),
         },
         LocatedOutcome::SkippedConflict => FixStatus::declined(format!(
             "edit to {path} skipped: conflicts with another edit"
