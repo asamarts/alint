@@ -458,6 +458,43 @@ warning or a v0.18 migration.
     `rule_create_and_register` + planted `_trig/reg_manifest.toml` + `_trig/reg_member`;
     3 build tests; 2 fix e2e [convergent + suggested-under-bare]; facts 21->22;
     README 26+60; CHANGELOG; options snapshot). Full preflight green.
+  - **Phase 1b AUDIT-HARDENED (2 independent worktree-isolated agents base-verified
+    at 7b86e51b + own CLI probing).** Verdict: SECURE (W2 demotion, confinement,
+    TOML-injection escaping, `--changed` blast-radius all sound -- proven), gate
+    cascade structurally sound (W2 teeth by mutation, property net 115/115
+    fired+converged), but NOT fully correct -- fixed 2 HIGH + several MED, all gated:
+    (1 HIGH, PRE-EXISTING+SHARED) `finalize`'s blanket `\n`->`\r\n` DOUBLED the `\r`
+    toml_edit keeps INSIDE a multi-line string -> INVALID TOML on a uniformly-CRLF
+    manifest (also reachable via set_value/remove_value); FIX = normalize `\r\n`->`\n`
+    first. (2 HIGH) `normalize:` made the fixer register the NORMALIZED value (a path
+    that doesn't exist) while `check` falsely went green; FIX = REJECT `normalize` on
+    `registered` (compare verbatim). (A#1 HIGH) the flagship `files: "crates/*"`
+    matched LOOSE files (README/.gitkeep) -> corrupt members; FIX = document the
+    manifest-anchored `crates/*/Cargo.toml` + `register_as: {dir}` pattern everywhere
+    + a loose-file-exclusion e2e gate. (A#2/B#5 MED) a multi-match target query
+    (`$..members[*]`) appended to the WRONG array; FIX = reject a non-static array
+    query at build. (A#4 MED) `--baseline` un-grandfathered siblings because the
+    per-target key encoded the whole missing set; FIX = ONE violation PER-MEMBER with
+    a stable per-member key (viable because read_for_fix is compose-aware, so N
+    appends to one file accumulate). (A#6) a `./`-prefixed named source read as
+    missing; FIX = normalize_confined it. (A#7) a zero-match glob silently passed;
+    FIX = fire "matched no files". (B#3) added a post-splice re-parse+member-present
+    verify (declines rather than write corrupt/wrong bytes). Gates: CRLF+multiline
+    finalize test (append + set_value), loose-file-exclusion e2e, normalize-reject +
+    multi-match-reject build tests. **DEFERRED (documented): A#5 (register into an
+    ABSENT `members` array -- create the array) -> Phase 2 alongside the create half;
+    A#5a (can_fix over-promises when the array is absent -- inherent fix-time state
+    like FileRenameFixer, fails LOUD not silent); B#4 (a new element in a MULTI-LINE
+    array is appended inline after the last, not on its own line -- valid TOML, a
+    formatter tidies).** **REUSABLE LESSONS: (1) `finalize`'s CRLF restore must
+    normalize `\r\n`->`\n` before `\n`->`\r\n`, or it doubles a `\r\n` toml_edit keeps
+    inside a multi-line string (invalid TOML) -- a PRE-EXISTING bug all 3 toml_edit
+    whole-doc ops share; (2) a value fixer must register the RAW value, never a
+    normalized one -- reject `normalize` where the fixer echoes the compared value;
+    (3) per-member (not per-target-with-a-list) baseline keys keep each finding's
+    fingerprint stable so partial progress doesn't un-grandfather siblings; (4) an
+    array-locating JSONPath for a fixer must be STATIC (one array) -- reject residual
+    wildcards, or the check unions while the fix targets the first.**
   - **Phase 2 -- create-if-missing + the 5.2.4 transaction.** NOT STARTED: the
     conditional `CreateFile` half + the stage/verify-against-staged/all-or-nothing
     write group + the injectable-writer `test-hooks` seam + fault-injection tests.

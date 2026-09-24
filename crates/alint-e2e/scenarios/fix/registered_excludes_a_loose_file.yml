@@ -1,0 +1,42 @@
+name: create_and_register with a manifest-anchored source excludes loose files
+# Audit A#1 regression: a BARE directory glob (`crates/*`) matches loose files
+# (a README, a .gitkeep) and would append them as invalid workspace members. The
+# documented SAFE pattern anchors the source to the manifest (`crates/*/Cargo.toml`)
+# + `register_as: "{dir}"`, so only real crate directories are members. Here
+# `crates/README.md` is a loose file: it must NOT be treated as a member or
+# appended. Only `crates/foo` (a real crate, by its Cargo.toml) is registered.
+tags: [fix, cross_file, registered, create_and_register]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = []\n"
+    crates:
+      README.md: "# crates\n"
+      foo:
+        Cargo.toml: "[package]\nname = \"foo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: reg
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*/Cargo.toml" }
+        register_as: "{dir}"
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+        fix: { create_and_register: {} }
+
+when: [fix_unsafe, check]
+
+expect:
+  - applied: [reg]
+  - violations: []
+
+expect_tree:
+  # Only crates/foo registered; the loose crates/README.md is NOT a member.
+  Cargo.toml: "[workspace]\nmembers = [\"crates/foo\"]\n"
+  crates:
+    README.md: "# crates\n"
+    foo:
+      Cargo.toml: "[package]\nname = \"foo\"\n"

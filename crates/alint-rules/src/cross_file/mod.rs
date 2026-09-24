@@ -10,7 +10,7 @@
 //! this kind with `relation` defaulting to `equals`; every existing
 //! config is byte-compatible.
 //!
-//! `relation` groups into three shapes, validated in `build`:
+//! `relation` groups into four shapes, validated in `build`:
 //! - **value** (`equals` | `subset` | `superset` | `set_equals`):
 //!   `source.extract` + `targets` (each with `extract`).
 //! - **`identical`**: whole-file byte identity — `targets` with NO
@@ -18,6 +18,11 @@
 //! - **`resolves`**: each extracted source path must exist on disk —
 //!   `source.extract`, NO `targets` (the forward half of
 //!   `registry_paths_resolve`, which keeps its richer ergonomics).
+//! - **`registered`**: each SOURCE member (a filesystem path from
+//!   `source.file` / `source.files`, mapped via `register_as`) must be
+//!   an element of each target's structured array (`targets` with an
+//!   `extract` selecting the elements, `$.workspace.members[*]`). Fixable
+//!   via `create_and_register` (append the missing member).
 //!
 //! ```yaml
 //! - id: workspace-versions-coherent
@@ -221,6 +226,22 @@ fn build_register_targets(
                          sees each element and the fix can locate the array; got `{query}`"
                     ))
                 })?;
+                // The array path must be STATIC -- exactly ONE array. A residual
+                // wildcard (`$..members[*]`, `$.a[*].members[*]`) or a filter makes
+                // the check UNION elements across several arrays while the fixer
+                // appends to only the FIRST match -- silently the wrong array (audit
+                // A#2/B#5). Reject any leftover `*` / `..` / `?`.
+                if array_query.contains('*')
+                    || array_query.contains("..")
+                    || array_query.contains('?')
+                {
+                    return Err(cfg(format!(
+                        "`relation: registered` {what} extract must select ONE array with a \
+                         STATIC path plus a trailing `[*]` (e.g. `$.workspace.members[*]`); \
+                         `{query}` has an extra wildcard / recursive-descent / filter, which \
+                         would append to the wrong array"
+                    )));
+                }
                 Ok(Extract::Structured(*fmt, array_query.to_string()))
             }
             _ => Err(cfg(format!(
@@ -381,10 +402,16 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         ));
     }
     let normalize = opts.normalize.into_list();
-    if !normalize.is_empty() && matches!(opts.relation, Relation::Identical | Relation::Resolves) {
+    if !normalize.is_empty()
+        && matches!(
+            opts.relation,
+            Relation::Identical | Relation::Resolves | Relation::Registered
+        )
+    {
         return Err(cfg(format!(
-            "`normalize` does not apply to `relation: {:?}` \
-             (it compares whole files / paths, not extracted values)",
+            "`normalize` does not apply to `relation: {:?}` (it compares whole files / \
+             filesystem paths verbatim, not normalized values -- a normalized member \
+             would be REGISTERED as the wrong path)",
             opts.relation
         )));
     }
@@ -835,6 +862,47 @@ mod tests {
         );
         let err = build(&spec).unwrap_err().to_string();
         assert!(err.contains("[*]"), "{err}");
+    }
+
+    #[test]
+    fn build_rejects_normalize_on_registered() {
+        // Audit A#3: a normalized member would be REGISTERED as the wrong path.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { files: \"crates/*\" }\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n\
+             normalize: lower\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("normalize"), "{err}");
+    }
+
+    #[test]
+    fn build_rejects_registered_multi_match_target_query() {
+        // Audit A#2/B#5: a recursive-descent / extra-wildcard array query would let
+        // the check union across arrays while the fix appends to the FIRST -- the
+        // wrong array. Only a STATIC array path + trailing `[*]` is allowed.
+        use crate::test_support::spec_yaml;
+        for q in ["$..members[*]", "$.a[*].members[*]"] {
+            let spec = spec_yaml(&format!(
+                "id: t\n\
+                 kind: cross_file\n\
+                 relation: registered\n\
+                 source: {{ files: \"crates/*\" }}\n\
+                 targets: [{{ file: Cargo.toml, extract: {{ toml: \"{q}\" }} }}]\n\
+                 fix: {{ create_and_register: {{}} }}\n\
+                 level: error\n",
+            ));
+            let err = build(&spec).unwrap_err().to_string();
+            assert!(
+                err.contains("wrong array") || err.contains("STATIC"),
+                "{q}: {err}"
+            );
+        }
     }
 
     #[test]

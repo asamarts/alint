@@ -704,18 +704,20 @@ impl CreateAndRegisterFixer {
         Some((*fmt, crate::fixers::structured::to_segs(node.location())))
     }
 
-    /// The missing members the `check_registered` finding recorded in its
-    /// `baseline_key` (`registered\0members\0<target>\0<m1>\0<m2>...`). Empty for an
+    /// The single missing member the `check_registered` finding recorded in its
+    /// `baseline_key` (`registered\0member\0<target>\0<member>`). Empty for an
     /// existence-only finding (`registered\0exists\0...`) or a malformed key -- the
     /// fixer then Skips (correlating EXACTLY to what the check flagged; no re-glob,
-    /// so it never diverges from the check's gitignore-aware member set).
+    /// so it never diverges from the check's gitignore-aware member set). One member
+    /// per finding (per-member keying keeps each member's baseline fingerprint
+    /// stable), so at most one element.
     fn missing_members(violation: &Violation) -> Vec<String> {
         let Some(key) = &violation.baseline_key else {
             return Vec::new();
         };
         let parts: Vec<&str> = key.split('\u{0}').collect();
-        if parts.len() >= 4 && parts[0] == "registered" && parts[1] == "members" {
-            parts[3..].iter().map(|s| (*s).to_string()).collect()
+        if parts.len() == 4 && parts[0] == "registered" && parts[1] == "member" {
+            vec![parts[3].to_string()]
         } else {
             Vec::new()
         }
@@ -739,10 +741,50 @@ impl CreateAndRegisterFixer {
         if !alint_core::structured_fix::supports_list_append(fmt) {
             return Err(format!("list append is not yet supported for {fmt:?}"));
         }
-        let values: Vec<serde_json::Value> =
-            members.into_iter().map(serde_json::Value::String).collect();
-        alint_core::structured_fix::document_append(fmt, target_bytes, &segs, &values)
-            .ok_or_else(|| "nothing to append (already present, or not an array)".to_string())
+        let values: Vec<serde_json::Value> = members
+            .iter()
+            .cloned()
+            .map(serde_json::Value::String)
+            .collect();
+        let new_bytes =
+            alint_core::structured_fix::document_append(fmt, target_bytes, &segs, &values)
+                .ok_or_else(|| {
+                    "nothing to append (already present, or not an array)".to_string()
+                })?;
+        // Post-splice re-verify (the located-fixer lesson + audit B#3): re-parse the
+        // new bytes and confirm each appended member is now an element of the array.
+        // A re-parse failure (e.g. a malformed edit) or a missing member means the
+        // append did not produce what the CHECK would accept -- decline rather than
+        // write bytes the check would still flag (or invalid syntax).
+        Self::verify_registered(extract, &new_bytes, &members)?;
+        Ok(new_bytes)
+    }
+
+    /// Confirm every `member` is now an element of the array the `extract` (with its
+    /// trailing `[*]` restored) selects in `bytes`. `Err` if the bytes don't parse
+    /// or a member is absent.
+    fn verify_registered(
+        extract: &Extract,
+        bytes: &[u8],
+        members: &[String],
+    ) -> std::result::Result<(), String> {
+        let Extract::Structured(fmt, array_query) = extract else {
+            return Ok(());
+        };
+        let element_query = format!("{array_query}[*]");
+        let elements = extract_values(
+            &Extract::Structured(*fmt, element_query),
+            &String::from_utf8_lossy(bytes),
+        )
+        .map_err(|e| format!("re-verify: the appended document did not parse: {e}"))?;
+        for m in members {
+            if !elements.iter().any(|e| e == m) {
+                return Err(format!(
+                    "re-verify: member {m:?} is not present after the append"
+                ));
+            }
+        }
+        Ok(())
     }
 }
 

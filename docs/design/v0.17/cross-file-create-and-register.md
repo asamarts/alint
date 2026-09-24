@@ -41,17 +41,18 @@ grouping of create-and-register with the `cross_file` family.
 
 **Register existing members (glob source — create is inert):**
 ```yaml
-# every crate dir under crates/ must be listed in workspace.members
+# every crate (identified by its manifest) must be listed in workspace.members
 - id: members-registered
   kind: cross_file
   relation: registered
-  source: { glob: "crates/*" }                 # existing crate dirs (the members)
+  source: { files: "crates/*/Cargo.toml" }     # each crate, by its manifest
+  register_as: "{dir}"                          # register its DIRECTORY (crates/foo)
   targets:
-    - { file: Cargo.toml, path: "$.workspace.members" }   # the list to register into
+    - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
   fix: { create_and_register: {} }             # no content -> registers only
 ```
 
-**Ensure a required member exists + is registered (named source — create-if-missing):**
+**Ensure a required member exists + is registered (named source — create-if-missing, Phase 2):**
 ```yaml
 - id: docs-crate
   kind: cross_file
@@ -59,22 +60,28 @@ grouping of create-and-register with the `cross_file` family.
   source: { file: "crates/docs/Cargo.toml" }   # a specific required member
   register_as: "{dir}"                          # value to add: crates/docs (the parent dir)
   targets:
-    - { file: Cargo.toml, path: "$.workspace.members" }
+    - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
   fix:
     create_and_register:
       content_from: .alint/templates/crate.toml   # used ONLY if the file is missing
 ```
 
-- **`source`**: a `glob:` (members = existing matches) or a `file:` (one named member, may be
-  missing → creatable).
+- **`source`**: a `files:` glob (members = the matched paths) or a `file:` (one named member, may
+  be missing → creatable in Phase 2). **Anchor a glob to a manifest** (`crates/*/Cargo.toml`), not
+  a bare directory glob (`crates/*`): a bare glob also matches LOOSE files under the directory (a
+  `crates/README.md`, a `.gitkeep`), which would be flagged as members and appended as invalid
+  entries. `register_as: "{dir}"` then maps each matched manifest to its crate directory.
 - **`register_as`**: the value appended to the list, as a `{path}`/`{dir}`/`{stem}` template over
-  the matched member path (same templating as the `command` fix). **Defaults to `{path}`** (the
-  matched path), so a `glob: "crates/*"` of dirs needs no `register_as`; a source that names a
-  `.../Cargo.toml` uses `{dir}`.
-- **`targets`**: one or more `{ file, path }`, where `path` is a JSONPath to a structured **array**
-  (`$.workspace.members`). Multiple targets register the same member in several manifests.
+  the matched member path (same templating as the `command` fix). **Defaults to `{path}`**. Note
+  `normalize` is REJECTED on `registered` — the member path is registered verbatim, never a
+  normalized form.
+- **`targets`**: one or more `{ file, extract }`, where `extract` is a structured JSONPath that
+  selects the array ELEMENTS with a trailing `[*]` (`$.workspace.members[*]`) over a STATIC array
+  path (no extra wildcard / recursive-descent / filter — that would target the wrong array). The
+  fixer strips the `[*]` to locate the array. Multiple targets register the same member in several
+  manifests.
 - **`fix.create_and_register.content` / `content_from`**: the bytes for a *missing* member;
-  optional. Absent (or a glob source) → register-only.
+  Phase 2 (create). Absent (or a glob source) → register-only.
 
 ## 4. The check (`check_registered`)
 
@@ -85,13 +92,18 @@ Per **member** (each glob match, or the single named source):
 2. **Registration**: `register_as(member)` is not an element of the target list at `path` → a
    violation (append-repairable).
 
-Emits **one violation per (member, target, reason)**, each carrying the member path and a
-**unique `baseline_key`** (`registered\0<member>\0<target>\0<reason>`). This is mandatory before
-the rule becomes fixable: a rule that emits multiple keyless findings on one path collides on
-`violation_key` and panics `fix` in debug (the value-prop F4 lesson,
-[[project_alint-autofix-located-fixer-correlation]]). Set-membership reuses the `subset` machinery
-(source ⊆ target list); existence reuses the `resolves` filesystem check. The check must skip a
-member already present (idempotence / convergence) and respect confinement on every path read.
+Emits **one violation PER (target, missing member)** — a registration finding keyed
+`registered\0member\0<target>\0<member>`, or an existence finding (named source) keyed
+`registered\0exists\0<path>`. A per-MEMBER key (not a per-target list of all missing) is
+deliberate: it keeps each member's baseline fingerprint STABLE, so registering or adding one
+member never un-grandfathers the others under `--baseline` (audit A#4), AND the key doubles as the
+fix channel — the fixer reads back the single member and appends exactly it (no re-glob, so it
+never diverges from the check's gitignore-aware member set). Every finding on a path is uniquely
+keyed (the value-prop F4 rule, before a rule becomes fixable). Comparison is VERBATIM (`normalize`
+is rejected on `registered`, so the fixer registers the member's real path, not a normalized one —
+audit A#3). The check skips a member already present (idempotence / convergence), fires on a
+zero-match glob source (audit A#7), normalizes a named `source.file` path before the existence
+check (audit A#6), and respects confinement on every path read.
 
 ## 5. The fix (`CreateAndRegisterFixer`)
 

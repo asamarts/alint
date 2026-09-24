@@ -153,6 +153,11 @@ pub fn document_remove(format: Format, bytes: &[u8], paths: &[Vec<PathSeg>]) -> 
 /// not parse, `path` is not an array, a value is not a string, or NOTHING was
 /// added. Used by the `create_and_register` fixer to register a member in a
 /// manifest list (`$.workspace.members`). Never panics.
+///
+/// `toml_edit` round-trips every untouched node and keeps the array's inline-vs-
+/// multi-line bracket structure, but a new element is appended AFTER the last one
+/// (on its line), not placed on a fresh indented line -- a formatter (`taplo`,
+/// `cargo fmt`) tidies a multi-line array afterward. The result is always valid.
 #[must_use]
 pub fn document_append(
     format: Format,
@@ -1381,10 +1386,15 @@ mod toml_ {
                 out = stripped.to_string();
             }
         }
-        // Line endings: restore CRLF when the original was uniformly CRLF (the
-        // rendered text is pure LF, so this cannot double an existing `\r\n`).
+        // Line endings: restore CRLF when the original was uniformly CRLF.
+        // `toml_edit` normalizes STRUCTURAL newlines to LF but PRESERVES a raw
+        // `\r\n` verbatim INSIDE a multi-line basic/literal string (`"""…"""` /
+        // `'''…'''`), so the rendered text is NOT pure LF -- a blanket
+        // `replace('\n', "\r\n")` would double those to `\r\r\n` and write invalid
+        // TOML (audit HIGH). Normalize any `\r\n` back to `\n` FIRST, then convert,
+        // so every newline (structural or in-string) ends up as exactly one `\r\n`.
         if original.contains("\r\n") && !original.replace("\r\n", "").contains('\n') {
-            out = out.replace('\n', "\r\n");
+            out = out.replace("\r\n", "\n").replace('\n', "\r\n");
         }
         // BOM: toml_edit strips a leading U+FEFF; restore it.
         if original.starts_with('\u{feff}') && !out.starts_with('\u{feff}') {

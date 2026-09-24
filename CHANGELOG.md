@@ -114,19 +114,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
       - id: members-registered
         kind: cross_file
         relation: registered
-        source: { files: "crates/*" }         # each crate dir is a member
+        source: { files: "crates/*/Cargo.toml" }   # each crate (by its manifest)
+        register_as: "{dir}"                        # register its directory
         targets:
           - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
         fix: { create_and_register: {} }
 
   The target `extract` selects the array elements with a trailing `[*]` (so the
-  check sees each element and the fix locates the array); `register_as` templates
-  the value with `{path}` (default) / `{dir}` / `{stem}`. `create_and_register` is
-  `Unsafe` by default (it mutates a manifest), `Safe`-promotable, and
-  content-injecting (an untrusted remote `extends:` demotes it to a suggestion).
-  The fix appends TOML lists today (format-preserving via `toml_edit`), skipping a
-  member already present; JSON / YAML list-append, and creating a missing named
-  member, are follow-ups.
+  check sees each element and the fix locates the array); the array path must be
+  static (one array). `register_as` templates the value with `{path}` (default) /
+  `{dir}` / `{stem}`. Prefer a manifest-anchored source glob
+  (`crates/*/Cargo.toml`, not a bare `crates/*`), since a bare directory glob also
+  matches loose files under the directory. `create_and_register` is `Unsafe` by
+  default (it mutates a manifest), `Safe`-promotable, and content-injecting (an
+  untrusted remote `extends:` demotes it to a suggestion). The fix appends TOML
+  lists today (format-preserving via `toml_edit`), skipping a member already
+  present; JSON / YAML list-append, creating a missing `members` array or a missing
+  named member, are follow-ups.
 
 ### Changed
 

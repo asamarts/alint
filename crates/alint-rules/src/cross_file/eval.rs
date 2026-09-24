@@ -55,6 +55,16 @@ impl CrossFileRule {
     /// this check reports them.
     fn check_registered(&self, ctx: &Context<'_>, out: &mut Vec<Violation>) {
         let members = self.registered_members(ctx);
+        // A glob source that matched NOTHING is almost always a typo; fire like the
+        // set relations do (`targets matched no files`), so a broken rule is not a
+        // silent green (audit A#7). Suppressed by `allow_missing_target`.
+        if self.source_glob.is_some() && members.is_empty() && !self.allow_missing {
+            out.push(Self::violation(
+                Path::new(&self.source_file),
+                "`source.files` glob matched no files",
+            ));
+            return;
+        }
         // Existence (named source only). A missing named member is reported here;
         // creating it is the `create_and_register` fix's job (Phase 2). Keyed
         // uniquely so it never collides with a registration violation on a shared
@@ -71,48 +81,43 @@ impl CrossFileRule {
             }
         }
         // Registration: each existing member's value must appear in every target
-        // list. One violation per target that is missing >=1 member (subset shape,
-        // like `check_set`), listing the missing members; keyed by target so a
-        // multi-target rule keeps distinct findings.
-        let member_set: BTreeSet<String> = members
-            .iter()
+        // list. `normalize` is rejected on `registered` (build), so the member value
+        // and target elements are compared VERBATIM -- the fixer then appends the
+        // member's REAL path, not a normalized form (audit A#3/B#2).
+        let existing: BTreeSet<String> = members
+            .into_iter()
             .filter(|(path, _)| self.source_glob.is_some() || member_exists(ctx, path))
-            .map(|(_, value)| apply_normalize(&self.normalize, value))
+            .map(|(_, value)| value)
             .collect();
-        if member_set.is_empty() {
+        if existing.is_empty() {
             return;
         }
         self.each_target(ctx, out, &mut |target, values, out| {
-            let target_set: BTreeSet<String> = values
-                .iter()
-                .map(|v| apply_normalize(&self.normalize, v))
-                .collect();
-            let missing: BTreeSet<&String> = member_set.difference(&target_set).collect();
-            if missing.is_empty() {
-                return;
+            let target_set: BTreeSet<&str> = values.iter().map(String::as_str).collect();
+            for member in &existing {
+                if target_set.contains(member.as_str()) {
+                    continue;
+                }
+                // ONE violation PER (target, missing member). The `baseline_key`
+                // carries the single member and doubles as the fix channel: the
+                // fixer appends exactly this member (no re-glob, so it never diverges
+                // from the check's gitignore-aware member set). A per-member key (not
+                // a per-target list of all missing) keeps each member's baseline
+                // fingerprint STABLE, so adding/registering one member does not
+                // un-grandfather the others (audit A#4). Members are paths, so they
+                // never contain the `\0` separator.
+                let msg = self.message.clone().unwrap_or_else(|| {
+                    format!("{} is missing member {member:?}", crate::slash(target))
+                });
+                out.push(
+                    Violation::new(msg)
+                        .with_path(target.to_path_buf())
+                        .with_baseline_key(format!(
+                            "registered\u{0}member\u{0}{}\u{0}{member}",
+                            crate::slash(target)
+                        )),
+                );
             }
-            let msg = self.message.clone().unwrap_or_else(|| {
-                format!(
-                    "{} is missing member(s): {}",
-                    crate::slash(target),
-                    render(&missing)
-                )
-            });
-            // The `baseline_key` doubles as the fix channel: the `create_and_register`
-            // fixer reads the missing members back from it and appends exactly those
-            // (no re-glob, so it never diverges from this check's gitignore-aware
-            // member set). Sorted (BTreeSet) for a stable key. Members are paths, so
-            // they never contain the `\0` separator.
-            let mut key = format!("registered\u{0}members\u{0}{}", crate::slash(target));
-            for m in &missing {
-                key.push('\u{0}');
-                key.push_str(m);
-            }
-            out.push(
-                Violation::new(msg)
-                    .with_path(target.to_path_buf())
-                    .with_baseline_key(key),
-            );
         });
     }
 
@@ -128,8 +133,13 @@ impl CrossFileRule {
             render_path(self.register_as.as_deref().unwrap_or("{path}"), &tokens)
         };
         let Some(scope) = &self.source_glob else {
-            // A single named member (`source.file`).
-            let p = std::path::PathBuf::from(&self.source_file);
+            // A single named member (`source.file`). Normalize the config-verbatim
+            // path (strip `./`, resolve `..` lexically) so `member_exists` matches
+            // the canonical index paths -- otherwise a `./crates/x/Cargo.toml` that
+            // exists reads as missing (audit A#6). A lexical escape keeps the raw
+            // path (then reads as missing, honestly).
+            let raw = std::path::Path::new(&self.source_file);
+            let p = crate::pathsafe::normalize_confined(raw).unwrap_or_else(|| raw.to_path_buf());
             let value = render_value(&p);
             return vec![(p, value)];
         };

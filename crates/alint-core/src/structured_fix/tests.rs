@@ -1470,3 +1470,44 @@ fn document_append_toml_adds_a_member_preserving_style() {
     assert!(!supports_list_append(Format::Json));
     assert!(document_append(Format::Json, b"[]", &[], &[json!("x")]).is_none());
 }
+
+#[test]
+fn finalize_preserves_uniform_crlf_with_a_multiline_string() {
+    // Audit HIGH: `toml_edit` keeps a raw `\r\n` verbatim INSIDE a multi-line
+    // string, so `finalize`'s CRLF restore must not double it to `\r\r\n` (invalid
+    // TOML). A uniformly-CRLF manifest with a `"""…"""` value must round-trip.
+    // Covers the shared `document_set`/`document_remove`/`document_append` path.
+    let src = "[workspace]\r\nmembers = [\"crates/bar\"]\r\n\
+               desc = \"\"\"\r\nline one\r\nline two\r\n\"\"\"\r\n";
+    let members = [key("workspace"), key("members")];
+    // append
+    let out = document_append(
+        Format::Toml,
+        src.as_bytes(),
+        &members,
+        &[json!("crates/foo")],
+    )
+    .unwrap();
+    let out = String::from_utf8(out).unwrap();
+    assert!(!out.contains("\r\r"), "append doubled a CR: {out:?}");
+    assert!(
+        Format::Toml.parse(&out).is_ok(),
+        "append output must be valid TOML: {out:?}"
+    );
+    assert!(out.contains("crates/foo") && out.contains("line one"));
+    assert!(out.contains("\r\n"), "CRLF must be restored");
+    // set_value on the SAME file (the shared finalize path) must also stay valid.
+    let set = document_set(
+        Format::Toml,
+        src.as_bytes(),
+        &[key("workspace"), key("desc")],
+        &json!("x"),
+    )
+    .unwrap();
+    let set = String::from_utf8(set).unwrap();
+    assert!(!set.contains("\r\r"), "set_value doubled a CR: {set:?}");
+    assert!(
+        Format::Toml.parse(&set).is_ok(),
+        "set_value output must be valid TOML: {set:?}"
+    );
+}
