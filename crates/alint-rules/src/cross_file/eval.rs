@@ -7,6 +7,7 @@
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
+use alint_core::template::{PathTokens, render_path};
 use alint_core::{Context, Extract, Result, Violation, extract_values, is_non_literal};
 
 use super::CrossFileRule;
@@ -40,8 +41,104 @@ impl CrossFileRule {
             }
             Relation::Identical => self.check_identical(ctx, &mut out),
             Relation::Resolves => self.check_resolves(ctx, &mut out),
+            Relation::Registered => self.check_registered(ctx, &mut out),
         }
         out
+    }
+
+    /// `relation: registered` - every SOURCE member (a filesystem path from
+    /// `source.file` / `source.files`, mapped through `register_as`) must be an
+    /// element of every target's list (the structured array the target `extract`
+    /// locates). Two independent conditions per member: it must EXIST (a named
+    /// source only - a glob only matches paths that exist) and it must be
+    /// REGISTERED. The fix (`create_and_register`) repairs whichever is unmet;
+    /// this check reports them.
+    fn check_registered(&self, ctx: &Context<'_>, out: &mut Vec<Violation>) {
+        let members = self.registered_members(ctx);
+        // Existence (named source only). A missing named member is reported here;
+        // creating it is the `create_and_register` fix's job (Phase 2). Keyed
+        // uniquely so it never collides with a registration violation on a shared
+        // path (the F4 unique-key rule, [[project_alint-autofix-located-fixer-correlation]]).
+        if self.source_glob.is_none() {
+            for (path, _) in &members {
+                if !member_exists(ctx, path) {
+                    out.push(
+                        Self::violation(path, "member file does not exist").with_baseline_key(
+                            format!("registered\u{0}exists\u{0}{}", crate::slash(path)),
+                        ),
+                    );
+                }
+            }
+        }
+        // Registration: each existing member's value must appear in every target
+        // list. One violation per target that is missing >=1 member (subset shape,
+        // like `check_set`), listing the missing members; keyed by target so a
+        // multi-target rule keeps distinct findings.
+        let member_set: BTreeSet<String> = members
+            .iter()
+            .filter(|(path, _)| self.source_glob.is_some() || member_exists(ctx, path))
+            .map(|(_, value)| apply_normalize(&self.normalize, value))
+            .collect();
+        if member_set.is_empty() {
+            return;
+        }
+        self.each_target(ctx, out, &mut |target, values, out| {
+            let target_set: BTreeSet<String> = values
+                .iter()
+                .map(|v| apply_normalize(&self.normalize, v))
+                .collect();
+            let missing: BTreeSet<&String> = member_set.difference(&target_set).collect();
+            if missing.is_empty() {
+                return;
+            }
+            let msg = self.message.clone().unwrap_or_else(|| {
+                format!(
+                    "{} is missing member(s): {}",
+                    crate::slash(target),
+                    render(&missing)
+                )
+            });
+            out.push(
+                Violation::new(msg)
+                    .with_path(target.to_path_buf())
+                    .with_baseline_key(format!(
+                        "registered\u{0}members\u{0}{}",
+                        crate::slash(target)
+                    )),
+            );
+        });
+    }
+
+    /// Enumerate the source members as `(path, register_value)` pairs: every match
+    /// of the `source.files` glob (files AND directories - a member can be either),
+    /// or the single `source.file`. `register_value` = `register_as` (default
+    /// `{path}`) rendered over the slash-normalized member path, so it matches the
+    /// forward-slash spelling manifests use on every platform.
+    fn registered_members(&self, ctx: &Context<'_>) -> Vec<(std::path::PathBuf, String)> {
+        let render_value = |p: &Path| -> String {
+            let slashed = crate::slash(p);
+            let tokens = PathTokens::from_path(Path::new(&slashed));
+            render_path(self.register_as.as_deref().unwrap_or("{path}"), &tokens)
+        };
+        let Some(scope) = &self.source_glob else {
+            // A single named member (`source.file`).
+            let p = std::path::PathBuf::from(&self.source_file);
+            let value = render_value(&p);
+            return vec![(p, value)];
+        };
+        // A `source.files` glob: every matching file OR directory is a member.
+        let mut members = Vec::new();
+        for e in ctx.index.files() {
+            if scope.matches(&e.path, ctx.index) {
+                members.push((e.path.to_path_buf(), render_value(&e.path)));
+            }
+        }
+        for e in ctx.index.dirs() {
+            if scope.matches(&e.path, ctx.index) {
+                members.push((e.path.to_path_buf(), render_value(&e.path)));
+            }
+        }
+        members
     }
 
     /// Read + extract the source file's literal values (raw, not
@@ -497,6 +594,14 @@ impl CrossFileRule {
 }
 
 /// Render a sorted value set for a violation message.
+/// Whether a `registered` member path is present in the walked tree (as a file OR
+/// a directory - a member can be either). Used only for a NAMED source's existence
+/// check; a glob source only ever yields paths the index already holds.
+fn member_exists(ctx: &Context<'_>, path: &Path) -> bool {
+    ctx.index.files().any(|e| e.path.as_ref() == path)
+        || ctx.index.dirs().any(|e| e.path.as_ref() == path)
+}
+
 fn render(set: &BTreeSet<&String>) -> String {
     if set.is_empty() {
         // `set_equals` renders both sides; an empty one reads `none`
@@ -606,6 +711,7 @@ mod tests {
             normalize: NormalizeSpec::One(normalize).into_list(),
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
             fixer: None,
         }
     }
@@ -938,6 +1044,7 @@ mod tests {
             normalize: vec![],
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
             fixer: None,
         };
         // union {Comment, String, Number} == highlight.c set → silent.
@@ -973,6 +1080,7 @@ mod tests {
             normalize: vec![],
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
             fixer: None,
         };
         let v = eval(&r, root, &idx);
@@ -1017,6 +1125,7 @@ mod tests {
             normalize: Vec::new(),
             allow_missing: false,
             skip_header_lines,
+            register_as: None,
             fixer: None,
         }
     }
@@ -1095,6 +1204,7 @@ mod tests {
             normalize: Vec::new(),
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
             fixer: None,
         }
     }

@@ -238,6 +238,11 @@
           "const": "resolves",
           "description": "Each extracted source path must exist on disk (file or dir).",
           "type": "string"
+        },
+        {
+          "const": "registered",
+          "description": "Each SOURCE member (a filesystem path from `source.file` / `source.files`, templated by `register_as`) must be an element of every target's list (the structured array the target `extract` locates). Unlike the value/set relations, the source is a set of filesystem PATHS, not values extracted from file contents. Fixable via `create_and_register` (create a missing named member, append an unregistered one).",
+          "type": "string"
         }
       ]
     },
@@ -1420,6 +1425,14 @@
         "normalize": {
           "$ref": "#/$defs/NormalizeSpec",
           "description": "A normalize transform, or an ordered list of transforms applied left-to-right (`[trim, semver-minor]`). `semver-major` / `semver-minor` keep only the leading MAJOR / MAJOR.MINOR band."
+        },
+        "register_as": {
+          "default": null,
+          "description": "For `relation: registered` only: the value to look for (and, on fix, add) in each target list, as a `{path}` / `{dir}` / `{stem}` template over the matched member path. Defaults to `{path}` (the matched path verbatim), so a `files: \"crates/*\"` of directories needs no `register_as`; a source that names a `.../Cargo.toml` uses `{dir}` to register the parent directory.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "relation": {
           "$ref": "#/$defs/Relation",

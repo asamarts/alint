@@ -77,6 +77,10 @@ pub struct CrossFileRule {
     normalize: Vec<Normalize>,
     allow_missing: bool,
     skip_header_lines: usize,
+    /// `relation: registered` only: the `{path}`/`{dir}`/`{stem}` template that
+    /// maps each matched member path to the value looked for (and, on fix, added)
+    /// in the target list. `None` ⇒ the default `{path}` (the matched path).
+    register_as: Option<String>,
     /// The `sync_from` fixer: on `relation: identical` a whole-file `SyncFromFixer`
     /// (mirror the source), on `relation: equals` a `CrossFileValueFixer`
     /// (propagate the source's extracted scalar into each target's node). `None`
@@ -251,13 +255,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             if g.trim().is_empty() {
                 return Err(cfg("`source.files` must not be empty".into()));
             }
+            // `files` is a glob-union of extracted VALUES for the set relations, and
+            // a glob of member PATHS for `registered` (each match is a member).
             if !matches!(
                 opts.relation,
-                Relation::Subset | Relation::Superset | Relation::SetEquals
+                Relation::Subset | Relation::Superset | Relation::SetEquals | Relation::Registered
             ) {
                 return Err(cfg(format!(
-                    "`source.files` (glob-union) requires a set relation \
-                     (subset / superset / set_equals), not `{:?}`",
+                    "`source.files` (a glob) requires a set relation \
+                     (subset / superset / set_equals) or `registered`, not `{:?}`",
                     opts.relation
                 )));
             }
@@ -320,6 +326,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             opts.relation
         )));
     }
+    // `register_as` is meaningful only for `registered` (it templates a member
+    // PATH into its list value); reject it elsewhere so a misplaced key fails loud.
+    if opts.register_as.is_some() && opts.relation != Relation::Registered {
+        return Err(cfg(
+            "`register_as` only applies to `relation: registered`".into()
+        ));
+    }
 
     let fixer = build_sync_from_fixer(
         spec.fix.as_ref(),
@@ -346,6 +359,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         normalize,
         allow_missing: opts.allow_missing_target,
         skip_header_lines: opts.skip_header_lines.unwrap_or(0),
+        register_as: opts.register_as,
         fixer,
     }))
 }
@@ -649,6 +663,79 @@ mod tests {
             "friendly text lost through the options wrapper: {err}"
         );
         assert!(!err.contains("NormalizeSpec"), "leaks internal enum: {err}");
+    }
+
+    // ─── registered ─────────────────────────────────────────────
+
+    #[test]
+    fn build_accepts_registered_with_a_glob_source_and_structured_target() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { files: \"crates/*\" }\n\
+             register_as: \"{dir}\"\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n\
+             level: error\n",
+        );
+        assert!(
+            build(&spec).is_ok(),
+            "registered + glob source + structured target should build"
+        );
+    }
+
+    #[test]
+    fn build_rejects_registered_with_a_source_extract() {
+        // The source is filesystem PATHS, not values extracted from a file.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { files: \"crates/*\", extract: { toml: \"$.name\" } }\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("registered") && err.contains("source.extract"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn build_rejects_registered_without_a_target_extract() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { files: \"crates/*\" }\n\
+             targets: [{ file: Cargo.toml }]\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("registered") && err.contains("JSONPath"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn build_rejects_register_as_on_a_non_registered_relation() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: equals\n\
+             source: { file: a.txt, extract: { regex: \"(.*)\" } }\n\
+             targets: { files: \"**/*.txt\", extract: { regex: \"(.*)\" } }\n\
+             register_as: \"{path}\"\n\
+             level: error\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("register_as"), "{err}");
     }
 
     // ─── build-time shape validation ────────────────────────────

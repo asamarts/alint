@@ -89,6 +89,13 @@ pub(super) enum Relation {
     Identical,
     /// Each extracted source path must exist on disk (file or dir).
     Resolves,
+    /// Each SOURCE member (a filesystem path from `source.file` / `source.files`,
+    /// templated by `register_as`) must be an element of every target's list (the
+    /// structured array the target `extract` locates). Unlike the value/set
+    /// relations, the source is a set of filesystem PATHS, not values extracted
+    /// from file contents. Fixable via `create_and_register` (create a missing
+    /// named member, append an unregistered one).
+    Registered,
 }
 
 impl Relation {
@@ -232,6 +239,13 @@ pub(super) struct Options {
     /// tolerated instead of reported as drift.
     #[serde(default)]
     pub(super) allow_missing_target: bool,
+    /// For `relation: registered` only: the value to look for (and, on fix, add)
+    /// in each target list, as a `{path}` / `{dir}` / `{stem}` template over the
+    /// matched member path. Defaults to `{path}` (the matched path verbatim), so a
+    /// `files: "crates/*"` of directories needs no `register_as`; a source that
+    /// names a `.../Cargo.toml` uses `{dir}` to register the parent directory.
+    #[serde(default)]
+    pub(super) register_as: Option<String>,
     /// For the `identical` relation only: drop this many leading lines from
     /// both files before comparison, to ignore a differing license or
     /// generated header.
@@ -348,6 +362,30 @@ pub(super) fn validate_shape(
         if any_target_extract {
             return Err(cfg(
                 "`relation: identical` compares whole files; remove `targets.extract`".into(),
+            ));
+        }
+    } else if relation == Relation::Registered {
+        // The source is a set of filesystem PATHS (`source.file`/`files`, templated
+        // by `register_as`), not values extracted from file contents.
+        if source_extract.is_some() {
+            return Err(cfg(
+                "`relation: registered` uses filesystem paths; remove `source.extract` \
+                 (use `register_as` to template the value from the matched path)"
+                    .into(),
+            ));
+        }
+        if targets.is_none() {
+            return Err(cfg(
+                "`relation: registered` needs `targets` (the manifest list(s) to register in)"
+                    .into(),
+            ));
+        }
+        // Every target needs the structured extract that LOCATES its list (e.g.
+        // `extract: { toml: \"$.workspace.members\" }`); its elements form the
+        // current-members set the source is checked against.
+        if !all_target_extract {
+            return Err(cfg(
+                "`relation: registered` targets need `extract` (the JSONPath to the list)".into(),
             ));
         }
     } else {

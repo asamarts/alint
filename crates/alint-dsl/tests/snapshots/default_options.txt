@@ -117,6 +117,7 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
     fixer: None,
 }
 
@@ -153,6 +154,7 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
     fixer: None,
 }
 
@@ -179,6 +181,7 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
     fixer: None,
 }
 
@@ -214,6 +217,7 @@ CrossFileRule {
     ],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
     fixer: None,
 }
 
