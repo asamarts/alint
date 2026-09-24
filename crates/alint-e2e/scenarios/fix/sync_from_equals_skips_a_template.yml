@@ -1,0 +1,38 @@
+name: sync_from on equals declines a non-literal (interpolated) target, no crash
+# Regression gate (audit CRITICAL + HIGH): a target whose captured value is an
+# interpolated `${VERSION}` template. The check skips it as a note and fires a
+# keyless "no literal value" violation; making cross_file fixable once collided
+# those keyless findings on `violation_key` (a debug panic / a silent release
+# drop). The notes are now uniquely keyed, so `fix` runs cleanly, and the fixer
+# must NOT clobber the template (it declines). This scenario runs in a debug
+# harness, so a regression of the note-keying would PANIC here.
+tags: [fix, cross_file, sync_from, applicability]
+
+given:
+  tree:
+    VERSION: "2.5.0\n"
+    deploy.yml: "image: myapp:${VERSION}\n"
+  config: |
+    version: 1
+    rules:
+      - id: img-version
+        kind: cross_file
+        relation: equals
+        source: { file: VERSION, extract: { regex: "([0-9.]+)" } }
+        targets:
+          - { file: deploy.yml, extract: { regex: "myapp:(\\S+)" } }
+        level: error
+        fix: { sync_from: {} }
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: img-version, level: error, path: deploy.yml}
+  - skipped: [img-version]
+  - violations:
+      - {rule: img-version, level: error, path: deploy.yml}
+
+expect_tree:
+  VERSION: "2.5.0\n"
+  deploy.yml: "image: myapp:${VERSION}\n"

@@ -460,8 +460,20 @@ impl CrossFileRule {
 
     /// An informational note (non-violation finding) - e.g. a
     /// non-literal value the rule skipped rather than compared.
+    ///
+    /// Carries a `reason`-discriminated `baseline_key`: a `cross_file` target can
+    /// emit SEVERAL notes on one path (one per skipped non-literal value), and a
+    /// keyless finding's `violation_key` collapses to `(rule_id, path)`. Once the
+    /// rule is FIXABLE (`sync_from`), the fixpoint's per-violation merge requires
+    /// distinct keys, so two `${A}`/`${B}` notes -- or a note beside the keyless
+    /// "no literal value" violation -- would otherwise collide (the F4 tripwire
+    /// panics in debug; a release build silently drops one). Keying the notes makes
+    /// every finding on a path unique (the violations are one-per-path or already
+    /// carry a per-value key).
     fn note(path: &Path, reason: &str) -> Violation {
-        Self::violation(path, reason).as_note()
+        Self::violation(path, reason)
+            .as_note()
+            .with_baseline_key(format!("note\u{0}{}\u{0}{reason}", crate::slash(path)))
     }
 
     fn mismatch(&self, target: &Path, source: &str, target_value: &str) -> Violation {

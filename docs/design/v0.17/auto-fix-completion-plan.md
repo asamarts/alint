@@ -340,6 +340,27 @@ warning or a v0.18 migration.
     rejected (no single value). Gates: 4 regex fixer units + a build-accept +
     a `lines`-reject build test + a regex e2e (`sync_from_equals_regex`, a README
     badge + Dockerfile `ARG`). The value-propagation feature is now complete.
+  - **AUDIT-HARDENED (2 independent agents + own probing). 1 CRITICAL + 2 HIGH,
+    all fixed -- the value fixer was re-deriving edits from raw bytes without
+    correlating to the check (the located-fixer-correlation lesson, violated).**
+    (CRITICAL) making `cross_file: equals` fixable exposed that it emits KEYLESS
+    multi-findings per path (a non-literal `${...}` NOTE + a keyless "no literal
+    value" violation) that collide on `violation_key` -- `alint fix` PANICKED in
+    debug (a plain `image: myapp:${VERSION}` config) / silently dropped one in
+    release. FIX: the notes now carry a `reason`-discriminated `baseline_key`
+    (`eval.rs`), so every finding on a path is uniquely keyed. (HIGH) the fixer
+    CLOBBERED non-literal `${...}` captures the check deliberately skips, and
+    (HIGH/MED) it IGNORED `normalize:`, over-writing a capture the check deemed
+    correct (`2.5.7`->`2.5.0` under `semver-minor`). FIX: an `is_drift` guard --
+    the fixer rewrites a capture/node ONLY if the check flagged it (LITERAL and
+    normalize-different from the source); the fixer now carries the rule's
+    `normalize`, and the regex re-extract verify is normalize + literal aware.
+    Also F-1 (a "matched nothing" regex now says so, not "no capture group 1").
+    Gates: non-literal-skip (regex + structured), normalize-correlation,
+    multi-capture, no-match, non-UTF-8, mixed-list build, and a
+    `sync_from_equals_skips_a_template` e2e (the debug panic gate). Agents
+    confirmed the re-extract verify SOUND (verify-pass implies check-pass) + byte
+    offsets, confinement, --changed, tiers all hold.
 
 Ops remaining. Cross-file create-and-register (multi-file transaction, 5.2.4);
 lockfile `relocate`. Risk: medium.

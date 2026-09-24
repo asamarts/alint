@@ -103,7 +103,7 @@ impl Relation {
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
 #[schemars(rename = "NormalizeTransform")]
-pub(super) enum Normalize {
+pub(crate) enum Normalize {
     #[default]
     None,
     Trim,
@@ -200,7 +200,7 @@ impl NormalizeSpec {
 }
 
 /// Apply an ordered list of transforms to a value (left-to-right).
-pub(super) fn apply_normalize(transforms: &[Normalize], v: &str) -> String {
+pub(crate) fn apply_normalize(transforms: &[Normalize], v: &str) -> String {
     transforms
         .iter()
         .fold(v.to_string(), |acc, t| t.apply(&acc))

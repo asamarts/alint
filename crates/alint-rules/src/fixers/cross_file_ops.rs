@@ -20,6 +20,7 @@ use alint_core::{
 };
 use serde_json_path::JsonPath;
 
+use crate::cross_file::{Normalize, apply_normalize};
 use crate::fixers::StructuredFixer;
 use crate::fixers::creators::confine_fix_path;
 
@@ -192,23 +193,42 @@ pub struct CrossFileValueFixer {
     source_file: PathBuf,
     source_extract: Extract,
     targets: ValueTargets,
+    /// The host rule's `normalize` transforms. The fixer MUST correlate to the
+    /// check: only rewrite a target value the check flagged as drift, i.e. one
+    /// whose NORMALIZED form differs from the normalized source (a `2.5.7` capture
+    /// the check accepted under `semver-minor` must not be clobbered to `2.5.0`).
+    normalize: Vec<Normalize>,
     applicability: Applicability,
 }
 
 impl CrossFileValueFixer {
+    // `pub(crate)`: constructed only by the `cross_file` builder (and tests). The
+    // signature carries the crate-internal `Normalize`, so a `pub` constructor
+    // would leak a more-private type (private_interfaces).
     #[must_use]
-    pub fn new(
+    pub(crate) fn new(
         source_file: PathBuf,
         source_extract: Extract,
         targets: ValueTargets,
+        normalize: Vec<Normalize>,
         applicability: Applicability,
     ) -> Self {
         Self {
             source_file,
             source_extract,
             targets,
+            normalize,
             applicability,
         }
+    }
+
+    /// Whether the target value `current` is DRIFT the check would flag: a LITERAL
+    /// value (the check skips interpolated `${...}` values as notes) whose
+    /// normalized form differs from the normalized source. The fixer rewrites only
+    /// these -- never a non-literal template (would clobber it) or a normalize-equal
+    /// value the check deemed correct (audit: located-fixer correlation).
+    fn is_drift(&self, current: &str, source_norm: &str) -> bool {
+        !is_non_literal(current) && apply_normalize(&self.normalize, current) != *source_norm
     }
 
     /// The `extract` for `target_rel`: the shared glob extract, or the matching
@@ -314,17 +334,22 @@ impl CrossFileValueFixer {
         })?;
         let re = regex::Regex::new(pattern)
             .map_err(|e| format!("invalid target regex `{pattern}`: {e}"))?;
-        // A `ReplaceRange` over each match's group-1 span. Disjoint + left-to-right
-        // (captures_iter is non-overlapping, leftmost), so `apply_file_edits`
-        // splices them all in one pass. A source value equal to every capture ->
-        // no net change (already equal); no group 1 -> nothing to set.
+        let source_norm = apply_normalize(&self.normalize, source_value);
+        // A `ReplaceRange` over each DRIFTING match's group-1 span. Disjoint +
+        // left-to-right (captures_iter is non-overlapping, leftmost), so
+        // `apply_file_edits` splices them in one pass. Rewrite a capture ONLY if the
+        // check flagged it as drift (`is_drift`): SKIP a non-literal `${...}`
+        // template (clobbering it would hardcode a computed value the check leaves
+        // alone) and a normalize-equal capture (one the check deemed correct).
         let mut collected = Vec::new();
+        let mut any_match = false;
         let mut had_group = false;
         for cap in re.captures_iter(text) {
+            any_match = true;
             let Some(g1) = cap.get(1) else { continue };
             had_group = true;
-            if g1.as_str() == source_value {
-                continue; // this capture already equals the source
+            if !self.is_drift(g1.as_str(), &source_norm) {
+                continue;
             }
             collected.push(alint_core::CollectedEdit {
                 edit: FixEdit::ReplaceRange {
@@ -337,6 +362,12 @@ impl CrossFileValueFixer {
                 isolation_group: None,
             });
         }
+        if !any_match {
+            return Err(format!(
+                "the target regex `{pattern}` matched nothing in {}",
+                target_rel.display()
+            ));
+        }
         if !had_group {
             return Err(format!(
                 "the target regex `{pattern}` has no capture group 1 to set on {}",
@@ -345,7 +376,8 @@ impl CrossFileValueFixer {
         }
         if collected.is_empty() {
             return Err(format!(
-                "{} already equals {source_value:?} at regex `{pattern}`",
+                "{}: nothing to propagate at regex `{pattern}` (every capture already \
+                 matches {source_value:?}, is a non-literal template, or is normalize-equal)",
                 target_rel.display()
             ));
         }
@@ -368,16 +400,22 @@ impl CrossFileValueFixer {
                 target_rel.display()
             ));
         }
-        // Re-extract verify: after the splice, EVERY group-1 capture must read back
-        // as the source value. A source value carrying a delimiter that truncates
-        // the surrounding pattern fails this -> decline (do not write a value the
-        // `equals` check would still reject).
+        // Re-extract verify, mirroring the check: after the splice, every LITERAL
+        // capture must NORMALIZE-EQUAL the source (non-literal captures are skipped
+        // by the check, so ignore them here too), and at least one literal must
+        // remain. A source value carrying a char that truncates the surrounding
+        // pattern fails this -> decline (never write a value the check still flags).
         let re_new = extract_values(
             &Extract::Regex(pattern.to_string()),
             &String::from_utf8_lossy(&new_bytes),
         )
         .map_err(|e| format!("regex re-extract failed: {e}"))?;
-        if re_new.is_empty() || !re_new.iter().all(|v| v == source_value) {
+        let literal_new: Vec<&String> = re_new.iter().filter(|v| !is_non_literal(v)).collect();
+        if literal_new.is_empty()
+            || !literal_new
+                .iter()
+                .all(|v| apply_normalize(&self.normalize, v) == source_norm)
+        {
             return Err(format!(
                 "setting {} to {source_value:?} would not satisfy the regex `{pattern}` \
                  (the value likely contains a char the pattern's capture cannot hold)",
@@ -425,6 +463,25 @@ impl CrossFileValueFixer {
                             target_rel.display(),
                             if n.is_number() { "numeric" } else { "boolean" }
                         ));
+                    }
+                    // Correlate to the check (audit): NEVER clobber a non-literal
+                    // `${...}` template node (the check skips it as a note), and skip
+                    // a node the check deemed correct under `normalize`.
+                    if let Some(s) = n.as_str() {
+                        if is_non_literal(s) {
+                            return Err(format!(
+                                "{} `{query}` is a non-literal template ({s:?}); `sync_from` \
+                                 leaves interpolated values alone",
+                                target_rel.display()
+                            ));
+                        }
+                        let source_norm = apply_normalize(&self.normalize, source_value);
+                        if apply_normalize(&self.normalize, s) == source_norm {
+                            return Err(format!(
+                                "{} `{query}` already equals {source_value:?} (under normalize)",
+                                target_rel.display()
+                            ));
+                        }
                     }
                 }
             }
@@ -941,6 +998,7 @@ mod tests {
             PathBuf::from(source),
             Extract::Structured(fmt, source_q.to_string()),
             ValueTargets::Glob(Extract::Structured(fmt, target_q.to_string())),
+            Vec::new(),
             Applicability::Unsafe,
         )
     }
@@ -1078,6 +1136,7 @@ mod tests {
                 victim.clone(),
                 Extract::Structured(Format::Toml, "$.package.version".to_string()),
             )]),
+            Vec::new(),
             Applicability::Unsafe,
         )
         .apply(&viol(victim.to_str().unwrap()), &ctx(&tmp, false))
@@ -1202,6 +1261,7 @@ mod tests {
             PathBuf::from("VERSION"),
             Extract::Regex(source_pat.to_string()),
             ValueTargets::Glob(Extract::Regex(target_pat.to_string())),
+            Vec::new(),
             Applicability::Unsafe,
         )
     }
@@ -1242,6 +1302,7 @@ mod tests {
             PathBuf::from("src.txt"),
             Extract::Regex("val=(.+)".to_string()),
             ValueTargets::Glob(Extract::Regex("v=([a-z]+)".to_string())),
+            Vec::new(),
             Applicability::Unsafe,
         );
         let out = fixer.apply(&viol("f.txt"), &ctx(&tmp, false)).unwrap();
@@ -1261,12 +1322,13 @@ mod tests {
             PathBuf::from("src.txt"),
             Extract::Regex("tag: ([0-9.]+)".to_string()),
             ValueTargets::Glob(Extract::Regex("pinned to ([0-9.]+) ".to_string())),
+            Vec::new(),
             Applicability::Unsafe,
         );
         let out = fixer.apply(&viol("t.txt"), &ctx(&tmp, false)).unwrap();
         assert!(
-            matches!(out, FixOutcome::Skipped(ref r) if r.contains("already equals")),
-            "got {out:?}"
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("nothing to propagate")),
+            "an already-equal capture must Skip, got {out:?}"
         );
     }
 
@@ -1280,12 +1342,140 @@ mod tests {
             PathBuf::from("src.txt"),
             Extract::Regex("tag: ([0-9.]+)".to_string()),
             ValueTargets::Glob(Extract::Regex("nogroup".to_string())),
+            Vec::new(),
             Applicability::Unsafe,
         );
         let out = fixer.apply(&viol("t.txt"), &ctx(&tmp, false)).unwrap();
         assert!(
             matches!(out, FixOutcome::Skipped(ref r) if r.contains("no capture group 1")),
             "got {out:?}"
+        );
+    }
+
+    #[test]
+    fn value_regex_declines_a_no_match_distinctly() {
+        // Audit F-1: a regex that HAS a group 1 but matches NOTHING must say
+        // "matched nothing", not the misleading "no capture group 1".
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "VERSION", b"tag: 9.9\n");
+        write(&tmp, "t.txt", b"unrelated content\n");
+        let out = value_fixer_regex("tag: ([0-9.]+)", "v=([0-9.]+)")
+            .apply(&viol("t.txt"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("matched nothing")),
+            "got {out:?}"
+        );
+    }
+
+    #[test]
+    fn value_regex_skips_a_non_literal_capture() {
+        // Audit HIGH: an interpolated `${VERSION}` capture is a template the check
+        // skips (as a note); the fixer must NOT clobber it. Here the ONLY capture is
+        // non-literal -> nothing to propagate, file untouched.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "VERSION", b"2.5.0\n");
+        write(&tmp, "t.txt", b"image: myapp:${VERSION}\n");
+        let out = value_fixer_regex("([0-9.]+)", "myapp:(\\S+)")
+            .apply(&viol("t.txt"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Skipped(_)), "got {out:?}");
+        assert_eq!(
+            read(&tmp, "t.txt"),
+            b"image: myapp:${VERSION}\n",
+            "the interpolated template must NOT be clobbered"
+        );
+    }
+
+    #[test]
+    fn value_regex_clobbers_only_the_literal_drift_beside_a_template() {
+        // A literal drift AND a `${VERSION}` template under one pattern: rewrite the
+        // literal, LEAVE the template (audit HIGH).
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "VERSION", b"2.5.0\n");
+        write(
+            &tmp,
+            "t.md",
+            b"badge/version-1.0.0-blue and badge/version-${VERSION}-green\n",
+        );
+        let out = value_fixer_regex("([0-9.]+)", "version-(\\S+?)-")
+            .apply(&viol("t.md"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "got {out:?}");
+        let after = String::from_utf8(read(&tmp, "t.md")).unwrap();
+        assert!(
+            after.contains("version-2.5.0-blue"),
+            "literal drift fixed: {after}"
+        );
+        assert!(
+            after.contains("version-${VERSION}-green"),
+            "the template must survive: {after}"
+        );
+    }
+
+    #[test]
+    fn value_regex_respects_normalize() {
+        // Audit HIGH/MED: under `normalize: semver-minor`, a capture in the same
+        // band as the source is NOT drift -- do not clobber it. Source 2.5.0 (band
+        // 2.5): "2.4.0" drifts (band 2.4), "2.5.7" does not (band 2.5).
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.txt", b"2.5.0\n");
+        write(&tmp, "t.txt", b"min v([0-9.]+) ... v2.4.0 and v2.5.7\n");
+        let fixer = CrossFileValueFixer::new(
+            PathBuf::from("src.txt"),
+            Extract::Regex("([0-9.]+)".to_string()),
+            ValueTargets::Glob(Extract::Regex("v([0-9.]+)".to_string())),
+            vec![Normalize::SemverMinor],
+            Applicability::Unsafe,
+        );
+        let out = fixer.apply(&viol("t.txt"), &ctx(&tmp, false)).unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "got {out:?}");
+        let after = String::from_utf8(read(&tmp, "t.txt")).unwrap();
+        assert!(
+            after.contains("v2.5.0 and"),
+            "the drifting 2.4.0 -> 2.5.0: {after}"
+        );
+        assert!(
+            after.contains("v2.5.7"),
+            "the in-band 2.5.7 must NOT be clobbered: {after}"
+        );
+    }
+
+    #[test]
+    fn value_regex_declines_a_non_utf8_target() {
+        // Audit F-2: a target with invalid UTF-8 declines cleanly (byte-offset
+        // safety), never mis-splices.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "VERSION", b"9\n");
+        write(&tmp, "t.txt", b"v=1 \xff\xfe raw\n");
+        let out = value_fixer_regex("([0-9]+)", "v=([0-9]+)")
+            .apply(&viol("t.txt"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("not valid UTF-8")),
+            "got {out:?}"
+        );
+        assert_eq!(read(&tmp, "t.txt"), b"v=1 \xff\xfe raw\n", "untouched");
+    }
+
+    #[test]
+    fn value_structured_skips_a_non_literal_node() {
+        // Audit HIGH: a JSON string node `${VERSION}` is a template the check skips;
+        // the structured path must NOT clobber it either.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.json", br#"{"v":"2.5.0"}"#);
+        write(&tmp, "t.json", br#"{"v":"${VERSION}"}"#);
+        let out = value_fixer("src.json", "$.v", Format::Json, "$.v")
+            .apply(&viol("t.json"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("non-literal template")),
+            "got {out:?}"
+        );
+        assert_eq!(
+            read(&tmp, "t.json"),
+            br#"{"v":"${VERSION}"}"#,
+            "template survives"
         );
     }
 }
