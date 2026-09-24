@@ -19,9 +19,13 @@
 //!     carry a "reading this on GitHub? the full reference is at
 //!     alint.org" banner for repo readers.
 //!
-//! Out of scope (different link-resolution semantics, not browsed as
-//! repo docs): the site-content tree `docs/site/**`, the benchmark
-//! result/▸archive snapshots, and the versioned `docs/design/v*/`
+//! The site-content tree `docs/site/**` has the opposite semantics and its
+//! own test below: its pages are served at trailing-slash URLs on
+//! alint.org, so they must use root-absolute `/docs/…` links and no
+//! relative ones.
+//!
+//! Out of scope (not browsed as repo docs): the benchmark
+//! result/▸archive snapshots and the versioned `docs/design/v*/`
 //! design records.
 
 use std::fmt::Write as _;
@@ -60,19 +64,19 @@ fn is_governed(rel: &str) -> bool {
     true
 }
 
-fn walk_md(base: &Path, dir: &Path, out: &mut Vec<String>) {
+fn walk_md(base: &Path, dir: &Path, keep: fn(&str) -> bool, out: &mut Vec<String>) {
     let Ok(rd) = std::fs::read_dir(dir) else {
         return;
     };
     for e in rd.flatten() {
         let p = e.path();
         if p.is_dir() {
-            walk_md(base, &p, out);
+            walk_md(base, &p, keep, out);
         } else if p.extension().is_some_and(|x| x == "md")
             && let Ok(rel) = p.strip_prefix(base)
         {
             let rel = rel.to_string_lossy().replace('\\', "/");
-            if is_governed(&rel) {
+            if keep(&rel) {
                 out.push(rel);
             }
         }
@@ -81,9 +85,12 @@ fn walk_md(base: &Path, dir: &Path, out: &mut Vec<String>) {
 
 fn collect_docs(root: &Path) -> Vec<String> {
     let mut out: Vec<String> = Vec::new();
-    // Top-level governance/readme docs.
+    // Top-level governance/readme docs. CHANGELOG.md is also exported to
+    // alint.org (/docs/changelog/), whose build turns its relative links
+    // into GitHub links, so they have to resolve in the repo either way.
     for top in [
         "README.md",
+        "CHANGELOG.md",
         "CONTRIBUTING.md",
         "SECURITY.md",
         "GOVERNANCE.md",
@@ -94,7 +101,7 @@ fn collect_docs(root: &Path) -> Vec<String> {
             out.push(top.to_string());
         }
     }
-    walk_md(root, &root.join("docs"), &mut out);
+    walk_md(root, &root.join("docs"), is_governed, &mut out);
     out
 }
 
@@ -232,6 +239,50 @@ fn repo_doc_links_are_not_dead_on_github() {
         broken_relative.len(),
         root_absolute.len(),
         missing_banner.len(),
+    );
+}
+
+/// alint.org serves each `docs/site/**` page at a trailing-slash URL
+/// (`docs/site/about/monorepos.md` is `/docs/about/monorepos/`), so a
+/// relative link resolves against the page's own URL, not against its
+/// file: `../integrations/docker/` from that page lands on
+/// `/docs/about/integrations/docker/`, a 404, and a `./page.md` link
+/// never resolves. Site pages therefore link with root-absolute `/docs/…`
+/// URLs, which alint.org's build-time link check resolves against the
+/// rendered pages.
+#[test]
+fn site_docs_link_root_absolute() {
+    let root = repo_root();
+    let mut pages: Vec<String> = Vec::new();
+    walk_md(&root, &root.join("docs/site"), |_| true, &mut pages);
+    assert!(!pages.is_empty(), "no docs/site pages found");
+
+    let mut relative: Vec<String> = Vec::new();
+    for rel in &pages {
+        let text = std::fs::read_to_string(root.join(rel)).unwrap();
+        for url in links(&strip_code(&text)) {
+            // A link title (`](url "title")`) follows the url.
+            let url = url.split_whitespace().next().unwrap_or("");
+            let absolute = url.is_empty()
+                || url.starts_with('#')
+                || url.starts_with('/')
+                || url.starts_with("mailto:")
+                || url.starts_with("http://")
+                || url.starts_with("https://")
+                || regexish_scheme(url);
+            if !absolute {
+                relative.push(format!(
+                    "  - {rel}: ]({url}), use a root-absolute /docs/… link"
+                ));
+            }
+        }
+    }
+    assert!(
+        relative.is_empty(),
+        "{} relative link(s) in docs/site, which break on alint.org's \
+         trailing-slash URLs:\n{}",
+        relative.len(),
+        relative.join("\n"),
     );
 }
 

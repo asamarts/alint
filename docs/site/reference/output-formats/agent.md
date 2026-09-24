@@ -149,4 +149,4 @@ https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/agent-report.js
 
 - [Output formats overview](/docs/reference/output-formats/) — every format `alint check` can emit.
 - [Guard an agent-heavy repo](/docs/cookbook/) — wiring the loop end to end with the `agent-hygiene` and `agent-context` rulesets.
-- [`alint check`](/docs/cli/check/) — the command and all its flags.
+- [`alint check`](/docs/cli/check/) — the command and its flags.

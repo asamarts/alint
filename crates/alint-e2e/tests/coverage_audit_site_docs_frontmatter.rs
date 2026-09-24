@@ -157,6 +157,56 @@ fn every_site_doc_has_parseable_yaml_frontmatter() {
     );
 }
 
+/// Every site page declares its own `description:`. A page without one
+/// gets Starlight's site-wide description, so it shares its search
+/// snippet with every other such page, and two pages that declare the
+/// same text have the same problem: in alint.org's Search Console
+/// (2026-09) five pages shared the site-wide text. The CLI prose files
+/// under `docs/site/cli/` count too: their description becomes the
+/// generated page's.
+#[test]
+fn every_site_doc_has_its_own_description() {
+    let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .and_then(|p| p.parent())
+        .unwrap()
+        .to_path_buf();
+    let mut missing: Vec<String> = Vec::new();
+    let mut by_description: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for rel in collect_site_docs() {
+        let src = std::fs::read_to_string(root.join(&rel)).unwrap();
+        // A missing or unparseable block is reported by the test above.
+        let Some(Ok(front)) =
+            extract_frontmatter(&src).map(serde_yaml::from_str::<serde_yaml::Value>)
+        else {
+            continue;
+        };
+        let rel = rel.display().to_string();
+        match front
+            .get("description")
+            .and_then(serde_yaml::Value::as_str)
+            .map(str::trim)
+        {
+            Some(description) if !description.is_empty() => by_description
+                .entry(description.to_string())
+                .or_default()
+                .push(rel),
+            _ => missing.push(rel),
+        }
+    }
+    let shared: Vec<String> = by_description
+        .into_iter()
+        .filter(|(_, pages)| pages.len() > 1)
+        .map(|(description, pages)| format!("{pages:?} share {description:?}"))
+        .collect();
+    assert!(
+        missing.is_empty() && shared.is_empty(),
+        "site docs need their own `description:` (the search snippet):\n\
+         without one: {missing:?}\nshared: {shared:#?}",
+    );
+}
+
 #[test]
 fn extract_frontmatter_recognises_well_formed_delimiters() {
     let src = "---\ntitle: hello\n---\n\nbody\n";
