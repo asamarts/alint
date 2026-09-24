@@ -382,6 +382,17 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         ],
         "x\n".to_string(),
     );
+    // An out-of-order keep-sorted block triggers `ordered_block` + the Phase-4
+    // `sort` fix, which reorders the entries in place -> converges (idempotent).
+    // Otherwise clean (LF, final newline, no trailing ws / BOM / bidi, no
+    // `DEBUGME`), so no other single-rule draw disturbs it; the 9-char stem
+    // `sortblock` exceeds the generator's 7-char limit so it never collides.
+    // `**/sortblock.txt` matches only this trigger. Safe, so a bare `Fix` applies.
+    insert_file(
+        root,
+        &[dir.clone(), "sortblock.txt".to_string()],
+        "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -924,6 +935,21 @@ fn rule_create_and_register() -> impl Strategy<Value = String> {
     })
 }
 
+/// An `ordered_block` rule fixed via the `sort` op (Phase 4): the planted
+/// `_trig/sortblock.txt` has an out-of-order keep-sorted block, so the rule fires
+/// and `sort` reorders the entries in place -> sorted -> converges (idempotent on
+/// a second pass). Safe (a keep-sorted block is order-independent), so a bare
+/// `Fix` APPLIES it -- exercising the whole-file sort path + the Safe tier. The
+/// 9-char stem `sortblock` exceeds the generator's 7-char limit, so it never
+/// collides with a random file; `**/sortblock.txt` matches only this trigger.
+fn rule_ordered_block_sort() -> impl Strategy<Value = String> {
+    rule_id("ob").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: ordered_block\n    paths: \"**/sortblock.txt\"\n    start: \"# keep-sorted start\"\n    end: \"# keep-sorted end\"\n    level: error\n    fix:\n      sort: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -982,6 +1008,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // the `create_and_register` op (Phase 1b): appends an unregistered member to
         // a manifest list -> converges (applied under --unsafe-fixes).
         rule_create_and_register(),
+        // the `sort` op (Phase 4): reorders an out-of-order keep-sorted block in
+        // place -> converges. Safe, so APPLIED under a bare `Fix`.
+        rule_ordered_block_sort(),
     ]
 }
 

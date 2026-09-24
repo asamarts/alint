@@ -151,3 +151,69 @@ fn check_does_not_tag_an_unsafe_file_remove_auto_fixable() {
         "nothing is auto-fixable by a bare fix here"
     );
 }
+
+#[test]
+fn check_tags_only_the_sortable_ordered_block_violation_fixable() {
+    // Phase-4 `sort` honesty (per-violation, like the `filename_case` case above):
+    // `ordered_block` emits entry findings (out-of-order / duplicate) AND a
+    // structural "unclosed block" finding. `sort` reorders entries but cannot
+    // invent a missing `end` marker, so its `can_fix` declines the unclosed
+    // finding (via the sentinel `baseline_key`). `check` must tag ONLY the
+    // sortable entry finding fixable -- promising "run alint fix" for the unclosed
+    // one is the false promise this guards. Drives the REAL rule + fixer through
+    // the engine's `mark_fixability`, not a unit stand-in.
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-sort-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    // An UNCLOSED block (no `end`) whose entries are ALSO out of order: two
+    // findings, exactly one of them sort-fixable.
+    let tree: TreeSpec =
+        serde_yaml_ng::from_str("deps.txt: \"# keep-sorted start\\ncharlie\\nalpha\\n\"\n")
+            .unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: keep-sorted\n    kind: ordered_block\n    paths: \"**/*.txt\"\n    start: \"# keep-sorted start\"\n    end: \"# keep-sorted end\"\n    level: error\n    fix:\n      sort: {}\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "keep-sorted")
+        .expect("keep-sorted produced a result");
+    assert!(
+        result.is_fixable,
+        "the rule declares a fixer (per-rule flag)"
+    );
+    assert_eq!(
+        result.violations.len(),
+        2,
+        "entry + unclosed: {:?}",
+        result.violations
+    );
+
+    let find = |needle: &str| {
+        result
+            .violations
+            .iter()
+            .find(|v| v.message.contains(needle))
+            .unwrap_or_else(|| panic!("no violation matching {needle:?}: {:?}", result.violations))
+    };
+    assert!(
+        find("out of order").is_fixable,
+        "the out-of-order entry is sort-fixable"
+    );
+    assert!(
+        !find("unclosed").is_fixable,
+        "the unclosed-block finding is NOT sort-fixable (sort can't add an `end`)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}

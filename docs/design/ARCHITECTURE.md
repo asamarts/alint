@@ -228,6 +228,11 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | `file_create` | `{content, path?, create_parents?}` | `file_exists` |
 | `file_remove` | `{}` | `file_absent`, `no_empty_files`, `no_symlinks`, `no_submodules` |
 | `file_rename` | `{}` (target derived from rule config) | `filename_case` |
+| `dir_create` | `{}` | `dir_exists` |
+| `relocate` | `{}` (moves the file to the repo root) | `file_absent` |
+| `chmod` | `{}` (direction from the rule) | `executable_bit`, `shebang_has_executable` |
+| `git_untrack` | `{}` (`git rm --cached`; *spawning*) | `file_absent` |
+| `command` | `{run, timeout?}` (runs a user command; *spawning*) | `command` |
 
 **Content-editing ops** (skipped on files over `fix_size_limit`; default 1 MiB, `null` disables):
 
@@ -243,8 +248,13 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | `file_strip_bom` | `{}` | `no_bom` |
 | `file_collapse_blank_lines` | `{}` (max read from parent rule) | `max_consecutive_blank_lines` |
 | `replace` | `{replacement}` (pattern from parent rule; optional `applicability`) | `file_content_forbidden` |
+| `set_value` | `{}` (value from the rule's `equals:`) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_equals` |
+| `remove_value` | `{}` (target from parent rule) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_absent` |
+| `sync_from` | `{}` (source + relation from parent rule) | `cross_file` (`relation: identical` / `equals`) |
+| `create_and_register` | `{content?, content_from?}` | `cross_file` (`relation: registered`) |
+| `sort` | `{}` (markers / comparator / `unique` / `select` from parent rule) | `ordered_block` |
 
-Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full.
+Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full. (`set_value` / `remove_value` are *located* ops -- one byte-range splice through the same regime as `replace`; `sort` is a whole-file rewrite that permutes the entry lines in place, and `create_and_register`'s register half is a list-append into the target manifest.)
 
 `replace` is the first *located* op: rather than rewriting the whole file, it emits one byte-range edit per regex match, which the located regime batches, orders, overlap-skips, and splices in a single pass. It is `Unsafe` by default (a regex rewrite is not behavior-preserving), so a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` applies it.
 

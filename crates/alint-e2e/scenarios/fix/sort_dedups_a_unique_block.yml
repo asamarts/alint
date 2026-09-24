@@ -1,0 +1,42 @@
+name: sort dedups a unique ordered_block
+tags: [fix, ordered_block, sort, unique]
+
+# With `unique: true` the block forbids duplicates, so `sort` both reorders the
+# entries AND drops the duplicate `bravo` -- the surplus entry slot is removed, so
+# the block shrinks by exactly the duplicate (the markers stay). Safe, so a bare
+# `fix` applies it -> sorted + unique -> converges.
+
+given:
+  tree:
+    allow.txt: |
+      # keep-sorted start
+      bravo
+      alpha
+      bravo
+      # keep-sorted end
+  config: |
+    version: 1
+    rules:
+      - id: keep-unique
+        kind: ordered_block
+        paths: "**/allow.txt"
+        start: "# keep-sorted start"
+        end: "# keep-sorted end"
+        unique: true
+        level: error
+        fix: { sort: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: keep-unique, level: error, path: allow.txt}
+  - applied: [keep-unique]
+  - violations: []
+
+expect_tree:
+  allow.txt: |
+    # keep-sorted start
+    alpha
+    bravo
+    # keep-sorted end

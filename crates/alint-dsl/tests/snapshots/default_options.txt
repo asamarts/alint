@@ -1836,6 +1836,7 @@ OrderedBlockRule {
             "^\\s*[A-Za-z]",
         ),
     ),
+    fixer: None,
 }
 
 === kind: pair | id: c-requires-h ===

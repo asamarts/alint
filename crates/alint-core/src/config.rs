@@ -456,6 +456,9 @@ pub enum FixSpec {
     CreateAndRegister {
         create_and_register: CreateAndRegisterFixSpec,
     },
+    Sort {
+        sort: SortFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -546,6 +549,7 @@ impl FixSpec {
         "sync_from",
         "relocate",
         "create_and_register",
+        "sort",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -573,6 +577,7 @@ impl FixSpec {
             Self::SyncFrom { .. } => "sync_from",
             Self::Relocate { .. } => "relocate",
             Self::CreateAndRegister { .. } => "create_and_register",
+            Self::Sort { .. } => "sort",
         }
     }
 }
@@ -937,6 +942,21 @@ pub struct CreateAndRegisterFixSpec {
     /// member. Mutually exclusive with `content`.
     #[serde(default)]
     pub content_from: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `sort` op (Phase 4): rewrite each of the host `ordered_block` rule's
+/// marked blocks with its entries sorted under the rule's `comparator` (and
+/// deduped when the rule sets `unique`), preserving non-entry lines (markers,
+/// blanks, `select`-excluded comments) in place. Behavior comes entirely from
+/// the host rule (`start`/`end`/`comparator`/`unique`/`select`); this spec adds
+/// only the optional tier override. **`Safe` by default** — a keep-sorted
+/// block's meaning is order-independent (and a `unique` block declared its
+/// duplicates redundant), so sorting is behavior-preserving.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SortFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1402,6 +1422,7 @@ mod tests {
             ("sync_from: {}", "sync_from"),
             ("relocate: {}", "relocate"),
             ("create_and_register: {}", "create_and_register"),
+            ("sort: {}", "sort"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

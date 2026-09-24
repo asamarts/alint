@@ -134,6 +134,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   idempotent postconditions, each repaired only if unmet, so a missing member is
   both created and registered. JSON / YAML list-append and creating a missing
   `members` array are follow-ups.
+- New `sort` auto-fix op for `ordered_block` (`fix: { sort: {} }`): reorders the
+  entries of each marked block (or, with no `start` / `end` markers, the whole
+  file -- the `CODEOWNERS` / allow-list shape) under the rule's `comparator`,
+  dropping duplicates when the rule sets `unique:`. It reuses the rule's own
+  `start` / `end` / `comparator` / `unique` / `select`, so what `sort` reorders
+  is exactly what the check flags out of order; markers, blank lines, and
+  `select`-excluded lines (comments, group headers) stay in place, and every
+  line keeps its exact terminator (LF vs CRLF) and the file its trailing-newline
+  state. `Safe` by default -- a keep-sorted block's meaning is order-independent,
+  and a `unique` block declared its duplicates redundant -- so a bare `alint fix`
+  applies it; a per-rule `applicability:` can retune it. It reorders the file's
+  own lines and injects no ruleset-authored bytes, so it is honored from any
+  source (unlike the content-injecting fixers). The one `ordered_block` finding
+  `sort` cannot repair -- an unclosed block (a `start` with no `end`) -- is
+  reported but not advertised as auto-fixable, since `sort` cannot invent a
+  missing marker.
 
 ### Changed
 

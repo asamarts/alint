@@ -24,10 +24,23 @@ use std::cmp::Ordering;
 use std::path::Path;
 
 use alint_core::{
-    Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation, eval_per_file,
+    Applicability, Context, Error, FixContext, FixEdit, FixOutcome, FixSpec, Fixer, Level,
+    PerFileRule, Result, Rule, RuleSpec, Scope, Violation, eval_per_file,
 };
 use regex::Regex;
 use serde::Deserialize;
+
+/// `baseline_key` prefix marking `ordered_block`'s ONE non-`sort`-fixable
+/// violation: an unclosed block (a `start` with no `end`). `sort` reorders
+/// entries but cannot invent a missing `end` marker, so the fixer's
+/// [`can_fix`](Fixer::can_fix) returns `false` for a violation carrying this
+/// key, and [`fix_edit`](Fixer::fix_edit) declines it -- keeping `check`'s
+/// per-violation `is_fixable` tag honest. Entry violations (out-of-order /
+/// duplicate) carry NO key (their fingerprint stays the offending line, so
+/// making the rule fixable does not un-grandfather existing baselines); the
+/// sentinel is set only on the rare unclosed finding. `\0`-delimited with the
+/// block's start line so two unclosed blocks in one file stay distinct (F4).
+const UNCLOSED_KEY_PREFIX: &str = "ordered_block\u{0}unclosed\u{0}";
 
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -112,6 +125,7 @@ pub struct OrderedBlockRule {
     comparator: Comparator,
     unique: bool,
     select: Option<Regex>,
+    fixer: Option<OrderedBlockSortFixer>,
 }
 
 /// In-flight block state while scanning a file.
@@ -125,6 +139,10 @@ struct Block {
 
 impl Rule for OrderedBlockRule {
     alint_core::rule_common_impl!();
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
 
     fn path_scope(&self) -> Option<&Scope> {
         Some(&self.scope)
@@ -179,12 +197,15 @@ impl PerFileRule for OrderedBlockRule {
                 // (In start-only / markerless mode a repeated `start` is
                 // the intended section delimiter, not an error.)
                 if let (Some(b), Some(end)) = (&block, &self.end) {
-                    violations.push(self.violation(
-                        path,
-                        b.start_line,
-                        b.start_line,
-                        &format!("unclosed ordered_block - no {end:?} line after the start"),
-                    ));
+                    violations.push(
+                        self.violation(
+                            path,
+                            b.start_line,
+                            b.start_line,
+                            &format!("unclosed ordered_block - no {end:?} line after the start"),
+                        )
+                        .with_baseline_key(format!("{UNCLOSED_KEY_PREFIX}{}", b.start_line)),
+                    );
                 }
                 block = Some(Block {
                     start_line: line_no,
@@ -202,14 +223,14 @@ impl PerFileRule for OrderedBlockRule {
                 block = None;
                 continue;
             }
-            // Blank lines inside a block are not entries.
-            if trimmed.is_empty() || b.reported {
+            if b.reported {
                 continue;
             }
-            // With `select:`, only matching lines are sortable
-            // entries; non-matching lines (comments, group headers)
-            // pass through untouched.
-            if self.select.as_ref().is_some_and(|re| !re.is_match(raw)) {
+            // Blank lines, and (with `select:`) non-matching lines such as
+            // comments or group headers, are not sortable entries. Shared with
+            // the `sort` fixer's block scan via `is_entry_line` so check and fix
+            // never disagree on what an entry is.
+            if !is_entry_line(self.select.as_ref(), raw, trimmed) {
                 continue;
             }
 
@@ -244,12 +265,15 @@ impl PerFileRule for OrderedBlockRule {
         if let Some(b) = block
             && let (Some(_), Some(end)) = (&self.start, &self.end)
         {
-            violations.push(self.violation(
-                path,
-                b.start_line,
-                b.start_line,
-                &format!("unclosed ordered_block - no {end:?} line after the start"),
-            ));
+            violations.push(
+                self.violation(
+                    path,
+                    b.start_line,
+                    b.start_line,
+                    &format!("unclosed ordered_block - no {end:?} line after the start"),
+                )
+                .with_baseline_key(format!("{UNCLOSED_KEY_PREFIX}{}", b.start_line)),
+            );
         }
         Ok(violations)
     }
@@ -264,6 +288,274 @@ impl OrderedBlockRule {
         Violation::new(msg)
             .with_path(std::sync::Arc::<Path>::from(path))
             .with_location(line, 1)
+    }
+}
+
+/// Whether a line inside a block is a sortable ENTRY: non-blank, and (when the
+/// rule sets `select:`) matching that regex. The check and the `sort` fixer's
+/// [`scan_blocks`] both route their entry test through this, so a file's entry
+/// set is identical for detection and repair -- the correlation invariant a
+/// located/whole-file fixer must hold ([[project_alint-autofix-located-fixer-correlation]]).
+fn is_entry_line(select: Option<&Regex>, raw: &str, trimmed: &str) -> bool {
+    !trimmed.is_empty() && select.is_none_or(|re| re.is_match(raw))
+}
+
+/// Enumerate each block's sortable entries as 0-based indices into `lines`
+/// (raw lines with no terminators -- exactly what `str::lines()` yields, so this
+/// mirrors the check's own scan). A `start` line (re)opens a block; an `end`
+/// line closes it; markerless mode (`start` = `None`) is one block from line 1
+/// to EOF. An UNCLOSED block's entries are still yielded: its extent (to the
+/// next `start` or EOF) is the same run the check reports out-of-order against,
+/// so `sort` reorders exactly what `check` flags; the separate "unclosed"
+/// structural finding is the one thing `sort` cannot repair (it cannot invent
+/// an `end` marker), and `can_fix` declines that via the sentinel key.
+fn scan_blocks(
+    start: Option<&str>,
+    end: Option<&str>,
+    select: Option<&Regex>,
+    lines: &[&str],
+) -> Vec<Vec<usize>> {
+    let mut blocks: Vec<Vec<usize>> = Vec::new();
+    // Markerless: one block open from the first line.
+    let mut current: Option<Vec<usize>> = start.is_none().then(Vec::new);
+    for (i, raw) in lines.iter().enumerate() {
+        let trimmed = raw.trim();
+        if start == Some(trimmed) {
+            // A `start` always (re)opens, flushing any active block first --
+            // uniform across delimited / start-only / markerless, matching the
+            // check's `Some(trimmed) == self.start` reopen.
+            if let Some(entries) = current.take() {
+                blocks.push(entries);
+            }
+            current = Some(Vec::new());
+            continue;
+        }
+        if current.is_none() {
+            continue; // outside any block, and not a `start` line
+        }
+        if end == Some(trimmed) {
+            blocks.push(current.take().expect("current is Some (checked above)"));
+            continue;
+        }
+        if is_entry_line(select, raw, trimmed) {
+            current
+                .as_mut()
+                .expect("current is Some (checked above)")
+                .push(i);
+        }
+    }
+    if let Some(entries) = current.take() {
+        blocks.push(entries);
+    }
+    blocks
+}
+
+/// Split `text` into `(body, ending)` slots. `body` is the line without its
+/// terminator (matching `str::lines()`, so a lone trailing `\r` at EOF stays in
+/// the body); `ending` is `"\n"`, `"\r\n"`, or `""` for a final line with no
+/// terminator. Concatenating `body + ending` over every slot reproduces `text`
+/// byte-for-byte, so a `sort` that only PERMUTES bodies while keeping each
+/// slot's ending preserves every line's exact terminator and the file's
+/// trailing-newline state (LF stays LF, CRLF stays CRLF, no-final-newline
+/// stays).
+fn split_lines(text: &str) -> Vec<(&str, &'static str)> {
+    let mut slots = Vec::new();
+    let mut rest = text;
+    while !rest.is_empty() {
+        let Some(i) = rest.find('\n') else {
+            // The final line has no terminator.
+            slots.push((rest, ""));
+            break;
+        };
+        let before = &rest[..i];
+        let (body, ending) = match before.strip_suffix('\r') {
+            Some(b) => (b, "\r\n"),
+            None => (before, "\n"),
+        };
+        slots.push((body, ending));
+        rest = &rest[i + 1..];
+    }
+    slots
+}
+
+/// Whether `entries` are ordered under `comparator`: non-decreasing, or strictly
+/// increasing when `unique`. The post-sort convergence guard -- a comparator
+/// that is not a strict weak order (a pathological mixed-`numeric` block) could
+/// leave `sort_by` output with an out-of-order adjacent pair that `check` would
+/// still flag; the fixer verifies this before committing a block (W4
+/// verify-per-edit) and skips the block otherwise rather than writing a
+/// non-converging file.
+fn is_monotonic(comparator: Comparator, unique: bool, entries: &[&str]) -> bool {
+    entries
+        .windows(2)
+        .all(|w| match comparator.order(w[1].trim(), w[0].trim()) {
+            Ordering::Greater => true,
+            Ordering::Equal => !unique,
+            Ordering::Less => false,
+        })
+}
+
+/// The `sort` fix for `ordered_block`: a whole-file rewrite that re-sorts every
+/// marked block's entries under the host rule's comparator (dropping duplicates
+/// when the rule sets `unique`), preserving markers, blank lines and
+/// `select`-excluded lines in place, and every line's terminator. Idempotent
+/// (a sorted file rewrites to itself -> the engine's per-violation `apply` loop
+/// converges), and behavior-preserving (a keep-sorted block is order-independent),
+/// hence `Safe` by default; a per-rule `applicability:` retunes it.
+#[derive(Debug, Clone)]
+struct OrderedBlockSortFixer {
+    start: Option<String>,
+    end: Option<String>,
+    comparator: Comparator,
+    unique: bool,
+    select: Option<Regex>,
+    applicability: Applicability,
+}
+
+impl OrderedBlockSortFixer {
+    /// The sorted form of `text`, or `None` when it is already sorted (nothing
+    /// to write). Reorders each block's entry bodies under the comparator,
+    /// removing `unique` duplicates' slots; non-entry lines and terminators stay.
+    fn sorted(&self, text: &str) -> Option<String> {
+        let slots = split_lines(text);
+        let bodies: Vec<&str> = slots.iter().map(|(b, _)| *b).collect();
+        let blocks = scan_blocks(
+            self.start.as_deref(),
+            self.end.as_deref(),
+            self.select.as_ref(),
+            &bodies,
+        );
+        // Per slot: the replacement body (default = unchanged) and whether the
+        // slot is DELETED (a `unique` duplicate collapsed away).
+        let mut new_body: Vec<&str> = bodies.clone();
+        let mut deleted = vec![false; slots.len()];
+        let mut changed = false;
+        for entry_idxs in &blocks {
+            if entry_idxs.is_empty() {
+                continue;
+            }
+            let mut sorted: Vec<&str> = entry_idxs.iter().map(|&i| bodies[i]).collect();
+            sorted.sort_by(|a, b| self.comparator.order(a.trim(), b.trim()));
+            if self.unique {
+                sorted
+                    .dedup_by(|a, b| self.comparator.order(a.trim(), b.trim()) == Ordering::Equal);
+            }
+            // Never write a block the comparator could not fully order (see
+            // `is_monotonic`): leave it, so `fix` never emits a file `check`
+            // would still flag.
+            if !is_monotonic(self.comparator, self.unique, &sorted) {
+                continue;
+            }
+            for (pos, &slot) in entry_idxs.iter().enumerate() {
+                if let Some(&body) = sorted.get(pos) {
+                    if new_body[slot] != body {
+                        changed = true;
+                    }
+                    new_body[slot] = body;
+                } else {
+                    // `unique` collapsed the block: the surplus entry slots are
+                    // removed, so the block shrinks by exactly its duplicates.
+                    deleted[slot] = true;
+                    changed = true;
+                }
+            }
+        }
+        if !changed {
+            return None;
+        }
+        let mut out = String::with_capacity(text.len());
+        for (i, (_, ending)) in slots.iter().enumerate() {
+            if deleted[i] {
+                continue;
+            }
+            out.push_str(new_body[i]);
+            out.push_str(ending);
+        }
+        Some(out)
+    }
+}
+
+impl Fixer for OrderedBlockSortFixer {
+    fn describe(&self) -> String {
+        if self.unique {
+            "sort each ordered_block's entries and drop duplicates".to_string()
+        } else {
+            "sort each ordered_block's entries".to_string()
+        }
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn can_fix(&self, violation: &Violation) -> bool {
+        // Every ordered_block violation is sort-fixable EXCEPT the structural
+        // "unclosed block" finding: `sort` reorders entries but cannot add a
+        // missing `end` marker. That one carries the sentinel key; all entry
+        // (out-of-order / duplicate) findings are key-less and fixable.
+        !violation
+            .baseline_key
+            .as_deref()
+            .is_some_and(|k| k.starts_with(UNCLOSED_KEY_PREFIX))
+    }
+
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(path) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let abs = ctx.root.join(path);
+        let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
+            alint_core::ReadForFix::Bytes(b) => b,
+            alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        let Ok(text) = std::str::from_utf8(&existing) else {
+            // The detector also skips non-UTF-8 (no violation), so this is
+            // defensive: a fix is never dispatched for such a file.
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is not UTF-8; cannot sort",
+                path.display()
+            )));
+        };
+        let Some(sorted) = self.sorted(text) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already sorted",
+                path.display()
+            )));
+        };
+        // Dry-run AFTER the read + sort, so a preview matches the real run.
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would sort ordered_block entries in {}",
+                path.display()
+            )));
+        }
+        ctx.commit_write(&abs, sorted.as_bytes())
+            .map_err(|source| Error::Io {
+                path: abs.clone(),
+                source,
+            })?;
+        Ok(FixOutcome::Applied(format!(
+            "sorted ordered_block entries in {}",
+            path.display()
+        )))
+    }
+
+    fn fix_edit(&self, violation: &Violation, bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+        // Decline the unclosed-block finding (see `can_fix`): the whole-file
+        // sort would fix OTHER blocks, but this violation is not sort-repairable,
+        // so the LSP must not offer it an "Apply fix".
+        if !self.can_fix(violation) {
+            return None;
+        }
+        let path = violation.path.as_deref()?;
+        let text = std::str::from_utf8(bytes).ok()?;
+        let sorted = self.sorted(text)?;
+        Some(FixEdit::SetContent {
+            path: path.to_path_buf(),
+            content: sorted.into_bytes(),
+        })
     }
 }
 
@@ -305,6 +597,28 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             })
         })
         .transpose()?;
+    // `sort` reuses the rule's own `start`/`end`/`comparator`/`unique`/`select`
+    // (cloned so the rule keeps ownership); the spec adds only the tier override.
+    let fixer = match &spec.fix {
+        Some(FixSpec::Sort { sort }) => Some(OrderedBlockSortFixer {
+            start: start.clone(),
+            end: end.clone(),
+            comparator: opts.comparator,
+            unique: opts.unique,
+            select: select.clone(),
+            applicability: sort.applicability.unwrap_or(Applicability::Safe),
+        }),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with ordered_block (only `sort` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(OrderedBlockRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -316,6 +630,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         comparator: opts.comparator,
         unique: opts.unique,
         select,
+        fixer,
     }))
 }
 
@@ -335,6 +650,7 @@ mod tests {
             comparator,
             unique,
             select: None,
+            fixer: None,
         }
     }
 
@@ -354,6 +670,7 @@ mod tests {
             comparator,
             unique: false,
             select: None,
+            fixer: None,
         }
     }
 
@@ -588,5 +905,354 @@ mod tests {
         let bad = "id: t\nkind: ordered_block\npaths: [\"x\"]\nselect: '(unclosed'\nlevel: error\n";
         let err = build(&spec_yaml(bad)).unwrap_err();
         assert!(err.to_string().contains("select"), "{err}");
+    }
+
+    // ----- the `sort` fix -----------------------------------------------
+
+    fn sort_fixer(comparator: Comparator, unique: bool) -> OrderedBlockSortFixer {
+        OrderedBlockSortFixer {
+            start: Some("# keep-sorted start".into()),
+            end: Some("# keep-sorted end".into()),
+            comparator,
+            unique,
+            select: None,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    fn markerless_sort_fixer(
+        start: Option<&str>,
+        end: Option<&str>,
+        comparator: Comparator,
+        unique: bool,
+        select: Option<&str>,
+    ) -> OrderedBlockSortFixer {
+        OrderedBlockSortFixer {
+            start: start.map(Into::into),
+            end: end.map(Into::into),
+            comparator,
+            unique,
+            select: select.map(|p| Regex::new(p).unwrap()),
+            applicability: Applicability::Safe,
+        }
+    }
+
+    #[test]
+    fn split_lines_round_trips_every_ending() {
+        for text in [
+            "",
+            "a",
+            "a\n",
+            "a\nb",
+            "a\nb\n",
+            "a\r\nb\r\n",
+            "a\r\nb\n",     // mixed
+            "\n\n",         // blank lines
+            "a\r",          // lone trailing CR (no LF) stays in body
+            "# start\nx\n", // markers
+        ] {
+            let rebuilt: String = split_lines(text)
+                .iter()
+                .flat_map(|(b, e)| [*b, *e])
+                .collect();
+            assert_eq!(rebuilt, text, "round-trip failed for {text:?}");
+        }
+    }
+
+    #[test]
+    fn split_lines_bodies_match_str_lines() {
+        for text in ["a\nb\n", "a\nb", "\n", "", "a\r\nb", "x\r"] {
+            let bodies: Vec<&str> = split_lines(text).iter().map(|(b, _)| *b).collect();
+            let stdlib: Vec<&str> = text.lines().collect();
+            assert_eq!(
+                bodies, stdlib,
+                "bodies diverge from str::lines() for {text:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sorted_reorders_a_delimited_block_leaving_surroundings() {
+        let t = "head\n# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\ntail\n";
+        let out = sort_fixer(Comparator::Lexical, false).sorted(t).unwrap();
+        assert_eq!(
+            out,
+            "head\n# keep-sorted start\nalpha\nbravo\ncharlie\n# keep-sorted end\ntail\n"
+        );
+    }
+
+    #[test]
+    fn sorted_returns_none_when_already_sorted() {
+        let t = "# keep-sorted start\nalpha\nbravo\n# keep-sorted end\n";
+        assert!(sort_fixer(Comparator::Lexical, false).sorted(t).is_none());
+    }
+
+    #[test]
+    fn sorted_is_idempotent() {
+        let t = "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\n";
+        let once = sort_fixer(Comparator::Lexical, false).sorted(t).unwrap();
+        // A second pass finds nothing to do (the engine's per-violation apply loop
+        // relies on this to converge).
+        assert!(
+            sort_fixer(Comparator::Lexical, false)
+                .sorted(&once)
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn sorted_preserves_crlf_per_line() {
+        let t = "# keep-sorted start\r\ncharlie\r\nalpha\r\n# keep-sorted end\r\n";
+        let out = sort_fixer(Comparator::Lexical, false).sorted(t).unwrap();
+        assert_eq!(
+            out,
+            "# keep-sorted start\r\nalpha\r\ncharlie\r\n# keep-sorted end\r\n"
+        );
+    }
+
+    #[test]
+    fn sorted_preserves_missing_final_newline() {
+        // Markerless whole-file sort where the last entry has no terminator: the
+        // file must still end without a newline (the ending is positional).
+        let out = markerless_sort_fixer(None, None, Comparator::Lexical, false, None)
+            .sorted("charlie\nalpha\nbravo")
+            .unwrap();
+        assert_eq!(out, "alpha\nbravo\ncharlie");
+    }
+
+    #[test]
+    fn sorted_numeric_comparator() {
+        let t = "# keep-sorted start\n10\n2\n1\n# keep-sorted end\n";
+        let out = sort_fixer(Comparator::Numeric, false).sorted(t).unwrap();
+        assert_eq!(out, "# keep-sorted start\n1\n2\n10\n# keep-sorted end\n");
+    }
+
+    #[test]
+    fn sorted_unique_drops_duplicate_slots() {
+        let t = "# keep-sorted start\nbravo\nalpha\nbravo\n# keep-sorted end\n";
+        let out = sort_fixer(Comparator::Lexical, true).sorted(t).unwrap();
+        // One `bravo` remains; the block shrank by exactly the duplicate.
+        assert_eq!(
+            out,
+            "# keep-sorted start\nalpha\nbravo\n# keep-sorted end\n"
+        );
+    }
+
+    #[test]
+    fn sorted_select_reorders_only_matching_lines_in_place() {
+        // Non-matching lines (the `# group` comment) stay at their slot; only
+        // `dep:`-prefixed entries are reordered around them.
+        let f = markerless_sort_fixer(
+            Some("# start"),
+            Some("# end"),
+            Comparator::Lexical,
+            false,
+            Some("^dep:"),
+        );
+        let t = "# start\ndep:z\n# group comment\ndep:a\n# end\n";
+        let out = f.sorted(t).unwrap();
+        assert_eq!(out, "# start\ndep:a\n# group comment\ndep:z\n# end\n");
+    }
+
+    #[test]
+    fn sorted_handles_multiple_blocks_each_independently() {
+        let t = "# keep-sorted start\nb\na\n# keep-sorted end\nx\n# keep-sorted start\nd\nc\n# keep-sorted end\n";
+        let out = sort_fixer(Comparator::Lexical, false).sorted(t).unwrap();
+        assert_eq!(
+            out,
+            "# keep-sorted start\na\nb\n# keep-sorted end\nx\n# keep-sorted start\nc\nd\n# keep-sorted end\n"
+        );
+    }
+
+    #[test]
+    fn sort_fix_correlates_with_the_check() {
+        // The load-bearing invariant: `sort` resolves exactly the entry
+        // violations `check` flags. Sort every unsorted fixture, then re-check
+        // and assert no entry (non-`unclosed`) violation survives.
+        for t in [
+            "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\n",
+            "# keep-sorted start\nz\ny\nx\nw\n# keep-sorted end\n",
+            "head\n# keep-sorted start\nb\na\n# keep-sorted end\nmid\n# keep-sorted start\nd\nc\n# keep-sorted end\n",
+        ] {
+            let rule = rule(Comparator::Lexical, false);
+            assert!(!eval(&rule, t).is_empty(), "fixture should flag: {t:?}");
+            let out = sort_fixer(Comparator::Lexical, false).sorted(t).unwrap();
+            let after: Vec<_> = eval(&rule, &out)
+                .into_iter()
+                .filter(|v| {
+                    v.baseline_key
+                        .as_deref()
+                        .is_none_or(|k| !k.starts_with(UNCLOSED_KEY_PREFIX))
+                })
+                .collect();
+            assert!(
+                after.is_empty(),
+                "entry violations survived sort: {after:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn sort_fix_unique_correlates_with_the_check() {
+        let rule = rule(Comparator::Lexical, true);
+        let t = "# keep-sorted start\nbravo\nalpha\nbravo\n# keep-sorted end\n";
+        assert!(!eval(&rule, t).is_empty());
+        let out = sort_fixer(Comparator::Lexical, true).sorted(t).unwrap();
+        assert!(eval(&rule, &out).is_empty(), "dup/order survived: {out:?}");
+    }
+
+    #[test]
+    fn can_fix_declines_only_the_unclosed_finding() {
+        let f = sort_fixer(Comparator::Lexical, false);
+        let entry = Violation::new("x is out of order");
+        assert!(f.can_fix(&entry), "an entry violation is sort-fixable");
+        let unclosed = Violation::new("unclosed ordered_block")
+            .with_baseline_key(format!("{UNCLOSED_KEY_PREFIX}7"));
+        assert!(
+            !f.can_fix(&unclosed),
+            "the unclosed finding is not sort-fixable"
+        );
+    }
+
+    #[test]
+    fn check_marks_the_unclosed_finding_with_the_sentinel_key() {
+        // A start with no end: the check emits the unclosed finding carrying the
+        // sentinel, so the engine tags it non-fixable.
+        let t = "# keep-sorted start\nalpha\nbravo\n";
+        let v = eval(&rule(Comparator::Lexical, false), t);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(
+            v[0].baseline_key
+                .as_deref()
+                .is_some_and(|k| k.starts_with(UNCLOSED_KEY_PREFIX)),
+            "unclosed finding must carry the sentinel key: {:?}",
+            v[0].baseline_key
+        );
+    }
+
+    #[test]
+    fn entry_violation_keeps_the_default_fingerprint_no_key() {
+        // Out-of-order entries stay key-less so making the rule fixable does not
+        // un-grandfather existing baselines (their fingerprint stays the line).
+        let t = "# keep-sorted start\nbravo\nalpha\n# keep-sorted end\n";
+        let v = eval(&rule(Comparator::Lexical, false), t);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(
+            v[0].baseline_key.is_none(),
+            "entry finding must be key-less"
+        );
+    }
+
+    #[test]
+    fn apply_sorts_the_file_on_disk() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let t = "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\n";
+        std::fs::write(tmp.path().join("f.txt"), t).unwrap();
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        let outcome = sort_fixer(Comparator::Lexical, false)
+            .apply(&Violation::new("x").with_path(Path::new("f.txt")), &ctx)
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
+            "# keep-sorted start\nalpha\nbravo\ncharlie\n# keep-sorted end\n"
+        );
+    }
+
+    #[test]
+    fn apply_dry_run_leaves_disk_untouched() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let t = "# keep-sorted start\nb\na\n# keep-sorted end\n";
+        std::fs::write(tmp.path().join("f.txt"), t).unwrap();
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: true,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        let outcome = sort_fixer(Comparator::Lexical, false)
+            .apply(&Violation::new("x").with_path(Path::new("f.txt")), &ctx)
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
+            t
+        );
+    }
+
+    #[test]
+    fn apply_skips_an_already_sorted_file() {
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        let t = "# keep-sorted start\na\nb\n# keep-sorted end\n";
+        std::fs::write(tmp.path().join("f.txt"), t).unwrap();
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        let outcome = sort_fixer(Comparator::Lexical, false)
+            .apply(&Violation::new("x").with_path(Path::new("f.txt")), &ctx)
+            .unwrap();
+        assert!(
+            matches!(&outcome, FixOutcome::Skipped(s) if s.contains("already sorted")),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn fix_edit_emits_set_content_and_declines_unclosed() {
+        let f = sort_fixer(Comparator::Lexical, false);
+        let bytes = b"# keep-sorted start\nb\na\n# keep-sorted end\n";
+        let edit = f
+            .fix_edit(
+                &Violation::new("x").with_path(Path::new("f.txt")),
+                bytes,
+                Path::new("/"),
+            )
+            .expect("an entry violation yields an edit");
+        match edit {
+            FixEdit::SetContent { content, .. } => assert_eq!(
+                content,
+                b"# keep-sorted start\na\nb\n# keep-sorted end\n".to_vec()
+            ),
+            other => panic!("expected SetContent, got {other:?}"),
+        }
+        // The unclosed finding is declined even though other blocks could sort.
+        let unclosed = Violation::new("unclosed")
+            .with_path(Path::new("f.txt"))
+            .with_baseline_key(format!("{UNCLOSED_KEY_PREFIX}1"));
+        assert!(f.fix_edit(&unclosed, bytes, Path::new("/")).is_none());
+    }
+
+    #[test]
+    fn build_wires_the_sort_fixer() {
+        use crate::test_support::spec_yaml;
+        let yaml = "id: t\nkind: ordered_block\npaths: [\"x\"]\nstart: '# s'\nend: '# e'\nlevel: error\nfix: { sort: {} }\n";
+        let rule = build(&spec_yaml(yaml)).unwrap();
+        assert!(rule.fixer().is_some(), "sort fix should wire a fixer");
+    }
+
+    #[test]
+    fn build_rejects_an_incompatible_fix_op() {
+        use crate::test_support::spec_yaml;
+        let yaml =
+            "id: t\nkind: ordered_block\npaths: [\"x\"]\nlevel: error\nfix: { file_remove: {} }\n";
+        let err = build(&spec_yaml(yaml)).unwrap_err();
+        assert!(err.to_string().contains("not compatible"), "{err}");
     }
 }

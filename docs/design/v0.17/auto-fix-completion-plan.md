@@ -546,10 +546,39 @@ After create-and-register: Phase 3 is COMPLETE; on to Phase 4.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 
-Not started. Ops: `sort` / `dedup` (on `ordered_block`), `indent_style` (lift the
-`indent_style.rs` rejection), a gitignore/gitattributes `insert_line`,
-`insert_header` (on `file_header`, comment-style/shebang/xml-decl/.license
-aware). Risk: low-medium. The clean deterministic wins; a good final phase.
+IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
+`indent_style` (lift the `indent_style.rs` rejection), a gitignore/gitattributes
+`insert_line`, `insert_header` (on `file_header`, comment-style/shebang/xml-decl/
+.license aware). Risk: low-medium. The clean deterministic wins; a good final phase.
+
+- **`sort` (first Phase-4 op, Safe). DELIVERED.** `fix: { sort: {} }` on
+  `ordered_block`: a whole-file rewrite that re-sorts each marked block's entries
+  under the rule's own `comparator` (dropping duplicates when `unique`), reusing
+  the rule's `start` / `end` / `comparator` / `unique` / `select` so what `sort`
+  reorders is exactly what the check flags out of order. Non-entry lines (markers,
+  blanks, `select`-excluded comments) and every line's terminator (LF vs CRLF) +
+  the file's trailing-newline state are preserved (the fix only PERMUTES entry
+  bodies across their slots, keeping each slot's ending positional; `unique`
+  deletes the surplus slot). `Safe` + fixed-behavior in the W2 partition (it
+  reorders the file's OWN lines -- no ruleset-authored bytes -- so it is honored
+  from any source, unlike `create_and_register`). Correlation held by a SHARED
+  entry predicate (`is_entry_line`) between the check and the fixer's `scan_blocks`
+  + a check->fix->converge e2e. The one non-`sort`-fixable finding -- an unclosed
+  block (a `start` with no `end`) -- carries a sentinel `baseline_key`
+  (`ordered_block\0unclosed\0<line>`) so `can_fix` declines it and `check` does not
+  advertise it fixable (proven through the engine in `fixable_accuracy.rs`); entry
+  findings stay key-less so making the rule fixable does not un-grandfather
+  baselines. A post-sort `is_monotonic` verify skips a block a non-strict-weak
+  comparator (pathological mixed-`numeric`) could not fully order, so `fix` never
+  writes a file `check` would still flag. Full gate cascade + preflight green.
+  `dedup` (order-preserving, without sort) and `indent_style` / `insert_line` /
+  `insert_header` remain. `dedup` folds naturally into `sort`'s `unique` path, so a
+  standalone order-preserving `dedup` is only needed for the "keep insertion order,
+  drop repeats" case.
+
+Next Phase-4 op: `indent_style` (lift the `indent_style.rs` rejection), or
+`dedup` (order-preserving) -- surface the host/field choice for `insert_line`
+before starting it (an open design surface).
 
 ### Coverage follow-ups (tracked from the audit; regression-prevention)
 

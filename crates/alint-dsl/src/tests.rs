@@ -1177,6 +1177,12 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         // `relocate` moves a file to the repo root (a rename) -- no ruleset bytes,
         // no spawn; gated by its Unsafe tier like `file_remove`/`file_rename`.
         "relocate",
+        // `sort` REORDERS the host file's own existing lines (and drops `unique`
+        // duplicates) under the rule's comparator -- no ruleset-authored bytes reach
+        // the file (the comparator/select pick an ORDER, they do not inject content),
+        // no spawn. Honored from any source, unlike `create_and_register` (which
+        // appends a ruleset-chosen member value and IS content-injecting).
+        "sort",
         // NOTE: `git_untrack` and `command` are NOT here -- they SPAWN, so they are
         // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
         // a strictly stronger gate than the content demotion.
