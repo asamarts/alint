@@ -217,3 +217,74 @@ fn check_tags_only_the_sortable_ordered_block_violation_fixable() {
         .count();
     assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
 }
+
+#[test]
+fn check_tags_only_the_reindentable_indent_style_violation_fixable() {
+    // Phase-4 `indent_style` honesty: the reindent fix converts a PURE-TAB lead
+    // (K tabs -> K*width spaces) but declines the ambiguous cases (a pure-space
+    // WIDTH-MISMATCH: round up or down?). `check` must tag ONLY the pure-tab file
+    // fixable. Drives the REAL rule + fixer through the engine's `mark_fixability`.
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-indent-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    // `good_tab.py`: a pure-tab lead (fixable). `bad_width.py`: 3 spaces under
+    // width 4, no tab (WidthMismatch, ambiguous -> not fixable). One finding each.
+    let tree: TreeSpec = serde_yaml_ng::from_str(
+        "good_tab.py: \"x:\\n\\ta()\\n\"\nbad_width.py: \"x:\\n   a()\\n\"\n",
+    )
+    .unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: ind\n    kind: indent_style\n    paths: \"**/*.py\"\n    style: spaces\n    width: 4\n    level: error\n    fix:\n      indent_style: {}\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "ind")
+        .expect("ind produced a result");
+    assert!(
+        result.is_fixable,
+        "the rule declares a fixer (per-rule flag)"
+    );
+    assert_eq!(
+        result.violations.len(),
+        2,
+        "one finding per file: {:?}",
+        result.violations
+    );
+
+    let fixable_of = |needle: &str| -> bool {
+        result
+            .violations
+            .iter()
+            .find(|v| {
+                v.path
+                    .as_deref()
+                    .is_some_and(|p| p.to_string_lossy().contains(needle))
+            })
+            .unwrap_or_else(|| panic!("no violation for {needle}: {:?}", result.violations))
+            .is_fixable
+    };
+    assert!(
+        fixable_of("good_tab"),
+        "a pure-tab lead is reindent-fixable"
+    );
+    assert!(
+        !fixable_of("bad_width"),
+        "a width-mismatch is NOT reindent-fixable (round up or down is ambiguous)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(
+        fixable_count, 1,
+        "exactly one indent violation is auto-fixable"
+    );
+}

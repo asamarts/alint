@@ -610,9 +610,34 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
   standalone order-preserving `dedup` is only needed for the "keep insertion order,
   drop repeats" case.
 
-Next Phase-4 op: `indent_style` (lift the `indent_style.rs` rejection), or
-`dedup` (order-preserving) -- surface the host/field choice for `insert_line`
-before starting it (an open design surface).
+- **`indent_style` (2nd Phase-4 op). IN PROGRESS (asamarts chose the width-based
+  scope, 2026-09-24).** Lifts the deferred `indent_style.rs` fix rejection. The
+  deferral was a real fork -- converting tabs<->spaces needs a tab-width -- which
+  the rule's own `width:` resolves for the common case. Scope: op `fix: {
+  indent_style: {} }`, wired ONLY for `style: spaces` + a `width: N` (>0); build
+  REJECTS the fix for `style: tabs` or a missing/zero width ("needs style: spaces +
+  a width -- the spaces-per-tab is otherwise unknown"). The fixer converts a line
+  whose leading whitespace is PURE TABS (K tabs, no spaces) to K*N spaces (resolves
+  WrongChar AND lands on a multiple of N). It DECLINES (leaves) the genuinely
+  ambiguous bad lines: a MIXED tab+space lead (round the trailing spaces? unknown)
+  and a pure-space WIDTH-MISMATCH (round up or down? unknown). Honesty: the check,
+  when fixable (`self.fixer.is_some()`), tags the first-bad-line finding with a
+  `baseline_key` = fixable (pure-tab) / unfixable (mixed / width-mismatch) so
+  `can_fix` declines the ambiguous ones (like `sort`'s unclosed sentinel); one
+  finding per file (first bad line), so NO F4 multi-finding issue. `apply` is
+  whole-file: converts EVERY pure-tab line -> N spaces (Applied if it changed a
+  line, else Skipped); width/mixed lines surface separately on re-check and are
+  reported unfixable -> honest, convergent. Tier **Safe** (a pure-tab->spaces
+  reindent is behavior-preserving for the common case, like the hygiene
+  normalizers). W2 **CONTENT_INJECTING** (demoted from an untrusted remote):
+  applying the SORT lessons proactively -- a remote could AIM a reindent at an
+  indent-SIGNIFICANT file (a `Makefile` recipe needs a literal tab; converting it
+  is a HARD build break), the same "aim it at your files" risk that demotes `sort`.
+  Preserves line endings + the trailing-newline state (only the leading run is
+  rewritten). Full new-fix-op gate cascade. Op #24.
+
+Next Phase-4 op after indent_style: `insert_line` (SURFACE its host/field fork
+first) or `insert_header`.
 
 ### Coverage follow-ups (tracked from the audit; regression-prevention)
 

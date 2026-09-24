@@ -660,6 +660,12 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // change its meaning at the Safe tier. Same "aim it at your files" risk as
     // `sync_from`, so it PROPOSES, never auto-writes, from an untrusted remote.
     "sort",
+    // `indent_style` rewrites the victim's OWN leading whitespace (tabs -> spaces),
+    // writing no ruleset bytes -- but a remote's `paths:` can AIM the reindent at an
+    // indent-SIGNIFICANT file (a `Makefile` recipe needs a literal tab; converting
+    // it to spaces is a HARD build break) at the Safe tier. Same aim risk as
+    // `sort`, so it PROPOSES, never auto-writes, from an untrusted remote.
+    "indent_style",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`

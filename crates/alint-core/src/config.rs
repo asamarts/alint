@@ -459,6 +459,9 @@ pub enum FixSpec {
     Sort {
         sort: SortFixSpec,
     },
+    IndentStyle {
+        indent_style: IndentStyleFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -550,6 +553,7 @@ impl FixSpec {
         "relocate",
         "create_and_register",
         "sort",
+        "indent_style",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -578,6 +582,7 @@ impl FixSpec {
             Self::Relocate { .. } => "relocate",
             Self::CreateAndRegister { .. } => "create_and_register",
             Self::Sort { .. } => "sort",
+            Self::IndentStyle { .. } => "indent_style",
         }
     }
 }
@@ -957,6 +962,20 @@ pub struct CreateAndRegisterFixSpec {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct SortFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `indent_style` op (Phase 4): reindent the host `indent_style` rule's
+/// violating lines. Wired ONLY for `style: spaces` + a `width: N` (the
+/// spaces-per-tab): it rewrites a PURE-TAB leading run (K tabs) to K*N spaces, and
+/// leaves the genuinely ambiguous cases (a mixed tab+space lead, a pure-space
+/// width mismatch). Behavior comes from the host rule (`style` / `width`); this
+/// spec adds only the optional tier override. **`Safe` by default** (a pure-tab
+/// reindent is behavior-preserving for the common case).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct IndentStyleFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1423,6 +1442,7 @@ mod tests {
             ("relocate: {}", "relocate"),
             ("create_and_register: {}", "create_and_register"),
             ("sort: {}", "sort"),
+            ("indent_style: {}", "indent_style"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

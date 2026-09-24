@@ -155,6 +155,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ordered_block` finding `sort` cannot repair -- an unclosed block (a `start`
   with no `end`) -- is reported but not advertised as auto-fixable, since `sort`
   cannot invent a missing marker.
+- New `indent_style` auto-fix op for the `indent_style` rule (`fix: {
+  indent_style: {} }`): reindents tab-indented lines to spaces. It is wired ONLY
+  for a `style: spaces` + `width: N` rule (the `width` supplies the spaces-per-tab)
+  and converts a line whose leading whitespace is PURE TABS to `N` spaces per tab
+  (1 tab -> N, 2 tabs -> 2N), preserving the rest of the line, its terminator, and
+  the trailing-newline state. It declines the genuinely ambiguous cases -- a mixed
+  tab+space lead, or a pure-space run that isn't a multiple of `width` (round up or
+  down?) -- so `check` does not advertise those as auto-fixable. A `tabs`-style or
+  width-less rule with a `fix` is rejected at load (spaces->tabs has no
+  spaces-per-tab). This lifts the previous "reindentation is deferred" rejection.
+  `Safe` by default (a pure-tab reindent is behavior-preserving for the common
+  case); like `sort`, a remote `extends:` could aim it at an indent-significant
+  file (a `Makefile` recipe needs a literal tab), so an untrusted remote's
+  `indent_style` fix is demoted to a suggestion.
 
 ### Changed
 

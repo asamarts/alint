@@ -852,6 +852,9 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         // `sort` is content-injecting (demoted from an untrusted remote); read its
         // tier so `w2_remote_sort_is_demoted_to_suggestion` sees the cap.
         FixSpec::Sort { sort } => sort.applicability,
+        // `indent_style` is content-injecting for the same reason (aim a reindent
+        // at a Makefile); read its tier for `w2_remote_indent_style_is_demoted`.
+        FixSpec::IndentStyle { indent_style } => indent_style.applicability,
         _ => None,
     }
 }
@@ -1060,6 +1063,24 @@ fn w2_remote_sort_is_demoted_to_suggestion() {
         declared_content_tier(rule),
         Some(alint_core::Applicability::Suggestion),
         "an untrusted remote's `sort` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_indent_style_is_demoted_to_suggestion() {
+    // `indent_style` writes no ruleset bytes, but a REMOTE `extends:` can AIM its
+    // reindent at an indent-significant file (a Makefile recipe's literal tab) at
+    // the Safe tier, so it is capped to `suggestion`. Teeth: dropping
+    // `indent_style` from CONTENT_INJECTING_FIX_OPS reverts this to None and reds.
+    let body = "version: 1\nrules:\n  - id: ind\n    kind: indent_style\n    \
+        paths: \"**/Makefile\"\n    style: spaces\n    width: 4\n    level: error\n    \
+        fix: { indent_style: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "ind").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `indent_style` must be demoted to suggestion"
     );
 }
 

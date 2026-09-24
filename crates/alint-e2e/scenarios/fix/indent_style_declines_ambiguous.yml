@@ -1,0 +1,34 @@
+name: indent_style declines a width-mismatch it cannot unambiguously reindent
+tags: [fix, indent_style, verify]
+
+# A pure-space lead that is not a multiple of `width` (3 spaces under width 4) is
+# a WidthMismatch. Rounding it up or down is ambiguous, so the reindent fix does
+# NOT touch it: `check` does not advertise it auto-fixable, and `fix` forms no
+# edit (there is no pure-tab indentation to convert) -> the file is byte-identical
+# and the violation survives. check and fix agree.
+
+given:
+  tree:
+    app.py: "def f():\n   return 1\n"
+  config: |
+    version: 1
+    rules:
+      - id: spaces-4
+        kind: indent_style
+        paths: "**/*.py"
+        style: spaces
+        width: 4
+        level: error
+        fix: { indent_style: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: spaces-4, level: error, path: app.py}
+  - skipped: [spaces-4]
+  - violations:
+      - {rule: spaces-4, level: error, path: app.py}
+
+expect_tree:
+  app.py: "def f():\n   return 1\n"

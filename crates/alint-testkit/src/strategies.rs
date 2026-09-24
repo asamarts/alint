@@ -399,6 +399,18 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
          # keep-sorted start\nyankee\nxray\n# keep-sorted end\n"
             .to_string(),
     );
+    // A TAB-indented file triggers `indent_style` (style: spaces) + the Phase-4
+    // `indent_style` reindent fix, which converts each pure-tab lead to 4 spaces
+    // per tab -> converges (idempotent). Otherwise clean (LF, final newline, no
+    // trailing ws -- the tabs are LEADING -- no BOM/bidi, no `DEBUGME`), so no
+    // other single-rule draw disturbs it; the 10-char stem `indenttrig` exceeds
+    // the generator's 7-char limit so it never collides. `**/indenttrig.txt`
+    // matches only this trigger. Safe, so a bare `Fix` applies.
+    insert_file(
+        root,
+        &[dir.clone(), "indenttrig.txt".to_string()],
+        "header\n\tfoo\n\t\tbar\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -956,6 +968,21 @@ fn rule_ordered_block_sort() -> impl Strategy<Value = String> {
     })
 }
 
+/// An `indent_style` rule fixed via the `indent_style` op (Phase 4): the planted
+/// `_trig/indenttrig.txt` is tab-indented, so the `style: spaces` + `width: 4`
+/// rule fires and the fix reindents each PURE-TAB line to 4 spaces per tab ->
+/// converges (idempotent). Safe (a pure-tab reindent is behavior-preserving), so
+/// a bare `Fix` APPLIES it. The 10-char stem `indenttrig` exceeds the generator's
+/// 7-char limit, so it never collides; `**/indenttrig.txt` matches only this
+/// trigger.
+fn rule_indent_style() -> impl Strategy<Value = String> {
+    rule_id("in").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: indent_style\n    paths: \"**/indenttrig.txt\"\n    style: spaces\n    width: 4\n    level: error\n    fix:\n      indent_style: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -1017,6 +1044,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // the `sort` op (Phase 4): reorders an out-of-order keep-sorted block in
         // place -> converges. Safe, so APPLIED under a bare `Fix`.
         rule_ordered_block_sort(),
+        // the `indent_style` op (Phase 4): reindents tab-indented lines to spaces
+        // -> converges. Safe, so APPLIED under a bare `Fix`.
+        rule_indent_style(),
     ]
 }
 

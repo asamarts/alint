@@ -1,0 +1,32 @@
+name: indent_style reindents tab-indented lines to spaces
+tags: [fix, indent_style]
+
+# A `style: spaces` + `width: 4` rule flags tab indentation; the `indent_style`
+# fix converts each PURE-TAB lead to 4 spaces per tab (1 tab -> 4, 2 tabs -> 8),
+# preserving the rest of each line. Safe (a pure-tab reindent is
+# behavior-preserving), so a bare `fix` applies it -> the second check is clean.
+
+given:
+  tree:
+    app.py: "def f():\n\tif True:\n\t\treturn 1\n"
+  config: |
+    version: 1
+    rules:
+      - id: spaces-4
+        kind: indent_style
+        paths: "**/*.py"
+        style: spaces
+        width: 4
+        level: error
+        fix: { indent_style: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: spaces-4, level: error, path: app.py}
+  - applied: [spaces-4]
+  - violations: []
+
+expect_tree:
+  app.py: "def f():\n    if True:\n        return 1\n"

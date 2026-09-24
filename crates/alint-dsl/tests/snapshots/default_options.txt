@@ -1322,6 +1322,7 @@ IndentStyleRule {
     width: Some(
         4,
     ),
+    fixer: None,
 }
 
 === kind: ini_path_absent | id: ini-no-debug ===

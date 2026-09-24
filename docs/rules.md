@@ -290,7 +290,7 @@ Cap line length in characters (not bytes — code points). Optional `tab_width` 
 
 Every non-blank line indents with the configured `style` (`tabs` or `spaces`). When `style: spaces`, optional `width` enforces a multiple.
 
-Check-only: tab-width-aware reindentation is language-specific. Pair with your editor's "reindent on save" for remediation.
+Fix: `indent_style` — reindents tab-indented lines to spaces, for a `style: spaces` + `width: N` rule only (the `width` is the spaces-per-tab). It converts a PURE-TAB leading run to `N` spaces per tab (1 tab → N, 2 tabs → 2N), preserving the rest of the line, its terminator, and the trailing-newline state; it declines the genuinely ambiguous cases — a mixed tab+space lead, or a pure-space run that isn't a multiple of `width` — so `check` does not advertise those as auto-fixable. A `tabs`-style or width-less rule with a `fix` is rejected at load (`spaces → tabs` has no spaces-per-tab). `Safe` by default; demoted to a suggestion from an untrusted remote `extends:` (a remote could aim a reindent at an indent-significant file such as a `Makefile`). With no fix declared, violations are unfixable; pair with your editor's "reindent on save".
 
 ### `max_consecutive_blank_lines`
 
@@ -790,6 +790,7 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 - `sync_from: {}` (source + relation from parent rule) — for `cross_file`
 - `create_and_register: {content?, content_from?}` — for `cross_file` `relation: registered`
 - `sort: {}` (markers / comparator / `unique` / `select` from parent rule) — for `ordered_block`
+- `indent_style: {}` (style / width from parent rule) — for `indent_style` (`style: spaces` + `width` only)
 
 `fix_size_limit` is a top-level config field:
 
