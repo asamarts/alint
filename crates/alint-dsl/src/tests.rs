@@ -842,6 +842,9 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         FixSpec::SetValue { set_value } => set_value.applicability,
         FixSpec::RemoveValue { remove_value } => remove_value.applicability,
         FixSpec::SyncFrom { sync_from } => sync_from.applicability,
+        FixSpec::CreateAndRegister {
+            create_and_register,
+        } => create_and_register.applicability,
         // `relocate` is fixed-behavior (never demoted), but reading its declared
         // tier explicitly gives `w2_remote_relocate_is_not_demoted` teeth: a
         // regression that demoted it would surface here as `Some(Suggestion)`.
@@ -1014,6 +1017,28 @@ fn w2_remote_sync_from_equals_is_demoted_to_suggestion() {
         declared_content_tier(rule),
         Some(alint_core::Applicability::Suggestion),
         "an untrusted remote's `sync_from` on `equals` must be demoted to suggestion"
+    );
+}
+
+const REMOTE_CREATE_AND_REGISTER: &str = "version: 1\nrules:\n  - id: reg\n    \
+     kind: cross_file\n    relation: registered\n    \
+     source: { files: \"crates/*\" }\n    \
+     targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n    \
+     level: error\n    fix: { create_and_register: {} }\n";
+
+#[test]
+fn w2_remote_create_and_register_is_demoted_to_suggestion() {
+    // `create_and_register` appends a ruleset-chosen member value into the user's
+    // manifest, so a REMOTE `extends:` the user has not trusted may PROPOSE but
+    // never auto-write: its tier is capped to `suggestion`. Teeth: dropping
+    // `create_and_register` from CONTENT_INJECTING_FIX_OPS reverts this to None
+    // (default Unsafe) and reds here.
+    let cfg = load_extending(REMOTE_CREATE_AND_REGISTER, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "reg").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `create_and_register` must be demoted to suggestion"
     );
 }
 

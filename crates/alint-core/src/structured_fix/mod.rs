@@ -147,6 +147,36 @@ pub fn document_remove(format: Format, bytes: &[u8], paths: &[Vec<PathSeg>]) -> 
     }
 }
 
+/// Append each string in `values` to the ARRAY at `path`, skipping any already
+/// present (idempotent), and return the FULL new document bytes. `None` when the
+/// format has no list-append support ([`supports_list_append`]), the source does
+/// not parse, `path` is not an array, a value is not a string, or NOTHING was
+/// added. Used by the `create_and_register` fixer to register a member in a
+/// manifest list (`$.workspace.members`). Never panics.
+#[must_use]
+pub fn document_append(
+    format: Format,
+    bytes: &[u8],
+    path: &[PathSeg],
+    values: &[serde_json::Value],
+) -> Option<Vec<u8>> {
+    let text = std::str::from_utf8(bytes).ok()?;
+    match format {
+        Format::Toml => toml_::document_append(text, path, values),
+        // JSON (jsonc-parser array insert) and YAML (block/flow sequence splice)
+        // are a fast-follow; every other format has no array to append to.
+        _ => None,
+    }
+}
+
+/// Whether `format` supports [`document_append`] (a list append that preserves
+/// formatting). TOML today; JSON / YAML are a fast-follow. The `create_and_register`
+/// fixer consults this so `check` does not promise a register it cannot apply.
+#[must_use]
+pub fn supports_list_append(format: Format) -> bool {
+    matches!(format, Format::Toml)
+}
+
 /// Whether `format`'s parse maps every leaf value to a STRING (XML, dotenv,
 /// properties, INI -- none carry native numbers/booleans). On such a format a
 /// non-string `equals` (`equals: 8080`) can never match the parsed string, so
@@ -1305,6 +1335,36 @@ mod toml_ {
             }
         }
         removed_any.then(|| finalize(text, &doc.to_string()))
+    }
+
+    /// Append each element of `values` (string members) to the ARRAY at `path`,
+    /// skipping any already present (idempotent). Returns the whole new document,
+    /// or `None` when `path` is not an array, a value is not a representable
+    /// string, or NOTHING was added (so the fixer declines rather than emit a
+    /// no-op whole-file edit). `toml_edit` preserves the array's existing style
+    /// (inline vs multi-line, indentation) and round-trips every untouched node.
+    pub(super) fn document_append(
+        text: &str,
+        path: &[PathSeg],
+        values: &[serde_json::Value],
+    ) -> Option<Vec<u8>> {
+        let mut doc = text.parse::<DocumentMut>().ok()?;
+        let arr = navigate_mut(doc.as_item_mut(), path)?.as_array_mut()?;
+        let mut added = false;
+        for v in values {
+            // Members are strings (rendered paths); a non-string element is not
+            // representable in a members list, so decline the whole append.
+            let serde_json::Value::String(s) = v else {
+                return None;
+            };
+            // Idempotence: skip an element already present (string compare).
+            if arr.iter().any(|e| e.as_str() == Some(s.as_str())) {
+                continue;
+            }
+            arr.push(s.as_str());
+            added = true;
+        }
+        added.then(|| finalize(text, &doc.to_string()))
     }
 
     /// Restore the byte-level details `toml_edit`'s reserialize normalizes away,

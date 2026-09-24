@@ -1423,3 +1423,50 @@ fn json_document_remove_drops_descendant_paths_without_panicking() {
     assert_eq!(rm(&[vec![key("a")], vec![key("a"), key("a")]]), "{}");
     assert_eq!(rm(&[vec![key("a"), key("a")], vec![key("a")]]), "{}"); // reverse order
 }
+
+#[test]
+fn document_append_toml_adds_a_member_preserving_style() {
+    let app = |src: &str, path: &[PathSeg], vals: &[serde_json::Value]| -> Option<String> {
+        document_append(Format::Toml, src.as_bytes(), path, vals)
+            .map(|b| String::from_utf8(b).unwrap())
+    };
+    let members = [key("workspace"), key("members")];
+    // Inline array: append preserves the inline style.
+    assert_eq!(
+        app(
+            "[workspace]\nmembers = [\"crates/bar\"]\n",
+            &members,
+            &[json!("crates/foo")],
+        )
+        .unwrap(),
+        "[workspace]\nmembers = [\"crates/bar\", \"crates/foo\"]\n"
+    );
+    // Multi-line array: toml_edit keeps the multi-line style.
+    let multi = "[workspace]\nmembers = [\n    \"crates/bar\",\n]\n";
+    let out = app(multi, &members, &[json!("crates/foo")]).unwrap();
+    assert!(out.contains("crates/bar"), "kept existing: {out}");
+    assert!(out.contains("crates/foo"), "added new: {out}");
+    // Idempotence: a member already present is NOT re-added -> None (no-op declined).
+    assert!(
+        app(
+            "[workspace]\nmembers = [\"crates/bar\"]\n",
+            &members,
+            &[json!("crates/bar")],
+        )
+        .is_none(),
+        "an already-present member yields no edit"
+    );
+    // A non-array path declines.
+    assert!(
+        app(
+            "[workspace]\nname = \"x\"\n",
+            &[key("workspace"), key("name")],
+            &[json!("y")]
+        )
+        .is_none()
+    );
+    // supports_list_append gate: TOML yes, others no.
+    assert!(supports_list_append(Format::Toml));
+    assert!(!supports_list_append(Format::Json));
+    assert!(document_append(Format::Json, b"[]", &[], &[json!("x")]).is_none());
+}

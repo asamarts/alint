@@ -453,6 +453,9 @@ pub enum FixSpec {
     Relocate {
         relocate: RelocateFixSpec,
     },
+    CreateAndRegister {
+        create_and_register: CreateAndRegisterFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -542,6 +545,7 @@ impl FixSpec {
         "dir_create",
         "sync_from",
         "relocate",
+        "create_and_register",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -568,6 +572,7 @@ impl FixSpec {
             Self::DirCreate { .. } => "dir_create",
             Self::SyncFrom { .. } => "sync_from",
             Self::Relocate { .. } => "relocate",
+            Self::CreateAndRegister { .. } => "create_and_register",
         }
     }
 }
@@ -906,6 +911,22 @@ pub struct SyncFromFixSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct RelocateFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `create_and_register`: ensure a `cross_file` `relation: registered` member both
+/// exists and is listed in each target's manifest array, applying only the unmet
+/// repair. **Phase 1b is register-only**: an existing-but-unregistered member is
+/// APPENDED to the list (a single-file structured edit); creating a missing named
+/// member (the multi-file transaction) is a follow-up. A **content-injecting** op
+/// (it writes a ruleset-chosen value into a manifest), so an untrusted remote
+/// `extends:` demotes it to a suggestion (auto-fix.md 5.5). **`Unsafe` by default**
+/// (mutates a manifest), `Safe`-promotable. Takes its members + targets from the
+/// host rule, not new fields.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAndRegisterFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1370,6 +1391,7 @@ mod tests {
             ("dir_create: {}", "dir_create"),
             ("sync_from: {}", "sync_from"),
             ("relocate: {}", "relocate"),
+            ("create_and_register: {}", "create_and_register"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

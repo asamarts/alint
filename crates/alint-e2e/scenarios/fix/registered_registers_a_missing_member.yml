@@ -1,0 +1,44 @@
+name: create_and_register appends an unregistered member to workspace.members
+# The register half: crates/foo exists but is absent from workspace.members.
+# create_and_register is Unsafe (it mutates a manifest), so `fix_unsafe` applies
+# it -- appending "crates/foo" to the TOML array (toml_edit preserves the inline
+# style) -> the member is now listed -> the tree converges. The fix reads the
+# missing member from the check's finding (no re-glob), so it registers exactly
+# what the check flagged.
+tags: [fix, cross_file, registered, create_and_register, applicability]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = [\"crates/bar\"]\n"
+    crates:
+      bar:
+        Cargo.toml: "[package]\nname = \"bar\"\n"
+      foo:
+        Cargo.toml: "[package]\nname = \"foo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: members-registered
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*" }
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+        fix: { create_and_register: {} }
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: members-registered, level: error, path: Cargo.toml}
+  - applied: [members-registered]
+  - violations: []
+
+expect_tree:
+  Cargo.toml: "[workspace]\nmembers = [\"crates/bar\", \"crates/foo\"]\n"
+  crates:
+    bar:
+      Cargo.toml: "[package]\nname = \"bar\"\n"
+    foo:
+      Cargo.toml: "[package]\nname = \"foo\"\n"

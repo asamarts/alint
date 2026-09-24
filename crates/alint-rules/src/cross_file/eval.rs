@@ -98,13 +98,20 @@ impl CrossFileRule {
                     render(&missing)
                 )
             });
+            // The `baseline_key` doubles as the fix channel: the `create_and_register`
+            // fixer reads the missing members back from it and appends exactly those
+            // (no re-glob, so it never diverges from this check's gitignore-aware
+            // member set). Sorted (BTreeSet) for a stable key. Members are paths, so
+            // they never contain the `\0` separator.
+            let mut key = format!("registered\u{0}members\u{0}{}", crate::slash(target));
+            for m in &missing {
+                key.push('\u{0}');
+                key.push_str(m);
+            }
             out.push(
                 Violation::new(msg)
                     .with_path(target.to_path_buf())
-                    .with_baseline_key(format!(
-                        "registered\u{0}members\u{0}{}",
-                        crate::slash(target)
-                    )),
+                    .with_baseline_key(key),
             );
         });
     }

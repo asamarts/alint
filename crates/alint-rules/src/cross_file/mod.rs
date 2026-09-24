@@ -41,7 +41,7 @@ use alint_core::{
     Violation,
 };
 
-use crate::fixers::{CrossFileValueFixer, SyncFromFixer, ValueTargets};
+use crate::fixers::{CreateAndRegisterFixer, CrossFileValueFixer, SyncFromFixer, ValueTargets};
 
 mod eval;
 mod spec;
@@ -177,10 +177,72 @@ fn build_sync_from_fixer(
                 ))),
             }
         }
+        Some(FixSpec::CreateAndRegister {
+            create_and_register,
+        }) => {
+            if relation != Relation::Registered {
+                return Err(cfg(format!(
+                    "`create_and_register` requires `relation: registered`; `{relation:?}` \
+                     has no member list to register into"
+                )));
+            }
+            let tier = create_and_register
+                .applicability
+                .unwrap_or(Applicability::Unsafe);
+            let register_targets = build_register_targets(targets, cfg)?;
+            Ok(Some(Box::new(CreateAndRegisterFixer::new(
+                register_targets,
+                tier,
+            ))))
+        }
         Some(other) => Err(cfg(format!(
-            "fix.{} is not compatible with cross_file (only `sync_from`)",
+            "fix.{} is not compatible with cross_file (only `sync_from` and `create_and_register`)",
             other.op_name()
         ))),
+    }
+}
+
+/// Resolve the per-target ARRAY extract for `create_and_register`: each target
+/// extract must be `Structured(fmt, "$.path[*]")` -- the same element query the
+/// check uses -- with the trailing `[*]` stripped to the ARRAY path the fixer
+/// appends into. A `lines` / `whole_file` / regex extract, or one that does not
+/// select array elements with `[*]`, is rejected at load.
+fn build_register_targets(
+    targets: Option<&Targets>,
+    cfg: &impl Fn(String) -> Error,
+) -> Result<ValueTargets> {
+    let array_extract = |ex: Option<&Extract>, what: &str| -> Result<Extract> {
+        match ex {
+            Some(Extract::Structured(fmt, query)) => {
+                let array_query = query.strip_suffix("[*]").ok_or_else(|| {
+                    cfg(format!(
+                        "`relation: registered` {what} extract must select the array ELEMENTS \
+                         with a trailing `[*]` (e.g. `$.workspace.members[*]`), so the check \
+                         sees each element and the fix can locate the array; got `{query}`"
+                    ))
+                })?;
+                Ok(Extract::Structured(*fmt, array_query.to_string()))
+            }
+            _ => Err(cfg(format!(
+                "`relation: registered` {what} needs a STRUCTURED extract naming the list, \
+                 e.g. `{{ toml: \"$.workspace.members[*]\" }}`"
+            ))),
+        }
+    };
+    match targets {
+        Some(Targets::Glob { extract, .. }) => Ok(ValueTargets::Glob(array_extract(
+            extract.as_ref(),
+            "the `targets.files` glob",
+        )?)),
+        Some(Targets::List(list)) => {
+            let mut out = Vec::with_capacity(list.len());
+            for (file, ex) in list {
+                let e = array_extract(ex.as_ref(), &format!("target `{file}`"))?;
+                out.push((PathBuf::from(file), e));
+            }
+            Ok(ValueTargets::List(out))
+        }
+        None => Err(cfg("`relation: registered` needs `targets`".into())),
     }
 }
 
@@ -720,6 +782,59 @@ mod tests {
             err.contains("registered") && err.contains("JSONPath"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn build_accepts_create_and_register_on_registered() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { files: \"crates/*\" }\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n\
+             level: error\n\
+             fix: { create_and_register: {} }\n",
+        );
+        let rule = build(&spec).expect("create_and_register builds on registered");
+        assert!(rule.fixer().is_some(), "the register fixer attaches");
+    }
+
+    #[test]
+    fn build_rejects_create_and_register_on_a_non_registered_relation() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: identical\n\
+             source: { file: canon.txt }\n\
+             targets: { files: \"**/copy.txt\" }\n\
+             level: error\n\
+             fix: { create_and_register: {} }\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("create_and_register") && err.contains("registered"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn build_rejects_create_and_register_target_without_a_star_suffix() {
+        // The target extract must select array ELEMENTS with a trailing `[*]`, so
+        // the check sees each element and the fix can locate the array.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { files: \"crates/*\" }\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members\" } }]\n\
+             level: error\n\
+             fix: { create_and_register: {} }\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("[*]"), "{err}");
     }
 
     #[test]

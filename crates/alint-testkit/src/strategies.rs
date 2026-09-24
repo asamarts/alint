@@ -361,6 +361,27 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "reloctrig.txt".to_string()],
         "lockfile\n".to_string(),
     );
+    // A workspace manifest with an EMPTY members list + a member directory not in
+    // it triggers cross_file `relation: registered` + the Phase-1b
+    // `create_and_register` fix, which APPENDS the member to the TOML array. After
+    // the append the member is listed -> converges (and is idempotent: a second
+    // pass finds it present and skips). `reg_member` has a 10-char stem (> the
+    // generator's 7-char limit) so it never collides; `reg_manifest.toml` is a
+    // clean structured file no other single-rule draw targets by its exact path.
+    insert_file(
+        root,
+        &[dir.clone(), "reg_manifest.toml".to_string()],
+        "[workspace]\nmembers = []\n".to_string(),
+    );
+    insert_file(
+        root,
+        &[
+            dir.clone(),
+            "reg_member".to_string(),
+            "keep.txt".to_string(),
+        ],
+        "x\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -889,6 +910,20 @@ fn rule_relocate() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `cross_file` `relation: registered` rule fixed via the `create_and_register`
+/// op (Phase 1b, register-only): the member dir `_trig/reg_member` is absent from
+/// the empty `members` list in `_trig/reg_manifest.toml`, so the rule fires and the
+/// fix APPENDS it to the TOML array -> it is now listed -> converges (idempotent on
+/// a second pass). Unsafe + content-injecting, so a bare `Fix` *suggests* it;
+/// `--unsafe-fixes` applies it (exercising `fix_unsafe_converges`).
+fn rule_create_and_register() -> impl Strategy<Value = String> {
+    rule_id("cr").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: cross_file\n    relation: registered\n    source:\n      files: \"_trig/reg_member\"\n    targets:\n      - {{ file: _trig/reg_manifest.toml, extract: {{ toml: \"$.workspace.members[*]\" }} }}\n    level: error\n    fix:\n      create_and_register: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -944,6 +979,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // the `relocate` op (Phase 3): moves a nested lockfile to the repo root ->
         // converges (applied under --unsafe-fixes).
         rule_relocate(),
+        // the `create_and_register` op (Phase 1b): appends an unregistered member to
+        // a manifest list -> converges (applied under --unsafe-fixes).
+        rule_create_and_register(),
     ]
 }
 

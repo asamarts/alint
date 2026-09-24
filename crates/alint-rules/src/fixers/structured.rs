@@ -158,7 +158,7 @@ impl StructuredFixer {
 
 /// Convert a resolved `JSONPath` location into the crate-neutral [`PathSeg`]
 /// list the span resolver navigates.
-fn to_segs(loc: &NormalizedPath<'_>) -> Vec<PathSeg> {
+pub(crate) fn to_segs(loc: &NormalizedPath<'_>) -> Vec<PathSeg> {
     loc.iter()
         .map(|el| match el {
             PathElement::Name(n) => PathSeg::Key((*n).to_string()),

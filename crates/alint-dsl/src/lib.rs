@@ -645,6 +645,10 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // an untrusted remote could aim it at your files. It PROPOSES, never
     // auto-writes, from an untrusted remote (auto-fix.md 5.5).
     "sync_from",
+    // `create_and_register` appends a ruleset-chosen member value into a manifest
+    // list (and, in a follow-up, creates a file from ruleset-authored content), so
+    // an untrusted remote must PROPOSE it, never auto-write (auto-fix.md 5.5).
+    "create_and_register",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`

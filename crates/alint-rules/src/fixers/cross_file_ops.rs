@@ -648,6 +648,187 @@ impl Fixer for CrossFileValueFixer {
     }
 }
 
+/// Registers a member in a manifest list for a `cross_file` `relation: registered`
+/// rule (`fix: { create_and_register: {} }`): appends each missing member the
+/// `check_registered` finding carried (in its `baseline_key`) to the target's
+/// structured array. A *content-injecting* op (it writes a ruleset-chosen value
+/// into the manifest), **`Unsafe` by default** (mutates a manifest), Safe-promotable.
+///
+/// PHASE 1b is register-only: an existing member that is unregistered is appended.
+/// A missing NAMED member's file CREATE (the two-file transaction) is Phase 2, so
+/// an existence-only finding (no members in the key) is Skipped here.
+#[derive(Debug)]
+pub struct CreateAndRegisterFixer {
+    /// Per target: the ARRAY-locating extract (`Structured(format, "$.a.b")` -- the
+    /// check's `[*]` element query with the trailing `[*]` stripped at build). Reuses
+    /// [`ValueTargets`] (a target-path -> extract map); here the extract locates the
+    /// array to append to, not a scalar to set.
+    targets: ValueTargets,
+    applicability: Applicability,
+}
+
+impl CreateAndRegisterFixer {
+    pub(crate) fn new(targets: ValueTargets, applicability: Applicability) -> Self {
+        Self {
+            targets,
+            applicability,
+        }
+    }
+
+    fn target_extract(&self, target_rel: &Path) -> Option<&Extract> {
+        match &self.targets {
+            ValueTargets::Glob(ex) => Some(ex),
+            ValueTargets::List(entries) => entries
+                .iter()
+                .find(|(p, _)| p == target_rel)
+                .map(|(_, ex)| ex),
+        }
+    }
+
+    /// Locate the array node the target `extract` points at and return its
+    /// `(format, path segments)` for [`structured_fix::document_append`]. `None`
+    /// when the target does not parse, the extract is not structured, or the array
+    /// is absent (so the fixer declines rather than mis-target).
+    fn array_location(
+        extract: &Extract,
+        target_bytes: &[u8],
+    ) -> Option<(Format, Vec<alint_core::structured_fix::PathSeg>)> {
+        let Extract::Structured(fmt, array_query) = extract else {
+            return None;
+        };
+        let text = String::from_utf8_lossy(target_bytes);
+        let value = fmt.parse(&text).ok()?;
+        let path = JsonPath::parse(array_query).ok()?;
+        let located = path.query_located(&value);
+        let node = located.iter().next()?;
+        Some((*fmt, crate::fixers::structured::to_segs(node.location())))
+    }
+
+    /// The missing members the `check_registered` finding recorded in its
+    /// `baseline_key` (`registered\0members\0<target>\0<m1>\0<m2>...`). Empty for an
+    /// existence-only finding (`registered\0exists\0...`) or a malformed key -- the
+    /// fixer then Skips (correlating EXACTLY to what the check flagged; no re-glob,
+    /// so it never diverges from the check's gitignore-aware member set).
+    fn missing_members(violation: &Violation) -> Vec<String> {
+        let Some(key) = &violation.baseline_key else {
+            return Vec::new();
+        };
+        let parts: Vec<&str> = key.split('\u{0}').collect();
+        if parts.len() >= 4 && parts[0] == "registered" && parts[1] == "members" {
+            parts[3..].iter().map(|s| (*s).to_string()).collect()
+        } else {
+            Vec::new()
+        }
+    }
+
+    /// Compute the target's new bytes with the missing members appended, or an
+    /// `Err(reason)` to Skip. Shared by `apply` (disk) and `fix_edit` (editor).
+    fn registered_bytes(
+        violation: &Violation,
+        extract: &Extract,
+        target_bytes: &[u8],
+    ) -> std::result::Result<Vec<u8>, String> {
+        let members = Self::missing_members(violation);
+        if members.is_empty() {
+            return Err("no members to register (an existence-only finding; \
+                        creating a missing member is a follow-up)"
+                .to_string());
+        }
+        let (fmt, segs) = Self::array_location(extract, target_bytes)
+            .ok_or_else(|| "could not locate the target list array".to_string())?;
+        if !alint_core::structured_fix::supports_list_append(fmt) {
+            return Err(format!("list append is not yet supported for {fmt:?}"));
+        }
+        let values: Vec<serde_json::Value> =
+            members.into_iter().map(serde_json::Value::String).collect();
+        alint_core::structured_fix::document_append(fmt, target_bytes, &segs, &values)
+            .ok_or_else(|| "nothing to append (already present, or not an array)".to_string())
+    }
+}
+
+impl Fixer for CreateAndRegisterFixer {
+    fn describe(&self) -> String {
+        "register the member in the manifest list".to_string()
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn can_fix(&self, violation: &Violation) -> bool {
+        // A registration finding (carries members) whose target format supports a
+        // list append. An existence-only finding (create -- Phase 2) is not fixable
+        // here, so `check` must not promise it.
+        if Self::missing_members(violation).is_empty() {
+            return false;
+        }
+        violation
+            .path
+            .as_deref()
+            .and_then(|p| self.target_extract(p))
+            .is_some_and(|ex| {
+                matches!(ex, Extract::Structured(fmt, _)
+                    if alint_core::structured_fix::supports_list_append(*fmt))
+            })
+    }
+
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(target) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let target_rel: &Path = target;
+        let Some(extract) = self.target_extract(target_rel) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is not a configured registration target",
+                target_rel.display()
+            )));
+        };
+        let target_abs = match confine_fix_path(target_rel, ctx.root, ctx.allow_out_of_root) {
+            Ok(p) => p,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        let target_bytes = match read_for_fix(&target_abs, target_rel, ctx)? {
+            ReadForFix::Bytes(b) => b,
+            ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        let new_bytes = match Self::registered_bytes(violation, extract, &target_bytes) {
+            Ok(b) => b,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would register member(s) in {}",
+                target_rel.display()
+            )));
+        }
+        ctx.commit_write(&target_abs, &new_bytes)
+            .map_err(|source| Error::Io {
+                path: target_abs.clone(),
+                source,
+            })?;
+        Ok(FixOutcome::Applied(format!(
+            "registered member(s) in {}",
+            target_rel.display()
+        )))
+    }
+
+    /// Editor / LSP form: a `SetContent` with the members appended. The two engine
+    /// suggestion sites call this with EMPTY `bytes`, where the target re-parse
+    /// fails and it declines (`None`) -- only the LSP passes the real buffer
+    /// (consistent with `CrossFileValueFixer`).
+    fn fix_edit(&self, violation: &Violation, bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+        let target_rel = violation.path.as_deref()?;
+        let extract = self.target_extract(target_rel)?;
+        let content = Self::registered_bytes(violation, extract, bytes).ok()?;
+        Some(FixEdit::SetContent {
+            path: target_rel.to_path_buf(),
+            content,
+        })
+    }
+}
+
 /// The locator string for a value-propagation target's extract, for messages: the
 /// `JSONPath` query or the regex pattern.
 fn locator(extract: &Extract) -> &str {

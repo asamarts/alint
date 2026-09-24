@@ -106,6 +106,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   undecodable basename is reported for a human, never clobbered. Anchor the
   pattern to subdirectories (`**/*/Cargo.lock`, not `**/Cargo.lock`) so the
   relocated root file converges.
+- New `cross_file` `relation: registered` + `create_and_register` auto-fix op: a
+  workspace member (a filesystem path from `source.file` / `source.files`, mapped
+  through `register_as`) must be listed in each target's manifest array. The check
+  flags an unregistered member; the fix APPENDS it to the list.
+
+      - id: members-registered
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*" }         # each crate dir is a member
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        fix: { create_and_register: {} }
+
+  The target `extract` selects the array elements with a trailing `[*]` (so the
+  check sees each element and the fix locates the array); `register_as` templates
+  the value with `{path}` (default) / `{dir}` / `{stem}`. `create_and_register` is
+  `Unsafe` by default (it mutates a manifest), `Safe`-promotable, and
+  content-injecting (an untrusted remote `extends:` demotes it to a suggestion).
+  The fix appends TOML lists today (format-preserving via `toml_edit`), skipping a
+  member already present; JSON / YAML list-append, and creating a missing named
+  member, are follow-ups.
 
 ### Changed
 

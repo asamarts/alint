@@ -439,14 +439,31 @@ warning or a v0.18 migration.
   a no-op whenever the member already exists (always so for a glob-discovered one).**
   So the common case (existing-but-unregistered) degrades to a single-file list
   append; the 5.2.4 multi-file transaction engages only when a create actually
-  fires (a missing NAMED source). New `StructuredOp::Append` (list-append, per
-  format). Unsafe + content-injecting. **Phasing: (1) check + register-only fix
-  (single-file, the high-value common case, full gate cascade, facts 21->22); (2)
-  create-if-missing + the 5.2.4 stage/verify-against-staged/all-or-nothing
-  transaction + the injectable-writer `test-hooks` seam + fault-injection tests.**
-  Each phase: full preflight + an independent adversarial audit round. Risk: medium
-  (Phase 2 builds the real multi-file-transaction infra + reworks the engine write
-  step).
+  fires (a missing NAMED source). Unsafe + content-injecting.
+  - **Phase 1a -- the `registered` CHECK. DONE (commit `6cbdd63b`).** The relation
+    + `check_registered` (filesystem-path source -> per-target subset check) +
+    `register_as` templating + the source-glob / shape validations + schema regen
+    (worked through a stale-base-`Relation` `$defs` gen-schema collision). 3 e2e +
+    4 build tests.
+  - **Phase 1b -- the register-only FIX. DONE (this commit).** `create_and_register`
+    (`FixSpec::CreateAndRegister`, #22): a `CreateAndRegisterFixer` (whole-file
+    apply, content-injecting, Unsafe-default) appends each missing member the check
+    recorded IN ITS `baseline_key` (the check->fixer channel, so the fixer never
+    re-globs and can't diverge from the check's gitignore-aware member set) to the
+    target's array via a new `structured_fix::document_append` (TOML via `toml_edit`,
+    format-preserving + idempotent; JSON/YAML decline as a fast-follow). The target
+    `extract` selects elements with a trailing `[*]`; the fixer strips it to the
+    array path. Full gate cascade (FixSpec + op_name + ALL_OP_NAMES + cases; W2
+    content-injecting + `w2_remote_create_and_register_is_demoted`; property net
+    `rule_create_and_register` + planted `_trig/reg_manifest.toml` + `_trig/reg_member`;
+    3 build tests; 2 fix e2e [convergent + suggested-under-bare]; facts 21->22;
+    README 26+60; CHANGELOG; options snapshot). Full preflight green.
+  - **Phase 2 -- create-if-missing + the 5.2.4 transaction.** NOT STARTED: the
+    conditional `CreateFile` half + the stage/verify-against-staged/all-or-nothing
+    write group + the injectable-writer `test-hooks` seam + fault-injection tests.
+    Also the JSON/YAML `document_append` fast-follow. Risk: medium (builds the
+    multi-file-transaction infra + reworks the engine write step).
+  - Each phase: full preflight + an independent adversarial audit round.
 
 After create-and-register: Phase 3 is COMPLETE; on to Phase 4.
 
