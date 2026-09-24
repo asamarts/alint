@@ -285,9 +285,31 @@ warning or a v0.18 migration.
   production code); `xtask` `rule_source_files` now resolves a `<stem>/mod.rs`
   directory module so alint.org's source links stay valid.
 
-Ops remaining. Cross-file value propagation (`equals`, a located patch with an
-injectable-writer test seam) + cross-file create-and-register; lockfile
-`relocate`. Risk: medium.
+- **`sync_from` on `equals` (value propagation). DONE (Phase 1).** Extends
+  `sync_from` to the value relation: propagate the source's single extracted
+  scalar into each drifting target's node, per format. `CrossFileValueFixer` (in
+  `fixers/cross_file_ops.rs`) is a WHOLE-FILE `apply` fixer that reuses the located
+  resolver INTERNALLY -- it builds a `StructuredFixer::set` for the target node,
+  takes its located edit, and applies + verifies it via `located_fix::
+  apply_file_edits`, then `commit_write`s the whole result. **Design finding
+  (recorded in `cross-file-value-propagation.md`): a located `collect_edits` fixer
+  must NOT host on `cross_file` -- the engine's located branch assumes per-file
+  hosts and would silently escape the `--changed` blast radius on a
+  `requires_full_index` rule (engine.rs:1633-1656). The whole-file `apply` approach
+  routes through the existing blast-radius-demoted path, so NO engine change.**
+  `cross_file`'s `fixer` field widened to `Option<Box<dyn Fixer>>` (identical ->
+  `SyncFromFixer`, equals -> the value fixer). `build()` accepts equals + all
+  STRUCTURED target extracts (all 8 formats via the `StructuredFixer` reuse);
+  regex-extract targets are the Phase-2 follow-up (rejected at load); a set /
+  resolves relation is rejected. Unsafe + content-injecting (W2 covers `sync_from`
+  already). Gates: 6 fixer units (propagate / idempotent / not-one-value / dry-run
+  / confine / tier) + 3 build tests (accepts equals+structured, rejects
+  regex-target, rejects set) + an e2e (`sync_from_equals_propagates_a_value`,
+  applied under `--unsafe-fixes` + convergent). No facts change (still `sync_from`,
+  op count 20). Design doc: `docs/design/v0.17/cross-file-value-propagation.md`.
+
+Ops remaining. `sync_from` on `equals` Phase 2 (regex-extract targets) +
+cross-file create-and-register; lockfile `relocate`. Risk: medium.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 

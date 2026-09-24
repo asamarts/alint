@@ -41,7 +41,7 @@ use alint_core::{
     Violation,
 };
 
-use crate::fixers::SyncFromFixer;
+use crate::fixers::{CrossFileValueFixer, SyncFromFixer, ValueTargets};
 
 mod eval;
 mod spec;
@@ -76,10 +76,12 @@ pub struct CrossFileRule {
     normalize: Vec<Normalize>,
     allow_missing: bool,
     skip_header_lines: usize,
-    /// The `sync_from` fixer (only for `relation: identical`), which overwrites a
-    /// drifted target with the canonical `source_file`. `None` for every other
-    /// relation and when no `fix:` block is set.
-    fixer: Option<SyncFromFixer>,
+    /// The `sync_from` fixer: on `relation: identical` a whole-file `SyncFromFixer`
+    /// (mirror the source), on `relation: equals` a `CrossFileValueFixer`
+    /// (propagate the source's extracted scalar into each target's node). `None`
+    /// for every other relation and when no `fix:` block is set. Boxed so the two
+    /// apply-based fixers share one field.
+    fixer: Option<Box<dyn Fixer>>,
 }
 
 impl Rule for CrossFileRule {
@@ -92,7 +94,7 @@ impl Rule for CrossFileRule {
     }
 
     fn fixer(&self) -> Option<&dyn Fixer> {
-        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+        self.fixer.as_deref()
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -101,56 +103,113 @@ impl Rule for CrossFileRule {
 }
 
 /// Build the `sync_from` fixer for a `cross_file` rule, or reject an unsupported
-/// `fix:` block. The only fix op `cross_file` supports is `sync_from`: overwrite a
-/// drifted target with the canonical source so an `identical` rule converges. It
-/// is a WHOLE-FILE copy, so it is only coherent on `relation: identical` with no
-/// header skipped (a value / set / resolves relation has no single "correct bytes"
-/// to write, and `skip_header_lines` means the target keeps its own header -- a
-/// whole-file overwrite would clobber it).
+/// `fix:` block. `sync_from` is the only fix op `cross_file` supports; its behavior
+/// depends on the relation: on `identical` it is a WHOLE-FILE mirror
+/// (`SyncFromFixer`), on `equals` it PROPAGATES the source's single extracted
+/// scalar into each target's node (`CrossFileValueFixer`). A value relation with a
+/// preserved header, or a set / resolves relation, has no single "correct" whole
+/// value/bytes to write and is rejected.
+#[allow(clippy::too_many_arguments)] // a config-parser dispatch: the shape inputs travel together
 fn build_sync_from_fixer(
     fix: Option<&FixSpec>,
     relation: Relation,
     skip_header_lines: usize,
     source_file: &str,
     single_file_source: bool,
+    source_extract: Option<&Extract>,
+    targets: Option<&Targets>,
     cfg: &impl Fn(String) -> Error,
-) -> Result<Option<SyncFromFixer>> {
+) -> Result<Option<Box<dyn Fixer>>> {
     match fix {
         None => Ok(None),
         Some(FixSpec::SyncFrom { sync_from }) => {
-            if relation != Relation::Identical {
-                return Err(cfg(format!(
-                    "`sync_from` requires `relation: identical` (a whole-file copy); \
-                     `{relation:?}` compares extracted values, which `sync_from` cannot \
-                     propagate yet"
-                )));
+            let tier = sync_from.applicability.unwrap_or(Applicability::Unsafe);
+            match relation {
+                Relation::Identical => {
+                    if skip_header_lines != 0 {
+                        return Err(cfg(
+                            "`sync_from` cannot preserve the target's header: it copies the \
+                             whole source file, which would overwrite the `skip_header_lines` \
+                             header the rule deliberately ignores. Drop `skip_header_lines`, or \
+                             fix the drift by hand."
+                                .into(),
+                        ));
+                    }
+                    // `identical` always has a single-file source (the glob-union
+                    // form is rejected earlier for non-set relations); assert it.
+                    debug_assert!(
+                        single_file_source,
+                        "identical must have a single-file source"
+                    );
+                    Ok(Some(Box::new(SyncFromFixer::new(
+                        PathBuf::from(source_file),
+                        tier,
+                    ))))
+                }
+                Relation::Equals => {
+                    // Value propagation: rewrite each target's extracted node to the
+                    // source's single scalar. `validate_shape` guarantees a value
+                    // relation has `source.extract` + `targets` with `extract`.
+                    let source_extract = source_extract
+                        .ok_or_else(
+                            || cfg("`sync_from` on `equals` needs `source.extract`".into()),
+                        )?
+                        .clone();
+                    let value_targets = build_value_targets(targets, cfg)?;
+                    Ok(Some(Box::new(CrossFileValueFixer::new(
+                        PathBuf::from(source_file),
+                        source_extract,
+                        value_targets,
+                        tier,
+                    ))))
+                }
+                other => Err(cfg(format!(
+                    "`sync_from` supports `relation: identical` (mirror the whole file) or \
+                     `equals` (propagate one value); `{other:?}` is a set / resolves relation \
+                     with no single value to propagate"
+                ))),
             }
-            if skip_header_lines != 0 {
-                return Err(cfg(
-                    "`sync_from` cannot preserve the target's header: it copies the \
-                     whole source file, which would overwrite the `skip_header_lines` \
-                     header the rule deliberately ignores. Drop `skip_header_lines`, or \
-                     fix the drift by hand."
-                        .into(),
-                ));
-            }
-            // `identical` always has a single-file source (the glob-union form is
-            // rejected earlier for non-set relations), so `source_file` is the one
-            // canonical path; assert it defensively.
-            debug_assert!(
-                single_file_source,
-                "identical must have a single-file source"
-            );
-            Ok(Some(SyncFromFixer::new(
-                PathBuf::from(source_file),
-                sync_from.applicability.unwrap_or(Applicability::Unsafe),
-            )))
         }
         Some(other) => Err(cfg(format!(
-            "fix.{} is not compatible with cross_file (only `sync_from`, on \
-             `relation: identical`)",
+            "fix.{} is not compatible with cross_file (only `sync_from`)",
             other.op_name()
         ))),
+    }
+}
+
+/// Resolve the per-target structured node model for value propagation, rejecting a
+/// non-structured target extract (regex / whole-file value propagation is a Phase-2
+/// follow-up). Every target's `extract` must be `Structured` (a `JSONPath` over a
+/// parsed format), which `StructuredFixer::set` can locate + rewrite.
+fn build_value_targets(
+    targets: Option<&Targets>,
+    cfg: &impl Fn(String) -> Error,
+) -> Result<ValueTargets> {
+    let non_structured = |what: &str| {
+        cfg(format!(
+            "`sync_from` on `equals` needs a STRUCTURED target extract (a toml/json/yaml/\
+             xml/ini/hcl/dotenv/properties JSONPath); {what} has a non-structured extract. \
+             Regex / whole-file value propagation is a deferred follow-up."
+        ))
+    };
+    match targets {
+        Some(Targets::Glob { extract, .. }) => match extract {
+            Some(Extract::Structured(fmt, q)) => Ok(ValueTargets::Glob(*fmt, q.clone())),
+            _ => Err(non_structured("the `targets.files` glob")),
+        },
+        Some(Targets::List(list)) => {
+            let mut out = Vec::with_capacity(list.len());
+            for (file, ex) in list {
+                match ex {
+                    Some(Extract::Structured(fmt, q)) => {
+                        out.push((PathBuf::from(file), *fmt, q.clone()));
+                    }
+                    _ => return Err(non_structured(&format!("target `{file}`"))),
+                }
+            }
+            Ok(ValueTargets::List(out))
+        }
+        None => Err(cfg("`sync_from` on `equals` needs `targets`".into())),
     }
 }
 
@@ -262,6 +321,8 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         opts.skip_header_lines.unwrap_or(0),
         &source_file,
         source_glob.is_none(),
+        source_extract.as_ref(),
+        targets.as_ref(),
         &cfg,
     )?;
 
@@ -409,9 +470,27 @@ mod tests {
     }
 
     #[test]
-    fn build_rejects_sync_from_on_a_value_relation() {
-        // `sync_from` is a whole-file copy, meaningless for a value relation (there
-        // is no single "correct bytes" to write) -- rejected at load.
+    fn build_accepts_sync_from_on_equals_with_structured_targets() {
+        // Value propagation: `equals` + a STRUCTURED target extract attaches the
+        // CrossFileValueFixer (propagate the source scalar into each target node).
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: equals\n\
+             source: { file: Cargo.toml, extract: { toml: \"$.workspace.package.version\" } }\n\
+             targets: { files: \"crates/*/Cargo.toml\", extract: { toml: \"$.package.version\" } }\n\
+             level: error\n\
+             fix: { sync_from: {} }\n",
+        );
+        let rule = build(&spec).expect("sync_from builds on equals + structured targets");
+        assert!(rule.fixer().is_some(), "the value fixer attaches");
+    }
+
+    #[test]
+    fn build_rejects_sync_from_on_equals_with_regex_targets() {
+        // Phase 1 is structured-extract targets only; a regex-extract target is a
+        // deferred (Phase 2) follow-up -- rejected at load with a clear message.
         use crate::test_support::spec_yaml;
         let spec = spec_yaml(
             "id: t\n\
@@ -424,9 +503,27 @@ mod tests {
         );
         let err = build(&spec).unwrap_err().to_string();
         assert!(
-            err.contains("sync_from") && err.contains("identical"),
+            err.contains("sync_from") && err.contains("STRUCTURED"),
             "{err}"
         );
+    }
+
+    #[test]
+    fn build_rejects_sync_from_on_a_set_relation() {
+        // A set relation (subset/superset/set_equals) has no single value to
+        // propagate; `sync_from` supports only identical + equals.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: set_equals\n\
+             source: { file: a.txt, extract: { regex: \"(\\\\w+)\" } }\n\
+             targets: { files: \"**/*.txt\", extract: { regex: \"(\\\\w+)\" } }\n\
+             level: error\n\
+             fix: { sync_from: {} }\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("sync_from") && err.contains("set"), "{err}");
     }
 
     #[test]

@@ -39,7 +39,7 @@ pub mod structured;
 
 pub use command_ops::CommandFixFixer;
 pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
-pub use cross_file_ops::SyncFromFixer;
+pub use cross_file_ops::{CrossFileValueFixer, SyncFromFixer, ValueTargets};
 pub use file_ops::{ChmodFixer, DirCreateFixer, FileRemoveFixer, FileRenameFixer};
 pub use git_ops::GitUntrackFixer;
 pub(crate) use hygiene::line_is_blank;

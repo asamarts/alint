@@ -13,11 +13,14 @@
 
 use std::path::{Path, PathBuf};
 
+use alint_core::located_fix::{LocatedEdit, LocatedOutcome, apply_file_edits};
 use alint_core::{
-    Applicability, Error, FixContext, FixEdit, FixOutcome, Fixer, ReadForFix, Result, Violation,
-    read_for_fix,
+    Applicability, Error, Extract, FixContext, FixEdit, FixOutcome, Fixer, Format, ReadForFix,
+    Result, Violation, extract_values, is_non_literal, read_for_fix,
 };
+use serde_json_path::JsonPath;
 
+use crate::fixers::StructuredFixer;
 use crate::fixers::creators::confine_fix_path;
 
 /// Overwrites the violating (drifted) target with the bytes of the host rule's
@@ -159,6 +162,255 @@ impl Fixer for SyncFromFixer {
             content: source_bytes,
         })
     }
+}
+
+/// Which structured node to set in a value-propagation target: the format and the
+/// `JSONPath` source. A glob shares one across every match; a list carries one per
+/// entry. (Phase 1 = structured-extract targets only; a regex-extract target is a
+/// deferred follow-up and is rejected at load.)
+#[derive(Debug)]
+pub enum ValueTargets {
+    Glob(Format, String),
+    List(Vec<(PathBuf, Format, String)>),
+}
+
+/// Propagates the host `cross_file` `relation: equals` source's single extracted
+/// scalar into each drifting target's node, per format. A whole-file `apply`
+/// fixer (NOT a located `collect_edits` one -- the engine's located branch assumes
+/// per-file hosts, and `cross_file` is `requires_full_index`, so a located fixer
+/// there would escape the `--changed` blast radius). It reuses the located
+/// resolver INTERNALLY: it builds a `StructuredFixer::set` for the target node,
+/// takes its located edit, and applies + verifies it via `apply_file_edits`, then
+/// `commit_write`s the result -- so all the per-format locate / serialize /
+/// `PutGet` machinery is reused with no engine change. `Unsafe` by default,
+/// content-injecting (the ruleset's `source:` chooses which value overwrites
+/// which node, so an untrusted remote demotes it -- W2 covers `sync_from`).
+#[derive(Debug)]
+pub struct CrossFileValueFixer {
+    /// The canonical source file (repo-relative) and how to extract its scalar.
+    source_file: PathBuf,
+    source_extract: Extract,
+    targets: ValueTargets,
+    applicability: Applicability,
+}
+
+impl CrossFileValueFixer {
+    #[must_use]
+    pub fn new(
+        source_file: PathBuf,
+        source_extract: Extract,
+        targets: ValueTargets,
+        applicability: Applicability,
+    ) -> Self {
+        Self {
+            source_file,
+            source_extract,
+            targets,
+            applicability,
+        }
+    }
+
+    /// The (format, `JSONPath` source) for `target_rel`: the shared glob node, or
+    /// the matching list entry. `None` when the violation path is not a configured
+    /// target (should not happen -- the violation came from this rule).
+    fn target_node(&self, target_rel: &Path) -> Option<(Format, &str)> {
+        match &self.targets {
+            ValueTargets::Glob(fmt, q) => Some((*fmt, q.as_str())),
+            ValueTargets::List(entries) => entries
+                .iter()
+                .find(|(p, _, _)| p == target_rel)
+                .map(|(_, fmt, q)| (*fmt, q.as_str())),
+        }
+    }
+
+    /// Read the source file and extract its single literal scalar (the value to
+    /// propagate). Mirrors `check_equals`: filter non-literal (interpolated)
+    /// values, then require exactly one -- else there is nothing to propagate and
+    /// the fixer Skips (consistent with what `check` already reported).
+    fn source_scalar(&self, ctx: &FixContext<'_>) -> std::result::Result<String, String> {
+        let source_abs = confine_fix_path(&self.source_file, ctx.root, ctx.allow_out_of_root)?;
+        let source_bytes = match read_for_fix(&source_abs, &self.source_file, ctx) {
+            Ok(ReadForFix::Bytes(b)) => b,
+            Ok(ReadForFix::Skipped(FixOutcome::Skipped(r) | FixOutcome::Applied(r))) => {
+                return Err(r);
+            }
+            Err(_) => {
+                return Err(format!(
+                    "canonical source {} is missing or unreadable",
+                    self.source_file.display()
+                ));
+            }
+        };
+        let text = String::from_utf8_lossy(&source_bytes);
+        let values = extract_values(&self.source_extract, &text)
+            .map_err(|e| format!("source extract failed: {e}"))?;
+        let mut literals = values.into_iter().filter(|v| !is_non_literal(v));
+        match (literals.next(), literals.next()) {
+            (Some(one), None) => Ok(one),
+            _ => Err("source did not resolve to exactly one literal value".to_string()),
+        }
+    }
+
+    /// Build the located edit for the target node (reusing `StructuredFixer::set`
+    /// to locate + serialize), apply + verify it (`apply_file_edits` runs the
+    /// `Structured` `PutGet` check and demotes a node that cannot be set), and return
+    /// the new WHOLE-FILE bytes. `Err(reason)` for any decline -- an invalid query,
+    /// an already-equal / not-a-single-scalar / not-representable node (the
+    /// empty-edit cases), a post-edit verify failure, or a no-op -- each a clean
+    /// Skip so `check` and `fix` agree. The whole-file write (`commit_write` in
+    /// `apply`) keeps this on the engine's blast-radius-demoted path, unlike a
+    /// located fixer on this `requires_full_index` rule.
+    fn propagated_bytes(
+        &self,
+        violation: &Violation,
+        format: Format,
+        query: &str,
+        source_value: &str,
+        target_bytes: &[u8],
+        root: &Path,
+    ) -> std::result::Result<Vec<u8>, String> {
+        let target_rel = violation.path.as_deref().unwrap_or_else(|| Path::new(""));
+        let path_expr =
+            JsonPath::parse(query).map_err(|_| format!("invalid target query `{query}`"))?;
+        let delegate = StructuredFixer::set(
+            format,
+            path_expr,
+            query.to_string(),
+            serde_json::Value::String(source_value.to_string()),
+            self.applicability,
+        );
+        let collected = delegate.collect_edits(
+            std::slice::from_ref(violation),
+            target_rel,
+            target_bytes,
+            root,
+        );
+        if collected.is_empty() {
+            // An empty edit set is EITHER an already-equal target (setting it to the
+            // same value reserializes byte-identical -> a no-op edit) OR a genuine
+            // locate/serialize failure (no single scalar node, or the value is not
+            // representable in this format). Re-extract the target to tell them apart
+            // so the skip reason is honest (and idempotence reads clearly).
+            let target_text = String::from_utf8_lossy(target_bytes);
+            let already = extract_values(
+                &Extract::Structured(format, query.to_string()),
+                &target_text,
+            )
+            .is_ok_and(|vals| vals.iter().any(|v| v == source_value));
+            return Err(if already {
+                format!(
+                    "{} already equals {source_value:?} at `{query}`",
+                    target_rel.display()
+                )
+            } else {
+                format!(
+                    "could not set {} at `{query}` to {source_value:?} (no single scalar node, \
+                     or the value is not representable in {format:?})",
+                    target_rel.display()
+                )
+            });
+        }
+        let batch: Vec<LocatedEdit> = collected
+            .into_iter()
+            .enumerate()
+            .map(|(i, collected)| LocatedEdit {
+                rule_index: 0,
+                violation_index: i,
+                collected,
+            })
+            .collect();
+        let (new_bytes, outcomes) = apply_file_edits(target_bytes, batch, self.applicability);
+        if !outcomes
+            .iter()
+            .any(|(_, o)| matches!(o, LocatedOutcome::Applied))
+        {
+            // Every edit was demoted (post-edit verify declined) or dropped: do NOT
+            // write. Consistent with `check` -- the violation stands.
+            return Err(format!(
+                "the target value at `{query}` could not be set (post-edit verify declined)"
+            ));
+        }
+        if new_bytes.as_slice() == target_bytes {
+            return Err(format!(
+                "{} already equals {source_value:?} at `{query}`",
+                target_rel.display()
+            ));
+        }
+        Ok(new_bytes)
+    }
+}
+
+impl Fixer for CrossFileValueFixer {
+    fn describe(&self) -> String {
+        format!(
+            "propagate the value from the canonical {}",
+            self.source_file.display()
+        )
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(target) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let target_rel: &Path = target;
+        let Some((format, query)) = self.target_node(target_rel) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is not a configured value-propagation target",
+                target_rel.display()
+            )));
+        };
+        let target_abs = match confine_fix_path(target_rel, ctx.root, ctx.allow_out_of_root) {
+            Ok(p) => p,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        let source_value = match self.source_scalar(ctx) {
+            Ok(v) => v,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        let target_bytes = match read_for_fix(&target_abs, target_rel, ctx)? {
+            ReadForFix::Bytes(b) => b,
+            ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        let new_bytes = match self.propagated_bytes(
+            violation,
+            format,
+            query,
+            &source_value,
+            &target_bytes,
+            ctx.root,
+        ) {
+            Ok(b) => b,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would set {} `{query}` to {source_value:?} from {}",
+                target_rel.display(),
+                self.source_file.display()
+            )));
+        }
+        ctx.commit_write(&target_abs, &new_bytes)
+            .map_err(|source| Error::Io {
+                path: target_abs.clone(),
+                source,
+            })?;
+        Ok(FixOutcome::Applied(format!(
+            "set {} `{query}` to {source_value:?} from {}",
+            target_rel.display(),
+            self.source_file.display()
+        )))
+    }
+
+    // No `fix_edit`: value propagation reuses the located resolver at apply time
+    // (it needs the source read + the delegate build), which the check-side
+    // proposed-edit path does not carry. It is Unsafe anyway, so the Safe-only
+    // machine surfaces advertise nothing. Inherits the trait default (`None`).
 }
 
 #[cfg(test)]
@@ -483,6 +735,178 @@ mod tests {
         assert_eq!(
             SyncFromFixer::new(PathBuf::from("s"), Applicability::Safe).applicability(),
             Applicability::Safe
+        );
+    }
+
+    // ─── CrossFileValueFixer (relation: equals value propagation) ────────
+
+    fn value_fixer(
+        source: &str,
+        source_q: &str,
+        target_fmt: Format,
+        target_q: &str,
+    ) -> CrossFileValueFixer {
+        CrossFileValueFixer::new(
+            PathBuf::from(source),
+            Extract::Structured(Format::Toml, source_q.to_string()),
+            ValueTargets::Glob(target_fmt, target_q.to_string()),
+            Applicability::Unsafe,
+        )
+    }
+
+    #[test]
+    fn value_propagates_a_scalar_into_the_target_node() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            &tmp,
+            "Cargo.toml",
+            b"[workspace.package]\nversion = \"2.0.0\"\n",
+        );
+        write(
+            &tmp,
+            "crate/Cargo.toml",
+            b"[package]\nname = \"a\"\nversion = \"1.0.0\"\n",
+        );
+        let out = value_fixer(
+            "Cargo.toml",
+            "$.workspace.package.version",
+            Format::Toml,
+            "$.package.version",
+        )
+        .apply(&viol("crate/Cargo.toml"), &ctx(&tmp, false))
+        .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "got {out:?}");
+        let after = String::from_utf8(read(&tmp, "crate/Cargo.toml")).unwrap();
+        assert!(after.contains("version = \"2.0.0\""), "{after}");
+        assert!(
+            after.contains("name = \"a\""),
+            "other keys preserved: {after}"
+        );
+    }
+
+    #[test]
+    fn value_is_idempotent_when_the_target_already_equals() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            &tmp,
+            "Cargo.toml",
+            b"[workspace.package]\nversion = \"2.0.0\"\n",
+        );
+        write(
+            &tmp,
+            "crate/Cargo.toml",
+            b"[package]\nversion = \"2.0.0\"\n",
+        );
+        let out = value_fixer(
+            "Cargo.toml",
+            "$.workspace.package.version",
+            Format::Toml,
+            "$.package.version",
+        )
+        .apply(&viol("crate/Cargo.toml"), &ctx(&tmp, false))
+        .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("already equals")),
+            "an already-equal target must Skip, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn value_skips_when_the_source_is_not_exactly_one_value() {
+        let tmp = TempDir::new().unwrap();
+        // The source query matches nothing.
+        write(&tmp, "Cargo.toml", b"[workspace.package]\nname = \"ws\"\n");
+        write(
+            &tmp,
+            "crate/Cargo.toml",
+            b"[package]\nversion = \"1.0.0\"\n",
+        );
+        let out = value_fixer(
+            "Cargo.toml",
+            "$.workspace.package.version",
+            Format::Toml,
+            "$.package.version",
+        )
+        .apply(&viol("crate/Cargo.toml"), &ctx(&tmp, false))
+        .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("exactly one")),
+            "a 0-match source must Skip, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn value_dry_run_reports_without_writing() {
+        let tmp = TempDir::new().unwrap();
+        write(
+            &tmp,
+            "Cargo.toml",
+            b"[workspace.package]\nversion = \"2.0.0\"\n",
+        );
+        write(
+            &tmp,
+            "crate/Cargo.toml",
+            b"[package]\nversion = \"1.0.0\"\n",
+        );
+        let out = value_fixer(
+            "Cargo.toml",
+            "$.workspace.package.version",
+            Format::Toml,
+            "$.package.version",
+        )
+        .apply(&viol("crate/Cargo.toml"), &ctx(&tmp, true))
+        .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Applied(ref s) if s.starts_with("would set")),
+            "got {out:?}"
+        );
+        assert!(
+            String::from_utf8(read(&tmp, "crate/Cargo.toml"))
+                .unwrap()
+                .contains("1.0.0"),
+            "dry-run must not write"
+        );
+    }
+
+    #[test]
+    fn value_confines_an_absolute_target() {
+        // SECURITY: an absolute target must not be written outside the root.
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let victim = outside.path().join("victim.toml");
+        std::fs::write(&victim, b"[package]\nversion = \"1.0.0\"\n").unwrap();
+        write(
+            &tmp,
+            "Cargo.toml",
+            b"[workspace.package]\nversion = \"2.0.0\"\n",
+        );
+        let out = CrossFileValueFixer::new(
+            PathBuf::from("Cargo.toml"),
+            Extract::Structured(Format::Toml, "$.workspace.package.version".to_string()),
+            ValueTargets::List(vec![(
+                victim.clone(),
+                Format::Toml,
+                "$.package.version".to_string(),
+            )]),
+            Applicability::Unsafe,
+        )
+        .apply(&viol(victim.to_str().unwrap()), &ctx(&tmp, false))
+        .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("escapes the repo root")),
+            "an absolute target must be confined, got {out:?}"
+        );
+        assert!(
+            std::fs::read_to_string(&victim).unwrap().contains("1.0.0"),
+            "out-of-root victim untouched"
+        );
+    }
+
+    #[test]
+    fn value_carries_its_tier() {
+        assert_eq!(
+            value_fixer("s", "$.a", Format::Toml, "$.b").applicability(),
+            Applicability::Unsafe
         );
     }
 }
