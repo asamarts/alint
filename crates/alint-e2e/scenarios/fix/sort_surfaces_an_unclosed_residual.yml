@@ -1,0 +1,38 @@
+name: sort surfaces an unclosed residual instead of suppressing it
+tags: [fix, ordered_block, sort, fixpoint, verify]
+
+# F1 regression (audit round-3): block 1 is sorted but UNCLOSED (a second `# s`
+# reopens it before any `# e`); block 2 is unsorted. The check emits the unclosed
+# finding (block 1) BEFORE the out-of-order finding (block 2). Without the `apply`
+# can_fix guard, apply(unclosed) would sort block 2, return Applied, the engine
+# would lock the unclosed key, and the fixpoint would DROP the unclosed residual
+# -> `fix` exits 0 with block 1 still unclosed. The guard declines the unclosed
+# finding, so block 2 is still sorted (by the out-of-order finding's apply) AND
+# the unclosed violation is SURFACED. Safe, so a bare `fix` applies the sort.
+
+given:
+  tree:
+    f.txt: "# s\na\nb\n# s\nd\nc\n# e\n"
+  config: |
+    version: 1
+    rules:
+      - id: ks
+        kind: ordered_block
+        paths: "**/f.txt"
+        start: "# s"
+        end: "# e"
+        level: error
+        fix: { sort: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: ks, level: error, path: f.txt}
+      - {rule: ks, level: error, path: f.txt}
+  - applied: [ks]
+  - violations:
+      - {rule: ks, level: error, path: f.txt}
+
+expect_tree:
+  f.txt: "# s\na\nb\n# s\nc\nd\n# e\n"

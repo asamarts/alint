@@ -405,7 +405,8 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
     // trailing ws -- the tabs are LEADING -- no BOM/bidi, no `DEBUGME`), so no
     // other single-rule draw disturbs it; the 10-char stem `indenttrig` exceeds
     // the generator's 7-char limit so it never collides. `**/indenttrig.txt`
-    // matches only this trigger. Safe, so a bare `Fix` applies.
+    // matches only this trigger. Unsafe, so a bare `Fix` suggests it and
+    // `FixUnsafe` applies it.
     insert_file(
         root,
         &[dir.clone(), "indenttrig.txt".to_string()],
@@ -971,10 +972,10 @@ fn rule_ordered_block_sort() -> impl Strategy<Value = String> {
 /// An `indent_style` rule fixed via the `indent_style` op (Phase 4): the planted
 /// `_trig/indenttrig.txt` is tab-indented, so the `style: spaces` + `width: 4`
 /// rule fires and the fix reindents each PURE-TAB line to 4 spaces per tab ->
-/// converges (idempotent). Safe (a pure-tab reindent is behavior-preserving), so
-/// a bare `Fix` APPLIES it. The 10-char stem `indenttrig` exceeds the generator's
-/// 7-char limit, so it never collides; `**/indenttrig.txt` matches only this
-/// trigger.
+/// converges (idempotent). Unsafe by default (a mis-aimed reindent hard-breaks an
+/// indent-significant file), so a bare `Fix` SUGGESTS it and `FixUnsafe` applies
+/// it. The 10-char stem `indenttrig` exceeds the generator's 7-char limit, so it
+/// never collides; `**/indenttrig.txt` matches only this trigger.
 fn rule_indent_style() -> impl Strategy<Value = String> {
     rule_id("in").prop_map(|id| {
         format!(
@@ -1045,7 +1046,7 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // place -> converges. Safe, so APPLIED under a bare `Fix`.
         rule_ordered_block_sort(),
         // the `indent_style` op (Phase 4): reindents tab-indented lines to spaces
-        // -> converges. Safe, so APPLIED under a bare `Fix`.
+        // -> converges. Unsafe, so applied under `--unsafe-fixes`.
         rule_indent_style(),
     ]
 }

@@ -3,8 +3,9 @@ tags: [fix, indent_style]
 
 # A `style: spaces` + `width: 4` rule flags tab indentation; the `indent_style`
 # fix converts each PURE-TAB lead to 4 spaces per tab (1 tab -> 4, 2 tabs -> 8),
-# preserving the rest of each line. Safe (a pure-tab reindent is
-# behavior-preserving), so a bare `fix` applies it -> the second check is clean.
+# preserving the rest of each line. Unsafe by default (a mis-aimed reindent
+# hard-breaks an indent-significant file such as a Makefile), so `fix_unsafe`
+# applies it -> the second check is clean.
 
 given:
   tree:
@@ -20,7 +21,7 @@ given:
         level: error
         fix: { indent_style: {} }
 
-when: [check, fix, check]
+when: [check, fix_unsafe, check]
 
 expect:
   - violations:

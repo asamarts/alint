@@ -165,10 +165,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   down?) -- so `check` does not advertise those as auto-fixable. A `tabs`-style or
   width-less rule with a `fix` is rejected at load (spaces->tabs has no
   spaces-per-tab). This lifts the previous "reindentation is deferred" rejection.
-  `Safe` by default (a pure-tab reindent is behavior-preserving for the common
-  case); like `sort`, a remote `extends:` could aim it at an indent-significant
-  file (a `Makefile` recipe needs a literal tab), so an untrusted remote's
-  `indent_style` fix is demoted to a suggestion.
+  **`Unsafe` by default**: a pure-tab reindent is behavior-preserving for the
+  common code file, but a mis-aimed one HARD-breaks an indent-significant file --
+  a `Makefile` recipe requires a literal tab, so converting it to spaces silently
+  breaks the build -- so, like `file_remove`, a bare `alint fix` suggests it and
+  `--unsafe-fixes` (or a per-rule `applicability: safe`) applies it. And, like
+  `sort`, an untrusted remote `extends:` cannot auto-apply it (it is demoted to a
+  suggestion, since a remote could aim it at your files).
 
 ### Changed
 

@@ -567,6 +567,20 @@ impl Fixer for OrderedBlockSortFixer {
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        // GUARD (audit F1): the engine calls `apply` for EVERY violation, gated
+        // only on the tier -- NOT on `can_fix`. Without this, an UNCLOSED finding
+        // (which `sort` cannot repair) whose `apply` happens to sort OTHER blocks
+        // in the file returns `Applied`; the engine then locks its key as applied
+        // and drops the unclosed finding's re-detection on the next pass, so `fix`
+        // exits 0 leaving the unclosed block on disk. Declining here keeps the
+        // unclosed finding honestly reported (skipped), matching `check`.
+        if !self.can_fix(violation) {
+            return Ok(FixOutcome::Skipped(
+                "an unclosed ordered_block (a `start` with no `end`) is not \
+                 sort-fixable"
+                    .to_string(),
+            ));
+        }
         let Some(path) = &violation.path else {
             return Ok(FixOutcome::Skipped(
                 "violation did not carry a path".to_string(),
@@ -1380,6 +1394,44 @@ mod tests {
         assert!(
             matches!(&outcome, FixOutcome::Skipped(s) if s.contains("already sorted")),
             "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn apply_declines_an_unclosed_finding_even_with_an_unsorted_block() {
+        // F1 GUARD: the engine calls `apply` for every violation regardless of
+        // `can_fix`. For an UNCLOSED finding (which sort cannot repair), `apply`
+        // must decline -- NOT sort the file's other blocks and return `Applied`
+        // (which would let the engine lock the key and drop the unclosed residual).
+        use tempfile::TempDir;
+        let tmp = TempDir::new().unwrap();
+        // An unsorted block: without the guard, apply(unclosed) would sort it.
+        let t = "# keep-sorted start\nb\na\n# keep-sorted end\n";
+        std::fs::write(tmp.path().join("f.txt"), t).unwrap();
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        let outcome = sort_fixer(Comparator::Lexical, false)
+            .apply(
+                &Violation::new("x")
+                    .with_path(Path::new("f.txt"))
+                    .with_baseline_key(format!("{UNCLOSED_KEY_PREFIX}0")),
+                &ctx,
+            )
+            .unwrap();
+        assert!(
+            matches!(&outcome, FixOutcome::Skipped(s) if s.contains("unclosed")),
+            "{outcome:?}"
+        );
+        // The block was NOT sorted (the guard declined the whole apply).
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("f.txt")).unwrap(),
+            t
         );
     }
 

@@ -28,17 +28,25 @@ use alint_core::{
 };
 use serde::Deserialize;
 
-/// `baseline_key` markers for the fixable-rule case (`style: spaces` + `width`
+/// `baseline_key` PREFIXES for the fixable-rule case (`style: spaces` + `width`
 /// with a `fix`). The check tags its ONE finding (the first bad line) with
-/// whether the `indent_style` reindent fix can resolve it: a PURE-TAB lead is
+/// whether the `indent_style` reindent fix can resolve it -- a PURE-TAB lead is
 /// convertible to `K*width` spaces (`FIXABLE`); a mixed tab+space lead or a
-/// pure-space width-mismatch is round-ambiguous and left (`UNFIXABLE`). `can_fix`
-/// reads this so `check` never advertises an ambiguous line as auto-fixable.
-/// Set ONLY when a fixer is attached, so a check-only `indent_style` keeps its
-/// offending-line fingerprint (no baseline churn). One finding per file, so
-/// (unlike `ordered_block`) no per-line ordinal is needed.
-const REINDENT_FIXABLE_KEY: &str = "indent_style\u{0}reindent\u{0}fixable";
-const REINDENT_UNFIXABLE_KEY: &str = "indent_style\u{0}reindent\u{0}unfixable";
+/// pure-space width-mismatch is round-ambiguous and left (`UNFIXABLE`) -- FOLLOWED
+/// by the offending line's content. `can_fix` reads the prefix (`starts_with`), so
+/// it declines the ambiguous cases, while the appended line content keeps the
+/// baseline fingerprint per-LINE, matching the key-less (check-only) path
+/// (`baseline.rs` hashes the offending line there): a CONSTANT key would collapse
+/// every fixable finding on a file to ONE fingerprint and silently suppress a
+/// genuinely-new violation under `--baseline` (audit round-3). Set ONLY when a
+/// fixer is attached, so a check-only `indent_style` is unchanged.
+const REINDENT_FIXABLE_PREFIX: &str = "indent_style\u{0}reindent\u{0}fixable\u{0}";
+const REINDENT_UNFIXABLE_PREFIX: &str = "indent_style\u{0}reindent\u{0}unfixable\u{0}";
+
+/// Upper bound on a reindent fix's `width` (spaces-per-tab). No real indent is
+/// near this; the cap only stops an absurd `width` from allocating a huge string
+/// (audit round-3, F3).
+const MAX_REINDENT_WIDTH: usize = 256;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -125,15 +133,19 @@ impl PerFileRule for IndentStyleRule {
             .with_path(std::sync::Arc::<Path>::from(path))
             .with_location(line_no, 1);
         // When a `reindent` fix is attached, tag the finding with whether that fix
-        // can resolve THIS bad line, so `can_fix` (and the engine's `is_fixable`
-        // tag) stay honest for the ambiguous cases it declines. Key-less otherwise
-        // -> a check-only rule's baseline fingerprint is unchanged.
+        // can resolve THIS bad line (so `can_fix` and the engine's `is_fixable` tag
+        // decline the ambiguous cases), FOLLOWED by the offending line's content so
+        // the baseline fingerprint stays per-line (matching the key-less path) --
+        // see the prefix docs. Key-less otherwise, so a check-only rule is
+        // unchanged.
         if self.fixer.is_some() {
-            violation = violation.with_baseline_key(if fixable {
-                REINDENT_FIXABLE_KEY
+            let offender = text.lines().nth(line_no - 1).unwrap_or_default();
+            let prefix = if fixable {
+                REINDENT_FIXABLE_PREFIX
             } else {
-                REINDENT_UNFIXABLE_KEY
-            });
+                REINDENT_UNFIXABLE_PREFIX
+            };
+            violation = violation.with_baseline_key(format!("{prefix}{offender}"));
         }
         Ok(vec![violation])
     }
@@ -214,6 +226,16 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let opts: Options = spec
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
+    // `width: 0` deserializes to `Some(0)` (the schema's `range(min = 1)` is
+    // advisory, not serde-enforced) and would silently disable the multiple-of
+    // check. Reject it explicitly so a `width: 0` typo is a loud error, not a
+    // silent no-op (audit round-3).
+    if opts.width == Some(0) {
+        return Err(Error::rule_config(
+            &spec.id,
+            "indent_style `width` must be >= 1 (omit `width:` to not enforce a multiple)",
+        ));
+    }
     // The `indent_style` reindent fix needs a spaces-per-tab, which only a
     // `style: spaces` + positive `width:` rule carries. A `tabs`-style rule
     // (spaces -> tabs) or a width-less `spaces` rule has no unambiguous
@@ -231,9 +253,29 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                     ));
                 }
             };
+            // Cap the fixer's width (audit round-3, F3): the reindent allocates
+            // `K*width` spaces per tab-lead line, so an absurd `width` (a remote
+            // could set `width: 1000000000`) would try to build a multi-GB string.
+            // No real indent is anywhere near this; reject it.
+            if width > MAX_REINDENT_WIDTH {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    format!(
+                        "indent_style fix `width` is too large for reindentation \
+                         (got {width}, max {MAX_REINDENT_WIDTH})"
+                    ),
+                ));
+            }
             Some(IndentStyleReindentFixer {
                 width,
-                applicability: indent_style.applicability.unwrap_or(Applicability::Safe),
+                // Unsafe by default (audit round-3): a pure-tab reindent is
+                // behavior-preserving for the common code file, but a mis-aimed one
+                // HARD-breaks an indent-significant file -- a `Makefile` recipe
+                // requires a literal tab, so converting it to spaces silently breaks
+                // the build. Like `file_remove`, "a mis-aimed op is catastrophic" =
+                // Unsafe: a bare `alint fix` suggests it, `--unsafe-fixes` (or a
+                // per-rule `applicability: safe`) applies it.
+                applicability: indent_style.applicability.unwrap_or(Applicability::Unsafe),
             })
         }
         Some(other) => {
@@ -268,12 +310,16 @@ fn reindent_pure_tabs(text: &str, width: usize) -> Option<String> {
     let mut out = String::with_capacity(text.len());
     let mut changed = false;
     for chunk in text.split_inclusive('\n') {
-        // Split the chunk into its body (no terminator) and its exact ending.
+        // Split the chunk into its body (no terminator) and its exact ending. On
+        // the final line with no `\n`, strip a lone trailing `\r` too (F2): the
+        // check strips it via `split('\n')` + `strip_suffix('\r')`, so a tab-only
+        // `\r`-ended final line is a BLANK line to the check -- the fixer must
+        // treat it the same, not reindent it.
         let (body, ending): (&str, &str) = if let Some(b) = chunk.strip_suffix('\n') {
             b.strip_suffix('\r')
                 .map_or((b, "\n"), |without_cr| (without_cr, "\r\n"))
         } else {
-            (chunk, "") // final line, no terminator
+            chunk.strip_suffix('\r').map_or((chunk, ""), |b| (b, "\r"))
         };
         let lead_end = body
             .char_indices()
@@ -326,10 +372,31 @@ impl Fixer for IndentStyleReindentFixer {
     fn can_fix(&self, violation: &Violation) -> bool {
         // Only the finding the check tagged FIXABLE (a pure-tab lead) is
         // reindentable; a mixed lead or a pure-space width-mismatch is declined.
-        violation.baseline_key.as_deref() == Some(REINDENT_FIXABLE_KEY)
+        // The key is the FIXABLE prefix followed by the offending line, so match
+        // the prefix.
+        violation
+            .baseline_key
+            .as_deref()
+            .is_some_and(|k| k.starts_with(REINDENT_FIXABLE_PREFIX))
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        // GUARD (audit F1): the engine calls `apply` for EVERY violation, gated
+        // only on the tier -- NOT on `can_fix`. Without this, when the reported
+        // first-bad-line is UNFIXABLE (mixed / width-mismatch) but some OTHER line
+        // is a pure-tab lead, the whole-file reindent would change bytes and return
+        // `Applied`; the engine then locks this violation's key as applied and
+        // drops its re-detection on the next pass, so `fix` exits 0 leaving a real
+        // violation on disk. Declining here keeps the reported finding honest (it
+        // is skipped, matching `check`), and a later pass reindents the pure-tab
+        // lines once the ambiguous line is resolved.
+        if !self.can_fix(violation) {
+            return Ok(FixOutcome::Skipped(
+                "the reported line is not a pure-tab lead (mixed indentation or a \
+                 width mismatch); reindent declined"
+                    .to_string(),
+            ));
+        }
         let Some(path) = &violation.path else {
             return Ok(FixOutcome::Skipped(
                 "violation did not carry a path".to_string(),
@@ -503,7 +570,9 @@ mod tests {
         ))
         .unwrap();
         assert!(ok.fixer().is_some(), "spaces + width wires a fixer");
-        assert_eq!(ok.fixer().unwrap().applicability(), Applicability::Safe);
+        // Unsafe by default: a mis-aimed reindent hard-breaks an indent-significant
+        // file (a Makefile recipe needs a literal tab).
+        assert_eq!(ok.fixer().unwrap().applicability(), Applicability::Unsafe);
 
         let no_width = build(&spec_for(
             "id: t\nkind: indent_style\npaths: [\"x\"]\nstyle: spaces\nlevel: error\nfix: { indent_style: {} }\n",
@@ -529,11 +598,45 @@ mod tests {
 
     #[test]
     fn build_honors_an_explicit_tier_override() {
+        // An explicit `applicability: safe` overrides the Unsafe default (a user
+        // who knows their `paths:` never catch a Makefile can opt into auto-apply).
         let r = build(&spec_for(
-            "id: t\nkind: indent_style\npaths: [\"x\"]\nstyle: spaces\nwidth: 4\nlevel: error\nfix:\n  indent_style:\n    applicability: unsafe\n",
+            "id: t\nkind: indent_style\npaths: [\"x\"]\nstyle: spaces\nwidth: 4\nlevel: error\nfix:\n  indent_style:\n    applicability: safe\n",
         ))
         .unwrap();
-        assert_eq!(r.fixer().unwrap().applicability(), Applicability::Unsafe);
+        assert_eq!(r.fixer().unwrap().applicability(), Applicability::Safe);
+    }
+
+    #[test]
+    fn build_rejects_width_zero_and_an_absurd_width() {
+        // width: 0 is rejected for ANY indent_style rule (#3).
+        let zero = build(&spec_for(
+            "id: t\nkind: indent_style\npaths: [\"x\"]\nstyle: spaces\nwidth: 0\nlevel: error\n",
+        ))
+        .unwrap_err();
+        assert!(zero.to_string().contains(">= 1"), "{zero}");
+        // An absurd fixer width is rejected (F3: no multi-GB allocation).
+        let huge = build(&spec_for(
+            "id: t\nkind: indent_style\npaths: [\"x\"]\nstyle: spaces\nwidth: 1000000\nlevel: error\nfix: { indent_style: {} }\n",
+        ))
+        .unwrap_err();
+        assert!(huge.to_string().contains("too large"), "{huge}");
+    }
+
+    #[test]
+    fn reindent_leaves_a_tab_only_lone_cr_final_line() {
+        // F2: a tab-ONLY line ending in a lone CR at EOF is BLANK to the check (it
+        // strips the trailing \r), so the fixer must not reindent it -- the earlier
+        // `\tx` line converts, the trailing `\t\r` blank line is left verbatim.
+        assert_eq!(reindent_pure_tabs("\tx\n\t\r", 4).unwrap(), "    x\n\t\r");
+        // A tab-only lone-CR line by itself is blank -> nothing to convert.
+        assert_eq!(
+            reindent_pure_tabs("\t\r", 4),
+            None,
+            "tab-only + lone CR = blank"
+        );
+        // A tab-INDENTED lone-CR line (has content) still converts, keeping the CR.
+        assert_eq!(reindent_pure_tabs("\ty\r", 4).unwrap(), "    y\r");
     }
 
     fn eval_keys(yaml: &str, text: &str) -> Vec<Violation> {
@@ -559,21 +662,49 @@ mod tests {
     fn check_keys_a_pure_tab_finding_fixable() {
         let v = eval_keys(FIX_YAML, "x:\n\ta();\n");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].baseline_key.as_deref(), Some(REINDENT_FIXABLE_KEY));
+        let key = v[0].baseline_key.as_deref().unwrap();
+        assert!(key.starts_with(REINDENT_FIXABLE_PREFIX), "{key:?}");
+        // The offending line is appended so the fingerprint is per-line.
+        assert!(
+            key.ends_with("\ta();"),
+            "key carries the offending line: {key:?}"
+        );
+    }
+
+    #[test]
+    fn check_keys_two_different_pure_tab_lines_get_distinct_keys() {
+        // audit round-3: a CONSTANT key would collapse both to one fingerprint and
+        // over-suppress under --baseline. The appended line content distinguishes.
+        let a = eval_keys(FIX_YAML, "x:\n\talpha();\n");
+        let b = eval_keys(FIX_YAML, "x:\n\tbravo();\n");
+        assert_ne!(
+            a[0].baseline_key, b[0].baseline_key,
+            "distinct lines -> distinct keys"
+        );
     }
 
     #[test]
     fn check_keys_a_mixed_lead_finding_unfixable() {
         let v = eval_keys(FIX_YAML, "x:\n\t  a();\n");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].baseline_key.as_deref(), Some(REINDENT_UNFIXABLE_KEY));
+        assert!(
+            v[0].baseline_key
+                .as_deref()
+                .unwrap()
+                .starts_with(REINDENT_UNFIXABLE_PREFIX)
+        );
     }
 
     #[test]
     fn check_keys_a_width_mismatch_finding_unfixable() {
         let v = eval_keys(FIX_YAML, "x:\n   a();\n");
         assert_eq!(v.len(), 1);
-        assert_eq!(v[0].baseline_key.as_deref(), Some(REINDENT_UNFIXABLE_KEY));
+        assert!(
+            v[0].baseline_key
+                .as_deref()
+                .unwrap()
+                .starts_with(REINDENT_UNFIXABLE_PREFIX)
+        );
     }
 
     #[test]
@@ -594,11 +725,19 @@ mod tests {
         }
     }
 
+    fn fixable_key(line: &str) -> String {
+        format!("{REINDENT_FIXABLE_PREFIX}{line}")
+    }
+
+    fn unfixable_key(line: &str) -> String {
+        format!("{REINDENT_UNFIXABLE_PREFIX}{line}")
+    }
+
     #[test]
     fn can_fix_only_the_fixable_finding() {
         let f = reindent_fixer(Applicability::Safe);
-        let fixable = Violation::new("x").with_baseline_key(REINDENT_FIXABLE_KEY);
-        let unfixable = Violation::new("x").with_baseline_key(REINDENT_UNFIXABLE_KEY);
+        let fixable = Violation::new("x").with_baseline_key(fixable_key("\ta()"));
+        let unfixable = Violation::new("x").with_baseline_key(unfixable_key("   a()"));
         assert!(f.can_fix(&fixable));
         assert!(!f.can_fix(&unfixable));
     }
@@ -620,7 +759,7 @@ mod tests {
             .apply(
                 &Violation::new("x")
                     .with_path(Path::new("f.rs"))
-                    .with_baseline_key(REINDENT_FIXABLE_KEY),
+                    .with_baseline_key(fixable_key("\tlet a = 1;")),
                 &ctx,
             )
             .unwrap();
@@ -632,11 +771,16 @@ mod tests {
     }
 
     #[test]
-    fn apply_skips_a_file_with_no_pure_tab_indent() {
+    fn apply_declines_an_unfixable_finding_even_with_a_pure_tab_line_elsewhere() {
+        // F1 GUARD: the engine calls `apply` for every violation regardless of
+        // `can_fix`. When the REPORTED finding is UNFIXABLE (width-mismatch here),
+        // `apply` must decline the WHOLE file -- even though line 2 is a pure-tab
+        // lead -- so the residual is surfaced (not silently applied + suppressed).
         use tempfile::TempDir;
         let tmp = TempDir::new().unwrap();
-        // Only a width-mismatch (pure-space) line: nothing pure-tab to convert.
-        std::fs::write(tmp.path().join("f.rs"), "x:\n   a();\n").unwrap();
+        // line 1 = width-mismatch (UNFIXABLE, the reported first bad line); line 2
+        // = pure-tab (would be converted without the guard).
+        std::fs::write(tmp.path().join("f.rs"), "   a();\n\tb();\n").unwrap();
         let ctx = FixContext {
             root: tmp.path(),
             dry_run: false,
@@ -649,13 +793,18 @@ mod tests {
             .apply(
                 &Violation::new("x")
                     .with_path(Path::new("f.rs"))
-                    .with_baseline_key(REINDENT_UNFIXABLE_KEY),
+                    .with_baseline_key(unfixable_key("   a();")),
                 &ctx,
             )
             .unwrap();
         assert!(
-            matches!(&outcome, FixOutcome::Skipped(s) if s.contains("no pure-tab")),
+            matches!(&outcome, FixOutcome::Skipped(s) if s.contains("not a pure-tab lead")),
             "{outcome:?}"
+        );
+        // The file is byte-identical -- line 2 was NOT silently reindented.
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("f.rs")).unwrap(),
+            "   a();\n\tb();\n"
         );
     }
 

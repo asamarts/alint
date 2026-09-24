@@ -627,14 +627,43 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
   finding per file (first bad line), so NO F4 multi-finding issue. `apply` is
   whole-file: converts EVERY pure-tab line -> N spaces (Applied if it changed a
   line, else Skipped); width/mixed lines surface separately on re-check and are
-  reported unfixable -> honest, convergent. Tier **Safe** (a pure-tab->spaces
-  reindent is behavior-preserving for the common case, like the hygiene
-  normalizers). W2 **CONTENT_INJECTING** (demoted from an untrusted remote):
-  applying the SORT lessons proactively -- a remote could AIM a reindent at an
+  reported unfixable -> honest, convergent. Tier **Unsafe** (audit round-3, see
+  below). W2 **CONTENT_INJECTING** (demoted from an untrusted remote): applying
+  the SORT lessons proactively -- a remote could AIM a reindent at an
   indent-SIGNIFICANT file (a `Makefile` recipe needs a literal tab; converting it
   is a HARD build break), the same "aim it at your files" risk that demotes `sort`.
   Preserves line endings + the trailing-newline state (only the leading run is
   rewritten). Full new-fix-op gate cascade. Op #24.
+  - **Audit round-3 (2 worktree agents + own probing). 1 HIGH (SHARED with `sort`)
+    + tier reversal + 4 more, all fixed:**
+    - **[HIGH, F1 -- also fixed in `sort`] `apply` had no `can_fix` guard.** The
+      engine calls `apply` for EVERY violation (gated only on the tier, not
+      `can_fix`). When the reported finding is UNFIXABLE but another line/block is
+      fixable, the whole-file `apply` changed bytes + returned `Applied`; the engine
+      locked the key and DROPPED the residual on the next pass -> `alint fix` exited
+      0 with a dirty tree. Found by the correctness agent on `indent_style`; my own
+      probing confirmed the IDENTICAL latent bug in the already-shipped `sort`
+      (unclosed-emits-first + unsorted block). FIX: a `can_fix` guard at the top of
+      both `apply`s (Skip when the reported finding is not repairable). Gated by a
+      unit test + an e2e for each (`*_not_suppressed` / `*_surfaces_an_unclosed_residual`).
+    - **[MED] Tier Safe -> UNSAFE (reversed my own approved-Safe proposal).** Both
+      my P8 probe AND the honesty agent reproduced a bare `alint fix` silently
+      HARD-breaking a `Makefile` (recipe tab -> spaces). The CONTENT_INJECTING
+      demotion only guards the REMOTE path; a LOCAL misconfig got full Safe
+      auto-apply. `file_remove`'s "a mis-aimed op is catastrophic = Unsafe" logic
+      applies. Now Unsafe by default; per-rule `applicability: safe` opts back in.
+    - **[MED] constant `baseline_key` over-suppressed baselines.** A bare constant
+      key collapsed every fixable indent finding on a file to ONE fingerprint, so
+      `check --baseline` silently suppressed a genuinely-NEW violation. FIX: the key
+      is now a `fixable`/`unfixable` PREFIX + the offending line, so `can_fix` still
+      matches the prefix while the fingerprint stays per-line (matching the key-less
+      path). (`sort`'s per-block-ordinal keys never had this.)
+    - **[LOW] F2** a tab-only lone-CR-at-EOF line (blank to the check) was
+      reindented -> strip the trailing lone `\r` in the fixer too.
+    - **[LOW] F3** an absurd `width` (a remote's `1000000000`) allocated a multi-GB
+      string -> cap the fixer's `width` at 256.
+    - **[LOW] #3** `width: 0` (schema `min=1` is advisory) silently disabled the
+      multiple check -> rejected at load for ANY indent_style rule.
 
 Next Phase-4 op after indent_style: `insert_line` (SURFACE its host/field fork
 first) or `insert_header`.

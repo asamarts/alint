@@ -3,9 +3,9 @@ tags: [fix, indent_style, verify]
 
 # A pure-space lead that is not a multiple of `width` (3 spaces under width 4) is
 # a WidthMismatch. Rounding it up or down is ambiguous, so the reindent fix does
-# NOT touch it: `check` does not advertise it auto-fixable, and `fix` forms no
-# edit (there is no pure-tab indentation to convert) -> the file is byte-identical
-# and the violation survives. check and fix agree.
+# NOT touch it: `check` does not advertise it auto-fixable, and even under
+# `fix_unsafe` the fixer DECLINES it (its `can_fix` guard) -> the file is
+# byte-identical and the violation survives. check and fix agree.
 
 given:
   tree:
@@ -21,7 +21,7 @@ given:
         level: error
         fix: { indent_style: {} }
 
-when: [check, fix, check]
+when: [check, fix_unsafe, check]
 
 expect:
   - violations:

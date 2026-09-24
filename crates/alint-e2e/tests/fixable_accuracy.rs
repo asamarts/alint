@@ -237,9 +237,13 @@ fn check_tags_only_the_reindentable_indent_style_violation_fixable() {
     .unwrap();
     materialize(&tree, root).unwrap();
 
+    // `indent_style` defaults to Unsafe (so a bare fix tags nothing fixable, like
+    // file_remove -- covered by the test above). Opt into `applicability: safe`
+    // here so the per-violation can_fix DISTINCTION (pure-tab fixable vs
+    // width-mismatch unfixable) is what governs the `is_fixable` tag.
     let report = run_check_with(
         root,
-        "version: 1\nrules:\n  - id: ind\n    kind: indent_style\n    paths: \"**/*.py\"\n    style: spaces\n    width: 4\n    level: error\n    fix:\n      indent_style: {}\n",
+        "version: 1\nrules:\n  - id: ind\n    kind: indent_style\n    paths: \"**/*.py\"\n    style: spaces\n    width: 4\n    level: error\n    fix:\n      indent_style:\n        applicability: safe\n",
     );
     let result = report
         .results
