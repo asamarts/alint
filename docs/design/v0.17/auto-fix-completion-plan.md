@@ -328,9 +328,21 @@ warning or a v0.18 migration.
     all 8 formats, PutGet verify (special chars / control chars demote), source +
     target confinement (incl. a real FIFO), compose + loud non-convergence, tier
     honesty across human/sarif/agent/json, and the partition gate.
+  - **Phase 2 DONE: regex-extract targets.** `ValueTargets` now carries the whole
+    `Extract` (structured or regex); `propagated_bytes` dispatches to
+    `propagate_structured` (Phase 1) or `propagate_regex` (new). The regex path
+    rewrites EACH match's capture group 1 to the source value via a `ReplaceRange`
+    batch through `apply_file_edits`, then RE-EXTRACTS to verify (a value that
+    breaks the surrounding pattern -- e.g. a `"` inside a `"([^"]+)"` capture, or a
+    digit into a `[a-z]+` capture -- fails and declines, never writing a value the
+    check would still reject); requires valid UTF-8 (byte-offset-safe). `build()`
+    accepts a structured OR regex target extract; a `lines`/`whole_file` target is
+    rejected (no single value). Gates: 4 regex fixer units + a build-accept +
+    a `lines`-reject build test + a regex e2e (`sync_from_equals_regex`, a README
+    badge + Dockerfile `ARG`). The value-propagation feature is now complete.
 
-Ops remaining. `sync_from` on `equals` Phase 2 (regex-extract targets) +
-cross-file create-and-register; lockfile `relocate`. Risk: medium.
+Ops remaining. Cross-file create-and-register (multi-file transaction, 5.2.4);
+lockfile `relocate`. Risk: medium.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 

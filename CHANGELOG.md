@@ -83,11 +83,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     `source:` file so the two are byte-identical again -- the workspace
     LICENSE-mirroring case, where each crate's copy must match the root one.
   - On **`relation: equals`** it PROPAGATES the source's single extracted value
-    into each drifting target's node, per format (any structured extract:
-    toml/json/yaml/xml/ini/hcl/dotenv/properties JSONPath), preserving the rest of
-    the file -- the "one source of truth, propagate to N others" case (e.g. a
-    workspace version to each crate's `$.package.version`). A regex-extract target
-    is a deferred follow-up.
+    into each drifting target, preserving the rest of the file -- the "one source
+    of truth, propagate to N others" case (e.g. a workspace version to each crate's
+    `$.package.version`). Works for a structured target extract (any
+    toml/json/yaml/xml/ini/hcl/dotenv/properties JSONPath -- rewrites the located
+    node) and a regex target extract (rewrites each match's capture group 1, then
+    re-verifies -- e.g. a version in a README badge or a Dockerfile `ARG`).
   `Unsafe` by default (a whole-file overwrite / a ruleset-chosen value can change
   the target), so a bare `alint fix` suggests it and `alint fix --unsafe-fixes`
   applies it. `identical` requires `skip_header_lines: 0`; a set / resolves

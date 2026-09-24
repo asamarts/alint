@@ -164,14 +164,15 @@ impl Fixer for SyncFromFixer {
     }
 }
 
-/// Which structured node to set in a value-propagation target: the format and the
-/// `JSONPath` source. A glob shares one across every match; a list carries one per
-/// entry. (Phase 1 = structured-extract targets only; a regex-extract target is a
-/// deferred follow-up and is rejected at load.)
+/// How to locate the value in a propagation target: the target's `extract`, which
+/// is either `Structured(Format, JSONPath)` (rewrite the located node) or
+/// `Regex(pattern)` (rewrite each match's capture group 1). A glob shares one
+/// across every match; a list carries one per entry. Non-structured/regex extracts
+/// (lines / whole-file) are rejected at load.
 #[derive(Debug)]
 pub enum ValueTargets {
-    Glob(Format, String),
-    List(Vec<(PathBuf, Format, String)>),
+    Glob(Extract),
+    List(Vec<(PathBuf, Extract)>),
 }
 
 /// Propagates the host `cross_file` `relation: equals` source's single extracted
@@ -210,16 +211,16 @@ impl CrossFileValueFixer {
         }
     }
 
-    /// The (format, `JSONPath` source) for `target_rel`: the shared glob node, or
-    /// the matching list entry. `None` when the violation path is not a configured
-    /// target (should not happen -- the violation came from this rule).
-    fn target_node(&self, target_rel: &Path) -> Option<(Format, &str)> {
+    /// The `extract` for `target_rel`: the shared glob extract, or the matching
+    /// list entry's. `None` when the violation path is not a configured target
+    /// (should not happen -- the violation came from this rule).
+    fn target_extract(&self, target_rel: &Path) -> Option<&Extract> {
         match &self.targets {
-            ValueTargets::Glob(fmt, q) => Some((*fmt, q.as_str())),
+            ValueTargets::Glob(ex) => Some(ex),
             ValueTargets::List(entries) => entries
                 .iter()
-                .find(|(p, _, _)| p == target_rel)
-                .map(|(_, fmt, q)| (*fmt, q.as_str())),
+                .find(|(p, _)| p == target_rel)
+                .map(|(_, ex)| ex),
         }
     }
 
@@ -260,7 +261,135 @@ impl CrossFileValueFixer {
     /// Skip so `check` and `fix` agree. The whole-file write (`commit_write` in
     /// `apply`) keeps this on the engine's blast-radius-demoted path, unlike a
     /// located fixer on this `requires_full_index` rule.
+    ///
+    /// Dispatches on the target's `extract`: a `Structured` node (rewrite the
+    /// located node) or a `Regex` (rewrite each match's capture group 1).
     fn propagated_bytes(
+        &self,
+        violation: &Violation,
+        extract: &Extract,
+        source_value: &str,
+        target_bytes: &[u8],
+        root: &Path,
+    ) -> std::result::Result<Vec<u8>, String> {
+        match extract {
+            Extract::Structured(format, query) => self.propagate_structured(
+                violation,
+                *format,
+                query,
+                source_value,
+                target_bytes,
+                root,
+            ),
+            Extract::Regex(pattern) => {
+                self.propagate_regex(violation, pattern, source_value, target_bytes)
+            }
+            // build_value_targets rejects every other extract, so this is unreachable
+            // for a built rule.
+            _ => Err("unsupported target extract for value propagation".to_string()),
+        }
+    }
+
+    /// Regex-extract target (Phase 2): rewrite EACH match's capture group 1 to the
+    /// source value, then re-extract to verify the whole file still yields exactly
+    /// the source value at that pattern (a source value carrying a char that breaks
+    /// the surrounding pattern -- e.g. a `"` inside a `"([^"]+)"` capture -- fails
+    /// this and declines, never writing a value the check would still reject).
+    fn propagate_regex(
+        &self,
+        violation: &Violation,
+        pattern: &str,
+        source_value: &str,
+        target_bytes: &[u8],
+    ) -> std::result::Result<Vec<u8>, String> {
+        let target_rel = violation.path.as_deref().unwrap_or_else(|| Path::new(""));
+        // A capture rewrite needs byte offsets into the real bytes; a lossy decode
+        // would shift them, so require valid UTF-8 (decline otherwise -- the check
+        // reads lossily, but a fix must not splice at a shifted offset).
+        let text = std::str::from_utf8(target_bytes).map_err(|_| {
+            format!(
+                "{} is not valid UTF-8; cannot rewrite a regex capture",
+                target_rel.display()
+            )
+        })?;
+        let re = regex::Regex::new(pattern)
+            .map_err(|e| format!("invalid target regex `{pattern}`: {e}"))?;
+        // A `ReplaceRange` over each match's group-1 span. Disjoint + left-to-right
+        // (captures_iter is non-overlapping, leftmost), so `apply_file_edits`
+        // splices them all in one pass. A source value equal to every capture ->
+        // no net change (already equal); no group 1 -> nothing to set.
+        let mut collected = Vec::new();
+        let mut had_group = false;
+        for cap in re.captures_iter(text) {
+            let Some(g1) = cap.get(1) else { continue };
+            had_group = true;
+            if g1.as_str() == source_value {
+                continue; // this capture already equals the source
+            }
+            collected.push(alint_core::CollectedEdit {
+                edit: FixEdit::ReplaceRange {
+                    path: target_rel.to_path_buf(),
+                    range: g1.start()..g1.end(),
+                    content: source_value.as_bytes().to_vec(),
+                },
+                applicability: self.applicability,
+                verify: alint_core::EditVerifier::None,
+                isolation_group: None,
+            });
+        }
+        if !had_group {
+            return Err(format!(
+                "the target regex `{pattern}` has no capture group 1 to set on {}",
+                target_rel.display()
+            ));
+        }
+        if collected.is_empty() {
+            return Err(format!(
+                "{} already equals {source_value:?} at regex `{pattern}`",
+                target_rel.display()
+            ));
+        }
+        let batch: Vec<LocatedEdit> = collected
+            .into_iter()
+            .enumerate()
+            .map(|(i, collected)| LocatedEdit {
+                rule_index: 0,
+                violation_index: i,
+                collected,
+            })
+            .collect();
+        let (new_bytes, outcomes) = apply_file_edits(target_bytes, batch, self.applicability);
+        if !outcomes
+            .iter()
+            .any(|(_, o)| matches!(o, LocatedOutcome::Applied))
+        {
+            return Err(format!(
+                "the target regex `{pattern}` capture could not be set on {}",
+                target_rel.display()
+            ));
+        }
+        // Re-extract verify: after the splice, EVERY group-1 capture must read back
+        // as the source value. A source value carrying a delimiter that truncates
+        // the surrounding pattern fails this -> decline (do not write a value the
+        // `equals` check would still reject).
+        let re_new = extract_values(
+            &Extract::Regex(pattern.to_string()),
+            &String::from_utf8_lossy(&new_bytes),
+        )
+        .map_err(|e| format!("regex re-extract failed: {e}"))?;
+        if re_new.is_empty() || !re_new.iter().all(|v| v == source_value) {
+            return Err(format!(
+                "setting {} to {source_value:?} would not satisfy the regex `{pattern}` \
+                 (the value likely contains a char the pattern's capture cannot hold)",
+                target_rel.display()
+            ));
+        }
+        Ok(new_bytes)
+    }
+
+    /// Structured-extract target (Phase 1): rewrite the located node via
+    /// `StructuredFixer::set`.
+    fn propagate_structured(
         &self,
         violation: &Violation,
         format: Format,
@@ -386,7 +515,7 @@ impl Fixer for CrossFileValueFixer {
             ));
         };
         let target_rel: &Path = target;
-        let Some((format, query)) = self.target_node(target_rel) else {
+        let Some(extract) = self.target_extract(target_rel) else {
             return Ok(FixOutcome::Skipped(format!(
                 "{} is not a configured value-propagation target",
                 target_rel.display()
@@ -404,20 +533,16 @@ impl Fixer for CrossFileValueFixer {
             ReadForFix::Bytes(b) => b,
             ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
-        let new_bytes = match self.propagated_bytes(
-            violation,
-            format,
-            query,
-            &source_value,
-            &target_bytes,
-            ctx.root,
-        ) {
-            Ok(b) => b,
-            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
-        };
+        let new_bytes =
+            match self.propagated_bytes(violation, extract, &source_value, &target_bytes, ctx.root)
+            {
+                Ok(b) => b,
+                Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+            };
+        let at = locator(extract);
         if ctx.dry_run {
             return Ok(FixOutcome::Applied(format!(
-                "would set {} `{query}` to {source_value:?} from {}",
+                "would set {} `{at}` to {source_value:?} from {}",
                 target_rel.display(),
                 self.source_file.display()
             )));
@@ -428,7 +553,7 @@ impl Fixer for CrossFileValueFixer {
                 source,
             })?;
         Ok(FixOutcome::Applied(format!(
-            "set {} `{query}` to {source_value:?} from {}",
+            "set {} `{at}` to {source_value:?} from {}",
             target_rel.display(),
             self.source_file.display()
         )))
@@ -446,7 +571,7 @@ impl Fixer for CrossFileValueFixer {
     /// re-parse fails and it declines (`None`) -- the LSP passes the real buffer.
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let target_rel = violation.path.as_deref()?;
-        let (format, query) = self.target_node(target_rel)?;
+        let extract = self.target_extract(target_rel)?;
         let source_abs = confine_fix_path(&self.source_file, root, false).ok()?;
         let source_text = crate::io::read_capped(&source_abs)
             .ok()
@@ -457,12 +582,22 @@ impl Fixer for CrossFileValueFixer {
             return None;
         };
         let content = self
-            .propagated_bytes(violation, format, query, &source_value, bytes, root)
+            .propagated_bytes(violation, extract, &source_value, bytes, root)
             .ok()?;
         Some(FixEdit::SetContent {
             path: target_rel.to_path_buf(),
             content,
         })
+    }
+}
+
+/// The locator string for a value-propagation target's extract, for messages: the
+/// `JSONPath` query or the regex pattern.
+fn locator(extract: &Extract) -> &str {
+    match extract {
+        Extract::Structured(_, query) => query,
+        Extract::Regex(pattern) => pattern,
+        _ => "",
     }
 }
 
@@ -805,7 +940,7 @@ mod tests {
         CrossFileValueFixer::new(
             PathBuf::from(source),
             Extract::Structured(fmt, source_q.to_string()),
-            ValueTargets::Glob(fmt, target_q.to_string()),
+            ValueTargets::Glob(Extract::Structured(fmt, target_q.to_string())),
             Applicability::Unsafe,
         )
     }
@@ -941,8 +1076,7 @@ mod tests {
             Extract::Structured(Format::Toml, "$.workspace.package.version".to_string()),
             ValueTargets::List(vec![(
                 victim.clone(),
-                Format::Toml,
-                "$.package.version".to_string(),
+                Extract::Structured(Format::Toml, "$.package.version".to_string()),
             )]),
             Applicability::Unsafe,
         )
@@ -1056,6 +1190,102 @@ mod tests {
                 .fix_edit(&viol("t.json"), &[], tmp.path())
                 .is_none(),
             "empty bytes -> no proposed edit"
+        );
+    }
+
+    // ─── regex-extract value propagation (Phase 2) ───────────────────────
+
+    // A value fixer with a regex source pattern + a (possibly different) regex
+    // target pattern.
+    fn value_fixer_regex(source_pat: &str, target_pat: &str) -> CrossFileValueFixer {
+        CrossFileValueFixer::new(
+            PathBuf::from("VERSION"),
+            Extract::Regex(source_pat.to_string()),
+            ValueTargets::Glob(Extract::Regex(target_pat.to_string())),
+            Applicability::Unsafe,
+        )
+    }
+
+    #[test]
+    fn value_propagates_a_regex_capture_preserving_the_pattern() {
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "VERSION", b"2.5.0\n");
+        write(
+            &tmp,
+            "README.md",
+            b"# Proj\n![v](https://x/badge/version-1.0.0-blue)\n",
+        );
+        let out = value_fixer_regex("^([0-9.]+)", "version-([0-9.]+)-")
+            .apply(&viol("README.md"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "got {out:?}");
+        let after = String::from_utf8(read(&tmp, "README.md")).unwrap();
+        assert!(
+            after.contains("version-2.5.0-blue"),
+            "capture rewritten: {after}"
+        );
+        assert!(
+            after.contains("# Proj") && after.contains("![v]"),
+            "rest preserved: {after}"
+        );
+    }
+
+    #[test]
+    fn value_regex_declines_when_the_value_breaks_the_pattern() {
+        // Re-extract verify: a source value that cannot satisfy the target's capture
+        // (here a digit-bearing value into a `[a-z]+` capture) must be declined --
+        // never write a value the `equals` check would still reject.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.txt", b"val=DIGITS123\n");
+        write(&tmp, "f.txt", b"v=old\n");
+        let fixer = CrossFileValueFixer::new(
+            PathBuf::from("src.txt"),
+            Extract::Regex("val=(.+)".to_string()),
+            ValueTargets::Glob(Extract::Regex("v=([a-z]+)".to_string())),
+            Applicability::Unsafe,
+        );
+        let out = fixer.apply(&viol("f.txt"), &ctx(&tmp, false)).unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("would not satisfy the regex")),
+            "a value that breaks the pattern must decline, got {out:?}"
+        );
+        assert_eq!(read(&tmp, "f.txt"), b"v=old\n", "target unchanged");
+    }
+
+    #[test]
+    fn value_regex_is_idempotent_when_already_equal() {
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.txt", b"tag: 9.9\n");
+        write(&tmp, "t.txt", b"pinned to 9.9 here\n");
+        let fixer = CrossFileValueFixer::new(
+            PathBuf::from("src.txt"),
+            Extract::Regex("tag: ([0-9.]+)".to_string()),
+            ValueTargets::Glob(Extract::Regex("pinned to ([0-9.]+) ".to_string())),
+            Applicability::Unsafe,
+        );
+        let out = fixer.apply(&viol("t.txt"), &ctx(&tmp, false)).unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("already equals")),
+            "got {out:?}"
+        );
+    }
+
+    #[test]
+    fn value_regex_declines_a_missing_capture_group() {
+        // A target regex with no group 1 has nothing to set.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.txt", b"tag: 9.9\n");
+        write(&tmp, "t.txt", b"nogroup 1.0\n");
+        let fixer = CrossFileValueFixer::new(
+            PathBuf::from("src.txt"),
+            Extract::Regex("tag: ([0-9.]+)".to_string()),
+            ValueTargets::Glob(Extract::Regex("nogroup".to_string())),
+            Applicability::Unsafe,
+        );
+        let out = fixer.apply(&viol("t.txt"), &ctx(&tmp, false)).unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("no capture group 1")),
+            "got {out:?}"
         );
     }
 }

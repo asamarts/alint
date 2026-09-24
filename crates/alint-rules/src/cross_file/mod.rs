@@ -177,35 +177,38 @@ fn build_sync_from_fixer(
     }
 }
 
-/// Resolve the per-target structured node model for value propagation, rejecting a
-/// non-structured target extract (regex / whole-file value propagation is a Phase-2
-/// follow-up). Every target's `extract` must be `Structured` (a `JSONPath` over a
-/// parsed format), which `StructuredFixer::set` can locate + rewrite.
+/// Resolve the per-target extract for value propagation. A target `extract` must be
+/// `Structured` (a `JSONPath` over a parsed format -- rewrite the located node) or
+/// `Regex` (rewrite each capture group 1); a `lines` / `whole_file` extract has no
+/// single scalar to set and is rejected at load.
 fn build_value_targets(
     targets: Option<&Targets>,
     cfg: &impl Fn(String) -> Error,
 ) -> Result<ValueTargets> {
-    let non_structured = |what: &str| {
+    let unsupported = |what: &str| {
         cfg(format!(
-            "`sync_from` on `equals` needs a STRUCTURED target extract (a toml/json/yaml/\
-             xml/ini/hcl/dotenv/properties JSONPath); {what} has a non-structured extract. \
-             Regex / whole-file value propagation is a deferred follow-up."
+            "`sync_from` on `equals` needs a STRUCTURED (toml/json/yaml/xml/ini/hcl/dotenv/\
+             properties JSONPath) or REGEX target extract; {what} has a lines/whole-file extract, \
+             which has no single value to set."
         ))
     };
+    // A propagation target's extract must be Structured or Regex.
+    let value_extract = |ex: Option<&Extract>, what: &str| -> Result<Extract> {
+        match ex {
+            Some(e @ (Extract::Structured(..) | Extract::Regex(_))) => Ok(e.clone()),
+            _ => Err(unsupported(what)),
+        }
+    };
     match targets {
-        Some(Targets::Glob { extract, .. }) => match extract {
-            Some(Extract::Structured(fmt, q)) => Ok(ValueTargets::Glob(*fmt, q.clone())),
-            _ => Err(non_structured("the `targets.files` glob")),
-        },
+        Some(Targets::Glob { extract, .. }) => Ok(ValueTargets::Glob(value_extract(
+            extract.as_ref(),
+            "the `targets.files` glob",
+        )?)),
         Some(Targets::List(list)) => {
             let mut out = Vec::with_capacity(list.len());
             for (file, ex) in list {
-                match ex {
-                    Some(Extract::Structured(fmt, q)) => {
-                        out.push((PathBuf::from(file), *fmt, q.clone()));
-                    }
-                    _ => return Err(non_structured(&format!("target `{file}`"))),
-                }
+                let e = value_extract(ex.as_ref(), &format!("target `{file}`"))?;
+                out.push((PathBuf::from(file), e));
             }
             Ok(ValueTargets::List(out))
         }
@@ -488,22 +491,40 @@ mod tests {
     }
 
     #[test]
-    fn build_rejects_sync_from_on_equals_with_regex_targets() {
-        // Phase 1 is structured-extract targets only; a regex-extract target is a
-        // deferred (Phase 2) follow-up -- rejected at load with a clear message.
+    fn build_accepts_sync_from_on_equals_with_regex_targets() {
+        // Phase 2: a regex-extract target attaches the value fixer (rewrite each
+        // capture group 1 to the source value).
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: equals\n\
+             source: { file: VERSION, extract: { regex: \"^([0-9.]+)$\" } }\n\
+             targets: { files: \"**/*.md\", extract: { regex: \"badge-([0-9.]+)-\" } }\n\
+             level: error\n\
+             fix: { sync_from: {} }\n",
+        );
+        let rule = build(&spec).expect("sync_from builds on equals + regex targets");
+        assert!(rule.fixer().is_some(), "the value fixer attaches");
+    }
+
+    #[test]
+    fn build_rejects_sync_from_on_equals_with_a_lines_target() {
+        // A `lines` (or `whole_file`) target extract has no single scalar to set --
+        // rejected at load (only structured / regex targets propagate a value).
         use crate::test_support::spec_yaml;
         let spec = spec_yaml(
             "id: t\n\
              kind: cross_file\n\
              relation: equals\n\
              source: { file: a.txt, extract: { regex: \"(.*)\" } }\n\
-             targets: { files: \"**/*.txt\", extract: { regex: \"(.*)\" } }\n\
+             targets: { files: \"**/*.txt\", extract: { lines: {} } }\n\
              level: error\n\
              fix: { sync_from: {} }\n",
         );
         let err = build(&spec).unwrap_err().to_string();
         assert!(
-            err.contains("sync_from") && err.contains("STRUCTURED"),
+            err.contains("sync_from") && err.contains("no single value"),
             "{err}"
         );
     }

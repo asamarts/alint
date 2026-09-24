@@ -1,10 +1,12 @@
 # Cross-file value propagation (`sync_from` on `relation: equals`)
 
-Status: **Phase 1 IMPLEMENTED** (2026-09-23; structured-extract targets). Extends
-the shipped `sync_from` whole-file mirror (`relation: identical`) to the value
-relation. Part of the v0.17 auto-fix arc, Phase 3. Companion:
-`docs/design/v0.17/auto-fix-completion-plan.md`. Phase 2 (regex-extract targets)
-remains.
+Status: **Phase 1 + Phase 2 IMPLEMENTED** (2026-09-23; structured-extract AND
+regex-extract targets). Extends the shipped `sync_from` whole-file mirror
+(`relation: identical`) to the value relation. Part of the v0.17 auto-fix arc,
+Phase 3. Companion: `docs/design/v0.17/auto-fix-completion-plan.md`. Phase 2 adds
+regex-extract targets (rewrite each capture group 1 + re-extract verify) via a
+`propagate_regex` branch beside the `propagate_structured` (StructuredFixer)
+one, dispatched in `propagated_bytes`.
 
 ## What it is
 
