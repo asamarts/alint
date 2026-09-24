@@ -36,35 +36,25 @@ pub(super) fn count_canonical_output_formats() -> Result<usize> {
     Ok(count_enum_variants(&src, "Format"))
 }
 
-/// Canonical auto-fix-ops count = `pub struct *Fixer` declarations under
-/// `crates/alint-rules/src/fixers/`. Mirrors
-/// `coverage_audit_readme_claims::readme_auto_fix_ops_count_matches_fixers`.
-pub(super) fn count_canonical_auto_fix_ops() -> Result<usize> {
-    fn count_fixers(dir: &Path) -> Result<usize> {
-        let mut n = 0;
-        for entry in fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
-            let p = entry?.path();
-            if p.is_dir() {
-                n += count_fixers(&p)?;
-            } else if p.extension().and_then(|e| e.to_str()) == Some("rs") {
-                let src =
-                    fs::read_to_string(&p).with_context(|| format!("read {}", p.display()))?;
-                for line in src.lines() {
-                    let line = line.trim_start();
-                    if line.starts_with("pub struct ") && line.contains("Fixer") {
-                        n += 1;
-                    }
-                }
-            }
-        }
-        Ok(n)
-    }
-    let dir = crate::bench_release::workspace_root()?
-        .join("crates")
-        .join("alint-rules")
-        .join("src")
-        .join("fixers");
-    count_fixers(&dir)
+/// Canonical auto-fix-ops count = the length of the canonical fix-op list
+/// [`alint_core::FixSpec::ALL_OP_NAMES`]. This is the SAME source of truth
+/// `facts.rs` and the README gate
+/// (`coverage_audit_readme_claims::readme_auto_fix_ops_count_matches_fixers`,
+/// which despite its name compares against `ALL_OP_NAMES.len()`) use, so the
+/// published manifest can never drift from them.
+///
+/// It used to count `pub struct *Fixer` declarations under
+/// `crates/alint-rules/src/fixers/`, which happened to equal the op count only by
+/// COINCIDENCE (one fixer struct can back several ops -- `StructuredFixer` serves
+/// `set_value`+`remove_value` (-1) while `sync_from` is served by two structs
+/// (+1), and they cancelled). A future op reusing an existing fixer struct would
+/// have made that count silently disagree with facts/README (audit F1); keying
+/// off `ALL_OP_NAMES` removes the coincidence entirely.
+///
+/// Unlike its sibling counters this one reads a compile-time constant rather than
+/// parsing a source file, so it is infallible (returns `usize`, not `Result`).
+pub(super) fn count_canonical_auto_fix_ops() -> usize {
+    alint_core::FixSpec::ALL_OP_NAMES.len()
 }
 
 /// Find `enum <name> {` in `source` and count comma-terminated or

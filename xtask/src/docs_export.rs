@@ -2347,7 +2347,8 @@ fn write_manifest(target_dir: &Path) -> Result<()> {
     let bundled_rulesets_total = counts::count_canonical_bundled_rulesets()?;
     let subcommands_total = counts::count_canonical_subcommands()?;
     let output_formats_total = counts::count_canonical_output_formats()?;
-    let auto_fix_ops_total = counts::count_canonical_auto_fix_ops()?;
+    // Infallible (reads `FixSpec::ALL_OP_NAMES`, a compile-time constant), so no `?`.
+    let auto_fix_ops_total = counts::count_canonical_auto_fix_ops();
 
     // format_version BUMPED 2 -> 3 (Phase 2.6 of the drift audit) so
     // alint.org's drift gate can affirmatively detect the three new

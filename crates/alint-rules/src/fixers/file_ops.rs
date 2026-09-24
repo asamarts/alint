@@ -317,11 +317,15 @@ impl Fixer for FileRenameFixer {
 /// Only the unambiguous case is fixed. A file already at the root
 /// (nothing to move; also the non-convergence guard) or one whose basename can't
 /// be decoded is reported, not fixed (`resolve_relocate_target` -> `Err`, so
-/// `can_fix` is false and `check` never promises it). A root slot already taken
-/// by a same-named file is left for a human (a fix-time collision skip, mirroring
-/// `FileRenameFixer`). Note: pair with a SUBDIRECTORY-anchored `paths:` (e.g.
-/// `**/*/Cargo.lock`, not `**/Cargo.lock`); a root-matching pattern keeps flagging
-/// the relocated file, which `relocate` then honestly skips as already-at-root.
+/// `can_fix` is false and `check` never promises it). A root slot already occupied
+/// is left for a human (a fix-time collision skip). The no-clobber guard is
+/// stricter than `FileRenameFixer`'s (audit-hardened): it uses `symlink_metadata`
+/// (any entry -- file, dir, or live/dangling symlink -- counts as occupied) rather
+/// than `exists()` (which follows links and misses a dangling one), and it also
+/// yields when the destination has a same-pass composed write pending. Note: pair
+/// with a SUBDIRECTORY-anchored `paths:` (e.g. `**/*/Cargo.lock`, not
+/// `**/Cargo.lock`); a root-matching pattern keeps flagging the relocated file,
+/// which `relocate` then honestly skips as already-at-root.
 #[derive(Debug)]
 pub struct RelocateFixer {
     applicability: Applicability,
@@ -404,8 +408,14 @@ impl Fixer for RelocateFixer {
         // A root slot already occupied is AMBIGUOUS (which lockfile is canonical?);
         // never clobber it. The source is in a subdirectory and the target is at
         // the root, so they can never be the same file -- no case-insensitive
-        // same-file exception is needed (unlike `FileRenameFixer`).
-        if abs_to.exists() {
+        // same-file exception is needed (unlike `FileRenameFixer`). Use
+        // `symlink_metadata` (which does NOT follow links) rather than `exists()`
+        // (which does): a DANGLING symlink occupying the root slot reads as
+        // non-existent to `exists()` and would be silently clobbered, so this holds
+        // a strictly stricter no-clobber bar than `FileRenameFixer` (a follow-up
+        // backports it there; auto-fix-completion-plan). Any entry -- file, dir, or
+        // live/dangling symlink -- counts as occupied.
+        if abs_to.symlink_metadata().is_ok() {
             return Ok(FixOutcome::Skipped(format!(
                 "the repository root already has {}",
                 new_path.display()
@@ -439,6 +449,20 @@ impl Fixer for RelocateFixer {
                 path.display()
             )));
         }
+        // Yield to a pending content edit on the DESTINATION too: a self-contradictory
+        // config (e.g. `file_create` composing `<root>/X` while relocate moves
+        // `sub/X -> <root>/X`) buffers a write to the root slot that `symlink_metadata`
+        // above cannot see (it is in the compose buffer, not yet on disk). Renaming
+        // onto it now would race the flush and clobber one of the two writes. Skip;
+        // on the fixpoint rerun the create is on disk and the collision check above
+        // handles it. (A stricter bar than `FileRenameFixer`, which guards only the
+        // source; the same backport follow-up covers it.)
+        if ctx.has_pending_write(&abs_to) {
+            return Ok(FixOutcome::Skipped(format!(
+                "the root slot {} has a pending content edit this pass; rerun to relocate",
+                new_path.display()
+            )));
+        }
         // A dry run reports only; a stage (`--diff`) records the rename so the diff
         // can render it. Both return before touching disk.
         if ctx.dry_run || ctx.stage_ops.is_some() {
@@ -470,8 +494,12 @@ impl Fixer for RelocateFixer {
         // Same guards + target as apply() (the shared helper). An editor
         // code-action must not diverge from what `alint fix` would do.
         let new_path = Self::resolve_relocate_target(path).ok()?;
-        // Collision: don't propose a move onto an existing root file.
-        if root.join(&new_path).exists() {
+        // Collision: don't propose a move onto an existing root slot. Mirror
+        // apply()'s `symlink_metadata` check (not `exists()`) so a dangling symlink
+        // at the slot is also treated as occupied -- the editor must not propose
+        // what `fix` would decline. (fix_edit has no compose buffer, so the
+        // pending-write guards are apply-only.)
+        if root.join(&new_path).symlink_metadata().is_ok() {
             return None;
         }
         Some(FixEdit::RenameFile {
@@ -1697,6 +1725,93 @@ mod tests {
         assert_eq!(
             RelocateFixer::new(Applicability::Safe).applicability(),
             Applicability::Safe
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relocate_skips_a_dangling_symlink_at_the_root_slot() {
+        // Audit hardening (Agent A #4): a DANGLING symlink occupying the root slot
+        // reads as non-existent to `exists()` (which follows links) but IS an entry.
+        // The `symlink_metadata` collision check must treat it as occupied and skip,
+        // never clobbering it.
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        std::fs::write(tmp.path().join("sub/Cargo.lock"), "# nested\n").unwrap();
+        symlink("nonexistent-target", tmp.path().join("Cargo.lock")).unwrap();
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &out else {
+            panic!("expected Skipped for a dangling-symlink root slot, got {out:?}");
+        };
+        assert!(msg.contains("already has"), "reason: {msg}");
+        // The dangling symlink is intact (not replaced) and the nested file stays.
+        assert!(
+            tmp.path()
+                .join("Cargo.lock")
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the dangling symlink must NOT be clobbered"
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("sub/Cargo.lock")).unwrap(),
+            "# nested\n"
+        );
+        // fix_edit mirrors apply: no proposal onto the occupied (dangling) slot.
+        assert_eq!(
+            RelocateFixer::new(Applicability::Unsafe).fix_edit(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                b"",
+                tmp.path(),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn relocate_yields_to_a_pending_write_on_the_destination() {
+        // Audit hardening (Agent B F4): a content fixer composing the root slot this
+        // pass buffers a write `symlink_metadata` cannot see (it is in the compose
+        // buffer, not on disk). relocate must yield rather than `fs::rename` onto it
+        // and race the flush (silent clobber). On the fixpoint rerun the create is on
+        // disk and the ordinary collision check handles it.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        std::fs::write(tmp.path().join("sub/Cargo.lock"), "# nested\n").unwrap();
+        let buf = std::cell::RefCell::new(std::collections::BTreeMap::new());
+        // A pending write to the DESTINATION (root slot). The dest does not exist on
+        // disk yet, so `resolve_write_target` returns the path unchanged -> this key
+        // matches the guard's lookup.
+        buf.borrow_mut()
+            .insert(tmp.path().join("Cargo.lock"), b"# created\n".to_vec());
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+            stage_ops: None,
+        };
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                &ctx,
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &out else {
+            panic!("expected Skipped for a pending destination write, got {out:?}");
+        };
+        assert!(msg.contains("pending content edit"), "reason: {msg}");
+        assert!(
+            tmp.path().join("sub/Cargo.lock").exists(),
+            "the nested file must stay put (not moved onto a pending create)"
         );
     }
 }

@@ -394,7 +394,39 @@ warning or a v0.18 migration.
   slot-taken, declines-a-root-level-file); 9 `RelocateFixer` unit tests; facts.json
   20->21; README count (26 + 60) + prose; CHANGELOG. No standalone design doc (a
   focused op like `dir_create`); the decisions live here.
-  - **AUDIT PENDING** (next adversarial round).
+  - **AUDIT-HARDENED (2 independent worktree-isolated agents, both base-verified at
+    the tip + own CLI probing).** Both verdicts: **sound and safe to ship** -- no
+    data-loss, no clobber of a real committed file, dry-run/stage disk-pure,
+    converges + idempotent; and the gate cascade is sound with every claimed
+    invariant asserted with teeth (the W2 classification -- the highest-risk area --
+    is correct and genuinely enforced: an untrusted remote cannot promote relocate
+    to Safe, clobber, retarget onto an arbitrary name (dest is always root + the
+    ORIGINAL basename), or path-traverse). All findings were LOW except two MED
+    preview/scope edges, all either FIXED, by-design, or shared-with-`FileRenameFixer`.
+    FIXED this round: (1) collision check now uses `symlink_metadata` not `exists()`,
+    so a DANGLING symlink at the root slot is never clobbered (Agent A #4); (2) a
+    DESTINATION `has_pending_write` guard, so a self-contradictory `file_create`
+    root/X + relocate nested/X->root/X config yields instead of racing the flush
+    (Agent B F4) -- both stricter than `FileRenameFixer`, with a backport follow-up;
+    (3) the docs-manifest `count_canonical_auto_fix_ops` now keys off
+    `FixSpec::ALL_OP_NAMES` (was a `pub struct *Fixer` text-count equal only by
+    coincidence -- a future struct-reuse would have drifted the published count from
+    facts/README; Agent B F1); (4) `dir_exists` `build_rejects_an_incompatible_fix_op`
+    now covers `relocate` (proving its only valid host is `file_absent`; Agent B F3);
+    (5) the README line-60 "N ops covering" prose count is now gated (Agent B F2).
+    By-design / accepted (documented, NOT bugs): Agent A #2 (`--changed
+    --unsafe-fixes` creates the root `to` target -- a rename's target is intrinsically
+    new; the engine correctly keys the blast-radius demote on the in-scope
+    violation/`from` path, and an UNTOUCHED nested file IS demoted to a suggestion;
+    demoting on the `to` would make every rename un-fixable under `--changed` and
+    regress `file_rename`); Agent A #3 (the fixer does no self-confinement -- the
+    target is confined by construction via `file_name`, and the source comes from
+    the walker's root-stripped, symlink-pruned index, so `..`-escape is unreachable
+    through the only host, matching `file_remove`/`file_rename`); Agent A #5 /
+    Agent B F5 (`can_fix`-true + `apply`-Skipped for a taken slot is intentional and
+    mirrors `FileRenameFixer`; `fix_is_idempotent` is vacuous for every Unsafe op
+    because it runs at the Safe threshold -- `fix_unsafe_converges` is the real
+    idempotence teeth).
 
 Ops remaining. Cross-file create-and-register (multi-file transaction, 5.2.4).
 Risk: medium.
@@ -449,6 +481,26 @@ The core algorithms held and the highest-value gaps are filled; these remain
   `toml_::navigate_mut` handles only `Key`).
 - **`structured_fix/mod.rs` `formats/` split** (~1820 lines, nearing the 2000
   cap).
+- **`fix --dry-run` collision-awareness (generic; from the relocate audit, Agent A
+  #1).** A plain `--dry-run` has no stage sink, so the staged-collision dedupe
+  (stage-mode-only) does not run: N nested files sharing a basename each report
+  "would move -> root/X", over-counting vs the real `fix` (1 applied, N-1 skipped)
+  and disagreeing with `--diff` (which dedupes). Bare `fix` (suggestion mode)
+  likewise suggests all N to the same slot via the stateless per-violation
+  `fix_edit`. No data risk (the real apply dedupes via the collision check), purely
+  preview/count fidelity. relocate makes it a NORMAL case (two stray lockfiles in a
+  monorepo), but the fix is generic (shared with `file_rename`/`file_create`): give
+  the `--dry-run` branch in `Engine::fix` a throwaway `stage_ops` sink so the
+  collision guard fires there too. Its own focused change + a CLI-count gate; NOT
+  bundled into the relocate op (would under-test the other affected ops).
+- **Backport relocate's stricter no-clobber guards to `FileRenameFixer`.** relocate
+  now uses `symlink_metadata` (not `exists()`) for the target-collision check (so a
+  dangling symlink is never clobbered) and guards `has_pending_write` on the
+  DESTINATION as well as the source (so a same-pass composed write to the target is
+  not raced). `FileRenameFixer` still uses `exists()` + a source-only pending-write
+  guard (the shared baseline the audit flagged as Agent A #4 / Agent B F4). Both are
+  pathological, but the guards are cheap and safe; apply the same two to
+  `FileRenameFixer` for parity.
 - **Docs (RELEASE-BLOCKING for v0.17): `docs/site/concepts/adoption/fixing.md` is
   arc-stale.** It still says "The twelve ops" and lists only the 7 content + 5
   path ops (its frontmatter `description:` too), missing the NINE added across the

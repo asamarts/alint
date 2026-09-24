@@ -392,12 +392,22 @@ scope_filter:
 
     #[test]
     fn build_rejects_an_incompatible_fix_op() {
-        let spec = spec_yaml(
-            "id: t\nkind: dir_exists\npaths: \"docs\"\nlevel: error\nfix:\n  file_remove: {}\n",
-        );
-        let err = build(&spec).unwrap_err().to_string();
-        assert!(err.contains("file_remove"), "{err}");
-        assert!(err.contains("not compatible with dir_exists"), "{err}");
+        // Every fix op that is NOT `dir_create` must be rejected here, by name, so a
+        // typo or a mis-hosted op (e.g. `relocate`, whose only valid host is
+        // `file_absent`) surfaces a config error instead of silently disabling the
+        // fix path (audit F3).
+        for op in ["file_remove: {}", "relocate: {}"] {
+            let spec = spec_yaml(&format!(
+                "id: t\nkind: dir_exists\npaths: \"docs\"\nlevel: error\nfix:\n  {op}\n",
+            ));
+            let err = build(&spec).unwrap_err().to_string();
+            let name = op.split(':').next().unwrap();
+            assert!(err.contains(name), "{op}: {err}");
+            assert!(
+                err.contains("not compatible with dir_exists"),
+                "{op}: {err}"
+            );
+        }
     }
 
     #[test]

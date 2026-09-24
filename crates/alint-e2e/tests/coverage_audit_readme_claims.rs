@@ -300,6 +300,18 @@ fn readme_auto_fix_ops_count_matches_fixers() {
         "README claims {claimed} auto-fix ops; FixSpec::ALL_OP_NAMES lists {actual}.\n\
          Update README.md or check whether a new fix op was added without bumping the count.",
     );
+
+    // The headline (line ~26, `N auto-fix ops`) and the feature-list prose (line
+    // ~60, `N ops covering ...`) are hand-edited separately, so a new op can bump
+    // one and not the other (audit F2). Pin the prose count too; `num_before`
+    // returns the FIRST match, so this distinct marker targets the line-60 phrase.
+    let prose = num_before(&readme, "ops covering")
+        .expect("README must contain the 'N ops covering ...' auto-fix prose");
+    assert_eq!(
+        prose, actual,
+        "README's 'N ops covering' auto-fix prose claims {prose}; \
+         FixSpec::ALL_OP_NAMES lists {actual}. Bump both the headline and the prose.",
+    );
 }
 
 #[test]
