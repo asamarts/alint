@@ -39,8 +39,10 @@ use serde::Deserialize;
 /// one (`engine.rs` F4 tripwire); (2) `can_fix` must tell the sortable entry
 /// findings (`ENTRY`) apart from the one thing `sort` cannot repair, an unclosed
 /// block with no `end` (`UNCLOSED`), so `check` never advertises the latter
-/// fixable. Both are `\0`-delimited with the block's start line, unique per
-/// block. Keyed ONLY when a fixer is attached, so a check-only `ordered_block`
+/// fixable. Both are `\0`-delimited with the block's 0-based ORDINAL (not its
+/// line -- `baseline.rs` never hashes line numbers, so inserting a line above a
+/// block does not re-churn its key), unique per block and stable across fixpoint
+/// passes. Keyed ONLY when a fixer is attached, so a check-only `ordered_block`
 /// keeps its offending-line fingerprint and adding a `sort` fix is the only
 /// thing that re-baselines it (an intentional config change, not silent drift).
 const UNCLOSED_KEY_PREFIX: &str = "ordered_block\u{0}unclosed\u{0}";
@@ -54,9 +56,9 @@ enum Comparator {
     Lexical,
     /// ASCII-case-insensitive lexical.
     LexicalCi,
-    /// Leading-integer order; entries without a leading integer
-    /// fall back to `lexical` so a mixed block degrades
-    /// predictably rather than panicking.
+    /// Leading-integer order; entries without a leading integer (or with one too
+    /// large even for `i128` -- 39+ digits) fall back to `lexical` so a mixed
+    /// block degrades predictably rather than panicking.
     Numeric,
 }
 
@@ -73,9 +75,12 @@ impl Comparator {
     }
 }
 
-/// The leading (optionally negative) integer of `s`, or `None`
-/// when it doesn't start with one.
-fn leading_int(s: &str) -> Option<i64> {
+/// The leading (optionally negative) integer of `s`, or `None` when it doesn't
+/// start with one. Parsed as `i128`, so u64-range identifiers (Discord/Twitter
+/// snowflakes ~1.8e19, nanosecond timestamps) and u128 values sort NUMERICALLY
+/// rather than falling back to a wrong byte-wise order; only a 39+-digit integer
+/// (over `i128::MAX`) still degrades to lexical.
+fn leading_int(s: &str) -> Option<i128> {
     let s = s.trim_start();
     let b = s.as_bytes();
     let neg = b.first() == Some(&b'-');
@@ -87,7 +92,7 @@ fn leading_int(s: &str) -> Option<i64> {
     if digits_end == digits_start {
         return None;
     }
-    s[..digits_end].parse::<i64>().ok()
+    s[..digits_end].parse::<i128>().ok()
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -135,6 +140,12 @@ pub struct OrderedBlockRule {
 /// In-flight block state while scanning a file.
 struct Block {
     start_line: usize,
+    /// 0-based ordinal of this block within the file, used ONLY for a fixable
+    /// rule's per-finding `baseline_key`. An ordinal (not `start_line`) keeps the
+    /// key line-number-free -- inserting a line above a block does not re-churn
+    /// its fingerprint (`baseline.rs`: line/column numbers are never hashed) -- and
+    /// stable across fixpoint passes (a `sort` never adds or removes a block).
+    index: usize,
     prev: Option<String>,
     /// One violation per block: once set, further entries are
     /// skipped until the `end` marker (keeps output actionable).
@@ -177,11 +188,20 @@ impl PerFileRule for OrderedBlockRule {
             return Ok(Vec::new());
         };
         let mut violations = Vec::new();
+        // Assigns each block its 0-based ordinal as it opens (for the fixable
+        // rule's per-block `baseline_key`); the markerless block-1 is ordinal 0.
+        let mut next_index = 0usize;
+        let mut new_index = || {
+            let i = next_index;
+            next_index += 1;
+            i
+        };
         // With no `start` marker the block is open from line 1 (the
         // markerless whole-file / sort-to-EOF form); otherwise it
         // opens when the `start` line is seen.
-        let mut block: Option<Block> = self.start.is_none().then_some(Block {
+        let mut block: Option<Block> = self.start.is_none().then(|| Block {
             start_line: 1,
+            index: new_index(),
             prev: None,
             reported: false,
         });
@@ -205,12 +225,14 @@ impl PerFileRule for OrderedBlockRule {
                         path,
                         b.start_line,
                         b.start_line,
+                        b.index,
                         UNCLOSED_KEY_PREFIX,
                         &format!("unclosed ordered_block - no {end:?} line after the start"),
                     ));
                 }
                 block = Some(Block {
                     start_line: line_no,
+                    index: new_index(),
                     prev: None,
                     reported: false,
                 });
@@ -244,6 +266,7 @@ impl PerFileRule for OrderedBlockRule {
                         path,
                         line_no,
                         b.start_line,
+                        b.index,
                         ENTRY_KEY_PREFIX,
                         &format!("{entry:?} is out of order (it comes after {prev:?})"),
                     ));
@@ -253,6 +276,7 @@ impl PerFileRule for OrderedBlockRule {
                         path,
                         line_no,
                         b.start_line,
+                        b.index,
                         ENTRY_KEY_PREFIX,
                         &format!("{entry:?} is a duplicate entry"),
                     ));
@@ -273,6 +297,7 @@ impl PerFileRule for OrderedBlockRule {
                 path,
                 b.start_line,
                 b.start_line,
+                b.index,
                 UNCLOSED_KEY_PREFIX,
                 &format!("unclosed ordered_block - no {end:?} line after the start"),
             ));
@@ -293,21 +318,23 @@ impl OrderedBlockRule {
     }
 
     /// A finding tagged, WHEN this rule is fixable, with a per-block
-    /// `baseline_key` (`prefix` + the block's `start_line`) so the fixpoint merge
-    /// keeps distinct blocks' findings apart (F4) and `can_fix` can classify them.
-    /// Key-less when no fixer is attached, so a check-only rule's baseline
+    /// `baseline_key` (`prefix` + the block's 0-based `block_index`) so the
+    /// fixpoint merge keeps distinct blocks' findings apart (F4) and `can_fix` can
+    /// classify them. The ordinal (not `start_line`) keeps the key free of line
+    /// numbers. Key-less when no fixer is attached, so a check-only rule's baseline
     /// fingerprints are unchanged (see [`UNCLOSED_KEY_PREFIX`]).
     fn keyed_violation(
         &self,
         path: &Path,
         line: usize,
         start_line: usize,
+        block_index: usize,
         key_prefix: &str,
         desc: &str,
     ) -> Violation {
         let v = self.violation(path, line, start_line, desc);
         if self.fixer.is_some() {
-            v.with_baseline_key(format!("{key_prefix}{start_line}"))
+            v.with_baseline_key(format!("{key_prefix}{block_index}"))
         } else {
             v
         }
@@ -402,12 +429,17 @@ fn split_lines(text: &str) -> Vec<(&str, &'static str)> {
 }
 
 /// Whether `entries` are ordered under `comparator`: non-decreasing, or strictly
-/// increasing when `unique`. The post-sort convergence guard -- a comparator
-/// that is not a strict weak order (a pathological mixed-`numeric` block) could
-/// leave `sort_by` output with an out-of-order adjacent pair that `check` would
-/// still flag; the fixer verifies this before committing a block (W4
-/// verify-per-edit) and skips the block otherwise rather than writing a
-/// non-converging file.
+/// increasing when `unique`. A DEFENSE-IN-DEPTH post-sort guard: all THREE
+/// built-in comparators are total orders (verified: `numeric`'s `i64`-then-tie
+/// fallback is a strict weak order over any input), so `sort_by` is always
+/// monotonic and this never skips a block today. It exists only so that a FUTURE
+/// non-strict-weak comparator -- whose `sort_by` output could leave an
+/// out-of-order adjacent pair `check` would still flag -- has the fixer skip that
+/// block (W4 verify-per-edit) rather than write a non-converging file. (Caveat
+/// for that hypothetical: if the ONLY block is skipped, `apply` reports
+/// `Skipped("already sorted")` while `can_fix` stayed `true` -- a benign
+/// over-promise on unreachable-today input; a real non-total comparator would
+/// need a more precise skip message.)
 fn is_monotonic(comparator: Comparator, unique: bool, entries: &[&str]) -> bool {
     entries
         .windows(2)
@@ -493,6 +525,18 @@ impl OrderedBlockSortFixer {
             }
             out.push_str(new_body[i]);
             out.push_str(ending);
+        }
+        // Preserve the file's trailing-newline STATE. If `unique` deleted the last
+        // physical line -- which carried no terminator -- the new last surviving
+        // line contributes its own `\n` / `\r\n`, spuriously adding a final
+        // newline the original lacked (a change beyond sort/dedup that can also
+        // conflict with a `final_newline` policy). Strip it back so a
+        // no-final-newline file stays that way. (A pure reorder never trips this:
+        // the last slot is preserved, so `out` keeps its `""` ending.)
+        if !text.ends_with('\n') {
+            if let Some(trimmed) = out.strip_suffix("\r\n").or_else(|| out.strip_suffix('\n')) {
+                out.truncate(trimmed.len());
+            }
         }
         Some(out)
     }
@@ -622,6 +666,14 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .transpose()?;
     // `sort` reuses the rule's own `start`/`end`/`comparator`/`unique`/`select`
     // (cloned so the rule keeps ownership); the spec adds only the tier override.
+    // DEFAULT TIER depends on `unique`: a pure reorder is behavior-preserving
+    // (`Safe`), but `unique` DELETES lines -- and equality is on the COMPARATOR
+    // (trimmed / case-folded), so a `unique` dedup can drop a line that is not
+    // byte-identical to its survivor (e.g. `Foo` vs `foo` under `lexical-ci`, or
+    // `  a` vs `a`). That is silent data loss, so it defaults to `Unsafe` like
+    // every other deleting fixer (`file_remove`, `remove_value`, `replace`): a
+    // bare `alint fix` SUGGESTS it, `--unsafe-fixes` (or a per-rule
+    // `applicability: safe`) applies it. An explicit `applicability:` always wins.
     let fixer = match &spec.fix {
         Some(FixSpec::Sort { sort }) => Some(OrderedBlockSortFixer {
             start: start.clone(),
@@ -629,7 +681,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             comparator: opts.comparator,
             unique: opts.unique,
             select: select.clone(),
-            applicability: sort.applicability.unwrap_or(Applicability::Safe),
+            applicability: sort.applicability.unwrap_or(if opts.unique {
+                Applicability::Unsafe
+            } else {
+                Applicability::Safe
+            }),
         }),
         Some(other) => {
             return Err(Error::rule_config(
@@ -1059,6 +1115,38 @@ mod tests {
     }
 
     #[test]
+    fn leading_int_parses_beyond_i64() {
+        // F3: u64-range identifiers (snowflakes / ns timestamps) must parse, so
+        // they sort numerically rather than falling back to a wrong lexical order.
+        assert_eq!(
+            leading_int("9999999999999999999"),
+            Some(9_999_999_999_999_999_999)
+        );
+        assert_eq!(
+            leading_int("100000000000000000000"),
+            Some(100_000_000_000_000_000_000)
+        );
+        assert_eq!(leading_int("-42x"), Some(-42));
+        assert!(leading_int("abc").is_none());
+        // A 40-digit integer overflows even i128 -> None (lexical fallback).
+        assert!(leading_int(&"9".repeat(40)).is_none());
+    }
+
+    #[test]
+    fn sorted_numeric_orders_u64_range_ids() {
+        // F3 end-to-end: `9999999999999999999` (~1e19) < `100000000000000000000`
+        // (1e20) numerically. i64 parse fails on both -> the OLD code fell back to
+        // lexical ("1…" < "9…") and left this "sorted"; i128 sorts it correctly.
+        let t =
+            "# keep-sorted start\n100000000000000000000\n9999999999999999999\n# keep-sorted end\n";
+        let out = sort_fixer(Comparator::Numeric, false).sorted(t).unwrap();
+        assert_eq!(
+            out,
+            "# keep-sorted start\n9999999999999999999\n100000000000000000000\n# keep-sorted end\n"
+        );
+    }
+
+    #[test]
     fn sorted_unique_drops_duplicate_slots() {
         let t = "# keep-sorted start\nbravo\nalpha\nbravo\n# keep-sorted end\n";
         let out = sort_fixer(Comparator::Lexical, true).sorted(t).unwrap();
@@ -1067,6 +1155,25 @@ mod tests {
             out,
             "# keep-sorted start\nalpha\nbravo\n# keep-sorted end\n"
         );
+    }
+
+    #[test]
+    fn sorted_unique_deleting_last_line_preserves_no_final_newline() {
+        // F2: markerless `unique` where the deleted duplicate is the LAST physical
+        // line (no terminator). The result must NOT gain a trailing newline.
+        let lf = markerless_sort_fixer(None, None, Comparator::Lexical, true, None)
+            .sorted("b\na\nb") // no final newline; `b` duplicated
+            .unwrap();
+        assert_eq!(lf, "a\nb", "must stay no-final-newline");
+        let crlf = markerless_sort_fixer(None, None, Comparator::Lexical, true, None)
+            .sorted("b\r\na\r\nb")
+            .unwrap();
+        assert_eq!(crlf, "a\r\nb", "CRLF: no spurious trailing terminator");
+        // A file that DID end with a newline keeps it (interior dedup).
+        let kept = markerless_sort_fixer(None, None, Comparator::Lexical, true, None)
+            .sorted("b\na\nb\n")
+            .unwrap();
+        assert_eq!(kept, "a\nb\n", "a final newline is preserved");
     }
 
     #[test]
@@ -1307,6 +1414,42 @@ mod tests {
         let yaml = "id: t\nkind: ordered_block\npaths: [\"x\"]\nstart: '# s'\nend: '# e'\nlevel: error\nfix: { sort: {} }\n";
         let rule = build(&spec_yaml(yaml)).unwrap();
         assert!(rule.fixer().is_some(), "sort fix should wire a fixer");
+    }
+
+    #[test]
+    fn build_defaults_the_deleting_unique_sort_to_unsafe() {
+        use crate::test_support::spec_yaml;
+        // A pure reorder is behavior-preserving -> Safe (a bare `alint fix`
+        // applies it). `unique` DELETES lines (equality on the trimmed / folded
+        // value), so it defaults to Unsafe -- a bare fix only suggests it.
+        let pure = build(&spec_yaml(
+            "id: t\nkind: ordered_block\npaths: [\"x\"]\nstart: '# s'\nend: '# e'\nlevel: error\nfix: { sort: {} }\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            pure.fixer().unwrap().applicability(),
+            Applicability::Safe,
+            "a pure reorder is Safe"
+        );
+        let uniq = build(&spec_yaml(
+            "id: t\nkind: ordered_block\npaths: [\"x\"]\nstart: '# s'\nend: '# e'\nunique: true\nlevel: error\nfix: { sort: {} }\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            uniq.fixer().unwrap().applicability(),
+            Applicability::Unsafe,
+            "a deleting `unique` sort defaults to Unsafe"
+        );
+        // An explicit tier always wins -- a user can opt the dedup back to Safe.
+        let promoted = build(&spec_yaml(
+            "id: t\nkind: ordered_block\npaths: [\"x\"]\nstart: '# s'\nend: '# e'\nunique: true\nlevel: error\nfix:\n  sort:\n    applicability: safe\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            promoted.fixer().unwrap().applicability(),
+            Applicability::Safe,
+            "an explicit `applicability: safe` overrides the unique default"
+        );
     }
 
     #[test]

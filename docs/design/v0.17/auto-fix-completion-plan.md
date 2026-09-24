@@ -584,6 +584,27 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
     (`fixable_rule_keys_two_blocks_distinctly`), an e2e scenario
     (`sort_two_blocks_in_one_file.yml`), and the property-net trigger now has TWO
     blocks.
+  - **Audit round 2 (2 worktree-isolated agents + own re-probing). F1 multi-block
+    panic INDEPENDENTLY CORROBORATED by the correctness agent = already fixed in
+    round 1. Six more fixed:** (a) **[HIGH]** a `unique` sort DELETED non-identical
+    lines at `Safe` (equality is on the trimmed/folded value, so `Foo`/`foo` or
+    `  a`/`a` collapse) -- silent data loss under a bare `fix`; now `unique`
+    defaults `Unsafe` like every sibling deleter (pure reorder stays `Safe`;
+    explicit `applicability:` overrides). (b) **[MED]** a remote `extends:` could
+    aim a `Safe` reorder at an order-significant file (`.gitignore`/`CODEOWNERS`)
+    to change its meaning; moved `sort` FIXED_BEHAVIOR -> CONTENT_INJECTING (demoted
+    from an untrusted remote, like `sync_from`). (c) **[MED, F3]** `numeric` sorted
+    u64-range integers (snowflakes) LEXICALLY (`leading_int` was `i64`) -> now
+    `i128`; a pre-existing CHECK bug the fix amplified. (d) **[MED, F2]** a `unique`
+    dedup deleting the last no-terminator line spuriously added a final newline ->
+    now preserved. (e) **[LOW-MED]** the per-block key embedded a line number ->
+    now the block ORDINAL (line-number-free, stable cross-pass). (f) **[LOW]** two
+    pre-existing ARCHITECTURE.md fix-op rows corrected. `is_monotonic` confirmed
+    unreachable for the total built-in comparators (2500+ fuzz iters clean). Gates:
+    `build_defaults_the_deleting_unique_sort_to_unsafe`, `w2_remote_sort_is_demoted_to_suggestion`,
+    `sorted_numeric_orders_u64_range_ids`, `leading_int_parses_beyond_i64`,
+    `sorted_unique_deleting_last_line_preserves_no_final_newline` + the dedup e2e now
+    uses `fix_unsafe`.
   `dedup` (order-preserving, without sort) and `indent_style` / `insert_line` /
   `insert_header` remain. `dedup` folds naturally into `sort`'s `unique` path, so a
   standalone order-preserving `dedup` is only needed for the "keep insertion order,

@@ -849,6 +849,9 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         // tier explicitly gives `w2_remote_relocate_is_not_demoted` teeth: a
         // regression that demoted it would surface here as `Some(Suggestion)`.
         FixSpec::Relocate { relocate } => relocate.applicability,
+        // `sort` is content-injecting (demoted from an untrusted remote); read its
+        // tier so `w2_remote_sort_is_demoted_to_suggestion` sees the cap.
+        FixSpec::Sort { sort } => sort.applicability,
         _ => None,
     }
 }
@@ -1043,6 +1046,24 @@ fn w2_remote_create_and_register_is_demoted_to_suggestion() {
 }
 
 #[test]
+fn w2_remote_sort_is_demoted_to_suggestion() {
+    // `sort` writes no ruleset bytes, but a REMOTE `extends:` the user has not
+    // trusted can AIM its reorder at an order-significant file (.gitignore /
+    // CODEOWNERS) at the Safe tier, so it is capped to `suggestion` -- may PROPOSE
+    // but never auto-write. Teeth: dropping `sort` from CONTENT_INJECTING_FIX_OPS
+    // reverts this to None and reds here.
+    let body = "version: 1\nrules:\n  - id: ks\n    kind: ordered_block\n    \
+        paths: \"**/CODEOWNERS\"\n    level: error\n    fix: { sort: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "ks").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `sort` must be demoted to suggestion"
+    );
+}
+
+#[test]
 fn w2_remote_remove_value_is_not_demoted() {
     // `remove_value` deletes a node (no ruleset bytes) -> fixed-behavior, gated
     // by its Unsafe tier like `file_remove`, NOT demoted by W2. Its tier stays
@@ -1177,12 +1198,10 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         // `relocate` moves a file to the repo root (a rename) -- no ruleset bytes,
         // no spawn; gated by its Unsafe tier like `file_remove`/`file_rename`.
         "relocate",
-        // `sort` REORDERS the host file's own existing lines (and drops `unique`
-        // duplicates) under the rule's comparator -- no ruleset-authored bytes reach
-        // the file (the comparator/select pick an ORDER, they do not inject content),
-        // no spawn. Honored from any source, unlike `create_and_register` (which
-        // appends a ruleset-chosen member value and IS content-injecting).
-        "sort",
+        // NOTE: `sort` is NOT here -- it writes no ruleset bytes, but a remote can
+        // AIM its reorder/dedup at an order-significant file (.gitignore/CODEOWNERS)
+        // at the Safe tier, so it is classified CONTENT_INJECTING (demoted from an
+        // untrusted remote) like `sync_from`, not fixed-behavior.
         // NOTE: `git_untrack` and `command` are NOT here -- they SPAWN, so they are
         // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
         // a strictly stronger gate than the content demotion.

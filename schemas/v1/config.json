@@ -21,7 +21,7 @@
         },
         {
           "const": "numeric",
-          "description": "Leading-integer order; entries without a leading integer fall back to `lexical` so a mixed block degrades predictably rather than panicking.",
+          "description": "Leading-integer order; entries without a leading integer (or with one too large even for `i128` -- 39+ digits) fall back to `lexical` so a mixed block degrades predictably rather than panicking.",
           "type": "string"
         }
       ]

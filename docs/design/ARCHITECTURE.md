@@ -239,7 +239,7 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | Op | Shape | Rule kinds |
 |---|---|---|
 | `file_prepend` | `{content}` | `file_header` |
-| `file_append` | `{content}` | `file_content_matches` |
+| `file_append` | `{content}` | `file_content_matches`, `file_footer` |
 | `file_trim_trailing_whitespace` | `{}` | `no_trailing_whitespace` |
 | `file_append_final_newline` | `{}` | `final_newline` |
 | `file_normalize_line_endings` | `{}` (target read from parent rule) | `line_endings` |
@@ -247,7 +247,7 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | `file_strip_zero_width` | `{}` | `no_zero_width_chars` |
 | `file_strip_bom` | `{}` | `no_bom` |
 | `file_collapse_blank_lines` | `{}` (max read from parent rule) | `max_consecutive_blank_lines` |
-| `replace` | `{replacement}` (pattern from parent rule; optional `applicability`) | `file_content_forbidden` |
+| `replace` | `{replacement}` (pattern from parent rule; optional `applicability`) | `file_content_forbidden`, `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_matches` |
 | `set_value` | `{}` (value from the rule's `equals:`) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_equals` |
 | `remove_value` | `{}` (target from parent rule) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_absent` |
 | `sync_from` | `{}` (source + relation from parent rule) | `cross_file` (`relation: identical` / `equals`) |

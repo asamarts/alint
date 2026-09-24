@@ -1,10 +1,13 @@
-name: sort dedups a unique ordered_block
-tags: [fix, ordered_block, sort, unique]
+name: sort dedups a unique ordered_block under --unsafe-fixes
+tags: [fix, ordered_block, sort, unique, applicability]
 
 # With `unique: true` the block forbids duplicates, so `sort` both reorders the
 # entries AND drops the duplicate `bravo` -- the surplus entry slot is removed, so
-# the block shrinks by exactly the duplicate (the markers stay). Safe, so a bare
-# `fix` applies it -> sorted + unique -> converges.
+# the block shrinks by exactly the duplicate (the markers stay). Because it
+# DELETES a line -- and equality is on the comparator (trimmed / case-folded), so
+# a dropped line need not be byte-identical to its survivor -- the `unique` sort
+# defaults to `Unsafe`, exactly like `file_remove` / `remove_value`. So a bare
+# `fix` only SUGGESTS it; `fix_unsafe` applies it -> sorted + unique -> converges.
 
 given:
   tree:
@@ -26,11 +29,12 @@ given:
         level: error
         fix: { sort: {} }
 
-when: [check, fix, check]
+when: [check, fix, fix_unsafe, check]
 
 expect:
   - violations:
       - {rule: keep-unique, level: error, path: allow.txt}
+  - suggested: [keep-unique]
   - applied: [keep-unique]
   - violations: []
 

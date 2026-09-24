@@ -142,14 +142,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is exactly what the check flags out of order; markers, blank lines, and
   `select`-excluded lines (comments, group headers) stay in place, and every
   line keeps its exact terminator (LF vs CRLF) and the file its trailing-newline
-  state. `Safe` by default -- a keep-sorted block's meaning is order-independent,
-  and a `unique` block declared its duplicates redundant -- so a bare `alint fix`
-  applies it; a per-rule `applicability:` can retune it. It reorders the file's
-  own lines and injects no ruleset-authored bytes, so it is honored from any
-  source (unlike the content-injecting fixers). The one `ordered_block` finding
-  `sort` cannot repair -- an unclosed block (a `start` with no `end`) -- is
-  reported but not advertised as auto-fixable, since `sort` cannot invent a
-  missing marker.
+  state. A pure reorder is `Safe` (behavior-preserving), so a bare `alint fix`
+  applies it; but a `unique` sort DELETES lines -- and equality is on the
+  comparator (trimmed / case-folded), so a dropped line need not be byte-identical
+  to its survivor -- so `unique` defaults to `Unsafe` like every other deleting
+  fixer (a bare `fix` suggests it, `--unsafe-fixes` applies it). A per-rule
+  `applicability:` overrides either default. Because a remote `extends:` could aim
+  a reorder at an order-significant file such as `.gitignore` (negation order) or
+  `CODEOWNERS` (last-match precedence) to change its meaning, a `sort` from an
+  untrusted (non-`trusted_extends:`) remote is demoted to a suggestion, exactly
+  like `sync_from`; your own top-level config applies it at its tier. The one
+  `ordered_block` finding `sort` cannot repair -- an unclosed block (a `start`
+  with no `end`) -- is reported but not advertised as auto-fixable, since `sort`
+  cannot invent a missing marker.
 
 ### Changed
 
@@ -193,6 +198,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- The `ordered_block` `numeric` comparator now orders integers larger than
+  `i64::MAX` (u64-range identifiers such as Discord/Twitter snowflakes, nanosecond
+  timestamps) NUMERICALLY. It parsed the leading integer as `i64`, so a value over
+  ~9.2e18 failed to parse and silently fell back to a byte-wise (lexical) order --
+  which put `10000000000000000000` before `9999999999999999999`. It now parses as
+  `i128` (only a 39+-digit integer still degrades to lexical), so both `check` and
+  the new `sort` fix order such lists correctly.
 - `alint check` now tags a violation `fixable` (and counts it as "auto-fixable")
   only when a bare `alint fix` would actually resolve that specific violation,
   rather than whenever its rule declares a fixer. Two cases that were falsely

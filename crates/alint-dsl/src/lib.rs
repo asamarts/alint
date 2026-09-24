@@ -622,14 +622,18 @@ fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
     Ok(())
 }
 
-/// The `fix:` ops that write ruleset-authored BYTES into a file: a regex
-/// `replace`ment template, or the inline `content:` / `content_from:` of a
-/// create / prepend / append. These are the content-injection surface a remote
-/// `extends:` could abuse, so they demote to `suggestion` from an untrusted remote
-/// (auto-fix.md 5.5). The fixed-behavior ops (the hygiene normalizers,
-/// `file_remove`, `file_rename`, `chmod`) carry no ruleset bytes and are honored at
-/// their own tier from any source; a destructive one like `file_remove` is already
-/// gated by its Unsafe tier, independent of source.
+/// The `fix:` ops a remote `extends:` could abuse to mutate YOUR files, so they
+/// demote to `suggestion` from an untrusted (non-`trusted_extends:`) remote
+/// (auto-fix.md 5.5). Two kinds: ops that write ruleset-authored BYTES (a regex
+/// `replace`ment template, the inline `content:` / `content_from:` of a create /
+/// prepend / append, a `set_value`), AND ops the ruleset can AIM at a file to
+/// change its content or meaning even though the bytes are the victim's own
+/// (`sync_from` picks which file overwrites which; `sort` reorders / dedups a
+/// file the rule's `paths:` selects). The genuinely fixed-behavior ops (the
+/// hygiene normalizers, `file_remove`, `file_rename`, `chmod`, `remove_value`,
+/// `dir_create`, `relocate`, `git_untrack`) are honored at their own tier from
+/// any source; a destructive one like `file_remove` is already gated by its
+/// Unsafe tier, independent of source.
 pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     "replace",
     "file_create",
@@ -649,6 +653,13 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // list (and, in a follow-up, creates a file from ruleset-authored content), so
     // an untrusted remote must PROPOSE it, never auto-write (auto-fix.md 5.5).
     "create_and_register",
+    // `sort` writes no ruleset bytes -- it reorders (and, with `unique`, dedups)
+    // the victim's OWN lines -- but the host `ordered_block` rule's `paths:` +
+    // `comparator` let an untrusted remote AIM a reorder at an order-SIGNIFICANT
+    // file (`.gitignore` negation order, `CODEOWNERS` last-match precedence) to
+    // change its meaning at the Safe tier. Same "aim it at your files" risk as
+    // `sync_from`, so it PROPOSES, never auto-writes, from an untrusted remote.
+    "sort",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`
