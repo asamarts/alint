@@ -38,7 +38,7 @@ If your top concern is build-graph correctness, dependency resolution, or code-l
 | Supply-chain signals | OpenSSF Scorecard | Adjacent, with overlap. alint's `ci/github-actions@v1` enforces Scorecard's Token-Permissions and Pinned-Dependencies checks at PR time; Scorecard runs as a periodic audit. They report the same finding from different angles. |
 | Repo conventions / community health | Repolinter (archived 2026-02-06) | alint covers the same ground under active maintenance, with structured-query primitives, bundled rulesets, and auto-fix. |
 | Pre-commit framework | pre-commit | alint ships a `.pre-commit-hooks.yaml` (`alint` + `alint-fix` hooks). |
-| GitHub Actions | (the platform) | alint ships an [official action](../integrations/github-actions/) and emits SARIF + GitHub annotations natively. |
+| GitHub Actions | (the platform) | alint ships an [official action](/docs/integrations/github-actions/) and emits SARIF + GitHub annotations natively. |
 
 The boundary that holds across the table: **alint reasons about the tree as data, not the build graph as logic, not the code as semantics.**
 
@@ -51,8 +51,8 @@ A progression the design points toward: start small, add layers as the value jus
 3. **CI hardening.** Add `ci/github-actions@v1` to require `permissions.contents: read` and SHA-pinned actions in every workflow.
 4. **Field-level overrides.** When a bundled rule almost fits but you want it as a warning instead of an error, override just the `level:` (the rest of the rule inherits).
 5. **Custom structured-query rules.** Write a few `json_path_*` / `yaml_path_*` / `toml_path_*` rules for repo-specific invariants, e.g., every `Cargo.toml` declares `edition = "2024"`.
-6. **Pre-commit + GHA wiring.** Run alint locally via the [pre-commit hook](../integrations/pre-commit/) so contributors catch issues before pushing.
-7. **Tighten absence rules with `git_tracked_only: true`.** Stop noisy false positives on locally-built artifacts (`target/`, `node_modules/`). See the [walker and `.gitignore`](../concepts/walker-and-gitignore/) page for the full semantics.
+6. **Pre-commit + GHA wiring.** Run alint locally via the [pre-commit hook](/docs/integrations/pre-commit/) so contributors catch issues before pushing.
+7. **Tighten absence rules with `git_tracked_only: true`.** Stop noisy false positives on locally-built artifacts (`target/`, `node_modules/`). See the [walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) page for the full semantics.
 8. **Turn on `nested_configs: true` for monorepos.** Subtree-local conventions live in nested `.alint.yml` files; the root config focuses on tree-wide invariants.
 
 ## Honest limits

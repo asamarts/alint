@@ -2,7 +2,7 @@
 
 > **Marketing / positioning note.** The narrative-framed write-up of this
 > case study (headline catches, "where alint earns its keep here", launch
-> story angles) lives at <https://alint.org/examples/vercel-next.js/>.
+> story angles) lives at <https://alint.org/examples/vercel-nextjs/>.
 > This README is the **engineering inventory**: tooling map, gap catalogue,
 > coverage classification, performance numbers, and gap-discovery findings.
 > Same facts, different language.

@@ -1617,7 +1617,7 @@ informational-notes channel surfaced via `--show-notes`.
   number. alint only claims `env`/`vars`/`ctx` spans (and close typos
   of `env`/`vars`); foreign `{{...}}` templates — Go's `{{json .}}`,
   cookiecutter, etc. — pass through verbatim. See
-  [variable interpolation](https://alint.org/docs/concepts/variable-interpolation/).
+  [variable interpolation](https://alint.org/docs/configuration/variable-interpolation/).
 - **`env.X` namespace in `when:` expressions.** `when: env.CI == "true"`
   gates a rule on an environment variable, alongside the existing
   `facts.` / `vars.` namespaces. Resolved at evaluation time; an unset
@@ -3076,7 +3076,7 @@ SHA + verify" cycle, not a blanket version bump.
 S3 / S6 / S8 wins are likely jsonschema 0.46's Validator
 performance work and lockfile patch updates compounding.
 1m/full all within ±5 % (most slightly faster). Full numbers in
-[`docs/benchmarks/macro/results/linux-x86_64/v0.9.13/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.13/)
+[`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.13/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.13/)
 once the bench-record workflow lands the canonical capture.
 
 ### Held for v0.9.14+
@@ -3352,7 +3352,7 @@ predicates. The bug class can no longer recur.
   rule iteration shape is unchanged (one `if !scope.matches(p,
   idx) { continue; }` per file), only the field layout is
   flatter. Full numbers in
-  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.10/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.10/).
+  [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.10/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.10/).
 
 ### Held for v0.9.11+
 
@@ -3445,7 +3445,7 @@ the `for_each_dir` literal-path bypass introduced in v0.9.8.
   cost of an in-scope vs out-of-scope check shifts). The
   point of S10 is regression detection, not a speedup
   headline. Full numbers in
-  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.9/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.9/).
+  [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.9/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.9/).
 
 ### Internal
 
@@ -3470,7 +3470,7 @@ backfill (1M S7 was stuck at ~614 s across all three releases).
 - See [`docs/benchmarks/HISTORY.md`](docs/benchmarks/HISTORY.md)
   per-scenario tables for the full v0.9.5 → v0.9.8 trajectory
   and the bench captures under
-  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.8/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.8/).
+  [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.8/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.8/).
 
 ### Added
 
@@ -3709,7 +3709,7 @@ monorepo + cargo-workspace`, hyperfine `--warmup 1 --runs 3`:
 
 Also ~50–80× faster than the published v0.5.6 baseline (the
 fastest 1M S3 numbers ever shipped). Full numbers under
-[`docs/benchmarks/macro/results/linux-x86_64/v0.9.5/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.5/).
+[`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.5/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.5/).
 
 ### Engine (.5)
 
@@ -3928,7 +3928,7 @@ paths), `structured_path` (which backs `json_path_*`,
 - Pre-v0.9.4 baseline frozen at
   `docs/benchmarks/archive/v0.9-development-baselines/baseline-v0.9.3/criterion/`.
   v0.9.4 numbers at
-  `docs/benchmarks/micro/results/linux-x86_64/v0.9.4/criterion/`.
+  `docs/benchmarks/micro/results/linux-x86_64-ryzen-3900x/v0.9.4/criterion/`.
 
 ## [0.9.3] - 2026-04-30
 
@@ -5115,7 +5115,7 @@ Schema-compatible; every v0.5.6 config runs unchanged.
   `ALINT_BENCH_IMAGE=...`.
 
 - **First competitive numbers** under
-  `docs/benchmarks/macro/results/linux-x86_64/v0.5.7/`. Same
+  `docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.7/`. Same
   fingerprint as v0.5.6's alint-only publication; rows
   for ls-lint / repolinter / grep added at the
   scenarios + sizes each tool supports. Headline
@@ -5131,7 +5131,7 @@ Schema-compatible; every v0.5.6 config runs unchanged.
   matrix; the new `Tool` column makes pivoting trivial.
 
 - **Published 1M-file numbers** under
-  `docs/benchmarks/macro/results/linux-x86_64/v0.5.6/1m/results.md`.
+  `docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.6/1m/results.md`.
   Six rows (`1m × {S1,S2,S3} × {full,changed}`) on the
   same hardware as v0.5.6's 1k/10k/100k publication.
   Headlines: 1m / S1 / full ≈ 3.5s, 1m / S2 / full ≈ 10s,
@@ -5216,7 +5216,7 @@ runs unchanged.
   files to "touch" in `--changed`-mode benches.
 
 - **First published numbers**:
-  `docs/benchmarks/macro/results/linux-x86_64/v0.5.7/` with 18 rows
+  `docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.7/` with 18 rows
   (3 sizes × 3 scenarios × 2 modes) on AMD Ryzen 9 3900X /
   62 GB / ext4 / Linux 6.1. Companion
   `docs/benchmarks/{README.md,RUNNING.md,macro/README.md} (post-reorg layout)`
@@ -5838,7 +5838,7 @@ keys.
   are intersected with `git ls-files`'s output so only files /
   directories actually in git's index participate. Closes the
   approximation gap documented on the
-  [walker-and-gitignore concept page](https://alint.org/docs/concepts/walker-and-gitignore/):
+  [walker-and-gitignore concept page](https://alint.org/docs/concepts/targeting/the-walker-and-git/):
   a `dir_absent` rule on `**/target` with `git_tracked_only: true`
   fires only when `target/` was actually committed, never on a
   developer's locally-built `target/` (gitignored or not). Outside
