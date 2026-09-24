@@ -30,17 +30,21 @@ use alint_core::{
 use regex::Regex;
 use serde::Deserialize;
 
-/// `baseline_key` prefix marking `ordered_block`'s ONE non-`sort`-fixable
-/// violation: an unclosed block (a `start` with no `end`). `sort` reorders
-/// entries but cannot invent a missing `end` marker, so the fixer's
-/// [`can_fix`](Fixer::can_fix) returns `false` for a violation carrying this
-/// key, and [`fix_edit`](Fixer::fix_edit) declines it -- keeping `check`'s
-/// per-violation `is_fixable` tag honest. Entry violations (out-of-order /
-/// duplicate) carry NO key (their fingerprint stays the offending line, so
-/// making the rule fixable does not un-grandfather existing baselines); the
-/// sentinel is set only on the rare unclosed finding. `\0`-delimited with the
-/// block's start line so two unclosed blocks in one file stay distinct (F4).
+/// `baseline_key` prefixes for `ordered_block`'s findings, set ONLY when the
+/// rule is fixable (a `sort` fix is declared). Two reasons a fixable
+/// `ordered_block` MUST key every finding per block (F4, and a hard debug panic
+/// otherwise): (1) the fixpoint merge keys fixable findings by `violation_key`,
+/// which for a key-LESS path-bearing finding collapses to `(rule_id, path)` --
+/// so two out-of-order blocks in ONE file would collide and the merge would drop
+/// one (`engine.rs` F4 tripwire); (2) `can_fix` must tell the sortable entry
+/// findings (`ENTRY`) apart from the one thing `sort` cannot repair, an unclosed
+/// block with no `end` (`UNCLOSED`), so `check` never advertises the latter
+/// fixable. Both are `\0`-delimited with the block's start line, unique per
+/// block. Keyed ONLY when a fixer is attached, so a check-only `ordered_block`
+/// keeps its offending-line fingerprint and adding a `sort` fix is the only
+/// thing that re-baselines it (an intentional config change, not silent drift).
 const UNCLOSED_KEY_PREFIX: &str = "ordered_block\u{0}unclosed\u{0}";
+const ENTRY_KEY_PREFIX: &str = "ordered_block\u{0}entry\u{0}";
 
 #[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
 #[serde(rename_all = "kebab-case")]
@@ -197,15 +201,13 @@ impl PerFileRule for OrderedBlockRule {
                 // (In start-only / markerless mode a repeated `start` is
                 // the intended section delimiter, not an error.)
                 if let (Some(b), Some(end)) = (&block, &self.end) {
-                    violations.push(
-                        self.violation(
-                            path,
-                            b.start_line,
-                            b.start_line,
-                            &format!("unclosed ordered_block - no {end:?} line after the start"),
-                        )
-                        .with_baseline_key(format!("{UNCLOSED_KEY_PREFIX}{}", b.start_line)),
-                    );
+                    violations.push(self.keyed_violation(
+                        path,
+                        b.start_line,
+                        b.start_line,
+                        UNCLOSED_KEY_PREFIX,
+                        &format!("unclosed ordered_block - no {end:?} line after the start"),
+                    ));
                 }
                 block = Some(Block {
                     start_line: line_no,
@@ -238,18 +240,20 @@ impl PerFileRule for OrderedBlockRule {
             if let Some(prev) = &b.prev {
                 let ord = self.comparator.order(&entry, prev);
                 if ord == Ordering::Less {
-                    violations.push(self.violation(
+                    violations.push(self.keyed_violation(
                         path,
                         line_no,
                         b.start_line,
+                        ENTRY_KEY_PREFIX,
                         &format!("{entry:?} is out of order (it comes after {prev:?})"),
                     ));
                     b.reported = true;
                 } else if self.unique && ord == Ordering::Equal {
-                    violations.push(self.violation(
+                    violations.push(self.keyed_violation(
                         path,
                         line_no,
                         b.start_line,
+                        ENTRY_KEY_PREFIX,
                         &format!("{entry:?} is a duplicate entry"),
                     ));
                     b.reported = true;
@@ -265,15 +269,13 @@ impl PerFileRule for OrderedBlockRule {
         if let Some(b) = block
             && let (Some(_), Some(end)) = (&self.start, &self.end)
         {
-            violations.push(
-                self.violation(
-                    path,
-                    b.start_line,
-                    b.start_line,
-                    &format!("unclosed ordered_block - no {end:?} line after the start"),
-                )
-                .with_baseline_key(format!("{UNCLOSED_KEY_PREFIX}{}", b.start_line)),
-            );
+            violations.push(self.keyed_violation(
+                path,
+                b.start_line,
+                b.start_line,
+                UNCLOSED_KEY_PREFIX,
+                &format!("unclosed ordered_block - no {end:?} line after the start"),
+            ));
         }
         Ok(violations)
     }
@@ -288,6 +290,27 @@ impl OrderedBlockRule {
         Violation::new(msg)
             .with_path(std::sync::Arc::<Path>::from(path))
             .with_location(line, 1)
+    }
+
+    /// A finding tagged, WHEN this rule is fixable, with a per-block
+    /// `baseline_key` (`prefix` + the block's `start_line`) so the fixpoint merge
+    /// keeps distinct blocks' findings apart (F4) and `can_fix` can classify them.
+    /// Key-less when no fixer is attached, so a check-only rule's baseline
+    /// fingerprints are unchanged (see [`UNCLOSED_KEY_PREFIX`]).
+    fn keyed_violation(
+        &self,
+        path: &Path,
+        line: usize,
+        start_line: usize,
+        key_prefix: &str,
+        desc: &str,
+    ) -> Violation {
+        let v = self.violation(path, line, start_line, desc);
+        if self.fixer.is_some() {
+            v.with_baseline_key(format!("{key_prefix}{start_line}"))
+        } else {
+            v
+        }
     }
 }
 
@@ -920,6 +943,14 @@ mod tests {
         }
     }
 
+    /// A delimited rule WITH a `sort` fixer attached, so its findings are keyed
+    /// (the fixable-rule path). Mirrors `rule()`'s markers.
+    fn rule_with_sort(comparator: Comparator, unique: bool) -> OrderedBlockRule {
+        let mut r = rule(comparator, unique);
+        r.fixer = Some(sort_fixer(comparator, unique));
+        r
+    }
+
     fn markerless_sort_fixer(
         start: Option<&str>,
         end: Option<&str>,
@@ -1115,11 +1146,11 @@ mod tests {
     }
 
     #[test]
-    fn check_marks_the_unclosed_finding_with_the_sentinel_key() {
-        // A start with no end: the check emits the unclosed finding carrying the
-        // sentinel, so the engine tags it non-fixable.
+    fn fixable_rule_marks_the_unclosed_finding_with_the_sentinel_key() {
+        // A start with no end, on a FIXABLE rule: the check emits the unclosed
+        // finding carrying the sentinel, so the engine tags it non-fixable.
         let t = "# keep-sorted start\nalpha\nbravo\n";
-        let v = eval(&rule(Comparator::Lexical, false), t);
+        let v = eval(&rule_with_sort(Comparator::Lexical, false), t);
         assert_eq!(v.len(), 1, "{v:?}");
         assert!(
             v[0].baseline_key
@@ -1131,15 +1162,46 @@ mod tests {
     }
 
     #[test]
-    fn entry_violation_keeps_the_default_fingerprint_no_key() {
-        // Out-of-order entries stay key-less so making the rule fixable does not
-        // un-grandfather existing baselines (their fingerprint stays the line).
-        let t = "# keep-sorted start\nbravo\nalpha\n# keep-sorted end\n";
-        let v = eval(&rule(Comparator::Lexical, false), t);
-        assert_eq!(v.len(), 1, "{v:?}");
+    fn check_only_rule_leaves_every_finding_key_less() {
+        // With NO fixer attached, findings stay key-less so their baseline
+        // fingerprint remains the offending line -- adding a `sort` fix is the
+        // only thing that re-baselines an ordered_block (no silent churn).
+        let entry = eval(
+            &rule(Comparator::Lexical, false),
+            "# keep-sorted start\nbravo\nalpha\n# keep-sorted end\n",
+        );
+        assert_eq!(entry.len(), 1, "{entry:?}");
         assert!(
-            v[0].baseline_key.is_none(),
+            entry[0].baseline_key.is_none(),
             "entry finding must be key-less"
+        );
+        let unclosed = eval(
+            &rule(Comparator::Lexical, false),
+            "# keep-sorted start\nalpha\n",
+        );
+        assert_eq!(unclosed.len(), 1, "{unclosed:?}");
+        assert!(
+            unclosed[0].baseline_key.is_none(),
+            "unclosed finding must be key-less without a fixer"
+        );
+    }
+
+    #[test]
+    fn fixable_rule_keys_two_blocks_distinctly() {
+        // F4 regression (found by CLI probing): a fixable ordered_block over a
+        // file with TWO out-of-order blocks emits two findings that MUST carry
+        // distinct baseline_keys -- otherwise the fixpoint merge keys both to
+        // `(rule_id, path)` and drops one (a debug panic in `alint fix`).
+        let t = "# keep-sorted start\nb\na\n# keep-sorted end\nMID\n# keep-sorted start\nd\nc\n# keep-sorted end\n";
+        let v = eval(&rule_with_sort(Comparator::Lexical, false), t);
+        assert_eq!(v.len(), 2, "one finding per block: {v:?}");
+        let k0 = v[0].baseline_key.as_deref();
+        let k1 = v[1].baseline_key.as_deref();
+        assert!(k0.is_some() && k1.is_some(), "both findings keyed: {v:?}");
+        assert_ne!(k0, k1, "the two blocks' findings must have distinct keys");
+        assert!(
+            k0.unwrap().starts_with(ENTRY_KEY_PREFIX) && k1.unwrap().starts_with(ENTRY_KEY_PREFIX),
+            "both are entry (sortable) findings: {v:?}"
         );
     }
 

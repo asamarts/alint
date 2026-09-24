@@ -382,16 +382,22 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         ],
         "x\n".to_string(),
     );
-    // An out-of-order keep-sorted block triggers `ordered_block` + the Phase-4
-    // `sort` fix, which reorders the entries in place -> converges (idempotent).
-    // Otherwise clean (LF, final newline, no trailing ws / BOM / bidi, no
-    // `DEBUGME`), so no other single-rule draw disturbs it; the 9-char stem
-    // `sortblock` exceeds the generator's 7-char limit so it never collides.
-    // `**/sortblock.txt` matches only this trigger. Safe, so a bare `Fix` applies.
+    // TWO out-of-order keep-sorted blocks trigger `ordered_block` + the Phase-4
+    // `sort` fix, which reorders the entries of BOTH in one whole-file pass ->
+    // converges (idempotent). Two blocks (not one) exercise the multi-finding
+    // fixpoint path: a fixable ordered_block emits one finding per block, which
+    // MUST carry distinct per-block baseline_keys or the merge collides them (the
+    // F4 panic a one-block trigger would miss). Otherwise clean (LF, final
+    // newline, no trailing ws / BOM / bidi, no `DEBUGME`), so no other single-rule
+    // draw disturbs it; the 9-char stem `sortblock` exceeds the generator's 7-char
+    // limit so it never collides. `**/sortblock.txt` matches only this trigger.
+    // Safe, so a bare `Fix` applies.
     insert_file(
         root,
         &[dir.clone(), "sortblock.txt".to_string()],
-        "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\n".to_string(),
+        "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\nmid\n\
+         # keep-sorted start\nyankee\nxray\n# keep-sorted end\n"
+            .to_string(),
     );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());

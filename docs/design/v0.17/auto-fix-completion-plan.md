@@ -571,6 +571,19 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
   baselines. A post-sort `is_monotonic` verify skips a block a non-strict-weak
   comparator (pathological mixed-`numeric`) could not fully order, so `fix` never
   writes a file `check` would still flag. Full gate cascade + preflight green.
+  - **Audit round 1 (CLI probing) HIGH -- F4 multi-block panic, FIXED.** A file
+    with TWO out-of-order blocks made `ordered_block` emit two FIXABLE findings on
+    one path; the fixpoint merge keys fixable findings by `violation_key`, which
+    for a key-LESS path-bearing finding collapses to `(rule_id, path)`, so the two
+    collided and `alint fix` PANICKED (engine F4 tripwire). The single-block
+    tests/scenarios/property-trigger all missed it. Fix: the check now tags EVERY
+    finding with a per-block `baseline_key` (`entry`/`unclosed` + start line) --
+    but ONLY when the rule is fixable (`self.fixer.is_some()`), so a check-only
+    ordered_block keeps its offending-line fingerprint (no baseline churn) and only
+    adding a `sort` fix re-baselines it. Regression-gated three ways: a unit test
+    (`fixable_rule_keys_two_blocks_distinctly`), an e2e scenario
+    (`sort_two_blocks_in_one_file.yml`), and the property-net trigger now has TWO
+    blocks.
   `dedup` (order-preserving, without sort) and `indent_style` / `insert_line` /
   `insert_header` remain. `dedup` folds naturally into `sort`'s `unique` path, so a
   standalone order-preserving `dedup` is only needed for the "keep insertion order,
