@@ -380,6 +380,9 @@ impl CrossFileRule {
             Some(Targets::List(list)) => {
                 for (file, extract) in list {
                     let Some(extract) = extract else { continue };
+                    // `file` is already normalized at resolution (`resolve_targets`),
+                    // so the violation path matches git's canonical diff spelling and
+                    // the value fixer's stored target path (audit F2).
                     let target = Path::new(file);
                     if let Some(values) = self.target_values(ctx, target, extract, out) {
                         f(target, &values, out);

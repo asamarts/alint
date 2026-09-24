@@ -418,3 +418,67 @@ rules:
          filtered index, independent of --unsafe-fixes"
     );
 }
+
+#[test]
+fn fix_changed_demotes_an_out_of_scope_value_propagation_to_a_suggestion() {
+    // The value-propagation `sync_from` (cross_file relation: equals) is a
+    // WHOLE-FILE apply fixer on a `requires_full_index` rule; the "no engine change
+    // was needed" design rests on the whole-file path's `writes_outside_changed`
+    // demote applying to it. Assert it: with only the SOURCE changed, a drifting
+    // OUT-of-diff target is SUGGESTED, never silently written (a blast-radius
+    // escape). (audit gap: no test covered the value fixer under --changed.)
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir_all(root.join("crates/pkg")).unwrap();
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace.package]\nversion = \"1.0.0\"\n",
+    )
+    .unwrap();
+    // Committed IN SYNC, so it is out of the diff after we bump only the source.
+    std::fs::write(
+        root.join("crates/pkg/Cargo.toml"),
+        "[package]\nname = \"pkg\"\nversion = \"1.0.0\"\n",
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: ver\n    kind: cross_file\n    relation: equals\n    \
+         source: { file: Cargo.toml, extract: { toml: \"$.workspace.package.version\" } }\n    \
+         targets: { files: \"crates/*/Cargo.toml\", extract: { toml: \"$.package.version\" } }\n    \
+         level: error\n    fix: { sync_from: {} }\n",
+    )
+    .unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+    // Bump ONLY the source; crates/pkg/Cargo.toml is now out-of-diff and drifting.
+    std::fs::write(
+        root.join("Cargo.toml"),
+        "[workspace.package]\nversion = \"2.0.0\"\n",
+    )
+    .unwrap();
+
+    let out = Command::new(alint())
+        .args(["fix", "--changed", "--unsafe-fixes", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed --unsafe-fixes");
+    let stdout = String::from_utf8_lossy(&out.stdout);
+
+    // The out-of-scope target must NOT be written -- only suggested.
+    assert_eq!(
+        std::fs::read_to_string(root.join("crates/pkg/Cargo.toml")).unwrap(),
+        "[package]\nname = \"pkg\"\nversion = \"1.0.0\"\n",
+        "the out-of-scope value propagation must NOT be applied -- only suggested"
+    );
+    assert!(
+        stdout.contains("1 suggested") && stdout.to_lowercase().contains("scope"),
+        "the out-of-scope value propagation must surface as a scope-naming Suggestion; got:\n{stdout}"
+    );
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "a standing out-of-scope Suggestion is unresolved -> exit 1"
+    );
+}

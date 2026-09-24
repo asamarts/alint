@@ -1,0 +1,40 @@
+name: sync_from on equals propagates a JSON value (a second format, end-to-end)
+# The value-propagation fixer reuses the per-format structured resolver, so every
+# structured format works from one code path. The TOML case is covered elsewhere;
+# this pins the JSON path end-to-end: a package.json version drifting from the
+# root manifest is rewritten to match, preserving the rest of the file. String
+# node, so no type change.
+tags: [fix, cross_file, sync_from, applicability]
+
+given:
+  tree:
+    manifest.json: |
+      {"version": "4.2.0"}
+    web:
+      package.json: |
+        {"name": "web", "version": "4.1.0", "private": true}
+  config: |
+    version: 1
+    rules:
+      - id: pkg-version-matches-manifest
+        kind: cross_file
+        relation: equals
+        source:  { file: manifest.json, extract: { json: "$.version" } }
+        targets: { files: "web/package.json", extract: { json: "$.version" } }
+        level: error
+        fix: { sync_from: {} }
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: pkg-version-matches-manifest, level: error, path: web/package.json}
+  - applied: [pkg-version-matches-manifest]
+  - violations: []
+
+expect_tree:
+  manifest.json: |
+    {"version": "4.2.0"}
+  web:
+    package.json: |
+      {"name": "web", "version": "4.2.0", "private": true}

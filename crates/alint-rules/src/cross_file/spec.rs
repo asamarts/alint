@@ -289,7 +289,17 @@ pub(super) fn resolve_targets(ts: TargetsSpec, cfg: &impl Fn(String) -> Error) -
                     ),
                     None => None,
                 };
-                resolved.push((t.file, ex));
+                // Normalize the config-verbatim path (strip `./`, resolve `..`
+                // lexically) at the single resolution point, so BOTH the check
+                // (violation path) and the value fixer (its stored target path) use
+                // git's canonical diff spelling -- otherwise `--changed` over-demotes
+                // a `./`-prefixed target that IS the changed file, or the fixer can't
+                // match the normalized violation path (audit F2). A lexical escape
+                // keeps the raw string (read confinement then reports it out-of-root).
+                let file = std::path::Path::new(&t.file);
+                let file = crate::pathsafe::normalize_confined(file)
+                    .map_or(t.file, |p| p.to_string_lossy().into_owned());
+                resolved.push((file, ex));
             }
             Ok(Targets::List(resolved))
         }
@@ -494,5 +504,22 @@ mod tests {
             NormalizeSpec::Many(vec![Normalize::None, Normalize::Trim]).into_list(),
             vec![Normalize::Trim]
         );
+    }
+
+    #[test]
+    fn resolve_targets_normalizes_a_dot_slash_list_path() {
+        // Audit F2: a `./`-prefixed list path is normalized at the single resolution
+        // point, so the violation path AND the value fixer's stored target path both
+        // match git's canonical diff spelling -- otherwise `--changed` over-demotes
+        // the changed target, or the fixer cannot match the normalized violation.
+        let cfg = |m: String| Error::rule_config("t", m);
+        let ts = TargetsSpec::List(vec![TargetEntrySpec {
+            file: "./sub/t.json".into(),
+            extract: None,
+        }]);
+        match resolve_targets(ts, &cfg).unwrap() {
+            Targets::List(list) => assert_eq!(list[0].0, "sub/t.json", "`./` stripped"),
+            Targets::Glob { .. } => panic!("expected a List, got a Glob"),
+        }
     }
 }

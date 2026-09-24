@@ -272,6 +272,34 @@ impl CrossFileValueFixer {
         let target_rel = violation.path.as_deref().unwrap_or_else(|| Path::new(""));
         let path_expr =
             JsonPath::parse(query).map_err(|_| format!("invalid target query `{query}`"))?;
+        let target_text = String::from_utf8_lossy(target_bytes);
+        // TYPE-PRESERVATION GUARD (audit F1): the propagated value is always a
+        // STRING (cross-file extraction yields text), so setting a NUMBER / BOOL
+        // node in a typed format (json/toml/yaml/hcl) would silently change its
+        // type to a quoted string. Worse, the `equals` check compares only string
+        // leaves, so a same-typed node would keep firing anyway -- a string
+        // coercion is the only thing that "converges", masking the mismatch as a
+        // fix. Decline instead; a numeric/bool pin belongs in a same-file
+        // `set_value` with a typed `equals:`. (String-leaf formats -- xml / dotenv /
+        // ini / properties -- parse every leaf as a string, so this never fires
+        // there.)
+        if let Ok(parsed) = format.parse(&target_text) {
+            let located = path_expr.query_located(&parsed);
+            if located.len() == 1 {
+                if let Some(node) = located.iter().next() {
+                    let n = node.node();
+                    if n.is_number() || n.is_boolean() {
+                        return Err(format!(
+                            "{} `{query}` is a {} node; `sync_from` on `equals` would change it \
+                             to a string (the propagated value is text). Pin a numeric/bool value \
+                             with a same-file `set_value` (typed `equals:`) instead.",
+                            target_rel.display(),
+                            if n.is_number() { "numeric" } else { "boolean" }
+                        ));
+                    }
+                }
+            }
+        }
         let delegate = StructuredFixer::set(
             format,
             path_expr,
@@ -291,7 +319,6 @@ impl CrossFileValueFixer {
             // locate/serialize failure (no single scalar node, or the value is not
             // representable in this format). Re-extract the target to tell them apart
             // so the skip reason is honest (and idempotence reads clearly).
-            let target_text = String::from_utf8_lossy(target_bytes);
             let already = extract_values(
                 &Extract::Structured(format, query.to_string()),
                 &target_text,
@@ -407,10 +434,36 @@ impl Fixer for CrossFileValueFixer {
         )))
     }
 
-    // No `fix_edit`: value propagation reuses the located resolver at apply time
-    // (it needs the source read + the delegate build), which the check-side
-    // proposed-edit path does not carry. It is Unsafe anyway, so the Safe-only
-    // machine surfaces advertise nothing. Inherits the trait default (`None`).
+    /// The editor / LSP form: a `SetContent` of the target with the value already
+    /// propagated into its node. Value propagation HAS a worktree-edit form (a
+    /// located rewrite), unlike `git_untrack` / `command`, so -- once a user
+    /// Safe-promotes it, or opts into an unsafe quick-fix -- the LSP should offer
+    /// it, consistent with the compose-derived SARIF / agent surfaces (which do NOT
+    /// use `fix_edit`, so this changes only the LSP; audit 4c). Reuses
+    /// `propagated_bytes` on `bytes` (the editor buffer). Confines the source read
+    /// STRICTLY (no `allow_out_of_root` in `fix_edit`), like `SyncFromFixer`; the
+    /// two engine suggestion sites call this with EMPTY `bytes`, where the target
+    /// re-parse fails and it declines (`None`) -- the LSP passes the real buffer.
+    fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
+        let target_rel = violation.path.as_deref()?;
+        let (format, query) = self.target_node(target_rel)?;
+        let source_abs = confine_fix_path(&self.source_file, root, false).ok()?;
+        let source_text = crate::io::read_capped(&source_abs)
+            .ok()
+            .map(|b| String::from_utf8_lossy(&b).into_owned())?;
+        let values = extract_values(&self.source_extract, &source_text).ok()?;
+        let mut literals = values.into_iter().filter(|v| !is_non_literal(v));
+        let (Some(source_value), None) = (literals.next(), literals.next()) else {
+            return None;
+        };
+        let content = self
+            .propagated_bytes(violation, format, query, &source_value, bytes, root)
+            .ok()?;
+        Some(FixEdit::SetContent {
+            path: target_rel.to_path_buf(),
+            content,
+        })
+    }
 }
 
 #[cfg(test)]
@@ -740,16 +793,19 @@ mod tests {
 
     // ─── CrossFileValueFixer (relation: equals value propagation) ────────
 
+    // Source and target share `fmt` (the common test case); the source extract
+    // uses the same format as the target so a JSON source parses as JSON, a TOML
+    // source as TOML, etc.
     fn value_fixer(
         source: &str,
         source_q: &str,
-        target_fmt: Format,
+        fmt: Format,
         target_q: &str,
     ) -> CrossFileValueFixer {
         CrossFileValueFixer::new(
             PathBuf::from(source),
-            Extract::Structured(Format::Toml, source_q.to_string()),
-            ValueTargets::Glob(target_fmt, target_q.to_string()),
+            Extract::Structured(fmt, source_q.to_string()),
+            ValueTargets::Glob(fmt, target_q.to_string()),
             Applicability::Unsafe,
         )
     }
@@ -907,6 +963,99 @@ mod tests {
         assert_eq!(
             value_fixer("s", "$.a", Format::Toml, "$.b").applicability(),
             Applicability::Unsafe
+        );
+    }
+
+    #[test]
+    fn value_declines_a_numeric_target_node_no_coercion() {
+        // Audit F1: the propagated value is always a STRING, so setting a NUMERIC
+        // target node would silently change its type to a quoted string (and the
+        // `equals` check, comparing only string leaves, would keep firing). Decline
+        // instead of coercing.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.json", br#"{"port":"8080"}"#);
+        write(&tmp, "svc.json", br#"{"port": 9090, "host": "x"}"#);
+        let out = value_fixer("src.json", "$.port", Format::Json, "$.port")
+            .apply(&viol("svc.json"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("numeric node")),
+            "a numeric target node must decline, got {out:?}"
+        );
+        assert_eq!(
+            read(&tmp, "svc.json"),
+            br#"{"port": 9090, "host": "x"}"#,
+            "the numeric node must NOT be coerced to a string"
+        );
+    }
+
+    #[test]
+    fn value_declines_a_boolean_target_node() {
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.json", br#"{"flag":"true"}"#);
+        write(&tmp, "t.json", br#"{"flag": false}"#);
+        let out = value_fixer("src.json", "$.flag", Format::Json, "$.flag")
+            .apply(&viol("t.json"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("boolean node")),
+            "a boolean target node must decline, got {out:?}"
+        );
+        assert_eq!(read(&tmp, "t.json"), br#"{"flag": false}"#, "unchanged");
+    }
+
+    #[test]
+    fn value_skips_a_non_scalar_target_node() {
+        // An object/array target node is not a single scalar -> StructuredFixer::set
+        // emits no edit -> clean Skip, byte-unchanged.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.json", br#"{"v":"3.0"}"#);
+        write(&tmp, "obj.json", br#"{"v": {"nested": 1}}"#);
+        let out = value_fixer("src.json", "$.v", Format::Json, "$.v")
+            .apply(&viol("obj.json"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Skipped(_)), "got {out:?}");
+        assert_eq!(
+            read(&tmp, "obj.json"),
+            br#"{"v": {"nested": 1}}"#,
+            "unchanged"
+        );
+    }
+
+    #[test]
+    fn value_fix_edit_produces_a_set_content_for_the_editor() {
+        // Audit 4c: value propagation HAS a worktree-edit form, so the LSP can offer
+        // it. `fix_edit` (real buffer bytes) returns a SetContent with the value
+        // already propagated into the node.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.json", br#"{"v":"3.0"}"#);
+        let buffer = br#"{"name":"x","v":"1.0"}"#;
+        write(&tmp, "t.json", buffer);
+        let edit = value_fixer("src.json", "$.v", Format::Json, "$.v")
+            .fix_edit(&viol("t.json"), buffer, tmp.path())
+            .expect("a proposed edit");
+        match edit {
+            FixEdit::SetContent { path, content } => {
+                assert_eq!(path, PathBuf::from("t.json"));
+                let s = String::from_utf8(content).unwrap();
+                assert!(s.contains(r#""v":"3.0""#), "value propagated: {s}");
+                assert!(s.contains(r#""name":"x""#), "other keys preserved: {s}");
+            }
+            other => panic!("expected SetContent, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn value_fix_edit_declines_empty_bytes() {
+        // The two engine SUGGESTION sites call fix_edit with EMPTY bytes; the target
+        // re-parse fails, so it declines (None). Only the LSP passes a real buffer.
+        let tmp = TempDir::new().unwrap();
+        write(&tmp, "src.json", br#"{"v":"3.0"}"#);
+        assert!(
+            value_fixer("src.json", "$.v", Format::Json, "$.v")
+                .fix_edit(&viol("t.json"), &[], tmp.path())
+                .is_none(),
+            "empty bytes -> no proposed edit"
         );
     }
 }

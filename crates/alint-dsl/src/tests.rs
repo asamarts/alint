@@ -990,6 +990,29 @@ fn w2_remote_sync_from_is_demoted_to_suggestion() {
     );
 }
 
+const REMOTE_SYNC_FROM_EQUALS: &str = "version: 1\nrules:\n  - id: propagate\n    \
+     kind: cross_file\n    relation: equals\n    \
+     source: { file: Cargo.toml, extract: { toml: \"$.workspace.package.version\" } }\n    \
+     targets: { files: \"crates/*/Cargo.toml\", extract: { toml: \"$.package.version\" } }\n    \
+     level: error\n    fix: { sync_from: {} }\n";
+
+#[test]
+fn w2_remote_sync_from_equals_is_demoted_to_suggestion() {
+    // The `equals` form of `sync_from` builds a DIFFERENT fixer type
+    // (CrossFileValueFixer, which propagates a value into a node) than `identical`
+    // (SyncFromFixer). The demotion keys on the op name, so it must cap the value
+    // fixer too -- a remote must PROPOSE a value propagation, never auto-write the
+    // ruleset-chosen value into the user's files. Locks in the equals-form demotion
+    // (audit gap: only the identical form was tested).
+    let cfg = load_extending(REMOTE_SYNC_FROM_EQUALS, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "propagate").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `sync_from` on `equals` must be demoted to suggestion"
+    );
+}
+
 #[test]
 fn w2_remote_remove_value_is_not_demoted() {
     // `remove_value` deletes a node (no ruleset bytes) -> fixed-behavior, gated

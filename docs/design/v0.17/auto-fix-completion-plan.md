@@ -307,6 +307,27 @@ warning or a v0.18 migration.
   regex-target, rejects set) + an e2e (`sync_from_equals_propagates_a_value`,
   applied under `--unsafe-fixes` + convergent). No facts change (still `sync_from`,
   op count 20). Design doc: `docs/design/v0.17/cross-file-value-propagation.md`.
+  - **AUDIT-HARDENED (2 independent agents + own ~12-probe pass). 1 MED + 1 LOW +
+    an LSP gap, all fixed; the load-bearing `--changed` claim VERIFIED live.**
+    (MED, F1) the fixer always writes a `Value::String` (extraction yields text),
+    so a NUMERIC/BOOL target node was silently coerced to a quoted string and
+    `check` went false-green -- FIX: a type-preservation guard declines a
+    non-string scalar node (the `equals` check compares only string leaves, so a
+    coercion is the only thing that "converges", masking the mismatch; a typed pin
+    belongs in same-file `set_value`). (LOW, F2) `--changed` over-demoted a
+    `./`-prefixed LIST target that IS the changed file (config-verbatim path vs
+    git-canonical diff spelling) -- FIX: normalize the list path at the single
+    resolution point (`resolve_targets`), so the violation path AND the fixer's
+    stored target path both match the diff. (LSP, 4c) the value fixer had no
+    `fix_edit`, so the LSP could never offer it even Safe-promoted (SARIF/agent DO
+    advertise it via the compose pass) -- FIX: implemented `fix_edit` (a
+    `SetContent` reusing `propagated_bytes`); changes only the LSP. Added: the W2
+    demotion test for the EQUALS form, the value fixer's `--changed`-demote CLI
+    test (the "no engine change" claim's gate), type-coercion + non-scalar-skip +
+    fix_edit units, a JSON e2e, and two stale-comment fixes. Agents confirmed SOUND:
+    all 8 formats, PutGet verify (special chars / control chars demote), source +
+    target confinement (incl. a real FIFO), compose + loud non-convergence, tier
+    honesty across human/sarif/agent/json, and the partition gate.
 
 Ops remaining. `sync_from` on `equals` Phase 2 (regex-extract targets) +
 cross-file create-and-register; lockfile `relocate`. Risk: medium.

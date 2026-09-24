@@ -267,10 +267,16 @@ fn whole_file_edit_to_proposed(orig: &[u8], edit: &FixEdit) -> Option<ProposedEd
 /// so it is derived directly from `fix_edit` and keyed by result index.
 // NOTE (`--changed`): the fix pass demotes an edit that would write OUTSIDE the
 // changed set; `stage_fixes` is NOT run with the changed set here, so a Safe,
-// path-bearing, full-index fixer whose target is out of scope could be advertised.
-// None ship today (per-file rules are confined to the changed set; the full-index
-// fixers are `file_exists` (path-less create) and the Unsafe `file_remove`). If
-// such a fixer is added, thread the changed set into this stage.
+// path-bearing, full-index fixer whose target is out of scope IS advertised over
+// the full tree. `cross_file`'s `sync_from` (identical mirror + equals value
+// propagation) is now exactly this shape when a user Safe-promotes it: under
+// `check --changed`, a Safe-promoted out-of-scope target is advertised here even
+// though `fix --changed` would demote it. This is CONSISTENT with the check --
+// `cross_file` is `requires_full_index` (`--changed`-exempt), so its `check`
+// verdict spans the whole tree and these proposed edits advertise exactly what
+// `check` found; the `--changed` blast-radius confinement is a `fix`-command
+// policy, not a `check` one. Thread the changed set into this stage only if strict
+// SARIF/`--changed` parity with the `fix` blast radius is ever required.
 pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path, index: &FileIndex) {
     // In-place content changes, composed exactly as `fix` composes them (one
     // single-pass compose; the `--diff` fidelity caveat about multi-pass cascades
