@@ -1,5 +1,6 @@
 use super::cli::{
-    CliProse, global_options, parse_cli_prose, render_cli_page, strip_global_options,
+    CliProse, StrippedHelp, code_list, global_options, parse_cli_prose, render_cli_page,
+    strip_global_options, top_level_only,
 };
 use super::exported_pages::set_frontmatter_description;
 use super::*;
@@ -284,7 +285,7 @@ Options:
                          (overrides config)
   -h, --help             Print help
 ";
-    let out = format_top_help(sample).expect("well-formed help parses");
+    let out = format_top_help(sample, &[]).expect("well-formed help parses");
     // Global-options table, with the wrapped continuation folded into one cell.
     assert!(out.contains("## Global options"), "{out}");
     assert!(
@@ -304,7 +305,14 @@ Options:
     );
 
     // No Options section -> None, so the caller keeps the raw `--help` dump.
-    assert!(format_top_help("Usage: alint\n\nCommands:\n  check  Lint\n").is_none());
+    assert!(format_top_help("Usage: alint\n\nCommands:\n  check  Lint\n", &[]).is_none());
+    // Every option works with every subcommand unless it is named as top-level only.
+    assert!(out.contains("These apply to every subcommand.\n"), "{out}");
+    let out = format_top_help(sample, &["--version".to_string()]).expect("parses");
+    assert!(
+        out.contains("These apply to every subcommand except `--version`.\n"),
+        "{out}"
+    );
 }
 
 /// Once options carry long help (the `wrap_help` + short/long split), clap renders
@@ -342,7 +350,7 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 ";
-    let out = format_top_help(sample).expect("next-line help parses");
+    let out = format_top_help(sample, &[]).expect("next-line help parses");
     assert!(out.contains("## Global options"), "{out}");
     // Flag header alone on its line; the single help line below folds into the cell.
     assert!(
@@ -565,15 +573,9 @@ fn rule_meta_descriptions_are_well_formed() {
     }
 }
 
-/// Subcommand `--help` repeats every global option verbatim; the subcommand
-/// page keeps only its own arguments and options, since the globals are
-/// documented once on the CLI landing page. A subcommand's OWN option that
-/// shares a global's flag (e.g. `suggest --format`, with its own values and
-/// default) must survive. Kept options keep their multi-paragraph help and
-/// `[default:]` metadata, clap's whitespace-only separator lines don't leave
-/// doubled blanks behind, and an Options header left empty is dropped.
-#[test]
-fn strip_global_options_keeps_only_subcommand_flags() {
+/// The global options of a trimmed-down top-level `alint --help`, for the
+/// strip tests.
+fn sample_globals() -> std::collections::HashMap<String, (String, String)> {
     let top = "\
 A monorepo linter.
 
@@ -597,7 +599,17 @@ Options:
           Print help (see a summary with '-h')
 "
     .replace("<WS>", "          ");
-    let globals = global_options(&top);
+    global_options(&top)
+}
+
+/// Subcommand `--help` repeats every global option verbatim; the subcommand
+/// page keeps only its own arguments and options, since the globals are
+/// documented once on the CLI landing page. Kept options keep their
+/// multi-paragraph help and `[default:]` metadata, and clap's whitespace-only
+/// separator lines don't leave doubled blanks behind.
+#[test]
+fn strip_global_options_keeps_only_subcommand_flags() {
+    let globals = sample_globals();
     for flag in ["--config", "--format", "--show-notes", "--help"] {
         assert!(
             globals.contains_key(flag),
@@ -642,8 +654,14 @@ Options:
           Print help (see a summary with '-h')
 "
     .replace("<WS>", "          ");
-    let (out, removed) = strip_global_options(&check, &globals);
-    assert_eq!(removed, 4, "{out}");
+    let stripped = strip_global_options(&check, &globals);
+    let out = &stripped.help;
+    assert_eq!(
+        stripped.removed,
+        ["--config", "--format", "--show-notes", "--help"],
+        "{out}"
+    );
+    assert!(stripped.own.is_empty(), "{out}");
     assert!(out.contains("Arguments:\n  [PATH]"), "{out}");
     assert!(out.contains("[default: .]"), "{out}");
     assert!(out.contains("      --changed\n"), "{out}");
@@ -653,6 +671,15 @@ Options:
         assert!(!out.contains(gone), "{gone} should be stripped: {out}");
     }
     assert!(!out.contains("\n\n\n"), "no doubled blank lines: {out}");
+}
+
+/// A subcommand's OWN option that shares a global's flag (e.g. `suggest
+/// --format`, with its own values and default) is not the global: it stays,
+/// and is reported so the page can say it replaces the global. An Options
+/// header left with no entries is dropped.
+#[test]
+fn strip_global_options_keeps_own_options_and_drops_empty_sections() {
+    let globals = sample_globals();
 
     // A subcommand's own `--format` (different help, default and values)
     // shares the global's flag but is not the global; it stays.
@@ -671,8 +698,10 @@ Options:
   -c, --config <CONFIG>
           Path to a config file
 ";
-    let (out, removed) = strip_global_options(suggest, &globals);
-    assert_eq!(removed, 1, "{out}");
+    let stripped = strip_global_options(suggest, &globals);
+    let out = &stripped.help;
+    assert_eq!(stripped.removed, ["--config"], "{out}");
+    assert_eq!(stripped.own, ["--format"], "{out}");
     assert!(
         out.contains("  -f, --format <FORMAT>\n          Output format for proposals"),
         "{out}"
@@ -699,8 +728,9 @@ Options:
   -h, --help
           Print help (see a summary with '-h')
 ";
-    let (out, removed) = strip_global_options(explain, &globals);
-    assert_eq!(removed, 2, "{out}");
+    let stripped = strip_global_options(explain, &globals);
+    let out = &stripped.help;
+    assert_eq!(stripped.removed, ["--config", "--help"], "{out}");
     assert!(!out.contains("Options:"), "{out}");
     assert!(out.ends_with("Rule id to describe\n"), "{out}");
 }
@@ -746,6 +776,47 @@ fn parse_cli_prose_splits_intro_sections_and_see_also() {
     assert!(parse_cli_prose("---\ndescription: [unclosed\n---\nbody\n").is_err());
     let err = parse_cli_prose("---\ntitle: x\nsidebar:\n  order: 2\n---\nbody\n").unwrap_err();
     assert!(err.to_string().contains("sidebar"), "{err}");
+
+    // A description that isn't a non-empty string, or that a search snippet
+    // would cut, fails rather than being replaced or truncated.
+    for bad in ["description: 42", "description: ''", "description: [a, b]"] {
+        let err = parse_cli_prose(&format!("---\n{bad}\n---\nbody\n")).unwrap_err();
+        assert!(err.to_string().contains("non-empty string"), "{bad}: {err}");
+    }
+    let long = "x".repeat(156);
+    let err = parse_cli_prose(&format!("---\ndescription: '{long}'\n---\nbody\n")).unwrap_err();
+    assert!(err.to_string().contains("156 characters"), "{err}");
+    let max = "x".repeat(155);
+    let prose = parse_cli_prose(&format!("---\ndescription: '{max}'\n---\nbody\n")).unwrap();
+    assert_eq!(prose.description.as_deref(), Some(max.as_str()));
+}
+
+/// Section headings are found the way Markdown finds them: `~~~` fences and
+/// longer backtick fences hide headings until a matching close, an indent of
+/// up to three spaces still makes a heading (four is code), and the See also
+/// heading matches in any case and with closing hashes.
+#[test]
+fn parse_cli_prose_follows_markdown_fences_and_headings() {
+    let tilde = parse_cli_prose("Intro.\n\n~~~\n## hidden\n~~~\n\n## Examples\n").unwrap();
+    assert_eq!(tilde.intro, "Intro.\n\n~~~\n## hidden\n~~~");
+    assert_eq!(tilde.sections, "## Examples");
+
+    let long_fence =
+        "Intro.\n\n````md\n```\n## hidden\n````\n\n## Examples\n\n## See also\n\n- x\n";
+    let prose = parse_cli_prose(long_fence).unwrap();
+    assert!(prose.intro.ends_with("````"), "{prose:?}");
+    assert_eq!(prose.sections, "## Examples");
+    assert_eq!(prose.see_also, "## See also\n\n- x");
+
+    let indented = parse_cli_prose("Intro.\n\n   ## Examples\n\n    ## code\n").unwrap();
+    assert_eq!(indented.intro, "Intro.");
+    assert!(indented.sections.contains("    ## code"), "{indented:?}");
+
+    for heading in ["## See Also", "## see also ##", "  ## SEE ALSO"] {
+        let prose = parse_cli_prose(&format!("## Examples\n\nx\n\n{heading}\n\n- y\n")).unwrap();
+        assert_eq!(prose.sections, "## Examples\n\nx", "{heading}");
+        assert!(prose.see_also.ends_with("- y"), "{heading}: {prose:?}");
+    }
 }
 
 /// A CLI page with prose: the prose description wins, the intro leads, the
@@ -761,7 +832,12 @@ fn render_cli_page_orders_prose_around_the_reference() {
         see_also: "## See also\n\n- [List](/docs/cli/list/)".into(),
     };
     let help = "Show a rule's definition\n\nUsage: alint explain <RULE_ID>\n";
-    let page = render_cli_page("explain", "Derived.", Some(&prose), help, true);
+    let stripped = StrippedHelp {
+        help: help.into(),
+        removed: vec!["--config".into()],
+        own: vec![],
+    };
+    let page = render_cli_page("explain", "Derived.", Some(&prose), &stripped);
     assert!(
         page.starts_with(
             "---\ntitle: 'alint explain'\ndescription: 'Hand-written description.'\n---\n"
@@ -778,7 +854,31 @@ fn render_cli_page_orders_prose_around_the_reference() {
     assert!(pos("Usage: alint explain") < pos("[global options](/docs/cli/#global-options)"));
     assert!(pos("[global options]") < pos("## See also"));
 
-    let bare = render_cli_page("explain", "Derived.", None, help, false);
+    assert!(!page.contains("Its own"), "{page}");
+
+    // A subcommand that redefines a global says which of its options replace it.
+    let own = |flags: &[&str]| StrippedHelp {
+        own: flags.iter().map(|f| (*f).to_string()).collect(),
+        ..stripped.clone()
+    };
+    let page = render_cli_page("suggest", "Derived.", None, &own(&["--format"]));
+    assert!(
+        page.contains(
+            "where they are relevant. Its own `--format` above replaces the global one.\n"
+        ),
+        "{page}"
+    );
+    let page = render_cli_page("x", "Derived.", None, &own(&["--format", "--config"]));
+    assert!(
+        page.contains("Its own `--format` and `--config` above replace the global ones.\n"),
+        "{page}"
+    );
+
+    let unstripped = StrippedHelp {
+        help: help.into(),
+        ..StrippedHelp::default()
+    };
+    let bare = render_cli_page("explain", "Derived.", None, &unstripped);
     assert!(bare.contains("description: 'Derived.'"), "{bare}");
     assert!(
         !bare.contains("## Reference") && !bare.contains("global options"),
@@ -794,12 +894,17 @@ fn check_cli_prose_files_rejects_unmatched_prose() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(dir.path().join("check.md"), "---\ntitle: x\n---\n").unwrap();
     super::cli::check_cli_prose_files(dir.path()).expect("a subcommand's prose is fine");
-    for stray in ["index.md", "nonsense.md"] {
+    std::fs::write(dir.path().join("diagram.svg"), "<svg/>").unwrap();
+    super::cli::check_cli_prose_files(dir.path()).expect("a non-page asset is fine");
+    for stray in ["index.md", "nonsense.md", "check.mdx"] {
         std::fs::write(dir.path().join(stray), "---\ntitle: x\n---\n").unwrap();
         let err = super::cli::check_cli_prose_files(dir.path()).unwrap_err();
         assert!(err.to_string().contains(stray), "{err}");
         std::fs::remove_file(dir.path().join(stray)).unwrap();
     }
+    std::fs::create_dir(dir.path().join("rules")).unwrap();
+    let err = super::cli::check_cli_prose_files(dir.path()).unwrap_err();
+    assert!(err.to_string().contains("\"rules\""), "{err}");
     super::cli::check_cli_prose_files(&dir.path().join("missing")).expect("no dir is fine");
 }
 
@@ -824,4 +929,52 @@ fn set_frontmatter_description_adds_once() {
 
     std::fs::write(&path, "No frontmatter.\n").unwrap();
     assert!(set_frontmatter_description(&path, "x").is_err());
+}
+
+/// Every subcommand page ships with hand-written prose. Without a
+/// `docs/site/cli/<sub>.md`, the page is the bare `--help` capture with a
+/// description derived from it: the thin, near-duplicate page the prose exists
+/// to replace.
+#[test]
+fn every_cli_subcommand_has_prose() {
+    let cli_dir = crate::workspace_root()
+        .expect("workspace root")
+        .join(docs_paths::SITE_DIR)
+        .join("cli");
+    let missing: Vec<&str> = CLI_REFERENCE_SUBCMDS
+        .iter()
+        .copied()
+        .filter(|sub| !cli_dir.join(format!("{sub}.md")).is_file())
+        .collect();
+    assert!(
+        missing.is_empty(),
+        "no prose in {} for: {missing:?}",
+        cli_dir.display()
+    );
+}
+
+/// The landing page names the global options no subcommand takes, as a list
+/// of code spans.
+#[test]
+fn top_level_only_lists_the_globals_no_subcommand_takes() {
+    let globals: std::collections::HashMap<String, (String, String)> =
+        ["--config", "--version", "--help"]
+            .iter()
+            .map(|f| ((*f).to_string(), (String::new(), String::new())))
+            .collect();
+    let seen: std::collections::HashSet<String> = ["--config", "--help"]
+        .iter()
+        .map(|f| (*f).to_string())
+        .collect();
+    assert_eq!(top_level_only(&globals, &seen), ["--version"]);
+    assert!(top_level_only(&globals, &globals.keys().cloned().collect()).is_empty());
+
+    let flags = |list: &[&str]| list.iter().map(|f| (*f).to_string()).collect::<Vec<_>>();
+    assert_eq!(code_list(&flags(&[])), "");
+    assert_eq!(code_list(&flags(&["--a"])), "`--a`");
+    assert_eq!(code_list(&flags(&["--a", "--b"])), "`--a` and `--b`");
+    assert_eq!(
+        code_list(&flags(&["--a", "--b", "--c"])),
+        "`--a`, `--b` and `--c`"
+    );
 }

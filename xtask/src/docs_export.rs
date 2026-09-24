@@ -2097,12 +2097,13 @@ fn parse_help_definition_list(lines: &[&str]) -> Vec<(String, String)> {
 
 /// Render the top-level `alint --help` as a formatted CLI landing page: the
 /// about blurb, the usage line, a Commands table (each linked to its subcommand
-/// page), and a Global-options table. Everything is parsed from the captured
+/// page), and a Global-options table that names the `top_level_only` flags no
+/// subcommand takes (`--version`). Everything is parsed from the captured
 /// `--help`, so it can never drift from the binary. Returns `None` if the help
 /// doesn't parse into a sane shape (no options found) so the caller falls back
 /// to the raw help dump — a clap format change degrades to the old behaviour,
 /// never to garbage.
-fn format_top_help(help: &str) -> Option<String> {
+fn format_top_help(help: &str, top_level_only: &[String]) -> Option<String> {
     let commands = parse_help_definition_list(&help_section_body(help, "Commands:"));
     let options = parse_help_definition_list(&help_section_body(help, "Options:"));
     if options.is_empty() {
@@ -2147,7 +2148,15 @@ fn format_top_help(help: &str) -> Option<String> {
         let _ = writeln!(&mut out);
     }
     let _ = writeln!(&mut out, "## Global options\n");
-    let _ = writeln!(&mut out, "These apply to every subcommand.\n");
+    if top_level_only.is_empty() {
+        let _ = writeln!(&mut out, "These apply to every subcommand.\n");
+    } else {
+        let except = cli::code_list(top_level_only);
+        let _ = writeln!(
+            &mut out,
+            "These apply to every subcommand except {except}.\n"
+        );
+    }
     let _ = writeln!(&mut out, "| Flag | Description |");
     let _ = writeln!(&mut out, "| --- | --- |");
     for (flag, desc) in &options {
@@ -2173,31 +2182,11 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
     // the landing page below is written as cli/index.md.
     cli::check_cli_prose_files(&cli_dir)?;
 
-    // Top-level help → cli/index.md
     let top = run_help(&bin, &[])?;
-    let mut index = String::new();
-    let _ = writeln!(&mut index, "---");
-    let _ = writeln!(&mut index, "title: CLI");
-    let _ = writeln!(
-        &mut index,
-        "description: alint's subcommands and global flags, captured from the binary itself."
-    );
-    let _ = writeln!(&mut index, "sidebar:");
-    let _ = writeln!(&mut index, "  order: 1");
-    let _ = writeln!(&mut index, "---");
-    let _ = writeln!(&mut index);
-    // Prefer a formatted landing page (Commands + Global-options tables) parsed
-    // from `--help`; fall back to the raw dump if the help doesn't parse.
-    if let Some(body) = format_top_help(&top) {
-        index.push_str(&body);
-    } else {
-        let _ = writeln!(&mut index, "```");
-        index.push_str(&top);
-        let _ = writeln!(&mut index, "```");
-    }
-    fs::write(cli_dir.join("index.md"), index)?;
-
     let globals = cli::global_options(&top);
+    // The global flags some subcommand's help repeats or redefines; the others
+    // work only on the top-level command, and the landing page says so.
+    let mut in_subcommands = std::collections::HashSet::new();
     let subcmds = CLI_REFERENCE_SUBCMDS;
     for sub in subcmds {
         let help = run_help(&bin, &[sub])?;
@@ -2222,14 +2211,39 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
         let prose = if page_path.is_file() {
             let text = fs::read_to_string(&page_path)
                 .with_context(|| format!("reading {}", page_path.display()))?;
-            Some(cli::parse_cli_prose(&text)?)
+            Some(cli::parse_cli_prose(&text).with_context(|| format!("docs/site/cli/{sub}.md"))?)
         } else {
             None
         };
-        let (help, removed) = cli::strip_global_options(&help, &globals);
-        let page = cli::render_cli_page(sub, &cli_desc, prose.as_ref(), &help, removed > 0);
+        let stripped = cli::strip_global_options(&help, &globals);
+        in_subcommands.extend(stripped.removed.iter().chain(&stripped.own).cloned());
+        let page = cli::render_cli_page(sub, &cli_desc, prose.as_ref(), &stripped);
         fs::write(&page_path, page)?;
     }
+
+    // Top-level help → cli/index.md
+    let top_level_only = cli::top_level_only(&globals, &in_subcommands);
+    let mut index = String::new();
+    let _ = writeln!(&mut index, "---");
+    let _ = writeln!(&mut index, "title: CLI");
+    let _ = writeln!(
+        &mut index,
+        "description: alint's subcommands and global flags, captured from the binary itself."
+    );
+    let _ = writeln!(&mut index, "sidebar:");
+    let _ = writeln!(&mut index, "  order: 1");
+    let _ = writeln!(&mut index, "---");
+    let _ = writeln!(&mut index);
+    // Prefer a formatted landing page (Commands + Global-options tables) parsed
+    // from `--help`; fall back to the raw dump if the help doesn't parse.
+    if let Some(body) = format_top_help(&top, &top_level_only) {
+        index.push_str(&body);
+    } else {
+        let _ = writeln!(&mut index, "```");
+        index.push_str(&top);
+        let _ = writeln!(&mut index, "```");
+    }
+    fs::write(cli_dir.join("index.md"), index)?;
 
     // Sanity-check: workspace path exists.
     let _ = workspace;

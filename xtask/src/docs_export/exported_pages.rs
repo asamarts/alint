@@ -25,7 +25,7 @@ pub(super) const DESCRIPTIONS: &[(&str, &str)] = &[
     ),
     (
         "about/roadmap.md",
-        "What each alint release shipped and what is planned next, version by version, from the v0.1 MVP to the latest release.",
+        "What each alint version shipped, from the v0.1 MVP to the latest release, and what is planned after it.",
     ),
     (
         "about/crate-graph.md",
