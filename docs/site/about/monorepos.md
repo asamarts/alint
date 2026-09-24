@@ -52,7 +52,7 @@ A progression the design points toward: start small, add layers as the value jus
 4. **Field-level overrides.** When a bundled rule almost fits but you want it as a warning instead of an error, override just the `level:` (the rest of the rule inherits).
 5. **Custom structured-query rules.** Write a few `json_path_*` / `yaml_path_*` / `toml_path_*` rules for repo-specific invariants, e.g., every `Cargo.toml` declares `edition = "2024"`.
 6. **Pre-commit + GHA wiring.** Run alint locally via the [pre-commit hook](/docs/integrations/pre-commit/) so contributors catch issues before pushing.
-7. **Tighten absence rules with `git_tracked_only: true`.** Stop noisy false positives on locally-built artifacts (`target/`, `node_modules/`). See the [walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) page for the full semantics.
+7. **Tighten absence rules with `git_tracked_only: true`.** Stop noisy false positives on locally-built artifacts (`target/`, `node_modules/`). See the [walker and git](/docs/concepts/targeting/the-walker-and-git/) page for the full semantics.
 8. **Turn on `nested_configs: true` for monorepos.** Subtree-local conventions live in nested `.alint.yml` files; the root config focuses on tree-wide invariants.
 
 ## Honest limits

@@ -5,7 +5,7 @@ description: 'alint export-agents-md turns the active lint rules into an AGENTS.
 
 Coding agents read `AGENTS.md` before they write code. `alint export-agents-md`
 generates a section listing the rules your config enforces, so the agent's
-instructions and the lint gate can't drift apart. Re-run it after changing
+instructions match what the lint gate checks. Re-run it after changing
 `.alint.yml`.
 
 ## Examples

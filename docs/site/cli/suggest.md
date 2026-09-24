@@ -10,7 +10,7 @@ find gaps.
 
 ## Examples
 
-Proposals at the default (medium) confidence:
+Proposals at medium confidence or higher (the default):
 
 ```bash
 alint suggest

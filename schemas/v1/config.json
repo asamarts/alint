@@ -951,7 +951,7 @@
     },
     "git_tracked_only": {
       "default": false,
-      "description": "When true, restrict the rule to files / directories tracked in git's index. Outside a git repo the rule becomes a silent no-op for absence-style checks. Currently supported on `file_exists`, `file_absent`, `dir_exists`, `dir_absent`; other rule kinds ignore the field. See https://alint.org/docs/concepts/targeting/the-walker-and-git/ for the full semantics.",
+      "description": "When true, restrict the rule to files / directories tracked in git's index. Outside a git repo the rule becomes a silent no-op for absence-style checks. Currently supported on `file_exists`, `file_absent`, `dir_exists`, `dir_absent`; any other rule kind rejects the field at load. See https://alint.org/docs/concepts/targeting/the-walker-and-git/ for the full semantics.",
       "type": "boolean"
     },
     "if_present": {

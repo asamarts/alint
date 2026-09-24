@@ -28,9 +28,10 @@ After fixing some entries, re-run to prune them:
 alint baseline
 ```
 
-Re-running `alint baseline` removes entries that no longer fail, but refuses
-to add new ones unless you pass `--accept-new`, so a refresh can't quietly
-grandfather fresh violations.
+Re-running `alint baseline` drops the entries that no longer fail. If the tree
+has any violation the file doesn't already hold, it writes nothing and exits 2
+unless you pass `--accept-new`, so a refresh can't quietly grandfather fresh
+violations.
 
 ## See also
 

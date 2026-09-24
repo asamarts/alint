@@ -16,7 +16,7 @@ Lint the repository in the current directory:
 alint check
 ```
 
-Only the files changed on this branch (a fast PR gate):
+A fast PR gate, where per-file rules check only the files changed on this branch:
 
 ```bash
 alint check --changed --base origin/main

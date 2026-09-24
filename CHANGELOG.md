@@ -5838,7 +5838,7 @@ keys.
   are intersected with `git ls-files`'s output so only files /
   directories actually in git's index participate. Closes the
   approximation gap documented on the
-  [walker-and-gitignore concept page](https://alint.org/docs/concepts/targeting/the-walker-and-git/):
+  [walker-and-git concept page](https://alint.org/docs/concepts/targeting/the-walker-and-git/):
   a `dir_absent` rule on `**/target` with `git_tracked_only: true`
   fires only when `target/` was actually committed, never on a
   developer's locally-built `target/` (gitignored or not). Outside

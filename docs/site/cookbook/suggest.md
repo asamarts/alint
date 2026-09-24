@@ -62,6 +62,6 @@ Progress on a large tree renders on stderr (`--progress` / `--quiet` control it)
 
 ## See also
 
-- [`alint suggest` CLI reference](/docs/cli/suggest/): every flag, captured from the binary
+- [`alint suggest` CLI reference](/docs/cli/suggest/): its flags, captured from the binary
 - [Baseline mode](/docs/concepts/adoption/baseline/): adopting on a repo with existing debt
 - [Rules](/docs/rules/): the bundled rulesets and rule kinds `suggest` proposes

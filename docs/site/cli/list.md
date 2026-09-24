@@ -9,7 +9,7 @@ alint ships instead, use [`alint rules`](/docs/cli/rules/).
 
 ## Examples
 
-Every configured rule:
+Every enabled rule:
 
 ```bash
 alint list

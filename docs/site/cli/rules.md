@@ -28,13 +28,14 @@ The categories and how many kinds each holds:
 alint rules categories
 ```
 
-One kind: summary, categories, aliases and docs link (aliases resolve):
+One kind: summary, categories, aliases and docs link. An alias resolves to its
+kind:
 
 ```bash
-alint rules show file_exists
+alint rules show content_forbidden
 ```
 
 ## See also
 
-- [The rule catalogue](/docs/rules/), browsable and filterable
+- [The rule catalog](/docs/rules/), browsable and filterable
 - [Kinds, families and categories](/docs/concepts/start-here/kinds-families-categories/)

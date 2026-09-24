@@ -10,7 +10,7 @@ the config file itself.
 
 ## Examples
 
-The config discovered upward from the current directory:
+The config in the current directory:
 
 ```bash
 alint validate-config
@@ -24,4 +24,4 @@ alint validate-config path/to/.alint.yml
 
 ## See also
 
-- [Configuration](/docs/configuration/): every top-level key
+- [Configuration](/docs/configuration/): what goes in the config file
