@@ -1,11 +1,11 @@
 name: create_and_register creates a missing named member then registers it
 # The two-postcondition model (Phase 2): a NAMED source member's file does not
-# exist AND its path is not in the manifest, so the check emits TWO findings --
-# existence (on the member path) + registration (on the manifest). fix_unsafe
-# applies both independently: create crates/docs/Cargo.toml from `content`, and
-# append "crates/docs" to workspace.members. Together they satisfy both
-# postconditions -> the tree converges. No multi-file transaction: two idempotent
-# fixes the fixpoint applies.
+# exist, so `check` emits the EXISTENCE finding (registration is gated on existence
+# -- a missing member is not registered until it exists, so no phantom entry). The
+# `fix_unsafe` fixpoint sequences the two repairs: pass 1 CREATES crates/docs/Cargo.toml
+# from `content`; the re-walk then sees it EXISTS, so pass 2 fires the registration
+# and APPENDS "crates/docs" to workspace.members -> the tree converges. No
+# multi-file transaction: two idempotent fixes the fixpoint applies in order.
 tags: [fix, cross_file, registered, create_and_register, applicability]
 
 given:
@@ -32,7 +32,6 @@ when: [check, fix_unsafe, check]
 expect:
   - violations:
       - {rule: docs-crate, level: error, path: crates/docs/Cargo.toml}
-      - {rule: docs-crate, level: error, path: Cargo.toml}
   - applied: [docs-crate]
   - violations: []
 

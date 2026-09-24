@@ -648,15 +648,20 @@ impl Fixer for CrossFileValueFixer {
     }
 }
 
-/// Registers a member in a manifest list for a `cross_file` `relation: registered`
-/// rule (`fix: { create_and_register: {} }`): appends each missing member the
-/// `check_registered` finding carried (in its `baseline_key`) to the target's
-/// structured array. A *content-injecting* op (it writes a ruleset-chosen value
-/// into the manifest), **`Unsafe` by default** (mutates a manifest), Safe-promotable.
+/// Repairs a `cross_file` `relation: registered` rule's two postconditions
+/// (`fix: { create_and_register: {} }`), dispatching on the finding kind:
+/// - a REGISTRATION finding (`registered\0member\0...`) APPENDS the missing member
+///   the `check_registered` finding carried (in its `baseline_key`) to the target's
+///   structured array;
+/// - an EXISTENCE finding (`registered\0exists\0...`, a missing NAMED member) CREATES
+///   the member's file from the fix's `content`/`content_from` (`create_member`).
 ///
-/// PHASE 1b is register-only: an existing member that is unregistered is appended.
-/// A missing NAMED member's file CREATE (the two-file transaction) is Phase 2, so
-/// an existence-only finding (no members in the key) is Skipped here.
+/// The two are independent idempotent fixes the fixpoint applies in order (create,
+/// then -- once the re-walk sees the member exists -- register); the check gates a
+/// registration finding on existence, so a member that cannot be created is never
+/// registered as a phantom. A *content-injecting* op (it writes a ruleset-chosen
+/// value into the manifest AND ruleset-authored bytes to a ruleset-named path),
+/// **`Unsafe` by default**, `Safe`-promotable.
 #[derive(Debug)]
 pub struct CreateAndRegisterFixer {
     /// Per target: the ARRAY-locating extract (`Structured(format, "$.a.b")` -- the
@@ -816,9 +821,9 @@ impl CreateAndRegisterFixer {
     ) -> std::result::Result<Vec<u8>, String> {
         let members = Self::missing_members(violation);
         if members.is_empty() {
-            return Err("no members to register (an existence-only finding; \
-                        creating a missing member is a follow-up)"
-                .to_string());
+            // Reached only for a malformed registration finding (an existence
+            // finding is routed to `create_member` by `apply` before this).
+            return Err("no member to register in this finding".to_string());
         }
         let (fmt, segs) = Self::array_location(extract, target_bytes)
             .ok_or_else(|| "could not locate the target list array".to_string())?;
@@ -874,7 +879,7 @@ impl CreateAndRegisterFixer {
 
 impl Fixer for CreateAndRegisterFixer {
     fn describe(&self) -> String {
-        "register the member in the manifest list".to_string()
+        "create the member's file and/or register it in the manifest list".to_string()
     }
 
     fn applicability(&self) -> Applicability {
@@ -1812,6 +1817,128 @@ mod tests {
             read(&tmp, "t.json"),
             br#"{"v":"${VERSION}"}"#,
             "template survives"
+        );
+    }
+
+    // ─── CreateAndRegisterFixer: the create half (Phase 2) ───────────
+
+    fn register_fixer(content: Option<&str>) -> CreateAndRegisterFixer {
+        CreateAndRegisterFixer::new(
+            ValueTargets::Glob(Extract::Structured(Format::Toml, "$.a".into())),
+            content.map(|c| alint_core::ContentSourceSpec::Inline(c.to_string())),
+            Applicability::Unsafe,
+        )
+    }
+
+    fn existence_viol(member: &str) -> Violation {
+        Violation::new("missing")
+            .with_path(Path::new(member))
+            .with_baseline_key(format!("registered\u{0}exists\u{0}{member}"))
+    }
+
+    #[test]
+    fn create_and_register_existence_member_parses_the_key() {
+        let ex = existence_viol("crates/d/Cargo.toml");
+        assert_eq!(
+            CreateAndRegisterFixer::existence_member(&ex),
+            Some(PathBuf::from("crates/d/Cargo.toml"))
+        );
+        // A registration finding is NOT an existence finding, and vice versa.
+        let reg = Violation::new("x")
+            .with_baseline_key("registered\u{0}member\u{0}Cargo.toml\u{0}crates/d");
+        assert_eq!(CreateAndRegisterFixer::existence_member(&reg), None);
+        assert_eq!(
+            CreateAndRegisterFixer::missing_members(&reg),
+            vec!["crates/d".to_string()]
+        );
+        assert!(CreateAndRegisterFixer::missing_members(&ex).is_empty());
+    }
+
+    #[test]
+    fn create_and_register_creates_a_missing_member() {
+        let tmp = TempDir::new().unwrap();
+        let out = register_fixer(Some("[package]\nname = \"x\"\n"))
+            .apply(&existence_viol("crates/new/Cargo.toml"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "{out:?}");
+        assert_eq!(
+            read(&tmp, "crates/new/Cargo.toml"),
+            b"[package]\nname = \"x\"\n"
+        );
+    }
+
+    #[test]
+    fn create_and_register_create_guards() {
+        let tmp = TempDir::new().unwrap();
+        // A `..` member escapes the root -> confined skip, no out-of-root write.
+        let out = register_fixer(Some("x"))
+            .apply(&existence_viol("../evil/Cargo.toml"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(&out, FixOutcome::Skipped(m) if m.contains("escapes")),
+            "{out:?}"
+        );
+        // No content -> skip (never a phantom-driving create).
+        let out = register_fixer(None)
+            .apply(&existence_viol("crates/new/Cargo.toml"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(&out, FixOutcome::Skipped(m) if m.contains("no `content`")),
+            "{out:?}"
+        );
+        assert!(!tmp.path().join("crates/new/Cargo.toml").exists());
+        // No-clobber: an existing file is left intact.
+        write(&tmp, "crates/have/Cargo.toml", b"keep");
+        let out = register_fixer(Some("x"))
+            .apply(&existence_viol("crates/have/Cargo.toml"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(&out, FixOutcome::Skipped(m) if m.contains("already exists")),
+            "{out:?}"
+        );
+        assert_eq!(read(&tmp, "crates/have/Cargo.toml"), b"keep");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn create_and_register_refuses_a_symlink_target() {
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        // A broken symlink at the member path -> refuse to create through it.
+        symlink("nonexistent", tmp.path().join("member.toml")).unwrap();
+        let out = register_fixer(Some("x"))
+            .apply(&existence_viol("member.toml"), &ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(&out, FixOutcome::Skipped(m) if m.contains("symlink")),
+            "{out:?}"
+        );
+    }
+
+    #[test]
+    fn create_and_register_dry_run_creates_nothing() {
+        let tmp = TempDir::new().unwrap();
+        let out = register_fixer(Some("x"))
+            .apply(&existence_viol("crates/new/Cargo.toml"), &ctx(&tmp, true))
+            .unwrap();
+        assert!(
+            matches!(&out, FixOutcome::Applied(m) if m.starts_with("would create")),
+            "{out:?}"
+        );
+        assert!(
+            !tmp.path().join("crates/new/Cargo.toml").exists(),
+            "dry-run must not create the file"
+        );
+    }
+
+    #[test]
+    fn create_and_register_can_fix_gates_existence_on_content() {
+        // An existence finding is fixable only when the rule carries content.
+        let ex = existence_viol("crates/new/Cargo.toml");
+        assert!(register_fixer(Some("x")).can_fix(&ex), "content -> fixable");
+        assert!(
+            !register_fixer(None).can_fix(&ex),
+            "no content -> not fixable"
         );
     }
 }

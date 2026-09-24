@@ -81,13 +81,25 @@ impl CrossFileRule {
                 }
             }
         }
-        // Registration: EVERY declared member's value must appear in every target
-        // list -- including a missing NAMED member (its existence is a separate
-        // finding whose fix CREATES the file; this finding's fix appends its path;
-        // together they satisfy both postconditions). `normalize` is rejected on
-        // `registered` (build), so member and target elements compare VERBATIM -- the
-        // fixer appends the member's REAL path, not a normalized form (audit A#3/B#2).
-        let member_values: BTreeSet<String> = members.into_iter().map(|(_, value)| value).collect();
+        // Registration: each EXISTING member's value must appear in every target
+        // list. Existence is a PREREQUISITE for registration -- registering a member
+        // whose file is missing would write a PHANTOM entry that breaks the consumer
+        // (a `workspace.members` path with no crate makes cargo fail), so a MISSING
+        // NAMED member is registered only AFTER its create-half fix makes it exist:
+        // the fixpoint re-walks and this pass then fires the registration. If the
+        // create is skipped (no `content`, an unreadable `content_from`, a root
+        // escape, a `--changed` skew), the member stays missing and is NEVER
+        // registered -- no phantom (round-2 audit HIGH: the uncoordinated
+        // two-postcondition model appended a phantom when the create was withheld;
+        // this also drops a root-escaping named source, which never resolves in the
+        // index). A glob member always exists (a glob matches only existing paths).
+        // `normalize` is rejected on `registered` (build), so member and target
+        // elements compare VERBATIM (audit A#3/B#2).
+        let member_values: BTreeSet<String> = members
+            .into_iter()
+            .filter(|(path, _)| self.source_glob.is_some() || member_exists(ctx, path))
+            .map(|(_, value)| value)
+            .collect();
         if member_values.is_empty() {
             return;
         }

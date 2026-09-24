@@ -514,6 +514,32 @@ warning or a v0.18 migration.
     full 5.2.4 all-or-nothing transaction + injectable-writer engine seam (a
     ROBUSTNESS layer, not needed for the model -- the write phase can't be truly
     atomic anyway); JSON/YAML `document_append`; creating a missing `members` array.**
+  - **Phase 2 AUDIT-HARDENED (round 2; 2 worktree-isolated agents base-verified at
+    383e8af5 + own CLI probing).** Both agents + own probing independently reproduced
+    ONE HIGH integration bug + minor items. **HIGH (the decisive one): the
+    uncoordinated two-postcondition model registered a PHANTOM member.** Removing the
+    existence filter (Phase 2) made a missing NAMED member get a registration finding
+    that fired even when the create was WITHHELD (no `content`, an unreadable
+    `content_from`, a root-escaping `source.file`, a `--changed` skew) -> the manifest
+    listed a nonexistent (or `../`-out-of-tree) member, BREAKING cargo, reported green,
+    non-convergent. FIX = RE-ADD the existence filter: registration is a
+    POSTCONDITION-ordered consequence of existence -- a missing member is registered
+    only AFTER the create-half makes it exist (the fixpoint re-walks and the next pass
+    fires the registration), and a member that can't be created is NEVER registered
+    (no phantom; also drops a root-escaping named source, which never resolves in the
+    index). Create-half SECURITY was CLEAN in both audits (no out-of-root create, no
+    clobber, symlink refusal, no `content_from` exfiltration, W2 demotion, dry-run/
+    `--diff` purity). Also fixed: 6 create-half unit tests (the create half had ZERO),
+    a phantom-prevention e2e gate, stale Phase-1b-register-only doc comments + the
+    `describe()` string. Deferred/documented (LOW, both agents): a dangling-symlink
+    PARENT yields a hard "fix error" not a clean Skip (SHARED with FileCreateFixer's
+    `create_dir_all`); `content`/`content_from` not in the JSON schema `fix` `oneOf`
+    (PRE-EXISTING -- 7 of ~22 ops are, `deny_unknown_fields` catches typos at load).
+    **REUSABLE LESSON: in a two-postcondition fix where one postcondition is a
+    PREREQUISITE of the other (a member must EXIST before it can be REGISTERED), gate
+    the dependent finding on the prerequisite and let the FIXPOINT sequence the
+    repairs -- do NOT emit both unconditionally, or a withheld prerequisite fix leaves
+    the dependent one applied as a corrupt half-state.**
   - Each phase: full preflight + an independent adversarial audit round.
 
 After create-and-register: Phase 3 is COMPLETE; on to Phase 4.

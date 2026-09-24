@@ -21,17 +21,25 @@ conditions** on each member and applies only the edit for whichever is unmet:
 
 "Create only if it does not already exist" is therefore not a mode flag: it is just the existence
 condition's repair, which is a **no-op whenever the member already exists** (always true for a
-glob-discovered member — a glob only matches paths that exist). One rule, one op; the shape of
-the work falls out of the current state:
+glob-discovered member — a glob only matches paths that exist).
 
-| Current state | Edits applied | Shape |
+**Existence is a PREREQUISITE for registration** (a member whose file is missing must not be
+listed — that phantom entry breaks the build). So the check gates a registration finding on the
+member existing, and the two repairs are **fixpoint-ordered** rather than fully independent: create
+makes the member exist, the fixpoint re-walks, and the next pass registers it. A member that
+**cannot** be created (no `content`, an unreadable `content_from`, a root escape) is therefore
+**never registered** — no phantom half-state (round-2 audit HIGH). The shape falls out of the
+current state:
+
+| Current state | What fires / applies | Shape |
 |---|---|---|
-| member exists, not registered | register only | **1 file** (a list append) |
-| member missing (named source) | create + register | **2 files** (the 5.2.4 transaction) |
+| member exists, not registered | 1 registration finding → append | **1 file** (a list append) |
+| member missing (named source) | existence finding → create; then (re-walk) registration → append | 2 files, **fixpoint-sequenced** |
+| member missing, no `content` | existence finding only (create Skips); **NOT registered** | manifest unchanged (honest, non-convergent) |
 | exists **and** registered | none | no violation |
 
-The multi-file transaction (5.2.4) only engages when a create actually fires; the common case
-(an existing-but-unregistered member) degrades to a plain single-file list append.
+No multi-file transaction: two idempotent fixes the fixpoint applies in order. The common case
+(an existing-but-unregistered member) is a plain single-file list append.
 
 ## 3. Host + config surface
 

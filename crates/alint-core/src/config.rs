@@ -917,13 +917,14 @@ pub struct RelocateFixSpec {
 
 /// `create_and_register`: ensure a `cross_file` `relation: registered` member both
 /// exists and is listed in each target's manifest array, applying only the unmet
-/// repair. **Phase 1b is register-only**: an existing-but-unregistered member is
-/// APPENDED to the list (a single-file structured edit); creating a missing named
-/// member (the multi-file transaction) is a follow-up. A **content-injecting** op
-/// (it writes a ruleset-chosen value into a manifest), so an untrusted remote
-/// `extends:` demotes it to a suggestion (auto-fix.md 5.5). **`Unsafe` by default**
-/// (mutates a manifest), `Safe`-promotable. Takes its members + targets from the
-/// host rule, not new fields.
+/// repair. An existing-but-unregistered member is APPENDED to the list (a
+/// single-file structured edit); a MISSING NAMED member is CREATED from `content` /
+/// `content_from` below and then registered (two independent idempotent fixes the
+/// fixpoint applies in order -- no multi-file transaction). A **content-injecting**
+/// op (it writes a ruleset-chosen value into a manifest, and a ruleset-authored
+/// file), so an untrusted remote `extends:` demotes it to a suggestion (auto-fix.md
+/// 5.5). **`Unsafe` by default** (mutates a manifest / creates a file),
+/// `Safe`-promotable. Members + targets come from the host rule.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateAndRegisterFixSpec {
