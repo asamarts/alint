@@ -245,6 +245,11 @@ pub(crate) fn docs_export(
         Some("Crate dependency graph"),
     )?;
 
+    // 4c'. SERP descriptions for the pages exported verbatim from repo docs.
+    for (rel, description) in exported_pages::DESCRIPTIONS {
+        exported_pages::set_frontmatter_description(&target_dir.join(rel), description)?;
+    }
+
     // 4d. The LikeC4 architecture model (*.c4 source). Shipped so alint.org can
     //     build the interactive system + flow views (LikeC4 web component) and
     //     re-export Mermaid. Non-markdown, so the sync routes it to
@@ -2163,6 +2168,10 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
 
     let cli_dir = target_dir.join("cli");
     fs::create_dir_all(&cli_dir)?;
+    // Prose copied in from docs/site/cli/ (by copy_site_tree) must each belong
+    // to a subcommand page. Checked before anything is generated here, since
+    // the landing page below is written as cli/index.md.
+    cli::check_cli_prose_files(&cli_dir)?;
 
     // Top-level help → cli/index.md
     let top = run_help(&bin, &[])?;
@@ -2188,6 +2197,7 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
     }
     fs::write(cli_dir.join("index.md"), index)?;
 
+    let globals = cli::global_options(&top);
     let subcmds = CLI_REFERENCE_SUBCMDS;
     for sub in subcmds {
         let help = run_help(&bin, &[sub])?;
@@ -2205,26 +2215,20 @@ fn generate_cli_reference(workspace: &Path, target_dir: &Path) -> Result<()> {
         } else {
             format!("{help_summary}. alint {sub} CLI reference and flags.")
         };
-        let mut page = String::new();
-        let _ = writeln!(&mut page, "---");
-        let _ = writeln!(&mut page, "title: 'alint {sub}'");
-        let _ = writeln!(
-            &mut page,
-            "description: '{}'",
-            escape_yaml_string(&meta_desc_clean(&cli_desc, 158))
-        );
-        let _ = writeln!(&mut page, "---");
-        let _ = writeln!(&mut page);
-        if let Some((view, caption)) = cli_view(sub) {
-            let _ = writeln!(&mut page, "{caption}");
-            let _ = writeln!(&mut page);
-            let _ = writeln!(&mut page, "<likec4-view view-id=\"{view}\"></likec4-view>");
-            let _ = writeln!(&mut page);
-        }
-        let _ = writeln!(&mut page, "```");
-        page.push_str(&help);
-        let _ = writeln!(&mut page, "```");
-        fs::write(cli_dir.join(format!("{sub}.md")), page)?;
+        // Hand-written prose for the page, from docs/site/cli/<sub>.md. It is
+        // already in the bundle at this path (copy_site_tree runs first and
+        // applies the release gating), and this page replaces it.
+        let page_path = cli_dir.join(format!("{sub}.md"));
+        let prose = if page_path.is_file() {
+            let text = fs::read_to_string(&page_path)
+                .with_context(|| format!("reading {}", page_path.display()))?;
+            Some(cli::parse_cli_prose(&text)?)
+        } else {
+            None
+        };
+        let (help, removed) = cli::strip_global_options(&help, &globals);
+        let page = cli::render_cli_page(sub, &cli_desc, prose.as_ref(), &help, removed > 0);
+        fs::write(&page_path, page)?;
     }
 
     // Sanity-check: workspace path exists.
@@ -2378,7 +2382,9 @@ mod examples;
 // "dangerous in a docs page").
 pub(crate) use examples::is_dangerous_docs_char;
 
+mod cli;
 mod counts;
+mod exported_pages;
 
 #[cfg(test)]
 mod tests;

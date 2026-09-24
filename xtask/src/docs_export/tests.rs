@@ -1,3 +1,7 @@
+use super::cli::{
+    CliProse, global_options, parse_cli_prose, render_cli_page, strip_global_options,
+};
+use super::exported_pages::set_frontmatter_description;
 use super::*;
 
 /// Release-gating of rule-body prose: `<!-- alint:since=X -->` blocks are
@@ -559,4 +563,265 @@ fn rule_meta_descriptions_are_well_formed() {
             }
         }
     }
+}
+
+/// Subcommand `--help` repeats every global option verbatim; the subcommand
+/// page keeps only its own arguments and options, since the globals are
+/// documented once on the CLI landing page. A subcommand's OWN option that
+/// shares a global's flag (e.g. `suggest --format`, with its own values and
+/// default) must survive. Kept options keep their multi-paragraph help and
+/// `[default:]` metadata, clap's whitespace-only separator lines don't leave
+/// doubled blanks behind, and an Options header left empty is dropped.
+#[test]
+fn strip_global_options_keeps_only_subcommand_flags() {
+    let top = "\
+A monorepo linter.
+
+Usage: alint [OPTIONS] [COMMAND]
+
+Options:
+  -c, --config <CONFIG>
+          Path to a config file
+
+  -f, --format <FORMAT>
+          Output format
+
+          [default: human]
+
+      --show-notes
+          List informational notes in full on stderr.
+<WS>
+          Notes are non-violation findings.
+
+  -h, --help
+          Print help (see a summary with '-h')
+"
+    .replace("<WS>", "          ");
+    let globals = global_options(&top);
+    for flag in ["--config", "--format", "--show-notes", "--help"] {
+        assert!(
+            globals.contains_key(flag),
+            "{flag} missing from {globals:?}"
+        );
+    }
+
+    let check = "\
+Run linters against the current (or given) directory
+
+Usage: alint check [OPTIONS] [PATH]
+
+Arguments:
+  [PATH]
+          Root of the repository to lint
+
+          [default: .]
+
+Options:
+  -c, --config <CONFIG>
+          Path to a config file
+
+      --changed
+          Lint only files changed since the base ref.
+<WS>
+          Pairs with --base.
+
+  -f, --format <FORMAT>
+          Output format
+
+          [default: human]
+
+      --show-notes
+          List informational notes in full on stderr.
+<WS>
+          Notes are non-violation findings.
+
+      --base <REF>
+          Base ref for --changed
+
+  -h, --help
+          Print help (see a summary with '-h')
+"
+    .replace("<WS>", "          ");
+    let (out, removed) = strip_global_options(&check, &globals);
+    assert_eq!(removed, 4, "{out}");
+    assert!(out.contains("Arguments:\n  [PATH]"), "{out}");
+    assert!(out.contains("[default: .]"), "{out}");
+    assert!(out.contains("      --changed\n"), "{out}");
+    assert!(out.contains("Pairs with --base."), "{out}");
+    assert!(out.contains("      --base <REF>"), "{out}");
+    for gone in ["--config", "--format", "--show-notes", "Print help"] {
+        assert!(!out.contains(gone), "{gone} should be stripped: {out}");
+    }
+    assert!(!out.contains("\n\n\n"), "no doubled blank lines: {out}");
+
+    // A subcommand's own `--format` (different help, default and values)
+    // shares the global's flag but is not the global; it stays.
+    let suggest = "\
+Scan for antipatterns and propose rules that would catch them
+
+Usage: alint suggest [OPTIONS]
+
+Options:
+  -f, --format <FORMAT>
+          Output format for proposals
+
+          [default: human]
+          [possible values: human, yaml, json]
+
+  -c, --config <CONFIG>
+          Path to a config file
+";
+    let (out, removed) = strip_global_options(suggest, &globals);
+    assert_eq!(removed, 1, "{out}");
+    assert!(
+        out.contains("  -f, --format <FORMAT>\n          Output format for proposals"),
+        "{out}"
+    );
+    assert!(
+        out.contains("[possible values: human, yaml, json]"),
+        "{out}"
+    );
+    assert!(!out.contains("Path to a config file"), "{out}");
+
+    let explain = "\
+Show a rule's definition
+
+Usage: alint explain [OPTIONS] <RULE_ID>
+
+Arguments:
+  <RULE_ID>
+          Rule id to describe
+
+Options:
+  -c, --config <CONFIG>
+          Path to a config file
+
+  -h, --help
+          Print help (see a summary with '-h')
+";
+    let (out, removed) = strip_global_options(explain, &globals);
+    assert_eq!(removed, 2, "{out}");
+    assert!(!out.contains("Options:"), "{out}");
+    assert!(out.ends_with("Rule id to describe\n"), "{out}");
+}
+
+/// Hand-written CLI prose (`docs/site/cli/<sub>.md`) splits into its
+/// description, intro, middle sections and trailing See also. Headings count
+/// only at the start of a line and outside code fences, `### See also` is not
+/// the See also section, CRLF checkouts parse the same, and a frontmatter key
+/// the generated page would drop is an error.
+#[test]
+fn parse_cli_prose_splits_intro_sections_and_see_also() {
+    let text = "---\ntitle: 'alint fix'\ndescription: 'Fix it, don''t just flag it.'\n---\n\nIntro paragraph.\n\n## Examples\n\n```bash\nalint fix --dry-run\n## not a heading, inside a fence\n```\n\n### See also the flags\n\nText.\n\n## See also\n\n- [Fixing](/docs/concepts/adoption/fixing/)\n";
+    for input in [text.to_string(), text.replace('\n', "\r\n")] {
+        let prose = parse_cli_prose(&input).expect("valid prose parses");
+        assert_eq!(
+            prose.description.as_deref(),
+            Some("Fix it, don't just flag it.")
+        );
+        assert_eq!(prose.intro, "Intro paragraph.");
+        assert!(prose.sections.starts_with("## Examples"), "{prose:?}");
+        assert!(
+            prose.sections.contains("## not a heading, inside a fence"),
+            "{prose:?}"
+        );
+        assert!(
+            prose.sections.contains("### See also the flags"),
+            "{prose:?}"
+        );
+        assert!(prose.see_also.starts_with("## See also\n"), "{prose:?}");
+        assert!(
+            prose.see_also.contains("/docs/concepts/adoption/fixing/"),
+            "{prose:?}"
+        );
+    }
+
+    // No frontmatter and no headings: everything is intro.
+    let bare = parse_cli_prose("Just an intro.\n").expect("bare prose parses");
+    assert_eq!(bare.description, None);
+    assert_eq!(bare.intro, "Just an intro.");
+    assert!(bare.sections.is_empty() && bare.see_also.is_empty());
+
+    // Frontmatter that isn't YAML, or carries a key the page would drop, fails.
+    assert!(parse_cli_prose("---\ndescription: [unclosed\n---\nbody\n").is_err());
+    let err = parse_cli_prose("---\ntitle: x\nsidebar:\n  order: 2\n---\nbody\n").unwrap_err();
+    assert!(err.to_string().contains("sidebar"), "{err}");
+}
+
+/// A CLI page with prose: the prose description wins, the intro leads, the
+/// help capture sits under a Reference heading after the prose sections, the
+/// global-options pointer follows it, and See also comes last. Without prose
+/// the page is just the capture (plus the derived description).
+#[test]
+fn render_cli_page_orders_prose_around_the_reference() {
+    let prose = CliProse {
+        description: Some("Hand-written description.".into()),
+        intro: "Intro.".into(),
+        sections: "## Examples\n\n```bash\nalint explain x\n```".into(),
+        see_also: "## See also\n\n- [List](/docs/cli/list/)".into(),
+    };
+    let help = "Show a rule's definition\n\nUsage: alint explain <RULE_ID>\n";
+    let page = render_cli_page("explain", "Derived.", Some(&prose), help, true);
+    assert!(
+        page.starts_with(
+            "---\ntitle: 'alint explain'\ndescription: 'Hand-written description.'\n---\n"
+        ),
+        "{page}"
+    );
+    let pos = |needle: &str| {
+        page.find(needle)
+            .unwrap_or_else(|| panic!("{needle} missing: {page}"))
+    };
+    assert!(pos("Intro.") < pos("## Examples"));
+    assert!(pos("## Examples") < pos("## Reference"));
+    assert!(pos("## Reference") < pos("Usage: alint explain"));
+    assert!(pos("Usage: alint explain") < pos("[global options](/docs/cli/#global-options)"));
+    assert!(pos("[global options]") < pos("## See also"));
+
+    let bare = render_cli_page("explain", "Derived.", None, help, false);
+    assert!(bare.contains("description: 'Derived.'"), "{bare}");
+    assert!(
+        !bare.contains("## Reference") && !bare.contains("global options"),
+        "{bare}"
+    );
+}
+
+/// Prose files that no generated page would merge fail the export: a name
+/// that isn't a subcommand would ship bare, and `index.md` would be silently
+/// overwritten by the landing page generated from `alint --help`.
+#[test]
+fn check_cli_prose_files_rejects_unmatched_prose() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("check.md"), "---\ntitle: x\n---\n").unwrap();
+    super::cli::check_cli_prose_files(dir.path()).expect("a subcommand's prose is fine");
+    for stray in ["index.md", "nonsense.md"] {
+        std::fs::write(dir.path().join(stray), "---\ntitle: x\n---\n").unwrap();
+        let err = super::cli::check_cli_prose_files(dir.path()).unwrap_err();
+        assert!(err.to_string().contains(stray), "{err}");
+        std::fs::remove_file(dir.path().join(stray)).unwrap();
+    }
+    super::cli::check_cli_prose_files(&dir.path().join("missing")).expect("no dir is fine");
+}
+
+/// Pages exported verbatim get a `description:` added to their frontmatter
+/// (quotes escaped); a page that already has one keeps it.
+#[test]
+fn set_frontmatter_description_adds_once() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join("page.md");
+    std::fs::write(&path, "---\ntitle: Changelog\n---\n\nBody.\n").unwrap();
+    set_frontmatter_description(&path, "It's every release.").unwrap();
+    assert_eq!(
+        std::fs::read_to_string(&path).unwrap(),
+        "---\ntitle: Changelog\ndescription: 'It''s every release.'\n---\n\nBody.\n"
+    );
+    set_frontmatter_description(&path, "Something else.").unwrap();
+    assert!(
+        !std::fs::read_to_string(&path)
+            .unwrap()
+            .contains("Something else")
+    );
+
+    std::fs::write(&path, "No frontmatter.\n").unwrap();
+    assert!(set_frontmatter_description(&path, "x").is_err());
 }
