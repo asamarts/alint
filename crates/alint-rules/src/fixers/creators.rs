@@ -207,7 +207,7 @@ pub(crate) fn confine_fix_path(
 /// missing or unreadable source produces a `Skipped`-friendly
 /// `Err(String)` so the caller can degrade gracefully rather
 /// than abort the whole fix run.
-fn resolve_source_bytes(
+pub(crate) fn resolve_source_bytes(
     source: &ContentSourceSpec,
     ctx_root: &std::path::Path,
     allow_out_of_root: bool,

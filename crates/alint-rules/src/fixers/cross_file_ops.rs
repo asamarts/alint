@@ -664,15 +664,99 @@ pub struct CreateAndRegisterFixer {
     /// [`ValueTargets`] (a target-path -> extract map); here the extract locates the
     /// array to append to, not a scalar to set.
     targets: ValueTargets,
+    /// The bytes for a MISSING named member (the create half). `None` = register-
+    /// only (an existence finding is then reported, not fixed). Only a `file:` (named)
+    /// source can produce an existence finding, so this is inert for a glob source
+    /// (rejected at build).
+    content: Option<alint_core::ContentSourceSpec>,
     applicability: Applicability,
 }
 
 impl CreateAndRegisterFixer {
-    pub(crate) fn new(targets: ValueTargets, applicability: Applicability) -> Self {
+    pub(crate) fn new(
+        targets: ValueTargets,
+        content: Option<alint_core::ContentSourceSpec>,
+        applicability: Applicability,
+    ) -> Self {
         Self {
             targets,
+            content,
             applicability,
         }
+    }
+
+    /// The member path an EXISTENCE finding (`registered\0exists\0<path>`) names --
+    /// the file to create. `None` for a registration finding or a malformed key.
+    fn existence_member(violation: &Violation) -> Option<PathBuf> {
+        let key = violation.baseline_key.as_deref()?;
+        let parts: Vec<&str> = key.split('\u{0}').collect();
+        (parts.len() == 3 && parts[0] == "registered" && parts[1] == "exists")
+            .then(|| PathBuf::from(parts[2]))
+    }
+
+    /// Create a MISSING named member's file from `content` (the create half of the
+    /// two-postcondition model). Mirrors `FileCreateFixer`'s confinement + no-clobber
+    /// + symlink-refusal guards; creates parent dirs (a new crate needs its dir).
+    fn create_member(&self, member: &Path, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(source) = &self.content else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} does not exist and the rule has no `content`/`content_from` to \
+                 create it",
+                member.display()
+            )));
+        };
+        let abs = match confine_fix_path(member, ctx.root, ctx.allow_out_of_root) {
+            Ok(p) => p,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        // Never clobber an existing file/dir, and never create THROUGH a (possibly
+        // broken) symlink at the target -- exactly `FileCreateFixer`'s guards.
+        if abs.exists() {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already exists",
+                member.display()
+            )));
+        }
+        if abs
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is a symlink; refusing to create through it",
+                member.display()
+            )));
+        }
+        let content = match crate::fixers::creators::resolve_source_bytes(
+            source,
+            ctx.root,
+            ctx.allow_out_of_root,
+        ) {
+            Ok(bytes) => bytes,
+            Err(skip) => return Ok(FixOutcome::Skipped(skip)),
+        };
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::CreateFile {
+                    path: member.to_path_buf(),
+                    content: content.clone(),
+                });
+            }
+            return Ok(FixOutcome::Applied(format!(
+                "would create {}",
+                member.display()
+            )));
+        }
+        if let Some(parent) = abs.parent() {
+            std::fs::create_dir_all(parent).map_err(|source| Error::Io {
+                path: parent.to_path_buf(),
+                source,
+            })?;
+        }
+        std::fs::write(&abs, &content).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
+        Ok(FixOutcome::Applied(format!("created {}", member.display())))
     }
 
     fn target_extract(&self, target_rel: &Path) -> Option<&Extract> {
@@ -798,9 +882,13 @@ impl Fixer for CreateAndRegisterFixer {
     }
 
     fn can_fix(&self, violation: &Violation) -> bool {
-        // A registration finding (carries members) whose target format supports a
-        // list append. An existence-only finding (create -- Phase 2) is not fixable
-        // here, so `check` must not promise it.
+        // An EXISTENCE finding (missing named member) is fixable iff the rule carries
+        // content to create it.
+        if Self::existence_member(violation).is_some() {
+            return self.content.is_some();
+        }
+        // A registration finding (carries a member) whose target format supports a
+        // list append.
         if Self::missing_members(violation).is_empty() {
             return false;
         }
@@ -815,6 +903,12 @@ impl Fixer for CreateAndRegisterFixer {
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        // An EXISTENCE finding (a missing NAMED member) -> create the file from
+        // `content`/`content_from` (the create half of the two-postcondition model;
+        // the registration finding, handled below, appends its path independently).
+        if let Some(member) = Self::existence_member(violation) {
+            return self.create_member(&member, ctx);
+        }
         let Some(target) = &violation.path else {
             return Ok(FixOutcome::Skipped(
                 "violation did not carry a path".to_string(),
@@ -856,11 +950,30 @@ impl Fixer for CreateAndRegisterFixer {
         )))
     }
 
-    /// Editor / LSP form: a `SetContent` with the members appended. The two engine
-    /// suggestion sites call this with EMPTY `bytes`, where the target re-parse
-    /// fails and it declines (`None`) -- only the LSP passes the real buffer
-    /// (consistent with `CrossFileValueFixer`).
-    fn fix_edit(&self, violation: &Violation, bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+    /// Editor / LSP form: a `CreateFile` for an existence finding, or a `SetContent`
+    /// with the member appended for a registration finding. The two engine suggestion
+    /// sites call this with EMPTY `bytes`, where the registration re-parse fails and
+    /// it declines (`None`) -- only the LSP passes the real buffer (consistent with
+    /// `CrossFileValueFixer`).
+    fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
+        // An existence finding -> a CreateFile (mirrors `create_member`'s guards).
+        if let Some(member) = Self::existence_member(violation) {
+            let source = self.content.as_ref()?;
+            let abs = confine_fix_path(&member, root, false).ok()?;
+            if abs.exists()
+                || abs
+                    .symlink_metadata()
+                    .is_ok_and(|m| m.file_type().is_symlink())
+            {
+                return None;
+            }
+            let content =
+                crate::fixers::creators::resolve_source_bytes(source, root, false).ok()?;
+            return Some(FixEdit::CreateFile {
+                path: member,
+                content,
+            });
+        }
         let target_rel = violation.path.as_deref()?;
         let extract = self.target_extract(target_rel)?;
         let content = Self::registered_bytes(violation, extract, bytes).ok()?;

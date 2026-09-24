@@ -195,8 +195,39 @@ fn build_sync_from_fixer(
                 .applicability
                 .unwrap_or(Applicability::Unsafe);
             let register_targets = build_register_targets(targets, cfg)?;
+            // Optional `content`/`content_from` = the create half (a missing NAMED
+            // member's file). Both absent = register-only. Content on a GLOB source
+            // is inert (a glob never yields a missing member), so it is rejected.
+            let content = match (
+                &create_and_register.content,
+                &create_and_register.content_from,
+            ) {
+                (None, None) => None,
+                (Some(_), Some(_)) => {
+                    return Err(cfg(
+                        "`create_and_register`: `content` and `content_from` are mutually exclusive"
+                            .into(),
+                    ));
+                }
+                (inline, from) => {
+                    if !single_file_source {
+                        return Err(cfg(
+                            "`create_and_register` `content`/`content_from` (the create half) \
+                             applies only to a NAMED `source.file`; a `source.files` glob never \
+                             yields a MISSING member to create -- remove it (register-only)"
+                                .into(),
+                        ));
+                    }
+                    Some(match (inline, from) {
+                        (Some(s), None) => alint_core::ContentSourceSpec::Inline(s.clone()),
+                        (None, Some(p)) => alint_core::ContentSourceSpec::File(p.clone()),
+                        _ => unreachable!("XOR checked above"),
+                    })
+                }
+            };
             Ok(Some(Box::new(CreateAndRegisterFixer::new(
                 register_targets,
+                content,
                 tier,
             ))))
         }
@@ -862,6 +893,60 @@ mod tests {
         );
         let err = build(&spec).unwrap_err().to_string();
         assert!(err.contains("[*]"), "{err}");
+    }
+
+    #[test]
+    fn build_accepts_create_and_register_content_on_a_named_source() {
+        // The create half: a NAMED source + `content` builds the create-capable fixer.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { file: \"crates/docs/Cargo.toml\" }\n\
+             register_as: \"{dir}\"\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n\
+             level: error\n\
+             fix:\n  create_and_register:\n    content: \"[package]\\n\"\n",
+        );
+        assert!(build(&spec).is_ok(), "content on a named source builds");
+    }
+
+    #[test]
+    fn build_rejects_create_and_register_content_on_a_glob_source() {
+        // A glob source never yields a MISSING member, so `content` is inert -> reject.
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { files: \"crates/*/Cargo.toml\" }\n\
+             register_as: \"{dir}\"\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n\
+             level: error\n\
+             fix:\n  create_and_register:\n    content: \"x\"\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(
+            err.contains("NAMED") || err.contains("source.file"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn build_rejects_create_and_register_content_and_content_from() {
+        use crate::test_support::spec_yaml;
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: cross_file\n\
+             relation: registered\n\
+             source: { file: \"crates/docs/Cargo.toml\" }\n\
+             targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n\
+             level: error\n\
+             fix:\n  create_and_register:\n    content: \"x\"\n    content_from: t.toml\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("mutually exclusive"), "{err}");
     }
 
     #[test]

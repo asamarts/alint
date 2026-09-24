@@ -495,11 +495,25 @@ warning or a v0.18 migration.
     fingerprint stable so partial progress doesn't un-grandfather siblings; (4) an
     array-locating JSONPath for a fixer must be STATIC (one array) -- reject residual
     wildcards, or the check unions while the fix targets the first.**
-  - **Phase 2 -- create-if-missing + the 5.2.4 transaction.** NOT STARTED: the
-    conditional `CreateFile` half + the stage/verify-against-staged/all-or-nothing
-    write group + the injectable-writer `test-hooks` seam + fault-injection tests.
-    Also the JSON/YAML `document_append` fast-follow. Risk: medium (builds the
-    multi-file-transaction infra + reworks the engine write step).
+  - **Phase 2 -- create-if-missing (the "two-postcondition create"). DONE (this
+    commit; asamarts chose this over the full 5.2.4 transaction via AskUserQuestion).**
+    KEY DECISION: the `exists` and `registered` conditions are already INDEPENDENT
+    idempotent findings, so a missing NAMED member is handled by TWO fixes the
+    fixpoint applies -- create the file (an existence finding, from `content`/
+    `content_from`) + append its path (a registration finding) -- with NO multi-file
+    transaction and NO engine write-step rework. `CreateAndRegisterFixSpec` gained
+    `content`/`content_from`; the fixer carries an `Option<ContentSourceSpec>` and
+    dispatches on the finding kind (`existence_member` vs `missing_members`):
+    `create_member` mirrors `FileCreateFixer`'s confinement + no-clobber + symlink
+    guards + parent creation (reuses `resolve_source_bytes`, now `pub(crate)`);
+    `fix_edit` emits a `CreateFile`. The check now emits a registration finding for a
+    missing NAMED member too (removed the exists-only filter), so both postconditions
+    fire. `build` rejects `content` on a GLOB source (inert -- a glob never yields a
+    missing member) + the content XOR. Gates: an e2e (missing named member ->
+    created + registered -> converges) + 3 build tests. **DEFERRED (documented): the
+    full 5.2.4 all-or-nothing transaction + injectable-writer engine seam (a
+    ROBUSTNESS layer, not needed for the model -- the write phase can't be truly
+    atomic anyway); JSON/YAML `document_append`; creating a missing `members` array.**
   - Each phase: full preflight + an independent adversarial audit round.
 
 After create-and-register: Phase 3 is COMPLETE; on to Phase 4.

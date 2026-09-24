@@ -128,9 +128,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   matches loose files under the directory. `create_and_register` is `Unsafe` by
   default (it mutates a manifest), `Safe`-promotable, and content-injecting (an
   untrusted remote `extends:` demotes it to a suggestion). The fix appends TOML
-  lists today (format-preserving via `toml_edit`), skipping a member already
-  present; JSON / YAML list-append, creating a missing `members` array or a missing
-  named member, are follow-ups.
+  lists (format-preserving via `toml_edit`, skipping a member already present). For
+  a NAMED `source.file` that is MISSING, a `content:` / `content_from:` on the fix
+  also CREATES the member's file -- existence and registration are two independent,
+  idempotent postconditions, each repaired only if unmet, so a missing member is
+  both created and registered. JSON / YAML list-append and creating a missing
+  `members` array are follow-ups.
 
 ### Changed
 

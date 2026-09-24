@@ -66,9 +66,10 @@ impl CrossFileRule {
             return;
         }
         // Existence (named source only). A missing named member is reported here;
-        // creating it is the `create_and_register` fix's job (Phase 2). Keyed
-        // uniquely so it never collides with a registration violation on a shared
-        // path (the F4 unique-key rule, [[project_alint-autofix-located-fixer-correlation]]).
+        // the `create_and_register` fix CREATES it (from `content`/`content_from`) --
+        // one of the two independent postconditions. Keyed uniquely so it never
+        // collides with a registration finding on a shared path (the F4 unique-key
+        // rule, [[project_alint-autofix-located-fixer-correlation]]).
         if self.source_glob.is_none() {
             for (path, _) in &members {
                 if !member_exists(ctx, path) {
@@ -80,21 +81,19 @@ impl CrossFileRule {
                 }
             }
         }
-        // Registration: each existing member's value must appear in every target
-        // list. `normalize` is rejected on `registered` (build), so the member value
-        // and target elements are compared VERBATIM -- the fixer then appends the
-        // member's REAL path, not a normalized form (audit A#3/B#2).
-        let existing: BTreeSet<String> = members
-            .into_iter()
-            .filter(|(path, _)| self.source_glob.is_some() || member_exists(ctx, path))
-            .map(|(_, value)| value)
-            .collect();
-        if existing.is_empty() {
+        // Registration: EVERY declared member's value must appear in every target
+        // list -- including a missing NAMED member (its existence is a separate
+        // finding whose fix CREATES the file; this finding's fix appends its path;
+        // together they satisfy both postconditions). `normalize` is rejected on
+        // `registered` (build), so member and target elements compare VERBATIM -- the
+        // fixer appends the member's REAL path, not a normalized form (audit A#3/B#2).
+        let member_values: BTreeSet<String> = members.into_iter().map(|(_, value)| value).collect();
+        if member_values.is_empty() {
             return;
         }
         self.each_target(ctx, out, &mut |target, values, out| {
             let target_set: BTreeSet<&str> = values.iter().map(String::as_str).collect();
-            for member in &existing {
+            for member in &member_values {
                 if target_set.contains(member.as_str()) {
                     continue;
                 }

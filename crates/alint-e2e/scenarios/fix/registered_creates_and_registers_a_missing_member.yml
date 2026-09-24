@@ -1,0 +1,43 @@
+name: create_and_register creates a missing named member then registers it
+# The two-postcondition model (Phase 2): a NAMED source member's file does not
+# exist AND its path is not in the manifest, so the check emits TWO findings --
+# existence (on the member path) + registration (on the manifest). fix_unsafe
+# applies both independently: create crates/docs/Cargo.toml from `content`, and
+# append "crates/docs" to workspace.members. Together they satisfy both
+# postconditions -> the tree converges. No multi-file transaction: two idempotent
+# fixes the fixpoint applies.
+tags: [fix, cross_file, registered, create_and_register, applicability]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = []\n"
+    # crates/docs/Cargo.toml is absent.
+  config: |
+    version: 1
+    rules:
+      - id: docs-crate
+        kind: cross_file
+        relation: registered
+        source: { file: "crates/docs/Cargo.toml" }
+        register_as: "{dir}"
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+        fix:
+          create_and_register:
+            content: "[package]\nname = \"docs\"\nversion = \"0.1.0\"\n"
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: docs-crate, level: error, path: crates/docs/Cargo.toml}
+      - {rule: docs-crate, level: error, path: Cargo.toml}
+  - applied: [docs-crate]
+  - violations: []
+
+expect_tree:
+  Cargo.toml: "[workspace]\nmembers = [\"crates/docs\"]\n"
+  crates:
+    docs:
+      Cargo.toml: "[package]\nname = \"docs\"\nversion = \"0.1.0\"\n"

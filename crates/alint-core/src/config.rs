@@ -927,6 +927,15 @@ pub struct RelocateFixSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CreateAndRegisterFixSpec {
+    /// Inline bytes for a MISSING named member (the create half). Mutually
+    /// exclusive with `content_from`; both absent = register-only (a glob source
+    /// never has a missing member, so content is inert there and rejected at load).
+    #[serde(default)]
+    pub content: Option<String>,
+    /// A `content_from` path (read at apply time, confined) for a missing named
+    /// member. Mutually exclusive with `content`.
+    #[serde(default)]
+    pub content_from: Option<std::path::PathBuf>,
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }

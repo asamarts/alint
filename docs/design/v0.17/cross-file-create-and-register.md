@@ -162,9 +162,14 @@ Per [[feedback_phased-rollouts]], one commit per phase with a forward `Next:` po
   op_name + `ALL_OP_NAMES` + cases; the `cross_file` build arm; W2 content-injecting partition;
   property net + a planted trigger; fix-coverage e2e; facts 21→22; README; CHANGELOG). No
   transaction infra. Ships "register an unregistered member".
-- **Phase 2 — create-if-missing + the multi-file transaction.** The conditional `CreateFile` half;
-  the 5.2.4 stage/verify-against-staged/all-or-nothing write group; the injectable-writer
-  `test-hooks` seam; the fault-injection tests. Ships "create a missing member and register it".
+- **Phase 2 — create-if-missing (the "two-postcondition create", DONE).** The `exists` and
+  `registered` conditions are already INDEPENDENT idempotent findings (§2), so a missing NAMED
+  member is repaired by TWO fixes the fixpoint applies — a `CreateFile` (an existence finding,
+  from `content`/`content_from`) + an append (a registration finding) — with NO multi-file
+  transaction and NO engine write-step rework (asamarts, 2026-09-24). The full 5.2.4 all-or-nothing
+  transaction + the injectable-writer seam are DEFERRED: they add *atomicity* (both-or-neither),
+  which is a robustness layer the model doesn't require, and the write phase cannot be truly atomic
+  on a filesystem anyway (§7). Also deferred: JSON/YAML `document_append`, creating a missing array.
 
 Each phase ends with the full preflight (fmt, workspace test, clippy `-D`, rustdoc `-D`,
 byte-scan, dogfood) + an independent adversarial audit round ([[feedback_repeated-adversarial-audit-rounds]]).
