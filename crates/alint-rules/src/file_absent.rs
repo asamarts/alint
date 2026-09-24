@@ -5,7 +5,7 @@ use alint_core::{
 };
 use serde::Deserialize;
 
-use crate::fixers::{FileRemoveFixer, GitUntrackFixer};
+use crate::fixers::{FileRemoveFixer, GitUntrackFixer, RelocateFixer};
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -184,6 +184,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 .applicability
                 .unwrap_or(alint_core::Applicability::Unsafe),
         ))),
+        Some(FixSpec::Relocate { relocate }) => Some(Box::new(RelocateFixer::new(
+            relocate
+                .applicability
+                .unwrap_or(alint_core::Applicability::Unsafe),
+        ))),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,
@@ -301,6 +306,23 @@ mod tests {
         );
         let rule = build(&spec).expect("valid git_untrack fix");
         assert!(rule.fixer().is_some(), "git_untrack fixer should attach");
+    }
+
+    #[test]
+    fn build_accepts_relocate_fix() {
+        // The Phase-3 fix on file_absent: move a nested file to the repo root
+        // rather than delete or untrack it. The canonical shape pairs it with a
+        // SUBDIRECTORY-anchored pattern so the relocated root file converges.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_absent\n\
+             paths: \"**/*/Cargo.lock\"\n\
+             level: error\n\
+             fix:\n  \
+               relocate: {}\n",
+        );
+        let rule = build(&spec).expect("valid relocate fix");
+        assert!(rule.fixer().is_some(), "relocate fixer should attach");
     }
 
     #[test]

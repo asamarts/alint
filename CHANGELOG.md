@@ -94,6 +94,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   applies it. `identical` requires `skip_header_lines: 0`; a set / resolves
   relation is rejected at load. Both the source read and the target write are
   confined to the repo root.
+- New `relocate` auto-fix op for `file_absent` (`fix: { relocate: {} }`): moves a
+  file the rule flagged in a subdirectory back to the repository root, keeping its
+  basename -- the "a lockfile drifted into a member directory" case (a `Cargo.lock`
+  / `package-lock.json` / `poetry.lock` belongs at the workspace root, so a rule
+  like `paths: "**/*/Cargo.lock"` flags a nested one and `relocate` moves it up).
+  `Unsafe` by default (a rename moves a real file and the destination is inferred),
+  so a bare `alint fix` suggests it and `alint fix --unsafe-fixes` applies it; a
+  per-rule Safe promotion is available from top-level config. Only the unambiguous
+  case is fixed: a file already at the root, an occupied root slot, or an
+  undecodable basename is reported for a human, never clobbered. Anchor the
+  pattern to subdirectories (`**/*/Cargo.lock`, not `**/Cargo.lock`) so the
+  relocated root file converges.
 
 ### Changed
 

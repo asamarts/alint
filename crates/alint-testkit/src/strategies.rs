@@ -350,6 +350,17 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         &[dir.clone(), "sync_dst.txt".to_string()],
         "drifted line\n".to_string(),
     );
+    // A NESTED file (below the root) triggers a subdir-anchored file_absent +
+    // the Phase-3 `relocate` fix, which moves it to the repo root. Clean `.txt`
+    // (no hygiene flaw, no `DEBUGME`), so no other single-rule draw disturbs it;
+    // its 9-char stem exceeds the generator's 7-char limit, so neither the nested
+    // trigger nor the relocated root file collides with a random name -- the root
+    // slot is always free, so `relocate` always applies (and then converges).
+    insert_file(
+        root,
+        &[dir.clone(), "reloctrig.txt".to_string()],
+        "lockfile\n".to_string(),
+    );
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
@@ -862,6 +873,22 @@ fn rule_sync_from() -> impl Strategy<Value = String> {
     })
 }
 
+/// A `file_absent` rule fixed via the `relocate` op (Phase 3): the planted nested
+/// file `_trig/reloctrig.txt` matches the SUBDIRECTORY-anchored `**/*/reloctrig.txt`
+/// (a nested lockfile), so the rule fires and `relocate` moves it to the repo root
+/// `reloctrig.txt` -- which no longer matches the subdir pattern, so it converges
+/// (and is idempotent on a second pass: nothing nested remains). Unsafe by default,
+/// so a bare `Fix` *suggests* it; `--unsafe-fixes` applies it (exercising
+/// `fix_unsafe_converges`). The 9-char stem exceeds the generator's 7-char limit,
+/// so the root slot never collides with a random file -- the move always applies.
+fn rule_relocate() -> impl Strategy<Value = String> {
+    rule_id("rl").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: file_absent\n    paths: \"**/*/reloctrig.txt\"\n    level: error\n    fix:\n      relocate: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -914,6 +941,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // the cross-file `sync_from` op (Phase 3): mirrors a drifted target from its
         // canonical source -> converges (applied under --unsafe-fixes).
         rule_sync_from(),
+        // the `relocate` op (Phase 3): moves a nested lockfile to the repo root ->
+        // converges (applied under --unsafe-fixes).
+        rule_relocate(),
     ]
 }
 

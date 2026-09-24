@@ -450,6 +450,9 @@ pub enum FixSpec {
     SyncFrom {
         sync_from: SyncFromFixSpec,
     },
+    Relocate {
+        relocate: RelocateFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -538,6 +541,7 @@ impl FixSpec {
         "command",
         "dir_create",
         "sync_from",
+        "relocate",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -563,6 +567,7 @@ impl FixSpec {
             Self::Command { .. } => "command",
             Self::DirCreate { .. } => "dir_create",
             Self::SyncFrom { .. } => "sync_from",
+            Self::Relocate { .. } => "relocate",
         }
     }
 }
@@ -884,6 +889,23 @@ pub struct DirCreateFixSpec {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct SyncFromFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `relocate`: move a file the host `file_absent` rule flagged in a subdirectory
+/// back to the repository root, keeping its basename (a lockfile that drifted
+/// into a member directory belongs at the workspace root). A **fixed-behavior**
+/// op: it writes no ruleset bytes and does not spawn, so it is honored at its
+/// tier from any source. **`Unsafe` by default** (a rename is easy to review but
+/// moves a real file, and the destination is inferred), `Safe`-promotable. Only
+/// the unambiguous case is fixed: the flagged file is below the root and the root
+/// slot (`<basename>` at the repo root) is free. A file already at the root, a
+/// taken root slot, or an undeterminable basename is left for a human (reported,
+/// not fixed). Takes its source path from the violation, not a new field.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelocateFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1347,6 +1369,7 @@ mod tests {
             ("command:\n  run: [\"x\"]\n", "command"),
             ("dir_create: {}", "dir_create"),
             ("sync_from: {}", "sync_from"),
+            ("relocate: {}", "relocate"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

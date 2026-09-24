@@ -1,0 +1,43 @@
+name: relocate skips (never clobbers) when the root slot is already taken
+# Safety guard: a root `Cargo.lock` already exists, so moving the nested one up
+# would OVERWRITE it -- and which lockfile is canonical is AMBIGUOUS. relocate
+# must skip (never clobber), leaving the nested file in place and the violation
+# standing (honestly reported), even under `--unsafe-fixes`. The subdir-anchored
+# `**/*/Cargo.lock` flags only the nested copy, never the root source.
+tags: [fix, file_absent, relocate, applicability]
+
+given:
+  tree:
+    Cargo.lock: "# root lock\n"
+    crates:
+      widget:
+        Cargo.lock: "# nested lock\n"
+        lib.rs: "// widget\n"
+  config: |
+    version: 1
+    rules:
+      - id: lockfile-at-root
+        kind: file_absent
+        paths: "**/*/Cargo.lock"
+        level: error
+        fix:
+          relocate: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: lockfile-at-root, level: error, path: crates/widget/Cargo.lock}
+  # The root slot is taken, so relocate declines rather than clobbering it.
+  - skipped: [lockfile-at-root]
+  # And it genuinely still stands: `check` reports it. `fix` and `check` agree.
+  - violations:
+      - {rule: lockfile-at-root, level: error, path: crates/widget/Cargo.lock}
+
+expect_tree:
+  # Both lockfiles are byte-identical to the input: nothing was clobbered.
+  Cargo.lock: "# root lock\n"
+  crates:
+    widget:
+      Cargo.lock: "# nested lock\n"
+      lib.rs: "// widget\n"

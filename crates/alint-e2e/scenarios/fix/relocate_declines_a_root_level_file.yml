@@ -1,0 +1,42 @@
+name: relocate declines an already-at-root file (the non-convergence guard)
+# A root-inclusive pattern (`**/Cargo.lock` matches the root too) flags a file
+# that is ALREADY at the repository root. relocate has nowhere to move it TO, and
+# proposing `X -> X` would never converge, so it declines: `can_fix` returns false
+# (so `check` never tags it fixable) and `apply` returns Skipped -- the file is
+# never force-moved onto itself, even under `--unsafe-fixes`, and the violation
+# stands. This is why a real config should anchor the pattern to subdirectories
+# (`**/*/Cargo.lock`); a root-matching one keeps flagging the file, which relocate
+# then honestly leaves in place.
+tags: [fix, file_absent, relocate, applicability]
+
+given:
+  tree:
+    Cargo.lock: "# root lock\n"
+  config: |
+    version: 1
+    rules:
+      - id: lockfile-nowhere
+        kind: file_absent
+        paths: "**/Cargo.lock"
+        level: error
+        fix:
+          relocate: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: lockfile-nowhere, level: error, path: Cargo.lock}
+  # An already-at-root file has nowhere to go: relocate declines (Skipped), never
+  # moving it onto itself. Pin the other outcome fields empty so a phantom
+  # applied/suggestion would fail the gate.
+  - skipped: [lockfile-nowhere]
+    applied: []
+    suggested: []
+  # And it genuinely still stands (no loop, no spurious convergence): check agrees.
+  - violations:
+      - {rule: lockfile-nowhere, level: error, path: Cargo.lock}
+
+expect_tree:
+  # Unchanged: the root file is left exactly in place (honestly reported).
+  Cargo.lock: "# root lock\n"

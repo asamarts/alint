@@ -842,6 +842,10 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         FixSpec::SetValue { set_value } => set_value.applicability,
         FixSpec::RemoveValue { remove_value } => remove_value.applicability,
         FixSpec::SyncFrom { sync_from } => sync_from.applicability,
+        // `relocate` is fixed-behavior (never demoted), but reading its declared
+        // tier explicitly gives `w2_remote_relocate_is_not_demoted` teeth: a
+        // regression that demoted it would surface here as `Some(Suggestion)`.
+        FixSpec::Relocate { relocate } => relocate.applicability,
         _ => None,
     }
 }
@@ -1031,6 +1035,24 @@ fn w2_remote_remove_value_is_not_demoted() {
 }
 
 #[test]
+fn w2_remote_relocate_is_not_demoted() {
+    // `relocate` moves a file to the repo root (a rename, no ruleset bytes, no
+    // spawn) -> fixed-behavior, gated by its Unsafe tier like `file_remove`/
+    // `file_rename`, NOT demoted by W2. Its tier stays unset (None -> default
+    // Unsafe at fix time), never forced to suggestion from an untrusted remote.
+    let body = "version: 1\nrules:\n  - id: nested-lock\n    kind: file_absent\n    \
+        paths: \"**/*/Cargo.lock\"\n    level: error\n    \
+        fix: { relocate: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "nested-lock").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "an untrusted remote's `relocate` is fixed-behavior, not demoted"
+    );
+}
+
+#[test]
 fn w2_remote_content_fixer_via_template_is_demoted() {
     // Bypass vector (audit): a remote provides a content-fix TEMPLATE plus a rule
     // that references it. The template's `fix:` block is spliced into the rule at
@@ -1127,6 +1149,9 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         "chmod",
         // `dir_create` makes an empty directory -- no ruleset bytes, no spawn.
         "dir_create",
+        // `relocate` moves a file to the repo root (a rename) -- no ruleset bytes,
+        // no spawn; gated by its Unsafe tier like `file_remove`/`file_rename`.
+        "relocate",
         // NOTE: `git_untrack` and `command` are NOT here -- they SPAWN, so they are
         // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
         // a strictly stronger gate than the content demotion.

@@ -51,11 +51,12 @@ warn-then-flip `file_remove` sections of
   load; the host's violation is path-less, so the fixer carries the target). Safe,
   fixed-behavior, converges + idempotent (joins the property net).
 
-**19 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
+**21 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
 `file_remove`, `file_rename`, `file_prepend`, `file_append`,
 `file_trim_trailing_whitespace`, `file_strip_bom`, `file_normalize_line_endings`,
 `file_collapse_blank_lines`, `file_append_final_newline`, `file_strip_bidi`,
-`file_strip_zero_width`, `chmod`, `git_untrack`, `command`, `dir_create`.
+`file_strip_zero_width`, `chmod`, `git_untrack`, `command`, `dir_create`,
+`sync_from` (cross-file mirror + value propagation), `relocate`.
 
 **Arc-wide audit (2026-09-20, 4 independent agents).** The core algorithms held
 up under adversarial probing (no silent corruption or uncaught over-deletion was
@@ -362,8 +363,41 @@ warning or a v0.18 migration.
     confirmed the re-extract verify SOUND (verify-pass implies check-pass) + byte
     offsets, confinement, --changed, tiers all hold.
 
-Ops remaining. Cross-file create-and-register (multi-file transaction, 5.2.4);
-lockfile `relocate`. Risk: medium.
+- **`relocate` (lockfile relocate). DONE.** A new fix op (`FixSpec::Relocate`,
+  #21) hosted on `file_absent`: when the rule flags a file in a SUBDIRECTORY, move
+  it back to the repository root keeping its basename -- the "a lockfile drifted
+  into a member directory" case (`paths: "**/*/Cargo.lock"` + `fix: { relocate:
+  {} }`). Design decisions: (a) HOST = reuse `file_absent` (the violation carries
+  the subdir path), joining `file_remove` / `git_untrack` in its `match &spec.fix`
+  -- no new rule kind, the smaller and self-contained option; a dedicated
+  `file_at_root` kind was considered and left as a future option. (b) MECHANISM =
+  `RelocateFixer` modeled on `FileRenameFixer` (a shared PURE `resolve_relocate_
+  target` feeds `apply` + `fix_edit` + `can_fix`; emits `FixEdit::RenameFile` to
+  root; honors dry-run + `--diff` stage via the `stage_ops` sink). (c) TIER =
+  Unsafe by default (a rename moves a real file, destination inferred),
+  Safe-promotable; FIXED-BEHAVIOR in W2 (no ruleset bytes, no spawn -- honored
+  from any source, gated only by its tier). (d) UNAMBIGUOUS-ONLY: an already-at-
+  root file (nowhere to move, `X->X` never converges) is `can_fix`-false and
+  Skipped; an occupied root slot is a fix-time collision Skip (never clobbered,
+  and the same-file case that `FileRenameFixer` needs cannot arise -- source is in
+  a subdir, target at root); a staged-collision (two nested files, one root slot)
+  skips the second so `--diff` never emits a self-conflicting patch. Convergence
+  requires a SUBDIRECTORY-anchored pattern (`**/*/Cargo.lock`, not `**/Cargo.lock`);
+  the docs + the fixspec doccomment say so. Gate cascade: `FixSpec::Relocate` +
+  `RelocateFixSpec` + `op_name` + `ALL_OP_NAMES` + the `cases` op-name test
+  (config.rs); `file_absent` build arm + `build_accepts_relocate_fix`; W2
+  fixed-behavior partition (`FIXED_BEHAVIOR_FIX_OPS`) + `w2_remote_relocate_is_not_
+  demoted` (with an explicit `declared_content_tier` arm for teeth); property net
+  (`rule_relocate` + a planted nested `_trig/reloctrig.txt`, drawn into the
+  convergence / idempotence / dry-run-purity laws); fix-coverage e2e (4 scenarios:
+  moves-a-nested-lockfile [convergent], suggested-under-bare-fix, skips-when-root-
+  slot-taken, declines-a-root-level-file); 9 `RelocateFixer` unit tests; facts.json
+  20->21; README count (26 + 60) + prose; CHANGELOG. No standalone design doc (a
+  focused op like `dir_create`); the decisions live here.
+  - **AUDIT PENDING** (next adversarial round).
+
+Ops remaining. Cross-file create-and-register (multi-file transaction, 5.2.4).
+Risk: medium.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 
@@ -415,6 +449,17 @@ The core algorithms held and the highest-value gaps are filled; these remain
   `toml_::navigate_mut` handles only `Key`).
 - **`structured_fix/mod.rs` `formats/` split** (~1820 lines, nearing the 2000
   cap).
+- **Docs (RELEASE-BLOCKING for v0.17): `docs/site/concepts/adoption/fixing.md` is
+  arc-stale.** It still says "The twelve ops" and lists only the 7 content + 5
+  path ops (its frontmatter `description:` too), missing the NINE added across the
+  arc: `set_value`, `remove_value`, `replace`, `chmod`, `git_untrack`, `command`,
+  `dir_create`, `sync_from`, `relocate`. This is pre-existing, arc-wide drift (not
+  a `relocate` regression), so it wants ONE comprehensive rewrite of the catalogue
+  section + the `fix_size_limit` coverage list (the located structured ops read
+  the target too) at release, not a per-op patch that would leave "twelve"
+  inconsistent. The README (26 + 60) and CHANGELOG are current; this site page is
+  the gap. (No count-gate catches it -- the prose "twelve" is not machine-checked;
+  consider a `num_before("ops")` gate on this page as part of the fix.)
 
 ## 4. Deferred-and-special items (§10): keep deferred
 
