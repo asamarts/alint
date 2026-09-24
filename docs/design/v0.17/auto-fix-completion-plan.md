@@ -428,8 +428,27 @@ warning or a v0.18 migration.
     because it runs at the Safe threshold -- `fix_unsafe_converges` is the real
     idempotence teeth).
 
-Ops remaining. Cross-file create-and-register (multi-file transaction, 5.2.4).
-Risk: medium.
+- **`create_and_register` (cross-file create-and-register). IN PROGRESS -- the LAST
+  Phase-3 op.** Design doc: `docs/design/v0.17/cross-file-create-and-register.md`
+  (asamarts approved the shape 2026-09-24). A new `cross_file` `relation: registered`
+  + `fix: { create_and_register: {} }`: a workspace member must both EXIST and be
+  REGISTERED in a manifest list (`$.workspace.members`). **KEY MODEL (asamarts):
+  two idempotent postconditions -- `exists` (repair = create from `content_from:`)
+  and `registered` (repair = append to the list) -- each applied ONLY if unmet;
+  "create only if it doesn't exist" is not a mode flag, just the existence repair,
+  a no-op whenever the member already exists (always so for a glob-discovered one).**
+  So the common case (existing-but-unregistered) degrades to a single-file list
+  append; the 5.2.4 multi-file transaction engages only when a create actually
+  fires (a missing NAMED source). New `StructuredOp::Append` (list-append, per
+  format). Unsafe + content-injecting. **Phasing: (1) check + register-only fix
+  (single-file, the high-value common case, full gate cascade, facts 21->22); (2)
+  create-if-missing + the 5.2.4 stage/verify-against-staged/all-or-nothing
+  transaction + the injectable-writer `test-hooks` seam + fault-injection tests.**
+  Each phase: full preflight + an independent adversarial audit round. Risk: medium
+  (Phase 2 builds the real multi-file-transaction infra + reworks the engine write
+  step).
+
+After create-and-register: Phase 3 is COMPLETE; on to Phase 4.
 
 ### P2 - Phase 4 (ordering, canonicalization, headers)
 
