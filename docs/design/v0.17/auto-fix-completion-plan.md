@@ -916,3 +916,64 @@ is prioritized:
   it behind `--include-fixes`. Applies when W3b is built.
 
 _All open decisions are resolved; the plan is ready to execute (start with P0)._
+
+## 7. Release readiness (v0.17.0) -- arc feature-complete, 2026-09-25
+
+The auto-fix arc is **FEATURE-COMPLETE and VERIFIED**. This section is the current
+release-readiness assessment (§5 is the historical order, now executed). Branch
+`phase-0-fix-engine` @ `522dc9bf`, **132 commits ahead of `origin/main`**.
+
+### Arc status -- DONE + certified
+
+- **26 fix ops** (was 12 at the arc's start): the 12 baseline (7 content-hygiene +
+  5 path/prepend/append) plus the 14 added across the arc -- `replace`, `set_value`,
+  `remove_value`, `chmod`, `git_untrack`, `command`, `dir_create`, `sync_from`,
+  `relocate`, `create_and_register`, `sort`, `indent_style`, `insert_line`,
+  `insert_header`. All Phase 0-4 work COMPLETE; every op audit-hardened (2
+  worktree-isolated agents + own CLI probing per increment).
+- **Certification on `522dc9bf` (clean tree, in sync):** `cargo test --workspace` =
+  **2938 tests / 87 suites, 0 failures**; `cargo fmt --check`, workspace `clippy -D
+  warnings`, `rustdoc -D warnings` all clean; `gen-facts --check` (26) + `gen-schema
+  --check` clean; dogfood = only the 4 pre-existing `rust-file-max-lines` warnings
+  (main.rs / engine.rs / alint-dsl tests.rs / docs_export.rs). Op-count coherent at
+  26 across `ALL_OP_NAMES` / `op_name` / facts.json / README (headline + prose) /
+  rules.md / ARCHITECTURE. The drift gates (readme_claims, rules_md_drift,
+  schema_drift, fix_coverage, the W2 3-way partition, the property-net op-coverage)
+  passing IS the "no drift across 132 commits" proof.
+
+### Release blockers (ordered, with current state)
+
+1. **`docs/site/concepts/adoption/fixing.md` rewrite -- RELEASE-BLOCKING (docs).**
+   Arc-stale: the `## The twelve ops` section (+ the frontmatter `description`) list
+   only the original **12** ops; the **14** arc ops and their new categories (located
+   value edits, cross-file, metadata/VCS, spawning, ordering, header, reindent) are
+   absent. Needs one code-verified rewrite to the 26-op surface (per the
+   concepts-redesign practice: CODE-VERIFY every claim, prose signal-free). Deploys
+   via docs-bundle without a release, but belongs to the v0.17 story. Own increment.
+2. **Version bump `0.16.1` -> `0.17.0`.** `bash ci/scripts/bump-version.sh 0.17.0`
+   edits `Cargo.toml [workspace.package].version` + README pins (GH Action / docker /
+   pre-commit rev) + `npm/package.json` + `editors/zed/{Cargo.toml,extension.toml}` +
+   `Cargo.lock`; then `gen-facts` refreshes `facts.json alint_version`. Preflight:
+   `check-version-pins.sh`, `check-workspace-dep-floors.sh`. (The `0.16.1` strings in
+   `examples/**` are unrelated data -- apache-RAT `RAT_VERSION`, `zone.js` -- do NOT
+   touch. `SECURITY.md`'s "as of v0.16.1" advisory line updates with the release.)
+3. **CHANGELOG `[Unreleased]` -> `[0.17.0]`** + date. (The `file_remove` breaking
+   entry + all 4 Phase-4 op entries already sit under `[Unreleased]`.)
+4. **`ROADMAP.md` / `roadmap.json`** v0.17 entry finalized (gen-roadmap).
+5. **Merge 132 commits to `main`** (PR from `phase-0-fix-engine`). The large one;
+   CI must be green on the merge. `main` is the release line.
+6. **Release execution (asamarts-authorized, OUTWARD-FACING):** commit + `git tag
+   v0.17.0` -> CI publishes to crates.io / npm / PyPI / Homebrew / Docker / editor
+   channels (per `RELEASING.md` + the distribution memories). Needs explicit go;
+   do not tag/publish autonomously.
+7. **alint.org pin-bump (post-tag, completes the release):** bump alint.org's
+   install-pins + prose claims to `v0.17.0` (as `asamarts`) and verify live -- else
+   the STALE DOCS BUNDLE guard blocks the docs deploy. See `RELEASING.md` §
+   "Documentation and site-drift" + the `alint.org` pin-bump note.
+
+### Recommended order
+
+fixing.md rewrite (1) -> version bump + CHANGELOG + ROADMAP (2-4, one release-prep
+commit) -> merge PR to main (5) -> **[asamarts go]** tag + publish (6) -> alint.org
+pin-bump + verify live (7). Steps 1-5 are safe/reversible; 6-7 are the
+outward-facing release and gated on explicit authorization.
