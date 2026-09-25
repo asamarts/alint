@@ -753,7 +753,42 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
   CHANGELOG; ARCHITECTURE + rules.md tables. gen-schema unchanged (`FixSpec` is
   Deserialize-only, not schemars-derived). Also fixed a STALE `InsertLineFixSpec`
   doc-comment ("Safe" -> "Unsafe") + stale testkit comments left by the insert_line
-  tier flip. **Audit round pending.**
+  tier flip.
+  - **Audit round 1 (2 worktree-isolated agents pinned to `3fa96558` + own P1-P6 CLI
+    probing), 2026-09-25. 1 HIGH + 2 LOW, all fixed/addressed.**
+    - **HIGH (BOTH agents independently) -- idempotency guard not marker-safe -> a
+      DOUBLE insert.** When the header CONTENT itself begins with a skippable prefix
+      (`#!` / `<?xml`), a later fixpoint pass's `header_insert_offset` re-parses the
+      just-inserted header AS that prefix and returns an `off` BEYOND it, so the
+      `existing[off..].starts_with(header)` guard checks the wrong spot and stacks a
+      SECOND copy (two `<?xml>` decls = INVALID XML; duplicate shebang). Bounded at 2
+      (then converges), Safe-tier, exit 0, and `--diff` (single-pass) showed only ONE
+      -- silent. `file_prepend` is immune (its guard anchors at a FIXED BOF position).
+      Only fires when the header does not satisfy `pattern` after one insert (a
+      misconfig / anchored pattern). FIX: the idempotency guard now checks BOTH the
+      computed `off` AND the after-BOM top (`after_bom.starts_with(header)`) -- the
+      latter catches a header that is itself a skippable prefix. Unit test
+      `insert_header_does_not_double_when_content_is_itself_a_skippable_prefix` (xml/
+      shebang/BOM+xml/multi-line) gates it. (Property net CANNOT gate this: the double
+      needs a NON-convergent config, which the convergence law forbids sampling -- the
+      unit test that calls the fixer twice is the correct gate.)
+    - **LOW -- empty `content: ""`** accepted -> misleading "already present" skip +
+      never converges. FIX: rejected at build (`insert_header content must not be
+      empty`) + test.
+    - **LOW/MED -- `^`-anchored `pattern` never converges** (the header lands on line
+      2 after a shebang, so an absolute-line-1 `^` pattern can't match), yet `check`
+      tags it fixable. Same class as `file_prepend`'s content-must-satisfy-pattern
+      limitation (`can_fix` is a convertibility verdict, not a satisfiability proof);
+      the line-2 placement makes `^` specifically unsatisfiable. DOCUMENTED (rules.md
+      / config.rs / CHANGELOG): the `pattern` must match below line 1 (unanchored or
+      `(?m)`).
+    - **Doc precision (agent F3):** reworded "strictly safer than file_prepend" ->
+      "at least as safe, and safer on a shebang/xml file"; "blindly at BOF" ->
+      "at BOF (after any BOM; blind to a shebang/xml-decl)"; the "guaranteed no-op"
+      claim is now TRUE post-fix (guard anchors on two positions).
+    - Verified CORRECT by the agents (each gate teeth-tested): W2 demotion + promotion
+      refusal + `content_from` confinement; op-count consistency (all 26); fixable/
+      unsafe honesty tagging; every gate REDS when the op is broken.
 
 Phase 4 is now FEATURE-COMPLETE (sort, indent_style, insert_line, insert_header =
 26 ops). After the insert_header audit round, the arc is ready to wrap.

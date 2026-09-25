@@ -200,10 +200,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a line that must stay first -- unlike `file_prepend`, which would push a shebang
   off line 1. For a file with none of those prefixes it inserts at BOF, exactly
   like `file_prepend`. **`Safe` by default** (the insertion point is the one
-  canonical header spot and the content is inert -- strictly safer than the `Safe`
-  `file_prepend` it refines); the header bytes are ruleset-authored, so an untrusted
-  remote's `insert_header` is demoted to a suggestion. Its idempotency guard checks
-  the exact bytes it would insert, so a repeated fix is a guaranteed no-op.
+  canonical header spot and the content is inert -- at least as safe as the `Safe`
+  `file_prepend` it refines, and safer on a file with a shebang / XML declaration);
+  the header bytes are ruleset-authored, so an untrusted remote's `insert_header` is
+  demoted to a suggestion. Its idempotency guard anchors on both the insertion point
+  and the file top, so a repeated fix is a guaranteed no-op even when the header
+  content itself begins with a `#!` / `<?xml` prefix. Because the header can land
+  below line 1, the rule's `pattern` must be able to match below the first line (use
+  an unanchored pattern or `(?m)`, not a `^`-anchored one).
 
 ### Changed
 

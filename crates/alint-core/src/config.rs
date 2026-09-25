@@ -1007,12 +1007,17 @@ pub struct InsertLineFixSpec {
 /// The `insert_header` op (Phase 4): insert the host `file_header` rule's required
 /// header at the top of a violating file, AFTER any leading BOM, shebang
 /// (`#!...`), or XML declaration (`<?xml ...?>`) -- the differentiator over
-/// `file_prepend`, which prepends blindly at BOF and would push a shebang off
-/// line 1. Content comes from `content` / `content_from` (as `file_prepend`).
-/// **`Safe` by default** (the insertion point is the one canonical header spot and
-/// the content is inert; strictly safer than the `Safe` `file_prepend` it refines);
+/// `file_prepend`, which prepends at BOF (after any BOM, but blind to a shebang /
+/// XML declaration) and would push a shebang off line 1. Content comes from
+/// `content` / `content_from` (as `file_prepend`). **`Safe` by default** (the
+/// insertion point is the one canonical header spot and the content is inert; at
+/// least as safe as the `Safe` `file_prepend` it refines, and safer on a file with
+/// a shebang / XML declaration, which `file_prepend` would displace);
 /// **content-injecting** in the W2 partition (the header bytes are ruleset-authored,
-/// so an untrusted remote demotes it).
+/// so an untrusted remote demotes it). NOTE: because the header can land below line
+/// 1, the host rule's `pattern` must be able to match below the first line (use an
+/// unanchored pattern or `(?m)`); a `^`-anchored pattern that only matches line 1
+/// cannot be satisfied once the header sits under a shebang.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct InsertHeaderFixSpec {

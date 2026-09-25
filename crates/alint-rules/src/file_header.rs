@@ -155,6 +155,17 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         // line that must stay first. Safe by default (the position is the one
         // canonical header spot and the content is inert).
         Some(FixSpec::InsertHeader { insert_header }) => {
+            // An empty inline header inserts nothing, so `inserted()` always reports
+            // "already present" and the check never clears -- reject it up front with
+            // a clear message rather than a misleading skip (audit F2). (`content_from`
+            // an empty file is the same shape but only knowable at apply time.)
+            if matches!(insert_header.content.as_deref(), Some("")) {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    "insert_header `content` must not be empty (an empty header inserts nothing \
+                     and would never satisfy the check)",
+                ));
+            }
             let source = alint_core::resolve_content_source(
                 &spec.id,
                 "insert_header",
@@ -293,6 +304,15 @@ mod tests {
              fix: { insert_header: {} }\n",
         ));
         assert!(no_content.is_err(), "a header needs content/content_from");
+        // insert_header with an EMPTY inline content is rejected (audit F2: an empty
+        // header inserts nothing and never satisfies the check).
+        let empty = build(&spec_yaml(
+            "id: t\nkind: file_header\npaths: \"**/*.sh\"\npattern: \"SPDX\"\nlevel: error\n\
+             fix: { insert_header: { content: \"\" } }\n",
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(empty.contains("must not be empty"), "{empty}");
         // A fix op that is neither file_prepend nor insert_header is rejected.
         let bad = build(&spec_yaml(
             "id: t\nkind: file_header\npaths: \"**/*.sh\"\npattern: \"SPDX\"\nlevel: error\n\

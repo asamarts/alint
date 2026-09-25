@@ -456,14 +456,21 @@ impl InsertHeaderFixer {
     }
 
     /// The file with `header` inserted at [`header_insert_offset`], or `None` when
-    /// the header is already there (idempotence). The byte check round-trips
-    /// exactly what this inserts, so a repeated fix is a GUARANTEED no-op (no
-    /// insert_line-style runaway is possible). Adds one separating newline when the
+    /// the header is already there (idempotence). The idempotency check covers TWO
+    /// positions: the computed insertion point (`off`) AND the top after any BOM.
+    /// The second is essential when the header content ITSELF begins with a
+    /// skippable prefix (`#!` / `<?xml`): a later fixpoint pass's
+    /// `header_insert_offset` would treat the just-inserted header as that prefix
+    /// and return an `off` BEYOND it, so the `off` check alone would miss the copy
+    /// and stack a second one (a bounded fixpoint double -- audit F1). Checking the
+    /// after-BOM top too -- mirroring [`FilePrependFixer`]'s fixed-position guard --
+    /// makes a repeated fix a guaranteed no-op. Adds one separating newline when the
     /// preceding prefix (a shebang with no trailing newline) leaves `off` mid-line,
     /// so the header always starts on its own line.
     fn inserted(existing: &[u8], header: &[u8]) -> Option<Vec<u8>> {
         let (off, consumed_line_prefix) = header_insert_offset(existing);
-        if existing[off..].starts_with(header) {
+        let after_bom = existing.strip_prefix(UTF8_BOM).unwrap_or(existing);
+        if existing[off..].starts_with(header) || after_bom.starts_with(header) {
             return None;
         }
         let mut out = Vec::with_capacity(existing.len() + header.len() + 1);
@@ -1278,6 +1285,30 @@ mod tests {
         // Header already sits right after the shebang -> no-op (guaranteed no
         // runaway: the byte check round-trips exactly what apply would insert).
         assert!(ins("# h\n", b"#!/bin/sh\n# h\ncode\n").is_none());
+    }
+
+    #[test]
+    fn insert_header_does_not_double_when_content_is_itself_a_skippable_prefix() {
+        // AUDIT F1: a header whose content itself begins with `<?xml` / `#!` would,
+        // on a second fixpoint pass, be re-parsed by `header_insert_offset` as a
+        // skippable prefix -- so the `off`-only idempotency check would jump PAST the
+        // just-inserted copy and stack a SECOND one (two xml-decls = invalid XML).
+        // The after-BOM guard makes the second pass a no-op.
+        let decl = b"<?xml version=\"1.0\"?>\n".as_slice();
+        let once = InsertHeaderFixer::inserted(b"<root/>\n", decl).unwrap();
+        assert_eq!(once, b"<?xml version=\"1.0\"?>\n<root/>\n".to_vec());
+        assert!(
+            InsertHeaderFixer::inserted(&once, decl).is_none(),
+            "an xml-decl header must not double: {}",
+            String::from_utf8_lossy(&once)
+        );
+        // Shebang-shaped header, same trap.
+        let sh = b"#!/usr/bin/env doit\n".as_slice();
+        let sh_once = InsertHeaderFixer::inserted(b"plain\n", sh).unwrap();
+        assert!(InsertHeaderFixer::inserted(&sh_once, sh).is_none());
+        // With a BOM before the (xml-decl) header.
+        let bom_once = InsertHeaderFixer::inserted(b"\xEF\xBB\xBF<root/>\n", decl).unwrap();
+        assert!(InsertHeaderFixer::inserted(&bom_once, decl).is_none());
     }
 
     #[test]
