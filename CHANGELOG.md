@@ -183,9 +183,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   with a `start`/`end` marker is rejected at load (a multi-block insert target is
   ambiguous). A missing-required-line finding is reported and auto-fixable
   independently of the sortedness findings (an out-of-order entry is `sort`'s job,
-  not `insert_line`'s). `Safe` by default (it inserts a user-declared line, like
-  `file_append`); the `require:` lines are ruleset-authored, so an untrusted
-  remote's `insert_line` is demoted to a suggestion.
+  not `insert_line`'s). **`Unsafe` by default**: it adds ruleset-authored content
+  at a COMPUTED position, which is load-bearing in the order-sensitive formats it
+  targets (a `.gitignore` negation must FOLLOW its pattern), so a bare `fix`
+  suggests it and `--unsafe-fixes` (or a per-rule `applicability: safe`, e.g. for
+  an order-tolerant `CODEOWNERS`) applies it; the `require:` lines are also
+  ruleset-authored, so an untrusted remote's `insert_line` is demoted to a
+  suggestion. Presence is exact-string (independent of `comparator`); a `require:`
+  line that could never round-trip to an entry -- one carrying an embedded line
+  break, or (with `select:`) one that does not itself match `select:` -- is
+  rejected at load, so a fix can never re-insert it forever.
 
 ### Changed
 

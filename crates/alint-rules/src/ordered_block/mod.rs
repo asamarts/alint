@@ -129,6 +129,14 @@ struct Options {
     /// sorted). A missing one is repaired by the `insert_line` fix, which splices
     /// it at its sorted position. Currently supported only for a MARKERLESS rule
     /// (the whole file is one sorted list -- the `CODEOWNERS` / allow-list shape).
+    ///
+    /// Presence is EXACT-string (trimmed), independent of `comparator`: under
+    /// `lexical-ci`, requiring `bravo` is NOT satisfied by an existing `Bravo`
+    /// (the distinct case-variant is inserted) -- a required line is inserted
+    /// verbatim, so it must match itself exactly. For the same reason, with
+    /// `select:` set every required line must itself match `select:` (else the
+    /// inserted line could never be recognized as an entry); a non-matching line
+    /// is rejected at load.
     #[serde(default)]
     require: Option<Vec<String>>,
 }
@@ -634,11 +642,20 @@ impl Fixer for OrderedBlockSortFixer {
         // exits 0 leaving the unclosed block on disk. Declining here keeps the
         // unclosed finding honestly reported (skipped), matching `check`.
         if !self.can_fix(violation) {
-            return Ok(FixOutcome::Skipped(
-                "an unclosed ordered_block (a `start` with no `end`) is not \
-                 sort-fixable"
-                    .to_string(),
-            ));
+            // `can_fix` declines two DIFFERENT non-sortable findings; report the
+            // matching reason so a markerless `require:` rule is not told to hunt
+            // for a nonexistent `end` marker (audit: `sort` MED false-diagnostic).
+            let reason = if violation
+                .baseline_key
+                .as_deref()
+                .is_some_and(|k| k.starts_with(REQUIRE_KEY_PREFIX))
+            {
+                "a missing `require:` line cannot be added by `sort` (it only reorders \
+                 existing lines); use the `insert_line` fix"
+            } else {
+                "an unclosed ordered_block (a `start` with no `end`) is not sort-fixable"
+            };
+            return Ok(FixOutcome::Skipped(reason.to_string()));
         }
         let Some(path) = &violation.path else {
             return Ok(FixOutcome::Skipped(
@@ -701,9 +718,15 @@ impl Fixer for OrderedBlockSortFixer {
 
 /// The `insert_line` fix for `ordered_block` + `require:` (markerless): splice a
 /// missing required line at its SORTED position among the entries, using the
-/// rule's comparator. Content-injecting (the required line is ruleset-authored),
-/// `Safe` by default (it inserts a user-declared line, like `file_append`). The
-/// specific missing line is read from the violation's `baseline_key`.
+/// rule's comparator. Content-injecting (the required line is ruleset-authored).
+/// `Unsafe` by default: it adds ruleset-authored content at a COMPUTED position,
+/// and position is load-bearing in the order-sensitive formats this targets (a
+/// `.gitignore` negation only works AFTER the pattern it re-includes; some config
+/// keys have precedence), so a mis-placed insert can silently change file meaning
+/// -- more agency than `sort` (which only permutes the user's own lines) or
+/// `file_append` (fixed EOF). A bare `fix` SUGGESTS it; `--unsafe-fixes` or a
+/// per-rule `applicability: safe` (e.g. for `CODEOWNERS`, which is order-tolerant)
+/// applies it. The specific missing line is read from the violation's `baseline_key`.
 #[derive(Debug, Clone)]
 struct OrderedBlockInsertLineFixer {
     comparator: Comparator,
@@ -861,6 +884,7 @@ fn parse_require(
     rule_id: &str,
     require: Option<&[String]>,
     has_marker: bool,
+    select: Option<&Regex>,
 ) -> Result<Vec<String>> {
     let Some(lines) = require else {
         return Ok(Vec::new());
@@ -877,6 +901,46 @@ fn parse_require(
         return Err(Error::rule_config(
             rule_id,
             "ordered_block `require:` lines must not be empty",
+        ));
+    }
+    // A required line with an EMBEDDED line break is not a single line: the fixer
+    // splices it as one slot, but the check re-reads the file via `str::lines()`
+    // as MULTIPLE lines, none equal to the required string -- so it is never
+    // "present" and the fixpoint re-inserts it every pass (audit: `insert_line`
+    // HIGH, embedded-newline trigger). `trim()` cannot strip an interior break, so
+    // reject at load, like the empty guard above.
+    if let Some(bad) = trimmed
+        .iter()
+        .find(|l| l.contains('\n') || l.contains('\r'))
+    {
+        return Err(Error::rule_config(
+            rule_id,
+            format!(
+                "ordered_block `require:` line {bad:?} contains an embedded line break; each \
+                 required line must be a single line"
+            ),
+        ));
+    }
+    // A required line that `select:` would EXCLUDE can never be recognized as an
+    // entry: the check filters entries through `select` (via `is_entry_line`) and
+    // `insert_line` splices the line verbatim. Inserting it would never satisfy
+    // the check, so the fixpoint re-inserts it EVERY pass -- unbounded duplicate
+    // lines, and `fix` never settles (audit: `insert_line` HIGH). Reject at load,
+    // like the marker / empty guards above.
+    if let Some(re) = select
+        && let Some(bad) = trimmed
+            .iter()
+            .find(|l| !is_entry_line(Some(re), l.as_str(), l.as_str()))
+    {
+        return Err(Error::rule_config(
+            rule_id,
+            format!(
+                "ordered_block `require:` line {bad:?} does not match `select:` `{}`, so it \
+                 could never be an entry -- the `insert_line` fix would re-add it every pass \
+                 without ever satisfying the check. Make each required line match `select:`, \
+                 or remove `select:`.",
+                re.as_str()
+            ),
         ));
     }
     Ok(trimmed)
@@ -934,6 +998,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         &spec.id,
         opts.require.as_deref(),
         start.is_some() || end.is_some(),
+        select.as_ref(),
     )?;
     // `sort` reindexes the rule's own config; `insert_line` inserts a missing
     // `require:` line at its sorted position. DEFAULT TIER for `sort` depends on
@@ -941,8 +1006,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     // lines (equality is on the COMPARATOR -- `Foo`/`foo` under `lexical-ci`, `  a`/
     // `a` -- so a dropped line need not be byte-identical), which is silent data
     // loss, so it defaults to `Unsafe` like every other deleting fixer. `insert_line`
-    // inserts a user-declared line (`Safe`, like `file_append`). An explicit
-    // `applicability:` always wins.
+    // defaults to `Unsafe` too: it adds ruleset-authored content at a COMPUTED
+    // position, and position is load-bearing in the order-sensitive formats it
+    // targets (a `.gitignore` negation must FOLLOW its pattern), so a mis-placed
+    // insert can silently change file meaning -- more agency than a `sort` permute
+    // or a fixed-EOF `file_append`. An explicit `applicability:` always wins
+    // (`CODEOWNERS`, which is order-tolerant, opts back into `safe`).
     let fixer: Option<Box<dyn Fixer>> = match &spec.fix {
         Some(FixSpec::Sort { sort }) => Some(Box::new(OrderedBlockSortFixer {
             start: start.clone(),
@@ -967,7 +1036,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             Some(Box::new(OrderedBlockInsertLineFixer {
                 comparator: opts.comparator,
                 select: select.clone(),
-                applicability: insert_line.applicability.unwrap_or(Applicability::Safe),
+                applicability: insert_line.applicability.unwrap_or(Applicability::Unsafe),
             }))
         }
         Some(other) => {

@@ -3749,7 +3749,7 @@
         },
         "require": {
           "default": null,
-          "description": "Exact lines that must be PRESENT in the block (in addition to it being sorted). A missing one is repaired by the `insert_line` fix, which splices it at its sorted position. Currently supported only for a MARKERLESS rule (the whole file is one sorted list -- the `CODEOWNERS` / allow-list shape).",
+          "description": "Exact lines that must be PRESENT in the block (in addition to it being sorted). A missing one is repaired by the `insert_line` fix, which splices it at its sorted position. Currently supported only for a MARKERLESS rule (the whole file is one sorted list -- the `CODEOWNERS` / allow-list shape). Presence is EXACT-string (trimmed), independent of `comparator`: under `lexical-ci`, requiring `bravo` is NOT satisfied by an existing `Bravo` (the distinct case-variant is inserted) -- a required line is inserted verbatim, so it must match itself exactly. For the same reason, with `select:` set every required line must itself match `select:` (else the inserted line could never be recognized as an entry); a non-matching line is rejected at load.",
           "items": {
             "type": "string"
           },

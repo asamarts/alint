@@ -219,6 +219,113 @@ fn check_tags_only_the_sortable_ordered_block_violation_fixable() {
 }
 
 #[test]
+fn check_tags_only_the_missing_require_line_fixable_under_insert_line() {
+    // Phase-4 `insert_line` honesty (the e2e routing gate the auditors flagged as
+    // missing): a markerless `ordered_block` with `require:` emits BOTH a
+    // sortedness ENTRY finding (out-of-order) AND a missing-required-line REQUIRE
+    // finding. `insert_line` can ADD a line but not REORDER, so its `can_fix`
+    // accepts ONLY the REQUIRE finding. `check` must tag only that one fixable.
+    // Forces `applicability: safe` so `is_fixable` reflects the per-violation
+    // ROUTING, not the op's default tier (the honesty gate is tier-agnostic, like
+    // the indent_style case below).
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-insert-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    // Unsorted (charlie before alpha) AND missing `bravo`: two findings, exactly
+    // one insert_line-fixable.
+    let tree: TreeSpec = serde_yaml_ng::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: allow\n    kind: ordered_block\n    paths: \"**/*.txt\"\n    require: [\"bravo\"]\n    level: error\n    fix:\n      insert_line:\n        applicability: safe\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "allow")
+        .expect("allow produced a result");
+    assert_eq!(
+        result.violations.len(),
+        2,
+        "entry + require: {:?}",
+        result.violations
+    );
+    let find = |needle: &str| {
+        result
+            .violations
+            .iter()
+            .find(|v| v.message.contains(needle))
+            .unwrap_or_else(|| panic!("no violation matching {needle:?}: {:?}", result.violations))
+    };
+    assert!(
+        find("required line").is_fixable,
+        "the missing required line is insert_line-fixable"
+    );
+    assert!(
+        !find("out of order").is_fixable,
+        "the sortedness finding is NOT insert_line-fixable (insert_line cannot reorder)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}
+
+#[test]
+fn check_tags_only_the_sortable_violation_fixable_under_sort_with_require() {
+    // The mirror routing: the SAME two findings under `fix: sort`. `sort` reorders
+    // entries but cannot ADD a missing `require:` line, so its `can_fix` accepts
+    // ONLY the ENTRY finding -- the exact opposite of `insert_line` above. Guards
+    // that a `sort`+`require:` rule never falsely promises `fix` will add the line.
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-sortreq-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    let tree: TreeSpec = serde_yaml_ng::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: allow\n    kind: ordered_block\n    paths: \"**/*.txt\"\n    require: [\"bravo\"]\n    level: error\n    fix:\n      sort: {}\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "allow")
+        .expect("allow produced a result");
+    assert_eq!(result.violations.len(), 2, "{:?}", result.violations);
+    let find = |needle: &str| {
+        result
+            .violations
+            .iter()
+            .find(|v| v.message.contains(needle))
+            .unwrap_or_else(|| panic!("no violation matching {needle:?}: {:?}", result.violations))
+    };
+    assert!(
+        find("out of order").is_fixable,
+        "the sortedness finding is sort-fixable"
+    );
+    assert!(
+        !find("required line").is_fixable,
+        "the missing required line is NOT sort-fixable (sort cannot add a line)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}
+
+#[test]
 fn check_tags_only_the_reindentable_indent_style_violation_fixable() {
     // Phase-4 `indent_style` honesty: the reindent fix converts a PURE-TAB lead
     // (K tabs -> K*width spaces) but declines the ambiguous cases (a pure-space

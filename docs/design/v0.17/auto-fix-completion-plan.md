@@ -683,10 +683,47 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
   `can_fix` is TRUE only for the missing-required-line findings -- an out-of-order
   entry is NOT insert_line-fixable (that is `sort`'s job; pair two rules for a
   fully-managed list), and the F1 `apply` can_fix-guard is baked in from the start.
-  Tier **Safe** (inserts a user-DECLARED line, like `file_append`). W2
-  **CONTENT_INJECTING** (the `require:` lines ARE ruleset-authored bytes -- the
-  clearest injection case; demoted from an untrusted remote). Op #25. Full gate
-  cascade + the round-1/2/3 lessons applied proactively.
+  Tier **Unsafe** (audit round-1 tier reversal, asamarts's call 2026-09-24; see
+  below). W2 **CONTENT_INJECTING** (the `require:` lines ARE ruleset-authored bytes
+  -- the clearest injection case; demoted from an untrusted remote). Op #25. Full
+  gate cascade + the round-1/2/3 lessons applied proactively.
+
+  - **Audit round 1 (2 worktree-isolated agents pinned to `092b2354` + own P1-P14
+    CLI probing), 2026-09-24. 1 HIGH + 1 MED + 3 LOW, ALL FIXED/RESOLVED.**
+    - **HIGH -- unbounded-duplication runaway (both agents).** A `require:` line
+      that can never round-trip to an entry was re-inserted every fixpoint pass to
+      the MAX_PASSES cap, exiting 2 with a corrupted (and compounding) file; the
+      `--dry-run` preview hid it. TWO triggers: (a) a `select:`-mismatched line
+      (incl. a whitespace-anchored `select:`, since `require:` lines are trimmed),
+      (b) an EMBEDDED-NEWLINE line (splits on re-read via `str::lines()`). FIX:
+      `parse_require` now takes `select` and rejects, at load, any require line that
+      is not an entry under `select` OR carries a `\n`/`\r` -- mirrors the existing
+      marker/empty guards. The load-time rejection is the ONLY correct fix: an
+      inserted non-entry is invisible to BOTH the presence scan and the insert
+      idempotence check (both gate on `is_entry_line`), so no runtime clamp helps.
+    - **MED -- false "unclosed" diagnostic (correctness agent).** `sort`'s `apply`
+      declines BOTH unclosed and require findings but printed a hardcoded "unclosed
+      ordered_block" skip reason, sending a markerless `require:` user hunting for a
+      nonexistent `end`. FIX: branch the skip reason on the key prefix.
+    - **MED (tier) -- Safe was wrong (honesty agent).** `insert_line` adds
+      ruleset-authored content at a COMPUTED position, load-bearing in the
+      order-sensitive formats it targets (a `.gitignore` negation must FOLLOW its
+      pattern; a bare Safe fix inserted `!keep.log` BEFORE `*.log`, a non-functional
+      negation). Surfaced to asamarts as a fork; **asamarts chose Unsafe** (matches
+      the `indent_style` precedent). Now default Unsafe: bare `fix` suggests,
+      `--unsafe-fixes` or per-rule `applicability: safe` (for order-tolerant
+      `CODEOWNERS`) applies. Scenarios moved to `fix_unsafe` + a new
+      `insert_line_suggested_under_bare_fix.yml` gates the tier.
+    - **LOW -- no e2e honesty gate for the REQUIRE/ENTRY routing (honesty agent).**
+      Added two `fixable_accuracy` gates (insert_line direction + the sort+require
+      mirror), forced `applicability: safe` so they assert ROUTING not tier.
+    - **LOW -- exact-string presence vs comparator (correctness agent).** By design
+      (a verbatim-insert feature); DOCUMENTED as intentional + pinned by
+      `require_presence_is_exact_string_not_comparator_equality` (proves it also
+      CONVERGES, no runaway).
+    - **LOW/latent -- `require:` key-name collision with nested-rule `require:`
+      blocks the W2 scans recurse (honesty agent).** Benign today (scalars skipped
+      by `.as_mapping()`); added a protective comment at the demote scan.
 
 Next Phase-4 op after insert_line: `insert_header` (or wrap the arc).
 

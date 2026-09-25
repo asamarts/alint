@@ -4,8 +4,9 @@ tags: [fix, ordered_block, insert_line, require]
 # A markerless `ordered_block` (the whole CODEOWNERS file is one sorted list) with
 # `require:` flags a missing required owner line; the `insert_line` fix splices it
 # at its SORTED position (between `*.md` and `*.rs`), not blindly at end-of-file
-# (the differentiator over `file_append`). Safe (it inserts a user-declared line),
-# so a bare `fix` applies it -> the second check is clean (sorted + present).
+# (the differentiator over `file_append`). Unsafe by default (a computed-position
+# insert can change meaning in an order-sensitive file), so `fix_unsafe` applies it
+# -> the second check is clean (sorted + present).
 
 given:
   tree:
@@ -20,7 +21,7 @@ given:
         level: error
         fix: { insert_line: {} }
 
-when: [check, fix, check]
+when: [check, fix_unsafe, check]
 
 expect:
   - violations:

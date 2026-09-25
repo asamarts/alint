@@ -1,0 +1,32 @@
+name: insert_line is Unsafe by default -- a bare fix suggests, does not insert
+tags: [fix, ordered_block, insert_line, require, applicability]
+
+# Counterpart to `insert_line_at_sorted_position.yml`: insert_line is Unsafe by
+# default (it adds ruleset-authored content at a COMPUTED position, which is
+# load-bearing in order-sensitive formats -- a `.gitignore` negation must FOLLOW
+# its pattern). Without `--unsafe-fixes` a bare `fix` SUGGESTS it, not applies it.
+# The `[check, fix]` shape asserts the fix step suggests and the `expect_tree`
+# proves the file is byte-untouched (a mis-placed negation is never auto-written).
+
+given:
+  tree:
+    .gitignore: "*.log\n"
+  config: |
+    version: 1
+    rules:
+      - id: keep-negation
+        kind: ordered_block
+        paths: "**/.gitignore"
+        require: ["!keep.log"]
+        level: error
+        fix: { insert_line: {} }
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: keep-negation, level: error, path: .gitignore}
+  - suggested: [keep-negation]
+
+expect_tree:
+  .gitignore: "*.log\n"

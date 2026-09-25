@@ -717,6 +717,12 @@ fn demote_content_fixers_in_rule(rule: &mut Mapping) {
             }
         }
     }
+    // Recurse the NESTED-RULE `require:` block (`for_each_dir` etc. carry a
+    // `Vec<NestedRuleSpec>` here). NOTE: `ordered_block` also has a `require:` key,
+    // but its items are SCALARS (exact lines), so `as_mapping_mut()` skips them --
+    // the two same-named features never cross wires. Keep this mapping-only guard
+    // if either feature changes (an ordered_block require line authored as a
+    // mapping must not be treated as a nested rule).
     if let Some(require) = rule
         .get_mut("require")
         .and_then(serde_yaml_ng::Value::as_sequence_mut)

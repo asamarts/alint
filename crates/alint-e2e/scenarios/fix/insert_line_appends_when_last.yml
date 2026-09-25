@@ -2,7 +2,9 @@ name: insert_line appends a required line that sorts last
 tags: [fix, ordered_block, insert_line, require]
 
 # When the missing required line sorts AFTER every existing entry, insert_line
-# appends it at the end (still the sorted position). Safe -> bare `fix` applies.
+# appends it at the end (still the sorted position). Unsafe by default (a
+# computed-position insert can change meaning in an order-sensitive file), so
+# `fix_unsafe` applies it.
 
 given:
   tree:
@@ -17,7 +19,7 @@ given:
         level: error
         fix: { insert_line: {} }
 
-when: [check, fix, check]
+when: [check, fix_unsafe, check]
 
 expect:
   - violations:

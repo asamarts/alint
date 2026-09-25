@@ -986,7 +986,14 @@ fn build_wires_insert_line_and_rejects_bad_configs() {
             "id: t\nkind: ordered_block\npaths: [\"CODEOWNERS\"]\nrequire: [\"* @team\"]\nlevel: error\nfix: { insert_line: {} }\n",
         ))
         .unwrap();
-    assert_eq!(ok.fixer().unwrap().applicability(), Applicability::Safe);
+    // Default tier is Unsafe (a computed-position insert can change meaning in an
+    // order-sensitive file); an explicit `applicability:` overrides.
+    assert_eq!(ok.fixer().unwrap().applicability(), Applicability::Unsafe);
+    let safe = build(&spec_yaml(
+            "id: t\nkind: ordered_block\npaths: [\"CODEOWNERS\"]\nrequire: [\"* @team\"]\nlevel: error\nfix: { insert_line: { applicability: safe } }\n",
+        ))
+        .unwrap();
+    assert_eq!(safe.fixer().unwrap().applicability(), Applicability::Safe);
     // require: with a marker is rejected.
     let markered = build(&spec_yaml(
             "id: t\nkind: ordered_block\npaths: [\"x\"]\nstart: '# s'\nend: '# e'\nrequire: [\"a\"]\nlevel: error\n",
@@ -1005,4 +1012,107 @@ fn build_wires_insert_line_and_rejects_bad_configs() {
     ))
     .unwrap_err();
     assert!(empty.to_string().contains("must not be empty"), "{empty}");
+    // AUDIT (insert_line HIGH): a require line that `select:` would EXCLUDE is
+    // unsatisfiable -- inserting it never makes it an entry, so the fixpoint would
+    // re-insert it every pass (unbounded duplication). Reject at load.
+    let unselectable = build(&spec_yaml(
+        "id: t\nkind: ordered_block\npaths: [\"deps.txt\"]\nselect: \"^dep:\"\nrequire: [\"config\"]\nlevel: error\nfix: { insert_line: {} }\n",
+    ))
+    .unwrap_err();
+    assert!(
+        unselectable
+            .to_string()
+            .contains("does not match `select:`")
+            && unselectable.to_string().contains("could never be an entry"),
+        "{unselectable}"
+    );
+    // ... but a require line that DOES match `select:` builds fine.
+    let selectable = build(&spec_yaml(
+        "id: t\nkind: ordered_block\npaths: [\"deps.txt\"]\nselect: \"^dep:\"\nrequire: [\"dep:z\"]\nlevel: error\nfix: { insert_line: {} }\n",
+    ));
+    assert!(selectable.is_ok(), "{:?}", selectable.err());
+    // AUDIT (insert_line HIGH, embedded-newline trigger): a require line with an
+    // interior line break splits into multiple physical lines on re-read, so it is
+    // never "present" -> the same unbounded-duplication runaway. Reject at load.
+    let multiline = build(&spec_yaml(
+        "id: t\nkind: ordered_block\npaths: [\"x\"]\nrequire: [\"mid\\nline\"]\nlevel: error\nfix: { insert_line: {} }\n",
+    ))
+    .unwrap_err();
+    assert!(
+        multiline.to_string().contains("embedded line break"),
+        "{multiline}"
+    );
+}
+
+#[test]
+fn insert_line_select_mismatch_cannot_run_away() {
+    // End-to-end guard for the HIGH finding: with the load-time rejection in
+    // place, a select-mismatched require line can never reach the fixer, so there
+    // is no config that produces the unbounded-duplication fixpoint. (The unit
+    // above asserts the rejection; this documents WHY it is load-time, not a
+    // runtime clamp: `is_entry_line` gates BOTH the presence scan and the insert
+    // idempotence check, so a non-entry line is invisible to both and would loop.)
+    use crate::test_support::spec_yaml;
+    let err = build(&spec_yaml(
+        "id: t\nkind: ordered_block\npaths: [\"deps.txt\"]\nselect: \"^dep:\"\nrequire: [\"config\", \"dep:ok\"]\nlevel: error\nfix: { insert_line: {} }\n",
+    ))
+    .unwrap_err();
+    // The offending line is named so the fix is obvious.
+    assert!(err.to_string().contains("\"config\""), "{err}");
+}
+
+#[test]
+fn sort_apply_reports_the_require_specific_skip_reason() {
+    // AUDIT (sort MED false-diagnostic): `can_fix` declines BOTH unclosed and
+    // require findings, but the skip reason must match the finding -- a markerless
+    // `require:` rule must NOT be told to hunt for a nonexistent `end` marker.
+    use tempfile::TempDir;
+    let tmp = TempDir::new().unwrap();
+    std::fs::write(tmp.path().join("f.txt"), "b\na\n").unwrap();
+    let ctx = FixContext {
+        root: tmp.path(),
+        dry_run: false,
+        fix_size_limit: None,
+        allow_out_of_root: false,
+        compose: None,
+        stage_ops: None,
+    };
+    let outcome = sort_fixer(Comparator::Lexical, false)
+        .apply(
+            &Violation::new("required line \"m\" is missing")
+                .with_path(Path::new("f.txt"))
+                .with_baseline_key(format!("{REQUIRE_KEY_PREFIX}m")),
+            &ctx,
+        )
+        .unwrap();
+    let FixOutcome::Skipped(s) = &outcome else {
+        panic!("expected a Skipped outcome, got {outcome:?}");
+    };
+    assert!(s.contains("insert_line"), "{s}");
+    assert!(
+        !s.contains("unclosed"),
+        "must not mention a nonexistent marker: {s}"
+    );
+}
+
+#[test]
+fn require_presence_is_exact_string_not_comparator_equality() {
+    // AUDIT (insert_line LOW, BY-DESIGN): presence is EXACT-string, independent of
+    // `comparator`. Under lexical-ci, `Bravo` present does NOT satisfy require
+    // `bravo` -- the distinct case-variant is flagged missing and inserted. This
+    // pins the intentional contract (a required line is inserted verbatim, so it
+    // must match itself exactly) and, crucially, that it CONVERGES (no runaway).
+    let mut r = rule_with_insert_line(&["bravo"]);
+    r.comparator = Comparator::LexicalCi;
+    r.fixer = Some(Box::new(insert_fixer(Comparator::LexicalCi)));
+    let text = "Bravo\ncharlie\n";
+    // `Bravo` is present but `bravo` (exact) is not -> one finding.
+    assert_eq!(eval(&r, text).len(), 1);
+    let out = insert_fixer(Comparator::LexicalCi)
+        .inserted(text, "bravo")
+        .unwrap();
+    // Inserted at its ci-sorted slot; both case-variants now present.
+    assert_eq!(out, "Bravo\nbravo\ncharlie\n");
+    // Converges: re-check is clean (the exact line is now present).
+    assert!(eval(&r, &out).is_empty(), "converged: {out:?}");
 }
