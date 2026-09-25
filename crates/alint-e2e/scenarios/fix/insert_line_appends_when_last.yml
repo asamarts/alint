@@ -1,0 +1,29 @@
+name: insert_line appends a required line that sorts last
+tags: [fix, ordered_block, insert_line, require]
+
+# When the missing required line sorts AFTER every existing entry, insert_line
+# appends it at the end (still the sorted position). Safe -> bare `fix` applies.
+
+given:
+  tree:
+    allow.txt: "alpha\nbravo\n"
+  config: |
+    version: 1
+    rules:
+      - id: allow
+        kind: ordered_block
+        paths: "**/allow.txt"
+        require: ["zulu"]
+        level: error
+        fix: { insert_line: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: allow, level: error, path: allow.txt}
+  - applied: [allow]
+  - violations: []
+
+expect_tree:
+  allow.txt: "alpha\nbravo\nzulu\n"

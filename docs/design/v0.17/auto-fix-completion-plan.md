@@ -665,8 +665,30 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
     - **[LOW] #3** `width: 0` (schema `min=1` is advisory) silently disabled the
       multiple check -> rejected at load for ANY indent_style rule.
 
-Next Phase-4 op after indent_style: `insert_line` (SURFACE its host/field fork
-first) or `insert_header`.
+- **`insert_line` (3rd Phase-4 op). DELIVERED (asamarts chose the host,
+  2026-09-24).** `insert_line` inserts a missing REQUIRED exact line at its SORTED
+  position -- the differentiator over `file_append` (append-at-EOF, which already
+  covers order-insensitive "ensure a line exists"). Host: **extend `ordered_block`
+  with a `require: [exact lines]` field** (asamarts's pick over a new rule /
+  extending file_content_matches): the block must CONTAIN each required line, and
+  the fix inserts a missing one at its sorted position using the rule's existing
+  `comparator`. Scope v1: **MARKERLESS ordered_block only** (`start`/`end` both
+  unset -- the whole file is one sorted list, the `CODEOWNERS` / allow-list case);
+  `require:` with a marker is rejected at load (a multi-block insert target is
+  ambiguous -- fast-follow). Check: after the sortedness scan, each `require:` line
+  whose TRIMMED form is not an entry emits a "missing required line" finding, keyed
+  per require-line (F4). Fix `insert_line`: whole-file; for each missing required
+  line, splice it (verbatim, with the file's line ending) at the position where the
+  comparator places it among the entries; idempotent (re-check finds it present).
+  `can_fix` is TRUE only for the missing-required-line findings -- an out-of-order
+  entry is NOT insert_line-fixable (that is `sort`'s job; pair two rules for a
+  fully-managed list), and the F1 `apply` can_fix-guard is baked in from the start.
+  Tier **Safe** (inserts a user-DECLARED line, like `file_append`). W2
+  **CONTENT_INJECTING** (the `require:` lines ARE ruleset-authored bytes -- the
+  clearest injection case; demoted from an untrusted remote). Op #25. Full gate
+  cascade + the round-1/2/3 lessons applied proactively.
+
+Next Phase-4 op after insert_line: `insert_header` (or wrap the arc).
 
 ### Coverage follow-ups (tracked from the audit; regression-prevention)
 

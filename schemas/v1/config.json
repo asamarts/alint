@@ -3747,6 +3747,17 @@
         "paths": {
           "$ref": "#/$defs/paths_spec"
         },
+        "require": {
+          "default": null,
+          "description": "Exact lines that must be PRESENT in the block (in addition to it being sorted). A missing one is repaired by the `insert_line` fix, which splices it at its sorted position. Currently supported only for a MARKERLESS rule (the whole file is one sorted list -- the `CODEOWNERS` / allow-list shape).",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "select": {
           "default": null,
           "description": "Regex; when set, only lines inside a block matching it are sortable entries (others, such as comments or group headers, pass through). The sectioned / keep-sorted-subset shape.",

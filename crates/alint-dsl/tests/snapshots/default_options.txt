@@ -1837,6 +1837,7 @@ OrderedBlockRule {
             "^\\s*[A-Za-z]",
         ),
     ),
+    require: [],
     fixer: None,
 }
 

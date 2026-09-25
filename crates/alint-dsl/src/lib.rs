@@ -666,6 +666,10 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // it to spaces is a HARD build break) at the Safe tier. Same aim risk as
     // `sort`, so it PROPOSES, never auto-writes, from an untrusted remote.
     "indent_style",
+    // `insert_line` splices the host `ordered_block` rule's `require:` lines --
+    // ruleset-authored bytes -- into the victim's file (e.g. a `CODEOWNERS` owner
+    // line), the clearest injection case. An untrusted remote must PROPOSE it.
+    "insert_line",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`

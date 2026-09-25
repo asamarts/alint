@@ -1,0 +1,32 @@
+name: insert_line splices a missing required line at its sorted position
+tags: [fix, ordered_block, insert_line, require]
+
+# A markerless `ordered_block` (the whole CODEOWNERS file is one sorted list) with
+# `require:` flags a missing required owner line; the `insert_line` fix splices it
+# at its SORTED position (between `*.md` and `*.rs`), not blindly at end-of-file
+# (the differentiator over `file_append`). Safe (it inserts a user-declared line),
+# so a bare `fix` applies it -> the second check is clean (sorted + present).
+
+given:
+  tree:
+    CODEOWNERS: "*.md @docs\n*.rs @rust\n"
+  config: |
+    version: 1
+    rules:
+      - id: codeowners-required
+        kind: ordered_block
+        paths: "**/CODEOWNERS"
+        require: ["*.py @py-team"]
+        level: error
+        fix: { insert_line: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: codeowners-required, level: error, path: CODEOWNERS}
+  - applied: [codeowners-required]
+  - violations: []
+
+expect_tree:
+  CODEOWNERS: "*.md @docs\n*.py @py-team\n*.rs @rust\n"

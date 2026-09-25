@@ -172,6 +172,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `--unsafe-fixes` (or a per-rule `applicability: safe`) applies it. And, like
   `sort`, an untrusted remote `extends:` cannot auto-apply it (it is demoted to a
   suggestion, since a remote could aim it at your files).
+- New `require:` field on `ordered_block` + a new `insert_line` auto-fix op
+  (`fix: { insert_line: {} }`): `require:` lists exact lines the block must
+  contain, and `insert_line` splices a missing one at its SORTED position (using
+  the rule's `comparator`) -- the differentiator over `file_append`, which only
+  appends at end-of-file. It is the "a managed sorted list (a `CODEOWNERS`, an
+  allow-list) must contain these entries, in order" shape; pair it with a second
+  `fix: { sort: {} }` rule to also reorder existing entries. Supported for a
+  MARKERLESS `ordered_block` only (the whole file is one sorted list); `require:`
+  with a `start`/`end` marker is rejected at load (a multi-block insert target is
+  ambiguous). A missing-required-line finding is reported and auto-fixable
+  independently of the sortedness findings (an out-of-order entry is `sort`'s job,
+  not `insert_line`'s). `Safe` by default (it inserts a user-declared line, like
+  `file_append`); the `require:` lines are ruleset-authored, so an untrusted
+  remote's `insert_line` is demoted to a suggestion.
 
 ### Changed
 

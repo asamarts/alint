@@ -462,6 +462,9 @@ pub enum FixSpec {
     IndentStyle {
         indent_style: IndentStyleFixSpec,
     },
+    InsertLine {
+        insert_line: InsertLineFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -554,6 +557,7 @@ impl FixSpec {
         "create_and_register",
         "sort",
         "indent_style",
+        "insert_line",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -583,6 +587,7 @@ impl FixSpec {
             Self::CreateAndRegister { .. } => "create_and_register",
             Self::Sort { .. } => "sort",
             Self::IndentStyle { .. } => "indent_style",
+            Self::InsertLine { .. } => "insert_line",
         }
     }
 }
@@ -976,6 +981,19 @@ pub struct SortFixSpec {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct IndentStyleFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `insert_line` op (Phase 4): insert a missing `require:` line of the host
+/// `ordered_block` rule at its SORTED position (using the rule's `comparator`).
+/// The required lines + comparator come from the host rule; this spec adds only
+/// the optional tier override. **`Safe` by default** (it inserts a user-declared
+/// line, like `file_append`); **content-injecting** in the W2 partition (the
+/// `require:` lines are ruleset-authored, so an untrusted remote demotes it).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct InsertLineFixSpec {
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1443,6 +1461,7 @@ mod tests {
             ("create_and_register: {}", "create_and_register"),
             ("sort: {}", "sort"),
             ("indent_style: {}", "indent_style"),
+            ("insert_line: {}", "insert_line"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

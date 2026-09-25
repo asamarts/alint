@@ -5,7 +5,7 @@
     "rule_kinds": 105,
     "families": 13,
     "bundled_rulesets": 22,
-    "auto_fix_ops": 24,
+    "auto_fix_ops": 25,
     "output_formats": 8,
     "subcommands": 12
   },
@@ -615,7 +615,7 @@
     "no_symlinks": "no_symlinks",
     "no_trailing_whitespace": "no_trailing_whitespace",
     "no_zero_width_chars": "no_zero_width_chars",
-    "ordered_block": "ordered_block",
+    "ordered_block": "ordered_block/mod",
     "pair": "pair",
     "pair_changed_together": "pair_changed_together",
     "pair_hash": "pair_hash",

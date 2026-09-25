@@ -855,6 +855,9 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         // `indent_style` is content-injecting for the same reason (aim a reindent
         // at a Makefile); read its tier for `w2_remote_indent_style_is_demoted`.
         FixSpec::IndentStyle { indent_style } => indent_style.applicability,
+        // `insert_line` injects the host rule's `require:` lines; read its tier for
+        // `w2_remote_insert_line_is_demoted`.
+        FixSpec::InsertLine { insert_line } => insert_line.applicability,
         _ => None,
     }
 }
@@ -1081,6 +1084,24 @@ fn w2_remote_indent_style_is_demoted_to_suggestion() {
         declared_content_tier(rule),
         Some(alint_core::Applicability::Suggestion),
         "an untrusted remote's `indent_style` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_insert_line_is_demoted_to_suggestion() {
+    // `insert_line` splices the host rule's ruleset-authored `require:` lines into
+    // the victim's file, so a REMOTE `extends:` must PROPOSE it, never auto-write:
+    // capped to `suggestion`. Teeth: dropping `insert_line` from
+    // CONTENT_INJECTING_FIX_OPS reverts this to None and reds here.
+    let body = "version: 1\nrules:\n  - id: co\n    kind: ordered_block\n    \
+        paths: \"**/CODEOWNERS\"\n    require: [\"* @team\"]\n    level: error\n    \
+        fix: { insert_line: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "co").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `insert_line` must be demoted to suggestion"
     );
 }
 

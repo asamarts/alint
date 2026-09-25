@@ -382,40 +382,47 @@ fn plant_fixable_triggers(root: &mut BTreeMap<String, TreeNode>) {
         ],
         "x\n".to_string(),
     );
-    // TWO out-of-order keep-sorted blocks trigger `ordered_block` + the Phase-4
-    // `sort` fix, which reorders the entries of BOTH in one whole-file pass ->
-    // converges (idempotent). Two blocks (not one) exercise the multi-finding
-    // fixpoint path: a fixable ordered_block emits one finding per block, which
-    // MUST carry distinct per-block baseline_keys or the merge collides them (the
-    // F4 panic a one-block trigger would miss). Otherwise clean (LF, final
-    // newline, no trailing ws / BOM / bidi, no `DEBUGME`), so no other single-rule
-    // draw disturbs it; the 9-char stem `sortblock` exceeds the generator's 7-char
-    // limit so it never collides. `**/sortblock.txt` matches only this trigger.
-    // Safe, so a bare `Fix` applies.
-    insert_file(
-        root,
-        &[dir.clone(), "sortblock.txt".to_string()],
-        "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\nmid\n\
-         # keep-sorted start\nyankee\nxray\n# keep-sorted end\n"
-            .to_string(),
-    );
-    // A TAB-indented file triggers `indent_style` (style: spaces) + the Phase-4
-    // `indent_style` reindent fix, which converts each pure-tab lead to 4 spaces
-    // per tab -> converges (idempotent). Otherwise clean (LF, final newline, no
-    // trailing ws -- the tabs are LEADING -- no BOM/bidi, no `DEBUGME`), so no
-    // other single-rule draw disturbs it; the 10-char stem `indenttrig` exceeds
-    // the generator's 7-char limit so it never collides. `**/indenttrig.txt`
-    // matches only this trigger. Unsafe, so a bare `Fix` suggests it and
-    // `FixUnsafe` applies it.
-    insert_file(
-        root,
-        &[dir.clone(), "indenttrig.txt".to_string()],
-        "header\n\tfoo\n\t\tbar\n".to_string(),
-    );
+    // The Phase-4 ordered_block / indent_style triggers (extracted so this stays
+    // under the function-length lint).
+    plant_phase4_triggers(root, &dir);
     // A backup file triggers file_absent (remove).
     insert_file(root, &[dir, "junk.bak".to_string()], "junk\n".to_string());
     // file_create is triggered by the ABSENCE of REQUIRED.md / CONFIG.toml /
     // NOTES.txt, which `_trig/` does not contain -- no plant needed.
+}
+
+/// Plant the Phase-4 `sort` / `indent_style` / `insert_line` triggers. Each is
+/// otherwise clean (LF, final newline, no trailing ws / BOM / bidi, no `DEBUGME`)
+/// with a stem over the generator's 7-char limit, so no other single-rule draw
+/// disturbs it and its `**/<name>.txt` glob matches only it.
+fn plant_phase4_triggers(root: &mut BTreeMap<String, TreeNode>, dir: &str) {
+    // TWO out-of-order keep-sorted blocks -> `ordered_block` + `sort`. Two blocks
+    // (not one) exercise the multi-finding fixpoint path: each block's finding MUST
+    // carry a distinct per-block baseline_key or the merge collides them (the F4
+    // panic a one-block trigger would miss). Safe, applied under a bare `Fix`.
+    insert_file(
+        root,
+        &[dir.to_string(), "sortblock.txt".to_string()],
+        "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\nmid\n\
+         # keep-sorted start\nyankee\nxray\n# keep-sorted end\n"
+            .to_string(),
+    );
+    // A TAB-indented file -> `indent_style` (style: spaces) + reindent (each pure-
+    // tab lead -> 4 spaces). Unsafe, so a bare `Fix` suggests it, `FixUnsafe`
+    // applies it. The tabs are LEADING, so no trailing-ws rule touches it.
+    insert_file(
+        root,
+        &[dir.to_string(), "indenttrig.txt".to_string()],
+        "header\n\tfoo\n\t\tbar\n".to_string(),
+    );
+    // A sorted list MISSING a required line -> `ordered_block` + `require:` +
+    // `insert_line`, which splices `bravo` between alpha/charlie. Safe, applied
+    // under a bare `Fix`.
+    insert_file(
+        root,
+        &[dir.to_string(), "insertline.txt".to_string()],
+        "alpha\ncharlie\n".to_string(),
+    );
 }
 
 fn insert_file(root: &mut BTreeMap<String, TreeNode>, segments: &[String], content: String) {
@@ -984,6 +991,20 @@ fn rule_indent_style() -> impl Strategy<Value = String> {
     })
 }
 
+/// A markerless `ordered_block` + `require:` rule fixed via the `insert_line` op
+/// (Phase 4): the planted `_trig/insertline.txt` is a sorted list MISSING the
+/// required `bravo`, so the rule fires and the fix splices `bravo` at its sorted
+/// position -> converges (idempotent). Safe (inserts a declared line), so a bare
+/// `Fix` APPLIES it. The 10-char stem `insertline` exceeds the generator's 7-char
+/// limit, so it never collides; `**/insertline.txt` matches only this trigger.
+fn rule_insert_line() -> impl Strategy<Value = String> {
+    rule_id("il").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: ordered_block\n    paths: \"**/insertline.txt\"\n    require: [\"bravo\"]\n    level: error\n    fix:\n      insert_line: {{}}\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -1048,6 +1069,9 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // the `indent_style` op (Phase 4): reindents tab-indented lines to spaces
         // -> converges. Unsafe, so applied under `--unsafe-fixes`.
         rule_indent_style(),
+        // the `insert_line` op (Phase 4): splices a missing required line at its
+        // sorted position -> converges. Safe, so APPLIED under a bare `Fix`.
+        rule_insert_line(),
     ]
 }
 
