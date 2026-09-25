@@ -255,6 +255,7 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | `sort` | `{}` (markers / comparator / `unique` / `select` from parent rule) | `ordered_block` |
 | `indent_style` | `{}` (style / width from parent rule) | `indent_style` (`style: spaces` + `width`) |
 | `insert_line` | `{}` (require lines / comparator from parent rule) | `ordered_block` (markerless, with `require:`) |
+| `insert_header` | `{content?, content_from?}` (inserts AFTER a leading BOM / shebang / `<?xml?>`) | `file_header` |
 
 Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full. (`set_value` / `remove_value` are *located* ops -- one byte-range splice through the same regime as `replace`; `sort` is a whole-file rewrite that permutes the entry lines in place, and `create_and_register`'s register half is a list-append into the target manifest.)
 

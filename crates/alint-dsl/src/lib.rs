@@ -670,6 +670,11 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // ruleset-authored bytes -- into the victim's file (e.g. a `CODEOWNERS` owner
     // line), the clearest injection case. An untrusted remote must PROPOSE it.
     "insert_line",
+    // `insert_header` inserts the host `file_header` rule's `content` /
+    // `content_from` header bytes near the top of the victim's file -- ruleset-
+    // authored bytes, like `file_prepend` (which it refines). An untrusted remote
+    // must PROPOSE it.
+    "insert_header",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`

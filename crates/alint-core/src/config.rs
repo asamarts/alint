@@ -465,6 +465,9 @@ pub enum FixSpec {
     InsertLine {
         insert_line: InsertLineFixSpec,
     },
+    InsertHeader {
+        insert_header: InsertHeaderFixSpec,
+    },
 }
 
 /// Deserialize a rule's `fix:` block, rejecting a block with more than one
@@ -558,6 +561,7 @@ impl FixSpec {
         "sort",
         "indent_style",
         "insert_line",
+        "insert_header",
     ];
 
     /// The op name as it appears in YAML — used in config-error messages.
@@ -588,6 +592,7 @@ impl FixSpec {
             Self::Sort { .. } => "sort",
             Self::IndentStyle { .. } => "indent_style",
             Self::InsertLine { .. } => "insert_line",
+            Self::InsertHeader { .. } => "insert_header",
         }
     }
 }
@@ -988,12 +993,40 @@ pub struct IndentStyleFixSpec {
 /// The `insert_line` op (Phase 4): insert a missing `require:` line of the host
 /// `ordered_block` rule at its SORTED position (using the rule's `comparator`).
 /// The required lines + comparator come from the host rule; this spec adds only
-/// the optional tier override. **`Safe` by default** (it inserts a user-declared
-/// line, like `file_append`); **content-injecting** in the W2 partition (the
-/// `require:` lines are ruleset-authored, so an untrusted remote demotes it).
+/// the optional tier override. **`Unsafe` by default** (it adds ruleset-authored
+/// content at a COMPUTED position, load-bearing in the order-sensitive formats it
+/// targets); **content-injecting** in the W2 partition (the `require:` lines are
+/// ruleset-authored, so an untrusted remote demotes it).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct InsertLineFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `insert_header` op (Phase 4): insert the host `file_header` rule's required
+/// header at the top of a violating file, AFTER any leading BOM, shebang
+/// (`#!...`), or XML declaration (`<?xml ...?>`) -- the differentiator over
+/// `file_prepend`, which prepends blindly at BOF and would push a shebang off
+/// line 1. Content comes from `content` / `content_from` (as `file_prepend`).
+/// **`Safe` by default** (the insertion point is the one canonical header spot and
+/// the content is inert; strictly safer than the `Safe` `file_prepend` it refines);
+/// **content-injecting** in the W2 partition (the header bytes are ruleset-authored,
+/// so an untrusted remote demotes it).
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InsertHeaderFixSpec {
+    /// Inline header bytes to insert. Mutually exclusive with `content_from`.
+    /// A trailing newline is the caller's responsibility.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Path to a file (relative to the lint root) whose bytes are the header.
+    /// Mutually exclusive with `content`.
+    #[serde(default)]
+    pub content_from: Option<PathBuf>,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`. W2
+    /// demotes an `insert_header` from an untrusted remote `extends:` to
+    /// `suggestion` (the header bytes are third-party-authored); demote-only.
     #[serde(default)]
     pub applicability: Option<crate::rule::Applicability>,
 }
@@ -1462,6 +1495,7 @@ mod tests {
             ("sort: {}", "sort"),
             ("indent_style: {}", "indent_style"),
             ("insert_line: {}", "insert_line"),
+            ("insert_header:\n  content: x\n", "insert_header"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =

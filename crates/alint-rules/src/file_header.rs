@@ -8,7 +8,7 @@ use alint_core::{
 use regex::Regex;
 use serde::Deserialize;
 
-use crate::fixers::FilePrependFixer;
+use crate::fixers::{FilePrependFixer, InsertHeaderFixer};
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -37,14 +37,16 @@ pub struct FileHeaderRule {
     pattern_src: String,
     pattern: Regex,
     lines: usize,
-    fixer: Option<FilePrependFixer>,
+    /// The `file_prepend` (blind BOF) or `insert_header` (after BOM/shebang/xml-decl)
+    /// fixer; `file_header` declares at most one. `None` for a check-only rule.
+    fixer: Option<Box<dyn Fixer>>,
 }
 
 impl Rule for FileHeaderRule {
     alint_core::rule_common_impl!();
 
     fn fixer(&self) -> Option<&dyn Fixer> {
-        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+        self.fixer.as_deref()
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -132,7 +134,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }
     let pattern = Regex::new(&opts.pattern)
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid pattern: {e}")))?;
-    let fixer = match &spec.fix {
+    let fixer: Option<Box<dyn Fixer>> = match &spec.fix {
         Some(FixSpec::FilePrepend { file_prepend }) => {
             let source = alint_core::resolve_content_source(
                 &spec.id,
@@ -140,13 +142,32 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 &file_prepend.content,
                 &file_prepend.content_from,
             )?;
-            Some(
+            Some(Box::new(
                 FilePrependFixer::new(source).with_applicability(
                     file_prepend
                         .applicability
                         .unwrap_or(alint_core::Applicability::Safe),
                 ),
-            )
+            ))
+        }
+        // `insert_header` refines `file_prepend`: same header content, but inserted
+        // AFTER a leading BOM / shebang / XML declaration so it never displaces a
+        // line that must stay first. Safe by default (the position is the one
+        // canonical header spot and the content is inert).
+        Some(FixSpec::InsertHeader { insert_header }) => {
+            let source = alint_core::resolve_content_source(
+                &spec.id,
+                "insert_header",
+                &insert_header.content,
+                &insert_header.content_from,
+            )?;
+            Some(Box::new(
+                InsertHeaderFixer::new(source).with_applicability(
+                    insert_header
+                        .applicability
+                        .unwrap_or(alint_core::Applicability::Safe),
+                ),
+            ))
         }
         Some(other) => {
             return Err(Error::rule_config(
@@ -242,6 +263,44 @@ mod tests {
         let (tmp, idx) = tempdir_with_files(&[("src/main.rs", b"fn main() {}\n")]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn build_wires_insert_header_at_safe_and_rejects_incompatible_fix() {
+        // insert_header is accepted on file_header (default Safe).
+        let ok = build(&spec_yaml(
+            "id: t\nkind: file_header\npaths: \"**/*.sh\"\npattern: \"SPDX\"\nlevel: error\n\
+             fix: { insert_header: { content: \"# SPDX\\n\" } }\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            ok.fixer().unwrap().applicability(),
+            alint_core::Applicability::Safe
+        );
+        // A per-rule applicability override wins.
+        let unsafe_ = build(&spec_yaml(
+            "id: t\nkind: file_header\npaths: \"**/*.sh\"\npattern: \"SPDX\"\nlevel: error\n\
+             fix: { insert_header: { content: \"# SPDX\\n\", applicability: unsafe } }\n",
+        ))
+        .unwrap();
+        assert_eq!(
+            unsafe_.fixer().unwrap().applicability(),
+            alint_core::Applicability::Unsafe
+        );
+        // insert_header with neither content nor content_from is rejected.
+        let no_content = build(&spec_yaml(
+            "id: t\nkind: file_header\npaths: \"**/*.sh\"\npattern: \"SPDX\"\nlevel: error\n\
+             fix: { insert_header: {} }\n",
+        ));
+        assert!(no_content.is_err(), "a header needs content/content_from");
+        // A fix op that is neither file_prepend nor insert_header is rejected.
+        let bad = build(&spec_yaml(
+            "id: t\nkind: file_header\npaths: \"**/*.sh\"\npattern: \"SPDX\"\nlevel: error\n\
+             fix: { file_remove: {} }\n",
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(bad.contains("not compatible with file_header"), "{bad}");
     }
 
     #[test]

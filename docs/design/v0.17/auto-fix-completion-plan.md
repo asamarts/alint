@@ -725,7 +725,38 @@ IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
       blocks the W2 scans recurse (honesty agent).** Benign today (scalars skipped
       by `.as_mapping()`); added a protective comment at the demote scan.
 
-Next Phase-4 op after insert_line: `insert_header` (or wrap the arc).
+- **`insert_header` (4th / LAST Phase-4 op). DELIVERED (asamarts chose to build it
+  over wrapping the arc, and chose tier Safe, 2026-09-24).** Op #26. Host: **extend
+  `file_header`** (joins `file_prepend` in its `fix` match; the rule's `fixer` field
+  became `Option<Box<dyn Fixer>>` to hold either). Content from `content` /
+  `content_from` (same `ContentSourceSpec` as `file_prepend`). The differentiator:
+  it inserts the header AFTER a leading UTF-8 BOM, shebang (`#!...` line), or XML
+  declaration (`<?xml ...?>`) via `header_insert_offset` -- so it never displaces a
+  line that must stay first (a `file_prepend` puts a license above a shebang,
+  breaking it). For a file with none of those prefixes it inserts at BOF, exactly
+  like `file_prepend`. **Tier Safe** (asamarts's call: the position is DETERMINISTIC
+  and canonical -- unlike `insert_line`'s risky sorted-SEARCH -- and the content is
+  an inert comment; and `file_prepend`, the cruder op it refines, is Safe, so the
+  safer op must not be harder to apply). W2 **CONTENT_INJECTING** (header bytes are
+  ruleset-authored, like `file_prepend`). **Runaway-SAFE by construction:** the
+  idempotency guard checks the EXACT bytes it would insert (`existing[off..]
+  .starts_with(header)`), which always round-trips what `apply` writes -- so a
+  repeated fix is a guaranteed no-op (no `insert_line`-style lossy-predicate
+  runaway). A one-line shebang with no trailing newline gets a separating newline;
+  a bare BOM does NOT (that is a plain BOF insert). Full gate cascade: config
+  (variant + `InsertHeaderFixSpec` {content/content_from/applicability} + op_name +
+  ALL_OP_NAMES + cases); DSL W2 (CONTENT_INJECTING + `declared_content_tier` arm +
+  `w2_remote_insert_header_is_demoted`); `InsertHeaderFixer` in `fixers/creators.rs`
+  (+ 11 units); `file_header` build arm (+ build-wiring test); property net
+  (`rule_file_header_insert_header` + planted `_trig/hdrtrig.sh`); 2 e2e
+  (after-shebang, after-xml-decl); facts 25->26; README (headline + prose);
+  CHANGELOG; ARCHITECTURE + rules.md tables. gen-schema unchanged (`FixSpec` is
+  Deserialize-only, not schemars-derived). Also fixed a STALE `InsertLineFixSpec`
+  doc-comment ("Safe" -> "Unsafe") + stale testkit comments left by the insert_line
+  tier flip. **Audit round pending.**
+
+Phase 4 is now FEATURE-COMPLETE (sort, indent_style, insert_line, insert_header =
+26 ops). After the insert_header audit round, the arc is ready to wrap.
 
 ### Coverage follow-ups (tracked from the audit; regression-prevention)
 

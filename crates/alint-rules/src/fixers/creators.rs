@@ -381,6 +381,183 @@ impl Fixer for FilePrependFixer {
     }
 }
 
+/// Where a header should be inserted: the byte offset after a leading UTF-8 BOM,
+/// then after a leading shebang (`#!...`) line OR an XML declaration
+/// (`<?xml ...?>`). Returns `(offset, consumed_line_prefix)`: the bool is `true`
+/// only when a shebang / XML declaration was skipped (NOT for a bare BOM), so the
+/// caller adds a separating newline only when such a prefix lacks its own trailing
+/// newline. A file has at most one of a shebang / XML declaration at the very top
+/// (each must be the first content), so they are checked in turn; a file with none
+/// returns `(0-or-BOM-len, false)` -- a plain BOF-after-BOM insert, like `file_prepend`.
+fn header_insert_offset(bytes: &[u8]) -> (usize, bool) {
+    let bom = if bytes.starts_with(UTF8_BOM) {
+        UTF8_BOM.len()
+    } else {
+        0
+    };
+    let rest = &bytes[bom..];
+    if rest.starts_with(b"#!") {
+        // Skip the shebang line, through its newline (or to EOF if unterminated).
+        let line = rest
+            .iter()
+            .position(|&b| b == b'\n')
+            .map_or(rest.len(), |nl| nl + 1);
+        (bom + line, true)
+    } else if rest.starts_with(b"<?xml")
+        && rest
+            .get(5)
+            .is_none_or(|&c| c.is_ascii_whitespace() || c == b'?')
+    {
+        // Skip the XML declaration, through its closing `?>` and a single trailing
+        // newline. A malformed declaration with no `?>` leaves the insert at the BOM
+        // boundary (insert at the very top -- the safe fallback).
+        if let Some(close) = rest.windows(2).position(|w| w == b"?>") {
+            let mut e = close + 2;
+            if rest[e..].starts_with(b"\r\n") {
+                e += 2;
+            } else if rest[e..].starts_with(b"\n") {
+                e += 1;
+            }
+            (bom + e, true)
+        } else {
+            (bom, false)
+        }
+    } else {
+        (bom, false)
+    }
+}
+
+/// Inserts `source` header content near the TOP of each violating file, AFTER any
+/// leading UTF-8 BOM, shebang (`#!...` line), or XML declaration (`<?xml ...?>`) --
+/// so the header does not displace a line that must stay first (a kernel reads a
+/// shebang only on line 1; an XML parser needs the declaration first). The
+/// position-aware refinement of [`FilePrependFixer`] for `file_header`; for a file
+/// with none of those prefixes it inserts at BOF, exactly like `file_prepend`.
+#[derive(Debug)]
+pub struct InsertHeaderFixer {
+    source: ContentSourceSpec,
+    applicability: Applicability,
+}
+
+impl InsertHeaderFixer {
+    pub fn new(source: ContentSourceSpec) -> Self {
+        Self {
+            source,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes an `insert_header` from an untrusted remote
+    /// `extends:` to [`Applicability::Suggestion`]. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
+    }
+
+    /// The file with `header` inserted at [`header_insert_offset`], or `None` when
+    /// the header is already there (idempotence). The byte check round-trips
+    /// exactly what this inserts, so a repeated fix is a GUARANTEED no-op (no
+    /// insert_line-style runaway is possible). Adds one separating newline when the
+    /// preceding prefix (a shebang with no trailing newline) leaves `off` mid-line,
+    /// so the header always starts on its own line.
+    fn inserted(existing: &[u8], header: &[u8]) -> Option<Vec<u8>> {
+        let (off, consumed_line_prefix) = header_insert_offset(existing);
+        if existing[off..].starts_with(header) {
+            return None;
+        }
+        let mut out = Vec::with_capacity(existing.len() + header.len() + 1);
+        out.extend_from_slice(&existing[..off]);
+        // Separate ONLY a consumed shebang / XML-decl that lacks its own trailing
+        // newline (a one-line `#!...` file); never after a bare BOM (whose last byte
+        // is not `\n` but needs no separator -- that is a plain BOF-after-BOM insert).
+        if consumed_line_prefix && existing[off - 1] != b'\n' {
+            out.push(b'\n');
+        }
+        out.extend_from_slice(header);
+        out.extend_from_slice(&existing[off..]);
+        Some(out)
+    }
+}
+
+impl Fixer for InsertHeaderFixer {
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn describe(&self) -> String {
+        match &self.source {
+            ContentSourceSpec::Inline(s) => format!(
+                "insert a {}-byte header after any BOM / shebang / XML declaration",
+                s.len()
+            ),
+            ContentSourceSpec::File(rel) => format!(
+                "insert the header from {} after any BOM / shebang / XML declaration",
+                rel.display()
+            ),
+        }
+    }
+
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(path) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let abs = ctx.root.join(path);
+        let header = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
+            Ok(b) => b,
+            Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
+        };
+        let existing = match alint_core::read_for_fix(&abs, path, ctx)? {
+            alint_core::ReadForFix::Bytes(b) => b,
+            alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
+        };
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not inserting a header",
+                path.display()
+            )));
+        }
+        let Some(out) = Self::inserted(&existing, &header) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already has the required header at the top",
+                path.display()
+            )));
+        };
+        // Dry-run AFTER the read + guards, so a preview matches the real run.
+        if ctx.dry_run {
+            return Ok(FixOutcome::Applied(format!(
+                "would insert a {}-byte header into {}",
+                header.len(),
+                path.display()
+            )));
+        }
+        ctx.commit_write(&abs, &out).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "inserted header into {}",
+            path.display()
+        )))
+    }
+
+    fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
+        let path = violation.path.as_deref()?;
+        // Mirror apply()'s binary guard on the editor (LSP) path.
+        if looks_binary(bytes) {
+            return None;
+        }
+        let header = resolve_source_bytes(&self.source, root, false).ok()?;
+        let out = Self::inserted(bytes, &header)?;
+        Some(FixEdit::SetContent {
+            path: path.to_path_buf(),
+            content: out,
+        })
+    }
+}
+
 /// Appends `source` content to the end of each violating file.
 /// Paired with `file_content_matches` / `file_footer` when the
 /// required content is satisfied by the appended bytes.
@@ -1029,6 +1206,138 @@ mod tests {
                 path: PathBuf::from("a.rs"),
                 content: b"// header\nfn main() {}\n".to_vec(),
             }
+        );
+    }
+
+    // ---- insert_header ----
+
+    fn ih(content: &str) -> InsertHeaderFixer {
+        InsertHeaderFixer::new(content.into())
+    }
+
+    fn ins(content: &str, existing: &[u8]) -> Option<Vec<u8>> {
+        InsertHeaderFixer::inserted(existing, content.as_bytes())
+    }
+
+    #[test]
+    fn insert_header_goes_after_a_shebang() {
+        assert_eq!(
+            ins("# (c) acme\n", b"#!/bin/bash\necho hi\n").unwrap(),
+            b"#!/bin/bash\n# (c) acme\necho hi\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn insert_header_goes_after_an_xml_declaration() {
+        assert_eq!(
+            ins("<!-- (c) acme -->\n", b"<?xml version=\"1.0\"?>\n<root/>\n").unwrap(),
+            b"<?xml version=\"1.0\"?>\n<!-- (c) acme -->\n<root/>\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn insert_header_at_bof_without_a_prefix_matches_file_prepend() {
+        // No BOM / shebang / xml-decl -> plain BOF insert (== file_prepend).
+        assert_eq!(
+            ins("// (c) acme\n", b"fn main() {}\n").unwrap(),
+            b"// (c) acme\nfn main() {}\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn insert_header_goes_after_a_bom() {
+        let existing = b"\xEF\xBB\xBFfn main() {}\n";
+        assert_eq!(
+            ins("// h\n", existing).unwrap(),
+            b"\xEF\xBB\xBF// h\nfn main() {}\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn insert_header_after_bom_and_shebang() {
+        // BOM then shebang: skip BOTH.
+        let existing = b"\xEF\xBB\xBF#!/bin/sh\ncode\n";
+        assert_eq!(
+            ins("# h\n", existing).unwrap(),
+            b"\xEF\xBB\xBF#!/bin/sh\n# h\ncode\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn insert_header_adds_a_separator_when_the_shebang_has_no_newline() {
+        // A one-line `#!...` file with no trailing newline: the header must not be
+        // glued onto the shebang.
+        assert_eq!(
+            ins("# h\n", b"#!/bin/sh").unwrap(),
+            b"#!/bin/sh\n# h\n".to_vec()
+        );
+    }
+
+    #[test]
+    fn insert_header_is_idempotent_when_already_present() {
+        // Header already sits right after the shebang -> no-op (guaranteed no
+        // runaway: the byte check round-trips exactly what apply would insert).
+        assert!(ins("# h\n", b"#!/bin/sh\n# h\ncode\n").is_none());
+    }
+
+    #[test]
+    fn insert_header_malformed_xml_decl_falls_back_to_top() {
+        // A `<?xml` with no closing `?>` -> insert at the top (after BOM), never
+        // scan past EOF or corrupt.
+        assert_eq!(
+            ins("<!-- h -->\n", b"<?xml version truncated").unwrap(),
+            b"<!-- h -->\n<?xml version truncated".to_vec()
+        );
+    }
+
+    #[test]
+    fn insert_header_apply_writes_after_the_shebang_on_disk() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("run.sh"), b"#!/bin/bash\necho hi\n").unwrap();
+        let outcome = ih("# (c) acme\n")
+            .apply(
+                &Violation::new("m").with_path(std::path::Path::new("run.sh")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        assert_eq!(
+            std::fs::read(tmp.path().join("run.sh")).unwrap(),
+            b"#!/bin/bash\n# (c) acme\necho hi\n"
+        );
+    }
+
+    #[test]
+    fn insert_header_skips_a_binary_file() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("bin"), b"\x00\x01\x02\x03bin\x00").unwrap();
+        let outcome = ih("# h\n")
+            .apply(
+                &Violation::new("m").with_path(std::path::Path::new("bin")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(
+            matches!(&outcome, FixOutcome::Skipped(s) if s.contains("binary")),
+            "{outcome:?}"
+        );
+    }
+
+    #[test]
+    fn insert_header_dry_run_does_not_touch_disk() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("run.sh"), b"#!/bin/sh\ncode\n").unwrap();
+        let outcome = ih("# h\n")
+            .apply(
+                &Violation::new("m").with_path(std::path::Path::new("run.sh")),
+                &make_ctx(&tmp, true),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        // dry-run reports Applied but leaves the file byte-identical.
+        assert_eq!(
+            std::fs::read(tmp.path().join("run.sh")).unwrap(),
+            b"#!/bin/sh\ncode\n"
         );
     }
 }

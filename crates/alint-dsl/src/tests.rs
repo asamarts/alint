@@ -858,6 +858,9 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         // `insert_line` injects the host rule's `require:` lines; read its tier for
         // `w2_remote_insert_line_is_demoted`.
         FixSpec::InsertLine { insert_line } => insert_line.applicability,
+        // `insert_header` injects the host `file_header` rule's header bytes; read
+        // its tier for `w2_remote_insert_header_is_demoted`.
+        FixSpec::InsertHeader { insert_header } => insert_header.applicability,
         _ => None,
     }
 }
@@ -1102,6 +1105,24 @@ fn w2_remote_insert_line_is_demoted_to_suggestion() {
         declared_content_tier(rule),
         Some(alint_core::Applicability::Suggestion),
         "an untrusted remote's `insert_line` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_insert_header_is_demoted_to_suggestion() {
+    // `insert_header` inserts the host `file_header` rule's ruleset-authored header
+    // bytes near the top of the victim's file (like `file_prepend`), so a REMOTE
+    // `extends:` must PROPOSE it, never auto-write: capped to `suggestion`. Teeth:
+    // dropping `insert_header` from CONTENT_INJECTING_FIX_OPS reverts this to None.
+    let body = "version: 1\nrules:\n  - id: hdr\n    kind: file_header\n    \
+        paths: \"**/*.rs\"\n    pattern: \"SPDX\"\n    level: error\n    \
+        fix: { insert_header: { content: \"// SPDX\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "hdr").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `insert_header` must be demoted to suggestion"
     );
 }
 

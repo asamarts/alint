@@ -38,7 +38,7 @@ pub mod strip;
 pub mod structured;
 
 pub use command_ops::CommandFixFixer;
-pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer};
+pub use creators::{FileAppendFixer, FileCreateFixer, FilePrependFixer, InsertHeaderFixer};
 pub use cross_file_ops::{
     CreateAndRegisterFixer, CrossFileValueFixer, SyncFromFixer, ValueTargets,
 };

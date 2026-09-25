@@ -193,6 +193,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   line that could never round-trip to an entry -- one carrying an embedded line
   break, or (with `select:`) one that does not itself match `select:` -- is
   rejected at load, so a fix can never re-insert it forever.
+- New `insert_header` auto-fix op for `file_header` (`fix: { insert_header: {
+  content: ... } }`): the position-aware alternative to `file_prepend` (same
+  `content` / `content_from`). It inserts the required header AFTER a leading UTF-8
+  BOM, shebang (`#!...`), or XML declaration (`<?xml ...?>`), so it never displaces
+  a line that must stay first -- unlike `file_prepend`, which would push a shebang
+  off line 1. For a file with none of those prefixes it inserts at BOF, exactly
+  like `file_prepend`. **`Safe` by default** (the insertion point is the one
+  canonical header spot and the content is inert -- strictly safer than the `Safe`
+  `file_prepend` it refines); the header bytes are ruleset-authored, so an untrusted
+  remote's `insert_header` is demoted to a suggestion. Its idempotency guard checks
+  the exact bytes it would insert, so a repeated fix is a guaranteed no-op.
 
 ### Changed
 

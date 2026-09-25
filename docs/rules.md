@@ -109,7 +109,9 @@ File contents must NOT match a regex.
 
 The first N lines must match a regex (line-oriented). For a byte-level prefix check, prefer `file_starts_with`.
 
-Fix: `file_prepend` — inject declared content at the top (preserves UTF-8 BOM).
+Fix: `file_prepend` — inject declared content at the top (preserves UTF-8 BOM). Blindly prepends at BOF.
+
+Fix: `insert_header` — the position-aware alternative to `file_prepend` (same `content` / `content_from`): inserts the header AFTER a leading UTF-8 BOM, shebang (`#!...`), or XML declaration (`<?xml ...?>`), so it never displaces a line that must stay first (a kernel reads a shebang only on line 1; an XML parser needs the declaration first). For a file with none of those prefixes it inserts at BOF, exactly like `file_prepend`. **`Safe` by default** (the insertion point is the one canonical header spot and the content is inert -- strictly safer than the `Safe` `file_prepend` it refines); demoted to a suggestion from an untrusted remote `extends:` (the header bytes are ruleset-authored). Its idempotency guard checks the exact bytes it would insert, so a repeated fix is a guaranteed no-op (no runaway).
 
 ### `file_starts_with` / `file_ends_with`
 
@@ -796,6 +798,7 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 - `sort: {}` (markers / comparator / `unique` / `select` from parent rule) — for `ordered_block`
 - `indent_style: {}` (style / width from parent rule) — for `indent_style` (`style: spaces` + `width` only)
 - `insert_line: {}` (require lines / comparator from parent rule) — for a markerless `ordered_block` with `require:`
+- `insert_header: {content?, content_from?}` — for `file_header`; inserts AFTER a leading BOM / shebang / `<?xml?>` (position-aware `file_prepend`)
 
 `fix_size_limit` is a top-level config field:
 

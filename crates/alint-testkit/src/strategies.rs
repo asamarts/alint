@@ -416,12 +416,21 @@ fn plant_phase4_triggers(root: &mut BTreeMap<String, TreeNode>, dir: &str) {
         "header\n\tfoo\n\t\tbar\n".to_string(),
     );
     // A sorted list MISSING a required line -> `ordered_block` + `require:` +
-    // `insert_line`, which splices `bravo` between alpha/charlie. Safe, applied
-    // under a bare `Fix`.
+    // `insert_line`, which splices `bravo` between alpha/charlie. Unsafe (a
+    // computed insert position), so a bare `Fix` suggests it, `FixUnsafe` applies it.
     insert_file(
         root,
         &[dir.to_string(), "insertline.txt".to_string()],
         "alpha\ncharlie\n".to_string(),
+    );
+    // A SHEBANG script MISSING the required header -> `file_header` + `insert_header`,
+    // which splices the header AFTER the shebang (not above it, which `file_prepend`
+    // would). Safe, applied under a bare `Fix`. `.sh` is outside every other
+    // single-rule glob, so it triggers only its own rule.
+    insert_file(
+        root,
+        &[dir.to_string(), "hdrtrig.sh".to_string()],
+        "#!/bin/sh\necho hi\n".to_string(),
     );
 }
 
@@ -1005,6 +1014,18 @@ fn rule_insert_line() -> impl Strategy<Value = String> {
     })
 }
 
+fn rule_file_header_insert_header() -> impl Strategy<Value = String> {
+    // `file_header` + `insert_header`: inserts the header AFTER the shebang on the
+    // planted `_trig/hdrtrig.sh`, landing `Copyright` inside the first `lines`, so
+    // the check passes on the next read. Scoped to `**/hdrtrig.sh` so it matches
+    // ONLY its own trigger (`.sh` is outside every other single-rule glob).
+    rule_id("ih").prop_map(|id| {
+        format!(
+            "  - id: {id}\n    kind: file_header\n    paths: \"**/hdrtrig.sh\"\n    pattern: \"(?s)Copyright\"\n    lines: 3\n    level: error\n    fix:\n      insert_header:\n        content: \"# Copyright 2026\\n\"\n"
+        )
+    })
+}
+
 /// The full fixable catalogue: every fix op, one rule at a time.
 /// The four whole-file-ish ops reuse the multi-rule generators (at
 /// `level: warning`); the eight content/header ops come from the single-rule
@@ -1070,8 +1091,11 @@ fn one_fixable_rule_yaml() -> impl Strategy<Value = String> {
         // -> converges. Unsafe, so applied under `--unsafe-fixes`.
         rule_indent_style(),
         // the `insert_line` op (Phase 4): splices a missing required line at its
-        // sorted position -> converges. Safe, so APPLIED under a bare `Fix`.
+        // sorted position -> converges. Unsafe, so applied under `--unsafe-fixes`.
         rule_insert_line(),
+        // the `insert_header` op (Phase 4): inserts a header after a shebang ->
+        // converges. Safe, so APPLIED under a bare `Fix`.
+        rule_file_header_insert_header(),
     ]
 }
 

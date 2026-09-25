@@ -1,0 +1,35 @@
+name: insert_header inserts a required header AFTER a shebang
+tags: [fix, file_header, insert_header]
+
+# `file_header` flags a script missing its license header; `insert_header` splices
+# the header AFTER the shebang line (not above it, which `file_prepend` would --
+# breaking the `#!` that the kernel reads only on line 1). Safe (a deterministic,
+# canonical position + inert comment content), so a bare `fix` applies it -> the
+# second check is clean (the header now sits within the first `lines`).
+
+given:
+  tree:
+    run.sh: "#!/bin/bash\necho hi\n"
+  config: |
+    version: 1
+    rules:
+      - id: license
+        kind: file_header
+        paths: "**/*.sh"
+        pattern: "Copyright"
+        lines: 5
+        level: error
+        fix:
+          insert_header:
+            content: "# Copyright 2026 acme\n"
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: license, level: error, path: run.sh}
+  - applied: [license]
+  - violations: []
+
+expect_tree:
+  run.sh: "#!/bin/bash\n# Copyright 2026 acme\necho hi\n"
