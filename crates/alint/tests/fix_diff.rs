@@ -292,6 +292,44 @@ fn diff_renders_every_op_kind() {
     );
 }
 
+// AUDIT M1: `diff_renders_every_op_kind` covers create / delete / rename / modify
+// (SetContent) but NOT a `SetMode` (chmod) or a located `ReplaceRange`
+// (set_value / replace). This adds both so a regression in rendering either kind
+// is caught.
+#[cfg(unix)]
+#[test]
+fn diff_renders_chmod_and_located_edits() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // A shebang script WITHOUT +x -> shebang_has_executable + chmod (SetMode).
+    std::fs::write(root.join("run.sh"), "#!/bin/sh\necho hi\n").unwrap();
+    std::fs::set_permissions(root.join("run.sh"), std::fs::Permissions::from_mode(0o644)).unwrap();
+    // A JSON whose value is wrong -> json_path_equals + set_value (located ReplaceRange).
+    std::fs::write(root.join("app.json"), "{\"version\": \"1.0\"}\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  \
+         - id: exec\n    kind: shebang_has_executable\n    paths: [\"**/*.sh\"]\n    level: error\n    fix: { chmod: {} }\n  \
+         - id: ver\n    kind: json_path_equals\n    paths: [\"**/*.json\"]\n    path: \"$.version\"\n    equals: \"2.0\"\n    level: error\n    fix: { set_value: {} }\n",
+    )
+    .unwrap();
+    let out = run(root, &["fix", "--diff", "--unsafe-fixes", "."]);
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    // chmod renders a git mode change (100644 -> 100755).
+    assert!(
+        stdout.contains("old mode 100644") && stdout.contains("new mode 100755"),
+        "chmod should render a git mode change; stdout:\n{stdout}"
+    );
+    // set_value renders an in-place hunk carrying the new value.
+    assert!(
+        stdout.contains("--- a/app.json")
+            && stdout.contains("+++ b/app.json")
+            && stdout.contains("2.0"),
+        "set_value should render a located hunk with the new value; stdout:\n{stdout}"
+    );
+}
+
 #[test]
 fn diff_exit_code_matches_a_real_fix() {
     // Every finding here is fixable, so a real fix would exit 0; --diff matches.

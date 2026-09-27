@@ -1089,13 +1089,18 @@ fn cmd_fix(
     // diff instead of writing. This is a preview, so it never touches the tree
     // (regardless of `--dry-run`), and the diff is emitted verbatim regardless
     // of `--format` (a unified diff is not a fix report). The exit code matches
-    // the equivalent real `fix` for the CONVERGED case, with two caveats inherent
+    // the equivalent real `fix` for the CONVERGED case, with three caveats inherent
     // to a single-pass no-write preview: (1) it cannot predict an I/O write
     // failure (a read-only target), which a real `fix` would surface as an
-    // unfixable error (exit 1); and (2) it cannot detect NON-CONVERGENCE -- the
+    // unfixable error (exit 1); (2) it cannot detect NON-CONVERGENCE -- the
     // preview is one pass, so it never re-walks and never returns the fixpoint's
     // exit 2, even for a config a real `fix` would fail to converge (the report's
-    // `non_convergent` is always false here). Both surface the edits as
+    // `non_convergent` is always false here); and (3) it cannot see a CASCADE -- a
+    // file a fix CREATES or rewrites this pass, which a LATER pass's rule then flags
+    // (e.g. an unfixable finding on the created content), is invisible to the single
+    // walk, so the preview can under-report the unfixable count and exit 0 where a
+    // real multi-pass `fix` exits 1 (audit: preview-fidelity MED). The preview exit
+    // code is thus a LOWER BOUND on a real run's. All three surface the edits as
     // would-apply. See docs/design/v0.17/fixpoint.md.
     if diff {
         let (report, staged) = engine

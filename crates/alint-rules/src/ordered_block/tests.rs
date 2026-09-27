@@ -197,6 +197,27 @@ fn empty_and_all_blank_files_are_silent() {
 }
 
 #[test]
+fn binary_file_is_skipped_by_check() {
+    // AUDIT H1: a NUL-bearing (valid-UTF-8) file must be skipped by the check, so
+    // `sort` / `insert_line` never reorder / splice binary bytes. The fixture is
+    // UNSORTED and missing the required line, so WITHOUT the `looks_binary` guard
+    // both checks would flag it.
+    let nul = "charlie\u{0}\nalpha\n";
+    assert!(
+        std::str::from_utf8(nul.as_bytes()).is_ok(),
+        "NUL is valid UTF-8"
+    );
+    assert!(
+        eval(&markerless_rule(None, None, Comparator::Lexical), nul).is_empty(),
+        "sort check must skip a NUL-bearing binary file"
+    );
+    assert!(
+        eval(&rule_with_insert_line(&["mango"]), nul).is_empty(),
+        "require check must skip a NUL-bearing binary file"
+    );
+}
+
+#[test]
 fn crlf_lines_sort_like_lf() {
     // `str::lines()` strips the trailing `\r`, so CRLF content
     // compares the same as LF.
