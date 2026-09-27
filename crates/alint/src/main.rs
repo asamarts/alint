@@ -193,6 +193,16 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
              `fix` are not yet implemented)"
         );
     }
+    // `--include-fixes` attaches `proposed_edit` to each fixable finding in
+    // `check --format json`; it has no effect on any other subcommand. Reject it
+    // loudly off `check` rather than silently no-op (matching `--only`/`--baseline`;
+    // audit R2 LOW-1).
+    if cli.include_fixes && !matches!(command, Command::Check { .. }) {
+        bail!(
+            "`--include-fixes` applies only to `check` (it adds `proposed_edit` to \
+             the `--format json` output); it has no effect on this subcommand"
+        );
+    }
     match command {
         Command::Check {
             path,

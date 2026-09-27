@@ -129,6 +129,36 @@ fn trailing_whitespace_with_invalid_utf8_byte_is_trimmed_and_converges() {
     assert!(check_is_clean(root), "converged");
 }
 
+/// R2 MED-1: a leading UTF-8 BOM is an encoding SIGNATURE, not the first sortable
+/// entry. Before the fix, `sort` ordered the first entry by U+FEFF (0xFEFF sorts
+/// after any ASCII) and silently relocated the BOM into the file body -- turning a
+/// UTF-8-with-BOM file into a no-BOM file carrying an embedded ZWNBSP. Now the BOM
+/// stays byte-exact at the front, only the entries below it reorder, and the fix
+/// converges.
+#[test]
+fn sort_preserves_a_leading_bom_and_converges() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    // BOM (EF BB BF) + `charlie\nbravo\nalpha\n` -- unsorted below the signature.
+    write(root, "f.t", b"\xEF\xBB\xBFcharlie\nbravo\nalpha\n");
+    config(
+        root,
+        "version: 1\nrules:\n  - id: r\n    kind: ordered_block\n    \
+         paths: \"**/*.t\"\n    level: error\n    fix: { sort: {} }\n",
+    );
+    assert!(
+        !check_is_clean(root),
+        "the unsorted entries must be flagged"
+    );
+    fix(root);
+    assert_eq!(
+        std::fs::read(root.join("f.t")).unwrap(),
+        b"\xEF\xBB\xBFalpha\nbravo\ncharlie\n",
+        "the BOM stays at the front (byte-exact); only the entries reorder"
+    );
+    assert!(check_is_clean(root), "converged after one sort");
+}
+
 /// F3: every byte-level content rule skips a NUL-bearing binary at the DETECTOR,
 /// so `check` reports nothing and `fix` touches nothing (agreement, not the old
 /// "flagged fixable forever, never fixed"). One representative file exercised by

@@ -45,17 +45,26 @@ pub fn write_github(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
 }
 
 fn escape_prop(s: &str) -> String {
-    s.replace('%', "%25")
+    // GitHub's `%`/`\r`/`\n`/`:`/`,` escaping FIRST, then neutralize any remaining
+    // terminal control bytes (ESC/BEL/...) from an attacker-named path or message so
+    // they can't fire when a developer previews `--format github` in a terminal
+    // (audit R2 MED-1). `\r`/`\n` are already `%`-escaped above, so `sanitize_terminal`
+    // only touches the other control bytes.
+    let escaped = s
+        .replace('%', "%25")
         .replace('\r', "%0D")
         .replace('\n', "%0A")
         .replace(':', "%3A")
-        .replace(',', "%2C")
+        .replace(',', "%2C");
+    crate::sanitize::sanitize_terminal(&escaped).into_owned()
 }
 
 fn escape_body(s: &str) -> String {
-    s.replace('%', "%25")
+    let escaped = s
+        .replace('%', "%25")
         .replace('\r', "%0D")
-        .replace('\n', "%0A")
+        .replace('\n', "%0A");
+    crate::sanitize::sanitize_terminal(&escaped).into_owned()
 }
 
 #[cfg(test)]

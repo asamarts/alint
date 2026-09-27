@@ -317,3 +317,146 @@ fn empty_report_json_validates_against_published_schema() {
         errs.join("\n"),
     );
 }
+
+const AGENT_REPORT_SCHEMA: &str = include_str!("../../../schemas/v1/agent-report.json");
+
+/// Validate `instance` against `schema_str`, returning the (path-annotated) errors.
+fn schema_errors(instance: &serde_json::Value, schema_str: &str) -> Vec<String> {
+    let schema: serde_json::Value = serde_json::from_str(schema_str).expect("schema is valid JSON");
+    let validator = jsonschema::validator_for(&schema).expect("schema compiles as Draft 2020-12");
+    validator
+        .iter_errors(instance)
+        .map(|e| format!("{} at {}", e, e.instance_path()))
+        .collect()
+}
+
+// AUDIT R2 (HIGH-2): the `agent` format ALWAYS emits `fix_command` + `proposed_edit`
+// for a fix-available finding, but the published agent-report.json omitted them, so
+// every agent run with a fixable finding was schema-INVALID. This exercises exactly
+// that path (the canonical report has a fixable warning) with a proposed_edit
+// attached, and validates against the real schema.
+#[test]
+fn agent_format_validates_against_published_schema() {
+    let report = report_with_a_proposed_edit();
+    let mut buf = Vec::new();
+    alint_output::write_agent(&report, &mut buf).unwrap();
+    let instance: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    let errs = schema_errors(&instance, AGENT_REPORT_SCHEMA);
+    assert!(
+        errs.is_empty(),
+        "agent output failed agent-report.json validation:\n{}\n\noutput:\n{}",
+        errs.join("\n"),
+        String::from_utf8_lossy(&buf)
+    );
+}
+
+// AUDIT R2 (HIGH-1): `check --format json --include-fixes` emits `proposed_edit` on a
+// violation, which check-report.json's `additionalProperties: false` rejected. The
+// existing `json_format_validates_*` uses a report with NO proposed_edit, so it was a
+// false-green. This attaches a real proposed_edit and validates.
+#[test]
+fn json_with_a_proposed_edit_validates_against_published_schema() {
+    let report = report_with_a_proposed_edit();
+    let mut buf = Vec::new();
+    Format::Json.write(&report, &mut buf).unwrap();
+    let instance: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+    let errs = schema_errors(&instance, CHECK_REPORT_SCHEMA);
+    assert!(
+        errs.is_empty(),
+        "json+proposed_edit failed check-report.json validation:\n{}",
+        errs.join("\n"),
+    );
+}
+
+// AUDIT R2 (HIGH-1b): `check --format json --baseline` adds `summary.baselined_suppressed`
+// (and, with `--show-baselined`, a top-level `baselined` list) that the schema rejected.
+#[test]
+fn json_with_baseline_validates_against_published_schema() {
+    use alint_core::RuleResult;
+    use alint_output::{BaselineMarks, ResultMarks, SuppressedFinding};
+    let report = Report {
+        results: vec![RuleResult::new(
+            "no-todo".into(),
+            Level::Error,
+            None,
+            vec![Violation::new("new").with_path(std::path::Path::new("a.rs"))],
+            false,
+        )],
+    };
+    let marks = BaselineMarks {
+        per_result: vec![ResultMarks {
+            live_fingerprints: vec!["fp-live".into()],
+            suppressed: vec![SuppressedFinding {
+                violation: Violation::new("old").with_path(std::path::Path::new("a.rs")),
+                fingerprint: "fp-supp".into(),
+            }],
+        }],
+        suppressed_total: 1,
+    };
+    for show in [true, false] {
+        let mut buf = Vec::new();
+        alint_output::write_json_with_baseline(&report, Some(&marks), show, &mut buf).unwrap();
+        let instance: serde_json::Value = serde_json::from_slice(&buf).unwrap();
+        let errs = schema_errors(&instance, CHECK_REPORT_SCHEMA);
+        assert!(
+            errs.is_empty(),
+            "json+baseline (show_baselined={show}) failed check-report.json validation:\n{}",
+            errs.join("\n"),
+        );
+    }
+}
+
+// AUDIT R2 MED-1: `github` / `markdown` (like `human`) must neutralize terminal
+// control bytes from an attacker-named path or message -- previewing either format
+// in a terminal on an untrusted repo must not fire an escape sequence. No raw ESC or
+// BEL may survive. (These machine formats emit no alint color of their own, so any
+// ESC/BEL is an injected leak.)
+#[test]
+fn github_and_markdown_neutralize_terminal_control_bytes() {
+    let report = Report {
+        results: vec![RuleResult {
+            rule_id: "ctl".into(),
+            level: Level::Error,
+            policy_url: None,
+            violations: vec![
+                Violation::new("msg with \u{1b}[2J and \u{7} bell")
+                    .with_path(std::path::Path::new("ev\u{1b}[2Il\u{7}.md"))
+                    .with_location(1, 1),
+            ],
+            notes: Vec::new(),
+            is_fixable: false,
+        }],
+    };
+    for (format, name) in [(Format::Github, "github"), (Format::Markdown, "markdown")] {
+        let mut buf = Vec::new();
+        format.write(&report, &mut buf).unwrap();
+        assert!(
+            !buf.contains(&0x1b),
+            "[{name}] leaked a raw ESC (0x1b) to the terminal"
+        );
+        assert!(
+            !buf.contains(&0x07),
+            "[{name}] leaked a raw BEL (0x07) to the terminal"
+        );
+    }
+}
+
+/// The canonical report with a `proposed_edit` attached to its fixable violation, so
+/// the json / agent fix-carrying fields are exercised against their schemas.
+fn report_with_a_proposed_edit() -> Report {
+    use alint_core::{EditRegion, ProposedEdit};
+    let mut report = canonical_report();
+    // The warning rule (index 1) is `is_fixable`; attach a concrete edit to its first
+    // violation so `proposed_edit` (and, for agent, `fix_command`) appears.
+    report.results[1].violations[0].proposed_edits = vec![ProposedEdit {
+        path: std::path::PathBuf::from("README.md"),
+        region: EditRegion {
+            start_line: 12,
+            start_column: 1,
+            end_line: 12,
+            end_column: 3,
+        },
+        inserted: String::new(),
+    }];
+    report
+}

@@ -218,6 +218,26 @@ fn binary_file_is_skipped_by_check() {
 }
 
 #[test]
+fn leading_bom_is_a_signature_not_an_entry_for_check() {
+    // AUDIT R2 MED-1: a leading UTF-8 BOM (U+FEFF) is an encoding signature, not
+    // the first entry's content. WITHOUT peeling, the check would compare the first
+    // entry as `<BOM>alpha` (U+FEFF sorts after any ASCII), so a BOM-prefixed
+    // ALREADY-SORTED file would be spuriously flagged as out-of-order.
+    let r = markerless_rule(None, None, Comparator::Lexical);
+    assert!(
+        eval(&r, "\u{feff}alpha\nbravo\ncharlie\n").is_empty(),
+        "a BOM-prefixed sorted file must be silent (BOM is not the first entry)"
+    );
+    // A BOM-prefixed UNSORTED file still flags -- the BOM does not mask a real
+    // out-of-order entry.
+    assert_eq!(
+        eval(&r, "\u{feff}charlie\nbravo\nalpha\n").len(),
+        1,
+        "a BOM-prefixed unsorted file must still be flagged"
+    );
+}
+
+#[test]
 fn crlf_lines_sort_like_lf() {
     // `str::lines()` strips the trailing `\r`, so CRLF content
     // compares the same as LF.
@@ -382,6 +402,24 @@ fn sorted_reorders_a_delimited_block_leaving_surroundings() {
     assert_eq!(
         out,
         "head\n# keep-sorted start\nalpha\nbravo\ncharlie\n# keep-sorted end\ntail\n"
+    );
+}
+
+#[test]
+fn sorted_preserves_a_leading_bom_and_sorts_the_content() {
+    // AUDIT R2 MED-1: peel the BOM, sort the content, re-emit the BOM at the front
+    // -- never order the first entry by U+FEFF (which relocated the BOM mid-body).
+    let f = markerless_sort_fixer(None, None, Comparator::Lexical, false, None);
+    assert_eq!(
+        f.sorted("\u{feff}charlie\nbravo\nalpha\n").unwrap(),
+        "\u{feff}alpha\nbravo\ncharlie\n",
+        "the BOM stays at the front; only the entries below it reorder"
+    );
+    // A BOM-prefixed already-sorted file has nothing to do (idempotence + agreement
+    // with the check, which likewise peels the BOM).
+    assert!(
+        f.sorted("\u{feff}alpha\nbravo\ncharlie\n").is_none(),
+        "a sorted file with a BOM must not be rewritten"
     );
 }
 
@@ -906,6 +944,20 @@ fn inserted_preserves_crlf_and_missing_final_newline() {
 fn inserted_numeric_comparator_positions_correctly() {
     let f = insert_fixer(Comparator::Numeric);
     assert_eq!(f.inserted("1\n10\n", "2").unwrap(), "1\n2\n10\n");
+}
+
+#[test]
+fn inserted_preserves_a_leading_bom() {
+    // AUDIT R2 MED-1: splice at the sorted position of the BOM-FREE content, then
+    // re-emit the BOM at the front -- so the first entry is not `<BOM>alpha`.
+    let f = insert_fixer(Comparator::Lexical);
+    assert_eq!(
+        f.inserted("\u{feff}alpha\ncharlie\n", "bravo").unwrap(),
+        "\u{feff}alpha\nbravo\ncharlie\n"
+    );
+    // Idempotence sees past the BOM: `alpha` is present even though the file opens
+    // with a BOM, so nothing is re-inserted.
+    assert_eq!(f.inserted("\u{feff}alpha\nbravo\n", "alpha"), None);
 }
 
 #[test]

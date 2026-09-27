@@ -84,11 +84,24 @@ pub fn classify_bytes(bytes: &[u8]) -> Classification {
     }
 }
 
-/// Whether `bytes` look like binary content (per `content_inspector`,
-/// sampling the same leading window as `file_is_text`). The byte-level
-/// fixers consult this and refuse to rewrite a binary file - a line-ending,
-/// BOM, final-newline, or prepend/append edit on a binary corrupts it.
+/// Whether `bytes` look like binary content. The byte-level fixers (and their
+/// detectors) consult this and refuse to touch a binary file -- a reorder,
+/// reindent, line-ending, BOM, final-newline, or prepend/append edit on a binary
+/// corrupts it.
+///
+/// A NUL byte ANYWHERE is the definitive binary marker, so the WHOLE slice is
+/// scanned for one (a cheap `memchr`). This is not redundant with
+/// `content_inspector`: that crate caps its own NUL scan at its `MAX_SCAN_SIZE`
+/// (1024 bytes as of 0.2.4) -- so a file that is clean text through the first KiB
+/// but carries a NUL LATER (e.g. a 40 KB text file with a NUL at 28 KB) is
+/// classified TEXT by `content_inspector` and a content fixer silently corrupts it
+/// (reorder / reindent / splice). The explicit full scan closes that (audit R2).
+/// `content_inspector` still supplies the broader statistical heuristics (encoding,
+/// control-char density) over its leading window.
 pub fn looks_binary(bytes: &[u8]) -> bool {
+    if bytes.contains(&0) {
+        return true;
+    }
     let window = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
     classify_bytes(window) == Classification::Binary
 }
@@ -224,6 +237,29 @@ mod tests {
     fn looks_binary_distinguishes_binary_from_text() {
         assert!(looks_binary(b"\x00\x01\x02\x00binary\x00data\x00"));
         assert!(!looks_binary(b"plain text\nmore text\n"));
+    }
+
+    #[test]
+    fn looks_binary_detects_a_nul_past_the_inspect_window() {
+        // AUDIT R2: a NUL byte ANYWHERE means binary -- not just within the leading
+        // `TEXT_INSPECT_LEN` window. A file that is clean text through the window but
+        // has a NUL later must still be refused, or a content fixer corrupts it.
+        let mut buf = vec![b'a'; TEXT_INSPECT_LEN * 2]; // clean text well past the window
+        for chunk in buf.chunks_mut(64) {
+            if let Some(last) = chunk.last_mut() {
+                *last = b'\n';
+            }
+        }
+        assert!(
+            !looks_binary(&buf),
+            "an all-text buffer past the window must NOT be binary"
+        );
+        let nul_pos = TEXT_INSPECT_LEN + 100; // past the leading window
+        buf[nul_pos] = 0;
+        assert!(
+            looks_binary(&buf),
+            "a NUL past the inspect window must still be detected as binary"
+        );
     }
 
     #[test]

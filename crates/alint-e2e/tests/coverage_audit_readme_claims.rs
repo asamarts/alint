@@ -315,6 +315,24 @@ fn readme_auto_fix_ops_count_matches_fixers() {
 }
 
 #[test]
+fn fixing_md_op_count_matches_fixers() {
+    // AUDIT R2 (coverage gap): the README count is gated above, but the synced
+    // concepts page `docs/site/concepts/adoption/fixing.md` carries its OWN "N fix
+    // ops" claim (frontmatter description) on the docs-bundle path to alint.org and
+    // drifts independently -- a 27th op would silently desync it. Pin it too.
+    let path = workspace_root().join("docs/site/concepts/adoption/fixing.md");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let claimed = num_before(&text, "fix ops")
+        .expect("fixing.md must state 'N fix ops' (the frontmatter description)");
+    let actual = alint_core::FixSpec::ALL_OP_NAMES.len();
+    assert_eq!(
+        claimed, actual,
+        "fixing.md claims {claimed} fix ops; FixSpec::ALL_OP_NAMES lists {actual}. \
+         Update docs/site/concepts/adoption/fixing.md.",
+    );
+}
+
+#[test]
 fn readme_output_formats_count_matches_format_enum() {
     let readme = read_readme();
     let claimed =

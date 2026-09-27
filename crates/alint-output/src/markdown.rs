@@ -301,7 +301,11 @@ fn md_escape(s: &str) -> String {
             _ => out.push(ch),
         }
     }
-    out
+    // Neutralize any remaining terminal control bytes (ESC/BEL/...) from an
+    // attacker-named path or message, so previewing `--format markdown` in a
+    // terminal on an untrusted repo can't fire an escape sequence (audit R2 MED-1).
+    // `\n`/`\r` are already collapsed above, so this only touches other controls.
+    crate::sanitize::sanitize_terminal(&out).into_owned()
 }
 
 /// Escape a string for inclusion inside a backtick code span.
@@ -316,8 +320,10 @@ fn md_inline_code(s: &str) -> String {
     // Inline code is single-line by definition: a `\n`/`\r` (legal in a path on
     // Unix) would break out of the span and split the enclosing `## ` heading,
     // so collapse them to a space. A backtick would close the span early, so
-    // swap in the modifier-letter look-alike.
-    s.replace(['\r', '\n'], " ").replace('`', "ʼ")
+    // swap in the modifier-letter look-alike. Then neutralize any remaining
+    // terminal control bytes (ESC/BEL/...) so they can't fire in a terminal preview
+    // (audit R2 MED-1); `\r`/`\n` are already collapsed above.
+    crate::sanitize::sanitize_terminal(&s.replace(['\r', '\n'], " ").replace('`', "ʼ")).into_owned()
 }
 
 /// Escape a URL for use in a markdown link target.

@@ -223,6 +223,12 @@ impl PerFileRule for OrderedBlockRule {
             // Non-UTF-8 is degenerate for a line-sorted region.
             return Ok(Vec::new());
         };
+        // Peel a leading UTF-8 BOM so it is treated as an encoding signature, not as
+        // the first entry's content (otherwise the first entry sorts/compares by
+        // U+FEFF). Both `sort` and `insert_line` peel identically, so `check` and
+        // `fix` agree on what the entries are. Line numbers are unaffected (the BOM
+        // sits on line 1). (Audit R2 MED-1.)
+        let (_, text) = split_leading_bom(text);
         let mut violations = Vec::new();
         // Assigns each block its 0-based ordinal as it opens (for the fixable
         // rule's per-block `baseline_key`); the markerless block-1 is ordinal 0.
@@ -484,6 +490,21 @@ fn scan_blocks(
 /// slot's ending preserves every line's exact terminator and the file's
 /// trailing-newline state (LF stays LF, CRLF stays CRLF, no-final-newline
 /// stays).
+/// Split off a leading UTF-8 BOM (U+FEFF), returning `(bom, rest)` where `bom` is
+/// `"\u{feff}"` when present and `""` otherwise. A leading BOM is an encoding
+/// signature, not sortable content: the `ordered_block` check and both fixers peel
+/// it so the first entry is not ordered/compared by U+FEFF (0xFEFF sorts after any
+/// ASCII, which would silently relocate the BOM into the file body), then the
+/// fixers re-emit it at the front. Mirrors the `no_bom`/hygiene convention and
+/// `proposed_fix::byte_to_line_col`, which both treat a leading U+FEFF as a
+/// signature rather than a column/character. (Audit R2 MED-1.)
+fn split_leading_bom(text: &str) -> (&str, &str) {
+    match text.strip_prefix('\u{feff}') {
+        Some(rest) => ("\u{feff}", rest),
+        None => ("", text),
+    }
+}
+
 fn split_lines(text: &str) -> Vec<(&str, &'static str)> {
     let mut slots = Vec::new();
     let mut rest = text;
@@ -548,6 +569,7 @@ impl OrderedBlockSortFixer {
     /// to write). Reorders each block's entry bodies under the comparator,
     /// removing `unique` duplicates' slots; non-entry lines and terminators stay.
     fn sorted(&self, text: &str) -> Option<String> {
+        let (bom, text) = split_leading_bom(text);
         let slots = split_lines(text);
         let bodies: Vec<&str> = slots.iter().map(|(b, _)| *b).collect();
         let blocks = scan_blocks(
@@ -594,7 +616,10 @@ impl OrderedBlockSortFixer {
         if !changed {
             return None;
         }
-        let mut out = String::with_capacity(text.len());
+        let mut out = String::with_capacity(bom.len() + text.len());
+        // Re-emit the leading BOM (if any) ahead of the sorted content; the
+        // trailing-newline strip below only touches `out`'s suffix. (Audit R2 MED-1.)
+        out.push_str(bom);
         for (i, (_, ending)) in slots.iter().enumerate() {
             if deleted[i] {
                 continue;
@@ -769,6 +794,7 @@ impl OrderedBlockInsertLineFixer {
     /// is one sorted list. Preserves every other line's terminator and the file's
     /// trailing-newline state.
     fn inserted(&self, text: &str, line: &str) -> Option<String> {
+        let (bom, text) = split_leading_bom(text);
         let mut slots = split_lines(text);
         // Idempotence: already present as an entry (trimmed-equal)?
         if slots.iter().any(|(body, _)| {
@@ -802,7 +828,8 @@ impl OrderedBlockInsertLineFixer {
                 }
             }
         }
-        let mut out = String::with_capacity(text.len() + line.len() + 2);
+        let mut out = String::with_capacity(bom.len() + text.len() + line.len() + 2);
+        out.push_str(bom); // re-emit the leading BOM ahead of the spliced content
         for (body, end) in &slots {
             out.push_str(body);
             out.push_str(end);

@@ -40,7 +40,7 @@
         "fixable_violations": {
           "type": "integer",
           "minimum": 0,
-          "description": "Subset of total_violations whose source rule declares an autofix; an agent can use this to decide whether to suggest `alint fix`."
+          "description": "Subset of total_violations that a bare `alint fix` resolves (a Safe, applicable fix), counted per-violation; an Unsafe or `can_fix`-declined finding is not counted. An agent uses this to decide whether to suggest `alint fix`."
         },
         "passing_rules": { "type": "integer", "minimum": 0 },
         "failing_rules": { "type": "integer", "minimum": 0 }
@@ -83,13 +83,44 @@
         },
         "fix_available": {
           "type": "boolean",
-          "description": "True when the source rule declares an autofix. Mirrors `fix_available: true` callout in `agent_instruction`."
+          "description": "Whether a bare `alint fix` resolves THIS violation (a Safe, applicable fix). Per-violation, mirroring `check --format json`'s `fixable`: an Unsafe fix, or one whose `can_fix` declines this finding, is false here even if the rule declares a fixer."
+        },
+        "fix_command": {
+          "type": "array",
+          "description": "The `alint` argv that fixes this violation (e.g. [\"fix\", \"--only\", \"<rule>\"]). Present only for a fix-available finding.",
+          "items": { "type": "string" }
+        },
+        "proposed_edit": {
+          "type": "array",
+          "description": "The concrete Safe edit(s) `alint fix` would apply to resolve this violation. Present only for a fix-available finding.",
+          "items": { "$ref": "#/$defs/proposed_edit" }
         },
         "policy_url": {
           "type": "string",
           "description": "Optional documentation URL provided by the rule.",
           "format": "uri"
         }
+      }
+    },
+    "proposed_edit": {
+      "type": "object",
+      "required": ["path", "region", "inserted"],
+      "additionalProperties": false,
+      "description": "A concrete fix edit: replace `region` of `path` with `inserted` (empty for a pure deletion).",
+      "properties": {
+        "path": { "type": "string", "description": "Repo-relative path of the edited file." },
+        "region": {
+          "type": "object",
+          "required": ["start_line", "start_column", "end_line", "end_column"],
+          "additionalProperties": false,
+          "properties": {
+            "start_line": { "type": "integer", "minimum": 1 },
+            "start_column": { "type": "integer", "minimum": 1 },
+            "end_line": { "type": "integer", "minimum": 1 },
+            "end_column": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "inserted": { "type": "string", "description": "Replacement text (empty for a deletion)." }
       }
     }
   }

@@ -26,12 +26,22 @@
         "passing_rules": { "type": "integer", "minimum": 0 },
         "total_violations": { "type": "integer", "minimum": 0 },
         "has_errors": { "type": "boolean" },
-        "has_warnings": { "type": "boolean" }
+        "has_warnings": { "type": "boolean" },
+        "baselined_suppressed": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "Count of violations suppressed by an active `--baseline`. Present only when a baseline is in effect."
+        }
       }
     },
     "results": {
       "type": "array",
       "items": { "$ref": "#/$defs/rule_result" }
+    },
+    "baselined": {
+      "type": "array",
+      "description": "Findings suppressed by an active `--baseline`, listed only under `--show-baselined`. Omitted otherwise.",
+      "items": { "$ref": "#/$defs/baselined" }
     }
   },
   "$defs": {
@@ -88,7 +98,47 @@
         "fixable": {
           "type": "boolean",
           "description": "Whether a bare `alint fix` resolves THIS violation (a Safe, applicable fix). Per-violation, unlike the rule-level `fixable`; an Unsafe or declined fix is false here. A note is always false."
+        },
+        "proposed_edit": {
+          "type": "array",
+          "description": "The concrete Safe edit(s) `alint fix` would apply to resolve this violation. Present only under `--include-fixes`, only for a Safe-fixable finding.",
+          "items": { "$ref": "#/$defs/proposed_edit" }
         }
+      }
+    },
+    "proposed_edit": {
+      "type": "object",
+      "required": ["path", "region", "inserted"],
+      "additionalProperties": false,
+      "description": "A concrete fix edit: replace `region` of `path` with `inserted` (empty for a pure deletion).",
+      "properties": {
+        "path": { "type": "string", "description": "Repo-relative path of the edited file." },
+        "region": {
+          "type": "object",
+          "required": ["start_line", "start_column", "end_line", "end_column"],
+          "additionalProperties": false,
+          "properties": {
+            "start_line": { "type": "integer", "minimum": 1 },
+            "start_column": { "type": "integer", "minimum": 1 },
+            "end_line": { "type": "integer", "minimum": 1 },
+            "end_column": { "type": "integer", "minimum": 1 }
+          }
+        },
+        "inserted": { "type": "string", "description": "Replacement text (empty for a deletion)." }
+      }
+    },
+    "baselined": {
+      "type": "object",
+      "required": ["id", "message", "fingerprint"],
+      "additionalProperties": false,
+      "description": "A finding grandfathered by the active baseline.",
+      "properties": {
+        "id": { "type": "string", "description": "Rule id." },
+        "path": { "type": "string", "description": "Repo-relative path; absent for tree-wide findings." },
+        "message": { "type": "string" },
+        "line": { "type": "integer", "minimum": 1 },
+        "column": { "type": "integer", "minimum": 1 },
+        "fingerprint": { "type": "string", "description": "The baseline fingerprint that matched." }
       }
     }
   }
