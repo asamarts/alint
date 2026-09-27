@@ -19,6 +19,8 @@ use alint_core::{
 use serde_json::Value;
 use serde_json_path::{JsonPath, NormalizedPath, PathElement};
 
+use crate::io::looks_binary;
+
 /// The operation a [`StructuredFixer`] performs.
 #[derive(Debug)]
 enum StructuredOp {
@@ -280,6 +282,16 @@ impl Fixer for StructuredFixer {
         bytes: &[u8],
         _root: &Path,
     ) -> Vec<CollectedEdit> {
+        // A NUL-bearing / binary file caught by a broad glob: the permissive-format
+        // host rules lossy-analyze it (a deliberate design, so a Latin-1 `.properties`
+        // is still checked -- see structured_path.rs), but SPLICING a value into a
+        // genuinely-binary file is never right and, worse, does not settle (the lossy
+        // round-trip is unstable) -> a false exit-2. Emit no edits so the fix skips it
+        // cleanly rather than churning. `looks_binary` triggers on NUL bytes, so a
+        // legitimate high-byte Latin-1 config (no NULs) is unaffected. (Audit M2.)
+        if looks_binary(bytes) {
+            return Vec::new();
+        }
         // Parse with the SAME lossy decode the host rule uses, so the query sees
         // the same tree. A parse failure means the rule already reported a
         // parse-error violation; emit no edits.

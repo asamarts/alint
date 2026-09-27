@@ -63,6 +63,7 @@ use alint_core::{
 };
 
 use crate::fixers::StructuredFixer;
+use crate::io::looks_binary;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
@@ -299,15 +300,25 @@ impl PerFileRule for StructuredPathRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // A NUL-bearing / genuinely-binary file caught by a broad glob is skipped
+        // (no violation), matching the hygiene fixers' invariant and keeping `check`
+        // and `fix` in agreement -- otherwise a PERMISSIVE-format rule (`.properties`
+        // / YAML) flags a fixable "value mismatch" on binary junk that `set_value`
+        // then cannot resolve, so the fix loops to a false exit-2 (audit M2).
+        // `looks_binary` triggers on NUL bytes, NOT high bytes, so a legitimate
+        // Latin-1 `.properties` (below) is unaffected.
+        if looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // Lossy-decode (like `json_schema_passes` / `cross_file`) rather than a
         // strict `from_utf8` + silent skip: a non-UTF-8 file -- e.g. a Latin-1
         // `.properties`, the format's historical default -- must be ANALYZED, not
         // silently ignored. Invalid bytes become U+FFFD. For the STRICT formats
-        // (JSON / TOML / XML / HCL / INI / dotenv) a genuinely-binary file caught by
-        // a broad glob then surfaces one parse-error violation rather than hiding.
-        // The two PERMISSIVE formats do NOT: `.properties` maps almost any bytes to
-        // valueless keys and YAML reads bare bytes as a scalar string, so a
-        // mis-globbed binary file there yields a junk tree (the query just finds no
+        // (JSON / TOML / XML / HCL / INI / dotenv) a truncated-but-textual file
+        // caught by a broad glob then surfaces one parse-error violation rather than
+        // hiding. The two PERMISSIVE formats do NOT: `.properties` maps almost any
+        // bytes to valueless keys and YAML reads bare bytes as a scalar string, so a
+        // mis-globbed textual file there yields a junk tree (the query just finds no
         // match), not a parse error -- keep the glob narrow for those formats.
         let text = String::from_utf8_lossy(bytes);
         let root_value = match self.format.parse(&text) {

@@ -163,6 +163,74 @@ fn detectors_skip_binary_so_check_and_fix_agree() {
     );
 }
 
+/// Audit H1 regression: the Phase-4 whole-file content fixers `sort`,
+/// `indent_style`, and `insert_line` are byte-level fixers too, so -- like the
+/// hygiene fixers above -- they MUST skip a NUL-bearing binary file, or they
+/// corrupt it (reorder / reindent / splice binary bytes) while `check` and `fix`
+/// "agree" (both act). This fixture would trip all three WITHOUT the guard:
+/// tab-indented (`indent_style: spaces`), out-of-order lines (`sort`), and missing a
+/// required line (`insert_line`), plus a NUL byte that makes it binary.
+#[test]
+fn phase4_content_fixers_skip_binary_so_check_and_fix_agree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let binary: &[u8] = b"\tzebra\x00\n\tapple\n";
+    write(root, "blob.bin", binary);
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: srt\n    kind: ordered_block\n    paths: \"**/*.bin\"\n    level: error\n    fix: { sort: {} }\n\
+         \x20 - id: ind\n    kind: indent_style\n    paths: \"**/*.bin\"\n    style: spaces\n    width: 4\n    level: error\n    fix: { indent_style: {} }\n\
+         \x20 - id: ins\n    kind: ordered_block\n    paths: \"**/*.bin\"\n    require: [\"mango\"]\n    level: error\n    fix: { insert_line: {} }\n",
+    );
+    assert!(
+        check_is_clean(root),
+        "sort/indent_style/insert_line must not flag a NUL-bearing binary (their fixers would refuse it)"
+    );
+    // check clean => no violations => nothing for any tier to apply; a bare fix and
+    // an --unsafe-fixes fix both leave the binary byte-identical.
+    fix(root);
+    Command::new(alint())
+        .args(["fix", "--unsafe-fixes", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --unsafe-fixes");
+    assert_eq!(
+        std::fs::read(root.join("blob.bin")).unwrap(),
+        binary,
+        "the binary is left byte-identical by sort/indent_style/insert_line"
+    );
+}
+
+/// Audit M2 regression: `set_value` / `remove_value` (the structured located
+/// fixers) must skip a NUL-bearing binary file too. The permissive-format host
+/// rules lossy-analyze non-UTF-8 (so a Latin-1 `.properties` is still checked),
+/// but a genuinely-binary file must be skipped so `check` and `fix` agree rather
+/// than the fix churning on junk. A high-byte (Latin-1) file with NO NUL must
+/// still be analyzed -- the guard keys on NUL, not high bytes.
+#[test]
+fn structured_fixers_skip_binary_so_check_and_fix_agree() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let binary: &[u8] = b"key=v\x00alue\nother=x\n";
+    write(root, "blob.properties", binary);
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: sv\n    kind: properties_path_equals\n    paths: \"**/*.properties\"\n    path: \"$.key\"\n    equals: \"new\"\n    level: error\n    fix: { set_value: {} }\n",
+    );
+    assert!(
+        check_is_clean(root),
+        "set_value must not flag a NUL-bearing binary .properties"
+    );
+    fix(root);
+    assert_eq!(
+        std::fs::read(root.join("blob.properties")).unwrap(),
+        binary,
+        "the binary .properties is left byte-identical"
+    );
+}
+
 /// Non-convergence (fixpoint cap): two `replace` rules that undo each other
 /// (`a` -> `b`, `b` -> `a`) change the tree every pass and never settle. The
 /// byte-level fixpoint must hard-stop at the cap and exit `2` ("fix could not

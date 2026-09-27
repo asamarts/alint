@@ -95,11 +95,25 @@ impl Fixer for FileRemoveFixer {
 #[derive(Debug)]
 pub struct FileRenameFixer {
     case: CaseConvention,
+    applicability: Applicability,
 }
 
 impl FileRenameFixer {
     pub fn new(case: CaseConvention) -> Self {
-        Self { case }
+        Self {
+            case,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_rename` from an untrusted remote
+    /// `extends:` to [`Applicability::Suggestion`] (a remote's `paths:` can AIM a
+    /// mass case-rename at the victim's source, breaking case-sensitive imports);
+    /// demote-only, promotion refused. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
     }
 
     /// Compute the rename TARGET path for `path` under this convention, or an
@@ -170,6 +184,10 @@ impl FileRenameFixer {
 impl Fixer for FileRenameFixer {
     fn describe(&self) -> String {
         format!("rename stems to {}", self.case.display_name())
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn can_fix(&self, violation: &Violation) -> bool {

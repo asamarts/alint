@@ -75,7 +75,7 @@
     },
     "violation": {
       "type": "object",
-      "required": ["message"],
+      "required": ["message", "fixable"],
       "additionalProperties": false,
       "properties": {
         "path": {
@@ -84,7 +84,11 @@
         },
         "message": { "type": "string" },
         "line": { "type": "integer", "minimum": 1 },
-        "column": { "type": "integer", "minimum": 1 }
+        "column": { "type": "integer", "minimum": 1 },
+        "fixable": {
+          "type": "boolean",
+          "description": "Whether a bare `alint fix` resolves THIS violation (a Safe, applicable fix). Per-violation, unlike the rule-level `fixable`; an Unsafe or declined fix is false here. A note is always false."
+        }
       }
     }
   }

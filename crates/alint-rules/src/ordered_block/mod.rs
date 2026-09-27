@@ -30,6 +30,8 @@ use alint_core::{
 use regex::Regex;
 use serde::Deserialize;
 
+use crate::io::looks_binary;
+
 /// `baseline_key` prefixes for `ordered_block`'s findings, set ONLY when the
 /// rule is fixable (a `sort` fix is declared). Two reasons a fixable
 /// `ordered_block` MUST key every finding per block (F4, and a hard debug panic
@@ -209,6 +211,14 @@ impl PerFileRule for OrderedBlockRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // A NUL-bearing / binary file is degenerate for a line-sorted region.
+        // `from_utf8` alone is too weak -- a NUL byte is valid UTF-8 -- so consult
+        // `looks_binary` too and skip, so `check` and `fix` AGREE (both no-op) on a
+        // binary file a broad `paths:` glob happens to catch. Matches the hygiene
+        // fixers' invariant (see fixers/hygiene.rs). (Audit H1.)
+        if looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         let Ok(text) = std::str::from_utf8(bytes) else {
             // Non-UTF-8 is degenerate for a line-sorted region.
             return Ok(Vec::new());
@@ -667,6 +677,14 @@ impl Fixer for OrderedBlockSortFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        if looks_binary(&existing) {
+            // The detector also skips a binary file (no violation); this keeps the
+            // fixer honest if one is ever dispatched anyway (audit H1).
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not sorting",
+                path.display()
+            )));
+        }
         let Ok(text) = std::str::from_utf8(&existing) else {
             // The detector also skips non-UTF-8 (no violation), so this is
             // defensive: a fix is never dispatched for such a file.
@@ -707,6 +725,9 @@ impl Fixer for OrderedBlockSortFixer {
             return None;
         }
         let path = violation.path.as_deref()?;
+        if looks_binary(bytes) {
+            return None;
+        }
         let text = std::str::from_utf8(bytes).ok()?;
         let sorted = self.sorted(text)?;
         Some(FixEdit::SetContent {
@@ -832,6 +853,12 @@ impl Fixer for OrderedBlockInsertLineFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        if looks_binary(&existing) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not inserting",
+                path.display()
+            )));
+        }
         let Ok(text) = std::str::from_utf8(&existing) else {
             return Ok(FixOutcome::Skipped(format!(
                 "{} is not UTF-8; cannot insert",
@@ -867,6 +894,9 @@ impl Fixer for OrderedBlockInsertLineFixer {
         }
         let line = Self::missing_line(violation)?;
         let path = violation.path.as_deref()?;
+        if looks_binary(bytes) {
+            return None;
+        }
         let text = std::str::from_utf8(bytes).ok()?;
         let out = self.inserted(text, line)?;
         Some(FixEdit::SetContent {

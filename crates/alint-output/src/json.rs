@@ -83,6 +83,12 @@ struct JsonViolation<'a> {
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
+    /// Whether a bare `alint fix` resolves THIS specific violation (a Safe,
+    /// applicable fix). PER-VIOLATION, unlike the rule-level `fixable` (which only
+    /// means the rule declares a fixer): an Unsafe fix, or one whose `can_fix`
+    /// declines this finding, is `false` here but may leave the rule `fixable`.
+    /// Matches the `agent` format's `fix_available` and the human `[fixable]` tag.
+    fixable: bool,
     /// The concrete Safe fix(es) alint would apply to resolve this violation
     /// (source region + replacement text). Present only under `--include-fixes`
     /// and only for a fixable finding; a note never carries one.
@@ -128,6 +134,7 @@ pub fn write_json_with_baseline(
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
+                    fixable: v.is_fixable,
                     proposed_edit: (!v.proposed_edits.is_empty())
                         .then_some(v.proposed_edits.as_slice()),
                 })
@@ -140,6 +147,7 @@ pub fn write_json_with_baseline(
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
+                    fixable: false, // notes are non-violations; never auto-fixable
                     proposed_edit: None, // notes are non-violations; no fix
                 })
                 .collect(),

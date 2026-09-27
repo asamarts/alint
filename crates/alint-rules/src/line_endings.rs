@@ -138,9 +138,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let target: LineEndingTarget = opts.target.into();
     let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileNormalizeLineEndings { .. }) => {
-            Some(FileNormalizeLineEndingsFixer::new(target))
-        }
+        Some(FixSpec::FileNormalizeLineEndings {
+            file_normalize_line_endings,
+        }) => Some(
+            FileNormalizeLineEndingsFixer::new(target).with_applicability(
+                file_normalize_line_endings
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

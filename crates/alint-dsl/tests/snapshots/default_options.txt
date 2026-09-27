@@ -863,6 +863,7 @@ FilenameCaseRule {
     fixer: Some(
         FileRenameFixer {
             case: Pascal,
+            applicability: Safe,
         },
     ),
 }

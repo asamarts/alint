@@ -733,12 +733,17 @@ impl From<&str> for ContentSourceSpec {
     }
 }
 
-/// Empty marker: `file_rename` takes no parameters. The target name
-/// is derived from the parent rule (e.g. `filename_case` converts the
-/// stem to its configured case; the extension is preserved).
+/// The target name is derived from the parent rule (e.g. `filename_case` converts
+/// the stem to its configured case; the extension is preserved). **`Safe` by
+/// default**; **content-injecting** in the W2 partition (no ruleset bytes, but a
+/// remote's `paths:` can AIM a mass case-rename at the victim's source, breaking
+/// case-sensitive imports -- so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileRenameFixSpec {}
+pub struct FileRenameFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 /// Empty marker. Behavior: read file (subject to `fix_size_limit`),
 /// strip trailing space/tab on every line, write back.
@@ -752,11 +757,17 @@ pub struct FileTrimTrailingWhitespaceFixSpec {}
 #[serde(deny_unknown_fields)]
 pub struct FileAppendFinalNewlineFixSpec {}
 
-/// Empty marker. Behavior: rewrite the file with every line ending
-/// replaced by the parent rule's configured target (`lf` or `crlf`).
+/// Behavior: rewrite the file with every line ending replaced by the parent rule's
+/// configured target (`lf` or `crlf`). **`Safe` by default**; **content-injecting**
+/// in the W2 partition (no ruleset bytes, but a remote's `paths:` can AIM a CRLF/LF
+/// rewrite at a line-ending-significant file -- CRLF on a `#!/bin/sh` shebang breaks
+/// it -- so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileNormalizeLineEndingsFixSpec {}
+pub struct FileNormalizeLineEndingsFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 /// Empty marker. Behavior: remove every Unicode bidi control
 /// character (U+202A–202E, U+2066–2069) from the file's content.
@@ -981,8 +992,10 @@ pub struct SortFixSpec {
 /// spaces-per-tab): it rewrites a PURE-TAB leading run (K tabs) to K*N spaces, and
 /// leaves the genuinely ambiguous cases (a mixed tab+space lead, a pure-space
 /// width mismatch). Behavior comes from the host rule (`style` / `width`); this
-/// spec adds only the optional tier override. **`Safe` by default** (a pure-tab
-/// reindent is behavior-preserving for the common case).
+/// spec adds only the optional tier override. **`Unsafe` by default** (a mis-aimed
+/// reindent HARD-breaks an indent-significant file such as a `Makefile` recipe;
+/// audit round-3), so a bare `fix` suggests it and `--unsafe-fixes` applies it;
+/// **content-injecting** in the W2 partition (a remote can aim it at such a file).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub struct IndentStyleFixSpec {

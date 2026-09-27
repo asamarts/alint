@@ -131,7 +131,8 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     // same `{{env.X}}` interpolation as the top-level config and
     // drop-ins. A YAML/typed error keeps the "parsing nested config"
     // context; an interpolation error already carries the path.
-    let config: RawConfig = match crate::loader::parse_config_interpolated(&contents, abs_path) {
+    let mut config: RawConfig = match crate::loader::parse_config_interpolated(&contents, abs_path)
+    {
         Ok(c) => c,
         Err(Error::Yaml(e)) => {
             return Err(Error::Other(format!(
@@ -217,6 +218,16 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     crate::reject_spawning_fix_ops_in(&config.rules, &source)?;
     // ...and no inherited rule may promote a destructive fix to auto-apply.
     crate::reject_fix_promotion_in(&config.rules, &source)?;
+    // ...and every CONTENT-INJECTING fixer is demoted to a suggestion, EXACTLY as
+    // for an `extends:`'d remote (loader.rs). Without this a subtree `.alint.yml`
+    // -- untrusted, "anyone who can open a PR" -- could auto-apply a content fixer
+    // on a bare `alint fix`; and because a fix op's own explicit `path` is NOT
+    // re-scoped to the subtree (only `paths`/`select`/`primary` are), a nested
+    // `file_create` could write a repo-ROOT file (e.g. a `.github/workflows/` CI
+    // job -> code execution once pushed). Demoting to a suggestion closes the
+    // SILENT auto-apply, matching this module's stated "as untrusted as an
+    // `extends:`'d ruleset" trust model (audit: nested-config HIGH).
+    crate::demote_content_fixers_in(&mut config.rules);
 
     // Glob patterns are platform-agnostic (always `/`); on
     // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd

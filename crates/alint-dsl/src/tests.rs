@@ -861,6 +861,13 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         // `insert_header` injects the host `file_header` rule's header bytes; read
         // its tier for `w2_remote_insert_header_is_demoted`.
         FixSpec::InsertHeader { insert_header } => insert_header.applicability,
+        // `file_rename` / `file_normalize_line_endings` are aimable Safe transforms
+        // (case-rename breaks imports; CRLF breaks a shebang); read their tier for
+        // `w2_remote_file_rename_is_demoted` / `..._file_normalize_line_endings_...`.
+        FixSpec::FileRename { file_rename } => file_rename.applicability,
+        FixSpec::FileNormalizeLineEndings {
+            file_normalize_line_endings,
+        } => file_normalize_line_endings.applicability,
         _ => None,
     }
 }
@@ -1127,6 +1134,42 @@ fn w2_remote_insert_header_is_demoted_to_suggestion() {
 }
 
 #[test]
+fn w2_remote_file_normalize_line_endings_is_demoted_to_suggestion() {
+    // AUDIT (partition MED): a remote can AIM a CRLF rewrite at a shebang script to
+    // break it (line endings are significance-bearing), so `file_normalize_line_endings`
+    // must be demoted from an untrusted remote. Teeth: dropping it from
+    // CONTENT_INJECTING_FIX_OPS reverts this to None.
+    let body = "version: 1\nrules:\n  - id: le\n    kind: line_endings\n    \
+        paths: \"**/*.sh\"\n    target: crlf\n    level: error\n    \
+        fix: { file_normalize_line_endings: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "le").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_normalize_line_endings` must be demoted"
+    );
+}
+
+#[test]
+fn w2_remote_file_rename_is_demoted_to_suggestion() {
+    // AUDIT (partition MED): a remote can AIM a mass case-rename at the victim's
+    // source, breaking case-sensitive imports, so `file_rename` must be demoted from
+    // an untrusted remote. Teeth: dropping it from CONTENT_INJECTING_FIX_OPS reverts
+    // this to None.
+    let body = "version: 1\nrules:\n  - id: fc\n    kind: filename_case\n    \
+        paths: \"**/*.py\"\n    case: snake\n    level: error\n    \
+        fix: { file_rename: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "fc").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_rename` must be demoted"
+    );
+}
+
+#[test]
 fn w2_remote_remove_value_is_not_demoted() {
     // `remove_value` deletes a node (no ruleset bytes) -> fixed-behavior, gated
     // by its Unsafe tier like `file_remove`, NOT demoted by W2. Its tier stays
@@ -1244,10 +1287,12 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
     // any source. The exhaustive complement of the content + spawning SSOTs.
     const FIXED_BEHAVIOR_FIX_OPS: &[&str] = &[
         "file_remove",
-        "file_rename",
+        // NOTE: `file_rename` and `file_normalize_line_endings` are NOT here -- they
+        // write no ruleset bytes, but a remote can AIM a case-rename (breaks imports)
+        // or a CRLF rewrite (breaks a shebang) at the victim's files at the Safe tier,
+        // so they are CONTENT_INJECTING (demoted from an untrusted remote) like `sort`.
         "file_trim_trailing_whitespace",
         "file_append_final_newline",
-        "file_normalize_line_endings",
         "file_strip_bidi",
         "file_strip_zero_width",
         "file_strip_bom",
@@ -2090,6 +2135,36 @@ fn nested_config_rejects_a_git_untrack_fix() {
     let err = load(&root_cfg).unwrap_err().to_string();
     assert!(err.contains("git_untrack"), "op not gated in nested: {err}");
     assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn nested_config_demotes_a_content_fixer_to_suggestion() {
+    // AUDIT (nested-config HIGH): a subtree `.alint.yml` is untrusted like an
+    // `extends:`'d ruleset, so a CONTENT-INJECTING fixer it declares must be demoted
+    // to a suggestion -- NEVER auto-applied on a bare `alint fix`. Without this a
+    // nested `file_create` silently creates a file, and because its explicit `path`
+    // is not re-scoped to the subtree it can land at the repo ROOT (e.g. a
+    // `.github/workflows/` CI job -> code execution once pushed). Teeth: dropping the
+    // `demote_content_fixers_in` call in nested.rs reverts this to `None` and reds.
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: sneaky-create\n    kind: file_exists\n    \
+         paths: \"README.md\"\n    level: error\n    fix:\n      file_create:\n        \
+         path: pwn.txt\n        content: \"x\"\n",
+    )
+    .unwrap();
+    let cfg = load(&root_cfg).unwrap();
+    let rule = cfg.rules.iter().find(|r| r.id == "sneaky-create").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "a nested content fixer must be demoted to suggestion, not auto-applied"
+    );
 }
 
 #[test]

@@ -92,7 +92,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileRename { .. }) => Some(FileRenameFixer::new(opts.case)),
+        Some(FixSpec::FileRename { file_rename }) => Some(
+            FileRenameFixer::new(opts.case).with_applicability(
+                file_rename
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

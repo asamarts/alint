@@ -28,6 +28,8 @@ use alint_core::{
 };
 use serde::Deserialize;
 
+use crate::io::looks_binary;
+
 /// `baseline_key` PREFIXES for the fixable-rule case (`style: spaces` + `width`
 /// with a `fix`). The check tags its ONE finding (the first bad line) with
 /// whether the `indent_style` reindent fix can resolve it -- a PURE-TAB lead is
@@ -109,9 +111,16 @@ impl PerFileRule for IndentStyleRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // A NUL-bearing / binary file is degenerate for a reindent, and `from_utf8`
+        // alone is too weak (a NUL byte is valid UTF-8), so consult `looks_binary`
+        // too and skip -- so `check` and `fix` AGREE (both no-op) on a binary file a
+        // broad `paths:` glob catches, per the hygiene fixers' invariant (audit H1).
+        if looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // The leading-indent scan inspects ASCII whitespace
         // characters and uses `char_indices` to slice the prefix
-        // — we keep the UTF-8 validation pass for parity with
+        // -- we keep the UTF-8 validation pass for parity with
         // the rule-major path. Non-UTF-8 files silently skip.
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Ok(Vec::new());
@@ -407,6 +416,13 @@ impl Fixer for IndentStyleReindentFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        if looks_binary(&existing) {
+            // The detector also skips a binary file (no violation); defensive (H1).
+            return Ok(FixOutcome::Skipped(format!(
+                "{} looks binary; not reindenting",
+                path.display()
+            )));
+        }
         let Ok(text) = std::str::from_utf8(&existing) else {
             // The detector also skips non-UTF-8 (no violation); defensive.
             return Ok(FixOutcome::Skipped(format!(
@@ -444,6 +460,9 @@ impl Fixer for IndentStyleReindentFixer {
             return None;
         }
         let path = violation.path.as_deref()?;
+        if looks_binary(bytes) {
+            return None;
+        }
         let text = std::str::from_utf8(bytes).ok()?;
         let out = reindent_pure_tabs(text, self.width)?;
         Some(FixEdit::SetContent {

@@ -663,8 +663,10 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // `indent_style` rewrites the victim's OWN leading whitespace (tabs -> spaces),
     // writing no ruleset bytes -- but a remote's `paths:` can AIM the reindent at an
     // indent-SIGNIFICANT file (a `Makefile` recipe needs a literal tab; converting
-    // it to spaces is a HARD build break) at the Safe tier. Same aim risk as
-    // `sort`, so it PROPOSES, never auto-writes, from an untrusted remote.
+    // it to spaces is a HARD build break). It is `Unsafe` by DEFAULT (so a bare fix
+    // never auto-applies it), and content-injecting here too as belt-and-suspenders:
+    // it PROPOSES, never auto-writes, from an untrusted remote even if a rule set an
+    // explicit `applicability: safe`. Same aim risk as `sort`.
     "indent_style",
     // `insert_line` splices the host `ordered_block` rule's `require:` lines --
     // ruleset-authored bytes -- into the victim's file (e.g. a `CODEOWNERS` owner
@@ -675,6 +677,18 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // authored bytes, like `file_prepend` (which it refines). An untrusted remote
     // must PROPOSE it.
     "insert_header",
+    // `file_normalize_line_endings` writes no ruleset bytes -- it rewrites the
+    // victim's OWN line endings -- but line endings are SIGNIFICANCE-bearing, so a
+    // remote's `paths:` can AIM a CRLF rewrite at a `#!/bin/sh` shebang (breaking
+    // it) at the Safe tier. Same aim risk as `sort` / `indent_style`, so it PROPOSES,
+    // never auto-writes, from an untrusted remote (audit: partition MED).
+    "file_normalize_line_endings",
+    // `file_rename` writes no ruleset bytes, but a remote's `paths:` + `filename_case`
+    // can AIM a mass case-rename at the victim's source, breaking case-sensitive
+    // imports at the Safe tier. Aimable like `sort`, so it PROPOSES from an untrusted
+    // remote (audit: partition MED). (The rename TARGET is derived, never
+    // remote-chosen, so this is availability-only, not a content-injection.)
+    "file_rename",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`

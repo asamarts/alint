@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use alint_core::{Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
+use alint_core::{Applicability, Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
 
 use crate::io::looks_binary;
 
@@ -210,17 +210,35 @@ impl LineEndingTarget {
 #[derive(Debug)]
 pub struct FileNormalizeLineEndingsFixer {
     target: LineEndingTarget,
+    applicability: Applicability,
 }
 
 impl FileNormalizeLineEndingsFixer {
     pub fn new(target: LineEndingTarget) -> Self {
-        Self { target }
+        Self {
+            target,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_normalize_line_endings` from an
+    /// untrusted remote `extends:` to [`Applicability::Suggestion`] (a remote's
+    /// `paths:` can AIM a CRLF/LF rewrite at a line-ending-significant file -- e.g.
+    /// CRLF on a `#!/bin/sh` shebang breaks it); demote-only. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
     }
 }
 
 impl Fixer for FileNormalizeLineEndingsFixer {
     fn describe(&self) -> String {
         format!("normalize line endings to {}", self.target.name())
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {

@@ -15,7 +15,8 @@
       "fixable": false,
       "violations": [
         {
-          "message": "expected a file matching [LICENSE]"
+          "message": "expected a file matching [LICENSE]",
+          "fixable": false
         }
       ]
     }

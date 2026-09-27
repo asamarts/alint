@@ -155,3 +155,56 @@ fn non_utf8_filename_does_not_break_json_or_agent() {
         );
     }
 }
+
+// Audit D-H1: the case above uses a FIXER-LESS rule, so it never serializes a
+// `proposed_edit`. The `agent` format ALWAYS attaches proposed edits, and
+// `json --include-fixes` attaches them on request; `ProposedEdit.path` serialized
+// with serde's STRICT `PathBuf` impl, which ERRORS on a non-UTF-8 path -> the JSON
+// was truncated mid-document and exit 2. This variant uses a FIXABLE rule so the
+// proposed_edit is present, and asserts both fix-carrying formats stay valid.
+#[cfg(target_os = "linux")]
+#[test]
+fn non_utf8_filename_does_not_break_fix_carrying_formats() {
+    use std::os::unix::ffi::OsStrExt;
+    let dir = tempfile::Builder::new()
+        .prefix("alint-weirdpath-fix-")
+        .tempdir()
+        .unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: trim\n    kind: no_trailing_whitespace\n    \
+         paths: \"**/*.txt\"\n    level: error\n    fix:\n      file_trim_trailing_whitespace: {}\n",
+    )
+    .unwrap();
+    let mut name = std::ffi::OsString::from("bad");
+    name.push(std::ffi::OsStr::from_bytes(b"\xff"));
+    name.push("name.txt");
+    std::fs::write(dir.path().join(&name), "trailing   \n").unwrap();
+
+    // `agent` (always attaches proposed_edit) and `json --include-fixes` (on request).
+    for args in [
+        &["check", ".", "--format", "agent"][..],
+        &["check", ".", "--format", "json", "--include-fixes"][..],
+    ] {
+        let out = run(dir.path(), args);
+        assert_eq!(
+            out.status.code(),
+            Some(1),
+            "{args:?} must not abort (exit 2) on a non-UTF-8 path with a proposed_edit; stderr: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+        let v: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+            panic!(
+                "{args:?} stdout is not valid JSON: {e}\n{}",
+                String::from_utf8_lossy(&out.stdout)
+            )
+        });
+        // The rendered blob must carry the lossy proposed-edit path (U+FFFD), proving
+        // the nested `ProposedEdit.path` serialized without aborting.
+        let blob = v.to_string();
+        assert!(
+            blob.contains("name.txt") && blob.contains('\u{fffd}'),
+            "{args:?} expected a lossy proposed_edit path; got {blob}"
+        );
+    }
+}

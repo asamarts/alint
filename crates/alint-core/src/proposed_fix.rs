@@ -66,9 +66,23 @@ pub struct EditRegion {
 /// `inserted` is the replacement text (empty for a pure deletion).
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
 pub struct ProposedEdit {
+    #[serde(serialize_with = "serialize_path_lossy")]
     pub path: PathBuf,
     pub region: EditRegion,
     pub inserted: String,
+}
+
+/// Serialize a path LOSSILY (invalid UTF-8 bytes -> U+FFFD) so a machine format
+/// (`agent` / `json --include-fixes`) never aborts mid-document on a non-UTF-8
+/// filename -- on Linux a filename is an arbitrary byte sequence, and serde's
+/// default `Path` serializer ERRORS on one, which truncated the JSON and exited 2
+/// (audit D-H1). The top-level `path` field already routes through a lossy helper in
+/// the output crate; this keeps the nested `ProposedEdit.path` consistent.
+fn serialize_path_lossy<S: serde::Serializer>(
+    path: &Path,
+    serializer: S,
+) -> std::result::Result<S::Ok, S::Error> {
+    serializer.serialize_str(&path.to_string_lossy())
 }
 
 /// Convert a byte offset in `text` (valid UTF-8) to a 1-based `(line, column)`,
