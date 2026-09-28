@@ -8,7 +8,7 @@ categories: ['text-hygiene']
 
 Every non-blank line indents with the configured `style` (`tabs` or `spaces`). When `style: spaces`, optional `width` enforces a multiple.
 
-Check-only: tab-width-aware reindentation is language-specific. Pair with your editor's "reindent on save" for remediation.
+Fix: `indent_style` — reindents tab-indented lines to spaces, for a `style: spaces` + `width: N` rule only (the `width` is the spaces-per-tab). It converts a PURE-TAB leading run to `N` spaces per tab (1 tab → N, 2 tabs → 2N), preserving the rest of the line, its terminator, and the trailing-newline state; it declines the genuinely ambiguous cases — a mixed tab+space lead, or a pure-space run that isn't a multiple of `width` — so `check` does not advertise those as auto-fixable. A `tabs`-style or width-less rule with a `fix` is rejected at load (`spaces → tabs` has no spaces-per-tab). **`Unsafe` by default** — a mis-aimed reindent hard-breaks an indent-significant file (a `Makefile` recipe requires a literal tab), so a bare `alint fix` suggests it and `--unsafe-fixes` (or a per-rule `applicability: safe`) applies it; it is also demoted to a suggestion from an untrusted remote `extends:`. With no fix declared, violations are unfixable; pair with your editor's "reindent on save".
 
 ## Options
 
