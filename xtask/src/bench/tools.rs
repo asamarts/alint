@@ -83,17 +83,27 @@ impl Tool {
     /// pipeline doesn't model the workspace bundle's
     /// cross-file rules so S3 is out of scope.
     pub fn supports(self, scenario: Scenario, mode: Mode) -> bool {
-        // Clippy thinks the `true` arms could be merged with
-        // `|`, but keeping them split makes adding the
-        // Repolinter arm in a follow-up commit a one-line
-        // change instead of a re-split.
+        // Keeping the arms split (rather than merging the `true`s with
+        // `|`) keeps each tool's remit legible and per-tool edits local.
         #[allow(clippy::match_same_arms)]
         match (self, scenario, mode) {
+            // alint: the four check scenarios run full + changed; the
+            // dedicated fix scenario (SFIX) runs fix-mode ONLY — and no
+            // check scenario runs fix mode. The ordering matters: the
+            // SFIX/Fix true arm precedes the SFIX catch-all false arm,
+            // which precedes the "any check scenario + fix" false arm,
+            // which precedes the general check-scenario true arm.
+            (Self::Alint, Scenario::Sfix, Mode::Fix) => true,
+            (Self::Alint, Scenario::Sfix, _) => false,
+            (Self::Alint, _, Mode::Fix) => false,
             (Self::Alint, _, _) => true,
+            // ls-lint: filename-only, S1 + full only.
             (Self::LsLint, Scenario::S1, Mode::Full) => true,
             (Self::LsLint, _, _) => false,
+            // grep pipeline: layout (S1) + content (S2), full only.
             (Self::GrepPipeline, Scenario::S1 | Scenario::S2, Mode::Full) => true,
             (Self::GrepPipeline, _, _) => false,
+            // Repolinter: existence + content (S2), full only.
             (Self::Repolinter, Scenario::S2, Mode::Full) => true,
             (Self::Repolinter, _, _) => false,
         }
@@ -171,29 +181,22 @@ impl Tool {
         match self {
             Self::Alint => {
                 let bin = quote_for_shell(&alint_bin.to_string_lossy());
-                if mode == Mode::Changed {
-                    format!("{bin} check {root} --changed")
-                } else {
-                    format!("{bin} check {root}")
+                match mode {
+                    Mode::Full => format!("{bin} check {root}"),
+                    Mode::Changed => format!("{bin} check {root} --changed"),
+                    // `--unsafe-fixes` so every op applies through compose
+                    // (Unsafe ops don't downgrade to compute-only
+                    // suggestions); `--dry-run` so nothing is written and
+                    // the tree stays byte-stable across hyperfine runs.
+                    Mode::Fix => format!("{bin} fix {root} --unsafe-fixes --dry-run"),
                 }
             }
             Self::LsLint => format!("ls-lint -workdir {root}"),
             Self::GrepPipeline => match scenario {
                 Scenario::S1 => grep_pipeline_s1(&root),
                 Scenario::S2 => grep_pipeline_s2(&root),
-                Scenario::S3
-                | Scenario::S4
-                | Scenario::S5
-                | Scenario::S6
-                | Scenario::S7
-                | Scenario::S8
-                | Scenario::S9
-                | Scenario::S10
-                | Scenario::S11
-                | Scenario::S12
-                | Scenario::S13
-                | Scenario::S14 => {
-                    unreachable!("supports() filters S3+ out for GrepPipeline")
+                Scenario::S3 | Scenario::S4 | Scenario::Sfix => {
+                    unreachable!("supports() filters S3/S4/SFIX out for GrepPipeline")
                 }
             },
             // `repolinter lint <root>` reads `repolinter.json`

@@ -710,8 +710,9 @@ mod tests {
         );
         assert_eq!(
             on_disk.len(),
-            14,
-            "expected the 14 synthetic bench scenarios"
+            4,
+            "expected the 4 numbered synthetic bench scenarios (S1-S4; the fix-only \
+             sfix_all.yml is excluded by the s<N>_ regex)"
         );
 
         for (id, count) in &f.bench_scenario_rule_counts {

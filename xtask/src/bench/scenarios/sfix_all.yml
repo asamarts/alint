@@ -1,0 +1,188 @@
+# Scenario sfix_all — Auto-fix (dedicated). [Consolidated set, the NEW fifth axis]
+#
+# Exercises the fix engine over all 24 NON-SPAWNING fix ops (the 26 in
+# FixSpec::ALL_OP_NAMES minus `command` + `git_untrack`, which spawn -- D5). Run as
+# `alint fix --unsafe-fixes --dry-run` (Mode::Fix): --unsafe-fixes so every op's
+# compute + compose path runs (not just the Safe ones); --dry-run so nothing is
+# written and the tree stays byte-stable across hyperfine iterations.
+#
+# Two scopes on purpose:
+#   * The 8 whole-file content normalizers scope to `**/*.rs`, so they fan out over
+#     the whole tree (the scan-at-scale signal) AND fire on the deterministic
+#     Callgrind bench's injected trailing-whitespace (det_check::materialize_fixable
+#     rewrites every `crates/**/*.rs` line into a violation -- no `sfix/` there).
+#   * The 16 structured / located / path / cross-file / header ops scope to the
+#     `sfix/` subtree that `Scenario::setup_overlay` plants (one deterministic
+#     violation apiece), so their compute + compose paths are exercised without
+#     depending on the shared tree's contents.
+# Closes the auto-fix macro-coverage gap (was 2/26 ops, micro-only).
+
+version: 1
+
+rules:
+  # --- whole-file content normalizers (8) over `**/*.rs` ---
+  - id: fix-trim-ws
+    kind: no_trailing_whitespace
+    paths: "**/*.rs"
+    level: warning
+    fix: { file_trim_trailing_whitespace: {} }
+  - id: fix-final-newline
+    kind: final_newline
+    paths: "**/*.rs"
+    level: warning
+    fix: { file_append_final_newline: {} }
+  - id: fix-line-endings
+    kind: line_endings
+    paths: "**/*.rs"
+    target: lf
+    level: warning
+    fix: { file_normalize_line_endings: {} }
+  - id: fix-strip-bidi
+    kind: no_bidi_controls
+    paths: "**/*.rs"
+    level: error
+    fix: { file_strip_bidi: {} }
+  - id: fix-strip-zero-width
+    kind: no_zero_width_chars
+    paths: "**/*.rs"
+    level: error
+    fix: { file_strip_zero_width: {} }
+  - id: fix-strip-bom
+    kind: no_bom
+    paths: "**/*.rs"
+    level: warning
+    fix: { file_strip_bom: {} }
+  - id: fix-collapse-blank
+    kind: max_consecutive_blank_lines
+    paths: "**/*.rs"
+    max: 1
+    level: info
+    fix: { file_collapse_blank_lines: {} }
+  - id: fix-indent-style
+    kind: indent_style
+    paths: "**/*.rs"
+    style: spaces
+    width: 4
+    level: info
+    fix: { indent_style: { applicability: safe } }
+
+  # --- located content (3) over the planted sfix/ fixture ---
+  - id: fix-replace
+    kind: file_content_forbidden
+    paths: "sfix/**/*.rs"
+    pattern: '\bFIXME\b'
+    level: warning
+    fix:
+      replace:
+        replacement: "DONE"
+        applicability: safe
+  - id: fix-sort
+    kind: ordered_block
+    paths: "sfix/sorted.txt"
+    level: warning
+    fix: { sort: { applicability: safe } }
+  - id: fix-insert-line
+    kind: ordered_block
+    paths: "sfix/CODEOWNERS"
+    require: ["*.py @py-team"]
+    level: warning
+    fix: { insert_line: { applicability: safe } }
+
+  # --- structured (2) ---
+  - id: fix-set-value
+    kind: yaml_path_equals
+    paths: "sfix/config.yaml"
+    path: "$['env']"
+    equals: "production"
+    level: error
+    fix: { set_value: {} }
+  - id: fix-remove-value
+    kind: yaml_path_absent
+    paths: "sfix/config.yaml"
+    path: "$['debug']"
+    level: error
+    fix: { remove_value: { applicability: safe } }
+
+  # --- inline content / header (3) ---
+  - id: fix-prepend-header
+    kind: file_header
+    paths: "sfix/**/*.rs"
+    pattern: "(?s)Copyright"
+    lines: 3
+    level: warning
+    fix:
+      file_prepend:
+        content: "// Copyright 2026 acme\n"
+  - id: fix-insert-header
+    kind: file_header
+    paths: "sfix/**/*.sh"
+    pattern: "Copyright"
+    lines: 5
+    level: warning
+    fix:
+      insert_header:
+        content: "# Copyright 2026 acme\n"
+  - id: fix-append-footer
+    kind: file_footer
+    paths: "sfix/**/*.rs"
+    pattern: "Licensed under"
+    lines: 3
+    level: warning
+    fix:
+      file_append:
+        content: "// Licensed under the Apache License, Version 2.0\n"
+
+  # --- path / metadata (5) ---
+  - id: fix-rename
+    kind: filename_case
+    paths: "sfix/**/*.rs"
+    case: snake
+    level: warning
+    fix: { file_rename: {} }
+  - id: fix-create
+    kind: file_exists
+    paths: "sfix/NOTICE"
+    level: error
+    fix:
+      file_create:
+        path: "sfix/NOTICE"
+        content: "(c) 2026 acme\n"
+  - id: fix-remove
+    kind: file_absent
+    paths: "sfix/**/*.tmp"
+    level: error
+    fix: { file_remove: { applicability: safe } }
+  - id: fix-relocate
+    kind: file_absent
+    paths: "sfix/**/*/Cargo.lock"
+    level: error
+    fix: { relocate: { applicability: safe } }
+  - id: fix-dir-create
+    kind: dir_exists
+    paths: "sfix/adr"
+    level: error
+    fix: { dir_create: {} }
+  - id: fix-chmod
+    kind: executable_bit
+    paths: "sfix/**/*.sh"
+    require: false
+    level: warning
+    fix: { chmod: {} }
+
+  # --- cross-file (2) ---
+  - id: fix-sync-from
+    kind: cross_file
+    relation: equals
+    source: { file: "sfix/version.toml", extract: { toml: "$.package.version" } }
+    targets: { files: "sfix/pkgs/*/Cargo.toml", extract: { toml: "$.package.version" } }
+    level: error
+    fix: { sync_from: {} }
+  - id: fix-create-and-register
+    kind: cross_file
+    relation: registered
+    source: { files: "sfix/pkgs/*/Cargo.toml" }
+    register_as: "{dir}"
+    targets:
+      - { file: "sfix/workspace.toml", extract: { toml: "$.workspace.members[*]" } }
+    level: error
+    fix: { create_and_register: {} }

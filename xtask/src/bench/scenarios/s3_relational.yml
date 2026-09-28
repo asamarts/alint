@@ -1,0 +1,142 @@
+# Scenario s3_relational — Cross-file, relational & graph. [Consolidated set, axis C]
+#
+# Whole-index build + path-index + relational fan-out + graph build/traversal +
+# single-shot spawn. Absorbs old S7 (pair / unique_by / for_each_* /
+# every_matching_has / dir_only_contains), S11 (registry_paths_resolve /
+# cross_file_value_equals / pair_hash), S13 (generated_file_fresh /
+# command_idempotent), and S14 (file_graph x3 / for_each_match / cross_file union).
+# Regular monorepo tree + overlays (manifest.sha256, .v012_editions, graph/,
+# .gff_target). Rules run silent except the deterministic pair_hash + graph-acyclic
+# injected violations; the perf signal is the index/graph work, not the counts.
+
+version: 1
+
+rules:
+  # --- Relational (old S7) ---
+  - id: rs-needs-pair
+    kind: pair
+    primary: "crates/*/src/lib.rs"
+    partner: "{dir}/mod_0001.rs"
+    level: info
+  - id: pkg-names-unique
+    kind: unique_by
+    select: "crates/*"
+    key: "{basename}"
+    level: warning
+  - id: every-pkg-cargo-toml-declares-name
+    kind: for_each_dir
+    select: "crates/*"
+    require:
+      - kind: toml_path_matches
+        paths: "{path}/Cargo.toml"
+        path: "$.package.name"
+        matches: '^[a-z][a-z0-9-]*$'
+    level: warning
+  - id: every-lib-has-content
+    kind: for_each_file
+    select: "crates/*/src/lib.rs"
+    require:
+      - kind: file_min_lines
+        paths: "{path}"
+        min_lines: 1
+    level: info
+  - id: every-pkg-has-source
+    kind: every_matching_has
+    select: "crates/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/src/lib.rs"
+    level: warning
+  - id: src-only-rs
+    kind: dir_only_contains
+    select: "crates/*/src"
+    allow:
+      - "*.rs"
+    level: info
+
+  # --- v0.10 cross-file (old S11) ---
+  - id: registry-members-resolve
+    kind: registry_paths_resolve
+    source: Cargo.toml
+    extract:
+      toml: "$.workspace.members"
+    entries_are_globs: true
+    expect: dir
+    level: warning
+  - id: edition-pins-across-members
+    kind: cross_file_value_equals
+    source:
+      file: crates/pkg-000000/Cargo.toml
+      extract:
+        toml: "$.package.edition"
+    targets:
+      files: "crates/*/Cargo.toml"
+      extract:
+        toml: "$.package.edition"
+    level: warning
+  - id: members-hashed-in-manifest
+    kind: pair_hash
+    source: "crates/*/Cargo.toml"
+    target: manifest.sha256
+    level: info
+
+  # --- Single-shot spawn (old S13) ---
+  - id: gff-true
+    kind: generated_file_fresh
+    file: .gff_target
+    command: ["true"]
+    level: info
+  - id: ci-true
+    kind: command_idempotent
+    command: ["true"]
+    level: info
+
+  # --- v0.12 graph + featureset (old S14) ---
+  - id: v012-graph-no-dangling
+    kind: file_graph
+    nodes: "crates/*/src/*.rs"
+    edges:
+      from_content:
+        extract:
+          regex: 'use\s+([\w:]+);'
+        resolve: relative_to_repo_root
+    require: no_dangling
+    level: info
+  - id: v012-graph-derive-sibling
+    kind: file_graph
+    nodes: "crates/*/Cargo.toml"
+    edges:
+      derive_target:
+        from: 'crates/(.*)/Cargo\.toml'
+        to: 'crates/$1/README.md'
+    require: no_dangling
+    level: info
+  - id: v012-for-each-match
+    kind: for_each_match
+    paths: "crates/*/src/*.rs"
+    select: '^[A-Za-z]'
+    require:
+      matches: ['.']
+    level: info
+  - id: v012-glob-union-source
+    kind: cross_file
+    source:
+      files: "crates/*/Cargo.toml"
+      extract:
+        toml: "$.package.edition"
+    targets:
+      - file: .v012_editions
+        extract:
+          lines: {}
+    relation: set_equals
+    level: info
+  - id: v012-graph-acyclic
+    kind: file_graph
+    nodes: "graph/*.rs"
+    edges:
+      from_content:
+        extract:
+          regex: '// dep: (\S+)'
+        resolve: relative_to_repo_root
+    require: acyclic
+    level: info

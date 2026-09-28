@@ -1,0 +1,96 @@
+# Scenario s1_layout — Layout & path (walk-bound). [Consolidated set, axis A]
+#
+# The cheapest path: walker + GlobSet + path/metadata rules, little or no content
+# read. The ls-lint / grep competitive anchor. Absorbs the old S1 (filename), S10
+# (scope_filter shape), and the existence/size half of S2/S4. A subset carries a
+# `scope_filter: { has_ancestor }` so the v0.9.8 scope_filter-on-non-per-file-rules
+# dispatch shape stays covered.
+
+version: 1
+
+rules:
+  # Filename class (old S1) — snake / pascal / kebab per extension.
+  - id: rs-snake
+    kind: filename_case
+    paths: "**/*.rs"
+    case: snake
+    level: warning
+  - id: tsx-pascal
+    kind: filename_case
+    paths: "**/*.tsx"
+    case: pascal
+    level: warning
+  - id: ts-kebab
+    kind: filename_case
+    paths: "**/*.ts"
+    case: kebab
+    level: warning
+  - id: yaml-kebab
+    kind: filename_case
+    paths: "**/*.yaml"
+    case: kebab
+    level: info
+  - id: yml-kebab
+    kind: filename_case
+    paths: "**/*.yml"
+    case: kebab
+    level: info
+  - id: md-any
+    kind: filename_regex
+    paths: "**/*.md"
+    pattern: "^[a-zA-Z0-9_.-]+$"
+    level: info
+  - id: json-any
+    kind: filename_regex
+    paths: "**/*.json"
+    pattern: "^[a-zA-Z0-9_.-]+$"
+    level: info
+
+  # Existence + absence (old S2 / S4 layout half) — path-only, no content read.
+  - id: readme
+    kind: file_exists
+    paths: ["README.md", "README"]
+    root_only: true
+    level: warning
+  - id: license
+    kind: file_exists
+    paths: ["LICENSE", "LICENSE.md", "LICENSE.txt"]
+    root_only: true
+    level: warning
+  - id: no-bak
+    kind: file_absent
+    paths: "**/*.bak"
+    level: error
+  - id: no-orig
+    kind: file_absent
+    paths: "**/*.orig"
+    level: error
+  - id: no-node-modules
+    kind: dir_absent
+    paths: "**/node_modules"
+    level: error
+
+  # Metadata (path-stat, no content read).
+  - id: no-huge
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 1048576
+    level: warning
+  - id: no-empty
+    kind: no_empty_files
+    paths: "**/*.rs"
+    level: info
+  - id: no-symlinks
+    kind: no_symlinks
+    paths: "**"
+    level: warning
+
+  # scope_filter on a non-PerFileRule kind (old S10 shape): narrow a broad `**`
+  # metadata rule to files under a Cargo.toml subtree via the ancestor walk.
+  - id: bounded-in-crates
+    kind: file_max_size
+    paths: "**"
+    max_bytes: 1048576
+    scope_filter:
+      has_ancestor: Cargo.toml
+    level: info

@@ -10,9 +10,11 @@
 //!   --changed` measures the v0.5.0 incremental path).
 //!
 //! Each (size, mode, scenario) triple becomes one hyperfine row.
-//! Scenarios live in `scenarios/*.yml` — three configs spanning
-//! filename hygiene (S1), existence + content (S2), and the
-//! full workspace bundle (S3).
+//! Scenarios live in `scenarios/*.yml` — five consolidated configs
+//! spanning the four cost axes plus auto-fix: layout/path (S1),
+//! per-file content (S2), cross-file/relational/graph (S3), the
+//! realistic workspace bundle (S4), and the dedicated auto-fix pass
+//! (`sfix_all`, run under `Mode::Fix`).
 //!
 //! Output: a per-platform, per-version directory under
 //! `docs/benchmarks/macro/results/<os>-<arch>/<workspace-version>/`
@@ -41,25 +43,17 @@ pub use tools::Tool;
 /// Embedded scenario YAMLs. Each ships in the xtask binary so
 /// running on any cloned checkout produces byte-identical
 /// configs without depending on workspace-relative path resolution.
-const SCENARIO_S1: &str = include_str!("scenarios/s1_filename.yml");
-const SCENARIO_S2: &str = include_str!("scenarios/s2_existence_content.yml");
-const SCENARIO_S3: &str = include_str!("scenarios/s3_workspace.yml");
-const SCENARIO_S4: &str = include_str!("scenarios/s4_agent_hygiene.yml");
-const SCENARIO_S5: &str = include_str!("scenarios/s5_fix_pass.yml");
-const SCENARIO_S6: &str = include_str!("scenarios/s6_per_file_content.yml");
-const SCENARIO_S7: &str = include_str!("scenarios/s7_cross_file_relational.yml");
-const SCENARIO_S8: &str = include_str!("scenarios/s8_git_overlay.yml");
-const SCENARIO_S9: &str = include_str!("scenarios/s9_nested_polyglot.yml");
-const SCENARIO_S10: &str = include_str!("scenarios/s10_scope_filter_outside_per_file.yml");
-const SCENARIO_S11: &str = include_str!("scenarios/s11_v010_cross_file.yml");
-const SCENARIO_S12: &str = include_str!("scenarios/s12_v010_per_file.yml");
-const SCENARIO_S13: &str = include_str!("scenarios/s13_v010_single_shot.yml");
-const SCENARIO_S14: &str = include_str!("scenarios/s14_v012_featureset.yml");
+const SCENARIO_S1: &str = include_str!("scenarios/s1_layout.yml");
+const SCENARIO_S2: &str = include_str!("scenarios/s2_content.yml");
+const SCENARIO_S3: &str = include_str!("scenarios/s3_relational.yml");
+const SCENARIO_S4: &str = include_str!("scenarios/s4_workspace.yml");
+const SCENARIO_SFIX: &str = include_str!("scenarios/sfix_all.yml");
 
 /// Parameters parsed from CLI flags. Defaults pick the
 /// "publish-grade run" — full size matrix (excluding 1m), all
-/// scenarios, both modes — so a bare `xtask bench-scale`
-/// produces a committable result.
+/// scenarios, all applicable modes (`supports()` skips the
+/// nonsensical cells) — so a bare `xtask bench-scale` produces a
+/// committable result.
 #[derive(Debug, Clone)]
 pub struct ScaleArgs {
     pub sizes: Vec<Size>,
@@ -141,37 +135,38 @@ impl Size {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Scenario {
+    /// Axis A — layout & path (walk-bound). Filename class, existence /
+    /// absence, path-metadata, and a `scope_filter` shape. The cheapest
+    /// path (walker + `GlobSet`, little content read); the ls-lint / grep
+    /// competitive anchor. Absorbs the old S1 / S10 + the layout half of
+    /// the old S2/S4.
     S1,
+    /// Axis B — per-file content. Per-file dispatch fan-out, content read,
+    /// per-line kinds, and per-file structured queries: the 13 content
+    /// kinds, forbidden-content patterns, and `ordered_block` /
+    /// `import_gate` / `xml_path_*` over `**/*.rs` (plus one `.csproj`
+    /// overlay, see `setup_overlay`). The Repolinter anchor. Absorbs the
+    /// old S2/S5/S6/S12.
     S2,
+    /// Axis C — cross-file, relational & graph. Whole-index build +
+    /// path-index + relational fan-out + `file_graph` build/traversal +
+    /// single-shot spawn. Needs the `manifest.sha256` / `.gff_target` /
+    /// `.v012_editions` / `graph/` overlay (see `setup_overlay`). Absorbs
+    /// the old S7/S11/S13/S14.
     S3,
+    /// Axis D — workspace bundle (realistic; release anchor). The six
+    /// bundled rulesets (`oss-baseline` + `rust` + `node` + `python` +
+    /// `monorepo` + `cargo-workspace`) over a POLYGLOT + GIT tree, with
+    /// `nested_configs` on and the two git-aware rules inline. Absorbs the
+    /// old S3/S8/S9. `requires_polyglot_tree` + `requires_git_repo` route
+    /// it to the git-aware polyglot generator.
     S4,
-    S5,
-    S6,
-    S7,
-    S8,
-    S9,
-    S10,
-    /// v0.10 cross-file dispatch class — `registry_paths_resolve`,
-    /// `cross_file_value_equals`, `pair_hash` on the regular tree
-    /// + a `manifest.sha256` overlay (see `setup_overlay`).
-    S11,
-    /// v0.10 per-file dispatch class — `ordered_block`,
-    /// `import_gate`, `xml_path_*` on the regular tree + one
-    /// root-level `.csproj` overlay (see `setup_overlay`).
-    S12,
-    /// v0.10 single-shot dispatch class — `generated_file_fresh`
-    /// + `command_idempotent` declared with `command: ["true"]`
-    ///   so the row measures `crate::spawn::run_capturing`, not
-    ///   the user's tool. Needs a `.gff_target` overlay file.
-    S13,
-    /// v0.12 net-new featureset (comprehensive) — one deliberately-
-    /// mixed scenario over the regular tree exercising every v0.12
-    /// file-shape kind/mode: `file_graph` (`no_dangling` over
-    /// `from_content` + over `derive_target`), `for_each_match`,
-    /// `cross_file` glob-union `source.files`, markerless
-    /// `ordered_block`, and `generated_file_fresh` mutating mode.
-    /// Needs a `.v012_editions` overlay (see `setup_overlay`).
-    S14,
+    /// Axis E — auto-fix (dedicated). `alint fix --unsafe-fixes --dry-run`
+    /// exercising all 24 non-spawn fix ops over the planted `sfix/` fixture
+    /// (see `setup_overlay`). The fix-mode-only scenario; `Tool::supports`
+    /// runs it under `Mode::Fix` and nothing else. Replaces the old S5
+    /// (4-op fix pass) and the deterministic `sfix_trim`.
+    Sfix,
 }
 
 impl Scenario {
@@ -181,17 +176,8 @@ impl Scenario {
             "S2" => Ok(Self::S2),
             "S3" => Ok(Self::S3),
             "S4" => Ok(Self::S4),
-            "S5" => Ok(Self::S5),
-            "S6" => Ok(Self::S6),
-            "S7" => Ok(Self::S7),
-            "S8" => Ok(Self::S8),
-            "S9" => Ok(Self::S9),
-            "S10" => Ok(Self::S10),
-            "S11" => Ok(Self::S11),
-            "S12" => Ok(Self::S12),
-            "S13" => Ok(Self::S13),
-            "S14" => Ok(Self::S14),
-            other => bail!("unknown scenario {other:?}; expected one of S1..S14"),
+            "SFIX" | "SFIX_ALL" => Ok(Self::Sfix),
+            other => bail!("unknown scenario {other:?}; expected one of S1, S2, S3, S4, SFIX"),
         }
     }
 
@@ -201,48 +187,26 @@ impl Scenario {
             Self::S2 => "S2",
             Self::S3 => "S3",
             Self::S4 => "S4",
-            Self::S5 => "S5",
-            Self::S6 => "S6",
-            Self::S7 => "S7",
-            Self::S8 => "S8",
-            Self::S9 => "S9",
-            Self::S10 => "S10",
-            Self::S11 => "S11",
-            Self::S12 => "S12",
-            Self::S13 => "S13",
-            Self::S14 => "S14",
+            Self::Sfix => "SFIX",
         }
     }
 
     pub fn description(self) -> &'static str {
         match self {
-            Self::S1 => "Filename hygiene (8 rules)",
-            Self::S2 => "Existence + content (8 rules)",
-            Self::S3 => "Workspace bundle (oss-baseline + rust + monorepo + cargo-workspace)",
-            Self::S4 => "Agent-era hygiene (5 rules: backup/scratch/debug/affirmation/model-TODO)",
-            Self::S5 => "Fix-pass throughput (4 content-editing fix ops)",
-            Self::S6 => "Per-file content fan-out (13 content rules over `**/*.rs`)",
-            Self::S7 => {
-                "Cross-file relational (pair / unique_by / for_each_dir / for_each_file / dir_only_contains / every_matching_has)"
+            Self::S1 => {
+                "Layout & path — filename class / existence / absence / metadata / scope_filter shape (walk-bound)"
             }
-            Self::S8 => {
-                "Git-tracked overlay (S3 + git_no_denied_paths + git_tracked_only over a real git repo)"
+            Self::S2 => {
+                "Per-file content — 13 content kinds + forbidden patterns + ordered_block / import_gate / xml over **/*.rs"
             }
-            Self::S9 => {
-                "Nested polyglot monorepo (rust + node + python rulesets over crates/ + packages/ + apps/)"
+            Self::S3 => {
+                "Cross-file, relational & graph — pair / unique_by / for_each_* / registry / cross_file / pair_hash / file_graph / single-shot spawn"
             }
-            Self::S10 => {
-                "scope_filter on rules outside the PerFileRule path (file_max_size / no_empty_files / no_symlinks / filename_case / filename_regex with has_ancestor narrowing)"
+            Self::S4 => {
+                "Workspace bundle — oss-baseline + rust + node + python + monorepo + cargo-workspace over a polyglot git tree + git-aware rules"
             }
-            Self::S11 => {
-                "v0.10 cross-file (registry_paths_resolve / cross_file_value_equals / pair_hash)"
-            }
-            Self::S12 => "v0.10 per-file (ordered_block / import_gate / xml_path_*)",
-            Self::S13 => {
-                "v0.10 single-shot (generated_file_fresh / command_idempotent, command=[\"true\"])"
-            }
-            Self::S14 => {
-                "v0.12 net-new featureset (file_graph no_dangling [from_content + derive_target] / for_each_match / cross_file glob-union / markerless ordered_block / generated_file_fresh mutating)"
+            Self::Sfix => {
+                "Auto-fix — fix --unsafe-fixes --dry-run over all 24 non-spawn fix ops on the planted sfix/ fixture"
             }
         }
     }
@@ -253,39 +217,32 @@ impl Scenario {
             Self::S2 => SCENARIO_S2,
             Self::S3 => SCENARIO_S3,
             Self::S4 => SCENARIO_S4,
-            Self::S5 => SCENARIO_S5,
-            Self::S6 => SCENARIO_S6,
-            Self::S7 => SCENARIO_S7,
-            Self::S8 => SCENARIO_S8,
-            Self::S9 => SCENARIO_S9,
-            Self::S10 => SCENARIO_S10,
-            Self::S11 => SCENARIO_S11,
-            Self::S12 => SCENARIO_S12,
-            Self::S13 => SCENARIO_S13,
-            Self::S14 => SCENARIO_S14,
+            Self::Sfix => SCENARIO_SFIX,
         }
     }
 
-    /// True for scenarios whose tree must be the v0.9.6
-    /// nested-polyglot shape (rust + node + python packages
-    /// distributed across `crates/` + `packages/` + `apps/`).
-    /// Drives `bench-scale`'s tree-gen path: the v0.9.6
-    /// `scope_filter:` primitive only fires meaningfully when
-    /// per-rule rules from different ecosystems compete for the
-    /// same files, which the standard Cargo-workspace tree
-    /// doesn't exercise.
+    /// True for scenarios whose tree must be the nested-polyglot
+    /// shape (rust + node + python packages distributed across
+    /// `crates/` + `packages/` + `apps/`). The consolidated `S4`
+    /// workspace bundle stacks the bundled ecosystem rulesets over
+    /// this shape (absorbing the old S9 polyglot + S10 `scope_filter`
+    /// competition); combined with `requires_git_repo` it drives
+    /// `bench-scale` to the git-aware polyglot generator.
     pub fn requires_polyglot_tree(self) -> bool {
-        matches!(self, Self::S9 | Self::S10)
+        matches!(self, Self::S4)
     }
 
     /// True for scenarios whose tree must be a real git repo
-    /// (`.git/` initialised, every file `git add`'d + commit
-    /// at generation time). Drives `bench-scale`'s tree-gen
-    /// path: `Engine::collect_git_tracked_if_needed` +
-    /// `BlameCache` only fire inside a real repo, so the
-    /// dispatch shape they produce is invisible without one.
+    /// (`.git/` initialised, every file `git add`'d + committed at
+    /// generation time). `S4` folds in the old S8 git overlay:
+    /// `git_no_denied_paths` / `git_tracked_only` +
+    /// `Engine::collect_git_tracked_if_needed` / `BlameCache` only
+    /// fire inside a repo, so the git state is baked at generation
+    /// (not deferred to the `--changed` setup) and the check side
+    /// sees it in every mode. Combined with `requires_polyglot_tree`,
+    /// run.rs selects `generate_git_nested_polyglot_monorepo`.
     pub fn requires_git_repo(self) -> bool {
-        matches!(self, Self::S8)
+        matches!(self, Self::S4)
     }
 
     /// Every value of the enum, in declaration order. Drives
@@ -293,22 +250,7 @@ impl Scenario {
     /// parse-validation unit test in this module.
     #[allow(dead_code)] // exercised by `#[cfg(test)]` only today; retained for the publish-grade default.
     pub fn all() -> &'static [Scenario] {
-        &[
-            Self::S1,
-            Self::S2,
-            Self::S3,
-            Self::S4,
-            Self::S5,
-            Self::S6,
-            Self::S7,
-            Self::S8,
-            Self::S9,
-            Self::S10,
-            Self::S11,
-            Self::S12,
-            Self::S13,
-            Self::S14,
-        ]
+        &[Self::S1, Self::S2, Self::S3, Self::S4, Self::Sfix]
     }
 
     /// Materialise this scenario's fixture overlay into the
@@ -317,21 +259,14 @@ impl Scenario {
     /// data files the config references). Called once per
     /// scenario per size, paired with [`Scenario::teardown_overlay`]
     /// so the overlay never persists across scenarios that share
-    /// the regular tree. No-op for S1..S10; S11/S12/S13/S14 each
-    /// write a tiny, deterministic fixture.
+    /// the regular tree. No-op for S1 / S4; S2 / S3 / Sfix each
+    /// write a deterministic fixture. Idempotent — re-running over
+    /// an existing overlay just rewrites it.
     pub fn setup_overlay(self, root: &Path) -> Result<()> {
         match self {
-            Self::S11 => std::fs::write(
-                root.join("manifest.sha256"),
-                // 64-char all-zeros sha256 + a path token that
-                // matches no real file in the synthetic tree;
-                // pair_hash (format: contains) finds every source's
-                // hash absent and flags it. Cost is deterministic
-                // per row.
-                "0000000000000000000000000000000000000000000000000000000000000000  fixture\n",
-            )
-            .with_context(|| format!("writing S11 manifest.sha256 to {}", root.display()))?,
-            Self::S12 => std::fs::write(
+            // S2 (per-file content) — one root `.csproj` for the two
+            // `xml_path_*` rules (absorbed from the old S12).
+            Self::S2 => std::fs::write(
                 root.join("sample.csproj"),
                 concat!(
                     "<Project Sdk=\"Microsoft.NET.Sdk\">",
@@ -341,77 +276,211 @@ impl Scenario {
                     "</Project>\n",
                 ),
             )
-            .with_context(|| format!("writing S12 sample.csproj to {}", root.display()))?,
-            Self::S13 => std::fs::write(root.join(".gff_target"), b"")
-                .with_context(|| format!("writing S13 .gff_target to {}", root.display()))?,
-            Self::S14 => {
-                // The single value every member crate's edition unions
-                // to, so the glob-union `set_equals` rule stays silent.
+            .with_context(|| format!("writing S2 sample.csproj to {}", root.display()))?,
+            // S3 (relational + graph) — the four fixtures the old
+            // S11/S13/S14 each carried, now on one scenario:
+            //   * manifest.sha256 — pair_hash (all-zeros hash + a token
+            //     matching no real file, so every source's hash is absent).
+            //   * .gff_target      — generated_file_fresh target.
+            //   * .v012_editions   — the single value every member's edition
+            //     unions to, so the glob-union set_equals rule stays silent.
+            //   * graph/           — a 24-node cyclic file_graph (ring
+            //     g{i} -> g{(i+1)%24}) so the `acyclic` rule exercises the
+            //     cycle-detection DFS the empty synthetic-lorem graph never
+            //     would. The one cycle is a deterministic violation.
+            Self::S3 => {
+                std::fs::write(
+                    root.join("manifest.sha256"),
+                    "0000000000000000000000000000000000000000000000000000000000000000  fixture\n",
+                )
+                .with_context(|| format!("writing S3 manifest.sha256 to {}", root.display()))?;
+                std::fs::write(root.join(".gff_target"), b"")
+                    .with_context(|| format!("writing S3 .gff_target to {}", root.display()))?;
                 std::fs::write(root.join(".v012_editions"), "2024\n")
-                    .with_context(|| format!("writing S14 .v012_editions to {}", root.display()))?;
-                // A small fixed CYCLIC file_graph so the `acyclic` rule
-                // exercises the cycle-detection DFS + edge resolution —
-                // the synthetic lorem `.rs` form an EMPTY graph, so the
-                // traversal code would otherwise never run. 24 nodes in
-                // one ring: g{i} -> g{(i+1) % 24}. The one cycle is a
-                // deterministic violation (like S11's pair_hash).
+                    .with_context(|| format!("writing S3 .v012_editions to {}", root.display()))?;
                 let graph = root.join("graph");
                 std::fs::create_dir_all(&graph)
-                    .with_context(|| format!("creating S14 graph/ in {}", root.display()))?;
+                    .with_context(|| format!("creating S3 graph/ in {}", root.display()))?;
                 for i in 0u32..24 {
                     let next = (i + 1) % 24;
                     std::fs::write(
                         graph.join(format!("g{i:02}.rs")),
                         format!("// dep: graph/g{next:02}.rs\n"),
                     )
-                    .with_context(|| format!("writing S14 graph/g{i:02}.rs"))?;
+                    .with_context(|| format!("writing S3 graph/g{i:02}.rs"))?;
                 }
             }
-            _ => {}
+            // Sfix (auto-fix) — the planted `sfix/` fixture (one
+            // deterministic violation per `sfix/`-scoped fix op).
+            Self::Sfix => setup_sfix_fixture(root)?,
+            Self::S1 | Self::S4 => {}
         }
         Ok(())
     }
 
     /// Remove this scenario's fixture overlay so the next
     /// scenario on the shared tree sees a pristine state.
-    /// Missing files are ignored — calling teardown without a
-    /// matching setup must not error.
+    /// Missing paths are ignored — calling teardown without a
+    /// matching setup (or twice) must not error.
     pub fn teardown_overlay(self, root: &Path) -> Result<()> {
-        let path = match self {
-            Self::S11 => Some(root.join("manifest.sha256")),
-            Self::S12 => Some(root.join("sample.csproj")),
-            Self::S13 => Some(root.join(".gff_target")),
-            Self::S14 => Some(root.join(".v012_editions")),
-            _ => None,
-        };
-        if let Some(p) = path {
-            match std::fs::remove_file(&p) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    return Err(e).with_context(|| format!("removing overlay {}", p.display()));
-                }
-            }
+        for rel in self.overlay_files() {
+            remove_file_if_present(&root.join(rel))?;
         }
-        // S14 also writes a `graph/` subtree (the cyclic file_graph).
-        if self == Self::S14 {
-            match std::fs::remove_dir_all(root.join("graph")) {
-                Ok(()) => {}
-                Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
-                Err(e) => {
-                    return Err(e)
-                        .with_context(|| format!("removing S14 graph/ in {}", root.display()));
-                }
-            }
+        for rel in self.overlay_dirs() {
+            remove_dir_if_present(&root.join(rel))?;
         }
         Ok(())
     }
+
+    /// Single-file overlay paths this scenario's [`setup_overlay`]
+    /// writes, relative to the tree root.
+    fn overlay_files(self) -> &'static [&'static str] {
+        match self {
+            Self::S2 => &["sample.csproj"],
+            Self::S3 => &["manifest.sha256", ".gff_target", ".v012_editions"],
+            Self::S1 | Self::S4 | Self::Sfix => &[],
+        }
+    }
+
+    /// Subtree overlay paths this scenario's [`setup_overlay`] writes,
+    /// relative to the tree root (removed with `remove_dir_all`).
+    fn overlay_dirs(self) -> &'static [&'static str] {
+        match self {
+            Self::S3 => &["graph"],
+            Self::Sfix => &["sfix"],
+            Self::S1 | Self::S2 | Self::S4 => &[],
+        }
+    }
+}
+
+/// Remove a file, tolerating its absence (idempotent teardown).
+fn remove_file_if_present(p: &Path) -> Result<()> {
+    match std::fs::remove_file(p) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("removing overlay {}", p.display())),
+    }
+}
+
+/// Remove a directory tree, tolerating its absence (idempotent teardown).
+fn remove_dir_if_present(p: &Path) -> Result<()> {
+    match std::fs::remove_dir_all(p) {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(e) => Err(e).with_context(|| format!("removing overlay dir {}", p.display())),
+    }
+}
+
+/// Plant the `sfix/` fixture for the [`Scenario::Sfix`] auto-fix bench:
+/// a deterministic violation for each of the 24 non-spawn fix ops whose
+/// rule scopes to `sfix/` (the 8 whole-file content ops scope to `**/*.rs`
+/// and also fire on `sfix/torture.rs`). Idempotent — every path is
+/// (re)written or created. Paths a rule fires on by ABSENCE (`sfix/NOTICE`
+/// for `file_create`, `sfix/adr/` for `dir_create`) are deliberately NOT
+/// created.
+fn setup_sfix_fixture(root: &Path) -> Result<()> {
+    let sfix = root.join("sfix");
+    std::fs::create_dir_all(&sfix)
+        .with_context(|| format!("creating sfix/ in {}", root.display()))?;
+
+    // torture.rs — the whole-file content-op violations (matched by the
+    // `**/*.rs` content rules): a leading BOM, tab indentation, trailing
+    // whitespace, a CRLF line, a 3-blank-line run, a bidi control, a
+    // zero-width space, and no final newline. Plus a FIXME (replace), and
+    // it lacks both a Copyright header (file_prepend) and a license footer
+    // (file_append).
+    let torture = concat!(
+        "\u{FEFF}use std::io;\t\n",   // BOM + tab indent + trailing tab
+        "fn main() {   \r\n",         // trailing spaces + CRLF
+        "    // FIXME: unfinished\n", // replace target
+        "\n\n\n",                     // blank-line run (collapse)
+        "\tlet x = 1; \n",            // tab indent + trailing space
+        "    let y = \u{202E}2;\n",   // bidi control
+        "    let z = 3;\u{200B}\n",   // zero-width space
+        "}",                          // no final newline
+    );
+    std::fs::write(sfix.join("torture.rs"), torture).with_context(|| "writing sfix/torture.rs")?;
+
+    // BadName.rs — PascalCase filename → filename_case(snake) → file_rename.
+    std::fs::write(sfix.join("BadName.rs"), "// placeholder\n")
+        .with_context(|| "writing sfix/BadName.rs")?;
+
+    // sorted.txt — a markerless ordered_block that isn't sorted → sort.
+    std::fs::write(sfix.join("sorted.txt"), "charlie\nalpha\nbravo\n")
+        .with_context(|| "writing sfix/sorted.txt")?;
+
+    // CODEOWNERS — a sorted markerless ordered_block missing a required
+    // line → insert_line splices `*.py @py-team` at its sorted position.
+    std::fs::write(sfix.join("CODEOWNERS"), "*.rs @rust-team\n*.ts @web-team\n")
+        .with_context(|| "writing sfix/CODEOWNERS")?;
+
+    // config.yaml — wrong `env` value (set_value) + a forbidden `debug`
+    // key (remove_value).
+    std::fs::write(sfix.join("config.yaml"), "env: staging\ndebug: true\n")
+        .with_context(|| "writing sfix/config.yaml")?;
+
+    // build.sh — a shebang but no Copyright header (insert_header, after
+    // the shebang); marked executable below → executable_bit(require:false)
+    // → chmod.
+    let build_sh = sfix.join("build.sh");
+    std::fs::write(&build_sh, "#!/bin/sh\necho build\n")
+        .with_context(|| "writing sfix/build.sh")?;
+
+    // junk.tmp — a forbidden file (file_remove).
+    std::fs::write(sfix.join("junk.tmp"), "scratch\n").with_context(|| "writing sfix/junk.tmp")?;
+
+    // nested/Cargo.lock — a nested lockfile (relocate).
+    let nested = sfix.join("nested");
+    std::fs::create_dir_all(&nested).with_context(|| "creating sfix/nested/")?;
+    std::fs::write(nested.join("Cargo.lock"), "# lock\n")
+        .with_context(|| "writing sfix/nested/Cargo.lock")?;
+
+    // version.toml + pkgs/*/Cargo.toml — pkg `b`'s version drifts from the
+    // source (sync_from); workspace.toml registers only `a`, so `b` is
+    // unregistered (create_and_register).
+    std::fs::write(
+        sfix.join("version.toml"),
+        "[package]\nname = \"root\"\nversion = \"1.0.0\"\n",
+    )
+    .with_context(|| "writing sfix/version.toml")?;
+    let pkgs = sfix.join("pkgs");
+    for (name, ver) in [("a", "1.0.0"), ("b", "0.9.0")] {
+        let dir = pkgs.join(name);
+        std::fs::create_dir_all(&dir).with_context(|| format!("creating sfix/pkgs/{name}/"))?;
+        std::fs::write(
+            dir.join("Cargo.toml"),
+            format!("[package]\nname = \"{name}\"\nversion = \"{ver}\"\n"),
+        )
+        .with_context(|| format!("writing sfix/pkgs/{name}/Cargo.toml"))?;
+    }
+    std::fs::write(
+        sfix.join("workspace.toml"),
+        "[workspace]\nmembers = [\"pkgs/a\"]\n",
+    )
+    .with_context(|| "writing sfix/workspace.toml")?;
+
+    // Mark build.sh executable so executable_bit(require:false) fires.
+    // Unix-only: Windows has no POSIX exec bit and the rule no-ops there.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&build_sh, std::fs::Permissions::from_mode(0o755))
+            .with_context(|| "chmod +x sfix/build.sh")?;
+    }
+
+    Ok(())
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Mode {
     Full,
     Changed,
+    /// `alint fix --unsafe-fixes --dry-run` — the auto-fix pass. Paired
+    /// exclusively with [`Scenario::Sfix`] (see [`Tool::supports`]).
+    /// `--dry-run` keeps the tree byte-stable across hyperfine iterations;
+    /// `--unsafe-fixes` forces every op's compute + compose path (not just
+    /// the Safe tier), so the bench covers the ops that default to Unsafe.
+    Fix,
 }
 
 impl Mode {
@@ -419,7 +488,8 @@ impl Mode {
         match s.trim().to_lowercase().as_str() {
             "full" => Ok(Self::Full),
             "changed" => Ok(Self::Changed),
-            other => bail!("unknown mode {other:?}; expected `full` or `changed`"),
+            "fix" => Ok(Self::Fix),
+            other => bail!("unknown mode {other:?}; expected `full`, `changed`, or `fix`"),
         }
     }
 
@@ -427,6 +497,7 @@ impl Mode {
         match self {
             Self::Full => "full",
             Self::Changed => "changed",
+            Self::Fix => "fix",
         }
     }
 }
@@ -566,9 +637,9 @@ mod tests {
     }
 
     /// `Scenario::all()` must enumerate every variant — the
-    /// `parse` / `label` match arms cover S1..S14, so `all()`
-    /// must too. Detects "added an enum variant, forgot to
-    /// update `all()`".
+    /// `parse` / `label` match arms cover S1..S4 + SFIX, so
+    /// `all()` must too. Detects "added an enum variant, forgot
+    /// to update `all()`".
     #[test]
     fn all_covers_every_parsed_label() {
         for &s in Scenario::all() {

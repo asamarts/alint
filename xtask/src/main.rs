@@ -91,14 +91,16 @@ enum Commands {
         /// Include the 1M-file size (multi-GB working set, slow).
         #[arg(long)]
         include_1m: bool,
-        /// Comma-separated scenarios. Default `S1,S2,S3` is the
-        /// publication trio (filename / existence+content /
-        /// workspace bundle). `S4` (agent-era hygiene) and `S5`
-        /// (fix-pass) are opt-in for characterization runs.
-        #[arg(long, default_value = "S1,S2,S3", value_delimiter = ',')]
+        /// Comma-separated scenarios. Default `S1,S2,S3,S4,SFIX` is the
+        /// full consolidated set: the four check scenarios (S1 layout /
+        /// S2 content / S3 relational / S4 workspace) plus the dedicated
+        /// auto-fix scenario (SFIX). SFIX only produces rows under `fix`
+        /// mode (see `Tool::supports`), so keep `fix` in `--modes` for it.
+        #[arg(long, default_value = "S1,S2,S3,S4,SFIX", value_delimiter = ',')]
         scenarios: Vec<String>,
-        /// Comma-separated modes (full,changed).
-        #[arg(long, default_value = "full,changed", value_delimiter = ',')]
+        /// Comma-separated modes (full, changed, fix). `fix` pairs only
+        /// with the SFIX scenario; the check scenarios take full/changed.
+        #[arg(long, default_value = "full,changed,fix", value_delimiter = ',')]
         modes: Vec<String>,
         /// Comma-separated tools (alint, ls-lint, or `all`).
         /// Default `alint` (preserves v0.5.6's alint-only

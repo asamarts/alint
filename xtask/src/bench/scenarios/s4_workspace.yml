@@ -1,0 +1,39 @@
+# Scenario s4_workspace — Workspace bundle (realistic; release anchor).
+# [Consolidated set, axis D]
+#
+# The realistic mixed workload + the release anchor. Absorbs old S3 (oss-baseline +
+# rust + monorepo + cargo-workspace bundle), S8 (git overlay), and S9 (nested
+# polyglot). `extends:` the six bundled rulesets over a POLYGLOT + GIT tree
+# (crates/ + packages/ + apps/, initialised as a real repo), with `nested_configs`
+# on and the two git-aware rules inline. The tree has no root `[workspace]`, so the
+# cargo-workspace fact-gated rules no-op gracefully -- included for the realistic
+# bundle a Cargo monorepo consumer would `extends:`. git_no_denied_paths /
+# git_tracked_only fire only inside the repo, which is why s4 needs the git tree in
+# every mode.
+
+version: 1
+nested_configs: true
+
+extends:
+  - alint://bundled/oss-baseline@v1
+  - alint://bundled/rust@v1
+  - alint://bundled/node@v1
+  - alint://bundled/python@v1
+  - alint://bundled/monorepo@v1
+  - alint://bundled/monorepo/cargo-workspace@v1
+
+rules:
+  # Git-aware overlay (old S8): tracked-secrets denylist + a tracked-only existence
+  # check. Both only fire inside a real git repo (the polyglot-git tree).
+  - id: no-tracked-secrets
+    kind: git_no_denied_paths
+    denied:
+      - "*.env"
+      - "*.pem"
+      - "secrets/**"
+    level: error
+  - id: readme-must-be-tracked
+    kind: file_exists
+    paths: "crates/*/README.md"
+    git_tracked_only: true
+    level: warning

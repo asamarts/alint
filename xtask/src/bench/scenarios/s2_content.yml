@@ -1,0 +1,116 @@
+# Scenario s2_content — Per-file content. [Consolidated set, axis B]
+#
+# Per-file dispatch fan-out + content read + per-line kinds + per-file structured.
+# Absorbs old S5/S6 (the 13 content kinds), S2's content rules (forbidden patterns),
+# and S12 (ordered_block / import_gate / xml). Every `**/*.rs` file is read once and
+# hit by the whole content mix; the xml rules match the one `.csproj` the overlay
+# writes. The perf signal is how flat the per-rule cost stays as the mix grows.
+
+version: 1
+
+rules:
+  # The 13 content kinds over `**/*.rs` (old S6).
+  - id: rs-final-newline
+    kind: final_newline
+    paths: "**/*.rs"
+    level: warning
+  - id: rs-no-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths: "**/*.rs"
+    level: info
+  - id: rs-no-bidi-controls
+    kind: no_bidi_controls
+    paths: "**/*.rs"
+    level: error
+  - id: rs-no-zero-width-chars
+    kind: no_zero_width_chars
+    paths: "**/*.rs"
+    level: error
+  - id: rs-no-bom
+    kind: no_bom
+    paths: "**/*.rs"
+    level: warning
+  - id: rs-line-endings
+    kind: line_endings
+    paths: "**/*.rs"
+    target: lf
+    level: warning
+  - id: rs-indent-style
+    kind: indent_style
+    paths: "**/*.rs"
+    style: spaces
+    width: 4
+    level: info
+  - id: rs-line-max-width
+    kind: line_max_width
+    paths: "**/*.rs"
+    max_width: 120
+    level: info
+  - id: rs-max-consecutive-blank-lines
+    kind: max_consecutive_blank_lines
+    paths: "**/*.rs"
+    max: 2
+    level: info
+  - id: rs-file-max-lines
+    kind: file_max_lines
+    paths: "**/*.rs"
+    max_lines: 10000
+    level: warning
+  - id: rs-file-min-lines
+    kind: file_min_lines
+    paths: "**/*.rs"
+    min_lines: 1
+    level: info
+  - id: rs-is-text
+    kind: file_is_text
+    paths: "**/*.rs"
+    level: warning
+  - id: rs-is-ascii
+    kind: file_is_ascii
+    paths: "**/*.rs"
+    level: info
+
+  # Forbidden-content patterns (old S2 content half) — Rust / TS / Python.
+  - id: rs-no-todo
+    kind: file_content_forbidden
+    paths: "**/*.rs"
+    pattern: '\b(TODO|XXX|FIXME)\b'
+    level: warning
+  - id: ts-no-debugger
+    kind: file_content_forbidden
+    paths: ["**/*.ts", "**/*.tsx"]
+    pattern: '\bdebugger\s*;'
+    level: error
+  - id: py-no-print
+    kind: file_content_forbidden
+    paths: "**/*.py"
+    pattern: '^\s*print\s*\('
+    level: warning
+
+  # Per-file structured (old S12) — keep-sorted marker scan, import gate, XML query.
+  - id: rs-keep-sorted
+    kind: ordered_block
+    paths: "**/*.rs"
+    start: "// alint:keep-sorted start"
+    end: "// alint:keep-sorted end"
+    level: info
+  - id: rs-no-internal-imports
+    kind: import_gate
+    paths: "**/*.rs"
+    language: rust
+    forbid: "^crates::internal::.*$"
+    level: info
+  - id: csproj-sdk-style
+    kind: xml_path_matches
+    paths: "*.csproj"
+    path: "$.Project['@Sdk']"
+    matches: "^Microsoft\\.NET\\.Sdk$"
+    if_present: true
+    level: info
+  - id: csproj-target-framework
+    kind: xml_path_equals
+    paths: "*.csproj"
+    path: "$.Project.PropertyGroup.TargetFramework"
+    equals: "net8.0"
+    if_present: true
+    level: info
