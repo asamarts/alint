@@ -311,8 +311,19 @@ pub(super) fn resolve_targets(ts: TargetsSpec, cfg: &impl Fn(String) -> Error) -
                 // match the normalized violation path (audit F2). A lexical escape
                 // keeps the raw string (read confinement then reports it out-of-root).
                 let file = std::path::Path::new(&t.file);
-                let file = crate::pathsafe::normalize_confined(file)
-                    .map_or(t.file, |p| p.to_string_lossy().into_owned());
+                let file = crate::pathsafe::normalize_confined(file).map_or(t.file, |p| {
+                    // git's canonical diff spelling is always `/`-separated, even on
+                    // Windows -- but `to_string_lossy()` on the normalized `PathBuf`
+                    // yields the OS separator (`sub\t.json`). Map it back to `/` so the
+                    // resolved target matches the git-derived violation path and the
+                    // fixer's stored target on every platform.
+                    let s = p.to_string_lossy();
+                    if std::path::MAIN_SEPARATOR == '/' {
+                        s.into_owned()
+                    } else {
+                        s.replace(std::path::MAIN_SEPARATOR, "/")
+                    }
+                });
                 resolved.push((file, ex));
             }
             Ok(Targets::List(resolved))
