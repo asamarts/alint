@@ -23,13 +23,21 @@ Each scenario is a single config YAML under
 `xtask/src/bench/scenarios/`, embedded in the xtask binary so a fresh
 clone produces byte-identical configs.
 
+> **v0.17 consolidation.** The scenario set was consolidated from 14 to 5:
+> **S1** layout/path, **S2** per-file content, **S3** cross-file/relational/graph,
+> **S4** workspace bundle (polyglot + git), and **SFIX** — a dedicated auto-fix
+> scenario run under `fix` mode (`alint fix --unsafe-fixes --dry-run` over all 24
+> non-spawn fix ops). The table below documents the pre-v0.17 S1-S14 set; the
+> full catalogue rewrite lands with the results migration. The current cost axes
+> are described in `xtask/src/bench/mod.rs`'s `Scenario` enum.
+
 | ID | Rules | Dispatch shape | Why it exists | Catches |
 |---|---|---|---|---|
 | **S1** | 8 filename-only (`filename_case`, `filename_regex`) | Pure walker + glob match; no content read | Narrowest scope alint shares with `ls-lint` — competitive comparison | Walker / scope-match regressions |
 | **S2** | 8 existence + content (`file_exists`, `file_absent`, `file_content_forbidden`, `file_max_size`) | Walker + per-file content scan over narrow scopes | Repolinter-comparable shape | Content-rule regressions on common shapes |
 | **S3** | Workspace bundle: `extends: oss-baseline + rust + monorepo + cargo-workspace` (32 effective rules) | Heavy mix — content rules over `**/*.rs`, cross-file `for_each_dir` over `crates/*`, `toml_path_matches` per crate | Realistic monorepo workload | Mixed regressions; the v0.9.5 cliff that triggered the path-index fix lived here |
 | **S4** | 5 agent-era hygiene rules (`file_absent`, `file_content_forbidden`) | Filename + content fan-out over agent-shaped trees | Mirrors the v0.6 `agent-hygiene` bundled ruleset | Agent-era rule shapes |
-| **S5** | 4 fix-pass content edits (`final_newline`, `no_trailing_whitespace`, `line_endings`, `no_bom`) | `--fix` end-to-end: read, transform, atomic-rename | The only `--fix`-mode bench | Fix-pipeline regressions |
+| **S5** | 4 fix-pass content edits (`final_newline`, `no_trailing_whitespace`, `line_endings`, `no_bom`) | `--fix` end-to-end: read, transform, atomic-rename | The `--fix`-mode bench (superseded in v0.17 by the consolidated **SFIX** scenario, which covers all 24 non-spawn fix ops) | Fix-pipeline regressions |
 | **S6** | 13 content rules over `**/*.rs` | Per-file dispatch path width — every `.rs` file hit by every rule on a single read | Stresses the read-coalescing path; v0.9.3 dispatch flip's design target | Per-file inner-loop regressions S3 doesn't surface |
 | **S7** | 6 cross-file relational kinds (`pair`, `unique_by`, `for_each_dir`, `for_each_file`, `dir_only_contains`, `every_matching_has`) | Various fan-out shapes over the synthetic monorepo | Catches the next O(D × N) cliff after the v0.9.5 path-index fix | Cross-file dispatch shapes the path-index doesn't cover |
 | **S8** | S3 reshape + `git_no_denied_paths` + `git_tracked_only` over a real git repo | Same as S3 but with `Engine::collect_git_tracked_if_needed` + `BlameCache` active | v0.7-era `git ls-files` regression had no scale gate; this fixes that | Git-aware dispatch regressions at scale |

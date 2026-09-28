@@ -198,7 +198,7 @@ Five rules from the v0.6 `agent-hygiene` bundled ruleset (`file_absent`, `file_c
 
 ## S5 — Fix-pass content edits
 
-Four content-edit rules under `--fix` (`final_newline`, `no_trailing_whitespace`, `line_endings`, `no_bom`). Read, transform, atomic-rename. The only `--fix`-mode bench. Catches fix-pipeline regressions.
+Four content-edit rules under `--fix` (`final_newline`, `no_trailing_whitespace`, `line_endings`, `no_bom`). Read, transform, atomic-rename. The `--fix`-mode bench through v0.16 — superseded in v0.17 by the consolidated `SFIX` scenario (all 24 non-spawn fix ops, run as `alint fix --unsafe-fixes --dry-run`). Catches fix-pipeline regressions.
 
 ### S5 — full
 

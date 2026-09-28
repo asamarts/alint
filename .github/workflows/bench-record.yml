@@ -268,13 +268,13 @@ jobs:
         run: cargo build --release -p alint -p xtask
 
       # ── Macro: full publish-grade matrix ─────────────────────────
-      # 14 scenarios × 4 sizes × 2 modes = 112 cells. The 1M cells
-      # dominate — ~10 min each, so ~3h for the 28 1M cells alone.
-      # S10 added in v0.9.9 (scope_filter outside per-file dispatch);
-      # S11–S13 added in v0.10 (v0.10 cross-file / per-file /
-      # single-shot dispatch classes — release-gating per audit D5);
-      # S14 added in v0.12 (the comprehensive v0.12 net-new featureset:
-      # file_graph / for_each_match / glob-union / markerless / gff-mutating).
+      # The consolidated set (5 scenarios): 4 check scenarios (S1 layout /
+      # S2 content / S3 relational / S4 workspace) × 4 sizes × 2 modes
+      # (full, changed) = 32 cells, plus the dedicated fix scenario (SFIX)
+      # × 4 sizes × 1 mode (fix) = 4 cells → 36 cells total. The 1M cells
+      # dominate — ~10 min each, so ~3h for the 1M row alone.
+      # Old tags re-baselined via workflow_dispatch keep their own
+      # scenario/mode set (see the file-guarded append below).
       - name: macro bench-scale
         env:
           OUT_LABEL: ${{ steps.label.outputs.label }}
@@ -300,21 +300,32 @@ jobs:
           sync   # flush the release build's dirty pages before measuring
           out_dir="docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}"
           mkdir -p "$out_dir"
-          # Scenarios present in THIS ref, not a hardcoded list: S10 landed in
-          # v0.9.9, S11-S13 in v0.10, S14 in v0.12, so re-benching an old tag (when
-          # re-baselining v0.10-v0.13 onto the runner) must request only the
-          # scenarios its own xtask knows, or bench-scale errors on an unknown
-          # scenario — the same per-tag adaptation the manual backfill made. Derived
-          # from the scenario definition files; a current release still yields the
-          # full S1..S14.
-          scenarios=$(ls xtask/src/bench/scenarios/s*.yml 2>/dev/null \
+          # Scenarios present in THIS ref, not a hardcoded list: the set has
+          # changed shape across releases (S10 in v0.9.9, S11-S13 in v0.10, S14 in
+          # v0.12, then the v0.17 consolidation to S1-S4 + the fix-only SFIX), so
+          # re-benching an old tag (re-baselining onto the runner) must request only
+          # the scenarios + modes its own xtask knows, or bench-scale errors on an
+          # unknown scenario/mode — the same per-tag adaptation the manual backfill
+          # made. The numbered check scenarios are derived from the definition
+          # files; the fix-only sfix_all.yml is excluded by the s[0-9]*_ glob
+          # (supports() runs it under fix mode only, not the full/changed the check
+          # scenarios take) and appended explicitly as SFIX.
+          scenarios=$(ls xtask/src/bench/scenarios/s[0-9]*_*.yml 2>/dev/null \
             | sed -E 's#.*/s([0-9]+)_.*#\1#' | sort -n | sed 's/^/S/' | paste -sd,)
-          echo "scenarios for this ref ($(git rev-parse --short HEAD)): $scenarios"
+          modes="full,changed"
+          # Append the fix scenario + enable fix mode ONLY when this ref ships
+          # sfix_all.yml, so an old-tag re-baseline whose xtask predates SFIX /
+          # Mode::Fix still requests only what its own binary understands.
+          if [ -f xtask/src/bench/scenarios/sfix_all.yml ]; then
+            scenarios="${scenarios:+$scenarios,}SFIX"
+            modes="full,changed,fix"
+          fi
+          echo "scenarios for this ref ($(git rev-parse --short HEAD)): $scenarios (modes: $modes)"
           ./target/release/xtask bench-scale \
             --include-1m \
             --sizes 1k,10k,100k,1m \
             --scenarios "$scenarios" \
-            --modes full,changed \
+            --modes "$modes" \
             --tools alint \
             --warmup 3 --runs 10 \
             --json-only \
