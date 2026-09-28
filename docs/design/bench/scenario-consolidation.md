@@ -1,8 +1,12 @@
 # Benchmark scenario consolidation (14 -> 5)
 
-Status: **APPROVED** (D1-D5 settled 2026-09-28) + adversarially audit-verified
-(3-agent pass: zero kinds dropped, all constraints + the glob bug confirmed).
-Ready to implement. Date: 2026-09-28.
+Status: **APPROVED + audit-verified across 2 adversarial rounds (5 agents).** Design
+sound (zero kinds dropped); all constraints + the live glob bug confirmed; round-2
+implementation-readiness gaps (Mode::Fix wiring, mode x scenario gating, the missing
+git+polyglot generator, the `sfix_all` fixture, the release-pipeline modes, the
+`cell_keys`/`schema_version` impact) folded into the sequence. **D1/D4 RESOLVED:** the
+5 new scenarios become the DEFAULT/MAIN series; the existing 14 move to a LEGACY page
+AFTER the new set is built, run, and verified. Ready to build. Date: 2026-09-28.
 
 ## Goal
 
@@ -137,10 +141,13 @@ S3 -- and old S5's fix ASPECT moves to S5fix while its check kinds move to S2.)
    re-gate; re-confirm each still targets the intended scenario. `run.rs:31`
    (`args.scenarios = vec![Scenario::S1]`, the quick-mode default) is also a
    use-site to update.
-3. **`det_check.rs` `include_str!` of s1/s2/s6/s7/s12/sfix_trim**: repoint the
-   deterministic Ir gate's cells to the new files (S1 layout, S2 content, S3
-   relational, and the new fix scenario for the `fix_grp` cell). Keeps the Callgrind
-   gate aligned with the new axes.
+3. **`det_check.rs` -- a BROADER rewrite than a repoint (G-note):** it
+   `include_str!`s s1/s2/s6/s7/s12/sfix_trim (`:38-64`). Repoint the deterministic Ir
+   gate's `check` cells to the new files (s1 layout, s2 content, s3 relational) --
+   which means rewriting BOTH the `const S6/S7/S12 = include_str!` AND the
+   `#[bench::s6_*/s7_*/s12_*]` attribute lines (`:163-171`), not just the paths --
+   and repoint the `fix_grp` cell from `sfix_trim.yml` to `sfix_all` (then delete
+   `sfix_trim.yml`). Keeps the Callgrind gate aligned with the new axes.
 4. **`facts.rs` `14` literal + `facts.json` `bench_scenario_rule_counts`**: change
    the expected count; regenerate `facts.json` (`xtask gen-facts`, drift-gated). The
    count is over `s<N>_*.yml` (excludes `sfix`-named), so a `sfix_all.yml` scenario
@@ -173,8 +180,9 @@ S3 -- and old S5's fix ASPECT moves to S5fix while its check kinds move to S2.)
    would `bail!` post-consolidation), the per-run READMEs under
    `docs/benchmarks/investigations/` + `docs/benchmarks/macro/results/`, and code
    comments (`xtask/src/facts.rs:322`, `xtask/src/bench/mod.rs:194,569`). Also update
-   the **"112 cells" (14x4x2)** count -> **40 (5x4x2)** (`bench-record.yml:271`,
-   `CHANGELOG.md:1334`). Fix the already-stale **"S5 = the only --fix bench"** claim,
+   the **"112 cells" (14x4x2)** count -> **36** (4 check scenarios x 4 sizes x 2
+   modes + `sfix_all` x 4 sizes x 1 fix mode; NOT 40 -- the fix scenario runs one
+   mode, per D2/D5/G2/G4) (`bench-record.yml:271`, `CHANGELOG.md:1334`). Fix the already-stale **"S5 = the only --fix bench"** claim,
    which lives in 3 concrete places: `render-history.py:199`, generated
    `docs/benchmarks/HISTORY.md:201`, and `docs/benchmarks/macro/README.md:32`.
 
@@ -183,13 +191,22 @@ S3 -- and old S5's fix ASPECT moves to S5fix while its check kinds move to S2.)
 asamarts approved all five recommendations. They are settled; implementation follows
 them.
 
-- **D1 -- Numbering & history transition: APPROVED (a) -- reuse `s1`..`s4` +
-  `sfix_all`** with new (broader) meanings. The trajectory system is append-only, so
-  a REDUCTION is a re-baseline; each new sN is a strict SUPERSET of the old sN's
-  axis, so the HISTORY row stays semantically continuous. Add a documented
-  "re-baselined at vX.Y" note (constraint 5 keeps the old ids known to
-  render-history). (Rejected: fresh `s20`+ ids -- clean append but odd for "5
-  scenarios".)
+- **D1 -- Numbering, main series & legacy migration: RESOLVED (asamarts; supersedes
+  the earlier "reuse ids in one series").** Keep the `s1`..`s4` + `sfix_all` ids, but
+  make the 5 NEW scenarios the **DEFAULT/MAIN** benchmark series and **move the
+  existing 14-scenario benchmarks + their published results to a LEGACY / historical
+  path + page.** This resolves the two round-2 blockers that killed the original
+  same-series id-reuse plan: (G6) new-S3 is the *cross-file* axis while old-S3 was the
+  *workspace* axis, so reusing the id in ONE series would splice incomparable numbers
+  into one HISTORY row (even forward-only); and (E) `render-history` keys on
+  `(version, scenario, size, mode)` last-write-wins, so backfilling new scenarios onto
+  past versions would collide with the old ids. With old + new in SEPARATE paths
+  nothing collides or mixes -- old-S3 (legacy) and new-S3 (main) are unambiguous, and
+  the new-vs-old gate mis-pairing (E's Q5) cannot arise (the main series has no
+  old-axis rows). The new main series is backfilled across past versions (see
+  **Past-version backfill**); the legacy series is frozen. **Sequence: BUILD the new
+  set -> RUN/benchmark it -> verify it's good -> THEN move the old to legacy** (never
+  tear down the proven-good old set before the new one is validated).
 - **D2 -- Fix scenario mode: APPROVED `fix --dry-run`** (add a `Mode::Fix` that runs
   it). It exercises collect + compute + compose + verify (the engine-heavy work) and
   is idempotent across hyperfine iterations -- no per-iteration re-materialization,
@@ -201,44 +218,156 @@ them.
   `requires_git_repo && requires_polyglot_tree` capability in `run.rs`), so one
   scenario carries the full realism. (Rejected: regular+git only -- loses S9's
   scope_filter-at-scale shape.)
-- **D4 -- Historical comparability: APPROVED -- keep the 14 old result dirs as-is**
-  (render-history shows them retiring); the consolidation release publishes only the
-  5. Cross-version comparison of an old axis reads the old sN row up to the
-  re-baseline and the new sN row after. Document the cutover in HISTORY.md +
-  `bench-coverage.md`.
+- **D4 -- Historical comparability: RESOLVED via the legacy page (see D1).** The old
+  S1-S14 series + its results move to a frozen LEGACY path + HISTORY page (kept for
+  reference, never re-run). The new 5-scenario MAIN series carries the go-forward
+  history AND is backfilled across past versions (ragged; see Past-version backfill),
+  so it has its own cross-version trajectory from day one. No old/new mixing to
+  reconcile -- the two series are separate paths. Document the split + a legacy
+  pointer in the new HISTORY + `bench-coverage.md`.
 - **D5 -- Spawn fix ops in S5fix: APPROVED -- EXCLUDE `command` + `git_untrack`**
   (they spawn a subprocess per violation, making the fix bench noisy/slow and
   measuring git / the command, not alint; correctness-gated elsewhere). So S5fix
   exercises the **24 non-spawning ops** (see the S5(fix) list). (Rejected: a tiny
   fixed-count `true` command to measure spawn overhead.)
 
+## Past-version backfill (the new MAIN series across releases)
+
+The harness has **no version selector** -- `Tool::Alint` always builds + runs the
+CURRENT checkout (`run.rs:39` -> `build_release_binary`; the version is derived from
+the workspace `Cargo.toml`, not chosen). `--docker` is NOT a past-version mechanism
+(it builds alint from the mounted current source; it only pins competitor + toolchain
+versions). So backfilling = for each past tag: checkout, graft the new bench
+subsystem, build that tag's alint, run the new scenarios, write into the MAIN series.
+This mirrors the v0.10-v0.13 manual-backfill precedent (`bench-host-migration.md`
+step 3), which grafted only `run.rs`; here the graft is larger (the whole new
+`xtask/src/bench/` tree + the 5 YAMLs + `Mode::Fix` + the git-polyglot generator),
+and `--scenarios` must be passed explicitly (the old ref's `s*.yml` glob emits the
+old ids). The backfill writes to the new series' **own fresh path**, so it never
+collides with the still-present old results (which move to legacy only in Phase C).
+
+**The matrix is RAGGED (feature availability -- verified against real tags):**
+- **`sfix_all`: consolidation release onward ONLY.** Its 24 ops are the unreleased
+  v0.17 arc (`insert_header`/`create_and_register` absent even at v0.16.1). No
+  pre-release fix history is possible.
+- **`s3_relational`: v0.12.0+** (`file_graph`/`cross_file`/`for_each_match` land at
+  v0.12; absent at v0.10/v0.11).
+- **`s2_content`: v0.10.0+** (`xml_path_*`/`ordered_block`/`import_gate` are v0.10).
+- **`s1_layout`: the whole kbench series** (v0.10.0+; the kinds are ancient).
+- **`s4_workspace`: runs from ~v0.10 but is a CROSS-VERSION CONFOUND** -- `extends:`
+  pulls the bundled rulesets shipped IN that binary, whose rule set evolved per
+  release, so it measures a moving target. Flag it as such (or pin a fixed inline
+  ruleset for comparability -- a follow-up).
+- An old tag whose alint lacks a declared kind/op `bail!`s at load; skip that (tag,
+  scenario) cell -- it renders `n/a` via each id's `FIRST_VERSION` floor.
+
+**Universe:** the canonical kbench series starts at **v0.10.0** (pre-v0.10 is on the
+retired 3900X arch, not comparable); 11 published dirs (v0.10.0-.2, v0.11.0, v0.12.0,
+v0.13.0, v0.14.0-.2, v0.15.0, v0.16.0). Pins: host `kbench`, rustc **1.97.0**,
+`ALINT_BENCH_DROP_CACHES=1`, `TMPDIR=/bench`. `bench gate` skips baseline-less cells
+(`gate.rs:161`), so a fresh backfilled series does not false-fail.
+
+## Legacy migration (Phase C -- only after the new set is proven)
+
+Make the 5 new scenarios the default; move the existing 14-scenario benchmarks +
+results to a frozen legacy home. Because the new MAIN series already wrote to its own
+fresh path in Phase B, Phase C is a relocation of the OLD data + a page/pointer swap,
+not a data move of the new (and never a backfill into a dir holding old data --
+`results.json` is overwritten, not merged, `output.rs:22`).
+- **Results:** relocate the old `docs/benchmarks/macro/results/<arch>/v*/` (S1-S14
+  data) to a legacy path (e.g. `.../results/legacy/<arch>/`).
+- **HISTORY page:** render the old series ONCE into a frozen legacy HISTORY page (a
+  static snapshot or `render-history` against the legacy path); the new MAIN HISTORY
+  (5 scenarios, backfilled) becomes the default page. Cross-link the two.
+- **render-history recurrence guard:** with legacy + main in SEPARATE paths, each
+  render only sees its own ids, so the guard (`measured` subset of `SCENARIOS`) is
+  satisfied without carrying the old ids in the main `SCENARIOS`. Add `FIRST_VERSION`
+  floors for the 5 new ids (per the ragged matrix).
+- **Site + `trajectory.json` (G5):** repoint `cell_keys` to the new main anchors
+  (e.g. `s4_workspace_1m_full`), bump `schema_version` 1->2 (the module's own rule),
+  update the `== 1` pin in `coverage_audit_benchmarks_trajectory.rs:91` + the
+  `s3_1m_full` anchor -> the new main cell, and point `benchmarks.astro` at the new
+  series with a legacy link (a coordinated alint.org site-repo edit).
+- **Scenario YAMLs:** only NOW delete the old 14 from the active path (they remain in
+  git history + the legacy results).
+
 ## Implementation sequence (approved; ready to build)
 
-1. Fix the `bench-record.yml` glob (constraint 7) -- standalone, lands first.
-2. Author the 5 new scenario YAMLs; delete the 14 old (det_check repoints).
-3. Rewrite the `Scenario` enum AND its use-sites -- `tools.rs` (the exhaustive
-   match + the competitive-tool gating + `debug_assert`s) and `run.rs:31`
-   (quick-mode default); add `Mode::Fix` + the git+polyglot combo; update the 3 enum
-   unit tests. Re-confirm the ls-lint/grep/repolinter gating still targets the
-   intended (now-broadened) scenario.
-4. Repoint `det_check.rs`; update the `facts.rs` `14` literal + regen `facts.json`.
-5. Update `render-history.py` (retire old ids, add new, repoint cell_keys / anchor);
-   update the trajectory assert.
-6. Update the docs + strings (constraint 8) -- incl. `pull_request_template.md`, the
-   "112 cells" -> "40 cells" count, and the "S5 = only --fix bench" claim in its 3
-   places -- and fix the pre-existing stale SOURCE comments (`mod.rs:223` calls S5
-   "fix-pass throughput" though the harness can't fix; `fix_throughput.rs` docstring
-   claims 3 ops, only 2 are wired).
-7. `cargo test --workspace` + a `xtask bench-scale --scenarios <new> --sizes 1k
-   --modes full,changed,fix --json-only` smoke on kbench; verify `bench gate` skips
-   the (baseline-less) new cells cleanly.
+Phased per D1: **BUILD -> RUN/verify -> MIGRATE old to legacy (last).**
+
+### Phase A -- build the new harness (on `main`, one PR)
+1. **Glob bugfix (constraint 7), standalone first:** `bench-record.yml:310` glob ->
+   `s[0-9]*_*.yml`; inject the fix scenario id into `--scenarios` (step 9).
+2. **Author the 5 scenario YAMLs** (`s1_layout`, `s2_content`, `s3_relational`,
+   `s4_workspace`, `sfix_all`). KEEP the old 14 for now (they move to legacy in
+   Phase C, AFTER the new set is proven -- do NOT delete them yet).
+3. **`Mode::Fix` (D2) -- the mechanics round-2 flagged (G1/G2), or fix mode silently
+   benchmarks `check`:**
+   - `tools.rs` `invocation()` is an if/else (`:174`), NOT a match -- add a
+     `Mode::Fix => format!("{bin} fix {root} --dry-run")` arm to the Alint branch.
+   - `Tool::supports()` (`:92`) is `(Alint,_,_) => true` -- NARROW so only (check
+     scenarios x `Full|Changed`) and (`sfix_all` x `Fix`) run; else S1-S4 run in fix
+     mode and `sfix_all` in check mode = junk rows.
+   - add the `Fix` variant to the `Mode` enum + the `--modes` CLI parse.
+4. **`Scenario` enum + ALL use-sites:** rewrite the arms in `mod.rs` (incl. the
+   `include_str!` block `:44-57`) + the 3 unit tests; rewrite `tools.rs`'s exhaustive
+   `Scenario::S1..S14` match + the competitive-tool gating (`(LsLint,S1)`,
+   `(GrepPipeline,S1|S2)`, `(Repolinter,S2)` + `debug_assert`s), re-confirming each
+   still targets the intended broadened scenario; fix `run.rs:31` quick-mode default.
+5. **git+polyglot tree (D3) -- the MISSING generator (G8):** `run.rs` tree-selection
+   is polyglot-XOR-git and there is no git-polyglot generator. Add
+   `generate_git_nested_polyglot_monorepo` (or a `git: bool` on the polyglot
+   generator) in `crates/alint-bench/src/tree.rs`, and rework `run.rs:143-152` so S4
+   (`requires_git_repo && requires_polyglot_tree`) gets a git-initialised polyglot
+   tree for ALL modes (not only `changed`).
+6. **`sfix_all` fixture (G7) -- the crux:** the base synthetic tree has ~no fixable
+   violations, so `fix --dry-run` would measure "scan, find nothing". Author a
+   fixture/overlay (extend `det_check`'s `materialize_fixable` idea) that plants a
+   violation for EACH of the 24 non-spawn ops.
+7. **`det_check.rs` (constraint 3 -- broader than a repoint):** rewrite the `check`
+   bench group -- the `const S6/S7/S12 = include_str!` AND the `#[bench::s6_*/...]`
+   attribute lines -- to the new files (s1/s2/s3); repoint the `fix_grp` cell from
+   `sfix_trim.yml` to `sfix_all`; delete `sfix_trim.yml`.
+8. **`facts.rs`:** change the `14` literal (-> 4 numbered; `sfix_all` is excluded like
+   `sfix_trim`) + regen `facts.json` (`xtask gen-facts`).
+9. **Release pipeline (G3):** `bench-record.yml:317` `--modes full,changed` ->
+   `full,changed,fix`; ensure `--scenarios` includes `sfix_all` (the numeric glob
+   won't add it).
+10. **Docs/strings (constraint 8)** incl. `pull_request_template.md`, the cell count
+    **36 (4x4x2 + 1x4x1), NOT 40** (G4), the "S5=only-fix" claim's 3 places,
+    `bench-coverage.md:157`'s runnable `--scenarios S1..S13`, `RELEASING.md:141/311`,
+    and the stale source comments (`mod.rs:223`, `fix_throughput.rs` docstring).
+11. Gate: `cargo test --workspace` + `cargo build --release -p alint -p xtask` green;
+    `xtask gen-facts --check` clean.
+
+### Phase B -- run + verify on kbench (current + past)
+12. Smoke on kbench (`ALINT_BENCH_DROP_CACHES=1`, `TMPDIR=/bench`, rustc 1.97.0):
+    `xtask bench-scale --scenarios s1,s2,s3,s4,sfix_all --sizes 1k --modes
+    full,changed,fix --json-only`. Confirm each scenario/mode makes sane rows +
+    `bench gate` skips the baseline-less new cells.
+13. Full current-version run (1k/10k/100k/1m) into the MAIN series path.
+14. **Past-version backfill** into the MAIN series per the ragged floors (see the
+    Past-version backfill section).
+
+### Phase C -- migrate old to legacy (only AFTER Phase B verifies good)
+15. Per the **Legacy migration** section: move the old S1-S14 results to the legacy
+    path, freeze/render the legacy HISTORY page, repoint `render-history` + the site
+    (`benchmarks.astro`, `cell_keys`, `trajectory.json`, `schema_version` 1->2 -- G5)
+    to the new MAIN series, and repoint the `s3_1m_full` anchor
+    (`coverage_audit_benchmarks_trajectory.rs`) to the new main workspace cell.
 
 ## Risks / rollback
 
-- **Historical trajectory continuity** (D1/D4): the main risk. Mitigated by keeping
-  old ids known to render-history and documenting the re-baseline.
-- **First-release gating gap**: brand-new scenario ids have no baseline mate, so
-  `bench gate` skips them on the consolidation release (expected; noted in
-  `bench-coverage.md`'s Phase-7 prerequisite).
-- **Rollback**: the 14 YAMLs + enum are recoverable from git; the change is
-  additive-then-subtractive in one PR, revertable wholesale.
+- **Old/new axis mixing + backfill collision (was the top risk): RESOLVED** by the
+  legacy-page split (D1) -- old S1-S14 and new s1-s4 live in SEPARATE paths, so
+  `render-history` never mixes or collides them, and the cutover gate cannot mis-pair
+  new-vs-old axis (E's Q5). No id-reuse-in-one-series hazard remains.
+- **First-run gating:** the new MAIN series has no baseline mate on its first run, so
+  `bench gate` skips its cells (`gate.rs:161`, expected); after the past-version
+  backfill the new scenarios gain their own (all-new-axis) cross-version mates.
+- **`s4_workspace` cross-version confound:** its `extends:` measures each binary's
+  own evolving bundled rulesets -- a moving target across versions (see Past-version
+  backfill); flagged, and pinning a fixed inline ruleset is a follow-up.
+- **Rollback:** the old 14 YAMLs + enum are in git history; Phase A is one PR
+  (revertable wholesale) and Phase C's legacy move is a reversible relocation. The
+  old set is never torn down until Phase B proves the new set good.
