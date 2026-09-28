@@ -18,9 +18,25 @@
 //! unusual filename cannot corrupt the header.
 
 use std::io::Write;
+use std::path::Path;
 
 use alint_core::{StagedFix, StagedKind};
 use similar::TextDiff;
+
+/// Render a path for a git patch, always with `/` separators. `Path::display()`
+/// uses the platform separator (`\` on Windows), and `git apply` REJECTS a
+/// backslash path as an "invalid path" -- a git patch is `/`-separated on every
+/// platform. On Unix the separator is already `/`, so this is a no-op (and
+/// preserves a literal `\`, which is a valid Unix filename byte); on Windows it
+/// maps the `\` path separator to `/`.
+fn to_slash(p: &Path) -> String {
+    let s = p.to_string_lossy();
+    if std::path::MAIN_SEPARATOR == '/' {
+        s.into_owned()
+    } else {
+        s.replace(std::path::MAIN_SEPARATOR, "/")
+    }
+}
 
 /// git's abbreviated all-zero object id (the absent side of a create/delete
 /// `index` line).
@@ -38,7 +54,7 @@ const EMPTY_BLOB_OID: &str = "e69de29";
 /// Propagates any write error from `w`.
 pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Result<()> {
     for fix in staged {
-        let path = fix.path.display().to_string();
+        let path = to_slash(&fix.path);
         // A permission change carries NO content diff, so it renders its git
         // mode-change stanza REGARDLESS of whether the (unchanged) file content is
         // UTF-8 or binary -- the UTF-8 / terminal-control gates below govern a text
@@ -111,7 +127,7 @@ pub fn write_fix_diff(staged: &[StagedFix], w: &mut dyn Write) -> std::io::Resul
             // `git apply` accepts -- `similarity index 100%` for a pure rename,
             // otherwise the rename headers plus the content hunks.
             StagedKind::Rename { from } => {
-                let from = from.display().to_string();
+                let from = to_slash(from);
                 writeln!(
                     w,
                     "diff --git {} {}",
@@ -217,18 +233,18 @@ fn write_hunks(a: &str, b: &str, old: &str, new: &str, w: &mut dyn Write) -> std
 
 /// One-line summary for a staged change whose content isn't UTF-8, per kind.
 fn write_binary_summary(fix: &StagedFix, w: &mut dyn Write) -> std::io::Result<()> {
-    let path = fix.path.display();
+    let path = to_slash(&fix.path);
     match &fix.kind {
         StagedKind::Create => writeln!(w, "Binary file {path} created ({} bytes)", fix.new.len()),
         StagedKind::Delete => writeln!(w, "Binary file {path} deleted ({} bytes)", fix.old.len()),
         StagedKind::Rename { from } => {
             if fix.old == fix.new {
-                writeln!(w, "Binary file renamed {} -> {path}", from.display())
+                writeln!(w, "Binary file renamed {} -> {path}", to_slash(from))
             } else {
                 writeln!(
                     w,
                     "Binary file renamed {} -> {path} ({} -> {} bytes)",
-                    from.display(),
+                    to_slash(from),
                     fix.old.len(),
                     fix.new.len()
                 )
@@ -267,6 +283,22 @@ mod tests {
             new: new.as_bytes().to_vec(),
             kind,
         }
+    }
+
+    #[test]
+    fn to_slash_leaves_a_forward_slash_path_untouched() {
+        // A git patch is `/`-separated; a normal relative path must pass through
+        // unchanged on every platform (and a literal `\` in a Unix filename stays).
+        assert_eq!(to_slash(Path::new("src/a/b.rs")), "src/a/b.rs");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn to_slash_maps_windows_separators_to_forward_slash() {
+        // The regression this guards: `Path::display()` would emit `src\bad.rs`,
+        // which `git apply` rejects as an "invalid path". `to_slash` must yield the
+        // `/`-form git requires.
+        assert_eq!(to_slash(Path::new(r"src\bad.rs")), "src/bad.rs");
     }
 
     #[test]

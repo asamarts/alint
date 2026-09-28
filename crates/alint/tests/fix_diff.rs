@@ -222,12 +222,18 @@ fn diff_empty_file_create_and_delete_apply_cleanly_with_git_apply() {
 
 #[test]
 fn diff_does_not_emit_a_self_conflicting_rename_patch() {
-    // Round-6 audit: two distinctly-cased files can convert to ONE snake target
-    // (`fooBar` and `foo_Bar` both -> `foo_bar`). Direct `fix` skips the second
+    // Round-6 audit: two distinctly-named files can convert to ONE snake target
+    // (`fooBar` and `foo-Bar` both -> `foo_bar`). Direct `fix` skips the second
     // (collision guard), but the stage path doesn't mutate disk, so without a
     // staged-target check `--diff` emitted TWO `rename to <same>` hunks -- a
     // self-conflicting patch `git apply` rejects/clobbers. The preview must stage
     // only one, and must apply cleanly.
+    // NOTE: the second source is `foo-Bar` (hyphen), NOT `foo_Bar` -- on a
+    // case-INSENSITIVE filesystem (macOS/Windows CI) `foo_Bar` case-folds to the
+    // target `foo_bar` itself, so it would already occupy the target and `git apply`
+    // would reject the rename ("already exists"). `foo-Bar` (ci `foo-bar`) is
+    // distinct from both `fooBar` (ci `foobar`) and the target `foo_bar`, so both
+    // sources coexist and neither pre-occupies the target on every platform.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
     std::fs::create_dir(root.join("src")).unwrap();
@@ -238,7 +244,7 @@ fn diff_does_not_emit_a_self_conflicting_rename_patch() {
     )
     .unwrap();
     std::fs::write(root.join("src/fooBar.rs"), "a\n").unwrap();
-    std::fs::write(root.join("src/foo_Bar.rs"), "b\n").unwrap();
+    std::fs::write(root.join("src/foo-Bar.rs"), "b\n").unwrap();
     git(root, &["init", "-q"]);
     git(root, &["add", "-A"]);
     git(root, &["commit", "-qm", "base"]);
