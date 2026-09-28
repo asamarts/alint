@@ -6,7 +6,12 @@ implementation-readiness gaps (Mode::Fix wiring, mode x scenario gating, the mis
 git+polyglot generator, the `sfix_all` fixture, the release-pipeline modes, the
 `cell_keys`/`schema_version` impact) folded into the sequence. **D1/D4 RESOLVED:** the
 5 new scenarios become the DEFAULT/MAIN series; the existing 14 move to a LEGACY page
-AFTER the new set is built, run, and verified. Ready to build. Date: 2026-09-28.
+AFTER the new set is built, run, and verified. **Phase A (build) COMPLETE +
+independently gate-verified** (commits 43561695 / 831879a3 / 3d9570e3: 5 YAMLs,
+`Mode::Fix`, git+polyglot generator, the 24-op `sfix_all` fixture; fmt / workspace
+clippy / `cargo test --workspace` / release build / `gen-facts --check` all green +
+a local `bench-scale SFIX` fix smoke). **Phase B (kbench run: current + past
+versions) + Phase C (legacy migration) remain.** Date: 2026-09-28.
 
 ## Goal
 
@@ -84,8 +89,11 @@ tree. The realistic mixed workload; the release anchor. Absorbs: S3, S8, S9.
 polyglot tree -- see D3.)
 
 ### S5(fix) -- Auto-fix (dedicated; NEW axis)
-The fix engine over a tree of fixable violations, run as **`alint fix --dry-run`**
-(D2). One scenario exercising **all 24 NON-SPAWNING fix ops** -- the full 26 in
+The fix engine over a tree of fixable violations, run as
+**`alint fix --unsafe-fixes --dry-run`** (D2: `--unsafe-fixes` so every op's
+compute+compose path runs rather than the Unsafe ops downgrading to compute-only
+suggestions; `--dry-run` so nothing writes and the tree stays byte-stable across
+hyperfine iterations). One scenario exercising **all 24 NON-SPAWNING fix ops** -- the full 26 in
 `FixSpec::ALL_OP_NAMES` minus `command` + `git_untrack`, which spawn a subprocess
 and are excluded per D5 (they would measure git / the command, not alint):
 - whole-file normalizers: `file_trim_trailing_whitespace`, `file_append_final_newline`, `file_normalize_line_endings`, `file_collapse_blank_lines`, `file_strip_bidi`, `file_strip_zero_width`, `file_strip_bom`
@@ -207,8 +215,10 @@ them.
   **Past-version backfill**); the legacy series is frozen. **Sequence: BUILD the new
   set -> RUN/benchmark it -> verify it's good -> THEN move the old to legacy** (never
   tear down the proven-good old set before the new one is validated).
-- **D2 -- Fix scenario mode: APPROVED `fix --dry-run`** (add a `Mode::Fix` that runs
-  it). It exercises collect + compute + compose + verify (the engine-heavy work) and
+- **D2 -- Fix scenario mode: APPROVED `fix --dry-run`; built as
+  `fix --unsafe-fixes --dry-run`** (add a `Mode::Fix` that runs it -- `--unsafe-fixes`
+  forces every op through compose so the fix bench measures all 24, not just the Safe
+  subset; refinement applied during the Phase A build). It exercises collect + compute + compose + verify (the engine-heavy work) and
   is idempotent across hyperfine iterations -- no per-iteration re-materialization,
   matching the micro `fix_throughput`. The write-back cost is I/O-bound and less
   interesting for an engine benchmark, and is covered by the `apply` correctness
@@ -295,7 +305,7 @@ not a data move of the new (and never a backfill into a dir holding old data --
 
 Phased per D1: **BUILD -> RUN/verify -> MIGRATE old to legacy (last).**
 
-### Phase A -- build the new harness (on `main`, one PR)
+### Phase A -- build the new harness (on `main`, one PR) -- DONE (43561695/831879a3/3d9570e3)
 1. **Glob bugfix (constraint 7), standalone first:** `bench-record.yml:310` glob ->
    `s[0-9]*_*.yml`; inject the fix scenario id into `--scenarios` (step 9).
 2. **Author the 5 scenario YAMLs** (`s1_layout`, `s2_content`, `s3_relational`,
@@ -304,7 +314,7 @@ Phased per D1: **BUILD -> RUN/verify -> MIGRATE old to legacy (last).**
 3. **`Mode::Fix` (D2) -- the mechanics round-2 flagged (G1/G2), or fix mode silently
    benchmarks `check`:**
    - `tools.rs` `invocation()` is an if/else (`:174`), NOT a match -- add a
-     `Mode::Fix => format!("{bin} fix {root} --dry-run")` arm to the Alint branch.
+     `Mode::Fix => format!("{bin} fix {root} --unsafe-fixes --dry-run")` arm.
    - `Tool::supports()` (`:92`) is `(Alint,_,_) => true` -- NARROW so only (check
      scenarios x `Full|Changed`) and (`sfix_all` x `Fix`) run; else S1-S4 run in fix
      mode and `sfix_all` in check mode = junk rows.
@@ -321,7 +331,8 @@ Phased per D1: **BUILD -> RUN/verify -> MIGRATE old to legacy (last).**
    (`requires_git_repo && requires_polyglot_tree`) gets a git-initialised polyglot
    tree for ALL modes (not only `changed`).
 6. **`sfix_all` fixture (G7) -- the crux:** the base synthetic tree has ~no fixable
-   violations, so `fix --dry-run` would measure "scan, find nothing". Author a
+   violations, so `fix --unsafe-fixes --dry-run` would measure "scan, find nothing".
+Author a
    fixture/overlay (extend `det_check`'s `materialize_fixable` idea) that plants a
    violation for EACH of the 24 non-spawn ops.
 7. **`det_check.rs` (constraint 3 -- broader than a repoint):** rewrite the `check`
