@@ -97,8 +97,14 @@ fn diff_never_mutates_the_tree() {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Output {
+    // Force LF so `git apply` does not rewrite the patched content's line endings on
+    // Windows, where `core.autocrlf` defaults to `true`: without this, an applied
+    // `# Project\n` reads back as `# Project\r\n` and the exact-content assertions
+    // below fail. `-c` scopes the override to each invocation (init/add/commit/apply).
+    let mut full = vec!["-c", "core.autocrlf=false"];
+    full.extend_from_slice(args);
     Command::new("git")
-        .args(args)
+        .args(&full)
         .current_dir(dir)
         .env("GIT_AUTHOR_NAME", "t")
         .env("GIT_AUTHOR_EMAIL", "t@t")
