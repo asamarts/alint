@@ -689,6 +689,29 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
     // remote (audit: partition MED). (The rename TARGET is derived, never
     // remote-chosen, so this is availability-only, not a content-injection.)
     "file_rename",
+    // The hygiene normalizers + `chmod` below write no ruleset bytes, but a remote's
+    // `paths:` can AIM them at a file where the "cosmetic" change is load-bearing, so
+    // an untrusted remote demotes each to a suggestion (asamarts, 2026-09-27 audit R3
+    // -- extends the "aimable at the Safe tier" principle to non-semantic hygiene).
+    // `file_strip_bidi` / `file_strip_zero_width` are DELIBERATELY EXCLUDED (stay in
+    // FIXED_BEHAVIOR): they are security-POSITIVE (they remove Trojan-Source / other
+    // zero-width attacks), so honoring them from any source is the safe default --
+    // demoting them would let a remote-sourced attack survive.
+    // `file_trim_trailing_whitespace`: trailing whitespace is significant in some
+    // formats (a Markdown hard line break is two trailing spaces).
+    "file_trim_trailing_whitespace",
+    // `file_append_final_newline`: the final byte can matter to downstream tooling.
+    "file_append_final_newline",
+    // `file_strip_bom`: a BOM is an encoding signature some consumers require.
+    "file_strip_bom",
+    // `file_collapse_blank_lines`: blank-line runs are significant where they delimit
+    // paragraphs / sections.
+    "file_collapse_blank_lines",
+    // `chmod`: a +/-x flip aimed at a script (loses +x -> breaks) or a data file
+    // (gains +x -> exec surface) is a real permission change -- only the 0o111 bits
+    // move, but the effect is remote-aimable. Unsafe-gated locally, demoted from a
+    // remote.
+    "chmod",
 ];
 
 /// Demote every content-injecting fixer in `rules` to `applicability: suggestion`

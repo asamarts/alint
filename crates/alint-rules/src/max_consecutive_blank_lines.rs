@@ -153,9 +153,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileCollapseBlankLines { .. }) => {
-            Some(FileCollapseBlankLinesFixer::new(opts.max))
-        }
+        Some(FixSpec::FileCollapseBlankLines {
+            file_collapse_blank_lines,
+        }) => Some(
+            FileCollapseBlankLinesFixer::new(opts.max).with_applicability(
+                file_collapse_blank_lines
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

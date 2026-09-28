@@ -745,17 +745,28 @@ pub struct FileRenameFixSpec {
     pub applicability: Option<crate::rule::Applicability>,
 }
 
-/// Empty marker. Behavior: read file (subject to `fix_size_limit`),
-/// strip trailing space/tab on every line, write back.
+/// Behavior: read file (subject to `fix_size_limit`), strip trailing space/tab on
+/// every line, write back. **`Safe` by default**; **content-injecting** in the W2
+/// partition (no ruleset bytes, but a remote's `paths:` can AIM a trim at a file
+/// where trailing whitespace is significant -- e.g. a Markdown hard line break
+/// `two spaces` -- so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileTrimTrailingWhitespaceFixSpec {}
+pub struct FileTrimTrailingWhitespaceFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
-/// Empty marker. Behavior: if the file has content and does not
-/// end with `\n`, append one.
+/// Behavior: if the file has content and does not end with `\n`, append one.
+/// **`Safe` by default**; **content-injecting** in the W2 partition (no ruleset
+/// bytes, but a remote's `paths:` can AIM the append at a file where the final byte
+/// matters, so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileAppendFinalNewlineFixSpec {}
+pub struct FileAppendFinalNewlineFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 /// Behavior: rewrite the file with every line ending replaced by the parent rule's
 /// configured target (`lf` or `crlf`). **`Safe` by default**; **content-injecting**
@@ -783,17 +794,29 @@ pub struct FileStripBidiFixSpec {}
 #[serde(deny_unknown_fields)]
 pub struct FileStripZeroWidthFixSpec {}
 
-/// Empty marker. Behavior: remove a leading UTF-8/UTF-16/UTF-32
-/// BOM byte sequence if present; otherwise a no-op.
+/// Behavior: remove a leading UTF-8/UTF-16/UTF-32 BOM byte sequence if present;
+/// otherwise a no-op. **`Safe` by default**; **content-injecting** in the W2
+/// partition (no ruleset bytes, but a remote's `paths:` can AIM a BOM strip at a
+/// file whose encoding signature matters, so an untrusted remote demotes it to a
+/// suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileStripBomFixSpec {}
+pub struct FileStripBomFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
-/// Empty marker. Behavior: collapse runs of blank lines longer than
-/// the parent rule's `max` down to exactly `max` blank lines.
+/// Behavior: collapse runs of blank lines longer than the parent rule's `max` down
+/// to exactly `max` blank lines. **`Safe` by default**; **content-injecting** in the
+/// W2 partition (no ruleset bytes, but a remote's `paths:` can AIM the collapse at a
+/// file where blank-line runs are significant -- e.g. paragraph breaks -- so an
+/// untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileCollapseBlankLinesFixSpec {}
+pub struct FileCollapseBlankLinesFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 /// The `replace` op (Phase 1): rewrite each span the host rule's `pattern:`
 /// matches with `replacement`. Wired to `file_content_forbidden` only -- the

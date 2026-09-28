@@ -94,7 +94,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .ok_or_else(|| Error::rule_config(&spec.id, "final_newline requires a `paths` field"))?;
     let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileAppendFinalNewline { .. }) => Some(FileAppendFinalNewlineFixer),
+        Some(FixSpec::FileAppendFinalNewline {
+            file_append_final_newline,
+        }) => Some(
+            FileAppendFinalNewlineFixer::new().with_applicability(
+                file_append_final_newline
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

@@ -104,7 +104,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     })?;
     let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileTrimTrailingWhitespace { .. }) => Some(FileTrimTrailingWhitespaceFixer),
+        Some(FixSpec::FileTrimTrailingWhitespace {
+            file_trim_trailing_whitespace,
+        }) => Some(
+            FileTrimTrailingWhitespaceFixer::new().with_applicability(
+                file_trim_trailing_whitespace
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

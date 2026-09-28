@@ -174,7 +174,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .as_ref()
         .ok_or_else(|| Error::rule_config(&spec.id, "no_bom requires a `paths` field"))?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileStripBom { .. }) => Some(FileStripBomFixer),
+        Some(FixSpec::FileStripBom { file_strip_bom }) => Some(
+            FileStripBomFixer::new().with_applicability(
+                file_strip_bom
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

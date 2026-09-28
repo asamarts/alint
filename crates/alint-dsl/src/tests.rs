@@ -868,6 +868,22 @@ fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Appl
         FixSpec::FileNormalizeLineEndings {
             file_normalize_line_endings,
         } => file_normalize_line_endings.applicability,
+        // The hygiene normalizers + `chmod` are content-injecting too (aimable at the
+        // Safe tier -- R3); read each tier for its `w2_remote_<op>_is_demoted` test.
+        // `file_strip_bidi` / `file_strip_zero_width` are NOT here -- they stay
+        // fixed-behavior (security-positive), covered by
+        // `w2_remote_security_positive_strip_is_not_demoted`.
+        FixSpec::FileTrimTrailingWhitespace {
+            file_trim_trailing_whitespace,
+        } => file_trim_trailing_whitespace.applicability,
+        FixSpec::FileAppendFinalNewline {
+            file_append_final_newline,
+        } => file_append_final_newline.applicability,
+        FixSpec::FileStripBom { file_strip_bom } => file_strip_bom.applicability,
+        FixSpec::FileCollapseBlankLines {
+            file_collapse_blank_lines,
+        } => file_collapse_blank_lines.applicability,
+        FixSpec::Chmod { chmod } => chmod.applicability,
         _ => None,
     }
 }
@@ -1287,29 +1303,29 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
     // any source. The exhaustive complement of the content + spawning SSOTs.
     const FIXED_BEHAVIOR_FIX_OPS: &[&str] = &[
         "file_remove",
-        // NOTE: `file_rename` and `file_normalize_line_endings` are NOT here -- they
-        // write no ruleset bytes, but a remote can AIM a case-rename (breaks imports)
-        // or a CRLF rewrite (breaks a shebang) at the victim's files at the Safe tier,
-        // so they are CONTENT_INJECTING (demoted from an untrusted remote) like `sort`.
-        "file_trim_trailing_whitespace",
-        "file_append_final_newline",
+        // `file_strip_bidi` / `file_strip_zero_width` are security-POSITIVE (they
+        // remove Trojan-Source / zero-width attacks), so honoring them from any source
+        // is the safe default -- demoting them would let a remote-sourced attack
+        // survive. DELIBERATELY kept fixed-behavior (asamarts, 2026-09-27 audit R3).
         "file_strip_bidi",
         "file_strip_zero_width",
-        "file_strip_bom",
-        "file_collapse_blank_lines",
         // `remove_value` deletes (no ruleset bytes); `set_value` is content-injecting.
         "remove_value",
-        // `chmod` sets/clears a permission bit -- no ruleset bytes, no injection.
-        "chmod",
         // `dir_create` makes an empty directory -- no ruleset bytes, no spawn.
         "dir_create",
         // `relocate` moves a file to the repo root (a rename) -- no ruleset bytes,
         // no spawn; gated by its Unsafe tier like `file_remove`/`file_rename`.
         "relocate",
-        // NOTE: `sort` is NOT here -- it writes no ruleset bytes, but a remote can
-        // AIM its reorder/dedup at an order-significant file (.gitignore/CODEOWNERS)
-        // at the Safe tier, so it is classified CONTENT_INJECTING (demoted from an
-        // untrusted remote) like `sync_from`, not fixed-behavior.
+        // NOTE (R3, asamarts): the hygiene normalizers `file_trim_trailing_whitespace`
+        // / `file_append_final_newline` / `file_strip_bom` / `file_collapse_blank_lines`
+        // + `chmod` are NOT here any more -- they write no ruleset bytes, but a remote
+        // can AIM them at a file where the "cosmetic" change is load-bearing (Markdown
+        // hard break, encoding signature, paragraph breaks, a script's +x), so they
+        // are CONTENT_INJECTING (demoted from an untrusted remote) like `sort` /
+        // `file_normalize_line_endings`.
+        // NOTE: `sort` / `indent_style` / `insert_*` / `file_rename` /
+        // `file_normalize_line_endings` are also CONTENT_INJECTING (aimable, or inject
+        // ruleset bytes), not fixed-behavior.
         // NOTE: `git_untrack` and `command` are NOT here -- they SPAWN, so they are
         // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
         // a strictly stronger gate than the content demotion.
@@ -1399,17 +1415,90 @@ fn w2_local_extends_content_fixer_is_not_demoted() {
 }
 
 #[test]
-fn w2_remote_hygiene_fixer_is_not_demoted() {
-    // A fixed-behavior fixer (no ruleset bytes) is honored from any source. It has
-    // no `applicability` field, so if the demotion wrongly targeted it the load
-    // would ERROR (deny_unknown_fields); a clean load proves it is left alone.
-    let body = "version: 1\nrules:\n  - id: ws\n    kind: no_trailing_whitespace\n    \
-        paths: \"*.txt\"\n    level: error\n    \
-        fix: { file_trim_trailing_whitespace: {} }\n";
+fn w2_remote_security_positive_strip_is_not_demoted() {
+    // `file_strip_bidi` / `file_strip_zero_width` are security-POSITIVE (they remove
+    // Trojan-Source / zero-width attacks), so they stay FIXED_BEHAVIOR -- honored from
+    // ANY source, never demoted (demoting them would let a remote-sourced attack
+    // survive). They have NO `applicability` field, so if the demotion wrongly
+    // targeted one the load would ERROR (deny_unknown_fields); a clean load with the
+    // rule present proves it is left alone. (R3: the OTHER hygiene ops + chmod ARE now
+    // demoted -- see the `w2_remote_*_is_demoted` tests below.)
+    let body = "version: 1\nrules:\n  - id: no-bidi\n    kind: no_bidi_controls\n    \
+        paths: \"*.rs\"\n    level: error\n    fix: { file_strip_bidi: {} }\n";
     let cfg = load_extending(body, "");
     assert!(
-        cfg.rules.iter().any(|r| r.id == "ws"),
-        "a remote hygiene fixer loads and is honored (never demoted)"
+        cfg.rules.iter().any(|r| r.id == "no-bidi"),
+        "a security-positive strip fixer loads and is honored (never demoted)"
+    );
+}
+
+#[test]
+fn w2_remote_file_trim_trailing_whitespace_is_demoted() {
+    // R3 (asamarts): the hygiene normalizers are content-injecting now -- a remote can
+    // AIM a trim at a file where trailing whitespace is significant (a Markdown hard
+    // line break is two trailing spaces), so its tier is capped to `suggestion`.
+    let body = "version: 1\nrules:\n  - id: ws\n    kind: no_trailing_whitespace\n    \
+        paths: \"*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "ws").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_trim_trailing_whitespace` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_file_append_final_newline_is_demoted() {
+    let body = "version: 1\nrules:\n  - id: eof\n    kind: final_newline\n    \
+        paths: \"*.txt\"\n    level: error\n    fix: { file_append_final_newline: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "eof").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_append_final_newline` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_file_strip_bom_is_demoted() {
+    let body = "version: 1\nrules:\n  - id: bom\n    kind: no_bom\n    \
+        paths: \"*.txt\"\n    level: error\n    fix: { file_strip_bom: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "bom").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_strip_bom` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_file_collapse_blank_lines_is_demoted() {
+    let body = "version: 1\nrules:\n  - id: blanks\n    kind: max_consecutive_blank_lines\n    \
+        paths: \"*.md\"\n    max: 1\n    level: error\n    fix: { file_collapse_blank_lines: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "blanks").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_collapse_blank_lines` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_chmod_is_demoted() {
+    // A remote aiming a +/-x flip at a script (loses +x -> breaks) or a data file
+    // (gains +x -> exec surface) is a real permission change -- capped to suggestion.
+    let body = "version: 1\nrules:\n  - id: exec\n    kind: executable_bit\n    \
+        paths: \"*.sh\"\n    require: true\n    level: error\n    fix: { chmod: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "exec").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `chmod` must be demoted (R3)"
     );
 }
 

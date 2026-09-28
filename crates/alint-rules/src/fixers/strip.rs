@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use alint_core::{Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
+use alint_core::{Applicability, Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
 
 use crate::io::looks_binary;
 
@@ -79,11 +79,42 @@ impl Fixer for FileStripZeroWidthFixer {
 /// Strips a leading BOM (UTF-8 / UTF-16 / UTF-32 LE & BE) from
 /// the violating file.
 #[derive(Debug)]
-pub struct FileStripBomFixer;
+pub struct FileStripBomFixer {
+    applicability: Applicability,
+}
+
+impl FileStripBomFixer {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_strip_bom` from an untrusted remote
+    /// `extends:` to [`Applicability::Suggestion`] (a remote's `paths:` can AIM a BOM
+    /// strip at a file whose encoding signature matters); demote-only. Defaults to
+    /// `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
+    }
+}
+
+impl Default for FileStripBomFixer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Fixer for FileStripBomFixer {
     fn describe(&self) -> String {
         "strip leading BOM".to_string()
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -459,7 +490,7 @@ mod tests {
 
     #[test]
     fn bom_fix_edit_strips_leading_bom() {
-        let edit = FileStripBomFixer
+        let edit = FileStripBomFixer::new()
             .fix_edit(&v(), "\u{FEFF}hello".as_bytes(), std::path::Path::new("/r"))
             .unwrap();
         assert_eq!(
@@ -474,7 +505,7 @@ mod tests {
     #[test]
     fn bom_fix_edit_none_when_no_bom() {
         assert!(
-            FileStripBomFixer
+            FileStripBomFixer::new()
                 .fix_edit(&v(), b"no bom", std::path::Path::new("/r"))
                 .is_none()
         );
@@ -490,7 +521,7 @@ mod tests {
         let mut clean = vec![0xEF, 0xBB, 0xBF]; // UTF-8 BOM
         clean.extend_from_slice(b"hello\nworld\n");
         assert!(!looks_binary(&clean), "a BOM + clean text is text-with-BOM");
-        let edit = FileStripBomFixer
+        let edit = FileStripBomFixer::new()
             .fix_edit(&v(), &clean, std::path::Path::new("/r"))
             .expect("a detectable BOM on text yields an edit");
         let FixEdit::SetContent { content, .. } = edit else {
@@ -506,7 +537,7 @@ mod tests {
         binaryish.extend_from_slice(&[0x00, 0x01, 0x02, 0x00, 0xFF, 0x00, 0x03]);
         assert!(looks_binary(&binaryish), "a BOM + NUL payload is binary");
         assert!(
-            FileStripBomFixer
+            FileStripBomFixer::new()
                 .fix_edit(&v(), &binaryish, std::path::Path::new("/r"))
                 .is_none(),
             "fix_edit must skip a binary file, mirroring apply's guard"

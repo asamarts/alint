@@ -8,11 +8,42 @@ use crate::io::looks_binary;
 /// file. Preserves original line endings (LF stays LF, CRLF
 /// stays CRLF).
 #[derive(Debug)]
-pub struct FileTrimTrailingWhitespaceFixer;
+pub struct FileTrimTrailingWhitespaceFixer {
+    applicability: Applicability,
+}
+
+impl FileTrimTrailingWhitespaceFixer {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_trim_trailing_whitespace` from an
+    /// untrusted remote `extends:` to [`Applicability::Suggestion`] (a remote's
+    /// `paths:` can AIM a trim at a file where trailing whitespace is significant --
+    /// e.g. a Markdown hard line break); demote-only. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
+    }
+}
+
+impl Default for FileTrimTrailingWhitespaceFixer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Fixer for FileTrimTrailingWhitespaceFixer {
     fn describe(&self) -> String {
         "strip trailing whitespace on every line".to_string()
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -112,11 +143,42 @@ fn strip_trailing_whitespace(bytes: &[u8]) -> Vec<u8> {
 /// Appends a single `\n` byte when a file has content but
 /// doesn't end with one.
 #[derive(Debug)]
-pub struct FileAppendFinalNewlineFixer;
+pub struct FileAppendFinalNewlineFixer {
+    applicability: Applicability,
+}
+
+impl FileAppendFinalNewlineFixer {
+    #[must_use]
+    pub fn new() -> Self {
+        Self {
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_append_final_newline` from an
+    /// untrusted remote `extends:` to [`Applicability::Suggestion`] (a remote's
+    /// `paths:` can AIM the append at a file where the final byte matters);
+    /// demote-only. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
+    }
+}
+
+impl Default for FileAppendFinalNewlineFixer {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl Fixer for FileAppendFinalNewlineFixer {
     fn describe(&self) -> String {
         "append final newline when missing".to_string()
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -333,17 +395,35 @@ fn normalize_line_endings(bytes: &[u8], target: LineEndingTarget) -> Vec<u8> {
 #[derive(Debug)]
 pub struct FileCollapseBlankLinesFixer {
     max: u32,
+    applicability: Applicability,
 }
 
 impl FileCollapseBlankLinesFixer {
     pub fn new(max: u32) -> Self {
-        Self { max }
+        Self {
+            max,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_collapse_blank_lines` from an
+    /// untrusted remote `extends:` to [`Applicability::Suggestion`] (a remote's
+    /// `paths:` can AIM the collapse at a file where blank-line runs are significant
+    /// -- e.g. paragraph breaks); demote-only. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
     }
 }
 
 impl Fixer for FileCollapseBlankLinesFixer {
     fn describe(&self) -> String {
         format!("collapse runs of blank lines to at most {}", self.max)
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -514,7 +594,7 @@ mod tests {
     fn file_trim_trailing_whitespace_rewrites_in_place() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("x.rs"), "let _ = 1;   \n").unwrap();
-        let outcome = FileTrimTrailingWhitespaceFixer
+        let outcome = FileTrimTrailingWhitespaceFixer::new()
             .apply(
                 &Violation::new("ws").with_path(std::path::Path::new("x.rs")),
                 &make_ctx(&tmp, false),
@@ -540,7 +620,7 @@ mod tests {
             compose: None,
             stage_ops: None,
         };
-        let outcome = FileTrimTrailingWhitespaceFixer
+        let outcome = FileTrimTrailingWhitespaceFixer::new()
             .apply(
                 &Violation::new("ws").with_path(std::path::Path::new("big.txt")),
                 &ctx,
@@ -563,7 +643,7 @@ mod tests {
     fn file_append_final_newline_adds_missing_newline() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("x.txt"), "hello").unwrap();
-        FileAppendFinalNewlineFixer
+        FileAppendFinalNewlineFixer::new()
             .apply(
                 &Violation::new("eof").with_path(std::path::Path::new("x.txt")),
                 &make_ctx(&tmp, false),
@@ -612,13 +692,13 @@ mod tests {
             std::str::from_utf8(binary).is_ok(),
             "the fixture must be valid UTF-8 so it exercises looks_binary, not from_utf8"
         );
-        assert_skips_binary(&FileTrimTrailingWhitespaceFixer, binary);
+        assert_skips_binary(&FileTrimTrailingWhitespaceFixer::new(), binary);
         assert_skips_binary(&FileCollapseBlankLinesFixer::new(1), binary);
         assert_skips_binary(
             &FileNormalizeLineEndingsFixer::new(LineEndingTarget::Crlf),
             binary,
         );
-        assert_skips_binary(&FileAppendFinalNewlineFixer, binary);
+        assert_skips_binary(&FileAppendFinalNewlineFixer::new(), binary);
         // An invalid-UTF-8 binary (the weaker case) must skip too.
         assert_skips_binary(
             &FileNormalizeLineEndingsFixer::new(LineEndingTarget::Crlf),
@@ -717,7 +797,7 @@ mod tests {
     #[test]
     fn trim_fix_edit_returns_set_content_with_trimmed_bytes() {
         let v = Violation::new("ws").with_path(std::path::Path::new("x.rs"));
-        let edit = FileTrimTrailingWhitespaceFixer
+        let edit = FileTrimTrailingWhitespaceFixer::new()
             .fix_edit(&v, b"let _ = 1;   \n", std::path::Path::new("/repo"))
             .expect("dirty file yields an edit");
         match edit {
@@ -733,7 +813,7 @@ mod tests {
     fn trim_fix_edit_returns_none_when_already_clean() {
         let v = Violation::new("ws").with_path(std::path::Path::new("x.rs"));
         assert!(
-            FileTrimTrailingWhitespaceFixer
+            FileTrimTrailingWhitespaceFixer::new()
                 .fix_edit(&v, b"clean\n", std::path::Path::new("/repo"))
                 .is_none()
         );
@@ -742,7 +822,7 @@ mod tests {
     #[test]
     fn append_final_newline_fix_edit_appends_one_newline() {
         let v = Violation::new("eof").with_path(std::path::Path::new("x.txt"));
-        let edit = FileAppendFinalNewlineFixer
+        let edit = FileAppendFinalNewlineFixer::new()
             .fix_edit(&v, b"hello", std::path::Path::new("/repo"))
             .unwrap();
         assert_eq!(
@@ -758,7 +838,7 @@ mod tests {
     fn append_final_newline_fix_edit_none_when_already_terminated() {
         let v = Violation::new("eof").with_path(std::path::Path::new("x.txt"));
         assert!(
-            FileAppendFinalNewlineFixer
+            FileAppendFinalNewlineFixer::new()
                 .fix_edit(&v, b"ends\n", std::path::Path::new("/repo"))
                 .is_none()
         );

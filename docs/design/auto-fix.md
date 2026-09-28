@@ -610,20 +610,28 @@ could ship a fix that silently injects bytes into the user's files or shells out
 `alint fix`, the file-writing and RCE analogue of the spawning-kind hazard. The gate keys on
 **what the fixer can do** and **where it came from**:
 
-- **Fixed-behavior fixers** (the seven hygiene normalizers, rename-to-case, `file_remove`, `chmod`,
-  `dir_create`) carry no ruleset-supplied bytes and do not spawn, so there is no injection surface;
-  they are honored at their own tier from any source. This is what keeps the bundled rulesets'
-  trailing-whitespace / final-newline fixes auto-applying (they arrive via
-  `extends: alint://bundled/...`); a destructive one like `file_remove` is already gated by its
-  Unsafe tier, independent of source.
-- **Content-injecting fixers** (`replace`, `set_value`, `sync_from`, `insert_header`, and
-  `file_create` / `file_prepend` / `file_append` with inline content) are honored at their tier
-  from the user's own top-level config, local-path `extends:`, a nested `.alint.yml` (all the
-  user's own tree), and first-party **bundled** rulesets. From a **remote-URL `extends:`** they
-  are **demoted to Suggestion** by default (they can propose an edit, never auto-write), because
-  the content is authored by a third party. A top-level `trusted_extends:` allowlist opts
-  specific remote URLs (a company's internal ruleset host) into honoring their content fixers at
-  tier.
+- **Fixed-behavior fixers** (`file_strip_bidi` / `file_strip_zero_width` -- security-POSITIVE
+  normalizers that remove Trojan-Source / zero-width attacks; `file_remove`, `remove_value`,
+  `relocate`, `dir_create`) carry no ruleset-supplied bytes, do not spawn, and cannot be turned
+  against the user by AIMING them, so there is no injection or attack surface; they are honored at
+  their own tier from any source. Demoting the security-positive strip ops would be
+  counterproductive -- it would let a remote-sourced Trojan-Source survive -- so they are
+  deliberately kept here; a destructive one like `file_remove` is already gated by its Unsafe tier,
+  independent of source.
+- **Content-injecting (and aimable) fixers** -- two shapes gated identically. **(a) Inline-content**
+  ops (`replace`, `set_value`, `sync_from`, `create_and_register`, `insert_line`, `insert_header`,
+  and `file_create` / `file_prepend` / `file_append`) write ruleset-authored bytes. **(b) Aimable**
+  transforms write no ruleset bytes but let a remote's `paths:` AIM a change at a file where it is
+  load-bearing: `sort`, `indent_style`, `file_normalize_line_endings`, `file_rename`, and
+  (2026-09 audit R3) the hygiene normalizers `file_trim_trailing_whitespace`,
+  `file_append_final_newline`, `file_strip_bom`, `file_collapse_blank_lines`, plus `chmod` (a +/-x
+  flip aimed at a script or data file). Both shapes are honored at their tier from the user's own
+  top-level config, local-path `extends:`, and first-party **bundled** rulesets -- so the bundled
+  rulesets' trailing-whitespace / final-newline fixes keep auto-applying. From a **remote-URL
+  `extends:`** (or an untrusted nested `.alint.yml`) they are **demoted to Suggestion** by default
+  (they can propose an edit, never auto-write), because the source is a third party. A top-level
+  `trusted_extends:` allowlist opts specific remote URLs (a company's internal ruleset host) into
+  honoring their fixers at tier.
 - **Spawning fixers** (`git_untrack`, a `command`-backed fix, regenerate-from-command) are
   **refused at load** from any non-top-level source (bundled included), matching the
   top-level-only posture of `SPAWNING_RULE_KINDS`.
@@ -1062,10 +1070,15 @@ Resolved after review (folded into the sections above):
 
 - **`file_remove` default:** reclassified **Unsafe** with a one-release migration and a per-rule
   Safe override (3, 5.6).
-- **Inherited fixers:** gated by capability and provenance: fixed-behavior fixers are honored from
-  any source (so bundled hygiene keeps auto-applying), remote-URL content-injecting fixers are
-  **demoted to Suggestion** with a `trusted_extends:` opt-in, and spawning fixers are refused from
-  any non-top-level source (5.5).
+- **Inherited fixers:** gated by capability and provenance. Fixed-behavior fixers -- the
+  security-positive `file_strip_bidi` / `file_strip_zero_width`, plus `file_remove` / `remove_value`
+  / `relocate` / `dir_create` -- are honored from any source. Content-injecting **and aimable**
+  fixers (the inline-content ops + `sort` / `indent_style` / `file_rename` /
+  `file_normalize_line_endings` + the hygiene normalizers `file_trim_trailing_whitespace` /
+  `file_append_final_newline` / `file_strip_bom` / `file_collapse_blank_lines` + `chmod`) are
+  honored from the user's own tree and bundled rulesets (so bundled hygiene keeps auto-applying) but
+  **demoted to Suggestion** from a remote-URL `extends:` or untrusted nested config, with a
+  `trusted_extends:` opt-in. Spawning fixers are refused from any non-top-level source (5.5).
 - **`ReplaceRange` vs `SetContent`:** **ranged**. The multi-node structured fan-out does not
   strictly require it (a rule-level `collect_edits` could emit one whole-file `SetContent`), but a
   ranged primitive gives the whole located-edit family one substrate with engine-level overlap
