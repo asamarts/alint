@@ -166,11 +166,35 @@ pub fn generate_git_monorepo(
     seed: u64,
 ) -> io::Result<Tree> {
     let tree = generate_monorepo(packages, files_per_package, seed)?;
-    let root = tree.root();
+    git_init_and_commit(tree.root())?;
+    Ok(tree)
+}
+
+/// Like [`generate_nested_polyglot_monorepo`] but the result is a real git repo
+/// (init + `add -A` + initial commit at generation time). Produced for
+/// bench-scale's scenario that needs BOTH a polyglot tree AND a git repo
+/// (the consolidated `s4_workspace`, which stacks the bundled ecosystem rulesets
+/// over a nested-polyglot tree AND runs `git_no_denied_paths` / `git_tracked_only`
+/// git-aware rules -- those only fire inside a real repo). The check side must see
+/// the repo in every mode, so the git state is baked at generation, not deferred to
+/// the `--changed` setup.
+pub fn generate_git_nested_polyglot_monorepo(
+    packages: usize,
+    files_per_package: usize,
+    seed: u64,
+) -> io::Result<Tree> {
+    let tree = generate_nested_polyglot_monorepo(packages, files_per_package, seed)?;
+    git_init_and_commit(tree.root())?;
+    Ok(tree)
+}
+
+/// Turn a freshly-generated tree at `root` into a committed git repo. Shared by
+/// the git-aware generators. `add -A` indexes the whole tree in one shot (at 1M
+/// files a per-path `git add` loop would be a multi-minute serial bottleneck); the
+/// `user.name`/`user.email` config is set inline (matching the alint-testkit
+/// runner's pattern) so the commit doesn't depend on the host's global git config.
+fn git_init_and_commit(root: &Path) -> io::Result<()> {
     run_git(root, &["init", "-q", "-b", "main"])?;
-    // Add everything in one shot; at 1M files the per-path
-    // `git add file` loop would be a multi-minute serial
-    // bottleneck whereas `git add -A` indexes the tree once.
     run_git(root, &["add", "-A"])?;
     run_git(
         root,
@@ -185,7 +209,7 @@ pub fn generate_git_monorepo(
             "bench-scale: initial commit",
         ],
     )?;
-    Ok(tree)
+    Ok(())
 }
 
 /// Generate a nested polyglot monorepo for the v0.9.6 S9 scenario.
