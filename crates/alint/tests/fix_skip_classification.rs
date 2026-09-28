@@ -44,6 +44,11 @@ const OVERSIZE: &str = "this line has trailing spaces to exceed eight bytes   \n
 /// F1: the size-skip reason starts with the file path, so a file named
 /// `baselined:evil.txt` makes it begin with the literal `baselined:`. The skip is
 /// DECLINED (not grandfathered), so an error-level run still exits 1.
+// Not Windows: the fixture filename contains a `:`, which is reserved on Windows
+// (drive / alternate-data-stream separator), so the file cannot be created there.
+// The `:` is load-bearing (it makes the skip reason begin with `baselined:`), so
+// there is no Windows-safe substitute.
+#[cfg(not(windows))]
 #[test]
 fn error_size_skip_on_a_baselined_named_file_still_exits_one() {
     let tmp = tempfile::tempdir().unwrap();
@@ -70,6 +75,8 @@ fn error_size_skip_on_a_baselined_named_file_still_exits_one() {
 /// `fix error:big.txt` makes the size-skip reason begin with the literal
 /// `fix error:`, but the skip is DECLINED (not an I/O error), so `--fix-only`
 /// still exits 0.
+// Not Windows: the fixture filename contains a `:` (see above), invalid on Windows.
+#[cfg(not(windows))]
 #[test]
 fn fix_only_on_a_fix_error_named_file_still_exits_zero() {
     let tmp = tempfile::tempdir().unwrap();
