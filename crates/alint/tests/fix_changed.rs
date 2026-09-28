@@ -26,6 +26,18 @@ fn git(dir: &Path, args: &[&str]) {
     assert!(status.success(), "git {args:?} failed");
 }
 
+/// Whether `dir` contains a directory entry named EXACTLY `name` (case-sensitive
+/// comparison of the stored entry). Unlike `Path::exists()`, this is reliable on a
+/// case-INSENSITIVE filesystem (macOS/Windows), where `join("Src.md").exists()`
+/// still resolves to a file that was case-renamed to `src.md`. A case-only rename
+/// is case-PRESERVING, so `read_dir` reports the new stored case on every platform.
+fn dir_has_exact(dir: &Path, name: &str) -> bool {
+    std::fs::read_dir(dir)
+        .expect("read_dir")
+        .filter_map(std::result::Result::ok)
+        .any(|e| e.file_name().to_string_lossy() == name)
+}
+
 const CONFIG: &str = "\
 version: 1
 rules:
@@ -345,21 +357,25 @@ fn fix_changed_renames_only_in_scope_files() {
         .expect("run alint fix --changed");
     assert!(out.status.code() == Some(0) || out.status.code() == Some(1));
     // In-scope Src.md renamed to src.md (its new name is an allowed created file).
+    // NOTE: check the exact-case directory entry, not `Path::exists()` -- on a
+    // case-INSENSITIVE filesystem (macOS/Windows CI) `Src.md` and `src.md` resolve
+    // to the same file, so `exists()` cannot tell whether the case-only rename
+    // happened. `dir_has_exact` reads the case-preserving directory listing instead.
     assert!(
-        root.join("src.md").exists(),
+        dir_has_exact(root, "src.md"),
         "in-scope Src.md is renamed to src.md"
     );
     assert!(
-        !root.join("Src.md").exists(),
+        !dir_has_exact(root, "Src.md"),
         "the in-scope original is gone"
     );
     // Out-of-diff Docs.md is never evaluated, so never renamed or created.
     assert!(
-        root.join("Docs.md").exists(),
+        dir_has_exact(root, "Docs.md"),
         "out-of-diff Docs.md must NOT be renamed under --changed"
     );
     assert!(
-        !root.join("docs.md").exists(),
+        !dir_has_exact(root, "docs.md"),
         "no out-of-diff rename target may be created"
     );
 }
