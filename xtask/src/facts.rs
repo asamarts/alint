@@ -86,7 +86,9 @@ fn build_facts() -> Result<Facts> {
         .collect();
     subcommands.sort();
     let fact_predicates = fact_predicates();
-    let auto_fix_ops = auto_fix_ops_count(&root)?;
+    // The canonical fix-op list, not the `*Fixer` struct count: one fixer can
+    // back several ops (`StructuredFixer` serves `set_value` + `remove_value`).
+    let auto_fix_ops = alint_core::FixSpec::ALL_OP_NAMES.len();
     let categories: Vec<CategoryEntry> = alint_core::Category::ALL
         .iter()
         .map(|c| CategoryEntry {
@@ -247,12 +249,22 @@ fn rule_source_files(root: &Path) -> Result<BTreeMap<String, String>> {
     for cap in re.captures_iter(body) {
         let kind = cap[1].to_string();
         let stem = cap[2].to_string();
-        anyhow::ensure!(
-            src_dir.join(format!("{stem}.rs")).exists(),
-            "register_builtin maps kind `{kind}` to `{stem}::…` but \
-             crates/alint-rules/src/{stem}.rs does not exist (rename drift)"
-        );
-        map.insert(kind, stem);
+        // A rule module is either a flat `<stem>.rs` or a directory module
+        // `<stem>/mod.rs` (e.g. `cross_file`, split into spec/eval/mod). Resolve to
+        // the path stem whose `.rs` exists, so `sourceUrlOf` links the real file
+        // (`cross_file/mod.rs`, not a phantom `cross_file.rs`).
+        let resolved = if src_dir.join(format!("{stem}.rs")).exists() {
+            stem.clone()
+        } else if src_dir.join(&stem).join("mod.rs").exists() {
+            format!("{stem}/mod")
+        } else {
+            anyhow::bail!(
+                "register_builtin maps kind `{kind}` to `{stem}::…` but neither \
+                 crates/alint-rules/src/{stem}.rs nor crates/alint-rules/src/{stem}/mod.rs \
+                 exists (rename drift)"
+            );
+        };
+        map.insert(kind, resolved);
     }
     anyhow::ensure!(
         !map.is_empty(),
@@ -433,30 +445,6 @@ fn output_formats(root: &Path) -> Result<Vec<String>> {
         .collect();
     names.sort();
     Ok(names)
-}
-
-/// `pub struct *Fixer` declarations (recursive) under `fixers/`.
-fn auto_fix_ops_count(root: &Path) -> Result<usize> {
-    fn walk(dir: &Path) -> Result<usize> {
-        let mut n = 0;
-        for entry in fs::read_dir(dir).with_context(|| format!("read_dir {}", dir.display()))? {
-            let path = entry?.path();
-            if path.is_dir() {
-                n += walk(&path)?;
-            } else if path.extension().and_then(|e| e.to_str()) == Some("rs") {
-                let src = fs::read_to_string(&path)
-                    .with_context(|| format!("read {}", path.display()))?;
-                for line in src.lines() {
-                    let line = line.trim_start();
-                    if line.starts_with("pub struct ") && line.contains("Fixer") {
-                        n += 1;
-                    }
-                }
-            }
-        }
-        Ok(n)
-    }
-    walk(&root.join("crates/alint-rules/src/fixers"))
 }
 
 /// The built-in fact-kind names, taken from `alint_core::FactKind::ALL_NAMES`
@@ -640,7 +628,7 @@ mod tests {
         for (kind, expected) in [
             ("json_path_equals", "structured_path"),
             ("xml_path_matches", "structured_path"),
-            ("cross_file_value_equals", "cross_file"),
+            ("cross_file_value_equals", "cross_file/mod"),
             ("content_matches", "file_content_matches"),
             ("header", "file_header"),
             ("max_size", "file_max_size"),

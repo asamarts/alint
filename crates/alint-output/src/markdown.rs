@@ -70,15 +70,25 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
     let applied = report.applied();
     let skipped = report.skipped();
     let unfixable = report.unfixable();
+    let suggested = report.suggested();
 
-    if applied + skipped + unfixable == 0 {
-        writeln!(w, "No violations found.")?;
-        return Ok(());
-    }
+    // NB: a fix report is about *fixes*, not violations, so it must NOT reuse
+    // check's "No violations found." for an empty report - under `--fix-only`
+    // the residual (skipped/unfixable) items are filtered out, so an empty
+    // report there means "0 fixes applied" over a tree that still has violations,
+    // not a clean tree. Always print the honest summary counts, matching the
+    // human and JSON formatters (which have no emptiness special-case).
 
+    // `suggested` is appended only when non-zero so a run with no suggestions
+    // renders byte-identically to before the tier machinery existed.
+    let suggested_part = if suggested > 0 {
+        format!(", **{suggested} suggested**")
+    } else {
+        String::new()
+    };
     writeln!(
         w,
-        "**{applied} applied**, **{skipped} skipped**, **{unfixable} unfixable**.",
+        "**{applied} applied**, **{skipped} skipped**, **{unfixable} unfixable**{suggested_part}.",
     )?;
     writeln!(w)?;
 
@@ -93,7 +103,12 @@ pub fn write_fix_markdown(report: &FixReport, w: &mut dyn Write) -> std::io::Res
             // prefix only on the message-based skipped / unfixable lines.
             let (status_label, show_path) = match &item.status {
                 FixStatus::Applied(msg) => (format!("**applied** - {}", md_escape(msg)), false),
-                FixStatus::Skipped(msg) => (format!("**skipped** - {}", md_escape(msg)), true),
+                FixStatus::Skipped { reason: msg, .. } => {
+                    (format!("**skipped** - {}", md_escape(msg)), true)
+                }
+                FixStatus::Suggested { summary, .. } => {
+                    (format!("**suggested** - {}", md_escape(summary)), true)
+                }
                 FixStatus::Unfixable => ("**unfixable**".to_string(), true),
             };
             let path_part = if show_path {
@@ -286,7 +301,11 @@ fn md_escape(s: &str) -> String {
             _ => out.push(ch),
         }
     }
-    out
+    // Neutralize any remaining terminal control bytes (ESC/BEL/...) from an
+    // attacker-named path or message, so previewing `--format markdown` in a
+    // terminal on an untrusted repo can't fire an escape sequence (audit R2 MED-1).
+    // `\n`/`\r` are already collapsed above, so this only touches other controls.
+    crate::sanitize::sanitize_terminal(&out).into_owned()
 }
 
 /// Escape a string for inclusion inside a backtick code span.
@@ -301,8 +320,10 @@ fn md_inline_code(s: &str) -> String {
     // Inline code is single-line by definition: a `\n`/`\r` (legal in a path on
     // Unix) would break out of the span and split the enclosing `## ` heading,
     // so collapse them to a space. A backtick would close the span early, so
-    // swap in the modifier-letter look-alike.
-    s.replace(['\r', '\n'], " ").replace('`', "ʼ")
+    // swap in the modifier-letter look-alike. Then neutralize any remaining
+    // terminal control bytes (ESC/BEL/...) so they can't fire in a terminal preview
+    // (audit R2 MED-1); `\r`/`\n` are already collapsed above.
+    crate::sanitize::sanitize_terminal(&s.replace(['\r', '\n'], " ").replace('`', "ʼ")).into_owned()
 }
 
 /// Escape a URL for use in a markdown link target.
@@ -413,6 +434,8 @@ mod tests {
                     column: Some(4),
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -436,6 +459,8 @@ mod tests {
                         column: None,
                         is_note: false,
                         baseline_key: None,
+                        is_fixable: false,
+                        proposed_edits: Vec::new(),
                     }],
                 ),
                 rule(
@@ -448,6 +473,8 @@ mod tests {
                         column: None,
                         is_note: false,
                         baseline_key: None,
+                        is_fixable: false,
+                        proposed_edits: Vec::new(),
                     }],
                 ),
             ],
@@ -576,6 +603,8 @@ mod tests {
                     column: None,
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -593,6 +622,8 @@ mod tests {
             column: Some(1),
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
+            proposed_edits: Vec::new(),
         };
         let v2 = Violation {
             path: Some(Path::new("a.rs").into()),
@@ -601,6 +632,8 @@ mod tests {
             column: Some(1),
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
+            proposed_edits: Vec::new(),
         };
         let r1 = Report {
             results: vec![rule("r1", Level::Error, vec![v1.clone(), v2.clone()])],
@@ -612,16 +645,70 @@ mod tests {
     }
 
     #[test]
-    fn fix_report_empty_renders_clean() {
+    fn fix_report_empty_renders_honest_summary_not_a_clean_banner() {
+        // A fix report must never claim "No violations found." (that's a check
+        // message): under `--fix-only` an empty report means 0 fixes applied over
+        // a still-dirty tree. It prints the honest zeroed summary instead.
         let out = render_fix(&FixReport {
+            non_convergent: false,
             results: Vec::new(),
         });
-        assert!(out.contains("No violations found."));
+        assert!(
+            !out.contains("No violations found."),
+            "a fix report must not reuse check's clean banner: {out:?}"
+        );
+        assert!(
+            out.contains("**0 applied**, **0 skipped**, **0 unfixable**."),
+            "expected the zeroed fix summary: {out:?}"
+        );
+    }
+
+    #[test]
+    fn fix_report_renders_suggested_item() {
+        use alint_core::FixEdit;
+        let report = FixReport {
+            non_convergent: false,
+            results: vec![FixRuleResult {
+                rule_id: "cfg".into(),
+                level: Level::Error,
+                items: vec![FixItem {
+                    violation: Violation {
+                        path: Some(Path::new("app.json").into()),
+                        message: "value mismatch".into(),
+                        line: None,
+                        column: None,
+                        is_note: false,
+                        baseline_key: None,
+                        is_fixable: false,
+                        proposed_edits: Vec::new(),
+                    },
+                    status: FixStatus::Suggested {
+                        summary: "would set $.debug to false".into(),
+                        edit: Some(FixEdit::SetContent {
+                            path: Path::new("app.json").into(),
+                            content: Vec::new(),
+                        }),
+                    },
+                }],
+            }],
+        };
+        let out = render_fix(&report);
+        // The dot in `$.debug` is markdown-escaped by `md_escape`, so match on
+        // the stable parts: the status label and the escaped summary tail.
+        assert!(
+            out.contains("**suggested** - would set $\\.debug to false"),
+            "suggested line should carry the summary: {out}"
+        );
+        assert!(
+            out.contains("**1 suggested**"),
+            "summary should count it: {out}"
+        );
     }
 
     #[test]
     fn fix_report_groups_by_rule_with_status() {
         let report = FixReport {
+            non_convergent: false,
             results: vec![FixRuleResult {
                 rule_id: "trim".into(),
                 level: Level::Warning,
@@ -634,6 +721,8 @@ mod tests {
                             column: None,
                             is_note: false,
                             baseline_key: None,
+                            is_fixable: false,
+                            proposed_edits: Vec::new(),
                         },
                         status: FixStatus::Applied("trimmed trailing whitespace in a.rs".into()),
                     },
@@ -645,6 +734,8 @@ mod tests {
                             column: None,
                             is_note: false,
                             baseline_key: None,
+                            is_fixable: false,
+                            proposed_edits: Vec::new(),
                         },
                         status: FixStatus::Unfixable,
                     },

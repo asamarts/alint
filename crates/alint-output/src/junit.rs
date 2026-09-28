@@ -248,6 +248,8 @@ mod tests {
                     column: Some(4),
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -306,6 +308,8 @@ mod tests {
                     column: None,
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -329,6 +333,8 @@ mod tests {
                     column: None,
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };
@@ -350,6 +356,8 @@ mod tests {
                     column: None,
                     is_note: false,
                     baseline_key: None,
+                    is_fixable: false,
+                    proposed_edits: Vec::new(),
                 }],
             )],
         };

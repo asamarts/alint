@@ -1,0 +1,31 @@
+name: replace is Unsafe by default -- a bare fix suggests, does not rewrite
+tags: [fix, file_content_forbidden, replace, applicability]
+
+# Counterpart to `replace.yml`: without `--unsafe-fixes`, the Unsafe `replace`
+# is surfaced as a suggestion, not applied -- the `[check, fix]` shape asserts
+# the fix step SUGGESTS, and the `expect_tree` proves the file is untouched.
+
+given:
+  tree:
+    app.js: "console.log(1);\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-console
+        kind: file_content_forbidden
+        paths: "**/*.js"
+        pattern: "console\\.log"
+        level: error
+        fix:
+          replace:
+            replacement: "logger.debug"
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: no-console, level: error, path: app.js}
+  - suggested: [no-console]
+
+expect_tree:
+  app.js: "console.log(1);\n"

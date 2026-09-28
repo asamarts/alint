@@ -1,5 +1,6 @@
 use std::borrow::Cow;
-use std::collections::HashMap;
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
@@ -44,6 +45,26 @@ pub struct Violation {
     /// content" (see [`crate::baseline::violation_fingerprint`]). It
     /// never affects rendering or pass/fail.
     pub baseline_key: Option<Cow<'static, str>>,
+    /// Engine-computed: whether a bare `alint fix` would resolve *this*
+    /// violation. A rule sets this to `false` at construction (rules do not know
+    /// about fixers); the engine overwrites it at result-assembly time as
+    /// per-violation convertibility ([`Fixer::can_fix`]) AND the fixer applying
+    /// at the default (`Safe`) threshold. So an unconvertible `café.rs` under
+    /// `snake` (which `fix` skips) is not tagged `fixable`, and neither is an
+    /// `Unsafe`-tier `file_remove` violation (which a bare `fix` only *suggests*,
+    /// needing `--unsafe-fixes`) -- `check` must not promise a resolution a bare
+    /// `fix` never delivers. A convertible Safe-tier sibling still is. `false`
+    /// whenever the rule has no fixer. The rule-level [`RuleResult::is_fixable`]
+    /// ("the rule declares a fixer") is independent and backs the machine formats.
+    pub is_fixable: bool,
+    /// Check-side-computed concrete edits a fix would make to resolve *this*
+    /// violation, for the machine formats (SARIF `result.fixes[]`) to render as
+    /// source region + replacement text. Empty by default and for every
+    /// non-fixable violation; the CLI populates it (via
+    /// [`crate::proposed_fix::attach_proposed_edits`]) only for a fix-carrying
+    /// format, so the ordinary check path pays nothing. Never affects rendering
+    /// of the finding itself, pass/fail, or fixability.
+    pub proposed_edits: Vec<crate::proposed_fix::ProposedEdit>,
 }
 
 impl Violation {
@@ -55,6 +76,8 @@ impl Violation {
             column: None,
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
+            proposed_edits: Vec::new(),
         }
     }
 
@@ -514,6 +537,83 @@ pub struct FixContext<'a> {
     /// MUST confine it to the repo root unless this is `true`, so an untrusted
     /// ruleset can't make `alint fix` write or read outside the tree.
     pub allow_out_of_root: bool,
+    /// Compose buffer for a real `alint fix` pass. When `Some`, a whole-file
+    /// write routed through [`FixContext::commit_write`] is captured here,
+    /// keyed by repo-relative path, instead of hitting disk, and
+    /// [`read_for_fix`] reads it back — so a file touched by several fixers in
+    /// config order composes in memory and the engine flushes it with a single
+    /// atomic write per file. `None` (the default, and every `--dry-run` run)
+    /// writes straight through, unchanged. Interior mutability because fixers
+    /// hold `&FixContext`. See auto-fix.md 5.2 and the Phase 0 engine rework.
+    pub compose: Option<&'a RefCell<BTreeMap<PathBuf, Vec<u8>>>>,
+    /// Sink for whole-file filesystem ops (create / remove / rename) when
+    /// *staging* for `alint fix --diff`. A content fixer routes through the
+    /// [`compose`](Self::compose) buffer, but a whole-file fixer performs its
+    /// effect directly in [`apply`](Fixer::apply) and would otherwise mutate the
+    /// tree during a preview. When this is `Some`, such a fixer records its
+    /// [`FixEdit`] here and returns *without touching disk*, so the diff can
+    /// render the op and `--diff` keeps its no-write contract. `Some` only in a
+    /// stage pass; a real `fix` and a `--dry-run` both leave it `None` (a real
+    /// fix writes directly; a dry run reports only). Interior mutability for the
+    /// same reason as `compose`.
+    pub stage_ops: Option<&'a RefCell<Vec<FixEdit>>>,
+}
+
+impl FixContext<'_> {
+    /// Persist a whole-file write of `bytes` for the file whose absolute path
+    /// is `abs`. In compose mode the bytes are buffered for the engine's single
+    /// per-file flush; otherwise they are written atomically now — byte-for-byte
+    /// the same as a direct [`write_atomic`]. Content fixers call this instead
+    /// of `write_atomic` so the engine can unify the write path.
+    ///
+    /// The compose buffer is keyed by the *resolved write target*
+    /// (`resolve_write_target`): a symlink and its in-tree target coalesce to
+    /// one entry, so two fixers touching the same underlying file through
+    /// different paths compose (the second reads the first's buffered write)
+    /// exactly as they would when writing straight to disk.
+    ///
+    /// # Errors
+    /// Propagates the underlying [`write_atomic`] I/O error in direct mode;
+    /// buffering in compose mode is infallible.
+    pub fn commit_write(&self, abs: &Path, bytes: &[u8]) -> std::io::Result<()> {
+        // A dry run must write NOTHING: every fixer guards `if ctx.dry_run` before
+        // reaching here, and the fixpoint's cap-confirmation pass relies on that
+        // (it runs `fix_run(dry_run=true)` purely to test convergence). Assert the
+        // invariant at the choke point so a fixer that forgets the guard fails
+        // loudly in tests/debug rather than silently mutating the tree.
+        debug_assert!(
+            !self.dry_run,
+            "commit_write reached during a dry run; a fixer must check ctx.dry_run before writing"
+        );
+        // Release-safe backstop (the assert is compiled out in release): a dry run
+        // writes NOTHING, so a fixer that forgot its `ctx.dry_run` guard becomes a
+        // silent no-op here instead of mutating the tree during, e.g., the
+        // fixpoint's cap-confirmation pass.
+        if self.dry_run {
+            return Ok(());
+        }
+        match self.compose {
+            Some(buf) => {
+                buf.borrow_mut()
+                    .insert(resolve_write_target(abs), bytes.to_vec());
+                Ok(())
+            }
+            None => write_atomic(abs, bytes),
+        }
+    }
+
+    /// True when a content fixer earlier in this pass has already composed a
+    /// pending whole-file write for `abs` (coalesced by resolved target, so a
+    /// symlink and its target share the answer). A whole-file op (remove /
+    /// rename) MUST yield when this is true: the pending content write is
+    /// flushed *after* the fixer loop, so acting on the pre-edit file now would
+    /// let the flush resurrect the removed/renamed path or strand the composed
+    /// bytes at a vacated path (a file-duplication corruption). Returns `false`
+    /// when there is no compose buffer (a `--dry-run` pass composes nothing).
+    pub fn has_pending_write(&self, abs: &Path) -> bool {
+        self.compose
+            .is_some_and(|buf| buf.borrow().contains_key(&resolve_write_target(abs)))
+    }
 }
 
 /// The result of applying (or simulating) one fix against one violation.
@@ -547,6 +647,141 @@ pub enum FixEdit {
     DeleteFile { path: PathBuf },
     /// Rename a file (same directory or not).
     RenameFile { from: PathBuf, to: PathBuf },
+    /// Replace the half-open byte range `[range.start, range.end)` of an
+    /// existing file with `content`. The range is in bytes against the
+    /// file's current contents. This is the workhorse of *located* edits
+    /// (Phase 1+): several disjoint `ReplaceRange`s against one file can
+    /// be batched, ordered, and spliced in a single pass. No Phase-0
+    /// fixer emits one, but the primitive splice and the batching engine
+    /// are built and tested here.
+    ReplaceRange {
+        path: PathBuf,
+        range: std::ops::Range<usize>,
+        content: Vec<u8>,
+    },
+    /// Set the permission bits of a file (a `chmod`). `mode` is the full
+    /// mode word (e.g. `0o755`). Applied only on Unix; on other platforms the
+    /// host rule never fires, so this is unreachable. Emitted by the `ChmodFixer`
+    /// (the `chmod` fix op on `executable_bit` / `shebang_has_executable`); the
+    /// fixer performs the `set_permissions` itself and records this in the stage
+    /// sink so `fix --diff` renders the mode change.
+    SetMode { path: PathBuf, mode: u32 },
+}
+
+/// How safe a fix is to apply automatically. A [`CollectedEdit`] declares
+/// its tier; `alint fix` filters against the user's chosen threshold
+/// (`Safe` by default, `Unsafe` with `--unsafe-fixes`).
+///
+/// The `Ord` is the application order: `Safe < Unsafe < Suggestion <
+/// Never`, so "would this apply at `threshold`?" is `self <= threshold`
+/// for the two *applying* tiers. `Suggestion` is shown but never applied;
+/// `Never` is collected for provenance only and neither applied nor
+/// suggested. See auto-fix.md 5.5 and ADR-0017.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Applicability {
+    /// Behavior-preserving; applied by a bare `alint fix`.
+    Safe,
+    /// May change semantics; applied only with `--unsafe-fixes`.
+    Unsafe,
+    /// Never applied automatically; surfaced as [`FixStatus::Suggested`](crate::FixStatus).
+    Suggestion,
+    /// Collected for analysis/provenance only; never applied, never
+    /// suggested for automatic application.
+    Never,
+}
+
+impl Applicability {
+    /// Whether an edit at this tier is *applied* when the user opted into
+    /// applying up to `threshold` (`Safe` for a bare `alint fix`, `Unsafe`
+    /// for `--unsafe-fixes`). `Suggestion` and `Never` never apply.
+    #[must_use]
+    pub fn applies_at(self, threshold: Applicability) -> bool {
+        matches!(self, Applicability::Safe | Applicability::Unsafe) && self <= threshold
+    }
+
+    /// Whether an edit at this tier is *suggested* (shown, not applied)
+    /// under `threshold`: an `Unsafe` edit the user did not opt into, or a
+    /// `Suggestion`. `Never` is never suggested; an applied tier is not
+    /// "merely" suggested.
+    #[must_use]
+    pub fn suggested_at(self, threshold: Applicability) -> bool {
+        match self {
+            Applicability::Suggestion => true,
+            Applicability::Unsafe => !self.applies_at(threshold),
+            Applicability::Safe | Applicability::Never => false,
+        }
+    }
+}
+
+/// The value a structured edit's target query must hold *after* the edit
+/// applies — the right-hand side of the localized-equivalence (`PutGet`)
+/// check the engine runs before committing a located edit.
+#[derive(Debug, Clone, PartialEq)]
+pub enum ExpectedValue {
+    /// The query must resolve to exactly this scalar.
+    Scalar(serde_json::Value),
+    /// The query must match nothing (used by `*_path_absent` /
+    /// `remove_value`: after a batched multi-node removal, array indices
+    /// shift, so only re-running the query and asserting zero matches is
+    /// correct).
+    Absent,
+    /// The query must resolve to a STRING that matches this regex (its source).
+    /// Used by `*_path_matches` + `replace`: the fixer rewrites the value so it
+    /// satisfies the rule's `matches:` pattern, and this re-checks that goal
+    /// (stored as the source string, since `regex::Regex` is not `PartialEq`).
+    Matches(String),
+}
+
+/// An executable post-edit check the engine can run *without knowing the
+/// op* that produced the edit. This is the load-bearing verification
+/// obligation the design's translation-validation rests on (R-VERIFY): a
+/// fixer returns not just an edit but the means to prove the edit did what
+/// the rule wanted, so the engine can demote an edit whose result does not
+/// verify to a [`FixStatus::Suggested`](crate::FixStatus) instead of writing bad bytes.
+#[derive(Debug, Clone, PartialEq)]
+pub enum EditVerifier {
+    /// No semantic check (whole-file normalizers): the edit is its own
+    /// specification. The engine still confirms the write succeeded.
+    None,
+    /// Re-parse the post-edit bytes in `format` (syntactic validity) and
+    /// re-run the `JSONPath` `query` against them, asserting the result
+    /// matches `expect`.
+    ///
+    /// `query` is the *owned* `JSONPath` source string (the rule's
+    /// `path_src`), NOT a borrowed `serde_json_path::NormalizedPath`: a
+    /// `NormalizedPath` borrows the parsed `Value` that drops when
+    /// `collect_edits` returns (a dangling borrow), and it cannot express
+    /// `Absent` after index shifts anyway. Re-running the source query is
+    /// the only correct check.
+    Structured {
+        format: crate::structured_format::Format,
+        query: String,
+        expect: ExpectedValue,
+    },
+}
+
+/// A tag marking edits that must not co-apply in a single pass even when
+/// their byte ranges are disjoint (e.g. two rewrites of the same logical
+/// node reached by different queries). The concrete grouping policy is
+/// pinned when the first isolation-needing op ships (Phase 2+); Phase 0
+/// carries the field and exercises exclusion with a fixture rule.
+pub type GroupId = u32;
+
+/// A single proposed edit plus everything the engine needs to decide
+/// whether and how to apply it *without knowing the op that produced it*:
+/// its tier, its post-edit verification obligation, and its
+/// mutual-exclusion group. Returned by [`Fixer::collect_edits`].
+///
+/// This refines ADR-0017 decision 1 / auto-fix.md 5.2.1, whose
+/// `collect_edits -> Vec<(FixEdit, Applicability)>` cannot carry the
+/// verifier the Safe acceptance test needs.
+#[derive(Debug, Clone)]
+pub struct CollectedEdit {
+    pub edit: FixEdit,
+    pub applicability: Applicability,
+    pub verify: EditVerifier,
+    pub isolation_group: Option<GroupId>,
 }
 
 /// A mechanical corrector for a specific rule's violations.
@@ -575,6 +810,101 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let _ = (violation, bytes, root);
         None
+    }
+
+    /// Collect the edits this fixer proposes for `violations` against the
+    /// current `bytes` of one file, each tagged with its tier, post-edit
+    /// verifier, and isolation group. The engine batches, tier-filters,
+    /// orders, overlap-skips, verifies, and applies the result.
+    ///
+    /// The default adapts the whole-file fixers unchanged: it delegates to
+    /// [`fix_edit`](Self::fix_edit) per violation and wraps each result as
+    /// a `Safe`, `verify: None`, ungrouped [`CollectedEdit`], so an
+    /// existing fixer's located-edit form is byte-identical to its
+    /// `fix_edit`. A fixer that emits `ReplaceRange`s, needs a tier other
+    /// than `Safe`, a semantic verifier, or an isolation group overrides
+    /// this. `file` is the edit's path relative to `root` (matching
+    /// [`Violation::path`]).
+    ///
+    /// Note: like [`fix_edit`](Self::fix_edit), this reads nothing from
+    /// disk beyond a declared template; the engine enforces the
+    /// `fix_size_limit` on `bytes` before calling it.
+    fn collect_edits(
+        &self,
+        violations: &[Violation],
+        file: &Path,
+        bytes: &[u8],
+        root: &Path,
+    ) -> Vec<CollectedEdit> {
+        let _ = file;
+        // Carry the fixer's OWN tier, not a hardcoded `Safe`: the located path is
+        // tier-gated on each `CollectedEdit`, so hardcoding `Safe` here would let
+        // an Unsafe fixer (e.g. `file_remove`) that opts into the located regime
+        // in a future phase have its edits applied by a bare `alint fix`, silently
+        // bypassing the tier gate. (Dormant in Phase 0 -- no shipped fixer returns
+        // `collects_located_edits() == true` -- but this closes the landmine before
+        // the path is ever activated.)
+        let tier = self.applicability();
+        violations
+            .iter()
+            .filter_map(|v| self.fix_edit(v, bytes, root))
+            .map(|edit| CollectedEdit {
+                edit,
+                applicability: tier,
+                verify: EditVerifier::None,
+                isolation_group: None,
+            })
+            .collect()
+    }
+
+    /// Whether this fixer emits *located* edits — byte-range
+    /// [`FixEdit::ReplaceRange`]s via [`collect_edits`](Self::collect_edits)
+    /// that the engine batches, tier-filters, verifies, and splices through the
+    /// located-edit path — rather than writing a whole file through
+    /// [`apply`](Self::apply).
+    ///
+    /// Default `false`: every Phase-0 fixer is a whole-file or path/existence op
+    /// and uses `apply`, so the located path is dormant (built and wired, but
+    /// never entered). The first `true` arrives with the Phase-1 `replace` op;
+    /// the engine then routes that rule's edits through
+    /// [`located_fix`](crate::located_fix) instead of `apply`.
+    fn collects_located_edits(&self) -> bool {
+        false
+    }
+
+    /// The [`Applicability`] tier this whole-file / path fixer applies at, gating
+    /// it against the user's threshold (`Safe` for a bare `alint fix`, `Unsafe`
+    /// for `--unsafe-fixes`). Default `Safe`: the content and path-normalizing
+    /// ops are behavior-preserving. `file_remove` overrides this to `Unsafe`
+    /// (deleting a whole file irreversibly is a poor default), so a bare
+    /// `alint fix` surfaces it as a suggestion rather than deleting; a user may
+    /// promote it per-rule (auto-fix.md 5.5). (The located-edit path carries its
+    /// tier on each `CollectedEdit` instead; this is the whole-file analogue.)
+    fn applicability(&self) -> Applicability {
+        Applicability::Safe
+    }
+
+    /// Whether this fixer can actually fix *this specific* violation -- a pure,
+    /// no-I/O predicate the engine calls at result-assembly time so `check` can
+    /// tag fixability per-violation (see [`Violation::is_fixable`]) rather than
+    /// per-rule.
+    ///
+    /// Default `true`: after the Phase-0 detector/fixer domain-alignment work
+    /// (rounds 3-6), a content or path/existence fixer fixes every violation its
+    /// rule flags. The one exception is `FileRenameFixer` (in `alint-rules`),
+    /// which overrides this:
+    /// a stem with no reachable target form under the requested case (a non-ASCII
+    /// letter under `snake` like `café`, a leading-digit stem under `camel`, a
+    /// caseless script under `lower`/`upper`) is flagged by the detector but has
+    /// no valid rename, so `fix` honestly skips it -- `check` must not promise it.
+    ///
+    /// This is a *convertibility* verdict, independent of the [`Applicability`]
+    /// tier (an Unsafe `file_remove` still `can_fix`; `--unsafe-fixes` gates
+    /// whether it is *applied*) and of fix-time filesystem state (collisions,
+    /// pending writes), which only the fix pass can know.
+    fn can_fix(&self, violation: &Violation) -> bool {
+        let _ = violation;
+        true
     }
 }
 
@@ -637,6 +967,32 @@ pub fn read_for_fix(
     display_path: &std::path::Path,
     ctx: &FixContext<'_>,
 ) -> Result<ReadForFix> {
+    // In compose mode, an earlier fixer's write for this file lives in the
+    // buffer, not on disk; read it back so fixers compose in config order.
+    // Keyed by the resolved write target (matching `commit_write`), so a read
+    // through a symlink sees a write made through the target and vice versa.
+    // The bytes were already size-checked on their first (disk) read, so the
+    // cap is not re-applied to in-memory bytes.
+    if let Some(buf) = ctx.compose {
+        if let Some(bytes) = buf.borrow().get(&resolve_write_target(abs)) {
+            return Ok(ReadForFix::Bytes(bytes.clone()));
+        }
+    }
+    // Refuse a non-regular file (FIFO / socket / device) BEFORE the read: a bare
+    // `std::fs::read` opens a named pipe `O_RDONLY` and BLOCKS until a writer
+    // appears, hanging the whole `fix` run -- including the `--dry-run` / `--diff`
+    // previews users run to stay safe. The walker prunes special files at index
+    // time, but a fixer can be handed a config-verbatim path that skips the walker
+    // (a `sync_from` `targets:` list entry or `source:`), so this direct-read path
+    // must guard exactly as `read_capped` / `open_regular` do. A stat error (e.g. a
+    // missing file) falls through so the read surfaces the same I/O error callers
+    // already handle.
+    if std::fs::metadata(abs).is_ok_and(|m| !m.is_file()) {
+        return Ok(ReadForFix::Skipped(FixOutcome::Skipped(format!(
+            "{} is not a regular file",
+            display_path.display()
+        ))));
+    }
     if let Some(outcome) = check_fix_size(abs, display_path, ctx)? {
         return Ok(ReadForFix::Skipped(outcome));
     }
@@ -645,6 +1001,84 @@ pub fn read_for_fix(
         source,
     })?;
     Ok(ReadForFix::Bytes(bytes))
+}
+
+/// The canonical underlying file a write to `path` ultimately modifies, with
+/// EVERY symlink in the path resolved — a symlinked file AND a file reached
+/// through a symlinked directory both collapse to the same real path. The
+/// compose buffer keys on this so two paths that alias one underlying file
+/// coalesce to a single entry and compose, exactly as the direct-write path
+/// does (a temp+rename through either alias lands on the same real file).
+///
+/// This is a FULL canonicalization, deliberately stronger than
+/// [`write_atomic`]'s own final-component symlink check (which exists only to
+/// preserve the final link node during its rename): keying must reflect the
+/// real file, not the spelling. Falls back to `path` when it cannot be
+/// canonicalized (e.g. a race deleted it), so a key is never lost.
+#[must_use]
+pub(crate) fn resolve_write_target(path: &Path) -> PathBuf {
+    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
+/// file, copy the original's permissions onto it (so an existing mode — notably
+/// the executable bit — survives), `fsync`, then rename it over `path`. Unlike
+/// `std::fs::write` (open-truncate-then-write), a crash or I/O error mid-write
+/// leaves the original intact rather than truncated. The temp is a sibling so
+/// the rename is atomic on the same filesystem, and it is cleaned up on
+/// failure. Writes THROUGH a symlink to its canonical target, preserving the
+/// link. (Manual temp, no `tempfile` runtime dependency.)
+///
+/// Lives in `alint-core` so both the fixers (`alint-rules`) and the engine's
+/// compose flush share one implementation; `alint-rules::io` re-exports it.
+///
+/// # Errors
+/// Propagates any I/O error from creating, writing, syncing, or renaming.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    // Unique sibling name: the pid distinguishes concurrent processes, the
+    // atomic counter distinguishes concurrent threads in this process.
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
+    // Write THROUGH a symlink to its (canonical) target, preserving the link.
+    // A bare temp+rename on the link path would replace the link NODE with a
+    // regular file, silently diverging it from its target (common for a
+    // symlinked LICENSE / README in a monorepo). `canonicalize` needs the
+    // target to exist, which it does: every caller has just read the file. A
+    // broken symlink errors here rather than clobbering the link (unlike the
+    // key-only `resolve_write_target`, which falls back so a key is never lost).
+    let resolved = match std::fs::symlink_metadata(path) {
+        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
+        _ => path.to_path_buf(),
+    };
+    let path = resolved.as_path();
+    let dir = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
+    let stem = path.file_name().and_then(|f| f.to_str()).unwrap_or("tmp");
+    let tmp = dir.join(format!(".{stem}.alint-fix.{}.{n}", std::process::id()));
+    let write = || -> std::io::Result<()> {
+        let mut f = std::fs::File::create(&tmp)?;
+        f.write_all(bytes)?;
+        // Preserve the original file's mode when it exists (a rewrite) -- AFTER
+        // the write, not before. A `write()` clears the setuid/setgid bits (the
+        // kernel's `should_remove_suid`), so copying the mode before writing
+        // would silently drop S_ISUID/S_ISGID from a setgid group helper or the
+        // like. Applying the mode after the last write preserves the full mode
+        // word (the plain executable bit survived either way, which is why the
+        // ordering bug went unnoticed).
+        if let Ok(meta) = std::fs::metadata(path) {
+            f.set_permissions(meta.permissions())?;
+        }
+        f.sync_all()
+    };
+    if let Err(e) = write().and_then(|()| std::fs::rename(&tmp, path)) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(e);
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -672,6 +1106,55 @@ mod tests {
         assert!(v.path.is_none());
         assert!(v.line.is_none());
         assert!(v.column.is_none());
+    }
+
+    /// A whole-file fixer at a configurable tier that emits a `DeleteFile` edit
+    /// and does NOT override `collect_edits` -- exercises the default adapter.
+    #[derive(Debug)]
+    struct TierEdgeFixer(Applicability);
+    impl Fixer for TierEdgeFixer {
+        fn describe(&self) -> String {
+            "tier-edge".to_string()
+        }
+        fn applicability(&self) -> Applicability {
+            self.0
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> Result<FixOutcome> {
+            Ok(FixOutcome::Skipped("n/a".to_string()))
+        }
+        fn fix_edit(&self, v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+            v.path.as_deref().map(|p| FixEdit::DeleteFile {
+                path: p.to_path_buf(),
+            })
+        }
+    }
+
+    #[test]
+    fn default_collect_edits_carries_the_fixers_tier_not_safe() {
+        // The default `collect_edits` adapter must tag each CollectedEdit with the
+        // fixer's OWN applicability, not a hardcoded `Safe` -- otherwise an Unsafe
+        // fixer routed through the (Phase-1) located path would have its edits
+        // applied at the Safe threshold, bypassing the tier gate.
+        let v = Violation::new("x").with_path(Path::new("junk.bak"));
+        for tier in [
+            Applicability::Safe,
+            Applicability::Unsafe,
+            Applicability::Suggestion,
+            Applicability::Never,
+        ] {
+            let f = TierEdgeFixer(tier);
+            let edits = f.collect_edits(
+                std::slice::from_ref(&v),
+                Path::new("junk.bak"),
+                b"",
+                Path::new("/repo"),
+            );
+            assert_eq!(edits.len(), 1, "tier {tier:?}");
+            assert_eq!(
+                edits[0].applicability, tier,
+                "collect_edits must carry the fixer's tier ({tier:?}), not Safe"
+            );
+        }
     }
 
     #[test]
@@ -790,6 +1273,8 @@ mod tests {
             dry_run: false,
             fix_size_limit: None,
             allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
         };
         let outcome = check_fix_size(&f, Path::new("a.txt"), &ctx).unwrap();
         assert!(outcome.is_none());
@@ -805,6 +1290,8 @@ mod tests {
             dry_run: false,
             fix_size_limit: Some(64),
             allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
         };
         let outcome = check_fix_size(&f, Path::new("big.txt"), &ctx).unwrap();
         match outcome {
@@ -826,6 +1313,8 @@ mod tests {
             dry_run: false,
             fix_size_limit: Some(1 << 20),
             allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
         };
         match read_for_fix(&f, Path::new("a.txt"), &ctx).unwrap() {
             ReadForFix::Bytes(b) => assert_eq!(b, b"hello"),
@@ -843,6 +1332,8 @@ mod tests {
             dry_run: false,
             fix_size_limit: Some(64),
             allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
         };
         match read_for_fix(&f, Path::new("big.txt"), &ctx).unwrap() {
             ReadForFix::Skipped(FixOutcome::Skipped(_)) => {}
@@ -854,9 +1345,185 @@ mod tests {
     }
 
     #[test]
+    fn read_for_fix_refuses_a_non_regular_file() {
+        // A fixer can be handed a config-verbatim path that skips the walker's
+        // special-file filter (a `sync_from` `targets:` list entry). A bare
+        // `std::fs::read` of a FIFO would block `O_RDONLY` forever, hanging `fix`.
+        // A directory is the portable, hang-free proxy for a non-regular file
+        // (same `metadata().is_file() == false` branch as a FIFO; this crate takes
+        // no libc dep, so it cannot `mkfifo(3)` here). The read must Skip, never
+        // reach the blocking `std::fs::read`.
+        let dir = tempfile::tempdir().unwrap();
+        let subdir = dir.path().join("adir");
+        std::fs::create_dir(&subdir).unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        match read_for_fix(&subdir, Path::new("adir"), &ctx).unwrap() {
+            ReadForFix::Skipped(FixOutcome::Skipped(r)) => {
+                assert!(r.contains("not a regular file"), "{r}");
+            }
+            other => panic!("a non-regular file must Skip, got {other:?}"),
+        }
+    }
+
+    #[test]
     fn fix_outcome_variants_are_constructible() {
         // Sanity: documented variant shapes haven't drifted.
         let _applied = FixOutcome::Applied("created LICENSE".into());
         let _skipped = FixOutcome::Skipped("already exists".into());
+    }
+
+    #[test]
+    #[should_panic(expected = "commit_write reached during a dry run")]
+    fn commit_write_asserts_against_a_dry_run_write() {
+        // A fixer that reaches `commit_write` during a dry run is a bug -- it must
+        // guard `ctx.dry_run` first. The `debug_assert!` catches it loudly in
+        // debug/tests (this test); in release the early-return makes it a safe
+        // no-op instead of a silent tree mutation during the cap-confirmation pass.
+        let dir = tempfile::tempdir().unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: true,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        let _ = ctx.commit_write(&dir.path().join("x"), b"nope");
+    }
+
+    #[test]
+    fn compose_buffer_captures_writes_and_reads_them_back() {
+        let dir = tempfile::tempdir().unwrap();
+        let abs = dir.path().join("a.txt");
+        std::fs::write(&abs, b"on disk").unwrap();
+        let buf = RefCell::new(BTreeMap::new());
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+            stage_ops: None,
+        };
+        let rel = Path::new("a.txt");
+        // Compose mode: commit_write buffers; disk stays untouched.
+        ctx.commit_write(&abs, b"composed").unwrap();
+        assert_eq!(
+            std::fs::read(&abs).unwrap(),
+            b"on disk",
+            "compose mode must not touch disk until flush"
+        );
+        // read_for_fix reads the buffered bytes back, so a later fixer in the
+        // same pass composes on top of the earlier one.
+        match read_for_fix(&abs, rel, &ctx).unwrap() {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"composed"),
+            ReadForFix::Skipped(_) => panic!("expected buffered bytes"),
+        }
+        // A file not in the buffer falls through to disk.
+        let abs2 = dir.path().join("b.txt");
+        std::fs::write(&abs2, b"other").unwrap();
+        match read_for_fix(&abs2, Path::new("b.txt"), &ctx).unwrap() {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"other"),
+            ReadForFix::Skipped(_) => panic!("expected disk bytes"),
+        }
+    }
+
+    #[test]
+    fn commit_write_direct_mode_writes_through_to_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let abs = dir.path().join("a.txt");
+        std::fs::write(&abs, b"old").unwrap();
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        // No compose buffer: commit_write is a direct atomic write, identical
+        // to calling write_atomic.
+        ctx.commit_write(&abs, b"new").unwrap();
+        assert_eq!(std::fs::read(&abs).unwrap(), b"new");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compose_buffer_coalesces_symlink_and_target() {
+        // R-audit: a symlink and its in-tree target must share ONE buffer
+        // entry, so a fixer writing through the link and another reading the
+        // target compose -- matching the direct-write path, which writes
+        // through the link. Without this the two would report two independent
+        // Applied edits instead of one Applied + one Skipped.
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("real.txt");
+        std::fs::write(&target, b"orig").unwrap();
+        let link = dir.path().join("link.txt");
+        symlink(&target, &link).unwrap();
+        let buf = RefCell::new(BTreeMap::new());
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+            stage_ops: None,
+        };
+        // Write through the LINK; read through the TARGET must see the write.
+        ctx.commit_write(&link, b"composed").unwrap();
+        match read_for_fix(&target, Path::new("real.txt"), &ctx).unwrap() {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"composed"),
+            ReadForFix::Skipped(_) => panic!("symlink and target must share one entry"),
+        }
+        assert_eq!(buf.borrow().len(), 1, "coalesced to a single keyed entry");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn compose_buffer_coalesces_through_a_symlinked_dir() {
+        // R-audit-3: a file reached through a symlinked DIRECTORY must coalesce
+        // with the same file reached directly. This needs FULL canonicalization,
+        // not just a final-component symlink check (the final component --
+        // file.txt -- is a regular file in both spellings).
+        use std::os::unix::fs::symlink;
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("real")).unwrap();
+        std::fs::write(dir.path().join("real/file.txt"), b"orig").unwrap();
+        symlink(dir.path().join("real"), dir.path().join("link")).unwrap(); // link/ -> real/
+        let buf = RefCell::new(BTreeMap::new());
+        let ctx = FixContext {
+            root: dir.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+            stage_ops: None,
+        };
+        // Write through the symlinked dir; read through the real dir -> hit.
+        ctx.commit_write(&dir.path().join("link/file.txt"), b"composed")
+            .unwrap();
+        match read_for_fix(
+            &dir.path().join("real/file.txt"),
+            Path::new("real/file.txt"),
+            &ctx,
+        )
+        .unwrap()
+        {
+            ReadForFix::Bytes(b) => assert_eq!(b, b"composed"),
+            ReadForFix::Skipped(_) => panic!("dir-symlink alias must coalesce"),
+        }
+        assert_eq!(
+            buf.borrow().len(),
+            1,
+            "one entry for the real underlying file"
+        );
     }
 }

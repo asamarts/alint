@@ -1,0 +1,48 @@
+name: file_header prepend and blank-line collapse compose on one file
+tags: [fix, interactions]
+
+# Adversarial same-file pair (auto-fix plan, Phase 0), second combo: a
+# file_header fix (file_prepend) and a max_consecutive_blank_lines fix
+# (file_collapse_blank_lines) both target the SAME file. The engine composes
+# them in config order in memory and flushes one write: the header is
+# prepended, then the collapse runs against the header-prepended bytes (read
+# back from the compose buffer), so the file ends up both headered and with
+# its blank runs collapsed.
+
+given:
+  tree:
+    src:
+      mod.rs: "fn a() {}\n\n\n\nfn b() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: header
+        kind: file_header
+        paths: "src/**/*.rs"
+        pattern: "(?s)Copyright"
+        lines: 3
+        level: error
+        fix:
+          file_prepend:
+            content: "// Copyright 2026\n"
+
+      - id: blanks
+        kind: max_consecutive_blank_lines
+        paths: "src/**/*.rs"
+        max: 1
+        level: warning
+        fix:
+          file_collapse_blank_lines: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: header, level: error, path: src/mod.rs}
+      - {rule: blanks, level: warning, path: src/mod.rs}
+  - applied: [header, blanks]
+  - violations: []
+
+expect_tree:
+  src:
+    mod.rs: "// Copyright 2026\nfn a() {}\n\nfn b() {}\n"

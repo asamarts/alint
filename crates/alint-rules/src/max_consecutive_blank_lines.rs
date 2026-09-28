@@ -68,6 +68,13 @@ impl PerFileRule for MaxConsecutiveBlankLinesRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content: a NUL byte is valid UTF-8 (U+0000), so the
+        // `from_utf8` gate below does NOT catch a NUL-bearing binary, but the
+        // `file_collapse_blank_lines` fixer refuses it via `looks_binary`. Guard
+        // here too so `check` and `fix` agree on scope.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // The blank-line check uses `line_is_blank` (str-based,
         // matches the fixer's logic — they share the helper) so
         // we keep the UTF-8 validation pass here. Non-UTF-8
@@ -86,7 +93,13 @@ impl PerFileRule for MaxConsecutiveBlankLinesRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(line_no, 1),
+                .with_location(line_no, 1)
+                // First-offender rule with a WHOLE-FILE fixer (it collapses every
+                // over-limit run). The file is the unit of accepted debt: key on
+                // the path so `fix --baseline` grandfathers the whole file and
+                // never collapses a grandfathered run when a NEW one precedes it
+                // (audit F3, 2026-09-20). Matches no_trailing_whitespace.
+                .with_baseline_key(crate::slash(path)),
         ])
     }
 }
@@ -140,9 +153,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .deserialize_options()
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileCollapseBlankLines { .. }) => {
-            Some(FileCollapseBlankLinesFixer::new(opts.max))
-        }
+        Some(FixSpec::FileCollapseBlankLines {
+            file_collapse_blank_lines,
+        }) => Some(
+            FileCollapseBlankLinesFixer::new(opts.max).with_applicability(
+                file_collapse_blank_lines
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

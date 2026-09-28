@@ -1,0 +1,39 @@
+name: remove_value deletes a TOML key, keeping its table + siblings
+tags: [fix, toml_path_absent, remove_value, toml]
+
+# `remove_value` deletes the whole `debug = true` entry (toml_edit owns the
+# removal surgery), leaving the `[server]` header and the sibling `host` / `port`
+# keys intact. `remove_value` is Unsafe by default; this rule promotes it to
+# `safe` so a bare `fix` applies.
+
+given:
+  tree:
+    app.toml: |
+      [server]
+      host = "localhost"
+      debug = true
+      port = 8080
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: toml_path_absent
+        paths: "**/*.toml"
+        path: "$['server']['debug']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: app.toml}
+  - applied: [no-debug]
+  - violations: []
+
+expect_tree:
+  app.toml: |
+    [server]
+    host = "localhost"
+    port = 8080

@@ -1,17 +1,38 @@
 use std::path::{Path, PathBuf};
 
-use alint_core::{Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
+use alint_core::{Applicability, Error, FixContext, FixEdit, FixOutcome, Fixer, Result, Violation};
 
 use crate::case::CaseConvention;
 
 /// Removes the file named by the violation's `path`. Used by
-/// `file_absent` to purge committed files that shouldn't be there.
+/// `file_absent`, `no_empty_files`, `no_submodules`, `no_symlinks`.
+///
+/// Carries an [`Applicability`] tier (auto-fix.md 5.5): `file_remove` is
+/// **`Unsafe` by default**, because deleting a whole file irreversibly is a poor
+/// default for a bare `alint fix` -- it is surfaced as a suggestion and applied
+/// only with `--unsafe-fixes`. A user may promote it back to `Safe` per-rule via
+/// `fix: { file_remove: { applicability: safe } }` in their own top-level config.
 #[derive(Debug)]
-pub struct FileRemoveFixer;
+pub struct FileRemoveFixer {
+    applicability: Applicability,
+}
+
+impl FileRemoveFixer {
+    /// Construct with the resolved tier (default [`Applicability::Unsafe`]; a
+    /// top-level rule may promote to `Safe`). The rule builders pass
+    /// `spec.applicability.unwrap_or(Applicability::Unsafe)`.
+    pub fn new(applicability: Applicability) -> Self {
+        Self { applicability }
+    }
+}
 
 impl Fixer for FileRemoveFixer {
     fn describe(&self) -> String {
         "remove the violating file".to_string()
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -27,7 +48,23 @@ impl Fixer for FileRemoveFixer {
                 path.display()
             )));
         }
-        if ctx.dry_run {
+        // Yield to a pending content edit: if a content fixer earlier in this
+        // pass composed this file, removing it now would let the post-loop flush
+        // resurrect it. Skip; the remove applies on a rerun once the edit lands.
+        if ctx.has_pending_write(&abs) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} has a pending content edit this pass; rerun to remove it",
+                path.display()
+            )));
+        }
+        // A dry run reports only; a stage (`--diff`) records the delete so the
+        // diff can render it. Both return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::DeleteFile {
+                    path: path.to_path_buf(),
+                });
+            }
             return Ok(FixOutcome::Applied(format!(
                 "would remove {}",
                 path.display()
@@ -58,11 +95,89 @@ impl Fixer for FileRemoveFixer {
 #[derive(Debug)]
 pub struct FileRenameFixer {
     case: CaseConvention,
+    applicability: Applicability,
 }
 
 impl FileRenameFixer {
     pub fn new(case: CaseConvention) -> Self {
-        Self { case }
+        Self {
+            case,
+            applicability: Applicability::Safe,
+        }
+    }
+
+    /// Override the fix tier. W2 demotes a `file_rename` from an untrusted remote
+    /// `extends:` to [`Applicability::Suggestion`] (a remote's `paths:` can AIM a
+    /// mass case-rename at the victim's source, breaking case-sensitive imports);
+    /// demote-only, promotion refused. Defaults to `Safe`.
+    #[must_use]
+    pub fn with_applicability(mut self, applicability: Applicability) -> Self {
+        self.applicability = applicability;
+        self
+    }
+
+    /// Compute the rename TARGET path for `path` under this convention, or an
+    /// `Err(reason)` explaining why the file must be left untouched. Shared by
+    /// `apply` (disk) and `fix_edit` (editor) so their stem-level decisions can
+    /// never drift -- both get the same dotfile / compound-extension exemption,
+    /// empty-conversion guard, no-conforming-form (non-convergence) guard, and
+    /// non-UTF-8-extension guard. Callers add their own filesystem-side checks
+    /// (collision, pending write, staging).
+    fn resolve_rename_target(&self, path: &Path) -> std::result::Result<PathBuf, String> {
+        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
+            return Err(format!(
+                "cannot decode filename stem for {}",
+                path.display()
+            ));
+        };
+        // A dot ANYWHERE in the stem is structural, not a case concern (mirrors
+        // the detector): a dotfile (`.gitignore`) or a compound extension
+        // (`index.d.ts`, `Button.test.tsx`) would have its dot DROPPED by
+        // `tokenize`, corrupting the file.
+        if stem.contains('.') {
+            return Err(format!(
+                "{} has a structural dot in its stem; not renaming",
+                path.display()
+            ));
+        }
+        let new_stem = self.case.convert(stem);
+        if new_stem.is_empty() {
+            return Err(format!(
+                "case conversion produced an empty stem for {}",
+                path.display()
+            ));
+        }
+        // The conversion must produce a CONFORMING name, or the rename would not
+        // converge (`check` keeps flagging it). A stem with no reachable target
+        // form (a non-ASCII letter under snake like `café`, a leading-digit stem
+        // under camel) is reported honestly, NOT with the false "already matches".
+        if !self.case.check(&new_stem) {
+            return Err(format!(
+                "{} cannot be renamed to a valid {} name",
+                path.display(),
+                self.case.display_name()
+            ));
+        }
+        if new_stem == stem {
+            return Err(format!("{} already matches target case", path.display()));
+        }
+        // A non-UTF-8 extension can't survive the string-based basename rebuild;
+        // dropping it would change the file's type.
+        if path.extension().is_some_and(|e| e.to_str().is_none()) {
+            return Err(format!(
+                "{} has a non-UTF-8 extension; not renaming",
+                path.display()
+            ));
+        }
+        let mut new_basename = new_stem;
+        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
+            new_basename.push('.');
+            new_basename.push_str(ext);
+        }
+        Ok(match path.parent() {
+            Some(p) if !p.as_os_str().is_empty() => p.join(&new_basename),
+            _ => PathBuf::from(&new_basename),
+        })
     }
 }
 
@@ -71,51 +186,96 @@ impl Fixer for FileRenameFixer {
         format!("rename stems to {}", self.case.display_name())
     }
 
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn can_fix(&self, violation: &Violation) -> bool {
+        // A rename is possible only when the stem has a reachable target form
+        // under this convention. `resolve_rename_target` is the shared, PURE
+        // (no-I/O) convertibility test: an unconvertible stem (`café` under
+        // snake, a leading-digit stem under camel, a caseless script under
+        // lower/upper) is flagged by the detector but returns `Err` here, so
+        // `fix` honestly skips it -- `check` must not tag it fixable. The
+        // filesystem-state guards (collision, pending write, staging) live in
+        // `apply`/`fix_edit`, NOT here: those are fix-time concerns `check`
+        // cannot and need not predict.
+        violation
+            .path
+            .as_deref()
+            .is_some_and(|p| self.resolve_rename_target(p).is_ok())
+    }
+
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
         let Some(path) = &violation.path else {
             return Ok(FixOutcome::Skipped(
                 "violation did not carry a path".to_string(),
             ));
         };
-        let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
-            return Ok(FixOutcome::Skipped(format!(
-                "cannot decode filename stem for {}",
-                path.display()
-            )));
-        };
-        let new_stem = self.case.convert(stem);
-        if new_stem == stem {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} already matches target case",
-                path.display()
-            )));
-        }
-        if new_stem.is_empty() {
-            return Ok(FixOutcome::Skipped(format!(
-                "case conversion produced an empty stem for {}",
-                path.display()
-            )));
-        }
-
-        let mut new_basename = new_stem;
-        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            new_basename.push('.');
-            new_basename.push_str(ext);
-        }
-        let new_path: PathBuf = match path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p.join(&new_basename),
-            _ => PathBuf::from(&new_basename),
+        // Compute the target name (and all stem-level guards) via the shared
+        // helper, so `apply` and `fix_edit` can't drift on which files they touch.
+        let new_path = match self.resolve_rename_target(path) {
+            Ok(target) => target,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
 
         let abs_from = ctx.root.join(path);
         let abs_to = ctx.root.join(&new_path);
         if abs_to.exists() {
+            // On a case-INSENSITIVE filesystem (macOS/Windows) a pure case flip
+            // (`Foo.rs` -> `foo.rs`) reports the target as "existing" because it
+            // IS the source file (same inode), which would wrongly abort the
+            // rename and never converge. That is not a real collision: allow it
+            // through only when the two paths resolve to the SAME file. On a
+            // case-sensitive FS the target genuinely does not exist yet, so this
+            // branch isn't even entered and behaviour is unchanged.
+            let from_canon = std::fs::canonicalize(&abs_from).ok();
+            let to_canon = std::fs::canonicalize(&abs_to).ok();
+            let same_file = from_canon.is_some() && from_canon == to_canon;
+            if !same_file {
+                return Ok(FixOutcome::Skipped(format!(
+                    "target {} already exists",
+                    new_path.display()
+                )));
+            }
+        }
+        // In a stage/preview pass (`--diff`), the disk is NOT mutated, so the
+        // `exists()` check above can't see a rename an EARLIER fixer already
+        // staged onto this same target. Two distinct source names can convert to
+        // one target (`fooBar` and `foo_Bar` both -> `foo_bar`); without this the
+        // preview would emit two `rename to <same>` hunks -- a self-conflicting
+        // patch `git apply` rejects/clobbers. Treat an already-staged target as a
+        // collision, mirroring the direct-fix behaviour (the second is skipped).
+        if let Some(sink) = ctx.stage_ops
+            && sink
+                .borrow()
+                .iter()
+                .any(|edit| matches!(edit, FixEdit::RenameFile { to, .. } if *to == new_path))
+        {
             return Ok(FixOutcome::Skipped(format!(
-                "target {} already exists",
+                "target {} is already staged for a rename this pass",
                 new_path.display()
             )));
         }
-        if ctx.dry_run {
+        // Yield to a pending content edit on the source: if a content fixer
+        // earlier in this pass composed it, renaming now would strand the
+        // composed bytes at the vacated old path when the flush runs (a
+        // file-duplication corruption). Skip; the rename applies on a rerun.
+        if ctx.has_pending_write(&abs_from) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} has a pending content edit this pass; rerun to rename it",
+                path.display()
+            )));
+        }
+        // A dry run reports only; a stage (`--diff`) records the rename so the
+        // diff can render it. Both return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::RenameFile {
+                    from: path.to_path_buf(),
+                    to: new_path.clone(),
+                });
+            }
             return Ok(FixOutcome::Applied(format!(
                 "would rename {} -> {}",
                 path.display(),
@@ -135,22 +295,229 @@ impl Fixer for FileRenameFixer {
 
     fn fix_edit(&self, violation: &Violation, _bytes: &[u8], root: &Path) -> Option<FixEdit> {
         let path = violation.path.as_deref()?;
-        let stem = path.file_stem().and_then(|s| s.to_str())?;
-        let new_stem = self.case.convert(stem);
-        if new_stem == stem || new_stem.is_empty() {
-            return None;
+        // Same stem-level guards + target as apply() (the shared helper): dotfile
+        // / compound-extension exemption, empty / no-conforming-form conversion,
+        // non-UTF-8 extension. An editor code-action must not diverge from what
+        // `alint fix` would do.
+        let new_path = self.resolve_rename_target(path).ok()?;
+        // Collision: don't propose a rename onto a DIFFERENT existing file. A pure
+        // case flip on a case-INSENSITIVE FS sees the target as "existing" (it is
+        // the same file); allow that through -- mirrors apply()'s A5 same-file
+        // check -- so the editor can still offer `Foo.rs` -> `foo.rs`.
+        let abs_to = root.join(&new_path);
+        if abs_to.exists() {
+            let from_canon = std::fs::canonicalize(root.join(path)).ok();
+            let to_canon = std::fs::canonicalize(&abs_to).ok();
+            let same_file = from_canon.is_some() && from_canon == to_canon;
+            if !same_file {
+                return None;
+            }
         }
-        let mut new_basename = new_stem;
-        if let Some(ext) = path.extension().and_then(|s| s.to_str()) {
-            new_basename.push('.');
-            new_basename.push_str(ext);
-        }
-        let new_path: PathBuf = match path.parent() {
-            Some(p) if !p.as_os_str().is_empty() => p.join(&new_basename),
-            _ => PathBuf::from(&new_basename),
+        Some(FixEdit::RenameFile {
+            from: path.to_path_buf(),
+            to: new_path,
+        })
+    }
+}
+
+/// Moves a file the host `file_absent` rule flagged in a SUBDIRECTORY back to the
+/// repository root, keeping its basename. Paired with `file_absent` for the
+/// "a lockfile drifted into a member directory" case: a `Cargo.lock` /
+/// `package-lock.json` / `poetry.lock` belongs at the workspace root, so a rule
+/// like `paths: "**/*/Cargo.lock"` flags a nested one and `relocate` moves it up.
+///
+/// Carries an [`Applicability`] tier (auto-fix.md 5.5): **`Unsafe` by default**,
+/// because a rename moves a real file and the destination is INFERRED (root +
+/// basename) rather than named -- a poor default for a bare `alint fix`. A user
+/// may promote it to `Safe` per-rule via
+/// `fix: { relocate: { applicability: safe } }`.
+///
+/// Only the unambiguous case is fixed. A file already at the root
+/// (nothing to move; also the non-convergence guard) or one whose basename can't
+/// be decoded is reported, not fixed (`resolve_relocate_target` -> `Err`, so
+/// `can_fix` is false and `check` never promises it). A root slot already occupied
+/// is left for a human (a fix-time collision skip). The no-clobber guard is
+/// stricter than `FileRenameFixer`'s (audit-hardened): it uses `symlink_metadata`
+/// (any entry -- file, dir, or live/dangling symlink -- counts as occupied) rather
+/// than `exists()` (which follows links and misses a dangling one), and it also
+/// yields when the destination has a same-pass composed write pending. Note: pair
+/// with a SUBDIRECTORY-anchored `paths:` (e.g. `**/*/Cargo.lock`, not
+/// `**/Cargo.lock`); a root-matching pattern keeps flagging the relocated file,
+/// which `relocate` then honestly skips as already-at-root.
+#[derive(Debug)]
+pub struct RelocateFixer {
+    applicability: Applicability,
+}
+
+impl RelocateFixer {
+    /// Construct with the resolved tier (default [`Applicability::Unsafe`]; a
+    /// top-level rule may promote to `Safe`). The rule builder passes
+    /// `spec.applicability.unwrap_or(Applicability::Unsafe)`.
+    pub fn new(applicability: Applicability) -> Self {
+        Self { applicability }
+    }
+
+    /// Compute the relocate TARGET -- the basename at the repository root -- for
+    /// `path`, or an `Err(reason)` explaining why the file must be left untouched.
+    /// Shared by `apply` (disk), `fix_edit` (editor), and `can_fix` (the
+    /// fixability predicate) so their decisions can never drift. PURE (no I/O):
+    /// callers add the filesystem-side checks (root-slot collision, pending write,
+    /// staging).
+    fn resolve_relocate_target(path: &Path) -> std::result::Result<PathBuf, String> {
+        let Some(basename) = path.file_name().and_then(|s| s.to_str()) else {
+            return Err(format!("cannot decode a filename for {}", path.display()));
         };
-        // Collision: don't propose a rename onto an existing file.
-        if root.join(&new_path).exists() {
+        // Already at the repository root: there is nowhere to relocate it TO, and
+        // proposing `X -> X` would never converge (`check` would keep flagging it).
+        // A path whose only component IS its name -- no parent, or an empty parent
+        // ("Cargo.lock".parent() is Some("")) -- is already at root.
+        let at_root = match path.parent() {
+            Some(parent) => parent.as_os_str().is_empty(),
+            None => true,
+        };
+        if at_root {
+            return Err(format!(
+                "{} is already at the repository root",
+                path.display()
+            ));
+        }
+        Ok(PathBuf::from(basename))
+    }
+}
+
+impl Fixer for RelocateFixer {
+    fn describe(&self) -> String {
+        "move the file to the repository root".to_string()
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn can_fix(&self, violation: &Violation) -> bool {
+        // Relocation is possible only when the flagged path is BELOW the root (so
+        // there is somewhere to move it to) and its basename decodes.
+        // `resolve_relocate_target` is the shared, PURE (no-I/O) test; a
+        // root-level or undecodable path returns `Err`, so `fix` honestly skips it
+        // and `check` must not tag it fixable. The filesystem-state guards
+        // (root-slot collision, pending write, staging) live in `apply`/`fix_edit`
+        // -- fix-time concerns `check` cannot predict, matching `FileRenameFixer`.
+        violation
+            .path
+            .as_deref()
+            .is_some_and(|p| Self::resolve_relocate_target(p).is_ok())
+    }
+
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        let Some(path) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        // Compute the target (and the already-at-root / undecodable guards) via
+        // the shared helper, so `apply` and `fix_edit` can't drift.
+        let new_path = match Self::resolve_relocate_target(path) {
+            Ok(target) => target,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+
+        let abs_from = ctx.root.join(path);
+        let abs_to = ctx.root.join(&new_path);
+        // A root slot already occupied is AMBIGUOUS (which lockfile is canonical?);
+        // never clobber it. The source is in a subdirectory and the target is at
+        // the root, so they can never be the same file -- no case-insensitive
+        // same-file exception is needed (unlike `FileRenameFixer`). Use
+        // `symlink_metadata` (which does NOT follow links) rather than `exists()`
+        // (which does): a DANGLING symlink occupying the root slot reads as
+        // non-existent to `exists()` and would be silently clobbered, so this holds
+        // a strictly stricter no-clobber bar than `FileRenameFixer` (a follow-up
+        // backports it there; auto-fix-completion-plan). Any entry -- file, dir, or
+        // live/dangling symlink -- counts as occupied.
+        if abs_to.symlink_metadata().is_ok() {
+            return Ok(FixOutcome::Skipped(format!(
+                "the repository root already has {}",
+                new_path.display()
+            )));
+        }
+        // In a stage/preview pass (`--diff`) the disk is not mutated, so `exists()`
+        // above can't see a relocation an EARLIER fixer already staged onto this
+        // same root slot. Two nested files can share a basename (`a/Cargo.lock`
+        // and `b/Cargo.lock` both -> `Cargo.lock`); without this the preview would
+        // emit two `rename to <same>` hunks -- a self-conflicting patch. Treat an
+        // already-staged target as a collision (the second is skipped), mirroring
+        // the direct-fix behaviour.
+        if let Some(sink) = ctx.stage_ops
+            && sink
+                .borrow()
+                .iter()
+                .any(|edit| matches!(edit, FixEdit::RenameFile { to, .. } if *to == new_path))
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "the root slot {} is already staged for a relocation this pass",
+                new_path.display()
+            )));
+        }
+        // Yield to a pending content edit on the source: if a content fixer earlier
+        // in this pass composed it, moving now would strand the composed bytes at
+        // the vacated old path when the flush runs. Skip; the move applies on a
+        // rerun.
+        if ctx.has_pending_write(&abs_from) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} has a pending content edit this pass; rerun to relocate it",
+                path.display()
+            )));
+        }
+        // Yield to a pending content edit on the DESTINATION too: a self-contradictory
+        // config (e.g. `file_create` composing `<root>/X` while relocate moves
+        // `sub/X -> <root>/X`) buffers a write to the root slot that `symlink_metadata`
+        // above cannot see (it is in the compose buffer, not yet on disk). Renaming
+        // onto it now would race the flush and clobber one of the two writes. Skip;
+        // on the fixpoint rerun the create is on disk and the collision check above
+        // handles it. (A stricter bar than `FileRenameFixer`, which guards only the
+        // source; the same backport follow-up covers it.)
+        if ctx.has_pending_write(&abs_to) {
+            return Ok(FixOutcome::Skipped(format!(
+                "the root slot {} has a pending content edit this pass; rerun to relocate",
+                new_path.display()
+            )));
+        }
+        // A dry run reports only; a stage (`--diff`) records the rename so the diff
+        // can render it. Both return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::RenameFile {
+                    from: path.to_path_buf(),
+                    to: new_path.clone(),
+                });
+            }
+            return Ok(FixOutcome::Applied(format!(
+                "would move {} -> {}",
+                path.display(),
+                new_path.display()
+            )));
+        }
+        std::fs::rename(&abs_from, &abs_to).map_err(|source| Error::Io {
+            path: abs_from,
+            source,
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "moved {} -> {}",
+            path.display(),
+            new_path.display()
+        )))
+    }
+
+    fn fix_edit(&self, violation: &Violation, _bytes: &[u8], root: &Path) -> Option<FixEdit> {
+        let path = violation.path.as_deref()?;
+        // Same guards + target as apply() (the shared helper). An editor
+        // code-action must not diverge from what `alint fix` would do.
+        let new_path = Self::resolve_relocate_target(path).ok()?;
+        // Collision: don't propose a move onto an existing root slot. Mirror
+        // apply()'s `symlink_metadata` check (not `exists()`) so a dangling symlink
+        // at the slot is also treated as occupied -- the editor must not propose
+        // what `fix` would decline. (fix_edit has no compose buffer, so the
+        // pending-write guards are apply-only.)
+        if root.join(&new_path).symlink_metadata().is_ok() {
             return None;
         }
         Some(FixEdit::RenameFile {
@@ -158,6 +525,223 @@ impl Fixer for FileRenameFixer {
             to: new_path,
         })
     }
+}
+
+/// Sets or clears the Unix executable bits (`0o111`) on the violating file,
+/// preserving every other permission bit. Paired with `executable_bit` /
+/// `shebang_has_executable`. `desired_exec` picks the direction: `true` sets +x,
+/// `false` clears it. `Safe` by default (the rule explicitly requires the state;
+/// reversible; touches only `0o111`).
+///
+/// Unix-only. On a non-Unix target the host rules never fire, so `apply` is
+/// unreachable; it returns a clean skip defensively and `fix_edit` returns `None`
+/// (a mode change has no cross-platform form).
+#[derive(Debug)]
+pub struct ChmodFixer {
+    desired_exec: bool,
+    applicability: Applicability,
+}
+
+impl ChmodFixer {
+    #[must_use]
+    pub fn new(desired_exec: bool, applicability: Applicability) -> Self {
+        Self {
+            desired_exec,
+            applicability,
+        }
+    }
+
+    /// The target mode for `current`, or `None` if `current` already satisfies
+    /// the rule (a no-op the fixer then skips). Only the `0o111` bits change.
+    #[cfg(unix)]
+    fn target_mode(&self, current: u32) -> Option<u32> {
+        let want = if self.desired_exec {
+            current | 0o111
+        } else {
+            current & !0o111
+        };
+        (want != current).then_some(want)
+    }
+}
+
+impl Fixer for ChmodFixer {
+    fn describe(&self) -> String {
+        if self.desired_exec {
+            "make the file executable (chmod +x)".to_string()
+        } else {
+            "clear the executable bit (chmod -x)".to_string()
+        }
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    #[cfg(unix)]
+    fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        use std::os::unix::fs::PermissionsExt;
+        let Some(path) = &violation.path else {
+            return Ok(FixOutcome::Skipped(
+                "violation did not carry a path".to_string(),
+            ));
+        };
+        let abs = ctx.root.join(path);
+        let Ok(meta) = std::fs::metadata(&abs) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} could not be read",
+                path.display()
+            )));
+        };
+        let Some(new_mode) = self.target_mode(meta.permissions().mode()) else {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} already has the required mode",
+                path.display()
+            )));
+        };
+        // A dry run reports only; a stage (`--diff`) records the mode change so
+        // the diff can render it. Both return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            if let Some(sink) = ctx.stage_ops {
+                sink.borrow_mut().push(FixEdit::SetMode {
+                    path: path.to_path_buf(),
+                    mode: new_mode,
+                });
+            }
+            return Ok(FixOutcome::Applied(format!(
+                "would chmod {} to {new_mode:o}",
+                path.display()
+            )));
+        }
+        std::fs::set_permissions(&abs, PermissionsExt::from_mode(new_mode)).map_err(|source| {
+            Error::Io {
+                path: abs.clone(),
+                source,
+            }
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "chmod {} to {new_mode:o}",
+            path.display()
+        )))
+    }
+
+    #[cfg(not(unix))]
+    fn apply(&self, _violation: &Violation, _ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        Ok(FixOutcome::Skipped(
+            "chmod is a no-op on non-Unix platforms".to_string(),
+        ))
+    }
+
+    #[cfg(unix)]
+    fn fix_edit(&self, violation: &Violation, _bytes: &[u8], root: &Path) -> Option<FixEdit> {
+        use std::os::unix::fs::PermissionsExt;
+        let path = violation.path.as_deref()?;
+        let meta = std::fs::metadata(root.join(path)).ok()?;
+        let new_mode = self.target_mode(meta.permissions().mode())?;
+        Some(FixEdit::SetMode {
+            path: path.to_path_buf(),
+            mode: new_mode,
+        })
+    }
+
+    #[cfg(not(unix))]
+    fn fix_edit(&self, _violation: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+        None
+    }
+}
+
+/// Creates the (single, literal) directory a `dir_exists` rule requires, when it
+/// is missing. The target comes from the RULE (`dir_exists` fires a path-less
+/// violation), so the fixer carries it -- confined to the repo root (unless the
+/// rule sets `allow_out_of_root`) via the shared `confine_fix_path`. `Safe` by
+/// default (an empty directory is benign). Creating an empty dir has no
+/// worktree-diff form (git does not track empty directories), so like
+/// `git_untrack` it offers no `fix_edit` and `--dry-run` reports "would create"
+/// while `--diff` (a worktree patch) shows nothing.
+#[derive(Debug)]
+pub struct DirCreateFixer {
+    dir: PathBuf,
+    applicability: Applicability,
+}
+
+impl DirCreateFixer {
+    #[must_use]
+    pub fn new(dir: PathBuf, applicability: Applicability) -> Self {
+        Self { dir, applicability }
+    }
+}
+
+impl Fixer for DirCreateFixer {
+    fn describe(&self) -> String {
+        format!("create the directory {}", self.dir.display())
+    }
+
+    fn applicability(&self) -> Applicability {
+        self.applicability
+    }
+
+    fn apply(&self, _violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
+        // `dir_exists`'s violation carries no path (it fires when NO matching dir
+        // exists), so the fixer creates its own configured target -- CONFINED to
+        // the repo root (unless the owning rule sets `allow_out_of_root`), exactly
+        // like `FileCreateFixer`. Without this an absolute `paths` (`root.join`
+        // discards the base) or a symlinked-parent `paths` would `mkdir` OUT OF
+        // ROOT -- and because `dir_create` is fixed-behavior it is honored from any
+        // source, so even an untrusted `extends:`'d ruleset could do it on a bare
+        // `alint fix` (audit C1, CRITICAL).
+        let abs = match crate::fixers::creators::confine_fix_path(
+            &self.dir,
+            ctx.root,
+            ctx.allow_out_of_root,
+        ) {
+            Ok(p) => p,
+            Err(reason) => return Ok(FixOutcome::Skipped(reason)),
+        };
+        // A symlink NODE at the target (incl. a BROKEN one, which `exists()` reads
+        // as absent) must not be created through -- `symlink_metadata` does not
+        // follow the link. Parity with `FileCreateFixer`; also fixes the raw-errno
+        // leak on a dangling symlink (audit M1).
+        if abs
+            .symlink_metadata()
+            .is_ok_and(|m| m.file_type().is_symlink())
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} exists but is not a directory (a symlink)",
+                self.dir.display()
+            )));
+        }
+        if abs.is_dir() {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is already a directory",
+                self.dir.display()
+            )));
+        }
+        if abs.exists() {
+            // A non-directory (a regular file) already occupies the path -- do NOT
+            // clobber it; the mismatch is a human call.
+            return Ok(FixOutcome::Skipped(format!(
+                "{} exists but is not a directory",
+                self.dir.display()
+            )));
+        }
+        // A dir creation has no worktree hunk to stage; dry-run / `--diff` report
+        // the intent and return before touching disk.
+        if ctx.dry_run || ctx.stage_ops.is_some() {
+            return Ok(FixOutcome::Applied(format!(
+                "would create directory {}",
+                self.dir.display()
+            )));
+        }
+        std::fs::create_dir_all(&abs).map_err(|source| Error::Io {
+            path: abs.clone(),
+            source,
+        })?;
+        Ok(FixOutcome::Applied(format!(
+            "created directory {}",
+            self.dir.display()
+        )))
+    }
+
+    // No `fix_edit`: an empty directory has no editor/worktree-edit form.
 }
 
 #[cfg(test)]
@@ -171,7 +755,137 @@ mod tests {
             dry_run,
             fix_size_limit: None,
             allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
         }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_sets_clears_and_is_idempotent() {
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let v = Violation::new("x").with_path(PathBuf::from("hello.sh"));
+        let ctx = make_ctx(&tmp, false);
+        let mode = |f: &std::path::Path| std::fs::metadata(f).unwrap().permissions().mode() & 0o777;
+
+        // +x sets the executable bits, preserving the rest.
+        let out = ChmodFixer::new(true, Applicability::Safe)
+            .apply(&v, &ctx)
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)));
+        assert_eq!(mode(&file), 0o755);
+
+        // Already +x -> a no-op skip (never re-applies).
+        let again = ChmodFixer::new(true, Applicability::Safe)
+            .apply(&v, &ctx)
+            .unwrap();
+        assert!(matches!(again, FixOutcome::Skipped(_)));
+
+        // -x clears them back.
+        let cleared = ChmodFixer::new(false, Applicability::Safe)
+            .apply(&v, &ctx)
+            .unwrap();
+        assert!(matches!(cleared, FixOutcome::Applied(_)));
+        assert_eq!(mode(&file), 0o644);
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_dry_run_keeps_mode() {
+        // Dry-run must report the intended change but leave the mode on disk
+        // untouched (the direct-write trap: `apply` calls `set_permissions`, so it
+        // MUST short-circuit before that under `dry_run`).
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let v = Violation::new("x").with_path(PathBuf::from("hello.sh"));
+        let out = ChmodFixer::new(true, Applicability::Safe)
+            .apply(&v, &make_ctx(&tmp, true))
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => {
+                assert!(s.starts_with("would chmod"), "dry-run summary: {s}");
+                assert!(s.contains("hello.sh"), "summary must name the file: {s}");
+            }
+            FixOutcome::Skipped(_) => panic!("expected Applied (would-chmod)"),
+        }
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "dry-run must not change the mode"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_in_stage_mode_records_without_chmod() {
+        // Stage mode (`--diff`): the fixer records a `SetMode` edit for the diff
+        // renderer and leaves the on-disk mode untouched.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let outcome = ChmodFixer::new(true, Applicability::Safe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("hello.sh")),
+                &stage_ctx(&tmp, &sink),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)));
+        assert_eq!(
+            std::fs::metadata(&file).unwrap().permissions().mode() & 0o777,
+            0o644,
+            "stage must not change the mode"
+        );
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::SetMode {
+                path: PathBuf::from("hello.sh"),
+                // The recorded mode is the FULL st_mode (regular-file type bits
+                // 0o100000 | 0o755), which is exactly git's `new mode 100755` form.
+                mode: 0o100_755,
+            }]
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn chmod_fixer_fix_edit_returns_setmode_and_is_idempotent() {
+        // The editor/proposed-edit path mirrors `apply`: it reads the current mode
+        // and returns a `SetMode` edit, or `None` when the file already conforms.
+        use std::os::unix::fs::PermissionsExt;
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("hello.sh");
+        std::fs::write(&file, "#!/bin/sh\n").unwrap();
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o644)).unwrap();
+        let v = Violation::new("x").with_path(Path::new("hello.sh"));
+        let edit = ChmodFixer::new(true, Applicability::Safe)
+            .fix_edit(&v, &[], tmp.path())
+            .unwrap();
+        assert_eq!(
+            edit,
+            FixEdit::SetMode {
+                path: PathBuf::from("hello.sh"),
+                // Full st_mode (type bits | 0o755) == git's `100755`.
+                mode: 0o100_755,
+            }
+        );
+        // Already +x -> no edit proposed (idempotent at the editor layer too).
+        std::fs::set_permissions(&file, PermissionsExt::from_mode(0o755)).unwrap();
+        assert!(
+            ChmodFixer::new(true, Applicability::Safe)
+                .fix_edit(&v, &[], tmp.path())
+                .is_none(),
+            "a conforming file yields no proposed edit"
+        );
     }
 
     #[test]
@@ -179,7 +893,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let target = tmp.path().join("debug.log");
         std::fs::write(&target, "noise").unwrap();
-        let outcome = FileRemoveFixer
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .apply(
                 &Violation::new("forbidden").with_path(std::path::Path::new("debug.log")),
                 &make_ctx(&tmp, false),
@@ -190,9 +904,32 @@ mod tests {
     }
 
     #[test]
+    fn file_remove_carries_its_tier() {
+        // Close-off (auto-fix.md 5.5): `file_remove` is Unsafe by default (the
+        // rule builders pass `Unsafe`), so a bare `alint fix` surfaces it as a
+        // suggestion; a top-level rule may promote it to `Safe`. The engine gates
+        // `apply` on this tier (`applies_at`/`suggested_at`), so the value must be
+        // reported faithfully. `apply` itself is tier-agnostic (it just deletes),
+        // which is why the tests above call it directly.
+        assert_eq!(
+            FileRemoveFixer::new(Applicability::Unsafe).applicability(),
+            Applicability::Unsafe
+        );
+        assert_eq!(
+            FileRemoveFixer::new(Applicability::Safe).applicability(),
+            Applicability::Safe
+        );
+        // Sibling whole-file fixers keep the trait default (Safe).
+        assert_eq!(
+            FileRenameFixer::new(CaseConvention::Snake).applicability(),
+            Applicability::Safe
+        );
+    }
+
+    #[test]
     fn file_remove_skips_when_violation_has_no_path() {
         let tmp = TempDir::new().unwrap();
-        let outcome = FileRemoveFixer
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .apply(&Violation::new("no path"), &make_ctx(&tmp, false))
             .unwrap();
         match outcome {
@@ -206,7 +943,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let target = tmp.path().join("victim.bak");
         std::fs::write(&target, "bytes").unwrap();
-        let outcome = FileRemoveFixer
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .apply(
                 &Violation::new("forbidden").with_path(std::path::Path::new("victim.bak")),
                 &make_ctx(&tmp, true),
@@ -267,6 +1004,165 @@ mod tests {
     }
 
     #[test]
+    fn file_rename_never_strips_the_leading_dot_off_a_dotfile() {
+        // Round-5 audit (A2): renaming `.gitignore` -> `gitignore` would drop the
+        // structural leading dot and change the file's meaning (git stops
+        // honoring it; a `.env` with secrets becomes committable). Dotfiles are
+        // exempt -- the fixer must skip, not rename.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join(".gitignore"), "build/\n").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new(".gitignore")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Skipped(ref r) if r.contains("structural dot")));
+        assert!(
+            tmp.path().join(".gitignore").exists(),
+            "the dotfile is untouched"
+        );
+        assert!(
+            !tmp.path().join("gitignore").exists(),
+            "no de-dotted copy created"
+        );
+    }
+
+    #[test]
+    fn file_rename_skips_a_compound_extension() {
+        // Round-6 audit (Finding 1): `Button.test.tsx` has stem `Button.test`
+        // (file_stem strips only `.tsx`); `tokenize` would drop the inner `.`,
+        // renaming to `button-test.tsx` and destroying the `.test` sub-extension.
+        // Any dot in the stem is structural -> skip, don't corrupt.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("Button.test.tsx"), "").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Kebab)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new("Button.test.tsx")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Skipped(ref r) if r.contains("structural dot")));
+        assert!(
+            tmp.path().join("Button.test.tsx").exists(),
+            "the compound-extension file is untouched"
+        );
+        assert!(
+            !tmp.path().join("button-test.tsx").exists(),
+            "no de-dotted corruption"
+        );
+    }
+
+    #[test]
+    fn file_rename_reports_honestly_when_no_conforming_name_exists() {
+        // Round-5 audit (A3): a stem with no reachable target form (a non-ASCII
+        // letter under snake) must NOT report the false "already matches target
+        // case" (which left `fix` claiming success on a still-flagged file). It
+        // is skipped with an honest "cannot be renamed" message and the file is
+        // left in place.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("café.rs"), "").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new("café.rs")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        match outcome {
+            FixOutcome::Skipped(reason) => {
+                assert!(
+                    reason.contains("cannot be renamed"),
+                    "honest reason: {reason}"
+                );
+                assert!(
+                    !reason.contains("already matches"),
+                    "must not lie: {reason}"
+                );
+            }
+            FixOutcome::Applied(_) => panic!("expected Skipped"),
+        }
+        assert!(tmp.path().join("café.rs").exists());
+    }
+
+    #[test]
+    fn file_rename_can_fix_matches_convertibility() {
+        // Close-off item 2: `can_fix` is the per-violation convertibility verdict
+        // `check` tags with -- it must exactly track what `apply`/`fix_edit` will
+        // actually do, so `check` never promises a rename `fix` then skips. Pure
+        // and path-only (no disk touched here).
+        let snake = FileRenameFixer::new(CaseConvention::Snake);
+        let camel = FileRenameFixer::new(CaseConvention::Camel);
+        let v = |p: &str| Violation::new("case").with_path(std::path::Path::new(p));
+        // Convertible stems -> can_fix true.
+        assert!(
+            snake.can_fix(&v("myFile.rs")),
+            "myFile -> my_file is fixable"
+        );
+        assert!(snake.can_fix(&v("Foo.rs")), "pure case flip is fixable");
+        // Unconvertible under this convention -> can_fix false (the false-promise
+        // cases: non-ASCII under snake, leading digit under camel).
+        assert!(!snake.can_fix(&v("café.rs")), "café has no snake target");
+        assert!(
+            !camel.can_fix(&v("2fast.rs")),
+            "leading digit has no camel target"
+        );
+        // Structural-dot stem (compound extension / dotfile) is detector-exempt,
+        // so it is also correctly not fixable.
+        assert!(!snake.can_fix(&v("index.d.ts")), "compound ext not fixable");
+        // A violation with no path can't be renamed.
+        assert!(
+            !snake.can_fix(&Violation::new("case")),
+            "no path -> not fixable"
+        );
+    }
+
+    #[test]
+    fn file_rename_allows_a_pure_case_flip() {
+        // Round-5 audit (A5): a case-only rename (`Foo.rs` -> `foo.rs`) must work.
+        // On a case-sensitive FS (this CI) the target doesn't exist so it renames
+        // straightforwardly; on a case-INSENSITIVE FS the same-file check added
+        // for A5 keeps it from being wrongly rejected as a self-collision. This
+        // guards the common-case path on every platform.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("Foo.rs"), "").unwrap();
+        FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new("Foo.rs")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        assert!(tmp.path().join("foo.rs").exists());
+    }
+
+    // Linux-only: creating a file with a NON-UTF-8 name requires a filesystem that
+    // permits non-Unicode names. Linux does; macOS/APFS and Windows reject it at
+    // write time, so the fixture cannot exist there (a bare `#[cfg(unix)]` still
+    // reached macOS and panicked on the write). Matches how `weird_path_formats_cli`
+    // gates its non-UTF-8 cases.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn file_rename_skips_a_non_utf8_extension_rather_than_dropping_it() {
+        // Phase-0 audit: a UTF-8 stem with a non-UTF-8 extension must NOT rename
+        // to a bare stem (dropping the extension changes the file's type). Skip.
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+        let tmp = TempDir::new().unwrap();
+        let name = OsStr::from_bytes(b"FooBar.\xff"); // UTF-8 stem, non-UTF-8 ext
+        std::fs::write(tmp.path().join(name), b"").unwrap();
+        let outcome = FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(std::path::Path::new(name)),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &outcome else {
+            panic!("expected Skipped for a non-UTF-8 extension, got {outcome:?}")
+        };
+        assert!(msg.contains("non-UTF-8 extension"), "message: {msg}");
+        assert!(tmp.path().join(name).exists(), "the file must be untouched");
+    }
+
+    #[test]
     fn file_rename_skips_on_target_collision() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("FooBar.rs"), "A").unwrap();
@@ -295,7 +1191,7 @@ mod tests {
     #[test]
     fn file_remove_fix_edit_returns_delete() {
         let v = Violation::new("forbidden").with_path(std::path::Path::new("debug.log"));
-        let edit = FileRemoveFixer
+        let edit = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
             .fix_edit(&v, &[], std::path::Path::new("/repo"))
             .unwrap();
         assert_eq!(
@@ -335,6 +1231,32 @@ mod tests {
     }
 
     #[test]
+    fn file_rename_fix_edit_mirrors_apply_guards() {
+        // Round-6 audit: the round-5 dotfile / unconvertible-stem guards were
+        // added to apply() only, leaving the editor (LSP) path proposing
+        // `.gitignore` -> `gitignore` (the security-adjacent data-integrity bug)
+        // and a non-converging rename for an unconvertible stem. fix_edit must
+        // mirror apply.
+        let tmp = TempDir::new().unwrap();
+        // Dotfile: no edit proposed (the leading dot is structural).
+        let dot = Violation::new("case").with_path(std::path::Path::new(".gitignore"));
+        assert!(
+            FileRenameFixer::new(CaseConvention::Snake)
+                .fix_edit(&dot, &[], tmp.path())
+                .is_none(),
+            "fix_edit must not propose renaming a dotfile"
+        );
+        // Unconvertible stem: no edit proposed (would not converge).
+        let cafe = Violation::new("case").with_path(std::path::Path::new("café.rs"));
+        assert!(
+            FileRenameFixer::new(CaseConvention::Snake)
+                .fix_edit(&cafe, &[], tmp.path())
+                .is_none(),
+            "fix_edit must not propose a rename that doesn't converge"
+        );
+    }
+
+    #[test]
     fn file_rename_dry_run_does_not_touch_disk() {
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("FooBar.rs"), "").unwrap();
@@ -346,5 +1268,573 @@ mod tests {
             .unwrap();
         assert!(tmp.path().join("FooBar.rs").exists());
         assert!(!tmp.path().join("foo_bar.rs").exists());
+    }
+
+    // A `FixContext` in stage mode (`--diff`): a sink is present, `dry_run` is
+    // false. Direct-write fixers must record their `FixEdit` here and leave the
+    // tree untouched.
+    fn stage_ctx<'a>(
+        tmp: &'a TempDir,
+        sink: &'a std::cell::RefCell<Vec<FixEdit>>,
+    ) -> FixContext<'a> {
+        FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: Some(sink),
+        }
+    }
+
+    #[test]
+    fn file_remove_in_stage_mode_records_without_deleting() {
+        let tmp = TempDir::new().unwrap();
+        let target = tmp.path().join("debug.log");
+        std::fs::write(&target, "noise").unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let outcome = FileRemoveFixer::new(alint_core::Applicability::Unsafe)
+            .apply(
+                &Violation::new("forbidden").with_path(Path::new("debug.log")),
+                &stage_ctx(&tmp, &sink),
+            )
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)));
+        assert!(target.exists(), "stage must not delete the file");
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::DeleteFile {
+                path: PathBuf::from("debug.log")
+            }]
+        );
+    }
+
+    #[test]
+    fn file_rename_in_stage_mode_records_without_renaming() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("FooBar.rs"), "x").unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        FileRenameFixer::new(CaseConvention::Snake)
+            .apply(
+                &Violation::new("case").with_path(Path::new("FooBar.rs")),
+                &stage_ctx(&tmp, &sink),
+            )
+            .unwrap();
+        assert!(
+            tmp.path().join("FooBar.rs").exists(),
+            "stage must not rename"
+        );
+        assert!(!tmp.path().join("foo_bar.rs").exists());
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::RenameFile {
+                from: PathBuf::from("FooBar.rs"),
+                to: PathBuf::from("foo_bar.rs"),
+            }]
+        );
+    }
+
+    #[test]
+    fn dir_create_makes_the_missing_directory_recursively() {
+        let tmp = TempDir::new().unwrap();
+        // dir_exists fires a PATH-LESS violation, so the fixer uses its own target.
+        let v = Violation::new("missing dir");
+        let out = DirCreateFixer::new(PathBuf::from("docs/adr"), Applicability::Safe)
+            .apply(&v, &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)), "got {out:?}");
+        assert!(
+            tmp.path().join("docs/adr").is_dir(),
+            "creates the directory (and its parents)"
+        );
+    }
+
+    #[test]
+    fn dir_create_is_idempotent_when_the_dir_already_exists() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir(tmp.path().join("docs")).unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("already")),
+            "an existing dir is a no-op skip, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn dir_create_does_not_clobber_a_non_directory() {
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("docs"), b"a file, not a dir\n").unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("not a directory")),
+            "got {out:?}"
+        );
+        assert!(tmp.path().join("docs").is_file(), "the file is untouched");
+    }
+
+    #[test]
+    fn dir_create_dry_run_does_not_create() {
+        let tmp = TempDir::new().unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, true))
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => assert!(s.starts_with("would create"), "{s}"),
+            FixOutcome::Skipped(s) => panic!("expected a would-create report, got Skipped({s})"),
+        }
+        assert!(
+            !tmp.path().join("docs").exists(),
+            "dry-run must not create the directory"
+        );
+    }
+
+    #[test]
+    fn dir_create_confines_an_absolute_path_to_root() {
+        // Audit C1 (CRITICAL): an absolute `paths` must NOT escape the repo root
+        // (`root.join("/abs")` discards the base). Confined -> Skipped, no create.
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let abs_target = outside.path().join("escaped");
+        let out = DirCreateFixer::new(abs_target.clone(), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("escapes the repo root")),
+            "an absolute path must be confined, got {out:?}"
+        );
+        assert!(!abs_target.exists(), "must NOT create outside the root");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_create_confines_a_symlinked_parent_escape() {
+        // Audit C1/F2: a `paths` whose PARENT is an in-repo symlink pointing
+        // OUTSIDE the root must not let `create_dir_all` escape.
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        std::os::unix::fs::symlink(outside.path(), tmp.path().join("linkdir")).unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("linkdir/sub"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("escapes the repo root")),
+            "a symlinked-parent escape must be confined, got {out:?}"
+        );
+        assert!(
+            !outside.path().join("sub").exists(),
+            "must NOT create through the symlink"
+        );
+    }
+
+    #[test]
+    fn dir_create_out_of_root_is_permitted_with_allow_out_of_root() {
+        // Parity with `file_create`: `allow_out_of_root` opts INTO an out-of-root
+        // create (the flag was dead for dir_create before -- audit F3).
+        let tmp = TempDir::new().unwrap();
+        let outside = TempDir::new().unwrap();
+        let abs_target = outside.path().join("allowed");
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: true,
+            compose: None,
+            stage_ops: None,
+        };
+        let out = DirCreateFixer::new(abs_target.clone(), Applicability::Safe)
+            .apply(&Violation::new("x"), &ctx)
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Applied(_)),
+            "allow_out_of_root permits the create, got {out:?}"
+        );
+        assert!(abs_target.is_dir(), "the out-of-root dir is created");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn dir_create_refuses_a_broken_symlink_target_with_a_clean_skip() {
+        // Audit M1: a broken symlink at the target -> a clean "not a directory"
+        // skip, not a raw errno (`exists()` reads a broken symlink as absent, so
+        // the guard is `symlink_metadata`-based).
+        let tmp = TempDir::new().unwrap();
+        std::os::unix::fs::symlink("/nonexistent-target-xyz", tmp.path().join("docs")).unwrap();
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(out, FixOutcome::Skipped(ref r) if r.contains("symlink")),
+            "a broken symlink is a clean skip, got {out:?}"
+        );
+    }
+
+    #[test]
+    fn dir_create_in_stage_mode_reports_without_creating() {
+        // Audit M2: stage mode (`--diff`) must NOT create; an editless op pushes
+        // nothing to the sink.
+        let tmp = TempDir::new().unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: Some(&sink),
+        };
+        let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
+            .apply(&Violation::new("x"), &ctx)
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => assert!(s.starts_with("would create"), "{s}"),
+            FixOutcome::Skipped(s) => panic!("expected would-create, got Skipped({s})"),
+        }
+        assert!(
+            !tmp.path().join("docs").exists(),
+            "stage must not create the directory"
+        );
+        assert!(
+            sink.into_inner().is_empty(),
+            "an editless op has no stage edit"
+        );
+    }
+
+    // ─── RelocateFixer ───────────────────────────────────────────────
+
+    #[test]
+    fn relocate_moves_a_nested_file_to_root() {
+        // The happy path: a lockfile below the root is moved up to `<root>/X`,
+        // keeping its basename. The old path is gone, the root path holds the bytes.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("crates/widget")).unwrap();
+        let from = tmp.path().join("crates/widget/Cargo.lock");
+        std::fs::write(&from, "# lock\n").unwrap();
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("crates/widget/Cargo.lock")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => assert!(s.starts_with("moved"), "summary: {s}"),
+            FixOutcome::Skipped(s) => panic!("expected Applied, got Skipped({s})"),
+        }
+        assert!(!from.exists(), "the nested file must be gone");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("Cargo.lock")).unwrap(),
+            "# lock\n",
+            "the bytes must land at the root"
+        );
+    }
+
+    #[test]
+    fn relocate_dry_run_keeps_the_file() {
+        // Dry run reports but leaves disk untouched (the direct-write trap:
+        // `apply` calls `fs::rename`, so it MUST short-circuit under `dry_run`).
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        let from = tmp.path().join("sub/Cargo.lock");
+        std::fs::write(&from, "# lock\n").unwrap();
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                &make_ctx(&tmp, true),
+            )
+            .unwrap();
+        match out {
+            FixOutcome::Applied(s) => assert!(s.starts_with("would move"), "summary: {s}"),
+            FixOutcome::Skipped(s) => panic!("expected would-move, got Skipped({s})"),
+        }
+        assert!(from.exists(), "dry-run must not move the file");
+        assert!(
+            !tmp.path().join("Cargo.lock").exists(),
+            "dry-run must not create the root file"
+        );
+    }
+
+    #[test]
+    fn relocate_in_stage_mode_records_without_moving() {
+        // Stage mode (`--diff`): record a `RenameFile` edit for the diff renderer,
+        // leave the disk untouched.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        let from = tmp.path().join("sub/Cargo.lock");
+        std::fs::write(&from, "# lock\n").unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                &stage_ctx(&tmp, &sink),
+            )
+            .unwrap();
+        assert!(matches!(out, FixOutcome::Applied(_)));
+        assert!(from.exists(), "stage must not move the file");
+        assert_eq!(
+            sink.into_inner(),
+            vec![FixEdit::RenameFile {
+                from: PathBuf::from("sub/Cargo.lock"),
+                to: PathBuf::from("Cargo.lock"),
+            }]
+        );
+    }
+
+    #[test]
+    fn relocate_skips_when_root_slot_taken() {
+        // Safety: a root file with the same basename already exists. Which lockfile
+        // is canonical is AMBIGUOUS, so relocate must skip (never clobber) and
+        // leave both files byte-intact.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        std::fs::write(tmp.path().join("Cargo.lock"), "# root\n").unwrap();
+        std::fs::write(tmp.path().join("sub/Cargo.lock"), "# nested\n").unwrap();
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &out else {
+            panic!("expected Skipped for a taken root slot, got {out:?}");
+        };
+        assert!(msg.contains("already has"), "honest reason: {msg}");
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("Cargo.lock")).unwrap(),
+            "# root\n",
+            "the root file must NOT be clobbered"
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("sub/Cargo.lock")).unwrap(),
+            "# nested\n",
+            "the nested file must stay in place"
+        );
+    }
+
+    #[test]
+    fn relocate_declines_an_already_at_root_file() {
+        // An already-at-root file has nowhere to move TO, and `X -> X` would never
+        // converge: resolve returns Err, `can_fix` is false, and `apply` Skips
+        // (never moving it onto itself).
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("Cargo.lock"), "# root\n").unwrap();
+        let fixer = RelocateFixer::new(Applicability::Unsafe);
+        let v = Violation::new("x").with_path(Path::new("Cargo.lock"));
+        assert!(!fixer.can_fix(&v), "a root file is not relocatable");
+        let out = fixer.apply(&v, &make_ctx(&tmp, false)).unwrap();
+        let FixOutcome::Skipped(msg) = &out else {
+            panic!("expected Skipped for a root file, got {out:?}");
+        };
+        assert!(
+            msg.contains("already at the repository root"),
+            "honest reason: {msg}"
+        );
+        assert!(
+            tmp.path().join("Cargo.lock").exists(),
+            "the root file must be left in place"
+        );
+    }
+
+    #[test]
+    fn relocate_staged_collision_skips_the_second() {
+        // Two nested files share a basename (`a/X` and `b/X` both -> root `X`). In a
+        // stage pass the disk isn't mutated, so the second must detect the first's
+        // STAGED target and skip -- else the preview emits two `rename to <same>`
+        // hunks (a self-conflicting patch).
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("a")).unwrap();
+        std::fs::create_dir_all(tmp.path().join("b")).unwrap();
+        std::fs::write(tmp.path().join("a/Cargo.lock"), "# a\n").unwrap();
+        std::fs::write(tmp.path().join("b/Cargo.lock"), "# b\n").unwrap();
+        let sink = std::cell::RefCell::new(Vec::new());
+        let ctx = stage_ctx(&tmp, &sink);
+        let fixer = RelocateFixer::new(Applicability::Unsafe);
+        let first = fixer
+            .apply(
+                &Violation::new("x").with_path(Path::new("a/Cargo.lock")),
+                &ctx,
+            )
+            .unwrap();
+        assert!(matches!(first, FixOutcome::Applied(_)));
+        let second = fixer
+            .apply(
+                &Violation::new("x").with_path(Path::new("b/Cargo.lock")),
+                &ctx,
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &second else {
+            panic!("expected the second to be Skipped, got {second:?}");
+        };
+        assert!(msg.contains("already staged"), "reason: {msg}");
+        assert_eq!(sink.borrow().len(), 1, "only ONE rename may be staged");
+    }
+
+    #[test]
+    fn relocate_can_fix_matches_relocatability() {
+        // `can_fix` is the pure per-violation verdict `check` tags with: true only
+        // when the path is below the root (somewhere to move it) -- never for a
+        // root-level or path-less violation. Fix-time state (collision) is NOT
+        // consulted here, mirroring `FileRenameFixer`.
+        let fixer = RelocateFixer::new(Applicability::Unsafe);
+        let v = |p: &str| Violation::new("x").with_path(Path::new(p));
+        assert!(fixer.can_fix(&v("sub/Cargo.lock")), "nested -> relocatable");
+        assert!(
+            fixer.can_fix(&v("a/b/c/Cargo.lock")),
+            "deeply nested -> relocatable"
+        );
+        assert!(
+            !fixer.can_fix(&v("Cargo.lock")),
+            "already at root -> not relocatable"
+        );
+        assert!(
+            !fixer.can_fix(&Violation::new("x")),
+            "no path -> not relocatable"
+        );
+    }
+
+    #[test]
+    fn relocate_fix_edit_mirrors_apply() {
+        // The editor/proposed-edit path returns the same `RenameFile` as `apply`
+        // for a nested file, and declines (None) for a root collision and for an
+        // already-at-root file -- never proposing what `fix` would not do.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        std::fs::write(tmp.path().join("sub/Cargo.lock"), "# lock\n").unwrap();
+        let fixer = RelocateFixer::new(Applicability::Unsafe);
+        assert_eq!(
+            fixer.fix_edit(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                b"",
+                tmp.path(),
+            ),
+            Some(FixEdit::RenameFile {
+                from: PathBuf::from("sub/Cargo.lock"),
+                to: PathBuf::from("Cargo.lock"),
+            })
+        );
+        // A taken root slot -> no proposal.
+        std::fs::write(tmp.path().join("Cargo.lock"), "# root\n").unwrap();
+        assert_eq!(
+            fixer.fix_edit(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                b"",
+                tmp.path(),
+            ),
+            None,
+            "must not propose a move onto an existing root file"
+        );
+        // An already-at-root file -> no proposal.
+        assert_eq!(
+            fixer.fix_edit(
+                &Violation::new("x").with_path(Path::new("Cargo.lock")),
+                b"",
+                tmp.path(),
+            ),
+            None,
+            "must not propose X -> X for a root file"
+        );
+    }
+
+    #[test]
+    fn relocate_carries_its_applicability_tier() {
+        // Default Unsafe; a top-level rule may promote to Safe. The tier is what
+        // gates a bare `fix` (suggest) vs `--unsafe-fixes` (apply).
+        assert_eq!(
+            RelocateFixer::new(Applicability::Unsafe).applicability(),
+            Applicability::Unsafe
+        );
+        assert_eq!(
+            RelocateFixer::new(Applicability::Safe).applicability(),
+            Applicability::Safe
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn relocate_skips_a_dangling_symlink_at_the_root_slot() {
+        // Audit hardening (Agent A #4): a DANGLING symlink occupying the root slot
+        // reads as non-existent to `exists()` (which follows links) but IS an entry.
+        // The `symlink_metadata` collision check must treat it as occupied and skip,
+        // never clobbering it.
+        use std::os::unix::fs::symlink;
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        std::fs::write(tmp.path().join("sub/Cargo.lock"), "# nested\n").unwrap();
+        symlink("nonexistent-target", tmp.path().join("Cargo.lock")).unwrap();
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                &make_ctx(&tmp, false),
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &out else {
+            panic!("expected Skipped for a dangling-symlink root slot, got {out:?}");
+        };
+        assert!(msg.contains("already has"), "reason: {msg}");
+        // The dangling symlink is intact (not replaced) and the nested file stays.
+        assert!(
+            tmp.path()
+                .join("Cargo.lock")
+                .symlink_metadata()
+                .unwrap()
+                .file_type()
+                .is_symlink(),
+            "the dangling symlink must NOT be clobbered"
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("sub/Cargo.lock")).unwrap(),
+            "# nested\n"
+        );
+        // fix_edit mirrors apply: no proposal onto the occupied (dangling) slot.
+        assert_eq!(
+            RelocateFixer::new(Applicability::Unsafe).fix_edit(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                b"",
+                tmp.path(),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn relocate_yields_to_a_pending_write_on_the_destination() {
+        // Audit hardening (Agent B F4): a content fixer composing the root slot this
+        // pass buffers a write `symlink_metadata` cannot see (it is in the compose
+        // buffer, not on disk). relocate must yield rather than `fs::rename` onto it
+        // and race the flush (silent clobber). On the fixpoint rerun the create is on
+        // disk and the ordinary collision check handles it.
+        let tmp = TempDir::new().unwrap();
+        std::fs::create_dir_all(tmp.path().join("sub")).unwrap();
+        std::fs::write(tmp.path().join("sub/Cargo.lock"), "# nested\n").unwrap();
+        let buf = std::cell::RefCell::new(std::collections::BTreeMap::new());
+        // A pending write to the DESTINATION (root slot). The dest does not exist on
+        // disk yet, so `resolve_write_target` returns the path unchanged -> this key
+        // matches the guard's lookup.
+        buf.borrow_mut()
+            .insert(tmp.path().join("Cargo.lock"), b"# created\n".to_vec());
+        let ctx = FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: Some(&buf),
+            stage_ops: None,
+        };
+        let out = RelocateFixer::new(Applicability::Unsafe)
+            .apply(
+                &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),
+                &ctx,
+            )
+            .unwrap();
+        let FixOutcome::Skipped(msg) = &out else {
+            panic!("expected Skipped for a pending destination write, got {out:?}");
+        };
+        assert!(msg.contains("pending content edit"), "reason: {msg}");
+        assert!(
+            tmp.path().join("sub/Cargo.lock").exists(),
+            "the nested file must stay put (not moved onto a pending create)"
+        );
     }
 }

@@ -1,0 +1,27 @@
+name: chmod clears +x on a file executable_bit says must not be executable
+# Unix-only. `$exec` materializes the file WITH +x; `require: false` says it must
+# not be, so the chmod fix clears the executable bits.
+tags: [fix, executable_bit, chmod, unix_metadata, unix-only]
+
+given:
+  tree:
+    docs:
+      generate.sh: { "$exec": "echo generated\n" }
+  config: |
+    version: 1
+    rules:
+      - id: docs-not-exec
+        kind: executable_bit
+        paths: "docs/**"
+        level: error
+        require: false
+        fix:
+          chmod: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: docs-not-exec, level: error, path: docs/generate.sh}
+  - applied: [docs-not-exec]
+  - violations: []

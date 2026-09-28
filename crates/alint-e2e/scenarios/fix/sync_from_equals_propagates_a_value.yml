@@ -1,0 +1,58 @@
+name: sync_from on relation equals propagates the source value into each target
+# cross_file(relation: equals) declares a source-of-truth value that N targets
+# must match. On `equals`, sync_from PROPAGATES: it rewrites each drifting target's
+# extracted node to the source's scalar, per format (here TOML $.package.version),
+# preserving the rest of the file. Unsafe, so `fix_unsafe` applies it; the target
+# whose version already matches is left untouched, and the tree converges.
+tags: [fix, cross_file, sync_from, applicability]
+
+given:
+  tree:
+    Cargo.toml: |
+      [workspace.package]
+      version = "2.0.0"
+    crates:
+      drifted:
+        Cargo.toml: |
+          [package]
+          name = "drifted"
+          version = "1.0.0"
+      current:
+        Cargo.toml: |
+          [package]
+          name = "current"
+          version = "2.0.0"
+  config: |
+    version: 1
+    rules:
+      - id: crate-versions-match-workspace
+        kind: cross_file
+        relation: equals
+        source:  { file: Cargo.toml, extract: { toml: "$.workspace.package.version" } }
+        targets: { files: "crates/*/Cargo.toml", extract: { toml: "$.package.version" } }
+        level: error
+        fix: { sync_from: {} }
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: crate-versions-match-workspace, level: error, path: crates/drifted/Cargo.toml}
+  - applied: [crate-versions-match-workspace]
+  - violations: []
+
+expect_tree:
+  Cargo.toml: |
+    [workspace.package]
+    version = "2.0.0"
+  crates:
+    drifted:
+      Cargo.toml: |
+        [package]
+        name = "drifted"
+        version = "2.0.0"
+    current:
+      Cargo.toml: |
+        [package]
+        name = "current"
+        version = "2.0.0"

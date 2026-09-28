@@ -36,10 +36,10 @@ The clarity of these non-goals is itself a feature.
 
 ## Design principles
 
-1. **The repository tree is the input.** Every rule sees a unified file/directory index. The walk happens once per invocation.
+1. **The repository tree is the input.** Every rule sees a unified file/directory index. `check` walks once per invocation; `fix` walks once per fixpoint pass (it re-walks after applying edits and re-fixes to convergence, see the [v0.17 fixpoint design](v0.17/fixpoint.md)).
 2. **A small set of composable rule families.** Existence, content, naming, and cross-file were the original shapes; the model has since grown to thirteen families, all built on the same rule record. The [rule reference](https://alint.org/docs/rules/) lists every kind by family.
 3. **Declarative by default, programmable at the edges.** YAML covers typical rules. A bounded expression language gates rules on facts. A plugin surface (command, later WASM) covers user-defined logic.
-4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism.
+4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism. (`fix` reuses this same walk+evaluate primitive once per fixpoint pass.)
 5. **Respect ecosystem defaults.** `.gitignore` is honored by default. YAML is the config format. Case aliases (`PascalCase` / `pascalcase` / `pascal-case`) all parse.
 6. **Every rule carries its own story.** Severity, message, `policy_url`, and optional `fix` are first-class fields.
 7. **Modern output formats from day one.** Eight formats: human, json, sarif, github, gitlab, junit, markdown, and agent.
@@ -228,13 +228,18 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | `file_create` | `{content, path?, create_parents?}` | `file_exists` |
 | `file_remove` | `{}` | `file_absent`, `no_empty_files`, `no_symlinks`, `no_submodules` |
 | `file_rename` | `{}` (target derived from rule config) | `filename_case` |
+| `dir_create` | `{}` | `dir_exists` |
+| `relocate` | `{}` (moves the file to the repo root) | `file_absent` |
+| `chmod` | `{}` (direction from the rule) | `executable_bit`, `shebang_has_executable` |
+| `git_untrack` | `{}` (`git rm --cached`; *spawning*) | `file_absent` |
+| `command` | `{run, timeout?}` (runs a user command; *spawning*) | `command` |
 
 **Content-editing ops** (skipped on files over `fix_size_limit`; default 1 MiB, `null` disables):
 
 | Op | Shape | Rule kinds |
 |---|---|---|
 | `file_prepend` | `{content}` | `file_header` |
-| `file_append` | `{content}` | `file_content_matches` |
+| `file_append` | `{content}` | `file_content_matches`, `file_footer` |
 | `file_trim_trailing_whitespace` | `{}` | `no_trailing_whitespace` |
 | `file_append_final_newline` | `{}` | `final_newline` |
 | `file_normalize_line_endings` | `{}` (target read from parent rule) | `line_endings` |
@@ -242,8 +247,21 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 | `file_strip_zero_width` | `{}` | `no_zero_width_chars` |
 | `file_strip_bom` | `{}` | `no_bom` |
 | `file_collapse_blank_lines` | `{}` (max read from parent rule) | `max_consecutive_blank_lines` |
+| `replace` | `{replacement}` (pattern from parent rule; optional `applicability`) | `file_content_forbidden`, `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_matches` |
+| `set_value` | `{}` (value from the rule's `equals:`) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_equals` |
+| `remove_value` | `{}` (target from parent rule) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_absent` |
+| `sync_from` | `{}` (source + relation from parent rule) | `cross_file` (`relation: identical` / `equals`) |
+| `create_and_register` | `{content?, content_from?}` | `cross_file` (`relation: registered`) |
+| `sort` | `{}` (markers / comparator / `unique` / `select` from parent rule) | `ordered_block` |
+| `indent_style` | `{}` (style / width from parent rule) | `indent_style` (`style: spaces` + `width`) |
+| `insert_line` | `{}` (require lines / comparator from parent rule) | `ordered_block` (markerless, with `require:`) |
+| `insert_header` | `{content?, content_from?}` (inserts AFTER a leading BOM / shebang / `<?xml?>`) | `file_header` |
 
-Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full. Fixers run serially after parallel evaluation so the tree is mutated from a single thread.
+Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full. (`set_value` / `remove_value` are *located* ops -- one byte-range splice through the same regime as `replace`; `sort` is a whole-file rewrite that permutes the entry lines in place, and `create_and_register`'s register half is a list-append into the target manifest.)
+
+`replace` is the first *located* op: rather than rewriting the whole file, it emits one byte-range edit per regex match, which the located regime batches, orders, overlap-skips, and splices in a single pass. It is `Unsafe` by default (a regex rewrite is not behavior-preserving), so a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` applies it.
+
+Every op carries an applicability tier (`Safe` / `Unsafe` / `Suggestion` / `Never`); most content and path-normalizing ops are `Safe` (applied by a bare `alint fix`), while the ones that delete content or are not behavior-preserving default to `Unsafe` — `file_remove` (irreversible deletion), `remove_value`, `replace` (a regex rewrite), `sort` with `unique` (drops lines), `indent_style` (a mis-aimed reindent hard-breaks an indent-significant file), and `insert_line` (a computed-position insert) — so a bare `alint fix` surfaces those as suggestions and `--unsafe-fixes` applies them. Per-op tiers are listed in [Rules](https://alint.org/docs/rules/). A user may promote `file_remove` back to `Safe` on a specific rule (`fix: { file_remove: { applicability: safe } }`) in their own top-level config; an inherited (`extends:`'d) ruleset may not promote it (the DSL refuses the promotion). Fixers run serially after the parallel evaluation, from a single thread. A content-editing op does not write as it runs: it routes its result into an in-memory compose buffer keyed by the resolved file target, and the engine flushes one atomic write per touched file, so several fixers editing the same file compose in config order rather than racing or clobbering. Path-only ops apply to the filesystem directly. `--dry-run` runs the whole pass but writes nothing; `--diff` stages the same composed result and prints it as a unified diff.
 
 ### Path template tokens
 
@@ -347,10 +365,10 @@ The pipeline from `alint check` to output:
 6. **Match.** Per rule, resolve matching files/dirs through `Scope::matches(&Path, &FileIndex)` (v0.9.10), so globs *and* `scope_filter:` ancestor predicates evaluate in one call. For `git_tracked_only:` rules the engine substitutes a pre-filtered `FileIndex` so out-of-scope paths never reach `evaluate` (v0.9.11).
 7. **Evaluate.** Per-file rules receive a pre-loaded `&[u8]` slice via `evaluate_file` (read once per file regardless of how many per-file rules match it); cross-file rules read what they need from the index. Both fan out via `rayon`.
 8. **Aggregate.** Collect `RuleResult`s into a `Report`.
-9. **Fix (optional).** Apply fixers serially; re-run checks.
+9. **Fix (optional).** Rules with a `fix:` block remediate what they flagged, gated by an applicability tier: the default threshold applies only `Safe` ops, `--unsafe-fixes` raises it to include `Unsafe` ones, and `Suggestion`-tier edits are reported but never written. Content-editing ops don't write as they go: each routes its result into a per-run in-memory buffer that composes every edit to a file in config order, so the engine emits a *single atomic write per file* however many fixers touched it. Path-only ops (create / remove / rename) act on the filesystem directly. A located-edit regime (collect, tier-filter, total-order, overlap-skip, verify, splice) handles byte-ranged edits; the `replace` op is its first user (a file also touched by a whole-file fixer this pass defers its located edits to a rerun, so offsets never splice into changed bytes). Each result is reported `Applied`, `Skipped`, `Suggested`, or `Unfixable`; `--dry-run` computes all of it without writing, and `--diff` renders the composed result as a unified diff.
 10. **Emit.** Format via selected output.
 
-Invariants: the walk runs exactly once per invocation; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially (they mutate the tree).
+Invariants (per pass): the walk runs exactly once; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially, and a file's content edits compose in memory and flush as a single atomic write per file. `check` runs one such pass; `fix` runs this pass repeatedly, re-walking after each until no new edit applies (bounded by a non-convergence cap), so across a `fix` the walk and per-file read recur once per pass. See the [v0.17 fixpoint design](v0.17/fixpoint.md).
 
 Step 2 in detail: facts are evaluated once (sequentially, cached), then gate which rules run via their `when:` conditions.
 

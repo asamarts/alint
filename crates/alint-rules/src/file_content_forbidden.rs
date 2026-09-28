@@ -2,9 +2,13 @@
 
 use std::path::Path;
 
-use alint_core::{Context, Error, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+};
 use regex::Regex;
 use serde::Deserialize;
+
+use crate::fixers::ReplaceFixer;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -24,10 +28,15 @@ pub struct FileContentForbiddenRule {
     scope: Scope,
     pattern_src: String,
     pattern: Regex,
+    fixer: Option<ReplaceFixer>,
 }
 
 impl Rule for FileContentForbiddenRule {
     alint_core::rule_common_impl!();
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
@@ -40,16 +49,16 @@ impl Rule for FileContentForbiddenRule {
             // via the `for_each`-nested path (which bypasses the engine's cap).
             // Over-cap → skip, matching the engine's per-file batch so the same
             // rule behaves identically whether top-level or nested (M3-F1).
-            let bytes = match crate::io::read_capped(&full) {
-                Ok(b) => b,
-                Err(crate::io::ReadCapError::TooLarge(_)) => continue,
-                Err(crate::io::ReadCapError::Io(e)) => {
-                    violations.push(
-                        Violation::new(format!("could not read file: {e}"))
-                            .with_path(entry.path.clone()),
-                    );
-                    continue;
-                }
+            // A read error (permission / I/O) now skips too -- not just the
+            // over-cap case above -- failing open to match `check`'s per-file read
+            // path (`read_capped_or_skip`, which skips an unreadable file before it
+            // ever calls `evaluate_file`). Flagging it here (this whole-index
+            // `evaluate` is the read path `fix` uses) made `fix` exit 1 with an
+            // unfixable "could not read file" while `check` skipped and exited 0 on
+            // the same tree. Per-file content rules fail open by design
+            // (`MAX_ANALYZE_BYTES`).
+            let Ok(bytes) = crate::io::read_capped(&full) else {
+                continue;
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
@@ -110,6 +119,29 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
     let pattern = Regex::new(&opts.pattern)
         .map_err(|e| Error::rule_config(&spec.id, format!("invalid pattern: {e}")))?;
+    // The `replace` op rewrites each occurrence of the forbidden pattern. It is
+    // the only fix compatible with this rule (Phase 1); any other op is a config
+    // error. `replace` is Unsafe by default (a regex rewrite is not
+    // behaviour-preserving); a user may promote it per-rule in their own config.
+    let fixer = match &spec.fix {
+        Some(FixSpec::Replace { replace }) => Some(ReplaceFixer::new(
+            pattern.clone(), // cheap: Regex is Arc-backed
+            replace.replacement.clone(),
+            replace
+                .applicability
+                .unwrap_or(alint_core::Applicability::Unsafe),
+        )),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with file_content_forbidden (only `replace` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(FileContentForbiddenRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -118,6 +150,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_spec(spec)?,
         pattern_src: opts.pattern,
         pattern,
+        fixer,
     }))
 }
 
@@ -147,6 +180,44 @@ mod tests {
              level: error\n",
         );
         assert!(build(&spec).is_err());
+    }
+
+    #[test]
+    fn build_accepts_replace_fix_as_unsafe() {
+        // Phase 1: `replace` is the compatible fix; it builds a fixer that is
+        // Unsafe by default (a regex rewrite is not behaviour-preserving).
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_forbidden\n\
+             paths: \"**/*.js\"\n\
+             pattern: \"console\\\\.log\"\n\
+             level: error\n\
+             fix:\n  replace:\n    replacement: \"logger.debug\"\n",
+        );
+        let rule = build(&spec).unwrap();
+        let fixer = rule.fixer().expect("replace attaches a fixer");
+        assert_eq!(fixer.applicability(), alint_core::Applicability::Unsafe);
+        assert!(fixer.collects_located_edits(), "replace is a located op");
+    }
+
+    #[test]
+    fn build_rejects_an_incompatible_fix_op() {
+        // Only `replace` is compatible; a whole-file op (e.g. file_append) is a
+        // config error, not a silent ignore.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: file_content_forbidden\n\
+             paths: \"**/*\"\n\
+             pattern: \"X\"\n\
+             level: error\n\
+             fix:\n  file_append:\n    content: \"y\"\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("file_append"), "names the bad op: {err}");
+        assert!(
+            err.contains("replace"),
+            "points at the compatible op: {err}"
+        );
     }
 
     #[test]

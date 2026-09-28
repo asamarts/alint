@@ -1,0 +1,41 @@
+name: set_value on an XML number-equals is never advertised nor applied
+tags: [fix, xml_path_equals, set_value, xml, verify]
+
+# XML leaves always parse as strings, so a numeric `equals: 8080` is
+# unsatisfiable: the value at `$.port` re-parses as the STRING "8080", never the
+# JSON number 8080. Both honesty guards agree, and they agree with EACH OTHER:
+#   1. `check` does NOT advertise this as auto-fixable -- the fixer's `can_fix`
+#      declines a non-string `equals` on a string-leaf format.
+#   2. `fix` forms NO edit (the same static check declines in `collect_edits`),
+#      so the violation is `skipped` with "no applicable fix" -- not surfaced as
+#      a suggestion that could never resolve the rule.
+# The tree is byte-identical and the violation survives: check and fix agree.
+
+given:
+  tree:
+    ports.xml: |
+      <port>9090</port>
+  config: |
+    version: 1
+    rules:
+      - id: port-num
+        kind: xml_path_equals
+        paths: "**/*.xml"
+        path: "$.port"
+        equals: 8080
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port-num, level: error, path: ports.xml}
+  - skipped: [port-num]
+  - violations:
+      - {rule: port-num, level: error, path: ports.xml}
+
+expect_tree:
+  ports.xml: |
+    <port>9090</port>

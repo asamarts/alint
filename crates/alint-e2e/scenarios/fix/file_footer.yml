@@ -1,0 +1,39 @@
+name: file_footer fix appends the footer and converges
+tags: [fix, file_footer, content]
+
+# Round-7 coverage gap (A4-F2): `file_footer` is fixable via `file_append`, but
+# no e2e asserted the APPENDED footer actually SATISFIES `file_footer`'s
+# tail-match check -- the detector<->fixer domain-alignment class the earlier
+# audit rounds hardened for other kinds. The `[check, fix, check]` shape proves
+# it end to end: the first check flags the missing footer, `fix` appends it, and
+# the second check finds nothing (the fix converges). The op-keyed coverage gate
+# credited `file_append` via `file_header`, leaving this kind's own fix untested.
+
+given:
+  tree:
+    src:
+      missing.rs: "fn b() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: license-footer
+        kind: file_footer
+        paths: "src/**/*.rs"
+        pattern: "Licensed under the Apache License"
+        lines: 3
+        level: warning
+        fix:
+          file_append:
+            content: "// Licensed under the Apache License, Version 2.0\n"
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: license-footer, level: warning, path: src/missing.rs}
+  - applied: [license-footer]
+  - violations: []
+
+expect_tree:
+  src:
+    missing.rs: "fn b() {}\n// Licensed under the Apache License, Version 2.0\n"

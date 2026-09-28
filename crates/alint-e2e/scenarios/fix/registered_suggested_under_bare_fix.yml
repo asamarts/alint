@@ -1,0 +1,41 @@
+name: create_and_register is a suggestion (requires --unsafe-fixes) under a bare fix
+# create_and_register is Unsafe (it mutates a manifest) + content-injecting, so a
+# bare `alint fix` must SUGGEST it, not append -- consistent with sync_from and the
+# value-propagation siblings. The `[check, fix]` shape asserts the bare fix step
+# suggests and does NOT modify the manifest.
+tags: [fix, cross_file, registered, create_and_register, applicability]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = [\"crates/bar\"]\n"
+    crates:
+      bar:
+        Cargo.toml: "[package]\nname = \"bar\"\n"
+      foo:
+        Cargo.toml: "[package]\nname = \"foo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: members-registered
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*" }
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+        fix: { create_and_register: {} }
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: members-registered, level: error, path: Cargo.toml}
+  - suggested: [members-registered]
+
+expect_tree:
+  Cargo.toml: "[workspace]\nmembers = [\"crates/bar\"]\n"
+  crates:
+    bar:
+      Cargo.toml: "[package]\nname = \"bar\"\n"
+    foo:
+      Cargo.toml: "[package]\nname = \"foo\"\n"

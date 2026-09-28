@@ -1,0 +1,32 @@
+name: file_remove is Unsafe by default -- a bare fix suggests, does not delete
+tags: [fix, file_absent, file_remove, applicability]
+
+# Round-6/close-off: `file_remove` is reclassified Unsafe (deleting a whole file
+# irreversibly is a poor default for a bare `alint fix`). Without an explicit
+# `applicability: safe` promotion, a bare `fix` must NOT delete the file -- it
+# surfaces the removal as a suggestion, and `check` still flags it afterward. The
+# `[check, fix]` shape asserts the fix step SUGGESTS (does not apply); the
+# `expect_tree` proves the file survives untouched.
+
+given:
+  tree:
+    stale.bak: "junk\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bak
+        kind: file_absent
+        paths: "**/*.bak"
+        level: error
+        fix:
+          file_remove: {}
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: no-bak, level: error, path: stale.bak}
+  - suggested: [no-bak]
+
+expect_tree:
+  stale.bak: "junk\n"

@@ -1,0 +1,46 @@
+name: remove_value deletes an INI key's whole multi-line continuation value
+tags: [fix, ini_path_absent, remove_value, ini, multiline]
+
+# The configparser indentation-continuation convention: `deps`'s value spans the
+# key line PLUS the indented lines. `remove_value` deletes the whole block -- the
+# key line through the LAST continuation line -- sweeping the interspersed blank
+# and comment (which MUST go, else the deeper `mock` line would be orphaned into a
+# parse error), while leaving the `[tox]` header, the trailing blank after the
+# block, and the sibling `other` byte-for-byte intact. This is the over-deletion
+# risk done deliberately and bounded: never a trailing blank, never a next key.
+
+given:
+  tree:
+    tox.ini: |
+      [tox]
+      deps =
+          pytest
+
+          # extra deps below
+          mock
+
+      other = 1
+  config: |
+    version: 1
+    rules:
+      - id: no-deps
+        kind: ini_path_absent
+        paths: "**/*.ini"
+        path: "$['tox']['deps']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-deps, level: error, path: tox.ini}
+  - applied: [no-deps]
+  - violations: []
+
+expect_tree:
+  tox.ini: |
+    [tox]
+
+    other = 1

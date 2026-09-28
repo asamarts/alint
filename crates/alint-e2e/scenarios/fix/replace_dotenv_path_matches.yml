@@ -1,0 +1,40 @@
+name: replace on dotenv_path_matches rewrites the value at the path to satisfy matches (dotenv)
+tags: [fix, dotenv_path_matches, replace, dotenv]
+
+# Arc-wide audit coverage gap: `replace` on `*_path_matches` was tested end-to-end
+# ONLY for JSON, yet each format has its own value-span resolver + `serialize_scalar`.
+# The value must start with `v`; the fix prepends one (decode -> regex-substitute ->
+# re-serialize -> splice the value span), and the sibling `name` is untouched.
+
+given:
+  tree:
+    .env: |
+      VERSION=1.2.3
+      NAME=app
+  config: |
+    version: 1
+    rules:
+      - id: v-prefix
+        kind: dotenv_path_matches
+        paths: "**/.env"
+        path: "$.VERSION"
+        matches: "^v"
+        level: error
+        fix:
+          replace:
+            pattern: "^"
+            replacement: "v"
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: v-prefix, level: error, path: .env}
+  - applied: [v-prefix]
+  - violations: []
+
+expect_tree:
+  .env: |
+    VERSION=v1.2.3
+    NAME=app

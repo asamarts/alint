@@ -58,6 +58,12 @@ impl PerFileRule for NoTrailingWhitespaceRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content: the `file_trim_trailing_whitespace` fixer refuses
+        // it, so `check` and `fix` must agree on scope (else a binary is flagged
+        // fixable forever but never fixed).
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         let Some(line_no) = first_offending_line(bytes) else {
             return Ok(Vec::new());
         };
@@ -98,7 +104,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     })?;
     let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileTrimTrailingWhitespace { .. }) => Some(FileTrimTrailingWhitespaceFixer),
+        Some(FixSpec::FileTrimTrailingWhitespace {
+            file_trim_trailing_whitespace,
+        }) => Some(
+            FileTrimTrailingWhitespaceFixer::new().with_applicability(
+                file_trim_trailing_whitespace
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

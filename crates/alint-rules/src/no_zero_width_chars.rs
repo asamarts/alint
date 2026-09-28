@@ -77,6 +77,13 @@ impl PerFileRule for NoZeroWidthCharsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content (NUL-bearing): the `file_strip_zero_width` fixer
+        // refuses it, so flagging it here would nag a file that can never be
+        // fixed -- `check` and `fix` must agree on scope. A lone invalid byte
+        // (no NUL) is NOT binary, so the fail-open evasion below stays closed.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // Lossily decode rather than abandon the file on the first invalid byte:
         // this is a security-posture rule, so a stray non-UTF-8 byte must NOT
         // suppress detection of a zero-width char elsewhere (fail-open evasion).
@@ -90,7 +97,13 @@ impl PerFileRule for NoZeroWidthCharsRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(line_no, col),
+                .with_location(line_no, col)
+                // First-offender rule with a WHOLE-FILE fixer (it strips every
+                // occurrence). The file is the unit of accepted debt: key on the
+                // path so `fix --baseline` grandfathers the whole file and never
+                // strips a grandfathered char when a NEW one precedes it (audit
+                // F3, 2026-09-20). Matches no_trailing_whitespace.
+                .with_baseline_key(crate::slash(path)),
         ])
     }
 }

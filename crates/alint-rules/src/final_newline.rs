@@ -64,6 +64,13 @@ impl PerFileRule for FinalNewlineRule {
         if bytes.last().copied() == Some(b'\n') {
             return Ok(Vec::new());
         }
+        // Skip binary content: the `file_append_final_newline` fixer refuses it,
+        // so `check` and `fix` must agree on scope (else a binary is flagged
+        // fixable forever but never fixed). Consulted only when a newline is
+        // actually missing, so the common (clean) case pays nothing.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         let msg = self
             .message
             .clone()
@@ -87,7 +94,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .ok_or_else(|| Error::rule_config(&spec.id, "final_newline requires a `paths` field"))?;
     let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileAppendFinalNewline { .. }) => Some(FileAppendFinalNewlineFixer),
+        Some(FixSpec::FileAppendFinalNewline {
+            file_append_final_newline,
+        }) => Some(
+            FileAppendFinalNewlineFixer::new().with_applicability(
+                file_append_final_newline
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

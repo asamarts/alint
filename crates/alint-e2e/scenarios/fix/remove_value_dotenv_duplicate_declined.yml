@@ -1,0 +1,40 @@
+name: remove_value declines a duplicate dotenv key -- ambiguous, writes nothing
+tags: [fix, dotenv_path_absent, remove_value, dotenv, safety]
+
+# Safety property. A duplicate key is the parser's last-wins case: `$.TOKEN`
+# collapses to ONE JSON key but TWO physical lines. Deleting only one would
+# leave the other (the query would still match, so verify would fail anyway),
+# and a single contiguous range cannot express a two-line deletion -- so the
+# resolver DECLINES rather than guess which occurrence to remove. The fix is
+# `skipped` (no applicable fix), the violation stands, and `expect_tree` proves
+# both lines are byte-for-byte intact.
+
+given:
+  tree:
+    .env: |
+      TOKEN=a
+      TOKEN=b
+  config: |
+    version: 1
+    rules:
+      - id: no-token
+        kind: dotenv_path_absent
+        paths: "**/.env"
+        path: "$.TOKEN"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-token, level: error, path: .env}
+  - skipped: [no-token]
+  - violations:
+      - {rule: no-token, level: error, path: .env}
+
+expect_tree:
+  .env: |
+    TOKEN=a
+    TOKEN=b

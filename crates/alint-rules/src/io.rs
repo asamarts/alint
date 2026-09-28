@@ -84,62 +84,32 @@ pub fn classify_bytes(bytes: &[u8]) -> Classification {
     }
 }
 
-/// Whether `bytes` look like binary content (per `content_inspector`,
-/// sampling the same leading window as `file_is_text`). The byte-level
-/// fixers consult this and refuse to rewrite a binary file - a line-ending,
-/// BOM, final-newline, or prepend/append edit on a binary corrupts it.
+/// Whether `bytes` look like binary content. The byte-level fixers (and their
+/// detectors) consult this and refuse to touch a binary file -- a reorder,
+/// reindent, line-ending, BOM, final-newline, or prepend/append edit on a binary
+/// corrupts it.
+///
+/// A NUL byte ANYWHERE is the definitive binary marker, so the WHOLE slice is
+/// scanned for one (a cheap `memchr`). This is not redundant with
+/// `content_inspector`: that crate caps its own NUL scan at its `MAX_SCAN_SIZE`
+/// (1024 bytes as of 0.2.4) -- so a file that is clean text through the first KiB
+/// but carries a NUL LATER (e.g. a 40 KB text file with a NUL at 28 KB) is
+/// classified TEXT by `content_inspector` and a content fixer silently corrupts it
+/// (reorder / reindent / splice). The explicit full scan closes that (audit R2).
+/// `content_inspector` still supplies the broader statistical heuristics (encoding,
+/// control-char density) over its leading window.
 pub fn looks_binary(bytes: &[u8]) -> bool {
+    if bytes.contains(&0) {
+        return true;
+    }
     let window = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
     classify_bytes(window) == Classification::Binary
 }
 
-/// Write `bytes` to `path` atomically: write a uniquely-named sibling temp
-/// file, copy the original's permissions onto it (so an existing mode -
-/// notably the executable bit - survives), `fsync`, then rename it over
-/// `path`. Unlike `std::fs::write` (open-truncate-then-write), a crash or
-/// I/O error mid-write leaves the original intact rather than truncated or
-/// destroyed. The temp is a sibling so the rename is atomic on the same
-/// filesystem, and it is cleaned up on failure. (Manual temp, no `tempfile`
-/// runtime dependency - matching the extends cache.)
-pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
-    use std::io::Write as _;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    // Unique sibling name: the pid distinguishes concurrent processes, the
-    // atomic counter distinguishes concurrent threads in this process.
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    // Write THROUGH a symlink to its (canonical) target, preserving the link —
-    // matching the prior `fs::write`/append behavior. A bare temp+rename on the
-    // link path would replace the link NODE with a regular file, silently
-    // diverging it from its target (common for a symlinked LICENSE / README in
-    // a monorepo). `canonicalize` needs the target to exist, which it does:
-    // every caller has just read the file via `read_for_fix`.
-    let resolved = match std::fs::symlink_metadata(path) {
-        Ok(m) if m.file_type().is_symlink() => std::fs::canonicalize(path)?,
-        _ => path.to_path_buf(),
-    };
-    let path = resolved.as_path();
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
-    let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let stem = path.file_name().and_then(|f| f.to_str()).unwrap_or("tmp");
-    let tmp = dir.join(format!(".{stem}.alint-fix.{}.{n}", std::process::id()));
-    let write = || -> std::io::Result<()> {
-        let mut f = std::fs::File::create(&tmp)?;
-        // Preserve the original file's mode when it exists (a rewrite).
-        if let Ok(meta) = std::fs::metadata(path) {
-            f.set_permissions(meta.permissions())?;
-        }
-        f.write_all(bytes)?;
-        f.sync_all()
-    };
-    if let Err(e) = write().and_then(|()| std::fs::rename(&tmp, path)) {
-        let _ = std::fs::remove_file(&tmp);
-        return Err(e);
-    }
-    Ok(())
-}
+/// Atomic whole-file write, re-exported from `alint-core` so the fixers and the
+/// engine's compose flush share one implementation. See
+/// [`alint_core::write_atomic`].
+pub use alint_core::write_atomic;
 
 /// Hard cap on a single whole-file read across the rule/engine read paths.
 /// Generous - every realistic manifest / source / generated file is orders of
@@ -270,6 +240,29 @@ mod tests {
     }
 
     #[test]
+    fn looks_binary_detects_a_nul_past_the_inspect_window() {
+        // AUDIT R2: a NUL byte ANYWHERE means binary -- not just within the leading
+        // `TEXT_INSPECT_LEN` window. A file that is clean text through the window but
+        // has a NUL later must still be refused, or a content fixer corrupts it.
+        let mut buf = vec![b'a'; TEXT_INSPECT_LEN * 2]; // clean text well past the window
+        for chunk in buf.chunks_mut(64) {
+            if let Some(last) = chunk.last_mut() {
+                *last = b'\n';
+            }
+        }
+        assert!(
+            !looks_binary(&buf),
+            "an all-text buffer past the window must NOT be binary"
+        );
+        let nul_pos = TEXT_INSPECT_LEN + 100; // past the leading window
+        buf[nul_pos] = 0;
+        assert!(
+            looks_binary(&buf),
+            "a NUL past the inspect window must still be detected as binary"
+        );
+    }
+
+    #[test]
     fn write_atomic_replaces_content_preserves_mode_and_leaves_no_temp() {
         let dir = tempfile::tempdir().unwrap();
         let p = dir.path().join("f.txt");
@@ -296,6 +289,36 @@ mod tests {
             .filter_map(std::result::Result::ok)
             .any(|e| e.file_name().to_string_lossy().contains("alint-fix"));
         assert!(!leaked, "atomic write leaked a temp file");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_preserves_setuid_and_setgid_bits() {
+        // Round-5 audit: `write_atomic` set the temp file's mode BEFORE writing,
+        // and a `write()` clears S_ISUID/S_ISGID (the kernel's
+        // `should_remove_suid`), silently stripping setuid/setgid from a fixed
+        // file. The plain executable bit survived, which is why the test above
+        // missed it. Now the mode is applied AFTER the last write, preserving the
+        // full mode word. `2775` = setgid + rwxrwxr-x is the tell (setgid is
+        // cleared on write only when group-executable).
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("helper.sh");
+        std::fs::write(&p, b"echo old").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o6755)).unwrap();
+        // Re-read: the FS may already mask bits we can't set unprivileged; assert
+        // against what actually stuck so the test is meaningful either way.
+        let before = std::fs::metadata(&p).unwrap().permissions().mode() & 0o7777;
+        write_atomic(&p, b"echo new").unwrap();
+        let after = std::fs::metadata(&p).unwrap().permissions().mode() & 0o7777;
+        assert_eq!(
+            after, before,
+            "the full mode word (incl. setuid/setgid) must survive an atomic write"
+        );
+        // And specifically: if setgid stuck before, it must still be set.
+        if before & 0o2000 != 0 {
+            assert_ne!(after & 0o2000, 0, "setgid must survive an atomic write");
+        }
     }
 
     #[cfg(unix)]

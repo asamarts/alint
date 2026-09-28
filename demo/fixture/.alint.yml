@@ -4,3 +4,14 @@ extends:
   - alint://bundled/hygiene/no-tracked-artifacts@v1
   - alint://bundled/ci/github-actions@v1
   - alint://bundled/agent-hygiene@v1
+
+# v0.17 flipped `file_remove` to Unsafe by default: destructive fixes now require an
+# explicit opt-in, and a bundled ruleset may NOT promote one (only your own top-level
+# config can). To keep alint AUTO-removing verified macOS junk -- `.DS_Store`, which
+# `hygiene-no-macos-junk` content-gates on the "Bud1" magic, so it is unambiguous junk
+# safe to delete -- opt in here, where promotion is allowed. This is the demo's cleanup
+# payoff and the recommended pattern for a team that wants junk auto-removed.
+rules:
+  - id: hygiene-no-macos-junk
+    fix:
+      file_remove: { applicability: safe }

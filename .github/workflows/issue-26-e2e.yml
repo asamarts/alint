@@ -217,7 +217,11 @@ jobs:
             - id: pr-commits-are-conventional
               kind: git_commit_message
               pattern: '^(feat|fix|chore|docs|refactor|test|build|ci|perf|style|revert)(\(.+\))?!?: '
-              subject_max_length: 100
+              # 120 (not the conventional 72): alint's own history uses descriptive
+              # `type: summary -- detail` subjects, and the v0.17 auto-fix arc had a
+              # few audit-round subjects in the 100-120 band. Still well under a hard
+              # terminal wrap.
+              subject_max_length: 120
               since: ${ALINT_BASE_SHA}
               level: error
           YAML

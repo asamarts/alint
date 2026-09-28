@@ -17,7 +17,7 @@
 //! | rule kinds             | distinct `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml` |
 //! | families               | non-meta `## ` headings in `docs/rules.md`                 |
 //! | bundled rulesets       | `.yml` files under `crates/alint-dsl/rulesets/v1/`          |
-//! | auto-fix ops           | `pub struct *Fixer` declarations under `crates/alint-rules/src/fixers/` |
+//! | auto-fix ops           | `FixSpec::ALL_OP_NAMES` (the canonical fix-op list; one fixer may back several ops) |
 //! | output formats         | variants of `Format` enum in `crates/alint-output/src/lib.rs` |
 //! | subcommands            | variants of `Command` enum in `crates/alint/src/cli.rs`     |
 //!
@@ -134,29 +134,6 @@ fn count_yml_files_recursive(dir: &Path) -> usize {
                 .is_some_and(|e| e == "yml")
         {
             total += 1;
-        }
-    }
-    total
-}
-
-/// Count `pub struct ...Fixer` lines across every `.rs` under `dir`.
-fn count_fixer_structs(dir: &Path) -> usize {
-    let mut total = 0;
-    for entry in fs::read_dir(dir).unwrap_or_else(|e| panic!("read_dir {}: {e}", dir.display())) {
-        let entry = entry.unwrap();
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("rs") {
-            continue;
-        }
-        let src = fs::read_to_string(&path).unwrap();
-        for line in src.lines() {
-            let t = line.trim_start();
-            if t.starts_with("pub struct ") && t.contains("Fixer") {
-                // Match either `pub struct FooFixer;` (unit struct)
-                // or `pub struct FooFixer {` / `pub struct FooFixer(...);`
-                // — both indicate one distinct fixer type.
-                total += 1;
-            }
         }
     }
     total
@@ -312,15 +289,46 @@ fn readme_auto_fix_ops_count_matches_fixers() {
     let claimed =
         num_before(&readme, "auto-fix ops").expect("README must contain 'N auto-fix ops'");
 
-    let dir = workspace_root().join("crates/alint-rules/src/fixers");
-    let actual = count_fixer_structs(&dir);
+    // The canonical op list, not the `*Fixer` struct count: one fixer can serve
+    // several ops (`StructuredFixer` backs both `set_value` and `remove_value`),
+    // so the op SSOT is what the "auto-fix ops" claim must track -- consistent
+    // with the sibling gates counting the `Format` / `Command` enum SSOTs.
+    let actual = alint_core::FixSpec::ALL_OP_NAMES.len();
 
     assert_eq!(
-        claimed,
-        actual,
-        "README claims {claimed} auto-fix ops; {actual} `pub struct *Fixer` declarations in {}.\n\
-         Update README.md or check whether a new fixer was added without bumping the count.",
-        dir.display()
+        claimed, actual,
+        "README claims {claimed} auto-fix ops; FixSpec::ALL_OP_NAMES lists {actual}.\n\
+         Update README.md or check whether a new fix op was added without bumping the count.",
+    );
+
+    // The headline (line ~26, `N auto-fix ops`) and the feature-list prose (line
+    // ~60, `N ops covering ...`) are hand-edited separately, so a new op can bump
+    // one and not the other (audit F2). Pin the prose count too; `num_before`
+    // returns the FIRST match, so this distinct marker targets the line-60 phrase.
+    let prose = num_before(&readme, "ops covering")
+        .expect("README must contain the 'N ops covering ...' auto-fix prose");
+    assert_eq!(
+        prose, actual,
+        "README's 'N ops covering' auto-fix prose claims {prose}; \
+         FixSpec::ALL_OP_NAMES lists {actual}. Bump both the headline and the prose.",
+    );
+}
+
+#[test]
+fn fixing_md_op_count_matches_fixers() {
+    // AUDIT R2 (coverage gap): the README count is gated above, but the synced
+    // concepts page `docs/site/concepts/adoption/fixing.md` carries its OWN "N fix
+    // ops" claim (frontmatter description) on the docs-bundle path to alint.org and
+    // drifts independently -- a 27th op would silently desync it. Pin it too.
+    let path = workspace_root().join("docs/site/concepts/adoption/fixing.md");
+    let text = fs::read_to_string(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+    let claimed = num_before(&text, "fix ops")
+        .expect("fixing.md must state 'N fix ops' (the frontmatter description)");
+    let actual = alint_core::FixSpec::ALL_OP_NAMES.len();
+    assert_eq!(
+        claimed, actual,
+        "fixing.md claims {claimed} fix ops; FixSpec::ALL_OP_NAMES lists {actual}. \
+         Update docs/site/concepts/adoption/fixing.md.",
     );
 }
 

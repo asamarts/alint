@@ -1,0 +1,37 @@
+name: indent_style does not suppress an unfixable-first residual
+tags: [fix, indent_style, fixpoint, verify]
+
+# F1 regression (audit round-3): the reported first bad line is a pure-space
+# WIDTH-MISMATCH (3 spaces under width 4 -- UNFIXABLE); line 2 is a pure-tab lead
+# (fixable). Without the `apply` can_fix guard, the whole-file reindent would
+# convert line 2, return Applied, the engine would lock the finding's key, and the
+# fixpoint would DROP the residual -> `fix` exits 0 with the width-mismatch still
+# on disk. The guard declines the whole file (the reported finding is unfixable),
+# so the violation is SURFACED and the tree is byte-identical. Uses fix_unsafe
+# because the fixer is Unsafe by default.
+
+given:
+  tree:
+    a.py: "   a()\n\tb()\n"
+  config: |
+    version: 1
+    rules:
+      - id: ind
+        kind: indent_style
+        paths: "**/*.py"
+        style: spaces
+        width: 4
+        level: error
+        fix: { indent_style: {} }
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: ind, level: error, path: a.py}
+  - skipped: [ind]
+  - violations:
+      - {rule: ind, level: error, path: a.py}
+
+expect_tree:
+  a.py: "   a()\n\tb()\n"

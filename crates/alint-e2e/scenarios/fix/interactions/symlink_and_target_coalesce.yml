@@ -1,0 +1,42 @@
+name: a symlink and its target coalesce into one fix, not two
+tags: [fix, interactions, unix-only]
+
+# R-audit regression: with follow_links the walker indexes BOTH a symlink and
+# its in-tree target, so a content rule flags both. The compose buffer keys on
+# the resolved write target, so the two COALESCE: the first fixer writes the
+# target (through the link), and the second reads that buffered write and finds
+# nothing to do. Before the coalesce fix this reported two independent writes.
+#
+# Reporting (Phase-1 fixpoint): the coalesced write leaves BOTH paths clean, so
+# the alias is not a standing residual. `fix` reports the ONE fix that happened
+# (`no-ws` applied) and exits 0 -- the fixpoint's residual reconciliation drops
+# the alias's "already clean once composed" skip rather than reporting an
+# error-level skip for a file that is, in fact, clean (which would fail an
+# otherwise-clean tree). `check` afterward agrees: nothing remains.
+
+given:
+  tree:
+    real.rs: "fn a() {}   \n"
+    link.rs: { "$symlink": "real.rs" }
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix, check]
+
+expect:
+  # One fix applied; the coalesced alias is clean, not a phantom skip.
+  - applied: [no-ws]
+    skipped: []
+  # Clean afterward through both spellings -- the fix and check agree.
+  - violations: []
+
+expect_tree_mode: contains
+expect_tree:
+  real.rs: "fn a() {}\n"

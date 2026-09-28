@@ -2,6 +2,7 @@
 //! bytes suitable for stdout or a file.
 
 mod agent;
+mod diff;
 mod github;
 mod gitlab;
 mod human;
@@ -18,6 +19,7 @@ use std::str::FromStr;
 use alint_core::{FixReport, Report};
 
 pub use agent::write_agent;
+pub use diff::write_fix_diff;
 pub use github::write_github;
 pub use gitlab::write_gitlab;
 pub use human::{wrap_message, write_fix_human, write_human};

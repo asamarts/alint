@@ -28,7 +28,12 @@ given:
 when: [fix]
 
 expect:
+  # Pin the clean-outcome fields empty too: the set-based matcher only checks a
+  # status when the key is present, so a stray phantom skip/suggestion on these
+  # rules (a reconciliation regression) would slip past `applied`/`unfixable`.
   - applied: [has-readme]
+    skipped: []
+    suggested: []
     unfixable: [no-dbg]
 
 expect_tree:

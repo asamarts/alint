@@ -1,0 +1,40 @@
+name: a file reached through a symlinked directory coalesces into one fix
+tags: [fix, interactions, unix-only]
+
+# R-audit-3 regression: the compose buffer must key on the FULLY canonical path,
+# not just resolve a final-component symlink. A file reached through a symlinked
+# DIRECTORY (link/ -> real/) is the same underlying file as real/file.rs, so the
+# two COALESCE onto one write target. Before the fix this wrote twice.
+#
+# Reporting (Phase-1 fixpoint): the coalesced write leaves both spellings clean,
+# so `fix` reports the ONE fix (`no-ws` applied) and exits 0 -- the residual
+# reconciliation drops the alias's "already clean once composed" skip (an
+# error-level skip for a now-clean file would wrongly fail the run). `check`
+# afterward agrees.
+
+given:
+  tree:
+    real:
+      file.rs: "fn a() {}   \n"
+    link: { "$symlink": "real" }
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix, check]
+
+expect:
+  - applied: [no-ws]
+    skipped: []
+  - violations: []
+
+expect_tree_mode: contains
+expect_tree:
+  real:
+    file.rs: "fn a() {}\n"

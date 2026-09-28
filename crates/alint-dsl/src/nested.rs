@@ -131,7 +131,8 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     // same `{{env.X}}` interpolation as the top-level config and
     // drop-ins. A YAML/typed error keeps the "parsing nested config"
     // context; an interpolation error already carries the path.
-    let config: RawConfig = match crate::loader::parse_config_interpolated(&contents, abs_path) {
+    let mut config: RawConfig = match crate::loader::parse_config_interpolated(&contents, abs_path)
+    {
         Ok(c) => c,
         Err(Error::Yaml(e)) => {
             return Err(Error::Other(format!(
@@ -177,6 +178,13 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
              trusted, root-only input; declare it in the top-level config"
         )));
     }
+    if !config.trusted_extends.is_empty() {
+        return Err(Error::Other(format!(
+            "nested config {source} declares `trusted_extends:` - it is a trusted, \
+             root-only grant (a subtree config must not allowlist a remote ruleset's \
+             content fixers); declare it in the top-level config"
+        )));
+    }
     if !config.allow_out_of_root.is_confined() {
         return Err(Error::Other(format!(
             "nested config {source} declares `allow_out_of_root:` - the out-of-root \
@@ -203,6 +211,23 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     // are refused wholesale just above, and `finalize` re-checks the
     // expanded rule set as a backstop.
     crate::reject_command_rules_in(&config.rules, &source)?;
+    // ...and no *spawning fix op* (`git_untrack`, `git rm --cached`) either: a
+    // subtree `.alint.yml` is as untrusted as an `extends:`'d ruleset, so a
+    // spawning fixer it declares would shell out on `alint fix`. (Templates are
+    // already refused wholesale above, so only `rules:` needs this gate here.)
+    crate::reject_spawning_fix_ops_in(&config.rules, &source)?;
+    // ...and no inherited rule may promote a destructive fix to auto-apply.
+    crate::reject_fix_promotion_in(&config.rules, &source)?;
+    // ...and every CONTENT-INJECTING fixer is demoted to a suggestion, EXACTLY as
+    // for an `extends:`'d remote (loader.rs). Without this a subtree `.alint.yml`
+    // -- untrusted, "anyone who can open a PR" -- could auto-apply a content fixer
+    // on a bare `alint fix`; and because a fix op's own explicit `path` is NOT
+    // re-scoped to the subtree (only `paths`/`select`/`primary` are), a nested
+    // `file_create` could write a repo-ROOT file (e.g. a `.github/workflows/` CI
+    // job -> code execution once pushed). Demoting to a suggestion closes the
+    // SILENT auto-apply, matching this module's stated "as untrusted as an
+    // `extends:`'d ruleset" trust model (audit: nested-config HIGH).
+    crate::demote_content_fixers_in(&mut config.rules);
 
     // Glob patterns are platform-agnostic (always `/`); on
     // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd

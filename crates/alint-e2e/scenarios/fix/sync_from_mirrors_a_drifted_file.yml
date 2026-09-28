@@ -1,0 +1,43 @@
+name: sync_from overwrites a drifted target with its canonical source
+# cross_file(relation: identical) fires when a target is not byte-identical to the
+# canonical source -- the workspace LICENSE-mirroring case: each crate's LICENSE
+# must match the root one. sync_from is Unsafe (a whole-file overwrite can discard
+# uncommitted target content), so `fix_unsafe` raises the threshold to apply it:
+# the drifted copy is overwritten with the source's bytes -> byte-identical -> the
+# tree converges. The `crates/*/LICENSE` target glob matches only the crate copy,
+# never the root source.
+tags: [fix, cross_file, sync_from, applicability]
+
+given:
+  tree:
+    LICENSE: "MIT License\n(c) 2026 acme\n"
+    crates:
+      widget:
+        LICENSE: "OLD License\nstale text\n"
+  config: |
+    version: 1
+    rules:
+      - id: license-mirror
+        kind: cross_file
+        relation: identical
+        source:
+          file: LICENSE
+        targets:
+          files: "crates/*/LICENSE"
+        level: error
+        fix:
+          sync_from: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: license-mirror, level: error, path: crates/widget/LICENSE}
+  - applied: [license-mirror]
+  - violations: []
+
+expect_tree:
+  LICENSE: "MIT License\n(c) 2026 acme\n"
+  crates:
+    widget:
+      LICENSE: "MIT License\n(c) 2026 acme\n"

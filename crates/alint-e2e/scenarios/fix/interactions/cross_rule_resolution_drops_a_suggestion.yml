@@ -1,0 +1,50 @@
+name: a below-threshold suggestion resolved by another rule is not a phantom
+tags: [fix, interactions, file_content_forbidden, replace, file_remove, fixpoint]
+
+# Companion to cross_rule_resolution_drops_phantom (which covers an Unfixable):
+# the residual reconciliation must drop a resolved SUGGESTED item too, not just
+# Unfixable/Skipped. `a-suggest`'s `replace` is Unsafe, so under a bare `fix` it
+# is withheld as a Suggestion (below the Safe threshold). `b-drop` then removes
+# x.txt (a Safe-promoted `file_remove`), which resolves a-suggest's violation as
+# a side effect. On the converged pass a-suggest no longer fires, so its
+# suggestion must be reconciled away -- else `has_unresolved` counts the standing
+# Suggestion and `fix` exits 1 on a clean tree (the BUG-E false-positive class,
+# for a Suggestion). Gates the `Suggested` branch of the reconciliation (which
+# falls through to the `final_keys` check, same as Unfixable/Skipped).
+
+given:
+  tree:
+    x.txt: "TODO\n"
+  config: |
+    version: 1
+    rules:
+      - id: a-suggest
+        kind: file_content_forbidden
+        paths: "*.txt"
+        pattern: "TODO"
+        level: error
+        fix:
+          replace:
+            replacement: "DONE"
+      - id: b-drop
+        kind: file_absent
+        paths: "x.txt"
+        level: error
+        fix:
+          file_remove:
+            applicability: safe
+
+when: [fix, check]
+
+expect:
+  # Only the delete applied; a-suggest's suggestion was reconciled away (not a
+  # phantom). All clean-outcome fields pinned empty.
+  - applied: [b-drop]
+    skipped: []
+    suggested: []
+    unfixable: []
+  # x.txt is gone, so neither rule fires -- fix and check agree (both exit 0).
+  - violations: []
+
+expect_tree_mode: contains
+expect_tree: {}

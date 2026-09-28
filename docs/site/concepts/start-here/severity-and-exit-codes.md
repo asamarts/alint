@@ -51,6 +51,8 @@ Every rule carries a `level`, and every `alint check` returns an exit code. The 
 - **`2`** a bad config or bad usage (an unknown field, a malformed `.alint.yml`, an invalid flag).
 - **`3`** an internal error (a bug). Distinct from `2` so CI can tell "your config is wrong" apart from "alint fell over."
 
+`alint fix` uses the same codes, with one addition to `2`. It returns `0` when the fix pass completed, `1` when a fix was attempted but errored (for example a read-only target) or an error-level violation was left unfixed, and `2` when the fix could not *complete* because it did not converge: a config whose fixes keep re-triggering, which `fix` re-runs to a fixed point and caps after a bounded number of passes. That is still a config problem (so it shares code `2`), but unlike a load-time config error it may have applied some fixes before stopping, and `fix --format json` reports it structurally as `summary.non_convergent`.
+
 ## In practice
 
 A CI step that blocks on errors is just `alint check` (a non-zero exit fails the job). To also block on warnings during a hardening push:

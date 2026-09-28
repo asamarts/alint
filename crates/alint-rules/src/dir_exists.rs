@@ -1,7 +1,12 @@
 //! `dir_exists` — at least one directory matching `paths` must exist.
 
-use alint_core::{Context, Error, Level, PathsSpec, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Applicability, Context, Error, FixSpec, Fixer, Level, PathsSpec, Result, Rule, RuleSpec, Scope,
+    Violation,
+};
 use serde::Deserialize;
+
+use crate::fixers::DirCreateFixer;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -32,10 +37,17 @@ pub struct DirExistsRule {
     /// tracked set is empty, so the rule reports the "missing"
     /// violation as if no matching directory existed.
     git_tracked_only: bool,
+    /// The optional `dir_create` fix (creates the missing literal directory).
+    fixer: Option<DirCreateFixer>,
 }
 
 impl Rule for DirExistsRule {
     alint_core::rule_common_impl!();
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
+    }
+
     fn git_tracked_mode(&self) -> alint_core::GitTrackedMode {
         if self.git_tracked_only {
             alint_core::GitTrackedMode::DirAware
@@ -106,6 +118,55 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         ));
     };
     let opts: Options = spec.deserialize_options()?;
+    // The only supported fix op is `dir_create`, which creates the required
+    // directory -- so `paths` must name ONE literal directory (a glob or multiple
+    // patterns is ambiguous: which directory would we create?).
+    let fixer = match &spec.fix {
+        None => None,
+        Some(FixSpec::DirCreate { dir_create }) => {
+            let dir = single_literal_dir(paths).ok_or_else(|| {
+                Error::rule_config(
+                    &spec.id,
+                    "dir_create requires `paths` to be a single literal directory \
+                     (no glob metacharacters, no `..`)",
+                )
+            })?;
+            // Reject combos an EMPTY directory can never satisfy, else `check` tags
+            // the violation fixable and `fix` reports "created directory" but the
+            // rule never clears -- a silent non-convergence (audit H1/H2).
+            if opts.git_tracked_only {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    "dir_create cannot satisfy `git_tracked_only`: git does not track an \
+                     empty directory, so a created directory has no tracked content. Commit \
+                     a `.gitkeep` (via a `file_create` fix) instead.",
+                ));
+            }
+            if opts.root_only && crate::is_nested(&dir) {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    format!(
+                        "dir_create with `root_only` requires a root-level (single-component) \
+                         directory; {} is nested and could never satisfy the rule",
+                        dir.display()
+                    ),
+                ));
+            }
+            Some(DirCreateFixer::new(
+                dir,
+                dir_create.applicability.unwrap_or(Applicability::Safe),
+            ))
+        }
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with dir_exists (only `dir_create`)",
+                    other.op_name()
+                ),
+            ));
+        }
+    };
     Ok(Box::new(DirExistsRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -115,7 +176,27 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         patterns: patterns_of(paths),
         root_only: opts.root_only,
         git_tracked_only: opts.git_tracked_only,
+        fixer,
     }))
+}
+
+/// The single, literal directory `paths` names, or `None` if it is a glob,
+/// multiple patterns, or contains a `..` component -- any of which makes
+/// "the directory to create" ambiguous or out-of-tree, so `dir_create` rejects it.
+fn single_literal_dir(paths: &PathsSpec) -> Option<std::path::PathBuf> {
+    let PathsSpec::Single(s) = paths else {
+        return None;
+    };
+    if s.contains(['*', '?', '[', ']', '{', '}']) {
+        return None;
+    }
+    let p = std::path::PathBuf::from(s);
+    if p.components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return None;
+    }
+    Some(p)
 }
 
 fn patterns_of(spec: &PathsSpec) -> Vec<String> {
@@ -277,6 +358,87 @@ scope_filter:
                 "id: t\nkind: dir_exists\npaths: \"docs\"\nlevel: error\nbogus: 1\n",
             ))
             .is_err()
+        );
+    }
+
+    #[test]
+    fn build_accepts_dir_create_for_a_single_literal_dir() {
+        let rule = build(&spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"docs/adr\"\nlevel: error\nfix:\n  dir_create: {}\n",
+        ))
+        .expect("dir_create builds for a literal directory");
+        assert!(rule.fixer().is_some(), "the dir_create fixer attaches");
+    }
+
+    #[test]
+    fn build_rejects_dir_create_on_a_glob_or_multiple_paths() {
+        // A glob or multiple patterns is ambiguous: which directory would we create?
+        for paths in [
+            "\"**/generated\"",
+            "\"gen*\"",
+            "[\"a\", \"b\"]",
+            "\"../up\"",
+        ] {
+            let spec = spec_yaml(&format!(
+                "id: t\nkind: dir_exists\npaths: {paths}\nlevel: error\nfix:\n  dir_create: {{}}\n",
+            ));
+            let err = build(&spec).unwrap_err().to_string();
+            assert!(
+                err.contains("single literal"),
+                "{paths} must be rejected: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_rejects_an_incompatible_fix_op() {
+        // Every fix op that is NOT `dir_create` must be rejected here, by name, so a
+        // typo or a mis-hosted op (e.g. `relocate`, whose only valid host is
+        // `file_absent`) surfaces a config error instead of silently disabling the
+        // fix path (audit F3).
+        for op in ["file_remove: {}", "relocate: {}"] {
+            let spec = spec_yaml(&format!(
+                "id: t\nkind: dir_exists\npaths: \"docs\"\nlevel: error\nfix:\n  {op}\n",
+            ));
+            let err = build(&spec).unwrap_err().to_string();
+            let name = op.split(':').next().unwrap();
+            assert!(err.contains(name), "{op}: {err}");
+            assert!(
+                err.contains("not compatible with dir_exists"),
+                "{op}: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_rejects_dir_create_with_git_tracked_only() {
+        // Audit H1: git never tracks an empty directory, so `git_tracked_only` +
+        // dir_create can never converge -- reject at load, not silently.
+        let spec = spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"vendored\"\ngit_tracked_only: true\n\
+             level: error\nfix:\n  dir_create: {}\n",
+        );
+        let err = build(&spec).unwrap_err().to_string();
+        assert!(err.contains("git_tracked_only"), "{err}");
+    }
+
+    #[test]
+    fn build_rejects_dir_create_with_root_only_and_a_nested_path() {
+        // Audit H2: a nested directory can never satisfy `root_only`.
+        let nested = spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"a/docs\"\nroot_only: true\n\
+             level: error\nfix:\n  dir_create: {}\n",
+        );
+        let err = build(&nested).unwrap_err().to_string();
+        assert!(err.contains("root_only") && err.contains("nested"), "{err}");
+        // ...but root_only + a single-component directory is fine.
+        let ok = spec_yaml(
+            "id: t\nkind: dir_exists\npaths: \"docs\"\nroot_only: true\n\
+             level: error\nfix:\n  dir_create: {}\n",
+        );
+        assert!(
+            build(&ok).is_ok(),
+            "root_only + a single-component dir_create must build"
         );
     }
 }

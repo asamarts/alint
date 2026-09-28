@@ -1,0 +1,51 @@
+name: replace on a wildcard json_path_matches rewrites only the violating nodes
+tags: [fix, json_path_matches, replace, json, safety]
+
+# Follow-up-1 audit MED fix: a `*_path_matches` rule with a WILDCARD `path:`
+# ($.deps.*) matches several values; it fires because ONE (`bad`) does not match
+# `^v`. The `replace` fix must (1) actually APPLY (the re-verify now checks that
+# ALL matched nodes match `matches:`, not `at_most_one` -- which used to demote
+# every wildcard) and (2) rewrite ONLY the violating node, leaving the already-
+# compliant `ok` untouched (rewriting it would clobber `v9` -> `vv9`). Promoted to
+# `safe` so a bare `fix` applies.
+
+given:
+  tree:
+    app.json: |
+      {
+        "deps": {
+          "ok": "v9",
+          "bad": "2.0"
+        }
+      }
+  config: |
+    version: 1
+    rules:
+      - id: v-pins
+        kind: json_path_matches
+        paths: "**/*.json"
+        path: "$.deps.*"
+        matches: "^v"
+        level: error
+        fix:
+          replace:
+            pattern: "^"
+            replacement: "v"
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: v-pins, level: error, path: app.json}
+  - applied: [v-pins]
+  - violations: []
+
+expect_tree:
+  app.json: |
+    {
+      "deps": {
+        "ok": "v9",
+        "bad": "v2.0"
+      }
+    }

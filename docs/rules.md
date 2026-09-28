@@ -109,7 +109,9 @@ File contents must NOT match a regex.
 
 The first N lines must match a regex (line-oriented). For a byte-level prefix check, prefer `file_starts_with`.
 
-Fix: `file_prepend` — inject declared content at the top (preserves UTF-8 BOM).
+Fix: `file_prepend` — inject declared content at the top, at BOF (after any UTF-8 BOM, which it preserves). Blind to a shebang / XML declaration (it would push either off line 1) -- use `insert_header` when that matters.
+
+Fix: `insert_header` — the position-aware alternative to `file_prepend` (same `content` / `content_from`): inserts the header AFTER a leading UTF-8 BOM, shebang (`#!...`), or XML declaration (`<?xml ...?>`), so it never displaces a line that must stay first (a kernel reads a shebang only on line 1; an XML parser needs the declaration first). For a file with none of those prefixes it inserts at BOF, exactly like `file_prepend`. **`Safe` by default** (the insertion point is the one canonical header spot and the content is inert -- at least as safe as the `Safe` `file_prepend` it refines, and safer on a file with a shebang / XML declaration); demoted to a suggestion from an untrusted remote `extends:` (the header bytes are ruleset-authored). Its idempotency guard anchors on both the insertion point and the file top, so a repeated fix is a guaranteed no-op even when the header content itself begins with a `#!` / `<?xml` prefix. Because the header can land below line 1, the rule's `pattern` must be able to match below the first line: use an unanchored pattern (or `(?m)`); a `^`-anchored pattern that only matches line 1 cannot be satisfied once the header sits under a shebang.
 
 ### `file_starts_with` / `file_ends_with`
 
@@ -290,7 +292,7 @@ Cap line length in characters (not bytes — code points). Optional `tab_width` 
 
 Every non-blank line indents with the configured `style` (`tabs` or `spaces`). When `style: spaces`, optional `width` enforces a multiple.
 
-Check-only: tab-width-aware reindentation is language-specific. Pair with your editor's "reindent on save" for remediation.
+Fix: `indent_style` — reindents tab-indented lines to spaces, for a `style: spaces` + `width: N` rule only (the `width` is the spaces-per-tab). It converts a PURE-TAB leading run to `N` spaces per tab (1 tab → N, 2 tabs → 2N), preserving the rest of the line, its terminator, and the trailing-newline state; it declines the genuinely ambiguous cases — a mixed tab+space lead, or a pure-space run that isn't a multiple of `width` — so `check` does not advertise those as auto-fixable. A `tabs`-style or width-less rule with a `fix` is rejected at load (`spaces → tabs` has no spaces-per-tab). **`Unsafe` by default** — a mis-aimed reindent hard-breaks an indent-significant file (a `Makefile` recipe requires a literal tab), so a bare `alint fix` suggests it and `--unsafe-fixes` (or a per-rule `applicability: safe`) applies it; it is also demoted to a suggestion from an untrusted remote `extends:`. With no fix declared, violations are unfixable; pair with your editor's "reindent on save".
 
 ### `max_consecutive_blank_lines`
 
@@ -636,6 +638,12 @@ Assemble the repo's *file → file* reference graph and assert a global structur
 
 The lines between a `start` / `end` marker pair must stay sorted (and, with `unique: true`, free of duplicates) under `comparator` (`lexical` / `lexical-ci` / `numeric`). **Both markers are optional**: omit `end` to sort from `start` to EOF, omit both to sort the whole file (the markerless "this file is one sorted list" form — dictionaries, allow-lists, a fully-sorted `CODEOWNERS`). The generic form of per-project keep-sorted scripts (protobuf `failure_lists`, sorted `.gitignore` / `CODEOWNERS` / dependency lists). Per-file: with markers, a file with no `start` marker is silently fine; markers match the trimmed line; blank lines inside a block are ignored; one violation per out-of-order block; a fully-delimited block that never sees its `end` is reported `unclosed` (a block with an absent `end` runs to EOF by design). An optional `select:` regex restricts the sortable entries to lines matching it — other lines inside the block (comments, group headers) pass through untouched (the sectioned / keep-sorted-subset shape).
 
+Optional `require:` — a list of exact lines the block must CONTAIN (in addition to being sorted), for the "a managed sorted list must have these entries" shape (a `CODEOWNERS`, an allow-list). Currently markerless-only (omit `start`/`end`; a marker makes the insert target ambiguous). A missing one is a separate, independently-fixable finding. Presence is exact-string (trimmed), independent of `comparator` — under `lexical-ci`, requiring `bravo` is not satisfied by an existing `Bravo` (the case-variant is inserted). A required line that could never round-trip to an entry is refused at load: one that carries an embedded line break, or (with `select:` set) one that does not itself match `select:`.
+
+Fix: `sort` — reorder each block's entries under the rule's `comparator` (dropping duplicates when `unique`), reusing the rule's own `start` / `end` / `comparator` / `unique` / `select` so the fix reorders exactly what the check flags; markers, blank lines, and `select`-excluded lines stay in place, and every line keeps its terminator (LF vs CRLF) and the file its trailing-newline state. `Safe` by default (a keep-sorted block is order-independent). The `unclosed` finding is not sort-fixable — `sort` cannot invent a missing `end` marker — so it is reported but not advertised as auto-fixable.
+
+Fix: `insert_line` — splice a missing `require:` line at its SORTED position (using the `comparator`), preserving every other line's terminator and the file's trailing-newline state. The differentiator over `file_append` (which only appends at EOF), for order-sensitive lists. **`Unsafe` by default**: it adds ruleset-authored content at a COMPUTED position, and position is load-bearing in exactly the order-sensitive formats it targets (a `.gitignore` negation only works AFTER the pattern it re-includes), so a mis-placed insert can silently change file meaning. A bare `fix` therefore SUGGESTS it; `--unsafe-fixes`, or a per-rule `applicability: safe` for an order-tolerant list such as `CODEOWNERS`, applies it. Also demoted to a suggestion from an untrusted remote `extends:` (the `require:` lines are ruleset-authored). It fixes only the missing-required-line findings — an out-of-order entry is `sort`'s job, so pair two rules (`sort` + `insert_line`) for a fully-managed list. With no fix declared, violations are unfixable.
+
 ### `for_each_match`
 
 **Categories:** Cross-file
@@ -765,6 +773,11 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 - `file_create: {content, path?, create_parents?}`
 - `file_remove: {}`
 - `file_rename: {}` (target derived from rule config)
+- `dir_create: {}`
+- `relocate: {}` (moves the file to the repo root)
+- `chmod: {}` (direction from the rule)
+- `git_untrack: {}` (`git rm --cached`; spawning)
+- `command: {run, timeout?}` (runs a user command; spawning)
 
 **Content-editing** (skipped on files over `fix_size_limit`; default 1 MiB, `null` disables the cap):
 
@@ -777,6 +790,15 @@ Every `fix:` block uses one of these ops. See [ARCHITECTURE.md](design/ARCHITECT
 - `file_strip_zero_width: {}`
 - `file_strip_bom: {}`
 - `file_collapse_blank_lines: {}` (max read from parent rule)
+- `replace: {replacement}` (pattern from parent rule) — located, one splice per match
+- `set_value: {}` (value from the rule's `equals:`) — for the `*_path_equals` kinds
+- `remove_value: {}` (target from parent rule) — for the `*_path_absent` kinds
+- `sync_from: {}` (source + relation from parent rule) — for `cross_file`
+- `create_and_register: {content?, content_from?}` — for `cross_file` `relation: registered`
+- `sort: {}` (markers / comparator / `unique` / `select` from parent rule) — for `ordered_block`
+- `indent_style: {}` (style / width from parent rule) — for `indent_style` (`style: spaces` + `width` only)
+- `insert_line: {}` (require lines / comparator from parent rule) — for a markerless `ordered_block` with `require:`
+- `insert_header: {content?, content_from?}` — for `file_header`; inserts AFTER a leading BOM / shebang / `<?xml?>` (position-aware `file_prepend`)
 
 `fix_size_limit` is a top-level config field:
 

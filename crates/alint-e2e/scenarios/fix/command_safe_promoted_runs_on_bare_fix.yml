@@ -1,0 +1,30 @@
+name: a Safe-promoted command fix runs on a bare alint fix
+# Tier decision (asamarts): the command fix is Unsafe by default but
+# Safe-PROMOTABLE in the user's OWN top-level config. With `applicability: safe`,
+# a BARE `alint fix` (Safe threshold) runs the command. Unix-only (/bin/sh).
+tags: [fix, command, applicability, unix-only]
+
+given:
+  tree:
+    src:
+      a.js: "const x = 1\n"
+  config: |
+    version: 1
+    rules:
+      - id: js
+        kind: command
+        paths: "src/**/*.js"
+        command: ["sh", "-c", "grep -q FIXED \"$1\"", "_", "{path}"]
+        level: error
+        fix:
+          command:
+            run: ["sh", "-c", "printf FIXED > \"$1\"", "_", "{path}"]
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: js, level: error, path: src/a.js}
+  - applied: [js]
+  - violations: []

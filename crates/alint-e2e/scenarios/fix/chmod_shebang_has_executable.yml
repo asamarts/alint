@@ -1,0 +1,27 @@
+name: chmod +x fixes a shebang script that lacks the executable bit
+# Unix-only: the rule (and the chmod fix) consult the Unix executable bit, absent
+# on Windows, where the rule is a no-op. Tree-spec files are materialized without
+# +x, so the shebang script trips the rule until the fix chmods it.
+tags: [fix, shebang_has_executable, chmod, unix_metadata, unix-only]
+
+given:
+  tree:
+    scripts:
+      hello.sh: "#!/bin/sh\necho hi\n"
+  config: |
+    version: 1
+    rules:
+      - id: shebang-needs-x
+        kind: shebang_has_executable
+        paths: "scripts/**"
+        level: error
+        fix:
+          chmod: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: shebang-needs-x, level: error, path: scripts/hello.sh}
+  - applied: [shebang-needs-x]
+  - violations: []

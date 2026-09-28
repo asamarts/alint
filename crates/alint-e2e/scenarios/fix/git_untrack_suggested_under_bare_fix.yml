@@ -1,0 +1,33 @@
+name: git_untrack is a suggestion (requires --unsafe-fixes) under a bare fix
+# git_untrack is Unsafe, so a bare `alint fix` must SUGGEST it -- consistent with
+# its sibling file_remove -- not report it as a "not applicable" skip. It is an
+# editless spawning fixer (`git rm --cached` has no worktree edit / fix_edit), but
+# an editless withheld fix is still a genuine suggestion (F1 audit). The `[check,
+# fix]` shape asserts the bare fix step SUGGESTS (does not untrack); the file stays
+# tracked.
+tags: [fix, file_absent, git_untrack, applicability]
+
+given:
+  tree:
+    build:
+      out.o: "OBJ\n"
+  git:
+    add: [build/out.o]
+    commit: true
+  config: |
+    version: 1
+    rules:
+      - id: no-tracked-build
+        kind: file_absent
+        paths: "build/**"
+        git_tracked_only: true
+        level: error
+        fix:
+          git_untrack: {}
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: no-tracked-build, level: error, path: build/out.o}
+  - suggested: [no-tracked-build]

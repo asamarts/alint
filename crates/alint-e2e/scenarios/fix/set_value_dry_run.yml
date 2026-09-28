@@ -1,0 +1,39 @@
+name: fix --dry-run on a located set_value reports would-apply but writes nothing
+tags: [fix, fix_dry_run, set_value, json]
+
+# Arc-wide audit GAP: the FixDryRun step was defined + validated but UNUSED by every
+# one of the 70 fix scenarios, so the engine's dry-run path had no corpus coverage
+# (only a proptest purity check + one whole-file CLI case). Here a located set_value
+# dry-run reports the would-apply fix, leaves the tree byte-identical, and the
+# following check still flags the (unwritten) violation.
+
+given:
+  tree:
+    app.json: |
+      {
+        "port": 8080
+      }
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: json_path_equals
+        paths: "**/*.json"
+        path: "$.port"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+
+when: [fix_dry_run, check]
+
+expect:
+  - applied: [port]
+  - violations:
+      - {rule: port, level: error, path: app.json}
+
+expect_tree:
+  app.json: |
+    {
+      "port": 8080
+    }

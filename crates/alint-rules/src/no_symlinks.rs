@@ -82,7 +82,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         .as_ref()
         .ok_or_else(|| Error::rule_config(&spec.id, "no_symlinks requires a `paths` field"))?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileRemove { .. }) => Some(FileRemoveFixer),
+        Some(FixSpec::FileRemove { file_remove }) => Some(FileRemoveFixer::new(
+            file_remove
+                .applicability
+                .unwrap_or(alint_core::Applicability::Unsafe),
+        )),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

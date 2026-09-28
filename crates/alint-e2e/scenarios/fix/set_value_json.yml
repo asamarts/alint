@@ -1,0 +1,52 @@
+name: set_value rewrites a JSON value in place, preserving JSONC comments + trailing commas
+tags: [fix, json_path_equals, set_value, json]
+
+# The sixth structured format, via jsonc-parser's spanned AST. Unlike the
+# whole-document TOML rewrite, JSON edits are a SPAN-SPLICE: the resolver returns
+# the byte range of just the `port` value, so the fixer overwrites `8080` with
+# `9090` and touches nothing else. Everything around it survives verbatim -- the
+# `//` line comment, the `/* */` block comment, the sibling `host`, AND the
+# trailing comma after the value (all JSONC, which both the serde_json check side
+# via strip_jsonc and the jsonc-parser fix side accept). Like TOML and unlike the
+# string-leaf formats, JSON is TYPED: a NUMERIC `equals` is fixable and renders
+# bare (no quotes). Safe (a scalar replacing a scalar).
+
+given:
+  tree:
+    app.json: |
+      {
+        // service config
+        "server": {
+          "host": "localhost",
+          "port": 8080 /* dev port */,
+        }
+      }
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: json_path_equals
+        paths: "**/*.json"
+        path: "$['server']['port']"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: app.json}
+  - applied: [port]
+  - violations: []
+
+expect_tree:
+  app.json: |
+    {
+      // service config
+      "server": {
+        "host": "localhost",
+        "port": 9090 /* dev port */,
+      }
+    }

@@ -1,0 +1,33 @@
+name: a second fix pass changes nothing (idempotence / Safe convergence)
+tags: [fix, no_trailing_whitespace, file_trim_trailing_whitespace]
+
+# The `[fix, fix]` convergence shape (auto-fix plan rung 8, Case A): the first
+# pass strips the trailing whitespace; the second pass finds a clean tree and
+# applies NOTHING (`applied: []`, no residual `skipped:`). This is the direct
+# no-op form of the Safe convergence law - a strictly stronger idempotence
+# proof than the `[check, fix, check]` "violation resolved" shape - and it is
+# the corpus's only exerciser of the coverage gate's Case A branch.
+
+given:
+  tree:
+    src:
+      bad.rs: "fn a() {}   \nfn b() {}\t\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "src/**/*.rs"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix, fix]
+
+expect:
+  - applied: [no-ws]
+  - applied: []
+
+expect_tree:
+  src:
+    bad.rs: "fn a() {}\nfn b() {}\n"

@@ -1,0 +1,44 @@
+name: set_value rewrites an INI section value, preserving section + siblings
+tags: [fix, ini_path_equals, set_value, ini]
+
+# The fourth structured format (hand-rolled re-scan; the INI parser keeps no
+# spans). `set_value` overwrites only the value token at `$['server']['port']`,
+# so the global `root` key, the `[server]` header, the blank line, and the
+# sibling `host` all survive. Safe (a scalar replacing an existing scalar), so a
+# bare `fix` applies.
+
+given:
+  tree:
+    app.ini: |
+      root = true
+
+      [server]
+      port = 8080
+      host = localhost
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: ini_path_equals
+        paths: "**/*.ini"
+        path: "$['server']['port']"
+        equals: "9090"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: app.ini}
+  - applied: [port]
+  - violations: []
+
+expect_tree:
+  app.ini: |
+    root = true
+
+    [server]
+    port = 9090
+    host = localhost

@@ -1,0 +1,42 @@
+name: a replace whose result re-forms the pattern converges over passes
+tags: [fix, interactions, file_content_forbidden, replace, fixpoint]
+
+# Phase-1 fixpoint regression (docs/design/v0.17/fixpoint.md 5). `replace` clears
+# matches left-to-right, but its replacement can re-form the forbidden pattern
+# across a splice boundary: forbidding `--` and replacing with `-`, the file
+# `---` becomes `--` after one pass (the leftmost `--` -> `-`, leaving `-` + `-`).
+# `replace.rs` deliberately does NOT catch that in a single pass and defers it to
+# the fixpoint. The fixpoint MUST therefore keep going: `---` -> `--` -> `-`, then
+# `-` has no match and the loop converges on a CLEAN file. A premature "fix this
+# file at most once" cutoff would stop at `--`, report success (exit 0), and leave
+# the forbidden pattern standing -- a silent wrong success this gate forbids.
+#
+# `fix_unsafe` because `replace` is Unsafe by default (a regex rewrite is not
+# behaviour-preserving), so this is the `--unsafe-fixes` path.
+
+given:
+  tree:
+    x.txt: "---\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-double-dash
+        kind: file_content_forbidden
+        paths: "*.txt"
+        pattern: "--"
+        level: error
+        fix:
+          replace:
+            replacement: "-"
+
+when: [fix_unsafe, check]
+
+expect:
+  # One `fix --unsafe-fixes` runs the whole `--- -> -- -> -` cascade to a fixed
+  # point across internal passes; the applied fix is reported once.
+  - applied: [no-double-dash]
+  # And it actually converged: no forbidden `--` remains, so `check` is clean.
+  - violations: []
+
+expect_tree:
+  x.txt: "-\n"

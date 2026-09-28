@@ -1,0 +1,32 @@
+name: a command fix runs the user's fix command
+# The `command` fix op runs a user-supplied `run:` argv (Unsafe + spawning, so the
+# `fix_unsafe` step). Here the check command fails when a file lacks a FIXED marker
+# and the fix command writes it; this particular command happens to converge (the
+# fix resolves the check), though the `command` fix is convergence-EXEMPT in
+# general -- alint cannot guarantee an arbitrary command's idempotence
+# (auto-fix.md 5.6). Unix-only: the fixtures shell out to /bin/sh.
+tags: [fix, command, applicability, unix-only]
+
+given:
+  tree:
+    src:
+      messy.js: "const x = 1\n"
+  config: |
+    version: 1
+    rules:
+      - id: js-needs-fixed-marker
+        kind: command
+        paths: "src/**/*.js"
+        command: ["sh", "-c", "grep -q FIXED \"$1\"", "_", "{path}"]
+        level: error
+        fix:
+          command:
+            run: ["sh", "-c", "printf FIXED > \"$1\"", "_", "{path}"]
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: js-needs-fixed-marker, level: error, path: src/messy.js}
+  - applied: [js-needs-fixed-marker]
+  - violations: []

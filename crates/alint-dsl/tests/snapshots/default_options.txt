@@ -25,6 +25,7 @@ CommandRule {
         "shellcheck",
     ],
     timeout: 30s,
+    fixer: None,
 }
 
 === kind: command_idempotent | id: fmt-is-idempotent ===
@@ -70,6 +71,7 @@ FileContentForbiddenRule {
     pattern: Regex(
         "unimplemented!",
     ),
+    fixer: None,
 }
 
 === kind: content_matches | id: content-matches-alias ===
@@ -115,6 +117,8 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
+    fixer: None,
 }
 
 === kind: cross_file | id: hl-groups-doc-matches-code ===
@@ -150,6 +154,8 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
+    fixer: None,
 }
 
 === kind: cross_file | id: license-copies-have-identical-content ===
@@ -175,6 +181,8 @@ CrossFileRule {
     normalize: [],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
+    fixer: None,
 }
 
 === kind: cross_file_value_equals | id: workspace-versions-coherent ===
@@ -209,6 +217,8 @@ CrossFileRule {
     ],
     allow_missing: false,
     skip_header_lines: 0,
+    register_as: None,
+    fixer: None,
 }
 
 === kind: dir_absent | id: no-target ===
@@ -254,6 +264,7 @@ DirExistsRule {
     ],
     root_only: false,
     git_tracked_only: false,
+    fixer: None,
 }
 
 === kind: dir_only_contains | id: src-only-rs ===
@@ -301,6 +312,7 @@ StructuredPathRule {
     path_src: "$.DEBUG",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: dotenv_path_equals | id: dotenv-node-env-production ===
@@ -334,6 +346,7 @@ StructuredPathRule {
         String("production"),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: dotenv_path_matches | id: dotenv-database-url-postgres ===
@@ -369,6 +382,7 @@ StructuredPathRule {
         ),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: every_matching_has | id: every-pkg-has-src ===
@@ -406,6 +420,7 @@ ExecutableBitRule {
     message: None,
     scope: Scope { ... },
     require_exec: true,
+    fixer: None,
 }
 
 === kind: executable_has_shebang | id: exec-needs-shebang ===
@@ -432,7 +447,9 @@ FileAbsentRule {
     git_tracked_only: false,
     content_prefixes: [],
     fixer: Some(
-        FileRemoveFixer,
+        FileRemoveFixer {
+            applicability: Unsafe,
+        },
     ),
 }
 
@@ -447,6 +464,7 @@ FileContentForbiddenRule {
     pattern: Regex(
         "\\bTODO\\b",
     ),
+    fixer: None,
 }
 
 === kind: file_content_forbidden | id: no-todos ===
@@ -460,6 +478,7 @@ FileContentForbiddenRule {
     pattern: Regex(
         "\\b(TODO|FIXME|XXX)\\b",
     ),
+    fixer: None,
 }
 
 === kind: file_content_matches | id: content-matches-spdx ===
@@ -492,6 +511,7 @@ FileContentMatchesRule {
             source: Inline(
                 "\n// Copyright (c) 2026\n",
             ),
+            applicability: Safe,
         },
     ),
 }
@@ -533,6 +553,7 @@ FileExistsRule {
                 "root = true\n[*]\nend_of_line = lf\nindent_style = space\nindent_size = 2\n",
             ),
             create_parents: true,
+            applicability: Safe,
         },
     ),
 }
@@ -678,6 +699,7 @@ FileHeaderRule {
             source: Inline(
                 "// Copyright (c) 2026 Acme Corp\n// SPDX-License-Identifier: Apache-2.0\n",
             ),
+            applicability: Safe,
         },
     ),
 }
@@ -841,6 +863,7 @@ FilenameCaseRule {
     fixer: Some(
         FileRenameFixer {
             case: Pascal,
+            applicability: Safe,
         },
     ),
 }
@@ -1157,6 +1180,7 @@ StructuredPathRule {
     path_src: "$.provider.aws.access_key",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: hcl_path_equals | id: hcl-instance-count ===
@@ -1208,6 +1232,7 @@ StructuredPathRule {
         Number(1),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: hcl_path_matches | id: hcl-required-version ===
@@ -1249,6 +1274,7 @@ StructuredPathRule {
         ),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: header | id: header-alias ===
@@ -1297,6 +1323,7 @@ IndentStyleRule {
     width: Some(
         4,
     ),
+    fixer: None,
 }
 
 === kind: ini_path_absent | id: ini-no-debug ===
@@ -1346,6 +1373,7 @@ StructuredPathRule {
     path_src: "$['server']['debug']",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: ini_path_equals | id: ini-server-port ===
@@ -1397,6 +1425,7 @@ StructuredPathRule {
         String("8080"),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: ini_path_matches | id: ini-database-url ===
@@ -1450,6 +1479,7 @@ StructuredPathRule {
         ),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: is_text | id: is-text-alias ===
@@ -1496,6 +1526,7 @@ StructuredPathRule {
     path_src: "$.scripts.postinstall",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: json_path_equals | id: package-name-matches ===
@@ -1529,6 +1560,7 @@ StructuredPathRule {
         String("demo"),
     ),
     if_present: false,
+    fixer: None,
 }
 
 === kind: json_path_matches | id: package-version-matches ===
@@ -1564,6 +1596,7 @@ StructuredPathRule {
         ),
     ),
     if_present: false,
+    fixer: None,
 }
 
 === kind: json_schema_passes | id: package-conforms-to-schema ===
@@ -1805,6 +1838,8 @@ OrderedBlockRule {
             "^\\s*[A-Za-z]",
         ),
     ),
+    require: [],
+    fixer: None,
 }
 
 === kind: pair | id: c-requires-h ===
@@ -1880,6 +1915,7 @@ StructuredPathRule {
     path_src: "$['debug.enabled']",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: properties_path_equals | id: properties-server-port ===
@@ -1919,6 +1955,7 @@ StructuredPathRule {
         String("8080"),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: properties_path_matches | id: properties-datasource-postgres ===
@@ -1960,6 +1997,7 @@ StructuredPathRule {
         ),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: registry_paths_resolve | id: workspace-members-resolve ===
@@ -2012,6 +2050,7 @@ ShebangHasExecutableRule {
     policy_url: None,
     message: None,
     scope: Scope { ... },
+    fixer: None,
 }
 
 === kind: toml_path_absent | id: no-cargo-patch-section ===
@@ -2043,6 +2082,7 @@ StructuredPathRule {
     path_src: "$.patch",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: toml_path_equals | id: cargo-edition-2024 ===
@@ -2082,6 +2122,7 @@ StructuredPathRule {
         String("2024"),
     ),
     if_present: false,
+    fixer: None,
 }
 
 === kind: toml_path_matches | id: rust-version-floor ===
@@ -2129,6 +2170,7 @@ StructuredPathRule {
         ),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: unique_by | id: unique-rs-stems ===
@@ -2181,6 +2223,7 @@ StructuredPathRule {
     path_src: "$.Project.PropertyGroup.AllowUnsafeBlocks",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: xml_path_equals | id: csproj-targets-net8 ===
@@ -2222,6 +2265,7 @@ StructuredPathRule {
         String("net8.0"),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: xml_path_matches | id: packageref-has-version ===
@@ -2285,6 +2329,7 @@ StructuredPathRule {
         ),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: yaml_path_absent | id: no-workflow-write-all ===
@@ -2357,6 +2402,7 @@ StructuredPathRule {
     path_src: "$[?($.permissions == 'write-all')]",
     op: Absent,
     if_present: false,
+    fixer: None,
 }
 
 === kind: yaml_path_equals | id: workflow-uses-checkout ===
@@ -2418,6 +2464,7 @@ StructuredPathRule {
         String("actions/checkout@v4"),
     ),
     if_present: true,
+    fixer: None,
 }
 
 === kind: yaml_path_matches | id: workflow-permissions-shape ===
@@ -2461,5 +2508,6 @@ StructuredPathRule {
         ),
     ),
     if_present: true,
+    fixer: None,
 }
 

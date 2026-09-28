@@ -314,10 +314,13 @@ be demoted but never promoted.
 behavior and are classified Safe on introduction. The one intentional change is `file_remove`
 (used by `file_absent`, `no_empty_files`, `no_submodules`, `no_symlinks`, and the bundled
 `hygiene/no-tracked-artifacts` ruleset): it is **reclassified Unsafe by default**, because deleting
-a whole file irreversibly is a poor default for a bare `alint fix`. A one-release deprecation
-warning ships first, and a user can **promote it back to Safe on a specific rule** via
+a whole file irreversibly is a poor default for a bare `alint fix`. The flip lands with the
+v0.17 fix-engine rework (a natural breaking point, noted in the changelog) rather than after a
+separate deprecation-warning release: a bare `alint fix` surfaces the removal as a suggestion
+and `--unsafe-fixes` applies it. A user can **promote it back to Safe on a specific rule** via
 `fix: { file_remove: { applicability: safe } }` in their own top-level config (per-rule promotion
-is top-level-only, 5.5).
+is top-level-only, 5.5 — an `extends:`'d ruleset may demote but never promote, enforced by the
+DSL trust gate `reject_fix_promotion_in`).
 
 ## 4. Prevalence and usefulness
 
@@ -607,20 +610,28 @@ could ship a fix that silently injects bytes into the user's files or shells out
 `alint fix`, the file-writing and RCE analogue of the spawning-kind hazard. The gate keys on
 **what the fixer can do** and **where it came from**:
 
-- **Fixed-behavior fixers** (the seven hygiene normalizers, rename-to-case, `file_remove`, `chmod`,
-  `dir_create`) carry no ruleset-supplied bytes and do not spawn, so there is no injection surface;
-  they are honored at their own tier from any source. This is what keeps the bundled rulesets'
-  trailing-whitespace / final-newline fixes auto-applying (they arrive via
-  `extends: alint://bundled/...`); a destructive one like `file_remove` is already gated by its
-  Unsafe tier, independent of source.
-- **Content-injecting fixers** (`replace`, `set_value`, `sync_from`, `insert_header`, and
-  `file_create` / `file_prepend` / `file_append` with inline content) are honored at their tier
-  from the user's own top-level config, local-path `extends:`, a nested `.alint.yml` (all the
-  user's own tree), and first-party **bundled** rulesets. From a **remote-URL `extends:`** they
-  are **demoted to Suggestion** by default (they can propose an edit, never auto-write), because
-  the content is authored by a third party. A top-level `trusted_extends:` allowlist opts
-  specific remote URLs (a company's internal ruleset host) into honoring their content fixers at
-  tier.
+- **Fixed-behavior fixers** (`file_strip_bidi` / `file_strip_zero_width` -- security-POSITIVE
+  normalizers that remove Trojan-Source / zero-width attacks; `file_remove`, `remove_value`,
+  `relocate`, `dir_create`) carry no ruleset-supplied bytes, do not spawn, and cannot be turned
+  against the user by AIMING them, so there is no injection or attack surface; they are honored at
+  their own tier from any source. Demoting the security-positive strip ops would be
+  counterproductive -- it would let a remote-sourced Trojan-Source survive -- so they are
+  deliberately kept here; a destructive one like `file_remove` is already gated by its Unsafe tier,
+  independent of source.
+- **Content-injecting (and aimable) fixers** -- two shapes gated identically. **(a) Inline-content**
+  ops (`replace`, `set_value`, `sync_from`, `create_and_register`, `insert_line`, `insert_header`,
+  and `file_create` / `file_prepend` / `file_append`) write ruleset-authored bytes. **(b) Aimable**
+  transforms write no ruleset bytes but let a remote's `paths:` AIM a change at a file where it is
+  load-bearing: `sort`, `indent_style`, `file_normalize_line_endings`, `file_rename`, and
+  (2026-09 audit R3) the hygiene normalizers `file_trim_trailing_whitespace`,
+  `file_append_final_newline`, `file_strip_bom`, `file_collapse_blank_lines`, plus `chmod` (a +/-x
+  flip aimed at a script or data file). Both shapes are honored at their tier from the user's own
+  top-level config, local-path `extends:`, and first-party **bundled** rulesets -- so the bundled
+  rulesets' trailing-whitespace / final-newline fixes keep auto-applying. From a **remote-URL
+  `extends:`** (or an untrusted nested `.alint.yml`) they are **demoted to Suggestion** by default
+  (they can propose an edit, never auto-write), because the source is a third party. A top-level
+  `trusted_extends:` allowlist opts specific remote URLs (a company's internal ruleset host) into
+  honoring their fixers at tier.
 - **Spawning fixers** (`git_untrack`, a `command`-backed fix, regenerate-from-command) are
   **refused at load** from any non-top-level source (bundled included), matching the
   top-level-only posture of `SPAWNING_RULE_KINDS`.
@@ -640,6 +651,29 @@ local-path / bundled / remote-URL) must be newly threaded through `merge()` onto
 `RuleEntry` and carried to fix time, and `trusted_extends:` is a new top-level config key. This is
 security-load-bearing work to build, not a mechanism to inherit.
 
+**Shipped design and its one known residual (load-time cap, chosen over fix-time provenance).**
+The demotion is implemented as a *load-time cap*, not the fix-time provenance the previous
+paragraph sketches: an untrusted remote's content-injecting fixers are rewritten to `suggestion`
+on the raw config during `load_recursive` -- across BOTH its `rules[]` (inline `fix:` blocks) and
+its `templates[]` (a template's `fix:` splices into its referencing rule at `finalize`, *after*
+this cap, so both are scanned) -- before any `RuleSpec` / `RuleEntry` is built. That is simpler
+than threading a four-way source tag through `merge()` to fix time, and it covers every case where
+the untrusted *content* is authored by the untrusted source. Its one residual: the cap keys on
+where the fixer content is DEFINED, not on which rule USES it. A rule from an untrusted remote that
+`extends_template:`s a template defined by a TRUSTED source (the user's own top-level config -- no
+bundled ruleset ships a `templates:` block today) acquires that template's fixer at its declared
+tier at `finalize`, because the trusted template was never demoted and the untrusted rule carried
+no inline fixer to demote. The untrusted rule then picks which of the user's files the
+(trusted-template-shaped) auto-write lands on via its host kind / scope / pattern; if the template
+exposes a `{{vars.*}}` hole in its fix content, the untrusted instance's `vars:` fill it, so the
+injected bytes can be attacker-chosen rather than the user's own. This is bounded and
+targeted-only: it needs the user to have authored a content-fix template, the remote to know that
+template's id (and var names), and the user to already `extends:` the remote -- and there is no
+public or bundled template id to target. It is pinned by
+`w2_known_residual_remote_rule_instantiating_a_trusted_template` (alint-dsl `tests.rs`); the
+deferred fix-time-provenance approach (tag each rule's origin, demote its EFFECTIVE fixer after
+template expansion) closes it, and closing it flips that test.
+
 ### 5.6 DSL, CLI, and downstream surface
 
 - **New `fix:` ops and their config surface.** Each new op declares a default applicability and
@@ -656,8 +690,8 @@ security-load-bearing work to build, not a mechanism to inherit.
   | `remove_value` | 3 | `*_path_absent` | target `path:` (the node to delete) | none | Unsafe |
   | `sort` | 6 | `ordered_block` | `comparator` / `start` / `end` / `select` / `unique` | none | Safe |
   | `dedup` | 6 | `ordered_block` only | the marked-block bounds | none | Safe |
-  | `chmod` | metadata | `executable_bit`, `shebang_has_executable`, `executable_has_shebang` | the desired bit (`require:`) | none (mode derived from `require:`) | Unsafe (Safe for shebang add-+x) |
-  | `git_untrack` | VCS | `file_absent` (and `no_committed_binaries` once built) | the violating path | `gitignore` (also append a `.gitignore` line; default true) | Unsafe, spawning (top-level-only, 5.5) |
+  | `chmod` | metadata | `executable_bit`, `shebang_has_executable` (NOT `executable_has_shebang`: ambiguous, fix-less) | the desired bit (`require:`; `shebang_has_executable` always +x) | none (mode derived; only `0o111` changes) | Safe (both hosts: the rule requires the state, reversible, touches only `0o111`) |
+  | `git_untrack` | VCS | `file_absent` (and `no_committed_binaries` once built) | the violating path | none as shipped (the optional `gitignore:` `.gitignore`-append, default true, is a deferred fast-follow) | Unsafe, spawning (top-level-only, 5.5) |
   | `sync_from` | 2.2 | `cross_file` (`identical` / `equals`) | the canonical `source:` file | none | Unsafe |
   | `insert_header` | 6 | `file_header` | (nothing: `pattern:` is a regex, unusable as literal bytes) | `text` (literal header) + `comment_style` (`line` / `block` / `auto`) | Safe (presence-guarded) |
   | `dir_create` | presence | `dir_exists` | the missing directory path | none | Safe |
@@ -754,10 +788,15 @@ security-load-bearing work to build, not a mechanism to inherit.
   and fail nonzero" posture of section 7 is preserved). Carrying a fix in a **check-side finding
   format** is a separate, deliberate feature: `alint check --format sarif` emits SARIF 2.1.0
   `result.fixes[]` (an `artifactChange` -> `replacement` of a `deletedRegion` + `insertedContent`,
-  which `ReplaceRange { range, content }` maps onto almost 1:1) for **every tier** (Safe, Unsafe,
-  Suggestion), tagging the tier in each fix's `description`. SARIF fixes are advisory (the consumer
-  chooses to apply), so surfacing all tiers is safe and is the point of emitting SARIF at all;
-  `agent` and `json` gain the same `proposed_edit: {path, range, content}[]` + `applicability`.
+  which `ReplaceRange { range, content }` maps onto almost 1:1) for the **Safe (applyable) tier
+  only** (DECISION 2026-09-20). The original design emitted every tier (Safe/Unsafe/Suggestion) with
+  a `description` tier tag, reasoning that SARIF fixes are advisory; that was revised to Safe-only,
+  because SARIF has no machine-honored per-fix safety FIELD -- the `description` tag is
+  human-advisory text a script ignores -- so a third-party tool that auto-applies `fixes[]` could
+  apply an Unsafe edit (e.g. a value or file removal) blind. alint's own `fix` keeps the full tier
+  surface (Unsafe fixes are shown as suggestions, applied only with `--unsafe-fixes`); the machine
+  export hands out only what is safe to apply without judgement. `agent` and `json --include-fixes`
+  gain the same Safe-only `proposed_edit: {path, range, content}[]`.
   Because computing an edit means running `collect_edits` during `check` (today `check` computes no
   edit bytes, only `is_fixable`), it runs **only when a fix-carrying format is selected**
   (`--format sarif` / `agent`, or `--format json --include-fixes`); the default `human` / `github`
@@ -933,7 +972,9 @@ per format: firing + silent + idempotence + a comment/order-preservation golden 
 ### Phase 3: metadata, VCS, and the repo-scale cross-file classes (2.2)
 
 - **chmod (`SetMode`):** `shebang_has_executable` -> add +x (Safe); `executable_bit` -> set/clear
-  (Unsafe); `executable_has_shebang` -> Suggestion.
+  (Safe as shipped: the rule requires the state, reversible, only `0o111` moves; a per-rule
+  `applicability:` may demote it); `executable_has_shebang` -> fix-less (ambiguous target: add a
+  shebang vs clear +x is a human call), not a Suggestion.
 - **VCS untrack:** a `git_untrack` fix (spawning, gated per 5.5) running `git rm --cached` plus an
   optional `.gitignore` line, Unsafe by default.
 - **Sync-from-canonical (`sync_from`)** and cross-file partner creation, using the multi-file
@@ -1029,10 +1070,15 @@ Resolved after review (folded into the sections above):
 
 - **`file_remove` default:** reclassified **Unsafe** with a one-release migration and a per-rule
   Safe override (3, 5.6).
-- **Inherited fixers:** gated by capability and provenance: fixed-behavior fixers are honored from
-  any source (so bundled hygiene keeps auto-applying), remote-URL content-injecting fixers are
-  **demoted to Suggestion** with a `trusted_extends:` opt-in, and spawning fixers are refused from
-  any non-top-level source (5.5).
+- **Inherited fixers:** gated by capability and provenance. Fixed-behavior fixers -- the
+  security-positive `file_strip_bidi` / `file_strip_zero_width`, plus `file_remove` / `remove_value`
+  / `relocate` / `dir_create` -- are honored from any source. Content-injecting **and aimable**
+  fixers (the inline-content ops + `sort` / `indent_style` / `file_rename` /
+  `file_normalize_line_endings` + the hygiene normalizers `file_trim_trailing_whitespace` /
+  `file_append_final_newline` / `file_strip_bom` / `file_collapse_blank_lines` + `chmod`) are
+  honored from the user's own tree and bundled rulesets (so bundled hygiene keeps auto-applying) but
+  **demoted to Suggestion** from a remote-URL `extends:` or untrusted nested config, with a
+  `trusted_extends:` opt-in. Spawning fixers are refused from any non-top-level source (5.5).
 - **`ReplaceRange` vs `SetContent`:** **ranged**. The multi-node structured fan-out does not
   strictly require it (a rule-level `collect_edits` could emit one whole-file `SetContent`), but a
   ranged primitive gives the whole located-edit family one substrate with engine-level overlap
@@ -1044,12 +1090,13 @@ Resolved after review (folded into the sections above):
   explicitly-opted-in fix or a future WASM plugin, never a bare `alint fix` (6, Deferred).
 - **Versioning:** the whole arc ships as **v0.17**, released only once every phase (0 through 4) is
   complete: the tiers, the primitives, and every fixer through ordering and headers land together, so
-  v0.17 is `alint`'s first fixing release rather than a dormant no-op. The one thing held back is the
-  `file_remove` default flip: v0.17 introduces its deprecation warning, and the Safe-to-Unsafe flip
-  lands one minor later in **v0.18** (a warned, pre-1.0 MINOR change with a full minor of overlap)
-  (5.6, 6).
-- **Fixes in finding output:** `check --format sarif` emits SARIF `fixes[]` for all tiers, and
-  `agent` / `json --include-fixes` carry a `proposed_edit`; the edit is computed during `check`
+  v0.17 is `alint`'s first fixing release rather than a dormant no-op. (SUPERSEDED: the
+  `file_remove` Safe-to-Unsafe flip was originally deferred to v0.18 behind a deprecation-warning
+  release; it now lands directly in v0.17 at the fix-engine rework breaking point -- commit
+  `266c88f9`, no separate warning release. See `v0.17/auto-fix-completion-plan.md` §2.)
+- **Fixes in finding output:** `check --format sarif` emits SARIF `fixes[]` for the Safe (applyable)
+  tier only (DECISION 2026-09-20; see 5.7), and `agent` / `json --include-fixes` carry a
+  `proposed_edit`; the edit is computed during `check`
   **only** when such a format is selected, so the default check path is unchanged (5.7).
 
 Still open:
@@ -1126,7 +1173,7 @@ corrected the trust boundary's false claim that per-source provenance already ex
 listed ARCHITECTURE / schema / `facts.json` / README / `docs/rules.md` as downstream artifacts each
 phase must update (5.6), fixed the per-rule `applicability` schema shape, made the multi-file
 failure model honest (all-or-nothing through verify, best-effort through the per-file writes,
-5.2.4), and added SARIF `fixes[]` for all tiers on `check --format sarif`, a
+5.2.4), and added SARIF `fixes[]` (Safe tier only, per the 2026-09-20 decision) on `check --format sarif`, a
 performance-and-perf-gate section (5.9), a preview-mode table, and Windows / `nested_configs`
 handling. The maintainer resolved: the v0.17 warned-migration slot, all-tier SARIF fixes, and
 computing check-side edits only when a fix-carrying format is selected. Round 5 (a holistic

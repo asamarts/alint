@@ -1,0 +1,44 @@
+name: a located fixer and a whole-file fixer compose on one file and converge
+tags: [fix, interactions, set_value, no_trailing_whitespace, json]
+
+# Arc-wide audit GAP: NO test at any level composed a LOCATED fixer (byte-range
+# set_value/remove_value/replace) with a WHOLE-FILE fixer on ONE file -- the arc's
+# most delicate engine path (the located batch DEFERS when a whole-file compose
+# changed the file since collect time, and the fixpoint re-walk applies it on the
+# next pass against the flushed bytes). `invariants.rs` wrongly claimed coverage via
+# a trim+RENAME scenario, which never populates a located batch. Here `set_value`
+# (located) rewrites the port while `file_trim_trailing_whitespace` (whole-file)
+# trims line 3; both land and the tree converges.
+
+given:
+  tree:
+    app.json: "{\n  \"port\": 8080,\n  \"name\": \"app\"   \n}\n"
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: json_path_equals
+        paths: "**/*.json"
+        path: "$.port"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: "**/*.json"
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: app.json}
+      - {rule: no-ws, level: error, path: app.json}
+  - applied: [port, no-ws]
+  - violations: []
+
+expect_tree:
+  app.json: "{\n  \"port\": 9090,\n  \"name\": \"app\"\n}\n"

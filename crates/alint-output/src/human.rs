@@ -143,7 +143,10 @@ fn write_violation(
     // byte past the parser's raw-control-char check) — sanitize it like the
     // message + path (M8).
     let safe_rule_id = sanitize_terminal(&result.rule_id);
-    if result.is_fixable {
+    // Per-VIOLATION fixability (not `result.is_fixable`, which is per-rule): a
+    // rule may fix one violation but honestly skip another (an unconvertible
+    // `café.rs` stem under `snake`), so tag only the violations `fix` will act on.
+    if violation.is_fixable {
         let fix = style::FIXABLE;
         writeln!(
             w,
@@ -236,9 +239,10 @@ fn write_summary(w: &mut dyn Write, report: &Report, glyphs: &GlyphSet) -> std::
             continue;
         }
         let count = r.violations.len();
-        if r.is_fixable {
-            fixable_violations += count;
-        }
+        // Count fixable violations per-violation, not per-rule: a rule with a
+        // fixer can still have violations `fix` honestly skips (an unconvertible
+        // stem), so the "N auto-fixable" total must match what `fix` will apply.
+        fixable_violations += r.violations.iter().filter(|v| v.is_fixable).count();
         match r.level {
             Level::Error => errors += count,
             Level::Warning => warnings += count,
@@ -376,12 +380,15 @@ fn write_human_compact(
                 }
                 Level::Off => (style::DIM, "off"), // filtered earlier; defensive
             };
-            if result.is_fixable {
+            // Per-violation fixability (see the block formatter): a rule with a
+            // fixer may still skip a specific violation, so tag and count only the
+            // ones `fix` will act on.
+            if v.is_fixable {
                 fixable += 1;
             }
 
             let rule_style = style::RULE_ID;
-            let fix_tag = if result.is_fixable {
+            let fix_tag = if v.is_fixable {
                 let fix = style::FIXABLE;
                 format!("  {fix}[fixable]{fix:#}")
             } else {
@@ -489,12 +496,25 @@ pub fn write_fix_human(
                         summary.clone(),
                     )
                 }
-                FixStatus::Skipped(reason) => (
+                FixStatus::Skipped { reason, .. } => (
                     opts.glyphs.bullet,
                     format!("{dim}"),
                     format!("{dim:#}"),
                     format!(
                         "{path_prefix}{} (skipped: {reason})",
+                        item.violation.message
+                    ),
+                ),
+                // Available but not applied (below the tier threshold, a
+                // suggestion, or verification-demoted). Emitted by the Unsafe ops
+                // under a bare `alint fix` -- `file_remove`, `git_untrack`, an
+                // unpromoted `command` fix, and any user-demoted fixer.
+                FixStatus::Suggested { summary, .. } => (
+                    opts.glyphs.bullet,
+                    format!("{dim}"),
+                    format!("{dim:#}"),
+                    format!(
+                        "{path_prefix}{} (suggested: {summary})",
                         item.violation.message
                     ),
                 ),
@@ -526,10 +546,18 @@ pub fn write_fix_human(
     let applied = report.applied();
     let skipped = report.skipped();
     let unfixable = report.unfixable();
+    let suggested = report.suggested();
     let ok = style::SUCCESS;
+    // Append `suggested` only when non-zero, so a run without suggestions is
+    // byte-identical to pre-tier output (the fix-*.stdout snapshots).
+    let suggested_part = if suggested > 0 {
+        format!(", {suggested} suggested")
+    } else {
+        String::new()
+    };
     writeln!(
         w,
-        "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable."
+        "\n{ok}{applied} applied{ok:#}, {skipped} skipped, {unfixable} unfixable{suggested_part}."
     )?;
     Ok(())
 }
@@ -786,12 +814,106 @@ mod tests {
         );
     }
 
+    /// Per-violation fixability: one rule, two violations, only one fixable
+    /// (mirrors `filename_case` under `snake` flagging both `café.rs`, which
+    /// `fix` skips, and `myFile.rs`, which it renames). The `fixable` tag and the
+    /// "auto-fixable" total must reflect the per-violation truth, not the
+    /// per-rule `is_fixable` -- otherwise `check` promises a fix `fix` won't make.
+    fn mixed_fixability_report() -> Report {
+        use std::path::PathBuf;
+        let mut fixable = Violation::new("stem \"myFile\" is not snake_case")
+            .with_path(PathBuf::from("myFile.rs"));
+        fixable.is_fixable = true;
+        let unfixable =
+            Violation::new("stem \"café\" is not snake_case").with_path(PathBuf::from("café.rs")); // is_fixable stays false
+        Report {
+            // The rule DOES declare a fixer (`is_fixable: true`), so this proves
+            // the renderer reads the per-violation flag, not the per-rule one.
+            results: vec![RuleResult::new(
+                "snake-names".into(),
+                Level::Warning,
+                None,
+                vec![unfixable, fixable],
+                true,
+            )],
+        }
+    }
+
+    /// The text of one file's block: from its `─── <path> ───` header to the
+    /// blank line that ends the block. Lets a test check the `fixable` tag on
+    /// the right violation without matching the summary's "auto-fixable".
+    fn block_for<'a>(out: &'a str, path: &str) -> &'a str {
+        let after = &out[out.find(path).expect("path header present")..];
+        after.split("\n\n").next().unwrap_or(after)
+    }
+
+    #[test]
+    fn block_tags_only_the_fixable_violation() {
+        let mut buf = Vec::new();
+        write_human(
+            &mixed_fixability_report(),
+            &mut buf,
+            HumanOptions::default(),
+        )
+        .unwrap();
+        let out = strip_sgr(&String::from_utf8(buf).unwrap());
+        assert!(
+            block_for(&out, "myFile.rs").contains("fixable"),
+            "convertible violation's block is tagged fixable:\n{out}"
+        );
+        assert!(
+            !block_for(&out, "café.rs").contains("fixable"),
+            "unconvertible violation's block is NOT tagged fixable:\n{out}"
+        );
+        assert!(
+            out.contains("1 auto-fixable"),
+            "summary must count 1 auto-fixable, not 2:\n{out}"
+        );
+        assert!(
+            out.contains("resolve 1 fixable violation."),
+            "call-to-action must say 1 (singular), not 2:\n{out}"
+        );
+    }
+
+    #[test]
+    fn compact_tags_only_the_fixable_violation() {
+        let mut buf = Vec::new();
+        let opts = HumanOptions {
+            compact: true,
+            ..HumanOptions::default()
+        };
+        write_human(&mixed_fixability_report(), &mut buf, opts).unwrap();
+        let out = strip_sgr(&String::from_utf8(buf).unwrap());
+        // The myFile line carries `[fixable]`; the café line does not.
+        let myfile_line = out
+            .lines()
+            .find(|l| l.contains("myFile.rs"))
+            .expect("myFile line present");
+        let cafe_line = out
+            .lines()
+            .find(|l| l.contains("café.rs"))
+            .expect("café line present");
+        assert!(
+            myfile_line.contains("[fixable]"),
+            "convertible violation is tagged: {myfile_line}"
+        );
+        assert!(
+            !cafe_line.contains("[fixable]"),
+            "unconvertible violation is NOT tagged: {cafe_line}"
+        );
+        assert!(
+            out.contains("1 auto-fixable"),
+            "compact summary counts 1, not 2:\n{out}"
+        );
+    }
+
     #[test]
     fn fix_format_neutralizes_terminal_escapes() {
         use std::path::PathBuf;
         let v = Violation::new(format!("{RAW_CLEAR}forged"))
             .with_path(PathBuf::from(format!("src/{RAW_CLEAR}evil.rs")));
         let report = FixReport {
+            non_convergent: false,
             results: vec![alint_core::FixRuleResult {
                 rule_id: "demo".into(),
                 level: Level::Warning,
@@ -804,5 +926,32 @@ mod tests {
         let mut buf = Vec::new();
         write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
         assert_neutralized(&String::from_utf8(buf).unwrap());
+    }
+
+    #[test]
+    fn fix_human_renders_suggested_item() {
+        use std::path::PathBuf;
+        let report = FixReport {
+            non_convergent: false,
+            results: vec![alint_core::FixRuleResult {
+                rule_id: "cfg".into(),
+                level: Level::Error,
+                items: vec![alint_core::FixItem {
+                    violation: Violation::new("value mismatch")
+                        .with_path(PathBuf::from("app.json")),
+                    status: FixStatus::Suggested {
+                        summary: "would set $.debug to false".into(),
+                        edit: Some(alint_core::FixEdit::SetContent {
+                            path: PathBuf::from("app.json"),
+                            content: Vec::new(),
+                        }),
+                    },
+                }],
+            }],
+        };
+        let mut buf = Vec::new();
+        write_fix_human(&report, &mut buf, HumanOptions::default()).unwrap();
+        let out = String::from_utf8(buf).unwrap();
+        assert!(out.contains("suggested"), "suggested should render: {out}");
     }
 }

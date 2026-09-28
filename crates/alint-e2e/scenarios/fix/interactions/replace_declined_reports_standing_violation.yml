@@ -1,0 +1,41 @@
+name: a located fixer that declines an edit still reports the standing violation
+tags: [fix, interactions, file_content_forbidden, replace, fixpoint]
+
+# Audit regression (false negative): the located path emits one report item per
+# collected EDIT, not per violation. When `replace`'s convergence guard drops a
+# self-re-matching replacement (here `foo` -> `foobar`, whose result still
+# contains `foo`), it collects NO edit -- and before the fix that meant the
+# violation produced no report item at all, so `fix` printed "0 applied, 0
+# skipped, 0 unfixable" and exited 0 while the forbidden pattern (a secret, a
+# merge marker, ...) stayed on disk. The located path must now emit a `Skipped`
+# for a declined violation, matching the whole-file dispatch, so the standing
+# violation is reported and the exit code agrees with `check`.
+
+given:
+  tree:
+    a.txt: "foo\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-foo
+        kind: file_content_forbidden
+        paths: "*.txt"
+        pattern: "foo"
+        level: error
+        fix:
+          replace:
+            replacement: "foobar"
+
+when: [fix_unsafe, check]
+
+expect:
+  # The fixer declined (its replacement would re-introduce the pattern), so the
+  # violation is reported as skipped -- NOT silently dropped.
+  - skipped: [no-foo]
+  # And it genuinely still stands: `check` reports it. `fix` and `check` agree.
+  - violations:
+      - {rule: no-foo, level: error, path: a.txt}
+
+expect_tree:
+  # Unchanged: the forbidden pattern was left in place (honestly reported).
+  a.txt: "foo\n"

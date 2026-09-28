@@ -7,7 +7,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
-use alint_core::{Engine, RuleRegistry, WalkOptions, walk};
+use alint_core::{Engine, FixReport, FixRuleResult, FixStatus, RuleRegistry, WalkOptions, walk};
 use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
@@ -147,6 +147,7 @@ fn init_tracing() {
         .try_init();
 }
 
+#[allow(clippy::too_many_lines)]
 fn run(mut cli: Cli) -> Result<ExitCode> {
     let command = cli.command.take().unwrap_or(Command::Check {
         path: PathBuf::from("."),
@@ -176,12 +177,30 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
     // error, never a silent no-op" contract. Reject them loudly off `check`,
     // matching `--only`. (The `baseline` subcommand writes via its own
     // `--output`, not this flag.)
-    if (cli.baseline.is_some() || cli.strict_baseline || cli.show_baselined)
-        && !matches!(command, Command::Check { .. })
-    {
+    // `--baseline` works on `check` AND `fix` (W4). `--strict-baseline` /
+    // `--show-baselined` remain `check`-only for now (a tracked follow-up). Reject
+    // loudly off their allowed commands, never a silent no-op.
+    if cli.baseline.is_some() && !matches!(command, Command::Check { .. } | Command::Fix { .. }) {
         bail!(
-            "`--baseline`, `--strict-baseline`, and `--show-baselined` apply only to \
-             `check` (the `baseline` subcommand writes via `--output`)"
+            "`--baseline` applies only to `check` and `fix` (the `baseline` \
+             subcommand writes via `--output`)"
+        );
+    }
+    if (cli.strict_baseline || cli.show_baselined) && !matches!(command, Command::Check { .. }) {
+        bail!(
+            "`--strict-baseline` and `--show-baselined` apply only to `check` \
+             (a baseline-aware `fix` supports `--baseline`; strict / show for \
+             `fix` are not yet implemented)"
+        );
+    }
+    // `--include-fixes` attaches `proposed_edit` to each fixable finding in
+    // `check --format json`; it has no effect on any other subcommand. Reject it
+    // loudly off `check` rather than silently no-op (matching `--only`/`--baseline`;
+    // audit R2 LOW-1).
+    if cli.include_fixes && !matches!(command, Command::Check { .. }) {
+        bail!(
+            "`--include-fixes` applies only to `check` (it adds `proposed_edit` to \
+             the `--format json` output); it has no effect on this subcommand"
         );
     }
     match command {
@@ -197,10 +216,18 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
             dry_run,
             changed,
             base,
+            unsafe_fixes,
+            fix_only,
+            diff,
         } => cmd_fix(
             &path,
-            dry_run,
             &ChangedMode::new(changed, base),
+            &FixOptions {
+                dry_run,
+                unsafe_fixes,
+                fix_only,
+                diff,
+            },
             &cli.only,
             &cli,
         ),
@@ -528,7 +555,21 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     let rule_count = entries.len();
     let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
-        .with_vars(loaded.vars);
+        .with_vars(loaded.vars)
+        // `check --format sarif/agent/json --include-fixes` runs
+        // `attach_proposed_edits`, which gates advertised fixes on the SAME
+        // `fix_size_limit` as `fix`; without this it silently used the 1 MiB
+        // default and advertised (or omitted) fixes `fix` would not (audit HIGH,
+        // 2026-09-20). Inert for a plain `check` (no fix derivation runs).
+        .with_fix_size_limit(loaded.fix_size_limit);
+    // When a baseline is active, make the engine baseline-aware so the
+    // `stage_fixes`-based proposed-edit derivation (for a fix-carrying format)
+    // advertises fixes ONLY for the live (new) findings, never grandfathered ones.
+    // Inert for `engine.run` (check uses no fix baseline), so a plain `check
+    // --baseline` is unaffected.
+    if let Some(bp) = &effective_baseline {
+        engine = engine.with_fix_baseline(load_baseline(bp)?);
+    }
     let changed_active = match changed.resolve(path)? {
         Some(set) => {
             engine = engine.with_changed_paths(set);
@@ -560,7 +601,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     // Baseline suppression (when --baseline is in effect): grandfather
     // recorded violations, leaving only new ones to format + gate on.
     let mut strict_stale_fail = false;
-    let (report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
+    let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
         let mut reader = FileReader::new(path);
         let applied =
@@ -585,6 +626,17 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     } else {
         (report, None)
     };
+
+    // The machine formats that carry the concrete proposed fix: SARIF
+    // (`result.fixes[]`), `agent` (always), and `json` (behind `--include-fixes`).
+    // Only Safe fixes are attached (derived from the engine's single-pass compose
+    // at the Safe threshold). The compute runs the fix pass in stage mode, so it is
+    // scoped to a run that actually asks for fixes.
+    if matches!(format, Format::Sarif | Format::Agent)
+        || (format == Format::Json && cli.include_fixes)
+    {
+        alint_core::attach_proposed_edits(&engine, &mut report, path, &index);
+    }
 
     let (mut out, opts) = render_env(cli)?;
     // SARIF and JSON render baselined findings (marked / counted) so Code
@@ -942,13 +994,35 @@ fn report_notes_to_stderr(report: &alint_core::Report, show_notes: bool) {
     }
 }
 
+/// The boolean flags of `alint fix`, grouped so the command signature stays
+/// under clippy's argument/bool-parameter caps (mirrors [`SuggestOptions`]).
+// Independent CLI flags, not a state machine - same shape (and allow) as `Cli`.
+#[allow(clippy::struct_excessive_bools)]
+struct FixOptions {
+    /// `--dry-run`: report what would change, write nothing.
+    dry_run: bool,
+    /// `--unsafe-fixes`: raise the applied tier from Safe to Unsafe.
+    unsafe_fixes: bool,
+    /// `--fix-only`: report only what was applied; exit 0 unless a fix errored.
+    fix_only: bool,
+    /// `--diff`: render a unified diff of the composed result, write nothing.
+    diff: bool,
+}
+
+#[allow(clippy::too_many_lines)]
 fn cmd_fix(
     path: &Path,
-    dry_run: bool,
     changed: &ChangedMode,
+    opts: &FixOptions,
     only: &[String],
     cli: &Cli,
 ) -> Result<ExitCode> {
+    let &FixOptions {
+        dry_run,
+        unsafe_fixes,
+        fix_only,
+        diff,
+    } = opts;
     require_directory(path)?;
     // Gate the output format *before* touching the tree: `fix` mutates files,
     // so a format we can't render must fail here, not after the write. Only
@@ -960,8 +1034,14 @@ fn cmd_fix(
     // instead, and point `agent` at its real home: `check --format agent`
     // (whose per-violation `fix_command` drives the agentic fix loop; `fix`
     // itself has no agent report).
+    //
+    // `--diff` is exempt from the fix-report-format restriction: it emits a
+    // unified diff, not a fix report, so it is format-independent (a stray
+    // `--format sarif` alongside `--diff` still yields the diff, matching the
+    // flag's documented "regardless of --format"). The string is still parsed so
+    // a genuine typo (`--format bogus`) fails loudly either way.
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
-    if !matches!(format, Format::Human | Format::Json | Format::Markdown) {
+    if !diff && !matches!(format, Format::Human | Format::Json | Format::Markdown) {
         bail!(
             "`alint fix` supports only `--format human`, `--format json`, or \
              `--format markdown` (got {fmt:?}); the SARIF/GitHub/JUnit/GitLab/agent \
@@ -991,6 +1071,13 @@ fn cmd_fix(
         .baseline
         .clone()
         .or_else(|| loaded.baseline.as_ref().map(|b| path.join(b)));
+    // W4: a resolved baseline (flag or config `baseline:` key) makes `fix` skip
+    // grandfathered findings and resolve only NEW ones (mirrors `check --baseline`;
+    // the artifact is excluded from the walk below). Classified in engine `fix_run`.
+    if let Some(baseline_path) = &effective_baseline {
+        let baseline = load_baseline(baseline_path)?;
+        engine = engine.with_fix_baseline(baseline);
+    }
     let mut extra_ignores = loaded.extra_ignores;
     exclude_baseline_from_walk(&mut extra_ignores, path, effective_baseline.as_deref());
     let walk_opts = WalkOptions {
@@ -999,24 +1086,138 @@ fn cmd_fix(
     };
 
     let index = walk(path, &walk_opts).context("walking repository")?;
+    // `--unsafe-fixes` raises the applied tier to Unsafe; the default is Safe.
+    // At Safe, an Unsafe op (`file_remove`) is surfaced as a suggestion; this
+    // flag is what applies it.
+    let threshold = if unsafe_fixes {
+        alint_core::Applicability::Unsafe
+    } else {
+        alint_core::Applicability::Safe
+    };
+
+    // `--diff`: stage the composed result in memory and render it as a unified
+    // diff instead of writing. This is a preview, so it never touches the tree
+    // (regardless of `--dry-run`), and the diff is emitted verbatim regardless
+    // of `--format` (a unified diff is not a fix report). The exit code matches
+    // the equivalent real `fix` for the CONVERGED case, with three caveats inherent
+    // to a single-pass no-write preview: (1) it cannot predict an I/O write
+    // failure (a read-only target), which a real `fix` would surface as an
+    // unfixable error (exit 1); (2) it cannot detect NON-CONVERGENCE -- the
+    // preview is one pass, so it never re-walks and never returns the fixpoint's
+    // exit 2, even for a config a real `fix` would fail to converge (the report's
+    // `non_convergent` is always false here); and (3) it cannot see a CASCADE -- a
+    // file a fix CREATES or rewrites this pass, which a LATER pass's rule then flags
+    // (e.g. an unfixable finding on the created content), is invisible to the single
+    // walk, so the preview can under-report the unfixable count and exit 0 where a
+    // real multi-pass `fix` exits 1 (audit: preview-fidelity MED). The preview exit
+    // code is thus a LOWER BOUND on a real run's. All three surface the edits as
+    // would-apply. See docs/design/v0.17/fixpoint.md.
+    if diff {
+        let (report, staged) = engine
+            .stage_fixes(path, &index, threshold)
+            .context("staging fixes")?;
+        let (mut out, _opts) = render_env(cli)?;
+        alint_output::write_fix_diff(&staged, &mut out).context("writing diff")?;
+        out.flush().ok();
+        return Ok(fix_exit_code(&report, fix_only, cli));
+    }
+
     let report = engine
-        .fix(path, &index, dry_run)
+        .fix(path, &index, &walk_opts, dry_run, threshold)
         .context("applying fixes")?;
 
     let (mut out, opts) = render_env(cli)?;
-    format
-        .write_fix_with_options(&report, &mut out, opts)
-        .context("writing output")?;
+    if fix_only {
+        // Report the fixes that were applied AND any that ERRORED. `--fix-only`
+        // suppresses BENIGN residuals (already-clean / binary / size-limit skips,
+        // suggestions, unfixable) -- but a genuine fix error (a `Skipped` carrying
+        // `FIX_ERROR_PREFIX`, e.g. a read-only target) drives a nonzero exit
+        // (`fix_exit_code` below), so hiding it would leave a CI operator with a
+        // failed step, a report reading "0 applied, 0 skipped", and no cause.
+        let applied_only = FixReport {
+            // Carry the real convergence verdict (was hardcoded `false`): the
+            // exit code comes from the unfiltered `report`, but the rendered
+            // JSON's `non_convergent` is the only machine signal of a capped
+            // exit-2 run, so `--fix-only --format json` must not report `false`
+            // on a non-convergent run.
+            non_convergent: report.non_convergent,
+            results: report
+                .results
+                .iter()
+                .filter_map(|r| {
+                    let items: Vec<_> = r
+                        .items
+                        .iter()
+                        .filter(|i| match &i.status {
+                            FixStatus::Applied(_) => true,
+                            // Classify on the structural kind, not the reason text:
+                            // a benign residual on a file named `fix error:*` must
+                            // not be kept as an error (audit F2, 2026-09-20).
+                            FixStatus::Skipped { kind, .. } => {
+                                *kind == alint_core::SkipKind::Errored
+                            }
+                            _ => false,
+                        })
+                        .cloned()
+                        .collect();
+                    (!items.is_empty()).then(|| FixRuleResult {
+                        rule_id: r.rule_id.clone(),
+                        level: r.level,
+                        items,
+                    })
+                })
+                .collect(),
+        };
+        format
+            .write_fix_with_options(&applied_only, &mut out, opts)
+            .context("writing output")?;
+    } else {
+        format
+            .write_fix_with_options(&report, &mut out, opts)
+            .context("writing output")?;
+    }
     out.flush().ok();
 
-    let exit = if report.has_unfixable_errors()
-        || (cli.fail_on_warning && report.has_unfixable_warnings())
-    {
-        ExitCode::from(1)
-    } else {
-        ExitCode::SUCCESS
-    };
-    Ok(exit)
+    Ok(fix_exit_code(&report, fix_only, cli))
+}
+
+/// The process exit code for a fix pass, shared by the write path, `--dry-run`,
+/// and `--diff`. Thin wrapper over [`fix_exit_status`] (which carries the logic
+/// and is unit-testable, `ExitCode` being opaque).
+fn fix_exit_code(report: &FixReport, fix_only: bool, cli: &Cli) -> ExitCode {
+    ExitCode::from(fix_exit_status(report, fix_only, cli.fail_on_warning))
+}
+
+/// The numeric exit status for a fix pass: `0` success, `1` a residual that
+/// stands (an unfixable/errored fix), `2` the fixpoint could not converge.
+/// `--fix-only` applied what it could, so a residual finding is expected and
+/// suppressed - it fails only if a fix was attempted and errored. Otherwise an
+/// unfixable error (or an unfixable warning under `--fail-on-warning`) fails.
+fn fix_exit_status(report: &FixReport, fix_only: bool, fail_on_warning: bool) -> u8 {
+    // Non-convergence is the most severe fix outcome and outranks every other
+    // branch, including `--fix-only`'s residual suppression: the fixpoint loop
+    // hit its pass cap without settling (a config whose fixes keep re-triggering,
+    // see docs/design/v0.17/fixpoint.md 2). Exit 2 -- "fix could not complete" --
+    // is distinct from 1 ("ran, violations remain") and shares the code alint
+    // already uses for a user-fixable config error (M11), which is what this is.
+    if report.non_convergent {
+        return 2;
+    }
+    if fix_only {
+        // A benign residual is suppressed; only a genuine fix error fails.
+        return u8::from(report.had_fix_error());
+    }
+    // `had_fix_error()`: a fix was ATTEMPTED and hit a genuine I/O error (a
+    // read-only target, ENOSPC, ...), recorded as a `Skipped("fix error: ...")`.
+    // That is not a benign declined skip (already-clean, binary, size-limit), so
+    // it must fail the process regardless of the rule's level -- otherwise `alint
+    // fix` reports success (exit 0) while a warning/info-level fix silently did
+    // not land. This matches the `--fix-only` branch above.
+    u8::from(
+        report.had_fix_error()
+            || report.has_unfixable_errors()
+            || (fail_on_warning && report.has_unfixable_warnings()),
+    )
 }
 
 fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {

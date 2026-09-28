@@ -1,0 +1,36 @@
+name: file_normalize_line_endings converges on a doubled CR (\r\r\n)
+tags: [fix, line_endings, file_normalize_line_endings, idempotence]
+
+# Non-convergence regression (Phase-0 round-3 audit, finding F1). A malformed
+# `\r\r\n` (doubled CR before LF) must collapse to the target in a SINGLE fix.
+# The old fixer popped only ONE preceding CR, leaving `\r\n` under an LF target,
+# which `line_endings` immediately re-flags -- so a second `fix` kept applying
+# (never a fixed point). The final `check` here asserts the real invariant:
+# after one fix the tree is clean, i.e. `fix` converged in one pass.
+
+given:
+  tree:
+    src:
+      a.rs: "x\r\r\ny\r\n"
+  config: |
+    version: 1
+    rules:
+      - id: lf-only
+        kind: line_endings
+        paths: "src/**/*.rs"
+        target: lf
+        level: error
+        fix:
+          file_normalize_line_endings: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: lf-only, level: error, path: src/a.rs}
+  - applied: [lf-only]
+  - violations: []
+
+expect_tree:
+  src:
+    a.rs: "x\ny\n"

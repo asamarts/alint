@@ -1,0 +1,62 @@
+name: multiple whole-document (TOML) set_value rules on one file co-apply in one fix
+tags: [fix, toml_path_equals, set_value, toml]
+
+# Follow-up 2: a whole-document-rewrite fixer (TOML via toml_edit) now emits its
+# MINIMAL changed span (not a `0..len` whole-file edit), so three rules changing
+# three different keys in ONE file produce DISJOINT edits that all apply together
+# -- previously they overlapped and serialized one-per-fixpoint-pass. All three
+# land, the leading comment + `[server]` header survive, and check converges.
+
+given:
+  tree:
+    app.toml: |
+      # config
+      [server]
+      host = "localhost"
+      port = 8080
+      debug = false
+  config: |
+    version: 1
+    rules:
+      - id: host
+        kind: toml_path_equals
+        paths: "**/*.toml"
+        path: "$['server']['host']"
+        equals: "prod"
+        level: error
+        fix:
+          set_value: {}
+      - id: port
+        kind: toml_path_equals
+        paths: "**/*.toml"
+        path: "$['server']['port']"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+      - id: debug
+        kind: toml_path_equals
+        paths: "**/*.toml"
+        path: "$['server']['debug']"
+        equals: true
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: host, level: error, path: app.toml}
+      - {rule: port, level: error, path: app.toml}
+      - {rule: debug, level: error, path: app.toml}
+  - applied: [host, port, debug]
+  - violations: []
+
+expect_tree:
+  app.toml: |
+    # config
+    [server]
+    host = "prod"
+    port = 9090
+    debug = true

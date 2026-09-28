@@ -1,0 +1,33 @@
+name: cross_file registered flags a crate dir missing from workspace.members
+# relation: registered -- every SOURCE member (a filesystem path from the
+# `source.files` glob, mapped through `register_as`, default `{path}`) must be an
+# element of the target list. `crates/foo` exists on disk but is absent from
+# `$.workspace.members`, so the root manifest is flagged. `crates/bar` IS listed,
+# so it does not fire. The target extract uses `[*]` to yield the array ELEMENTS
+# (a bare path would return the whole array as one node, RFC 9535).
+tags: [cross_file, registered]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = [\"crates/bar\"]\n"
+    crates:
+      bar:
+        Cargo.toml: "[package]\nname = \"bar\"\n"
+      foo:
+        Cargo.toml: "[package]\nname = \"foo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: members-registered
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*" }
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: members-registered, level: error, path: Cargo.toml}

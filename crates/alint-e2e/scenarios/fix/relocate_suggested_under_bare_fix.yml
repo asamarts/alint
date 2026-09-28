@@ -1,0 +1,36 @@
+name: relocate is a suggestion (requires --unsafe-fixes) under a bare fix
+# relocate is Unsafe (a rename moves a real file and the destination is inferred),
+# so a bare `alint fix` must SUGGEST it, not move the file -- consistent with its
+# fixed-behavior siblings under the Unsafe tier (file_remove, file_rename). The
+# `[check, fix]` shape asserts the bare fix step suggests and does NOT move the
+# nested lockfile.
+tags: [fix, file_absent, relocate, applicability]
+
+given:
+  tree:
+    crates:
+      widget:
+        Cargo.lock: "# lock v1\n"
+        lib.rs: "// widget\n"
+  config: |
+    version: 1
+    rules:
+      - id: lockfile-at-root
+        kind: file_absent
+        paths: "**/*/Cargo.lock"
+        level: error
+        fix:
+          relocate: {}
+
+when: [check, fix]
+
+expect:
+  - violations:
+      - {rule: lockfile-at-root, level: error, path: crates/widget/Cargo.lock}
+  - suggested: [lockfile-at-root]
+
+expect_tree:
+  crates:
+    widget:
+      Cargo.lock: "# lock v1\n"
+      lib.rs: "// widget\n"

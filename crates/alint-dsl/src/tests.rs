@@ -1,6 +1,35 @@
 use super::*;
 
 #[test]
+fn spawning_fix_ops_are_gated() {
+    // Phase 3 shipped the first spawning fix op. Every entry must be a real fix
+    // op, and `git_untrack` (`git rm --cached`) must be present -- its
+    // top-level-only trust gate is `reject_spawning_fix_ops_in` (+ the template
+    // and `finalize` backstops), exercised by the `load_rejects_git_untrack_*`
+    // tests below and the e2e canary `crates/alint/tests/fix_spawn_gate.rs`.
+    use std::collections::BTreeSet;
+    assert!(
+        !SPAWNING_FIX_OPS.is_empty(),
+        "SPAWNING_FIX_OPS is empty; the first spawning op (git_untrack) should be listed"
+    );
+    let all: BTreeSet<&str> = alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
+    let spawning: BTreeSet<&str> = SPAWNING_FIX_OPS.iter().copied().collect();
+    assert!(
+        spawning.is_subset(&all),
+        "SPAWNING_FIX_OPS names an unknown op: {:?}",
+        &spawning - &all
+    );
+    assert!(
+        spawning.contains("git_untrack"),
+        "git_untrack (the first spawning fix op) must be gated"
+    );
+    assert!(
+        spawning.contains("command"),
+        "the `command` fix op (a user-supplied fix command) must be gated"
+    );
+}
+
+#[test]
 fn collect_drop_ins_handles_missing_dir() {
     // Missing `.alint.d/` is the common case (drop-ins
     // are opt-in by mkdir); should be silent.
@@ -457,6 +486,29 @@ fn parse_rejects_config_with_extends() {
 }
 
 #[test]
+fn parse_rejects_fix_block_with_two_ops() {
+    // R-TWOOP end to end: a `fix:` block carrying two op keys is rejected by
+    // the real loader, not silently first-wins (the untagged-FixSpec trap).
+    // Fires during deserialization, before any kind-compatibility build step.
+    let yaml = "\
+version: 1
+rules:
+  - id: r
+    kind: file_exists
+    level: error
+    paths: README.md
+    fix:
+      file_trim_trailing_whitespace: {}
+      file_append_final_newline: {}
+";
+    let err = parse(yaml).unwrap_err();
+    assert!(
+        err.to_string().contains("exactly one op key"),
+        "expected a two-op rejection, got: {err}"
+    );
+}
+
+#[test]
 fn load_resolves_local_extends_and_merges_rules() {
     let tmp = tempfile::tempdir().unwrap();
     let base = tmp.path().join("base.yml");
@@ -775,6 +827,706 @@ fn load_resolves_https_extends_via_cache_hit() {
     assert_eq!(ids, vec!["inherited", "local"]);
 }
 
+// --- W2 content-fixer trust (auto-fix.md 5.5) ---------------------------------
+
+/// The applicability a loaded rule's content fixer DECLARES (`None` = unset, so the
+/// builder's default tier applies). W2 sets it to `Suggestion` for a content fixer
+/// from an untrusted remote.
+fn declared_content_tier(rule: &alint_core::RuleSpec) -> Option<alint_core::Applicability> {
+    use alint_core::FixSpec;
+    match rule.fix.as_ref()? {
+        FixSpec::Replace { replace } => replace.applicability,
+        FixSpec::FileCreate { file_create } => file_create.applicability,
+        FixSpec::FilePrepend { file_prepend } => file_prepend.applicability,
+        FixSpec::FileAppend { file_append } => file_append.applicability,
+        FixSpec::SetValue { set_value } => set_value.applicability,
+        FixSpec::RemoveValue { remove_value } => remove_value.applicability,
+        FixSpec::SyncFrom { sync_from } => sync_from.applicability,
+        FixSpec::CreateAndRegister {
+            create_and_register,
+        } => create_and_register.applicability,
+        // `relocate` is fixed-behavior (never demoted), but reading its declared
+        // tier explicitly gives `w2_remote_relocate_is_not_demoted` teeth: a
+        // regression that demoted it would surface here as `Some(Suggestion)`.
+        FixSpec::Relocate { relocate } => relocate.applicability,
+        // `sort` is content-injecting (demoted from an untrusted remote); read its
+        // tier so `w2_remote_sort_is_demoted_to_suggestion` sees the cap.
+        FixSpec::Sort { sort } => sort.applicability,
+        // `indent_style` is content-injecting for the same reason (aim a reindent
+        // at a Makefile); read its tier for `w2_remote_indent_style_is_demoted`.
+        FixSpec::IndentStyle { indent_style } => indent_style.applicability,
+        // `insert_line` injects the host rule's `require:` lines; read its tier for
+        // `w2_remote_insert_line_is_demoted`.
+        FixSpec::InsertLine { insert_line } => insert_line.applicability,
+        // `insert_header` injects the host `file_header` rule's header bytes; read
+        // its tier for `w2_remote_insert_header_is_demoted`.
+        FixSpec::InsertHeader { insert_header } => insert_header.applicability,
+        // `file_rename` / `file_normalize_line_endings` are aimable Safe transforms
+        // (case-rename breaks imports; CRLF breaks a shebang); read their tier for
+        // `w2_remote_file_rename_is_demoted` / `..._file_normalize_line_endings_...`.
+        FixSpec::FileRename { file_rename } => file_rename.applicability,
+        FixSpec::FileNormalizeLineEndings {
+            file_normalize_line_endings,
+        } => file_normalize_line_endings.applicability,
+        // The hygiene normalizers + `chmod` are content-injecting too (aimable at the
+        // Safe tier -- R3); read each tier for its `w2_remote_<op>_is_demoted` test.
+        // `file_strip_bidi` / `file_strip_zero_width` are NOT here -- they stay
+        // fixed-behavior (security-positive), covered by
+        // `w2_remote_security_positive_strip_is_not_demoted`.
+        FixSpec::FileTrimTrailingWhitespace {
+            file_trim_trailing_whitespace,
+        } => file_trim_trailing_whitespace.applicability,
+        FixSpec::FileAppendFinalNewline {
+            file_append_final_newline,
+        } => file_append_final_newline.applicability,
+        FixSpec::FileStripBom { file_strip_bom } => file_strip_bom.applicability,
+        FixSpec::FileCollapseBlankLines {
+            file_collapse_blank_lines,
+        } => file_collapse_blank_lines.applicability,
+        FixSpec::Chmod { chmod } => chmod.applicability,
+        _ => None,
+    }
+}
+
+/// Seed `cache` with `body` under its own SRI and return the `https://…#sha256-…`
+/// URL a config would `extends:`. Its base (no fragment) is
+/// `https://example.invalid/remote.yml`.
+fn seed_remote(cache: &extends::Cache, body: &str) -> String {
+    use sha2::{Digest, Sha256};
+    let digest = Sha256::digest(body.as_bytes());
+    let mut hex = String::with_capacity(digest.len() * 2);
+    for b in &digest {
+        use std::fmt::Write as _;
+        write!(hex, "{b:02x}").unwrap();
+    }
+    let sri_str = format!("sha256-{hex}");
+    let sri = extends::Sri::parse(&sri_str).unwrap();
+    cache.put(&sri, body.as_bytes()).unwrap();
+    format!("https://example.invalid/remote.yml#{sri_str}")
+}
+
+const REMOTE_REPLACE: &str = "version: 1\nrules:\n  - id: no-todo\n    \
+     kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: TODO\n    \
+     level: error\n    fix: { replace: { replacement: DONE } }\n";
+
+fn load_extending(remote_body: &str, top_extra: &str) -> alint_core::Config {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = extends::Cache::at(tmp.path().join("cache"));
+    let url = seed_remote(&cache, remote_body);
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        format!("version: 1\nextends: [\"{url}\"]\n{top_extra}rules: []\n"),
+    )
+    .unwrap();
+    // Keep the tempdir alive for the duration of the load by leaking it into the
+    // cache path (the cache is read during load); simplest is to load before drop.
+    let opts = LoadOptions::with_cache(cache);
+    let cfg = load_with(&config_path, &opts).unwrap();
+    drop(tmp);
+    cfg
+}
+
+#[test]
+fn w2_remote_replace_is_demoted_to_suggestion() {
+    // A `replace` (content-injecting) from a REMOTE `extends:` the user has not
+    // trusted may propose but never auto-write: its tier is capped to `suggestion`.
+    let cfg = load_extending(REMOTE_REPLACE, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `replace` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_file_create_is_demoted_to_suggestion() {
+    // R-RETRO: the pre-existing inline-content ops are demoted too. `file_create`
+    // gained an `applicability` field precisely so this cap has somewhere to land.
+    let body = "version: 1\nrules:\n  - id: need-notice\n    kind: file_exists\n    \
+        paths: NOTICE\n    root_only: true\n    level: error\n    \
+        fix: { file_create: { content: \"(c) them\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "need-notice").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_create` must be demoted (R-RETRO)"
+    );
+}
+
+#[test]
+fn w2_remote_file_prepend_is_demoted_to_suggestion() {
+    // R-RETRO: `file_prepend` is a content-injecting inline op in
+    // `CONTENT_INJECTING_FIX_OPS`, so an untrusted remote's must be capped too
+    // (the classification-exhaustiveness gate had it, but no runtime demotion
+    // test proved the cap fires for this op shape).
+    let body = "version: 1\nrules:\n  - id: header-required\n    kind: file_header\n    \
+        paths: \"src/**/*.rs\"\n    pattern: \"(?s)Copyright\"\n    lines: 3\n    \
+        level: error\n    fix: { file_prepend: { content: \"// Copyright\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg
+        .rules
+        .iter()
+        .find(|r| r.id == "header-required")
+        .unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_prepend` must be demoted (R-RETRO)"
+    );
+}
+
+#[test]
+fn w2_remote_file_append_is_demoted_to_suggestion() {
+    let body = "version: 1\nrules:\n  - id: spdx\n    kind: file_content_matches\n    \
+        paths: \"README.md\"\n    pattern: \"SPDX-License-Identifier\"\n    \
+        level: warning\n    fix: { file_append: { content: \"\\n<!-- SPDX -->\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "spdx").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_append` must be demoted (R-RETRO)"
+    );
+}
+
+#[test]
+fn w2_remote_set_value_is_demoted_to_suggestion() {
+    // Phase 2: `set_value` writes the host rule's `equals` bytes, so a REMOTE
+    // untrusted `extends:` may PROPOSE it but never auto-write -> capped to
+    // suggestion. Teeth: reclassifying `set_value` out of CONTENT_INJECTING_FIX_OPS
+    // (or dropping it) makes this assert `None` (auto-applies).
+    let body = "version: 1\nrules:\n  - id: sv\n    kind: hcl_path_equals\n    \
+        paths: \"*.tf\"\n    path: \"$.region\"\n    equals: \"x\"\n    level: error\n    \
+        fix: { set_value: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "sv").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `set_value` must be demoted to suggestion"
+    );
+}
+
+const REMOTE_SYNC_FROM: &str = "version: 1\nrules:\n  - id: mirror\n    \
+     kind: cross_file\n    relation: identical\n    source: { file: LICENSE }\n    \
+     targets: { files: \"crates/*/LICENSE\" }\n    level: error\n    \
+     fix: { sync_from: {} }\n";
+
+#[test]
+fn w2_remote_sync_from_is_demoted_to_suggestion() {
+    // `sync_from` overwrites a target with the ruleset-chosen `source:` bytes, so a
+    // REMOTE `extends:` the user has not trusted may PROPOSE but never auto-write:
+    // its tier is capped to `suggestion`. This locks in the demotion that otherwise
+    // rests only on structural assumptions about where a `cross_file` rule's `fix:`
+    // sits (audit gap). Teeth: dropping `sync_from` from CONTENT_INJECTING_FIX_OPS
+    // reverts this to None (default Unsafe) and reds here.
+    let cfg = load_extending(REMOTE_SYNC_FROM, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "mirror").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `sync_from` must be demoted to suggestion"
+    );
+}
+
+const REMOTE_SYNC_FROM_EQUALS: &str = "version: 1\nrules:\n  - id: propagate\n    \
+     kind: cross_file\n    relation: equals\n    \
+     source: { file: Cargo.toml, extract: { toml: \"$.workspace.package.version\" } }\n    \
+     targets: { files: \"crates/*/Cargo.toml\", extract: { toml: \"$.package.version\" } }\n    \
+     level: error\n    fix: { sync_from: {} }\n";
+
+#[test]
+fn w2_remote_sync_from_equals_is_demoted_to_suggestion() {
+    // The `equals` form of `sync_from` builds a DIFFERENT fixer type
+    // (CrossFileValueFixer, which propagates a value into a node) than `identical`
+    // (SyncFromFixer). The demotion keys on the op name, so it must cap the value
+    // fixer too -- a remote must PROPOSE a value propagation, never auto-write the
+    // ruleset-chosen value into the user's files. Locks in the equals-form demotion
+    // (audit gap: only the identical form was tested).
+    let cfg = load_extending(REMOTE_SYNC_FROM_EQUALS, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "propagate").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `sync_from` on `equals` must be demoted to suggestion"
+    );
+}
+
+const REMOTE_CREATE_AND_REGISTER: &str = "version: 1\nrules:\n  - id: reg\n    \
+     kind: cross_file\n    relation: registered\n    \
+     source: { files: \"crates/*\" }\n    \
+     targets: [{ file: Cargo.toml, extract: { toml: \"$.workspace.members[*]\" } }]\n    \
+     level: error\n    fix: { create_and_register: {} }\n";
+
+#[test]
+fn w2_remote_create_and_register_is_demoted_to_suggestion() {
+    // `create_and_register` appends a ruleset-chosen member value into the user's
+    // manifest, so a REMOTE `extends:` the user has not trusted may PROPOSE but
+    // never auto-write: its tier is capped to `suggestion`. Teeth: dropping
+    // `create_and_register` from CONTENT_INJECTING_FIX_OPS reverts this to None
+    // (default Unsafe) and reds here.
+    let cfg = load_extending(REMOTE_CREATE_AND_REGISTER, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "reg").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `create_and_register` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_sort_is_demoted_to_suggestion() {
+    // `sort` writes no ruleset bytes, but a REMOTE `extends:` the user has not
+    // trusted can AIM its reorder at an order-significant file (.gitignore /
+    // CODEOWNERS) at the Safe tier, so it is capped to `suggestion` -- may PROPOSE
+    // but never auto-write. Teeth: dropping `sort` from CONTENT_INJECTING_FIX_OPS
+    // reverts this to None and reds here.
+    let body = "version: 1\nrules:\n  - id: ks\n    kind: ordered_block\n    \
+        paths: \"**/CODEOWNERS\"\n    level: error\n    fix: { sort: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "ks").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `sort` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_indent_style_is_demoted_to_suggestion() {
+    // `indent_style` writes no ruleset bytes, but a REMOTE `extends:` can AIM its
+    // reindent at an indent-significant file (a Makefile recipe's literal tab) at
+    // the Safe tier, so it is capped to `suggestion`. Teeth: dropping
+    // `indent_style` from CONTENT_INJECTING_FIX_OPS reverts this to None and reds.
+    let body = "version: 1\nrules:\n  - id: ind\n    kind: indent_style\n    \
+        paths: \"**/Makefile\"\n    style: spaces\n    width: 4\n    level: error\n    \
+        fix: { indent_style: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "ind").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `indent_style` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_insert_line_is_demoted_to_suggestion() {
+    // `insert_line` splices the host rule's ruleset-authored `require:` lines into
+    // the victim's file, so a REMOTE `extends:` must PROPOSE it, never auto-write:
+    // capped to `suggestion`. Teeth: dropping `insert_line` from
+    // CONTENT_INJECTING_FIX_OPS reverts this to None and reds here.
+    let body = "version: 1\nrules:\n  - id: co\n    kind: ordered_block\n    \
+        paths: \"**/CODEOWNERS\"\n    require: [\"* @team\"]\n    level: error\n    \
+        fix: { insert_line: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "co").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `insert_line` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_insert_header_is_demoted_to_suggestion() {
+    // `insert_header` inserts the host `file_header` rule's ruleset-authored header
+    // bytes near the top of the victim's file (like `file_prepend`), so a REMOTE
+    // `extends:` must PROPOSE it, never auto-write: capped to `suggestion`. Teeth:
+    // dropping `insert_header` from CONTENT_INJECTING_FIX_OPS reverts this to None.
+    let body = "version: 1\nrules:\n  - id: hdr\n    kind: file_header\n    \
+        paths: \"**/*.rs\"\n    pattern: \"SPDX\"\n    level: error\n    \
+        fix: { insert_header: { content: \"// SPDX\\n\" } }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "hdr").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `insert_header` must be demoted to suggestion"
+    );
+}
+
+#[test]
+fn w2_remote_file_normalize_line_endings_is_demoted_to_suggestion() {
+    // AUDIT (partition MED): a remote can AIM a CRLF rewrite at a shebang script to
+    // break it (line endings are significance-bearing), so `file_normalize_line_endings`
+    // must be demoted from an untrusted remote. Teeth: dropping it from
+    // CONTENT_INJECTING_FIX_OPS reverts this to None.
+    let body = "version: 1\nrules:\n  - id: le\n    kind: line_endings\n    \
+        paths: \"**/*.sh\"\n    target: crlf\n    level: error\n    \
+        fix: { file_normalize_line_endings: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "le").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_normalize_line_endings` must be demoted"
+    );
+}
+
+#[test]
+fn w2_remote_file_rename_is_demoted_to_suggestion() {
+    // AUDIT (partition MED): a remote can AIM a mass case-rename at the victim's
+    // source, breaking case-sensitive imports, so `file_rename` must be demoted from
+    // an untrusted remote. Teeth: dropping it from CONTENT_INJECTING_FIX_OPS reverts
+    // this to None.
+    let body = "version: 1\nrules:\n  - id: fc\n    kind: filename_case\n    \
+        paths: \"**/*.py\"\n    case: snake\n    level: error\n    \
+        fix: { file_rename: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "fc").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_rename` must be demoted"
+    );
+}
+
+#[test]
+fn w2_remote_remove_value_is_not_demoted() {
+    // `remove_value` deletes a node (no ruleset bytes) -> fixed-behavior, gated
+    // by its Unsafe tier like `file_remove`, NOT demoted by W2. Its tier stays
+    // unset (None -> default Unsafe at fix time), never forced to suggestion.
+    let body = "version: 1\nrules:\n  - id: rv\n    kind: hcl_path_absent\n    \
+        paths: \"*.tf\"\n    path: \"$.secret\"\n    level: error\n    \
+        fix: { remove_value: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "rv").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "an untrusted remote's `remove_value` is fixed-behavior, not demoted"
+    );
+}
+
+#[test]
+fn w2_remote_relocate_is_not_demoted() {
+    // `relocate` moves a file to the repo root (a rename, no ruleset bytes, no
+    // spawn) -> fixed-behavior, gated by its Unsafe tier like `file_remove`/
+    // `file_rename`, NOT demoted by W2. Its tier stays unset (None -> default
+    // Unsafe at fix time), never forced to suggestion from an untrusted remote.
+    let body = "version: 1\nrules:\n  - id: nested-lock\n    kind: file_absent\n    \
+        paths: \"**/*/Cargo.lock\"\n    level: error\n    \
+        fix: { relocate: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "nested-lock").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "an untrusted remote's `relocate` is fixed-behavior, not demoted"
+    );
+}
+
+#[test]
+fn w2_remote_content_fixer_via_template_is_demoted() {
+    // Bypass vector (audit): a remote provides a content-fix TEMPLATE plus a rule
+    // that references it. The template's `fix:` block is spliced into the rule at
+    // `finalize` -- AFTER the per-source demotion -- so the cap must cover
+    // `templates:` too, or the remote content fixer auto-applies (escaping a
+    // rules-only cap). Teeth: dropping the `parent.templates` demotion in
+    // `load_recursive` makes this assert `None`.
+    let body = "version: 1\ntemplates:\n  - id: inject\n    \
+        kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: TODO\n    \
+        level: error\n    fix: { replace: { replacement: PWNED } }\nrules:\n  \
+        - extends_template: inject\n    id: pwned\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "pwned").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "a content fixer smuggled through a remote TEMPLATE must also be demoted"
+    );
+}
+
+#[test]
+fn w2_known_residual_remote_rule_instantiating_a_trusted_template() {
+    // KNOWN RESIDUAL of the load-time cap (whole-phase audit W2-1, LOW,
+    // targeted-only; auto-fix.md 5.5, loader.rs demotion site). The cap demotes an
+    // untrusted remote's OWN content fixers (inline `fix:` + its own `templates:`),
+    // keying on where the CONTENT is defined. It does NOT re-examine which rule
+    // USES a fixer after template expansion, so an untrusted remote rule that
+    // `extends_template:`s a template defined by the TRUSTED top-level config
+    // acquires that (never-demoted) fixer at its declared tier -- and, through a
+    // `{{vars.*}}` hole, with attacker-chosen bytes. This test PINS the residual so
+    // it cannot drift silently: the deferred fix-time-provenance approach would
+    // close it, flipping this assert to `Some(Suggestion)` (update the docs then).
+    //
+    // The user's top-level config authors the parameterized content-fix template;
+    // the untrusted remote authors only a rule that instantiates it and fills the
+    // `{{vars.text}}` hole with its own bytes.
+    let remote = "version: 1\nrules:\n  - id: pwned\n    \
+        extends_template: user_inject\n    paths: \"*.txt\"\n    \
+        vars:\n      text: PWNED\n";
+    let top_template = "templates:\n  - id: user_inject\n    \
+        kind: file_content_forbidden\n    pattern: TODO\n    level: error\n    \
+        fix: { replace: { replacement: \"{{vars.text}}\" } }\n";
+    let cfg = load_extending(remote, top_template);
+    let rule = cfg.rules.iter().find(|r| r.id == "pwned").unwrap();
+    // NOT demoted: the trusted template's `replace` keeps its declared tier
+    // (unset -> defaults to Unsafe, auto-applies under --unsafe-fixes), not
+    // `suggestion`. If a future provenance fix demotes it, this becomes
+    // `Some(Suggestion)` -- update this test and auto-fix.md 5.5 together.
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "KNOWN RESIDUAL: a remote rule instantiating a TRUSTED template's content \
+         fixer is not demoted by the load-time cap (auto-fix.md 5.5)"
+    );
+    // And the injected bytes are the remote's own (var-hole amplification), proving
+    // this is arbitrary-byte injection, not merely triggering the user's own fixer.
+    match rule.fix.as_ref().expect("pwned carries the expanded fixer") {
+        alint_core::FixSpec::Replace { replace } => {
+            assert_eq!(
+                replace.replacement, "PWNED",
+                "the untrusted instance's `vars:` filled the trusted template's hole"
+            );
+        }
+        other => panic!("expected a Replace fixer, got {other:?}"),
+    }
+}
+
+#[test]
+fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
+    // Defense-in-depth for the W2 audit's architectural risk: the trust handling
+    // keys on hand-maintained SSOTs, so a FUTURE fix op could be added to the
+    // engine yet forgotten here -- left un-demoted / un-refused from a remote
+    // `extends:` (the class of the templates bypass this audit found). This gate
+    // forces EVERY fix op into exactly ONE of THREE trust classes, so a new op
+    // fails the build until the call is made (and wired in): content-injecting
+    // (demoted from an untrusted remote), spawning (refused from any non-top-level
+    // source), or fixed-behavior (no ruleset bytes, no spawn -- honored anywhere).
+    use std::collections::BTreeSet;
+    // Fix ops that carry NO ruleset-authored bytes AND do not spawn: honored from
+    // any source. The exhaustive complement of the content + spawning SSOTs.
+    const FIXED_BEHAVIOR_FIX_OPS: &[&str] = &[
+        "file_remove",
+        // `file_strip_bidi` / `file_strip_zero_width` are security-POSITIVE (they
+        // remove Trojan-Source / zero-width attacks), so honoring them from any source
+        // is the safe default -- demoting them would let a remote-sourced attack
+        // survive. DELIBERATELY kept fixed-behavior (asamarts, 2026-09-27 audit R3).
+        "file_strip_bidi",
+        "file_strip_zero_width",
+        // `remove_value` deletes (no ruleset bytes); `set_value` is content-injecting.
+        "remove_value",
+        // `dir_create` makes an empty directory -- no ruleset bytes, no spawn.
+        "dir_create",
+        // `relocate` moves a file to the repo root (a rename) -- no ruleset bytes,
+        // no spawn; gated by its Unsafe tier like `file_remove`/`file_rename`.
+        "relocate",
+        // NOTE (R3, asamarts): the hygiene normalizers `file_trim_trailing_whitespace`
+        // / `file_append_final_newline` / `file_strip_bom` / `file_collapse_blank_lines`
+        // + `chmod` are NOT here any more -- they write no ruleset bytes, but a remote
+        // can AIM them at a file where the "cosmetic" change is load-bearing (Markdown
+        // hard break, encoding signature, paragraph breaks, a script's +x), so they
+        // are CONTENT_INJECTING (demoted from an untrusted remote) like `sort` /
+        // `file_normalize_line_endings`.
+        // NOTE: `sort` / `indent_style` / `insert_*` / `file_rename` /
+        // `file_normalize_line_endings` are also CONTENT_INJECTING (aimable, or inject
+        // ruleset bytes), not fixed-behavior.
+        // NOTE: `git_untrack` and `command` are NOT here -- they SPAWN, so they are
+        // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
+        // a strictly stronger gate than the content demotion.
+    ];
+    let content: BTreeSet<&str> = crate::CONTENT_INJECTING_FIX_OPS.iter().copied().collect();
+    let fixed: BTreeSet<&str> = FIXED_BEHAVIOR_FIX_OPS.iter().copied().collect();
+    let spawning: BTreeSet<&str> = crate::SPAWNING_FIX_OPS.iter().copied().collect();
+    let all: BTreeSet<&str> = alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();
+
+    assert!(
+        content.is_subset(&all),
+        "content SSOT names an unknown op: {:?}",
+        &content - &all
+    );
+    assert!(
+        spawning.is_subset(&all),
+        "spawning SSOT names an unknown op: {:?}",
+        &spawning - &all
+    );
+    // The three trust classes must be PAIRWISE disjoint: each op has exactly one
+    // trust posture.
+    assert!(
+        content.is_disjoint(&fixed),
+        "op(s) marked BOTH content-injecting and fixed-behavior: {:?}",
+        &content & &fixed
+    );
+    assert!(
+        content.is_disjoint(&spawning),
+        "op(s) marked BOTH content-injecting and spawning: {:?}",
+        &content & &spawning
+    );
+    assert!(
+        fixed.is_disjoint(&spawning),
+        "op(s) marked BOTH fixed-behavior and spawning: {:?}",
+        &fixed & &spawning
+    );
+    // ...and together they must cover EVERY op (exhaustive partition).
+    let classified: BTreeSet<&str> = content.union(&fixed).copied().collect::<BTreeSet<_>>();
+    let classified: BTreeSet<&str> = classified.union(&spawning).copied().collect();
+    assert_eq!(
+        classified,
+        all,
+        "unclassified fix op(s) -- decide content-injecting (add to \
+         CONTENT_INJECTING_FIX_OPS, demoted from a remote `extends:`), spawning (add \
+         to SPAWNING_FIX_OPS, refused from any non-top-level source), or fixed-behavior: {:?}",
+        &all - &classified
+    );
+}
+
+#[test]
+fn w2_trusted_extends_re_honors_a_named_remote() {
+    // Listing the remote's URL in the top-level `trusted_extends:` opts it back in:
+    // its content fixers are honored at their own tier (no demotion -> unset spec).
+    let cfg = load_extending(
+        REMOTE_REPLACE,
+        "trusted_extends: [\"https://example.invalid/remote.yml\"]\n",
+    );
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "a trusted remote's `replace` keeps its own (unset -> Unsafe) tier"
+    );
+}
+
+#[test]
+fn w2_local_extends_content_fixer_is_not_demoted() {
+    // A content fixer from a LOCAL `extends:` (the user's own tree) is honored at
+    // tier -- only remote-URL sources are demoted.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    std::fs::write(&base, REMOTE_REPLACE).unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        "version: 1\nextends: [\"base.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let opts = LoadOptions::with_cache(extends::Cache::at(tmp.path().join("cache")));
+    let cfg = load_with(&config_path, &opts).unwrap();
+    let rule = cfg.rules.iter().find(|r| r.id == "no-todo").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "a LOCAL extends is the user's own tree -- not demoted"
+    );
+}
+
+#[test]
+fn w2_remote_security_positive_strip_is_not_demoted() {
+    // `file_strip_bidi` / `file_strip_zero_width` are security-POSITIVE (they remove
+    // Trojan-Source / zero-width attacks), so they stay FIXED_BEHAVIOR -- honored from
+    // ANY source, never demoted (demoting them would let a remote-sourced attack
+    // survive). They have NO `applicability` field, so if the demotion wrongly
+    // targeted one the load would ERROR (deny_unknown_fields); a clean load with the
+    // rule present proves it is left alone. (R3: the OTHER hygiene ops + chmod ARE now
+    // demoted -- see the `w2_remote_*_is_demoted` tests below.)
+    let body = "version: 1\nrules:\n  - id: no-bidi\n    kind: no_bidi_controls\n    \
+        paths: \"*.rs\"\n    level: error\n    fix: { file_strip_bidi: {} }\n";
+    let cfg = load_extending(body, "");
+    assert!(
+        cfg.rules.iter().any(|r| r.id == "no-bidi"),
+        "a security-positive strip fixer loads and is honored (never demoted)"
+    );
+}
+
+#[test]
+fn w2_remote_file_trim_trailing_whitespace_is_demoted() {
+    // R3 (asamarts): the hygiene normalizers are content-injecting now -- a remote can
+    // AIM a trim at a file where trailing whitespace is significant (a Markdown hard
+    // line break is two trailing spaces), so its tier is capped to `suggestion`.
+    let body = "version: 1\nrules:\n  - id: ws\n    kind: no_trailing_whitespace\n    \
+        paths: \"*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "ws").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_trim_trailing_whitespace` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_file_append_final_newline_is_demoted() {
+    let body = "version: 1\nrules:\n  - id: eof\n    kind: final_newline\n    \
+        paths: \"*.txt\"\n    level: error\n    fix: { file_append_final_newline: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "eof").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_append_final_newline` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_file_strip_bom_is_demoted() {
+    let body = "version: 1\nrules:\n  - id: bom\n    kind: no_bom\n    \
+        paths: \"*.txt\"\n    level: error\n    fix: { file_strip_bom: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "bom").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_strip_bom` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_file_collapse_blank_lines_is_demoted() {
+    let body = "version: 1\nrules:\n  - id: blanks\n    kind: max_consecutive_blank_lines\n    \
+        paths: \"*.md\"\n    max: 1\n    level: error\n    fix: { file_collapse_blank_lines: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "blanks").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `file_collapse_blank_lines` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_remote_chmod_is_demoted() {
+    // A remote aiming a +/-x flip at a script (loses +x -> breaks) or a data file
+    // (gains +x -> exec surface) is a real permission change -- capped to suggestion.
+    let body = "version: 1\nrules:\n  - id: exec\n    kind: executable_bit\n    \
+        paths: \"*.sh\"\n    require: true\n    level: error\n    fix: { chmod: {} }\n";
+    let cfg = load_extending(body, "");
+    let rule = cfg.rules.iter().find(|r| r.id == "exec").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted remote's `chmod` must be demoted (R3)"
+    );
+}
+
+#[test]
+fn w2_trusted_extends_in_an_extended_config_is_rejected() {
+    // A ruleset must not allowlist ITSELF: `trusted_extends:` in an extended config
+    // is refused at load (only the user's top-level config grants trust).
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    std::fs::write(
+        &base,
+        "version: 1\ntrusted_extends: [\"https://evil.example/x.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        "version: 1\nextends: [\"base.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let opts = LoadOptions::with_cache(extends::Cache::at(tmp.path().join("cache")));
+    let err = load_with(&config_path, &opts).unwrap_err().to_string();
+    assert!(
+        err.contains("trusted_extends") && err.contains("top-level"),
+        "an extended config's `trusted_extends:` must be refused; got: {err}"
+    );
+}
+
 #[test]
 fn load_rejects_custom_fact_declared_in_local_extends() {
     let tmp = tempfile::tempdir().unwrap();
@@ -842,6 +1594,29 @@ rules:
     let err = load(&child).unwrap_err().to_string();
     assert!(err.contains("command"), "{err}");
     assert!(err.contains("base.yml"), "{err}");
+}
+
+#[test]
+fn load_rejects_command_fix_op_via_extends_on_a_non_command_kind() {
+    // Audit H1: the `command` FIX op is spawning, so it must be refused from an
+    // extended source even on a NON-command host kind. This is a path the
+    // command-RULE gate (`reject_command_rules_in`, keyed on `kind: command`) does
+    // NOT cover -- a `fix: { command: {...} }` on `file_absent` -- but the fix-op
+    // gate (`reject_spawning_fix_ops_in`, which scans `fix:` blocks) does. Without
+    // it an adopted ruleset could shell out on a bare `alint fix`.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\nrules:\n  - id: smuggled\n    kind: file_absent\n    paths: \"**/*\"\n    level: error\n    fix:\n      command:\n        run: [\"sh\", \"-c\", \"touch pwned\"]\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("command"), "op not named: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+    assert!(err.contains("base.yml"), "source not named: {err}");
 }
 
 #[test]
@@ -920,6 +1695,178 @@ fn finalize_rejects_a_top_level_spawning_template() {
     let err = load(&cfg).unwrap_err().to_string();
     assert!(err.contains("generated_file_fresh"), "{err}");
     assert!(err.contains("templates"), "{err}");
+}
+
+// ── git_untrack: the first SPAWNING fix op (R-SPAWNGATE, DSL layer) ──────────
+// The spawn gate keys on the rule KIND, but a spawning FIXER hangs off a
+// non-spawning kind (`git_untrack` on `file_absent`), so these prove the
+// fix-op gate (`reject_spawning_fix_ops_in` + the template / finalize backstops)
+// refuses it from every non-top-level source, while a top-level declaration
+// still loads. The RCE-canary end-to-end analogue lives in
+// `crates/alint/tests/fix_spawn_gate.rs`.
+
+#[test]
+fn load_rejects_git_untrack_fix_declared_in_extends() {
+    // A `git_untrack` fix shells out (`git rm --cached`), so an extended ruleset
+    // declaring one must be refused -- adopting a published ruleset must never
+    // imply it can run git against the user's repo on a bare `alint fix`.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\nrules:\n  - id: sneaky-untrack\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    level: error\n    fix:\n      git_untrack: {}\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "op not named: {err}");
+    assert!(err.contains("base.yml"), "source not named: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn load_rejects_git_untrack_fix_in_extends_require_block() {
+    // Depth check: a spawning fix buried in a `require:` block (a `for_each_dir`
+    // nested rule) must be refused too -- the gate recurses at every depth, like
+    // the spawning-KIND gate.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\nrules:\n  - id: outer\n    kind: for_each_dir\n    paths: \"**/\"\n    level: error\n    require:\n      - id: inner-untrack\n        kind: file_absent\n        paths: \"*\"\n        git_tracked_only: true\n        fix:\n          git_untrack: {}\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "nested op not gated: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn load_rejects_git_untrack_fix_template_smuggled_via_extends() {
+    // Template-bypass analogue of the spawning-kind C1: an extended ruleset hides
+    // the `git_untrack` fix in a `templates:` block referenced by a
+    // `kind`-less `extends_template:` rule; the template's `fix:` splices in at
+    // finalize, after the rule-level gate. The template gate must catch it.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &base,
+        "version: 1\ntemplates:\n  - id: ut\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    fix:\n      git_untrack: {}\nrules:\n  - id: pwned\n    level: error\n    extends_template: ut\n",
+    )
+    .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "op not named: {err}");
+    assert!(err.contains("base.yml"), "source not named: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn finalize_rejects_a_top_level_git_untrack_template() {
+    // Source-agnostic backstop: a spawning fix op may never live in a `templates:`
+    // block (a latent bypass the moment the config is extended), so even a
+    // top-level `git_untrack` template is a hard error -- declare the fix directly
+    // on a rule. Mirrors `finalize_rejects_a_top_level_spawning_template`.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\ntemplates:\n  - id: ut\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    fix:\n      git_untrack: {}\nrules:\n  - id: x\n    level: error\n    extends_template: ut\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "{err}");
+    assert!(err.contains("templates"), "{err}");
+}
+
+#[test]
+fn finalize_rejects_a_require_nested_git_untrack_in_a_top_level_template() {
+    // Defense-in-depth (audit A1): the finalize template backstop must recurse
+    // `require:`, matching the per-source gate. A spawning fix buried in a
+    // top-level template's `require:` block would otherwise LOAD (the backstop
+    // scanned only the template's top-level `fix:`), leaving the "no spawning fix
+    // in ANY template, EVERY source" invariant enforced non-uniformly.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\ntemplates:\n  - id: t\n    kind: for_each_dir\n    select: \"**/\"\n    require:\n      - id: inner\n        kind: file_absent\n        paths: \"*\"\n        git_tracked_only: true\n        fix:\n          git_untrack: {}\nrules:\n  - id: x\n    level: error\n    extends_template: t\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(
+        err.contains("git_untrack"),
+        "require-nested op not gated: {err}"
+    );
+    assert!(err.contains("templates"), "{err}");
+}
+
+#[test]
+fn load_allows_git_untrack_in_the_users_top_level_config() {
+    // No over-rejection: the whole point of the gate is that a `git_untrack` fix
+    // in the USER'S OWN top-level `rules:` is allowed (it is their explicit call
+    // to let alint run `git rm --cached`). Only inherited sources are refused.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nrules:\n  - id: no-tracked-build\n    kind: file_absent\n    paths: \"build/**\"\n    git_tracked_only: true\n    level: error\n    fix:\n      git_untrack: {}\n",
+    )
+    .unwrap();
+    let cfg = load(&cfg).expect("a top-level git_untrack fix must load");
+    assert_eq!(cfg.rules.len(), 1, "the git_untrack rule is kept");
+}
+
+#[test]
+fn load_rejects_fix_promotion_template_smuggled_via_extends() {
+    // Round-7 (arbitrary file DELETION bypass): an extended ruleset can't
+    // promote `file_remove` to Safe on a `rules:` entry (caught by
+    // `reject_fix_promotion_in`), but it could hide the promotion in a
+    // `templates:` block referenced by a `kind`-less `extends_template:` rule.
+    // The template expands into the rule at finalize, *after* the rule-level
+    // gate -- so without the template gate a bare `alint fix` would irreversibly
+    // DELETE files the moment the user adds one `extends:` line. Mirrors the
+    // spawning-template bypass gate above.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+            &base,
+            "version: 1\ntemplates:\n  - id: rm\n    kind: file_absent\n    paths: \"*.log\"\n    fix: { file_remove: { applicability: safe } }\nrules:\n  - id: no-logs\n    level: error\n    extends_template: rm\n",
+        )
+        .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    let err = load(&child).unwrap_err().to_string();
+    assert!(
+        err.contains("applicability: safe"),
+        "promotion not named: {err}"
+    );
+    assert!(err.contains("base.yml"), "source not named: {err}");
+    assert!(err.contains("top-level"), "{err}");
+}
+
+#[test]
+fn load_allows_a_non_promoting_template_via_extends() {
+    // No over-rejection: an inherited template with a DEFAULT (Unsafe)
+    // `file_remove` -- the common case -- must still load. Only a `safe`
+    // promotion is refused.
+    let tmp = tempfile::tempdir().unwrap();
+    let base = tmp.path().join("base.yml");
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(
+            &base,
+            "version: 1\ntemplates:\n  - id: rm\n    kind: file_absent\n    paths: \"*.log\"\n    fix: { file_remove: {} }\nrules:\n  - id: no-logs\n    level: error\n    extends_template: rm\n",
+        )
+        .unwrap();
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    assert!(
+        load(&child).is_ok(),
+        "a non-promoting inherited template must load"
+    );
 }
 
 #[test]
@@ -1216,6 +2163,26 @@ fn nested_allow_out_of_root_is_rejected() {
 }
 
 #[test]
+fn nested_trusted_extends_is_rejected() {
+    // A nested config may not declare `trusted_extends:` -- it is a trusted,
+    // root-only grant (a subtree must not allowlist a remote ruleset's content
+    // fixers). Parallels `nested_baseline_is_rejected`; closes the silent-drop gap
+    // where the key parsed but was ignored without feedback (W2 audit).
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        "version: 1\ntrusted_extends: [\"https://x.example/r.yml\"]\nrules: []\n",
+    )
+    .unwrap();
+    let err = load(&root_cfg).unwrap_err();
+    assert!(err.to_string().contains("trusted_extends"), "{err}");
+}
+
+#[test]
 fn nested_command_rule_is_rejected() {
     // C2 (RCE bypass): a nested `.alint.yml` is untrusted like an
     // `extends:`'d ruleset (anyone who can open a monorepo PR can add
@@ -1236,6 +2203,57 @@ fn nested_command_rule_is_rejected() {
     let err = load(&root_cfg).unwrap_err().to_string();
     assert!(err.contains("command"), "{err}");
     assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn nested_config_rejects_a_git_untrack_fix() {
+    // The nested-config analogue: a subtree `.alint.yml` is untrusted like an
+    // `extends:`'d ruleset, so a `git_untrack` fix it declares (which shells out
+    // to `git rm --cached`) must be refused -- otherwise a monorepo PR adding one
+    // subtree config grants it git access on a bare `alint fix`.
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: sneaky-untrack\n    kind: file_absent\n    paths: \"**/*\"\n    git_tracked_only: true\n    level: error\n    fix:\n      git_untrack: {}\n",
+    )
+    .unwrap();
+    let err = load(&root_cfg).unwrap_err().to_string();
+    assert!(err.contains("git_untrack"), "op not gated in nested: {err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+}
+
+#[test]
+fn nested_config_demotes_a_content_fixer_to_suggestion() {
+    // AUDIT (nested-config HIGH): a subtree `.alint.yml` is untrusted like an
+    // `extends:`'d ruleset, so a CONTENT-INJECTING fixer it declares must be demoted
+    // to a suggestion -- NEVER auto-applied on a bare `alint fix`. Without this a
+    // nested `file_create` silently creates a file, and because its explicit `path`
+    // is not re-scoped to the subtree it can land at the repo ROOT (e.g. a
+    // `.github/workflows/` CI job -> code execution once pushed). Teeth: dropping the
+    // `demote_content_fixers_in` call in nested.rs reverts this to `None` and reds.
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: sneaky-create\n    kind: file_exists\n    \
+         paths: \"README.md\"\n    level: error\n    fix:\n      file_create:\n        \
+         path: pwn.txt\n        content: \"x\"\n",
+    )
+    .unwrap();
+    let cfg = load(&root_cfg).unwrap();
+    let rule = cfg.rules.iter().find(|r| r.id == "sneaky-create").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "a nested content fixer must be demoted to suggestion, not auto-applied"
+    );
 }
 
 #[test]
@@ -1562,4 +2580,57 @@ fn parse_rejects_a_yaml_flow_bomb_without_hanging() {
         err.to_string().contains("flow nesting"),
         "expected a flow-depth error, got: {err}"
     );
+}
+
+#[test]
+fn extends_promoting_file_remove_to_safe_is_rejected() {
+    use serde_yaml_ng::Mapping;
+    let parse_rule = |y: &str| -> Mapping { serde_yaml_ng::from_str(y).unwrap() };
+
+    // An INHERITED rule promoting `file_remove` to Safe is refused (5.5: an
+    // inherited fixer may be demoted, never promoted -- an extended ruleset must
+    // not silently opt a repo into auto-deleting files).
+    let promote = parse_rule(
+        "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+         fix: { file_remove: { applicability: safe } }",
+    );
+    let err = crate::reject_fix_promotion_in(std::slice::from_ref(&promote), "./base.yml")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("applicability: safe"), "{err}");
+    assert!(err.contains("top-level"), "{err}");
+
+    // The gate is op-agnostic: the Phase-1 `replace` op (also Unsafe, also
+    // promotable) is refused from an inherited config just the same.
+    let promote_replace = parse_rule(
+        "id: no-console\nkind: file_content_forbidden\npaths: '**/*.js'\nlevel: error\n\
+         fix: { replace: { replacement: 'logger.debug', applicability: safe } }",
+    );
+    assert!(
+        crate::reject_fix_promotion_in(std::slice::from_ref(&promote_replace), "./base.yml")
+            .is_err(),
+        "an inherited `replace` promotion to safe must be refused"
+    );
+
+    // The default (no override, so Unsafe) from an inherited config is fine.
+    let plain = parse_rule(
+        "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+         fix: { file_remove: {} }",
+    );
+    assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&plain), "./base.yml").is_ok());
+
+    // A DEMOTE (toward suggestion) from an inherited config is allowed.
+    let demote = parse_rule(
+        "id: no-bak\nkind: file_absent\npaths: '**/*.bak'\nlevel: error\n\
+         fix: { file_remove: { applicability: suggestion } }",
+    );
+    assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&demote), "./base.yml").is_ok());
+
+    // A promotion buried in a nested `require:` block is caught too.
+    let nested = parse_rule(
+        "id: parent\nkind: for_each_dir\npaths: '*'\nlevel: error\n\
+         require:\n  - id: n\n    kind: file_absent\n    paths: '**/*.bak'\n    \
+         fix: { file_remove: { applicability: safe } }",
+    );
+    assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&nested), "./base.yml").is_err());
 }

@@ -1,0 +1,43 @@
+name: set_value on a dotenv value dotenv cannot escape is never advertised nor applied
+tags: [fix, dotenv_path_equals, set_value, dotenv, verify]
+
+# dotenv's double-quote grammar can escape only \n \r \t, so an `equals` string
+# carrying any OTHER control char (here a vertical tab, `\x0b`) is STATICALLY
+# un-serializable. Both honesty guards agree, and they agree with each other:
+#   1. `check` does NOT advertise this as auto-fixable -- the fixer's `can_fix`
+#      consults the same static predicate `collect_edits` does, which includes
+#      "can this value be serialized to this format?".
+#   2. `fix` forms NO edit, so the violation is `skipped` ("no applicable fix"),
+#      not surfaced as a suggestion that could never resolve the rule.
+# The tree is byte-identical and the violation survives: check and fix agree.
+# (The control char is written as the text `\x0b` here; the config parser
+# interprets the YAML escape, so the committed scenario holds no raw control byte.)
+
+given:
+  tree:
+    .env: |
+      MSG=plain
+  config: |
+    version: 1
+    rules:
+      - id: msg
+        kind: dotenv_path_equals
+        paths: "**/.env"
+        path: "$.MSG"
+        equals: "a\x0bb"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: msg, level: error, path: .env}
+  - skipped: [msg]
+  - violations:
+      - {rule: msg, level: error, path: .env}
+
+expect_tree:
+  .env: |
+    MSG=plain

@@ -1,0 +1,29 @@
+name: cross_file registered passes when every member is listed (no false positive)
+# The convergence / clean case: both crate dirs appear in workspace.members, so
+# the rule is silent. Guards against a false positive that would make the fix
+# (Phase 1b) never settle.
+tags: [cross_file, registered]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = [\"crates/bar\", \"crates/foo\"]\n"
+    crates:
+      bar:
+        Cargo.toml: "[package]\nname = \"bar\"\n"
+      foo:
+        Cargo.toml: "[package]\nname = \"foo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: members-registered
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*" }
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

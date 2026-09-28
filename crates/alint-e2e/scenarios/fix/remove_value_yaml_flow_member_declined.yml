@@ -1,0 +1,42 @@
+name: remove_value declines a multi-line YAML flow-mapping member (no sibling over-deletion)
+tags: [fix, yaml_path_absent, remove_value, yaml, safety]
+
+# Follow-up-1 audit HIGH regression: in a MULTI-LINE flow mapping the target key
+# (`a`) starts a physical line it SHARES with sibling members (`b`, `c`) after the
+# value. The old line-scan deleted the whole line and ATE `b`/`c` -- an
+# over-deletion that still parses, so the Absent re-verify was blind to it (silent
+# data loss). The resolver now requires the value to be the LAST content on its
+# line (a `#` comment aside), so it DECLINES: `skipped`, and `expect_tree` proves
+# `b` and `c` survive byte-for-byte.
+
+given:
+  tree:
+    app.yaml: |
+      x: {
+        a: 1, b: 2, c: 3
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-a
+        kind: yaml_path_absent
+        paths: "**/*.yaml"
+        path: "$['x']['a']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-a, level: error, path: app.yaml}
+  - skipped: [no-a]
+  - violations:
+      - {rule: no-a, level: error, path: app.yaml}
+
+expect_tree:
+  app.yaml: |
+    x: {
+      a: 1, b: 2, c: 3
+    }

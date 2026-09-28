@@ -346,8 +346,9 @@ pub struct RuleSpec {
     /// Optional mechanical-fix strategy. Rules whose builders understand
     /// the chosen op attach a [`Fixer`](crate::Fixer) to the built rule;
     /// rules whose kind is incompatible with the op return a config error
-    /// at build time.
-    #[serde(default)]
+    /// at build time. A block with more than one op key is rejected at
+    /// load (R-TWOOP) by `deserialize_fix_spec`.
+    #[serde(default, deserialize_with = "deserialize_fix_spec")]
     pub fix: Option<FixSpec>,
     // Neither `git_tracked_only` nor `respect_gitignore` is a RuleSpec field:
     // both are kind-specific options (ADR-0008). `git_tracked_only` lives in
@@ -425,9 +426,144 @@ pub enum FixSpec {
     FileCollapseBlankLines {
         file_collapse_blank_lines: FileCollapseBlankLinesFixSpec,
     },
+    Replace {
+        replace: ReplaceFixSpec,
+    },
+    SetValue {
+        set_value: SetValueFixSpec,
+    },
+    RemoveValue {
+        remove_value: RemoveValueFixSpec,
+    },
+    Chmod {
+        chmod: ChmodFixSpec,
+    },
+    GitUntrack {
+        git_untrack: GitUntrackFixSpec,
+    },
+    Command {
+        command: CommandFixSpec,
+    },
+    DirCreate {
+        dir_create: DirCreateFixSpec,
+    },
+    SyncFrom {
+        sync_from: SyncFromFixSpec,
+    },
+    Relocate {
+        relocate: RelocateFixSpec,
+    },
+    CreateAndRegister {
+        create_and_register: CreateAndRegisterFixSpec,
+    },
+    Sort {
+        sort: SortFixSpec,
+    },
+    IndentStyle {
+        indent_style: IndentStyleFixSpec,
+    },
+    InsertLine {
+        insert_line: InsertLineFixSpec,
+    },
+    InsertHeader {
+        insert_header: InsertHeaderFixSpec,
+    },
+}
+
+/// Deserialize a rule's `fix:` block, rejecting a block with more than one
+/// op key (R-TWOOP). [`FixSpec`] is `#[serde(untagged)]`, so serde silently
+/// picks the *first* matching variant and drops sibling keys (the inner
+/// structs' `deny_unknown_fields` does not apply across the fix-block map).
+/// A file-mutating feature must not inherit that latent footgun, so a
+/// two-op block is a hard config error rather than a silent first-wins.
+fn deserialize_fix_spec<'de, D>(deserializer: D) -> std::result::Result<Option<FixSpec>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    use serde::de::Error as _;
+    let value = serde_yaml_ng::Value::deserialize(deserializer)?;
+    if value.is_null() {
+        return Ok(None);
+    }
+    if let serde_yaml_ng::Value::Mapping(m) = &value {
+        if m.len() != 1 {
+            let mut keys: Vec<String> = m
+                .keys()
+                .map(|k| match k {
+                    serde_yaml_ng::Value::String(s) => s.clone(),
+                    other => format!("{other:?}"),
+                })
+                .collect();
+            keys.sort();
+            return Err(D::Error::custom(format!(
+                "a `fix:` block must have exactly one op key, found {}: {}. \
+                 Each rule declares a single fix op; split them into separate rules.",
+                m.len(),
+                keys.join(", ")
+            )));
+        }
+    }
+    // For a single-op block, name the op in any deserialize error. `FixSpec` is
+    // `#[serde(untagged)]`, so a variant that fails on a missing/unknown field is
+    // silently discarded and the enum falls to its generic `expecting` string --
+    // which misleadingly says "exactly one fix op" when the user HAS exactly one
+    // op that merely has a bad field (e.g. `replace:` without `replacement`, or an
+    // unknown key). Naming the op turns that into an actionable message without a
+    // second op-name SSOT (the name comes straight from the single key).
+    let single_op: Option<String> = match &value {
+        serde_yaml_ng::Value::Mapping(m) => m
+            .iter()
+            .next()
+            .and_then(|(k, _)| k.as_str())
+            .map(str::to_owned),
+        _ => None,
+    };
+    serde_yaml_ng::from_value(value)
+        .map(Some)
+        .map_err(|e| match single_op {
+            Some(op) => D::Error::custom(format!(
+                "`{op}`: not a recognized fix op, or it has a missing or invalid field \
+             (a fix op's required fields must be present and unknown fields are rejected)"
+            )),
+            None => D::Error::custom(e),
+        })
 }
 
 impl FixSpec {
+    /// Every fix op's YAML key, in declaration order. The single source of
+    /// truth the fix-coverage gate (`coverage_audit_fix_coverage`)
+    /// enumerates. A new enum variant forces a new [`op_name`](Self::op_name)
+    /// arm (the match is exhaustive) and must be added here in tandem;
+    /// `fix_spec_op_name_covers_every_variant` asserts the two agree.
+    pub const ALL_OP_NAMES: &'static [&'static str] = &[
+        "file_create",
+        "file_remove",
+        "file_prepend",
+        "file_append",
+        "file_rename",
+        "file_trim_trailing_whitespace",
+        "file_append_final_newline",
+        "file_normalize_line_endings",
+        "file_strip_bidi",
+        "file_strip_zero_width",
+        "file_strip_bom",
+        "file_collapse_blank_lines",
+        "replace",
+        "set_value",
+        "remove_value",
+        "chmod",
+        "git_untrack",
+        "command",
+        "dir_create",
+        "sync_from",
+        "relocate",
+        "create_and_register",
+        "sort",
+        "indent_style",
+        "insert_line",
+        "insert_header",
+    ];
+
     /// The op name as it appears in YAML — used in config-error messages.
     pub fn op_name(&self) -> &'static str {
         match self {
@@ -443,6 +579,20 @@ impl FixSpec {
             Self::FileStripZeroWidth { .. } => "file_strip_zero_width",
             Self::FileStripBom { .. } => "file_strip_bom",
             Self::FileCollapseBlankLines { .. } => "file_collapse_blank_lines",
+            Self::Replace { .. } => "replace",
+            Self::SetValue { .. } => "set_value",
+            Self::RemoveValue { .. } => "remove_value",
+            Self::Chmod { .. } => "chmod",
+            Self::GitUntrack { .. } => "git_untrack",
+            Self::Command { .. } => "command",
+            Self::DirCreate { .. } => "dir_create",
+            Self::SyncFrom { .. } => "sync_from",
+            Self::Relocate { .. } => "relocate",
+            Self::CreateAndRegister { .. } => "create_and_register",
+            Self::Sort { .. } => "sort",
+            Self::IndentStyle { .. } => "indent_style",
+            Self::InsertLine { .. } => "insert_line",
+            Self::InsertHeader { .. } => "insert_header",
         }
     }
 }
@@ -471,6 +621,13 @@ pub struct FileCreateFixSpec {
     /// Whether to create intermediate directories. Defaults to true.
     #[serde(default = "default_create_parents")]
     pub create_parents: bool,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`
+    /// (creating a required file is behavior-preserving). W2 uses this to demote a
+    /// `file_create` from an untrusted remote `extends:` to `suggestion` -- its
+    /// content is third-party-authored. An extends'd ruleset may only DEMOTE; a
+    /// promotion is rejected upstream by the DSL trust gate.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
 }
 
 fn default_create_parents() -> bool {
@@ -479,7 +636,17 @@ fn default_create_parents() -> bool {
 
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileRemoveFixSpec {}
+pub struct FileRemoveFixSpec {
+    /// Per-rule applicability override (auto-fix.md 5.5). `file_remove` defaults
+    /// to `Unsafe` -- deleting a whole file irreversibly is a poor default for a
+    /// bare `alint fix`, so it is surfaced as a suggestion and applied only with
+    /// `--unsafe-fixes`. A user may promote it back to `safe` on a specific rule
+    /// (`fix: { file_remove: { applicability: safe } }`) in their OWN top-level
+    /// config; an extends'd ruleset attempting the promotion is rejected upstream
+    /// by the DSL trust gate (inherited fixers may be demoted, never promoted).
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -493,6 +660,11 @@ pub struct FilePrependFixSpec {
     /// will be prepended. Mutually exclusive with `content`.
     #[serde(default)]
     pub content_from: Option<PathBuf>,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`. W2
+    /// demotes a `file_prepend` from an untrusted remote `extends:` to `suggestion`
+    /// (the header bytes are third-party-authored); demote-only, promotion refused.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -507,6 +679,11 @@ pub struct FileAppendFixSpec {
     /// will be appended. Mutually exclusive with `content`.
     #[serde(default)]
     pub content_from: Option<PathBuf>,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`. W2
+    /// demotes a `file_append` from an untrusted remote `extends:` to `suggestion`
+    /// (the footer bytes are third-party-authored); demote-only, promotion refused.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
 }
 
 /// Resolution of an `(content, content_from)` pair to a single
@@ -556,30 +733,52 @@ impl From<&str> for ContentSourceSpec {
     }
 }
 
-/// Empty marker: `file_rename` takes no parameters. The target name
-/// is derived from the parent rule (e.g. `filename_case` converts the
-/// stem to its configured case; the extension is preserved).
+/// The target name is derived from the parent rule (e.g. `filename_case` converts
+/// the stem to its configured case; the extension is preserved). **`Safe` by
+/// default**; **content-injecting** in the W2 partition (no ruleset bytes, but a
+/// remote's `paths:` can AIM a mass case-rename at the victim's source, breaking
+/// case-sensitive imports -- so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileRenameFixSpec {}
+pub struct FileRenameFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
-/// Empty marker. Behavior: read file (subject to `fix_size_limit`),
-/// strip trailing space/tab on every line, write back.
+/// Behavior: read file (subject to `fix_size_limit`), strip trailing space/tab on
+/// every line, write back. **`Safe` by default**; **content-injecting** in the W2
+/// partition (no ruleset bytes, but a remote's `paths:` can AIM a trim at a file
+/// where trailing whitespace is significant -- e.g. a Markdown hard line break
+/// `two spaces` -- so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileTrimTrailingWhitespaceFixSpec {}
+pub struct FileTrimTrailingWhitespaceFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
-/// Empty marker. Behavior: if the file has content and does not
-/// end with `\n`, append one.
+/// Behavior: if the file has content and does not end with `\n`, append one.
+/// **`Safe` by default**; **content-injecting** in the W2 partition (no ruleset
+/// bytes, but a remote's `paths:` can AIM the append at a file where the final byte
+/// matters, so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileAppendFinalNewlineFixSpec {}
+pub struct FileAppendFinalNewlineFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
-/// Empty marker. Behavior: rewrite the file with every line ending
-/// replaced by the parent rule's configured target (`lf` or `crlf`).
+/// Behavior: rewrite the file with every line ending replaced by the parent rule's
+/// configured target (`lf` or `crlf`). **`Safe` by default**; **content-injecting**
+/// in the W2 partition (no ruleset bytes, but a remote's `paths:` can AIM a CRLF/LF
+/// rewrite at a line-ending-significant file -- CRLF on a `#!/bin/sh` shebang breaks
+/// it -- so an untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileNormalizeLineEndingsFixSpec {}
+pub struct FileNormalizeLineEndingsFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 /// Empty marker. Behavior: remove every Unicode bidi control
 /// character (U+202A–202E, U+2066–2069) from the file's content.
@@ -595,17 +794,300 @@ pub struct FileStripBidiFixSpec {}
 #[serde(deny_unknown_fields)]
 pub struct FileStripZeroWidthFixSpec {}
 
-/// Empty marker. Behavior: remove a leading UTF-8/UTF-16/UTF-32
-/// BOM byte sequence if present; otherwise a no-op.
+/// Behavior: remove a leading UTF-8/UTF-16/UTF-32 BOM byte sequence if present;
+/// otherwise a no-op. **`Safe` by default**; **content-injecting** in the W2
+/// partition (no ruleset bytes, but a remote's `paths:` can AIM a BOM strip at a
+/// file whose encoding signature matters, so an untrusted remote demotes it to a
+/// suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileStripBomFixSpec {}
+pub struct FileStripBomFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
-/// Empty marker. Behavior: collapse runs of blank lines longer than
-/// the parent rule's `max` down to exactly `max` blank lines.
+/// Behavior: collapse runs of blank lines longer than the parent rule's `max` down
+/// to exactly `max` blank lines. **`Safe` by default**; **content-injecting** in the
+/// W2 partition (no ruleset bytes, but a remote's `paths:` can AIM the collapse at a
+/// file where blank-line runs are significant -- e.g. paragraph breaks -- so an
+/// untrusted remote demotes it to a suggestion).
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
-pub struct FileCollapseBlankLinesFixSpec {}
+pub struct FileCollapseBlankLinesFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `replace` op (Phase 1): rewrite each span the host rule's `pattern:`
+/// matches with `replacement`. Wired to `file_content_forbidden` only -- the
+/// pattern comes from the host rule, not a field here. (`file_content_matches`
+/// violates on the pattern's *absence*, so `replace` -- which rewrites matches
+/// -- has nothing to act on there and rejects the op.) `replacement` is a byte
+/// template supporting `$1` / `${name}`
+/// capture references (the regex-crate substitution syntax); a literal `$` is
+/// written `$$`. This is a *located* op (one [`FixEdit::ReplaceRange`] per
+/// match), Unsafe by default (a regex rewrite is not behavior-preserving in
+/// general), applied only under `--unsafe-fixes` unless promoted per-rule.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ReplaceFixSpec {
+    /// The search regex, applied to the SCALAR VALUE at the rule's `path:`. Used
+    /// (and REQUIRED) by `*_path_matches` only: there the rule's `matches:` is the
+    /// check + re-verify target, so the transformation needs its own search
+    /// pattern. `file_content_forbidden` / `file_content_matches` leave this
+    /// unset -- they use the HOST rule's own pattern as the whole-file search.
+    #[serde(default)]
+    pub pattern: Option<String>,
+    /// The replacement template written in place of each match. Supports the
+    /// regex crate's `$1` / `${name}` capture references; `$$` is a literal `$`.
+    pub replacement: String,
+    /// Per-rule applicability override (auto-fix.md 5.5). `replace` defaults to
+    /// `Unsafe`; a user may set `safe` in their OWN top-level config when the
+    /// rewrite is provably a normalization (an inherited config may only demote,
+    /// enforced by the DSL trust gate).
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `set_value` (Phase 2): the located structured-value setter. Hosts on the
+/// eight `*_path_equals` kinds and reads BOTH its parameters -- the `JSONPath`
+/// `path:` and the expected value `equals:` -- from the host rule, so the fix
+/// restates nothing the rule already carries. Format-preservingly rewrites the
+/// value at `path` to `equals` via a byte-range splice against a span-resolving
+/// parser (auto-fix.md 5.3/5.4). Content-injecting (it writes the rule's
+/// `equals` bytes), so a remote `extends:` demotes it under W2.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SetValueFixSpec {
+    /// Per-rule applicability override. `set_value` defaults to `Safe`, but ONLY
+    /// a scalar replacing an existing scalar node is ever applied at tier: the
+    /// fixer itself demotes object/array values, zero-match insertion, and
+    /// nested creation to `Suggestion` regardless of this field (the re-parse
+    /// postcondition is undefined there, auto-fix.md 5.8). An inherited config
+    /// may only demote (the DSL trust gate), never promote.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `remove_value` (Phase 2): the located structured-value remover. Hosts on the
+/// eight `*_path_absent` kinds and reads its `path:` from the host rule.
+/// Deletes the node the `JSONPath` selects, along with its format-specific
+/// separator (a trailing comma, a whole `key = value` line, an XML element),
+/// via a byte-range splice. Fixed-behavior (it injects no ruleset bytes), so W2
+/// never demotes it; `Unsafe` by default because a deletion is not
+/// behavior-preserving in general.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RemoveValueFixSpec {
+    /// Per-rule applicability override. `remove_value` defaults to `Unsafe`; a
+    /// user may promote a specific rule to `Safe` in their OWN top-level config.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `chmod`: set or clear the Unix executable bits (`0o111`) on the violating
+/// file, preserving every other permission bit. The host rule (`executable_bit`,
+/// `shebang_has_executable`) picks the direction. Unix-only; a no-op on platforms
+/// without an executable bit, where the host rule never fires. `Safe` by default:
+/// the rule explicitly requires the +x state, the change is reversible, and it
+/// touches only the executable bits.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ChmodFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `git_untrack`: remove the violating path from git's index (`git rm --cached`)
+/// while leaving it on disk, for the "a committed artifact should be untracked"
+/// hygiene case (host `file_absent` with `git_tracked_only: true`, so the rule
+/// converges once the path leaves the tracked set). A **spawning** fix op: it
+/// shells out to `git`, so it is refused from any non-top-level source
+/// (`extends:`/nested/bundled) exactly like a spawning rule kind (auto-fix.md
+/// 5.5), and it is **`Unsafe` by default** (irreversibly restructures the index
+/// on a bare `alint fix`; surfaced as a suggestion, applied only with
+/// `--unsafe-fixes`). A user may promote a specific rule to `Safe` in their OWN
+/// top-level config.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct GitUntrackFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `command`: run a user-supplied fix command per violation on a `command` rule
+/// (e.g. check `eslint {path}`, fix `eslint --fix {path}`). A **spawning** fix op:
+/// it shells out, so it is refused from any non-top-level source (auto-fix.md 5.5,
+/// like the `command` rule kind itself) and is **`Unsafe` by default** (running an
+/// arbitrary command on a bare `alint fix` is opt-in). A user may promote a
+/// specific rule to `Safe` in their OWN top-level config.
+/// `dir_create`: create the (single, literal) directory the host `dir_exists`
+/// rule requires. A **fixed-behavior** op: it writes no ruleset bytes and does not
+/// spawn, so it is honored at its tier from any source. **`Safe` by default** (an
+/// empty directory is benign and easily removed). Only valid when the rule's
+/// `paths` is one literal directory (a glob or multiple patterns is ambiguous and
+/// rejected at load). Note: git does not track an empty directory, so this creates
+/// it for local tooling; pair with a `file_create` of a `.gitkeep` to persist it.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct DirCreateFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `sync_from`: overwrite a drifted target with its canonical source, so a
+/// `cross_file` `relation: identical` rule converges. A **content-injecting** op:
+/// it writes another file's bytes wholesale, and the host rule's `source:`
+/// decides which file overwrites which, so a remote `extends:` the user has not
+/// trusted demotes it to `suggestion` (auto-fix.md 5.5). **`Unsafe` by default**
+/// (a whole-file overwrite can discard uncommitted target content). Only valid on
+/// `relation: identical` with `skip_header_lines: 0` (a header-preserving sync is
+/// a deferred follow-up) and a single-file `source:` (not a glob-union); other
+/// shapes are rejected at load. Takes its source from the host rule, not a new
+/// field.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SyncFromFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `relocate`: move a file the host `file_absent` rule flagged in a subdirectory
+/// back to the repository root, keeping its basename (a lockfile that drifted
+/// into a member directory belongs at the workspace root). A **fixed-behavior**
+/// op: it writes no ruleset bytes and does not spawn, so it is honored at its
+/// tier from any source. **`Unsafe` by default** (a rename is easy to review but
+/// moves a real file, and the destination is inferred), `Safe`-promotable. Only
+/// the unambiguous case is fixed: the flagged file is below the root and the root
+/// slot (`<basename>` at the repo root) is free. A file already at the root, a
+/// taken root slot, or an undeterminable basename is left for a human (reported,
+/// not fixed). Takes its source path from the violation, not a new field.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RelocateFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// `create_and_register`: ensure a `cross_file` `relation: registered` member both
+/// exists and is listed in each target's manifest array, applying only the unmet
+/// repair. An existing-but-unregistered member is APPENDED to the list (a
+/// single-file structured edit); a MISSING NAMED member is CREATED from `content` /
+/// `content_from` below and then registered (two independent idempotent fixes the
+/// fixpoint applies in order -- no multi-file transaction). A **content-injecting**
+/// op (it writes a ruleset-chosen value into a manifest, and a ruleset-authored
+/// file), so an untrusted remote `extends:` demotes it to a suggestion (auto-fix.md
+/// 5.5). **`Unsafe` by default** (mutates a manifest / creates a file),
+/// `Safe`-promotable. Members + targets come from the host rule.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CreateAndRegisterFixSpec {
+    /// Inline bytes for a MISSING named member (the create half). Mutually
+    /// exclusive with `content_from`; both absent = register-only (a glob source
+    /// never has a missing member, so content is inert there and rejected at load).
+    #[serde(default)]
+    pub content: Option<String>,
+    /// A `content_from` path (read at apply time, confined) for a missing named
+    /// member. Mutually exclusive with `content`.
+    #[serde(default)]
+    pub content_from: Option<std::path::PathBuf>,
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `sort` op (Phase 4): rewrite each of the host `ordered_block` rule's
+/// marked blocks with its entries sorted under the rule's `comparator` (and
+/// deduped when the rule sets `unique`), preserving non-entry lines (markers,
+/// blanks, `select`-excluded comments) in place. Behavior comes entirely from
+/// the host rule (`start`/`end`/`comparator`/`unique`/`select`); this spec adds
+/// only the optional tier override. **`Safe` by default** — a keep-sorted
+/// block's meaning is order-independent (and a `unique` block declared its
+/// duplicates redundant), so sorting is behavior-preserving.
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct SortFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `indent_style` op (Phase 4): reindent the host `indent_style` rule's
+/// violating lines. Wired ONLY for `style: spaces` + a `width: N` (the
+/// spaces-per-tab): it rewrites a PURE-TAB leading run (K tabs) to K*N spaces, and
+/// leaves the genuinely ambiguous cases (a mixed tab+space lead, a pure-space
+/// width mismatch). Behavior comes from the host rule (`style` / `width`); this
+/// spec adds only the optional tier override. **`Unsafe` by default** (a mis-aimed
+/// reindent HARD-breaks an indent-significant file such as a `Makefile` recipe;
+/// audit round-3), so a bare `fix` suggests it and `--unsafe-fixes` applies it;
+/// **content-injecting** in the W2 partition (a remote can aim it at such a file).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct IndentStyleFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `insert_line` op (Phase 4): insert a missing `require:` line of the host
+/// `ordered_block` rule at its SORTED position (using the rule's `comparator`).
+/// The required lines + comparator come from the host rule; this spec adds only
+/// the optional tier override. **`Unsafe` by default** (it adds ruleset-authored
+/// content at a COMPUTED position, load-bearing in the order-sensitive formats it
+/// targets); **content-injecting** in the W2 partition (the `require:` lines are
+/// ruleset-authored, so an untrusted remote demotes it).
+#[derive(Debug, Clone, Deserialize, Default)]
+#[serde(deny_unknown_fields)]
+pub struct InsertLineFixSpec {
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+/// The `insert_header` op (Phase 4): insert the host `file_header` rule's required
+/// header at the top of a violating file, AFTER any leading BOM, shebang
+/// (`#!...`), or XML declaration (`<?xml ...?>`) -- the differentiator over
+/// `file_prepend`, which prepends at BOF (after any BOM, but blind to a shebang /
+/// XML declaration) and would push a shebang off line 1. Content comes from
+/// `content` / `content_from` (as `file_prepend`). **`Safe` by default** (the
+/// insertion point is the one canonical header spot and the content is inert; at
+/// least as safe as the `Safe` `file_prepend` it refines, and safer on a file with
+/// a shebang / XML declaration, which `file_prepend` would displace);
+/// **content-injecting** in the W2 partition (the header bytes are ruleset-authored,
+/// so an untrusted remote demotes it). NOTE: because the header can land below line
+/// 1, the host rule's `pattern` must be able to match below the first line (use an
+/// unanchored pattern or `(?m)`); a `^`-anchored pattern that only matches line 1
+/// cannot be satisfied once the header sits under a shebang.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct InsertHeaderFixSpec {
+    /// Inline header bytes to insert. Mutually exclusive with `content_from`.
+    /// A trailing newline is the caller's responsibility.
+    #[serde(default)]
+    pub content: Option<String>,
+    /// Path to a file (relative to the lint root) whose bytes are the header.
+    /// Mutually exclusive with `content`.
+    #[serde(default)]
+    pub content_from: Option<PathBuf>,
+    /// Per-rule applicability override (auto-fix.md 5.5). Defaults to `Safe`. W2
+    /// demotes an `insert_header` from an untrusted remote `extends:` to
+    /// `suggestion` (the header bytes are third-party-authored); demote-only.
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct CommandFixSpec {
+    /// The fix command argv. The first token is the program (PATH-looked-up if a
+    /// bare name). EVERY token -- the program included -- accepts the same `{path}`
+    /// / `{dir}` / `{stem}` / ... templates (with the option-injection guard) as
+    /// the `command` rule's `command:`; put a fixed program name first unless you
+    /// intend to run a repo file. Must be non-empty.
+    pub run: Vec<String>,
+    /// Per-invocation timeout in seconds (default 30, matching the `command`
+    /// rule). Past it the child is killed and the fix reports an error.
+    #[serde(default)]
+    pub timeout: Option<u64>,
+    #[serde(default)]
+    pub applicability: Option<crate::rule::Applicability>,
+}
 
 impl RuleSpec {
     /// Deserialize the full spec (common + kind-specific fields) into a typed
@@ -1009,9 +1491,19 @@ mod tests {
 
     #[test]
     fn fix_spec_op_name_covers_every_variant() {
-        // Round-trip every documented op name through YAML; any
-        // future fix variant added without a corresponding
-        // op_name arm will fall through serde and trip this test.
+        // Two guards below: (1) round-trip -- every `cases` YAML parses to a
+        // FixSpec whose op_name() matches, so each listed op is real and
+        // correctly named; (2) set-equality of `cases` names with ALL_OP_NAMES.
+        //
+        // The compile-time backstop for "every variant is covered" is op_name()
+        // itself -- an EXHAUSTIVE match, so a new FixSpec variant is a hard
+        // compile error there until an arm is added (right beside ALL_OP_NAMES
+        // and its doc, which says to add the name in tandem). Known limitation:
+        // both `cases` and ALL_OP_NAMES are hand-maintained, so a variant added
+        // to op_name() but omitted from BOTH would slip past this test (and the
+        // fix-coverage gate would then not require a scenario for it). A fully
+        // type-derived list (e.g. `strum::EnumCount`) would close that, but is
+        // not worth a core-crate proc-macro dependency for the current op set.
         let cases = [
             ("file_create:\n  content: x\n", "file_create"),
             ("file_remove: {}", "file_remove"),
@@ -1031,12 +1523,64 @@ mod tests {
             ("file_strip_zero_width: {}", "file_strip_zero_width"),
             ("file_strip_bom: {}", "file_strip_bom"),
             ("file_collapse_blank_lines: {}", "file_collapse_blank_lines"),
+            ("replace:\n  replacement: x\n", "replace"),
+            ("set_value: {}", "set_value"),
+            ("remove_value: {}", "remove_value"),
+            ("chmod: {}", "chmod"),
+            ("git_untrack: {}", "git_untrack"),
+            ("command:\n  run: [\"x\"]\n", "command"),
+            ("dir_create: {}", "dir_create"),
+            ("sync_from: {}", "sync_from"),
+            ("relocate: {}", "relocate"),
+            ("create_and_register: {}", "create_and_register"),
+            ("sort: {}", "sort"),
+            ("indent_style: {}", "indent_style"),
+            ("insert_line: {}", "insert_line"),
+            ("insert_header:\n  content: x\n", "insert_header"),
         ];
         for (yaml, expected) in cases {
             let spec: FixSpec =
                 serde_yaml_ng::from_str(yaml).unwrap_or_else(|e| panic!("{yaml}: {e}"));
             assert_eq!(spec.op_name(), expected);
         }
+        // The gate's SSOT must list exactly the variants op_name covers.
+        let enumerated: std::collections::BTreeSet<&str> = cases.iter().map(|(_, n)| *n).collect();
+        let ssot: std::collections::BTreeSet<&str> =
+            FixSpec::ALL_OP_NAMES.iter().copied().collect();
+        assert_eq!(
+            enumerated, ssot,
+            "FixSpec::ALL_OP_NAMES must match the op_name-covered variants"
+        );
+    }
+
+    #[test]
+    fn fix_block_rejects_two_ops() {
+        // R-TWOOP: an untagged FixSpec would silently keep the first key and
+        // drop the second; the load-time guard must reject it instead.
+        #[derive(Debug, Deserialize)]
+        struct Holder {
+            #[serde(default, deserialize_with = "deserialize_fix_spec")]
+            fix: Option<FixSpec>,
+        }
+        let err = serde_yaml_ng::from_str::<Holder>(
+            "fix:\n  file_trim_trailing_whitespace: {}\n  file_append_final_newline: {}\n",
+        )
+        .expect_err("two op keys must be rejected");
+        let msg = err.to_string();
+        assert!(
+            msg.contains("exactly one op key"),
+            "unexpected error: {msg}"
+        );
+
+        // One op still parses, and an absent block stays None.
+        let one = serde_yaml_ng::from_str::<Holder>("fix:\n  file_append_final_newline: {}\n")
+            .expect("single op parses");
+        assert_eq!(
+            one.fix.as_ref().map(FixSpec::op_name),
+            Some("file_append_final_newline")
+        );
+        let none = serde_yaml_ng::from_str::<Holder>("version: 1\n").expect("absent parses");
+        assert!(none.fix.is_none());
     }
 
     #[test]

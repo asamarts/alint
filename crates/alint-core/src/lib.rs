@@ -16,12 +16,15 @@ pub mod git;
 mod ini;
 pub mod jsonpath_diagnostics;
 mod level;
+pub mod located_fix;
 mod pathsafe;
+pub mod proposed_fix;
 mod registry;
 mod report;
 mod rule;
 mod scope;
 mod scope_filter;
+pub mod structured_fix;
 mod structured_format;
 pub mod template;
 mod walker;
@@ -37,17 +40,21 @@ pub use config::{
     FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
     resolve_content_source,
 };
-pub use engine::{Engine, RuleEntry};
+pub use engine::{Engine, RuleEntry, StagedFix, StagedKind};
 pub use error::{Error, Result};
 pub use extract::{Extract, ExtractSpec, LinesOpts, WholeFileOpts, extract_values, is_non_literal};
 pub use facts::{FactKind, FactSpec, FactValue, FactValues, evaluate_facts};
 pub use level::Level;
 pub use pathsafe::{derive_target, normalize_confined};
+pub use proposed_fix::{EditRegion, ProposedEdit, attach_proposed_edits, byte_to_line_col};
 pub use registry::{RuleBuilder, RuleRegistry};
-pub use report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
+pub use report::{
+    FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report, SkipKind,
+};
 pub use rule::{
-    Context, FixContext, FixEdit, FixOutcome, Fixer, GitTrackedMode, PerFileRule, ReadForFix, Rule,
-    RuleResult, Violation, check_fix_size, eval_per_file, read_for_fix,
+    Applicability, CollectedEdit, Context, EditVerifier, ExpectedValue, FixContext, FixEdit,
+    FixOutcome, Fixer, GitTrackedMode, GroupId, PerFileRule, ReadForFix, Rule, RuleResult,
+    Violation, check_fix_size, eval_per_file, read_for_fix, write_atomic,
 };
 pub use scope::Scope;
 pub use scope_filter::{

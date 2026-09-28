@@ -50,8 +50,13 @@ use std::process::{Command as StdCommand, Stdio};
 use std::time::{Duration, Instant};
 
 use alint_core::template::{PathTokens, render_path_argv};
-use alint_core::{Context, Error, FactValue, Level, Result, Rule, RuleSpec, Scope, Violation};
+use alint_core::{
+    Applicability, Context, Error, FactValue, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope,
+    Violation,
+};
 use serde::Deserialize;
+
+use crate::fixers::CommandFixFixer;
 
 /// Default per-file timeout. Generous for slow tools (kubeconform
 /// pulling schemas, slow shellcheck on large files) but bounded
@@ -94,6 +99,9 @@ pub struct CommandRule {
     scope: Scope,
     argv: Vec<String>,
     timeout: Duration,
+    /// Optional `command` fix op: a user-supplied `run:` command. Spawning, so
+    /// refused from any non-top-level source before this rule is ever built.
+    fixer: Option<CommandFixFixer>,
 }
 
 impl Rule for CommandRule {
@@ -101,6 +109,10 @@ impl Rule for CommandRule {
 
     fn path_scope(&self) -> Option<&Scope> {
         Some(&self.scope)
+    }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
@@ -282,14 +294,35 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             "command rule's `command:` argv must not be empty",
         ));
     }
-    if spec.fix.is_some() {
-        return Err(Error::rule_config(
-            &spec.id,
-            "command rules do not support `fix:` blocks in v0.5.x - \
-             wire a paired fix-on-save tool via a separate `command` \
-             rule (or another rule kind) for now",
-        ));
-    }
+    // The only supported fix op is `command`: a user-supplied `run:` argv. It is
+    // spawning, so `alint_dsl::reject_spawning_fix_ops_in` already refused it from
+    // any non-top-level source before this builder runs (a ruleset the user
+    // `extends:` can never introduce one).
+    let fixer = match &spec.fix {
+        None => None,
+        Some(FixSpec::Command { command }) => {
+            if command.run.is_empty() {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    "command fix's `run:` argv must not be empty",
+                ));
+            }
+            Some(CommandFixFixer::new(
+                command.run.clone(),
+                Duration::from_secs(command.timeout.unwrap_or(DEFAULT_TIMEOUT_SECS)),
+                command.applicability.unwrap_or(Applicability::Unsafe),
+            ))
+        }
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with command (only `command`)",
+                    other.op_name()
+                ),
+            ));
+        }
+    };
     let timeout = Duration::from_secs(opts.timeout.unwrap_or(DEFAULT_TIMEOUT_SECS));
     Ok(Box::new(CommandRule {
         id: spec.id.clone(),
@@ -299,6 +332,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         scope: Scope::from_spec(spec)?,
         argv: opts.command,
         timeout,
+        fixer,
     }))
 }
 
@@ -335,6 +369,7 @@ mod tests {
             scope: Scope::from_patterns(&[scope.to_string()]).unwrap(),
             argv: argv.into_iter().map(String::from).collect(),
             timeout,
+            fixer: None,
         }
     }
 
@@ -480,7 +515,8 @@ command: ["/bin/true"]
     }
 
     #[test]
-    fn fix_block_rejected_at_build_time() {
+    fn incompatible_fix_block_rejected_at_build_time() {
+        // The only supported fix op is `command`; any other op is a config error.
         let yaml = r#"
 id: t
 kind: command
@@ -491,8 +527,46 @@ fix:
   file_remove: {}
 "#;
         let spec: RuleSpec = serde_yaml_ng::from_str(yaml).unwrap();
-        let err = build(&spec).expect_err("fix on command rule must error");
-        assert!(format!("{err}").contains("do not support `fix:`"));
+        let err = build(&spec).expect_err("an incompatible fix op must error");
+        assert!(format!("{err}").contains("file_remove"), "{err}");
+        assert!(
+            format!("{err}").contains("not compatible with command"),
+            "{err}"
+        );
+    }
+
+    #[test]
+    fn command_fix_builds_and_attaches_a_fixer() {
+        let yaml = r#"
+id: t
+kind: command
+level: error
+paths: "*.js"
+command: ["eslint", "{path}"]
+fix:
+  command:
+    run: ["eslint", "--fix", "{path}"]
+"#;
+        let spec: RuleSpec = serde_yaml_ng::from_str(yaml).unwrap();
+        let rule = build(&spec).expect("a command fix must build");
+        assert!(rule.fixer().is_some(), "the command fix attaches a fixer");
+    }
+
+    #[test]
+    fn command_fix_rejects_an_empty_run_argv() {
+        let yaml = r#"
+id: t
+kind: command
+level: error
+paths: "*.js"
+command: ["eslint", "{path}"]
+fix:
+  command:
+    run: []
+"#;
+        let spec: RuleSpec = serde_yaml_ng::from_str(yaml).unwrap();
+        let err = build(&spec).expect_err("an empty run argv must error");
+        assert!(format!("{err}").contains("run"), "{err}");
     }
 
     #[test]

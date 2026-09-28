@@ -1,0 +1,42 @@
+name: create_and_register never registers a member it cannot create (no phantom)
+# Audit round-2 HIGH regression: a NAMED source whose member is MISSING and has NO
+# `content`/`content_from` to create it must NOT be appended to the manifest -- a
+# phantom `workspace.members` entry with no crate directory breaks `cargo`.
+# Registration is gated on existence, so with no way to create crates/docs only the
+# existence finding fires (skipped -- no content), the manifest is left UNCHANGED,
+# and the fix does not falsely converge (the missing member still stands).
+tags: [fix, cross_file, registered, create_and_register]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = []\n"
+    # crates/docs/Cargo.toml is absent and there is no content to create it.
+  config: |
+    version: 1
+    rules:
+      - id: r
+        kind: cross_file
+        relation: registered
+        source: { file: "crates/docs/Cargo.toml" }
+        register_as: "{dir}"
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+        fix: { create_and_register: {} }
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: r, level: error, path: crates/docs/Cargo.toml}
+  # The create is skipped (no content); NO registration finding fires (gated on
+  # existence), so nothing is appended.
+  - skipped: [r]
+    applied: []
+  # The missing member still stands -- honest, no false convergence.
+  - violations:
+      - {rule: r, level: error, path: crates/docs/Cargo.toml}
+
+expect_tree:
+  # UNCHANGED: no phantom "crates/docs" appended to workspace.members.
+  Cargo.toml: "[workspace]\nmembers = []\n"

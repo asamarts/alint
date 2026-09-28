@@ -58,8 +58,12 @@
 use std::path::{Path, PathBuf};
 
 use alint_core::{
-    Context, Error, Format, Level, PathsSpec, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
+    Applicability, Context, Error, FixSpec, Fixer, Format, Level, PathsSpec, PerFileRule, Result,
+    Rule, RuleSpec, Scope, Violation,
 };
+
+use crate::fixers::StructuredFixer;
+use crate::io::looks_binary;
 use regex::Regex;
 use serde::Deserialize;
 use serde_json::Value;
@@ -217,6 +221,10 @@ pub struct StructuredPathRule {
     /// "every `uses:` in a workflow must be SHA-pinned" - a
     /// workflow with no `uses:` at all shouldn't be flagged).
     if_present: bool,
+    /// The located structured fixer, when the rule declares a compatible
+    /// `fix:` (`set_value` on `*_path_equals`, `remove_value` on
+    /// `*_path_absent`). `None` for `*_path_matches` and unfixed rules.
+    fixer: Option<StructuredFixer>,
 }
 
 impl Rule for StructuredPathRule {
@@ -228,6 +236,10 @@ impl Rule for StructuredPathRule {
     }
     fn policy_url(&self) -> Option<&str> {
         self.policy_url.as_deref()
+    }
+
+    fn fixer(&self) -> Option<&dyn Fixer> {
+        self.fixer.as_ref().map(|f| f as &dyn Fixer)
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -288,15 +300,25 @@ impl PerFileRule for StructuredPathRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // A NUL-bearing / genuinely-binary file caught by a broad glob is skipped
+        // (no violation), matching the hygiene fixers' invariant and keeping `check`
+        // and `fix` in agreement -- otherwise a PERMISSIVE-format rule (`.properties`
+        // / YAML) flags a fixable "value mismatch" on binary junk that `set_value`
+        // then cannot resolve, so the fix loops to a false exit-2 (audit M2).
+        // `looks_binary` triggers on NUL bytes, NOT high bytes, so a legitimate
+        // Latin-1 `.properties` (below) is unaffected.
+        if looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // Lossy-decode (like `json_schema_passes` / `cross_file`) rather than a
         // strict `from_utf8` + silent skip: a non-UTF-8 file -- e.g. a Latin-1
         // `.properties`, the format's historical default -- must be ANALYZED, not
         // silently ignored. Invalid bytes become U+FFFD. For the STRICT formats
-        // (JSON / TOML / XML / HCL / INI / dotenv) a genuinely-binary file caught by
-        // a broad glob then surfaces one parse-error violation rather than hiding.
-        // The two PERMISSIVE formats do NOT: `.properties` maps almost any bytes to
-        // valueless keys and YAML reads bare bytes as a scalar string, so a
-        // mis-globbed binary file there yields a junk tree (the query just finds no
+        // (JSON / TOML / XML / HCL / INI / dotenv) a truncated-but-textual file
+        // caught by a broad glob then surfaces one parse-error violation rather than
+        // hiding. The two PERMISSIVE formats do NOT: `.properties` maps almost any
+        // bytes to valueless keys and YAML reads bare bytes as a scalar string, so a
+        // mis-globbed textual file there yields a junk tree (the query just finds no
         // match), not a parse error -- keep the glob narrow for those formats.
         let text = String::from_utf8_lossy(bytes);
         let root_value = match self.format.parse(&text) {
@@ -378,11 +400,27 @@ impl PerFileRule for StructuredPathRule {
 fn match_baseline_key(path_src: &str, op: &Op, m: &Value) -> String {
     let op_descr = match op {
         Op::Equals(expected) => format!("== {expected}"),
-        Op::Matches(re) => format!("=~ {}", re.as_str()),
+        // The `matches:` key is shared with the located `replace` fixer -- route
+        // it through the single source so the two can never drift.
+        Op::Matches(re) => return matches_baseline_key(path_src, re.as_str(), m),
         // Unreached: `Absent` violations are file-level (built in `evaluate_file`).
         Op::Absent => "absent".to_string(),
     };
     format!("{path_src}\u{0}{op_descr}\u{0}got {m}")
+}
+
+/// The baseline identity of one failing `matches:` node -- the SINGLE definition
+/// of that key, shared with the located `replace` fixer
+/// ([`crate::fixers::StructuredFixer::collect_edits`]). `fix --baseline` drops
+/// the grandfathered violations upstream and hands the fixer only the LIVE set;
+/// the fixer re-derives every node from the file, so it must correlate each
+/// candidate back to a live violation by this exact key. If the check side and
+/// the fixer ever computed it differently, a grandfathered node would be
+/// silently re-fixed (an under-suppression trust bug) -- routing both callers
+/// through this fn makes that drift impossible. Output is byte-identical to the
+/// former inline `=~ {re}` branch, so recorded baselines stay valid.
+pub(crate) fn matches_baseline_key(path_src: &str, matches_regex_src: &str, m: &Value) -> String {
+    format!("{path_src}\u{0}=~ {matches_regex_src}\u{0}got {m}")
 }
 
 /// Return `Some(message)` if the match fails the op; `None` if it passes.
@@ -568,6 +606,27 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
             alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
         )
     })?;
+    // Only `remove_value` is compatible with a `*_path_absent` kind (it deletes
+    // the matched node the rule requires to be absent). Any other op is a config
+    // error rather than a silently-ignored `fix:`. Unsafe by default.
+    let fixer = match &spec.fix {
+        Some(FixSpec::RemoveValue { remove_value }) => Some(StructuredFixer::remove(
+            format,
+            path_expr.clone(),
+            opts.path.clone(),
+            remove_value.applicability.unwrap_or(Applicability::Unsafe),
+        )),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with {kind_label} (only `remove_value` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(StructuredPathRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -580,6 +639,7 @@ fn build_absent(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         path_src: opts.path,
         op: Op::Absent,
         if_present: false,
+        fixer,
     }))
 }
 
@@ -596,6 +656,29 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
             alint_core::jsonpath_diagnostics::format_parse_error(&opts.path, e),
         )
     })?;
+    // Only `set_value` is compatible with a `*_path_equals` kind (it overwrites
+    // the matched node with the rule's `equals` value). Safe by default, but the
+    // fixer only emits at tier for a scalar replacing an existing scalar
+    // (`StructuredFixer::collect_edits`); anything else declines.
+    let fixer = match &spec.fix {
+        Some(FixSpec::SetValue { set_value }) => Some(StructuredFixer::set(
+            format,
+            path_expr.clone(),
+            opts.path.clone(),
+            opts.equals.clone(),
+            set_value.applicability.unwrap_or(Applicability::Safe),
+        )),
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with {kind_label} (only `set_value` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(StructuredPathRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -608,6 +691,7 @@ fn build_equals(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Box
         path_src: opts.path,
         op: Op::Equals(opts.equals),
         if_present: opts.if_present,
+        fixer,
     }))
 }
 
@@ -627,6 +711,49 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
     let re = Regex::new(&opts.matches).map_err(|e| {
         Error::rule_config(&spec.id, format!("invalid regex {:?}: {e}", opts.matches))
     })?;
+    // `*_path_matches` accepts ONLY the `replace` op: the value at `path` is
+    // rewritten (by the fix's OWN `pattern:` -> `replacement:`) so it satisfies the
+    // rule's `matches:` -- which stays the check + re-verify target. Any other op is
+    // a config error. Unsafe by default (a regex rewrite is not behavior-preserving).
+    let fixer = match &spec.fix {
+        Some(FixSpec::Replace { replace }) => {
+            let Some(pattern) = &replace.pattern else {
+                return Err(Error::rule_config(
+                    &spec.id,
+                    format!(
+                        "fix.replace on {kind_label} requires a `pattern:` (the search \
+                         regex applied to the value at `path`); the rule's `matches:` is \
+                         the check target, not the search"
+                    ),
+                ));
+            };
+            let search = Regex::new(pattern).map_err(|e| {
+                Error::rule_config(
+                    &spec.id,
+                    format!("invalid fix.replace.pattern {pattern:?}: {e}"),
+                )
+            })?;
+            Some(StructuredFixer::replace(
+                format,
+                path_expr.clone(),
+                opts.path.clone(),
+                search,
+                replace.replacement.clone(),
+                opts.matches.clone(),
+                replace.applicability.unwrap_or(Applicability::Unsafe),
+            ))
+        }
+        Some(other) => {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "fix.{} is not compatible with {kind_label} (only `replace` is)",
+                    other.op_name()
+                ),
+            ));
+        }
+        None => None,
+    };
     Ok(Box::new(StructuredPathRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -639,6 +766,7 @@ fn build_matches(spec: &RuleSpec, format: Format, kind_label: &str) -> Result<Bo
         path_src: opts.path,
         op: Op::Matches(re),
         if_present: opts.if_present,
+        fixer,
     }))
 }
 
@@ -703,6 +831,59 @@ mod tests {
         // latent bug this previously had).
         let e = json_path_matches_build(&spec).unwrap_err().to_string();
         assert!(e.contains("regex"), "expected a regex error, got: {e}");
+    }
+
+    #[test]
+    fn path_matches_replace_requires_a_pattern() {
+        // `*_path_matches` + `replace` needs its OWN search `pattern:` (the rule's
+        // `matches:` is the check target, not the search) -> config error without it.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"**/*.json\"\n\
+             path: \"$.v\"\n\
+             matches: \"^v\"\n\
+             level: error\n\
+             fix: { replace: { replacement: \"v\" } }\n",
+        );
+        let e = json_path_matches_build(&spec).unwrap_err().to_string();
+        assert!(
+            e.contains("pattern"),
+            "expected a missing-pattern error, got: {e}"
+        );
+    }
+
+    #[test]
+    fn path_matches_replace_with_a_pattern_builds() {
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"**/*.json\"\n\
+             path: \"$.v\"\n\
+             matches: \"^v\"\n\
+             level: error\n\
+             fix: { replace: { pattern: \"^\", replacement: \"v\" } }\n",
+        );
+        assert!(json_path_matches_build(&spec).is_ok());
+    }
+
+    #[test]
+    fn path_matches_rejects_a_non_replace_fix() {
+        // Only `replace` is compatible with `*_path_matches`.
+        let spec = spec_yaml(
+            "id: t\n\
+             kind: json_path_matches\n\
+             paths: \"**/*.json\"\n\
+             path: \"$.v\"\n\
+             matches: \"^v\"\n\
+             level: error\n\
+             fix: { set_value: {} }\n",
+        );
+        let e = json_path_matches_build(&spec).unwrap_err().to_string();
+        assert!(
+            e.contains("not compatible") && e.contains("replace"),
+            "expected an incompatibility error naming `replace`, got: {e}"
+        );
     }
 
     // ─── json_path_equals ─────────────────────────────────────

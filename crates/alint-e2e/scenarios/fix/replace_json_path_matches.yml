@@ -1,0 +1,47 @@
+name: replace on json_path_matches rewrites the value at the path to satisfy matches
+tags: [fix, json_path_matches, replace, json]
+
+# Follow-up 3: a `*_path_matches` rule fires when the value at `path:` does NOT
+# match `matches:`. Its `replace` fix carries its OWN `pattern:` (search) +
+# `replacement:` -- applied to the scalar value at the path (decoded, transformed,
+# re-serialized, spliced over the value span) -- so the value is rewritten to
+# satisfy `matches:`. Here the version must start with `v`; the fix prepends one.
+# `matches:` stays the check + re-verify target; the sibling `name` is untouched.
+# Promoted to `safe` (prepending `v` is a normalization) so a bare `fix` applies.
+
+given:
+  tree:
+    app.json: |
+      {
+        "version": "1.2.3",
+        "name": "app"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: v-prefix
+        kind: json_path_matches
+        paths: "**/*.json"
+        path: "$.version"
+        matches: "^v"
+        level: error
+        fix:
+          replace:
+            pattern: "^"
+            replacement: "v"
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: v-prefix, level: error, path: app.json}
+  - applied: [v-prefix]
+  - violations: []
+
+expect_tree:
+  app.json: |
+    {
+      "version": "v1.2.3",
+      "name": "app"
+    }

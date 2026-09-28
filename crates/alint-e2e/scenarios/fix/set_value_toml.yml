@@ -1,0 +1,43 @@
+name: set_value rewrites a TOML value (typed, decor-preserving), keeping comments
+tags: [fix, toml_path_equals, set_value, toml]
+
+# The fifth structured format, via the toml_edit round-trip CST. Unlike the
+# string-leaf formats (XML/dotenv/INI), TOML is TYPED: a NUMERIC `equals` is
+# fixable and renders bare (no quotes). The fixer rewrites the whole document,
+# but toml_edit round-trips byte-identically, so ONLY the value changes -- the
+# leading comment, the `[server]` header, the sibling `host`, and the value's own
+# trailing comment + alignment all survive. Safe (a scalar replacing a scalar).
+
+given:
+  tree:
+    app.toml: |
+      # config
+      [server]
+      host = "localhost"
+      port = 8080  # dev port
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: toml_path_equals
+        paths: "**/*.toml"
+        path: "$['server']['port']"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: app.toml}
+  - applied: [port]
+  - violations: []
+
+expect_tree:
+  app.toml: |
+    # config
+    [server]
+    host = "localhost"
+    port = 9090  # dev port

@@ -1,0 +1,43 @@
+name: remove_value declines the XML document root -- never empties the file
+tags: [fix, xml_path_absent, remove_value, xml, safety]
+
+# Safety-critical: `$.project` matches the DOCUMENT ROOT element. Deleting the
+# root would leave a zero-byte file -- and an empty document re-parses as `{}`,
+# so `$.project` is then absent and the `Absent` verifier would be SATISFIED.
+# Verify cannot catch this (the query no longer matches), so the resolver must
+# refuse structurally: removing an element whose parent is not itself an element
+# is DECLINED. With no applicable edit the fix is `skipped`, the violation
+# survives, and `expect_tree` proves the file is byte-for-byte intact. The rule
+# promotes to `safe` to show the decline is at resolution, not the tier gate.
+
+given:
+  tree:
+    pom.xml: |
+      <project>
+        <groupId>com.example</groupId>
+      </project>
+  config: |
+    version: 1
+    rules:
+      - id: no-project
+        kind: xml_path_absent
+        paths: "**/*.xml"
+        path: "$.project"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-project, level: error, path: pom.xml}
+  - skipped: [no-project]
+  - violations:
+      - {rule: no-project, level: error, path: pom.xml}
+
+expect_tree:
+  pom.xml: |
+    <project>
+      <groupId>com.example</groupId>
+    </project>

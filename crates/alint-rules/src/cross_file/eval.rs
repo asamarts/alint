@@ -1,332 +1,28 @@
-//! `cross_file` — a value (or set of values, or the whole content,
-//! or a set of paths) extracted from one authoritative `source`
-//! file must hold a `relation:` to one or more `targets` (or the
-//! filesystem). The unified cross-file value-relation kind
-//! (architecture-synthesis primitive A): one kind, a `relation:`
-//! knob, over the shared `crate::extract` + `normalize`. Design +
-//! open questions: `docs/design/v0.12/cross_file.md`.
-//!
-//! `cross_file_value_equals` (v0.10) is a registered **alias** for
-//! this kind with `relation` defaulting to `equals`; every existing
-//! config is byte-compatible.
-//!
-//! `relation` groups into three shapes, validated in `build`:
-//! - **value** (`equals` | `subset` | `superset` | `set_equals`):
-//!   `source.extract` + `targets` (each with `extract`).
-//! - **`identical`**: whole-file byte identity — `targets` with NO
-//!   `extract`, no `source.extract` (optional `skip_header_lines`).
-//! - **`resolves`**: each extracted source path must exist on disk —
-//!   `source.extract`, NO `targets` (the forward half of
-//!   `registry_paths_resolve`, which keeps its richer ergonomics).
-//!
-//! ```yaml
-//! - id: workspace-versions-coherent
-//!   kind: cross_file
-//!   source:  { file: Cargo.toml, extract: { toml: "$.workspace.package.version" } }
-//!   targets: { files: "crates/*/Cargo.toml", extract: { toml: "$.package.version" } }
-//!   relation: equals               # equals (default) | subset | superset | set_equals
-//!
-//! # identical — the crate README must mirror the workspace README byte-for-byte.
-//! - id: readme-mirrors-root
-//!   kind: cross_file
-//!   source:  { file: README.md }
-//!   targets: { files: "crates/*/README.md" }
-//!   relation: identical
-//! ```
+//! `cross_file` runtime evaluation: the per-relation checks
+//! (`equals` / `subset` / `superset` / `set_equals` / `identical` / `resolves`)
+//! on [`CrossFileRule`](super::CrossFileRule), plus the confined-read helpers.
+//! The config schema lives in [`super::spec`]; assembly + `build` in
+//! [`super`](super).
 
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
-use alint_core::{
-    Context, Error, Extract, ExtractSpec, Level, Result, Rule, RuleSpec, Scope, Violation,
-    extract_values, is_non_literal,
-};
-use serde::Deserialize;
+use alint_core::template::{PathTokens, render_path};
+use alint_core::{Context, Extract, Result, Violation, extract_values, is_non_literal};
 
-/// The file whose extracted value(s) form the reference side of the relation:
-/// a single `{ file, extract }`, or (set relations only) `{ files: <glob>,
-/// extract }` whose matches are unioned into one set.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-#[schemars(extend("oneOf" = [{"required": ["file"]}, {"required": ["files"]}]))]
-struct SourceSpec {
-    /// A single source file.
-    #[serde(default)]
-    file: Option<String>,
-    /// A glob whose matches are read and whose extracted values are UNIONED
-    /// into one set, for the set relations only (`subset` / `superset` /
-    /// `set_equals`).
-    #[serde(default)]
-    files: Option<String>,
-    /// The extraction to apply. Absent for `identical` (whole-file); required
-    /// otherwise.
-    #[serde(default)]
-    extract: Option<ExtractSpec>,
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct TargetEntrySpec {
-    /// A single target file.
-    file: String,
-    /// The extraction to apply to this target (absent for `identical`).
-    #[serde(default)]
-    extract: Option<ExtractSpec>,
-}
-
-/// `targets:` is either a `{ files: <glob>, extract: … }` map
-/// (form a - one query applied per glob match) or a sequence of
-/// `{ file, extract }` (form b - heterogeneous pins). A YAML map
-/// vs a sequence are structurally distinct, so an untagged enum
-/// decodes them unambiguously. `extract` is absent for `identical`.
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(
-    untagged,
-    expecting = "a `{ files, extract }` map, or a list of `{ file, extract }` entries"
-)]
-enum TargetsSpec {
-    /// Form a: one query applied per glob match.
-    // The hand-written schema rejected unknown keys in this form; schemars does
-    // not emit `additionalProperties: false` for an untagged struct variant, so
-    // restore it schema-side (the loader stays lenient, as it was before).
-    #[schemars(extend("additionalProperties" = false))]
-    Glob {
-        files: String,
-        // Boxed so this inline variant does not dwarf `List` (a `Vec`): the
-        // `ExtractSpec` one-of has grown one `Option<String>` per config format,
-        // and unboxed it trips clippy's `large_enum_variant`. Transparent to
-        // serde and schemars, and `resolve()` moves through the `Box` unchanged.
-        #[serde(default)]
-        extract: Option<Box<ExtractSpec>>,
-    },
-    /// Form b: a sequence of heterogeneous `{ file, extract }` pins.
-    List(Vec<TargetEntrySpec>),
-}
-
-/// The relation the source must hold to each target. `equals` is the
-/// 1:1 scalar case (the released `cross_file_value_equals`); the set
-/// relations compare extracted sets; `identical` compares whole
-/// files; `resolves` checks path existence on the filesystem.
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
-#[serde(rename_all = "snake_case")]
-enum Relation {
-    /// Source extracts exactly one value `v`; every target value
-    /// must equal `v` (after normalize).
-    #[default]
-    Equals,
-    /// `S ⊆ T` - every source value appears in the target
-    /// (singleton `S` = membership).
-    Subset,
-    /// `S ⊇ T` - every target value appears in the source.
-    Superset,
-    /// `S == T` - the sets match exactly.
-    SetEquals,
-    /// Whole-file byte identity (optional `skip_header_lines`).
-    Identical,
-    /// Each extracted source path must exist on disk (file or dir).
-    Resolves,
-}
-
-impl Relation {
-    fn is_value(self) -> bool {
-        matches!(
-            self,
-            Self::Equals | Self::Subset | Self::Superset | Self::SetEquals
-        )
-    }
-}
-
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
-#[serde(rename_all = "kebab-case")]
-#[schemars(rename = "NormalizeTransform")]
-enum Normalize {
-    #[default]
-    None,
-    Trim,
-    Lower,
-    /// Compare only the leading `MAJOR` token (the dotnet/runtime
-    /// SDK-band shape: same feature band, not exact patch).
-    SemverMajor,
-    /// Compare only the leading `MAJOR.MINOR` band - drops patch and
-    /// pre-release and takes the leading digits of each token, so
-    /// `4.36-dev`, `4.36.0`, `pnpm@11.3.0` (→ `11.3`) and `>=22.13`
-    /// all reconcile to one band (the protobuf / pnpm version-format
-    /// case the v0.12 study surfaced).
-    SemverMinor,
-}
-
-impl Normalize {
-    fn apply(self, v: &str) -> String {
-        match self {
-            Self::None => v.to_string(),
-            Self::Trim => v.trim().to_string(),
-            Self::Lower => v.trim().to_lowercase(),
-            // Leading `.`-token, leading non-digits stripped. The trailing
-            // `trim_end` keeps normalisation idempotent: `trim()` runs before
-            // the split, so the pre-`.` token can still carry trailing
-            // whitespace (e.g. `"0 ."` -> token `"0 "`) that a second pass
-            // would strip — found by `normalize_transforms_are_idempotent`.
-            // (Trailing non-whitespace like `-dev` is intentionally kept, so
-            // released behaviour is unchanged for real version strings.)
-            Self::SemverMajor => v
-                .trim()
-                .split('.')
-                .next()
-                .unwrap_or("")
-                .trim_start_matches(|c: char| !c.is_ascii_digit())
-                .trim_end()
-                .to_string(),
-            Self::SemverMinor => semver_minor(v),
-        }
-    }
-}
-
-/// Leading digits of a semver token after stripping a non-digit
-/// prefix (`pnpm@11` → `11`, `>=22` → `22`, `36-dev` → `36`).
-fn token_digits(tok: &str) -> String {
-    tok.trim_start_matches(|c: char| !c.is_ascii_digit())
-        .chars()
-        .take_while(char::is_ascii_digit)
-        .collect()
-}
-
-/// The `MAJOR.MINOR` band of a version string.
-fn semver_minor(v: &str) -> String {
-    let mut it = v.trim().split('.');
-    let major = token_digits(it.next().unwrap_or(""));
-    if major.is_empty() {
-        return String::new();
-    }
-    match it.next().map(token_digits).filter(|m| !m.is_empty()) {
-        Some(minor) => format!("{major}.{minor}"),
-        None => major,
-    }
-}
-
-/// `normalize:` accepts a single transform (`trim`) or an ordered
-/// list (`[trim, semver-minor]`), applied left-to-right. A scalar
-/// vs a sequence are structurally distinct, so an untagged enum
-/// decodes them unambiguously.
-#[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
-#[serde(
-    untagged,
-    expecting = "a normalize transform (`none`, `trim`, `lower`, `semver-major`, or `semver-minor`), or a list of them"
-)]
-enum NormalizeSpec {
-    One(Normalize),
-    Many(Vec<Normalize>),
-}
-
-impl Default for NormalizeSpec {
-    fn default() -> Self {
-        Self::One(Normalize::None)
-    }
-}
-
-impl NormalizeSpec {
-    /// The ordered transform list, with `None` (a no-op marker)
-    /// dropped - so an empty list means "no normalization".
-    fn into_list(self) -> Vec<Normalize> {
-        let raw = match self {
-            Self::One(n) => vec![n],
-            Self::Many(v) => v,
-        };
-        raw.into_iter().filter(|n| *n != Normalize::None).collect()
-    }
-}
-
-/// Apply an ordered list of transforms to a value (left-to-right).
-fn apply_normalize(transforms: &[Normalize], v: &str) -> String {
-    transforms
-        .iter()
-        .fold(v.to_string(), |acc, t| t.apply(&acc))
-}
-
-#[derive(Debug, Deserialize, schemars::JsonSchema)]
-#[serde(deny_unknown_fields)]
-struct Options {
-    /// The file whose extracted value(s) form the reference side of the
-    /// relation: a single `{ file, extract }`, or (set relations only)
-    /// `{ files: <glob>, extract }` whose matches are unioned into one set.
-    source: SourceSpec,
-    /// The file(s) compared against the source, one relation check per target.
-    /// Absent for `resolves` (the target is the filesystem).
-    #[serde(default)]
-    targets: Option<TargetsSpec>,
-    /// The assertion checked between the source and each target: `equals`
-    /// (default), `subset`, `superset`, `set_equals`, `identical` (whole file
-    /// byte-for-byte), or `resolves` (each path the source extracts exists on
-    /// disk).
-    #[serde(default)]
-    relation: Relation,
-    /// A normalize transform, or an ordered list of transforms applied
-    /// left-to-right (`[trim, semver-minor]`). `semver-major` / `semver-minor`
-    /// keep only the leading MAJOR / MAJOR.MINOR band.
-    #[serde(default)]
-    normalize: NormalizeSpec,
-    /// When true, an absent target file or a missing extracted target value is
-    /// tolerated instead of reported as drift.
-    #[serde(default)]
-    allow_missing_target: bool,
-    /// For the `identical` relation only: drop this many leading lines from
-    /// both files before comparison, to ignore a differing license or
-    /// generated header.
-    #[serde(default)]
-    #[schemars(range(min = 0))]
-    skip_header_lines: Option<usize>,
-}
-
-crate::options_schema_for!(Options);
-
-/// Resolved target shape. `extract` is `None` for `identical`
-/// (whole-file), `Some` for the value relations.
-#[derive(Debug)]
-enum Targets {
-    Glob {
-        scope: Scope,
-        extract: Option<Extract>,
-    },
-    List(Vec<(String, Option<Extract>)>),
-}
+use super::CrossFileRule;
+use super::spec::{Relation, Targets, apply_normalize};
 
 /// Per-target callback for `each_target`: receives the target's
 /// path, its raw literal values, and the violation sink.
 type TargetFn<'a> = dyn FnMut(&Path, &[String], &mut Vec<Violation>) + 'a;
 
-#[derive(Debug)]
-pub struct CrossFileRule {
-    id: String,
-    level: Level,
-    policy_url: Option<String>,
-    message: Option<String>,
-    /// The source path (single-file mode) or the glob string (used
-    /// for display in messages when `source_glob` is set).
-    source_file: String,
-    /// `Some` ⇒ glob-union source: `source_file` is the glob, and
-    /// `source_values` unions the extracted values across every
-    /// matching file. Set-relations only.
-    source_glob: Option<Scope>,
-    /// `Some` for value relations + `resolves`; `None` for `identical`.
-    source_extract: Option<Extract>,
-    /// `Some` for value relations + `identical`; `None` for `resolves`.
-    targets: Option<Targets>,
-    relation: Relation,
-    /// Ordered transform list (empty = no normalization).
-    normalize: Vec<Normalize>,
-    allow_missing: bool,
-    skip_header_lines: usize,
-}
-
-impl Rule for CrossFileRule {
-    alint_core::rule_common_impl!();
-
-    fn requires_full_index(&self) -> bool {
-        // Cross-file: the source and every target may live
-        // anywhere in the tree; never `--changed`-scoped.
-        true
-    }
-
-    fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
+impl CrossFileRule {
+    /// Dispatch to the per-relation check. Called by the `Rule::evaluate` shim in
+    /// [`super`](super); the rest of the impl is private to this module. Infallible
+    /// (read/parse failures are pushed as violations, never `Err`), so the shim
+    /// wraps the returned vec in `Ok`.
+    pub(super) fn evaluate_impl(&self, ctx: &Context<'_>) -> Vec<Violation> {
         let mut out = Vec::new();
         match self.relation {
             Relation::Equals => {
@@ -345,12 +41,134 @@ impl Rule for CrossFileRule {
             }
             Relation::Identical => self.check_identical(ctx, &mut out),
             Relation::Resolves => self.check_resolves(ctx, &mut out),
+            Relation::Registered => self.check_registered(ctx, &mut out),
         }
-        Ok(out)
+        out
     }
-}
 
-impl CrossFileRule {
+    /// `relation: registered` - every SOURCE member (a filesystem path from
+    /// `source.file` / `source.files`, mapped through `register_as`) must be an
+    /// element of every target's list (the structured array the target `extract`
+    /// locates). Two independent conditions per member: it must EXIST (a named
+    /// source only - a glob only matches paths that exist) and it must be
+    /// REGISTERED. The fix (`create_and_register`) repairs whichever is unmet;
+    /// this check reports them.
+    fn check_registered(&self, ctx: &Context<'_>, out: &mut Vec<Violation>) {
+        let members = self.registered_members(ctx);
+        // A glob source that matched NOTHING is almost always a typo; fire like the
+        // set relations do (`targets matched no files`), so a broken rule is not a
+        // silent green (audit A#7). Suppressed by `allow_missing_target`.
+        if self.source_glob.is_some() && members.is_empty() && !self.allow_missing {
+            out.push(Self::violation(
+                Path::new(&self.source_file),
+                "`source.files` glob matched no files",
+            ));
+            return;
+        }
+        // Existence (named source only). A missing named member is reported here;
+        // the `create_and_register` fix CREATES it (from `content`/`content_from`) --
+        // one of the two independent postconditions. Keyed uniquely so it never
+        // collides with a registration finding on a shared path (the F4 unique-key
+        // rule, [[project_alint-autofix-located-fixer-correlation]]).
+        if self.source_glob.is_none() {
+            for (path, _) in &members {
+                if !member_exists(ctx, path) {
+                    out.push(
+                        Self::violation(path, "member file does not exist").with_baseline_key(
+                            format!("registered\u{0}exists\u{0}{}", crate::slash(path)),
+                        ),
+                    );
+                }
+            }
+        }
+        // Registration: each EXISTING member's value must appear in every target
+        // list. Existence is a PREREQUISITE for registration -- registering a member
+        // whose file is missing would write a PHANTOM entry that breaks the consumer
+        // (a `workspace.members` path with no crate makes cargo fail), so a MISSING
+        // NAMED member is registered only AFTER its create-half fix makes it exist:
+        // the fixpoint re-walks and this pass then fires the registration. If the
+        // create is skipped (no `content`, an unreadable `content_from`, a root
+        // escape, a `--changed` skew), the member stays missing and is NEVER
+        // registered -- no phantom (round-2 audit HIGH: the uncoordinated
+        // two-postcondition model appended a phantom when the create was withheld;
+        // this also drops a root-escaping named source, which never resolves in the
+        // index). A glob member always exists (a glob matches only existing paths).
+        // `normalize` is rejected on `registered` (build), so member and target
+        // elements compare VERBATIM (audit A#3/B#2).
+        let member_values: BTreeSet<String> = members
+            .into_iter()
+            .filter(|(path, _)| self.source_glob.is_some() || member_exists(ctx, path))
+            .map(|(_, value)| value)
+            .collect();
+        if member_values.is_empty() {
+            return;
+        }
+        self.each_target(ctx, out, &mut |target, values, out| {
+            let target_set: BTreeSet<&str> = values.iter().map(String::as_str).collect();
+            for member in &member_values {
+                if target_set.contains(member.as_str()) {
+                    continue;
+                }
+                // ONE violation PER (target, missing member). The `baseline_key`
+                // carries the single member and doubles as the fix channel: the
+                // fixer appends exactly this member (no re-glob, so it never diverges
+                // from the check's gitignore-aware member set). A per-member key (not
+                // a per-target list of all missing) keeps each member's baseline
+                // fingerprint STABLE, so adding/registering one member does not
+                // un-grandfather the others (audit A#4). Members are paths, so they
+                // never contain the `\0` separator.
+                let msg = self.message.clone().unwrap_or_else(|| {
+                    format!("{} is missing member {member:?}", crate::slash(target))
+                });
+                out.push(
+                    Violation::new(msg)
+                        .with_path(target.to_path_buf())
+                        .with_baseline_key(format!(
+                            "registered\u{0}member\u{0}{}\u{0}{member}",
+                            crate::slash(target)
+                        )),
+                );
+            }
+        });
+    }
+
+    /// Enumerate the source members as `(path, register_value)` pairs: every match
+    /// of the `source.files` glob (files AND directories - a member can be either),
+    /// or the single `source.file`. `register_value` = `register_as` (default
+    /// `{path}`) rendered over the slash-normalized member path, so it matches the
+    /// forward-slash spelling manifests use on every platform.
+    fn registered_members(&self, ctx: &Context<'_>) -> Vec<(std::path::PathBuf, String)> {
+        let render_value = |p: &Path| -> String {
+            let slashed = crate::slash(p);
+            let tokens = PathTokens::from_path(Path::new(&slashed));
+            render_path(self.register_as.as_deref().unwrap_or("{path}"), &tokens)
+        };
+        let Some(scope) = &self.source_glob else {
+            // A single named member (`source.file`). Normalize the config-verbatim
+            // path (strip `./`, resolve `..` lexically) so `member_exists` matches
+            // the canonical index paths -- otherwise a `./crates/x/Cargo.toml` that
+            // exists reads as missing (audit A#6). A lexical escape keeps the raw
+            // path (then reads as missing, honestly).
+            let raw = std::path::Path::new(&self.source_file);
+            let p = crate::pathsafe::normalize_confined(raw).unwrap_or_else(|| raw.to_path_buf());
+            let value = render_value(&p);
+            return vec![(p, value)];
+        };
+        // A `source.files` glob: every matching file OR directory is a member.
+        let mut members = Vec::new();
+        for e in ctx.index.files() {
+            if scope.matches(&e.path, ctx.index) {
+                members.push((e.path.to_path_buf(), render_value(&e.path)));
+            }
+        }
+        for e in ctx.index.dirs() {
+            if scope.matches(&e.path, ctx.index) {
+                members.push((e.path.to_path_buf(), render_value(&e.path)));
+            }
+        }
+        members
+    }
+
     /// Read + extract the source file's literal values (raw, not
     /// normalised - callers normalise as the relation needs).
     /// `None` (with a violation pushed) when the source can't be
@@ -687,6 +505,9 @@ impl CrossFileRule {
             Some(Targets::List(list)) => {
                 for (file, extract) in list {
                     let Some(extract) = extract else { continue };
+                    // `file` is already normalized at resolution (`resolve_targets`),
+                    // so the violation path matches git's canonical diff spelling and
+                    // the value fixer's stored target path (audit F2).
                     let target = Path::new(file);
                     if let Some(values) = self.target_values(ctx, target, extract, out) {
                         f(target, &values, out);
@@ -764,8 +585,20 @@ impl CrossFileRule {
 
     /// An informational note (non-violation finding) - e.g. a
     /// non-literal value the rule skipped rather than compared.
+    ///
+    /// Carries a `reason`-discriminated `baseline_key`: a `cross_file` target can
+    /// emit SEVERAL notes on one path (one per skipped non-literal value), and a
+    /// keyless finding's `violation_key` collapses to `(rule_id, path)`. Once the
+    /// rule is FIXABLE (`sync_from`), the fixpoint's per-violation merge requires
+    /// distinct keys, so two `${A}`/`${B}` notes -- or a note beside the keyless
+    /// "no literal value" violation -- would otherwise collide (the F4 tripwire
+    /// panics in debug; a release build silently drops one). Keying the notes makes
+    /// every finding on a path unique (the violations are one-per-path or already
+    /// carry a per-value key).
     fn note(path: &Path, reason: &str) -> Violation {
-        Self::violation(path, reason).as_note()
+        Self::violation(path, reason)
+            .as_note()
+            .with_baseline_key(format!("note\u{0}{}\u{0}{reason}", crate::slash(path)))
     }
 
     fn mismatch(&self, target: &Path, source: &str, target_value: &str) -> Violation {
@@ -789,6 +622,14 @@ impl CrossFileRule {
 }
 
 /// Render a sorted value set for a violation message.
+/// Whether a `registered` member path is present in the walked tree (as a file OR
+/// a directory - a member can be either). Used only for a NAMED source's existence
+/// check; a glob source only ever yields paths the index already holds.
+fn member_exists(ctx: &Context<'_>, path: &Path) -> bool {
+    ctx.index.files().any(|e| e.path.as_ref() == path)
+        || ctx.index.dirs().any(|e| e.path.as_ref() == path)
+}
+
 fn render(set: &BTreeSet<&String>) -> String {
     if set.is_empty() {
         // `set_equals` renders both sides; an empty one reads `none`
@@ -859,322 +700,11 @@ fn read_rel(ctx: &Context<'_>, rel: &Path) -> Result<String, crate::io::ReadCapE
     crate::io::read_capped(&ctx.root.join(rel)).map(|b| String::from_utf8_lossy(&b).into_owned())
 }
 
-/// Resolve a `targets:` spec, validating each glob / list entry.
-/// `extract` stays `Option` (absent for `identical`); the
-/// relation-shape coupling is checked in `validate_shape`.
-fn resolve_targets(ts: TargetsSpec, cfg: &impl Fn(String) -> Error) -> Result<Targets> {
-    match ts {
-        TargetsSpec::Glob { files, extract } => {
-            if files.trim().is_empty() {
-                return Err(cfg("`targets.files` must not be empty".into()));
-            }
-            let scope = Scope::from_patterns(std::slice::from_ref(&files))
-                .map_err(|e| cfg(format!("invalid `targets.files` glob: {e}")))?;
-            let extract = match extract {
-                Some(e) => Some(
-                    e.resolve()
-                        .map_err(|e| cfg(format!("invalid `targets.extract`: {e}")))?,
-                ),
-                None => None,
-            };
-            Ok(Targets::Glob { scope, extract })
-        }
-        TargetsSpec::List(list) => {
-            if list.is_empty() {
-                return Err(cfg("`targets` list must not be empty".into()));
-            }
-            let mut resolved = Vec::with_capacity(list.len());
-            for (i, t) in list.into_iter().enumerate() {
-                if t.file.trim().is_empty() {
-                    return Err(cfg(format!("`targets[{i}].file` must not be empty")));
-                }
-                let ex = match t.extract {
-                    Some(e) => Some(
-                        e.resolve()
-                            .map_err(|e| cfg(format!("invalid `targets[{i}].extract`: {e}")))?,
-                    ),
-                    None => None,
-                };
-                resolved.push((t.file, ex));
-            }
-            Ok(Targets::List(resolved))
-        }
-    }
-}
-
-/// Enforce the per-relation shape: value relations need
-/// `source.extract` + `targets` (with `extract`); `identical` needs
-/// `targets` without `extract` and no `source.extract`; `resolves`
-/// needs `source.extract` and no `targets`.
-fn validate_shape(
-    relation: Relation,
-    source_extract: Option<&Extract>,
-    targets: Option<&Targets>,
-    cfg: &impl Fn(String) -> Error,
-) -> Result<()> {
-    let (any_target_extract, all_target_extract) = match targets {
-        Some(Targets::Glob { extract, .. }) => (extract.is_some(), extract.is_some()),
-        Some(Targets::List(list)) => (
-            list.iter().any(|(_, e)| e.is_some()),
-            list.iter().all(|(_, e)| e.is_some()),
-        ),
-        None => (false, false),
-    };
-    if relation.is_value() {
-        if source_extract.is_none() {
-            return Err(cfg(format!(
-                "`relation: {relation:?}` (a value relation) needs `source.extract`"
-            )));
-        }
-        if targets.is_none() {
-            return Err(cfg("a value relation needs `targets`".into()));
-        }
-        if !all_target_extract {
-            return Err(cfg("a value relation's `targets` need `extract`".into()));
-        }
-    } else if relation == Relation::Identical {
-        if source_extract.is_some() {
-            return Err(cfg(
-                "`relation: identical` compares whole files; remove `source.extract`".into(),
-            ));
-        }
-        if targets.is_none() {
-            return Err(cfg("`relation: identical` needs `targets`".into()));
-        }
-        if any_target_extract {
-            return Err(cfg(
-                "`relation: identical` compares whole files; remove `targets.extract`".into(),
-            ));
-        }
-    } else {
-        // resolves
-        if source_extract.is_none() {
-            return Err(cfg(
-                "`relation: resolves` needs `source.extract` (the paths to check)".into(),
-            ));
-        }
-        if targets.is_some() {
-            return Err(cfg(
-                "`relation: resolves` checks the filesystem; remove `targets`".into(),
-            ));
-        }
-    }
-    Ok(())
-}
-
-/// Reject a malformed regex extract at build time (like `file_graph` /
-/// `registry_paths_resolve`), so a bad pattern is a clean config error
-/// rather than an error-level eval-time violation.
-fn validate_extract_regexes(
-    source_extract: Option<&Extract>,
-    targets: Option<&Targets>,
-    cfg: &impl Fn(String) -> Error,
-) -> Result<()> {
-    let check = |e: Option<&Extract>| -> Result<()> {
-        if let Some(Extract::Regex(p)) = e {
-            regex::Regex::new(p).map_err(|err| cfg(format!("invalid `extract.regex`: {err}")))?;
-        }
-        Ok(())
-    };
-    check(source_extract)?;
-    if let Some(t) = targets {
-        match t {
-            Targets::Glob { extract, .. } => check(extract.as_ref())?,
-            Targets::List(list) => {
-                for (_, e) in list {
-                    check(e.as_ref())?;
-                }
-            }
-        }
-    }
-    Ok(())
-}
-
-pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
-    alint_core::reject_scope_filter_on_cross_file(spec, "cross_file")?;
-    let opts: Options = spec
-        .deserialize_options()
-        .map_err(|e| Error::rule_config(&spec.id, format!("invalid options: {e}")))?;
-    let cfg = |msg: String| Error::rule_config(&spec.id, msg);
-
-    let source_extract = match opts.source.extract {
-        Some(spec) => Some(
-            spec.resolve()
-                .map_err(|e| cfg(format!("invalid `source.extract`: {e}")))?,
-        ),
-        None => None,
-    };
-    // Source: exactly one of `file` (single) or `files` (glob-union,
-    // set relations only). For the glob form `source_file` holds the
-    // glob string so violation messages still name a source.
-    let (source_file, source_glob) = match (opts.source.file, opts.source.files) {
-        (Some(f), None) => {
-            if f.trim().is_empty() {
-                return Err(cfg("`source.file` must not be empty".into()));
-            }
-            (f, None)
-        }
-        (None, Some(g)) => {
-            if g.trim().is_empty() {
-                return Err(cfg("`source.files` must not be empty".into()));
-            }
-            if !matches!(
-                opts.relation,
-                Relation::Subset | Relation::Superset | Relation::SetEquals
-            ) {
-                return Err(cfg(format!(
-                    "`source.files` (glob-union) requires a set relation \
-                     (subset / superset / set_equals), not `{:?}`",
-                    opts.relation
-                )));
-            }
-            let scope = Scope::from_patterns(std::slice::from_ref(&g))
-                .map_err(|e| cfg(format!("invalid `source.files` glob: {e}")))?;
-            (g, Some(scope))
-        }
-        (Some(_), Some(_)) => {
-            return Err(cfg(
-                "set exactly one of `source.file` (a path) or `source.files` (a glob), not both"
-                    .into(),
-            ));
-        }
-        (None, None) => {
-            return Err(cfg(
-                "`source` needs `file` (a path) or `files` (a glob-union over set relations)"
-                    .into(),
-            ));
-        }
-    };
-    // Glob-union + `whole_file` would union whole-file CONTENTS as set
-    // members — semantically odd and never useful; reject it so the
-    // misconfiguration fails loudly at build time.
-    if source_glob.is_some() && matches!(source_extract, Some(Extract::WholeFile)) {
-        return Err(cfg(
-            "`source.files` (glob-union) cannot use a `whole_file` extract \
-             (it would union file contents as set members); use a structured / \
-             regex / lines extract"
-                .into(),
-        ));
-    }
-    let targets = match opts.targets {
-        Some(ts) => Some(resolve_targets(ts, &cfg)?),
-        None => None,
-    };
-
-    // Pre-validate regex extracts at build time (clean config error,
-    // not an error-level eval-time violation).
-    validate_extract_regexes(source_extract.as_ref(), targets.as_ref(), &cfg)?;
-
-    validate_shape(
-        opts.relation,
-        source_extract.as_ref(),
-        targets.as_ref(),
-        &cfg,
-    )?;
-
-    // Reject options the chosen relation ignores, so a misconfiguration
-    // fails loudly at build rather than silently doing nothing.
-    if opts.skip_header_lines.is_some() && opts.relation != Relation::Identical {
-        return Err(cfg(
-            "`skip_header_lines` only applies to `relation: identical`".into(),
-        ));
-    }
-    let normalize = opts.normalize.into_list();
-    if !normalize.is_empty() && matches!(opts.relation, Relation::Identical | Relation::Resolves) {
-        return Err(cfg(format!(
-            "`normalize` does not apply to `relation: {:?}` \
-             (it compares whole files / paths, not extracted values)",
-            opts.relation
-        )));
-    }
-
-    Ok(Box::new(CrossFileRule {
-        id: spec.id.clone(),
-        level: spec.level,
-        policy_url: spec.policy_url.clone(),
-        message: spec.message.clone(),
-        source_file,
-        source_glob,
-        source_extract,
-        targets,
-        relation: opts.relation,
-        normalize,
-        allow_missing: opts.allow_missing_target,
-        skip_header_lines: opts.skip_header_lines.unwrap_or(0),
-    }))
-}
-
 #[cfg(test)]
 mod tests {
+    use super::super::spec::{Normalize, NormalizeSpec};
     use super::*;
-    use alint_core::{FileEntry, FileIndex, Format};
-    use proptest::prelude::*;
-
-    #[test]
-    fn untagged_enums_name_accepted_forms_not_internal_enum() {
-        // A value matching no variant reports the accepted forms (via
-        // `#[serde(expecting)]`), not the internal untagged-enum name.
-        let n = serde_yaml_ng::from_str::<NormalizeSpec>("42")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            n.contains("a normalize transform") && !n.contains("NormalizeSpec"),
-            "NormalizeSpec: {n}"
-        );
-        let t = serde_yaml_ng::from_str::<TargetsSpec>("42")
-            .unwrap_err()
-            .to_string();
-        assert!(
-            t.contains("{ files, extract }") && !t.contains("TargetsSpec"),
-            "TargetsSpec: {t}"
-        );
-    }
-
-    proptest! {
-        /// Every `normalize` transform is idempotent: normalising an
-        /// already-normalised value is a no-op. A non-idempotent
-        /// transform would make `equals` comparisons depend on how many
-        /// times normalisation ran - a latent correctness bug. (This is
-        /// the behaviour spec; proptest is the partial proof.)
-        #[test]
-        fn normalize_transforms_are_idempotent(s in r"\PC{0,48}") {
-            for t in [
-                Normalize::Trim,
-                Normalize::Lower,
-                Normalize::SemverMajor,
-                Normalize::SemverMinor,
-            ] {
-                let once = t.apply(&s);
-                let twice = t.apply(&once);
-                prop_assert_eq!(&twice, &once, "{:?} is not idempotent on {:?}", t, s);
-            }
-        }
-
-        /// `apply_normalize` with a single transform equals that
-        /// transform applied directly - the fold has no off-by-one.
-        #[test]
-        fn apply_normalize_single_equals_transform(s in r"\PC{0,48}") {
-            let t = Normalize::SemverMinor;
-            prop_assert_eq!(apply_normalize(&[t], &s), t.apply(&s));
-        }
-
-        /// `semver_minor` always yields a clean band: empty, or digits
-        /// optionally followed by `.` and more digits (`MAJOR` or
-        /// `MAJOR.MINOR`). No stray separators or non-digits survive.
-        #[test]
-        fn semver_minor_yields_a_clean_band(s in r"\PC{0,48}") {
-            let band = semver_minor(&s);
-            if !band.is_empty() {
-                let mut parts = band.split('.');
-                let major = parts.next().unwrap();
-                prop_assert!(!major.is_empty() && major.bytes().all(|b| b.is_ascii_digit()));
-                if let Some(minor) = parts.next() {
-                    prop_assert!(!minor.is_empty() && minor.bytes().all(|b| b.is_ascii_digit()));
-                }
-                prop_assert!(parts.next().is_none(), "at most MAJOR.MINOR");
-            }
-        }
-    }
+    use alint_core::{FileEntry, FileIndex, Format, Level, Rule, Scope};
 
     fn index(files: &[&str]) -> FileIndex {
         FileIndex::from_entries(
@@ -1209,6 +739,8 @@ mod tests {
             normalize: NormalizeSpec::One(normalize).into_list(),
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
         }
     }
 
@@ -1353,17 +885,6 @@ mod tests {
     }
 
     #[test]
-    fn semver_major_is_idempotent_on_trailing_space_token() {
-        // Regression (found by normalize_transforms_are_idempotent): `trim()`
-        // runs before `split('.')`, so the pre-`.` token can carry trailing
-        // whitespace (`"0 ."` -> token `"0 "`). Without the trailing `trim_end`
-        // the first pass returned `"0 "` and a second pass `"0"` — not stable.
-        assert_eq!(Normalize::SemverMajor.apply("0 ."), "0");
-        let once = Normalize::SemverMajor.apply("0 .");
-        assert_eq!(Normalize::SemverMajor.apply(&once), once);
-    }
-
-    #[test]
     fn equals_semver_major_normalize_allows_band() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -1388,36 +909,6 @@ mod tests {
     }
 
     #[test]
-    fn semver_minor_reconciles_version_formats() {
-        // The protobuf / pnpm version-format cases all collapse to
-        // one MAJOR.MINOR band.
-        assert_eq!(semver_minor("4.36-dev"), "4.36");
-        assert_eq!(semver_minor("4.36.0"), "4.36");
-        assert_eq!(semver_minor("pnpm@11.3.0"), "11.3");
-        assert_eq!(semver_minor(">=22.13"), "22.13");
-        assert_eq!(semver_minor("4"), "4");
-        assert_eq!(semver_minor(""), "");
-        // SemverMajor keeps its unchanged released behaviour.
-        assert_eq!(Normalize::SemverMajor.apply("8.0.402"), "8");
-    }
-
-    #[test]
-    fn normalize_list_applies_in_order_and_filters_none() {
-        assert_eq!(
-            apply_normalize(&[Normalize::Trim, Normalize::Lower], "  ABC  "),
-            "abc"
-        );
-        // An empty list is the identity.
-        assert_eq!(apply_normalize(&[], "  ABC  "), "  ABC  ");
-        // `none` is dropped from the resolved list.
-        assert!(NormalizeSpec::One(Normalize::None).into_list().is_empty());
-        assert_eq!(
-            NormalizeSpec::Many(vec![Normalize::None, Normalize::Trim]).into_list(),
-            vec![Normalize::Trim]
-        );
-    }
-
-    #[test]
     fn equals_semver_minor_reconciles_dev_and_patch() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
@@ -1439,26 +930,6 @@ mod tests {
             eval(&r, root, &idx).is_empty(),
             "{:?}",
             eval(&r, root, &idx)
-        );
-    }
-
-    #[test]
-    fn build_accepts_scalar_and_list_normalize() {
-        use crate::test_support::spec_yaml;
-        let base = "id: t\nkind: cross_file\nsource:\n  file: a\n  extract:\n    lines: {}\n\
-                    targets:\n  files: \"b/*\"\n  extract:\n    lines: {}\nrelation: equals\n";
-        // Scalar (the released form) and a list both build.
-        assert!(
-            build(&spec_yaml(&format!(
-                "{base}normalize: semver-minor\nlevel: error\n"
-            )))
-            .is_ok()
-        );
-        assert!(
-            build(&spec_yaml(&format!(
-                "{base}normalize: [trim, semver-minor]\nlevel: error\n"
-            )))
-            .is_ok()
         );
     }
 
@@ -1601,6 +1072,8 @@ mod tests {
             normalize: vec![],
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
         };
         // union {Comment, String, Number} == highlight.c set → silent.
         assert!(eval(&r, root, &idx).is_empty(), "matched union should pass");
@@ -1635,6 +1108,8 @@ mod tests {
             normalize: vec![],
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
         };
         let v = eval(&r, root, &idx);
         assert_eq!(v.len(), 1, "{v:?}");
@@ -1643,43 +1118,6 @@ mod tests {
             "{}",
             v[0].message
         );
-    }
-
-    #[test]
-    fn build_glob_source_requires_a_set_relation() {
-        let yaml = "id: t\nkind: cross_file\n\
-                    source: { files: \"doc/*.txt\", extract: { regex: 'x(.)' } }\n\
-                    targets: [{ file: c, extract: { regex: 'y(.)' } }]\n\
-                    relation: equals\nlevel: error\n";
-        let err = build(&crate::test_support::spec_yaml(yaml))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("set relation"), "{err}");
-    }
-
-    #[test]
-    fn build_glob_source_rejects_whole_file_extract() {
-        // Unioning whole-file CONTENTS as set members is never useful.
-        let yaml = "id: t\nkind: cross_file\n\
-                    source: { files: \"doc/*.txt\", extract: { whole_file: {} } }\n\
-                    targets: [{ file: c, extract: { whole_file: {} } }]\n\
-                    relation: set_equals\nlevel: error\n";
-        let err = build(&crate::test_support::spec_yaml(yaml))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("whole_file"), "{err}");
-    }
-
-    #[test]
-    fn build_rejects_both_source_file_and_files() {
-        let yaml = "id: t\nkind: cross_file\n\
-                    source: { file: a, files: \"b/*\", extract: { regex: 'x(.)' } }\n\
-                    targets: [{ file: c, extract: { regex: 'y(.)' } }]\n\
-                    relation: set_equals\nlevel: error\n";
-        let err = build(&crate::test_support::spec_yaml(yaml))
-            .unwrap_err()
-            .to_string();
-        assert!(err.contains("exactly one"), "{err}");
     }
 
     #[test]
@@ -1701,77 +1139,6 @@ mod tests {
         assert!(eval(&r, root, &idx).is_empty());
     }
 
-    // ─── identical ──────────────────────────────────────────────
-
-    #[test]
-    fn build_rejects_invalid_extract_regex() {
-        use crate::test_support::spec_yaml;
-        let spec = spec_yaml(
-            "id: t\n\
-             kind: cross_file\n\
-             relation: equals\n\
-             source: { file: a.txt, extract: { regex: \"(unclosed\" } }\n\
-             targets: { files: \"**/*.txt\", extract: { regex: \".*\" } }\n\
-             level: error\n",
-        );
-        let err = build(&spec).unwrap_err();
-        assert!(err.to_string().contains("regex"), "{err}");
-    }
-
-    #[test]
-    fn build_rejects_skip_header_on_non_identical() {
-        use crate::test_support::spec_yaml;
-        let spec = spec_yaml(
-            "id: t\n\
-             kind: cross_file\n\
-             relation: equals\n\
-             source: { file: a.txt, extract: { regex: \"(.*)\" } }\n\
-             targets: { files: \"**/*.txt\", extract: { regex: \"(.*)\" } }\n\
-             skip_header_lines: 2\n\
-             level: error\n",
-        );
-        let err = build(&spec).unwrap_err();
-        assert!(err.to_string().contains("skip_header_lines"), "{err}");
-    }
-
-    #[test]
-    fn build_rejects_normalize_on_identical() {
-        use crate::test_support::spec_yaml;
-        let spec = spec_yaml(
-            "id: t\n\
-             kind: cross_file\n\
-             relation: identical\n\
-             source: { file: a.txt }\n\
-             targets: { files: \"**/*.txt\" }\n\
-             normalize: trim\n\
-             level: error\n",
-        );
-        let err = build(&spec).unwrap_err();
-        assert!(err.to_string().contains("normalize"), "{err}");
-    }
-
-    #[test]
-    fn build_surfaces_friendly_untagged_error_through_options_wrapper() {
-        // The `expecting` message must reach the user through build()'s
-        // `invalid options: {e}` wrapping, not just the isolated enum. Guards a
-        // refactor that drops the inner error from the wrapper (audit M3).
-        use crate::test_support::spec_yaml;
-        let spec = spec_yaml(
-            "id: t\n\
-             kind: cross_file\n\
-             relation: equals\n\
-             source: { file: a.txt, extract: { toml: \"$.v\" } }\n\
-             normalize: 42\n\
-             level: error\n",
-        );
-        let err = build(&spec).unwrap_err().to_string();
-        assert!(
-            err.contains("a normalize transform"),
-            "friendly text lost through the options wrapper: {err}"
-        );
-        assert!(!err.contains("NormalizeSpec"), "leaks internal enum: {err}");
-    }
-
     fn identical_rule(targets: Targets, skip_header_lines: usize) -> CrossFileRule {
         CrossFileRule {
             id: "t".into(),
@@ -1786,6 +1153,8 @@ mod tests {
             normalize: Vec::new(),
             allow_missing: false,
             skip_header_lines,
+            register_as: None,
+            fixer: None,
         }
     }
 
@@ -1863,6 +1232,8 @@ mod tests {
             normalize: Vec::new(),
             allow_missing: false,
             skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
         }
     }
 
@@ -1915,48 +1286,5 @@ mod tests {
             Extract::Lines(alint_core::LinesOpts::default()),
         );
         assert!(eval(&r, root, &idx).is_empty());
-    }
-
-    // ─── build-time shape validation ────────────────────────────
-
-    #[test]
-    fn build_enforces_per_relation_shape() {
-        use crate::test_support::spec_yaml;
-        // identical with a stray source.extract -> rejected.
-        let bad_identical = "id: t\nkind: cross_file\nsource:\n  file: a\n  \
-            extract:\n    lines: {}\ntargets:\n  files: \"b/*\"\nrelation: identical\nlevel: error\n";
-        assert!(
-            build(&spec_yaml(bad_identical)).is_err(),
-            "identical must not take source.extract"
-        );
-        // resolves with targets -> rejected.
-        let bad_resolves = "id: t\nkind: cross_file\nsource:\n  file: a\n  \
-            extract:\n    lines: {}\ntargets:\n  files: \"b/*\"\n  extract:\n    lines: {}\n\
-            relation: resolves\nlevel: error\n";
-        assert!(
-            build(&spec_yaml(bad_resolves)).is_err(),
-            "resolves must not take targets"
-        );
-        // value relation missing source.extract -> rejected.
-        let bad_value = "id: t\nkind: cross_file\nsource:\n  file: a\ntargets:\n  \
-            files: \"b/*\"\n  extract:\n    lines: {}\nrelation: subset\nlevel: error\n";
-        assert!(
-            build(&spec_yaml(bad_value)).is_err(),
-            "value relation needs source.extract"
-        );
-        // valid identical (no extract anywhere) -> builds.
-        let ok_identical = "id: t\nkind: cross_file\nsource:\n  file: README.md\n\
-            targets:\n  files: \"crates/*/README.md\"\nrelation: identical\nlevel: error\n";
-        assert!(
-            build(&spec_yaml(ok_identical)).is_ok(),
-            "valid identical should build"
-        );
-        // valid resolves (source extract, no targets) -> builds.
-        let ok_resolves = "id: t\nkind: cross_file\nsource:\n  file: Cargo.toml\n  \
-            extract:\n    toml: \"$.workspace.members[*]\"\nrelation: resolves\nlevel: error\n";
-        assert!(
-            build(&spec_yaml(ok_resolves)).is_ok(),
-            "valid resolves should build"
-        );
     }
 }

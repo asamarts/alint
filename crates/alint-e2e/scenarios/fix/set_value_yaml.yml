@@ -1,0 +1,44 @@
+name: set_value rewrites a YAML value in place, preserving comments and structure
+tags: [fix, yaml_path_equals, set_value, yaml]
+
+# The EIGHTH and final structured format, via saphyr's spanned MarkedYaml tree. A
+# YAML scalar edit is a span-splice (like JSON): the resolver returns the byte
+# range of just the `port` value, so the fixer rewrites `8080` -> `9090` and
+# touches nothing else -- the leading comment, the `server:` header, the sibling
+# `host` and its `# dev` comment, and `port`'s own `# the port` trailing comment
+# all survive. Like JSON/TOML and unlike the string-leaf formats, YAML is TYPED:
+# a numeric `equals` is fixable and renders bare. Safe (a scalar for a scalar).
+
+given:
+  tree:
+    app.yaml: |
+      # service config
+      server:
+        host: localhost  # dev
+        port: 8080  # the port
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: yaml_path_equals
+        paths: "**/*.yaml"
+        path: "$['server']['port']"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: app.yaml}
+  - applied: [port]
+  - violations: []
+
+expect_tree:
+  app.yaml: |
+    # service config
+    server:
+      host: localhost  # dev
+      port: 9090  # the port

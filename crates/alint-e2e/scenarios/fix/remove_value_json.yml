@@ -1,0 +1,48 @@
+name: remove_value deletes a JSON member via the CST, keeping siblings + comments
+tags: [fix, json_path_absent, remove_value, json]
+
+# JSON `remove_value` is a WHOLE-DOCUMENT rewrite via the jsonc-parser editable
+# CST (not a span splice like JSON `set_value`): the CST owns the comma / comment
+# surgery, so deleting `debug` takes its trailing `// drop` comment WITH it, fixes
+# up the comma, and leaves the `host` (+ its `// keep` comment) and `port` siblings
+# byte-locally intact -- never over-deleting a neighbour (the trap the `Absent`
+# verifier is blind to). `remove_value` is Unsafe by default; this rule promotes it
+# to `safe` so a bare `fix` applies. (Was deferred before Phase-2 follow-up 1.)
+
+given:
+  tree:
+    app.json: |
+      {
+        "server": {
+          "host": "localhost",  // keep
+          "debug": true,  // drop
+          "port": 8080
+        }
+      }
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: json_path_absent
+        paths: "**/*.json"
+        path: "$['server']['debug']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: app.json}
+  - applied: [no-debug]
+  - violations: []
+
+expect_tree:
+  app.json: |
+    {
+      "server": {
+        "host": "localhost",  // keep
+        "port": 8080
+      }
+    }

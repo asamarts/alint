@@ -74,6 +74,12 @@ pub(crate) fn load_recursive(
     opts: &LoadOptions,
     confine: Option<&Path>,
     is_top: bool,
+    // The top-level `trusted_extends:` allowlist (remote URLs whose content fixers
+    // stay auto-applying), threaded down the LOCAL nesting so a remote extended at
+    // any depth is checked against the user's list. A non-top-level config may not
+    // grant trust, so nested calls receive the top's list; `is_top` calls read
+    // their OWN `trusted_extends:` and ignore this argument. (W2, auto-fix.md 5.5.)
+    trusted: &[String],
 ) -> Result<RawConfig> {
     let canonical = path.canonicalize().map_err(|source| Error::Io {
         path: path.to_path_buf(),
@@ -104,6 +110,20 @@ pub(crate) fn load_recursive(
         source,
     })?;
     let mut config = parse_config_interpolated(&contents, &canonical)?;
+
+    // W2 (auto-fix.md 5.5): `trusted_extends:` is a top-level authority. An is_top
+    // config (the user's own `.alint.yml` or a `.alint.d/` drop-in) owns the
+    // allowlist and uses it for its own extends chain; a non-top-level config's
+    // list is rejected per-source below, so nested loads use the list threaded from
+    // the top. Taken (consumed) at is_top -- it gates the demotion here and is not
+    // carried onto `Config`.
+    let top_trusted: Vec<String>;
+    let trusted: &[String] = if is_top {
+        top_trusted = std::mem::take(&mut config.trusted_extends);
+        &top_trusted
+    } else {
+        trusted
+    };
 
     let extends = std::mem::take(&mut config.extends);
     if extends.is_empty() {
@@ -154,7 +174,7 @@ pub(crate) fn load_recursive(
         } else {
             let target = resolve_relative(&source_dir, url);
             confine_extends_target(&target, url, confine)?;
-            load_recursive(&target, visiting, opts, confine, false)?
+            load_recursive(&target, visiting, opts, confine, false, trusted)?
         };
         // Extended configs cannot introduce `custom:` facts or
         // `kind: command` rules — both spawn arbitrary processes
@@ -162,10 +182,62 @@ pub(crate) fn load_recursive(
         // write. Same trust model on both sides.
         alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
         reject_command_rules_in(&parent.rules, url)?;
+        // A *spawning* fix op (`git_untrack`) is the RCE analogue of a spawning
+        // rule kind: refuse it from any extended source, at every `require:` depth
+        // (auto-fix.md 5.5). The kind gate above misses it because a spawning
+        // FIXER can hang off a non-spawning kind (`git_untrack` on `file_absent`).
+        crate::reject_spawning_fix_ops_in(&parent.rules, url)?;
+        crate::reject_fix_promotion_in(&parent.rules, url)?;
         reject_spawning_templates_in(&parent.templates, url)?;
+        // ...and the template analogue: a spawning fix in a `templates:` block
+        // would splice into its referencing rule at finalize, past the gate above.
+        crate::reject_spawning_fix_op_templates_in(&parent.templates, url)?;
+        // ...and the same promotion refusal for a `templates:` block, which a
+        // template instance would otherwise smuggle a `fix.<op>.applicability:
+        // safe` past the rule-level gate above (it expands at finalize time).
+        crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
         reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
         reject_baseline_in(&parent.baseline, url)?;
+        // A ruleset may not allowlist ITSELF into auto-applying content fixers;
+        // only the user's top-level config grants that via `trusted_extends:`.
+        crate::reject_trusted_extends_in(&parent.trusted_extends, url)?;
         parent.rules = apply_rule_filter(parent.rules, entry)?;
+        // W2 content-fixer trust (auto-fix.md 5.5): a REMOTE `extends:` the user has
+        // NOT listed in `trusted_extends:` may PROPOSE a content edit but never
+        // auto-write one -- demote its content-injecting fixers to `suggestion`
+        // before the merge. Local / nested targets (the user's own tree) and bundled
+        // (first-party) sources are honored at their declared tier. A remote is a
+        // leaf (no nested `extends:`), so this caps exactly that source's own rules;
+        // the URL matches with or without its `#sha256-` integrity fragment.
+        //
+        // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
+        // spliced into its referencing rule at `finalize` (after this per-source
+        // gate), so a remote content fixer smuggled through a `templates:` entry
+        // would otherwise escape the cap (the template analogue of
+        // `reject_fix_promotion_templates_in`).
+        //
+        // KNOWN RESIDUAL of this load-time cap (whole-phase audit W2-1, LOW,
+        // targeted-only; auto-fix.md 5.5). The cap keys on where the fixer CONTENT
+        // is DEFINED, not on which rule USES it: a rule from THIS untrusted remote
+        // that `extends_template:`s a template defined by a TRUSTED source (the
+        // user's own top-level config -- no bundled ruleset ships `templates:`
+        // today) acquires that template's fixer at its declared tier at `finalize`,
+        // because the trusted template is never demoted and the untrusted rule
+        // carries no INLINE fixer here to demote. Pinned by
+        // `w2_known_residual_remote_rule_instantiating_a_trusted_template`. Closing
+        // it needs the deferred fix-time-provenance approach (tag each rule's origin,
+        // demote its EFFECTIVE fixer after expansion), which the arc traded away for
+        // this simpler cap; it is bounded (needs the user to author a content-fix
+        // template, the remote to know its id/var-names, and to already `extends:`
+        // the remote), so it is documented, not closed here.
+        if url.starts_with("https://") {
+            let base = url.split('#').next().unwrap_or(url);
+            let trusted_remote = trusted.iter().any(|t| t == base || t == url);
+            if !trusted_remote {
+                crate::demote_content_fixers_in(&mut parent.rules);
+                crate::demote_content_fixers_in(&mut parent.templates);
+            }
+        }
         merged = merge(merged, parent);
     }
     merged = merge(merged, config);

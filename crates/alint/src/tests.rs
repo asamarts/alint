@@ -48,6 +48,97 @@ fn url_encode_handles_unicode() {
     assert_eq!(url_encode("ñ"), "%C3%B1");
 }
 
+#[test]
+fn fix_exit_status_maps_the_fix_contract() {
+    use alint_core::{FixItem, FixRuleResult, FixStatus, Level, Violation};
+
+    let report = |results, non_convergent| FixReport {
+        results,
+        non_convergent,
+    };
+    let rule = |level, status| FixRuleResult {
+        rule_id: "r".into(),
+        level,
+        items: vec![FixItem {
+            violation: Violation::new("v"),
+            status,
+        }],
+    };
+    let err_rule = || rule(Level::Error, FixStatus::Unfixable);
+    // A fix that was ATTEMPTED and errored (a `Skipped` of kind `Errored`).
+    let fix_error = || {
+        rule(
+            Level::Warning,
+            FixStatus::errored(format!(
+                "{} permission denied",
+                alint_core::FIX_ERROR_PREFIX
+            )),
+        )
+    };
+    // An unresolved WARNING-level residual (no error).
+    let warn_residual = || rule(Level::Warning, FixStatus::Unfixable);
+
+    // Converged + clean -> 0.
+    assert_eq!(fix_exit_status(&report(vec![], false), false, false), 0);
+    // An unfixable error-level residual -> 1.
+    assert_eq!(
+        fix_exit_status(&report(vec![err_rule()], false), false, false),
+        1
+    );
+    // `--fix-only` suppresses that benign residual -> 0.
+    assert_eq!(
+        fix_exit_status(&report(vec![err_rule()], false), true, false),
+        0
+    );
+    // A DECLINED error-level Skip (a located fixer collected no edit, or a
+    // size-skip) is NOT a fix error but a standing violation -> exit 1. This is
+    // the exit-code half of BUG B (the located declined-skip): the report set is
+    // gated by a scenario, the exit code here.
+    assert_eq!(
+        fix_exit_status(
+            &report(
+                vec![rule(Level::Error, FixStatus::declined("no applicable fix"))],
+                false
+            ),
+            false,
+            false
+        ),
+        1,
+        "an error-level declined skip is a standing violation -> exit 1"
+    );
+    // A warning-level residual is 0 by default, 1 under --fail-on-warning.
+    assert_eq!(
+        fix_exit_status(&report(vec![warn_residual()], false), false, false),
+        0
+    );
+    assert_eq!(
+        fix_exit_status(&report(vec![warn_residual()], false), false, true),
+        1,
+        "an unfixable warning fails under --fail-on-warning"
+    );
+    // A genuine fix ERROR fails (exit 1) regardless of level, and even under
+    // `--fix-only` (which suppresses only BENIGN residuals).
+    assert_eq!(
+        fix_exit_status(&report(vec![fix_error()], false), false, false),
+        1
+    );
+    assert_eq!(
+        fix_exit_status(&report(vec![fix_error()], false), true, false),
+        1,
+        "--fix-only still fails on an attempted-and-errored fix"
+    );
+
+    // Non-convergence -> 2, and it OUTRANKS everything: a clean report, and even
+    // `--fix-only` (which otherwise suppresses residuals) still yields 2.
+    assert_eq!(fix_exit_status(&report(vec![], true), false, false), 2);
+    assert_eq!(fix_exit_status(&report(vec![], true), true, false), 2);
+    assert_eq!(
+        fix_exit_status(&report(vec![err_rule()], true), true, true),
+        2,
+        "non-convergence (exit 2) outranks a residual (exit 1) and --fix-only suppression"
+    );
+}
+
 fn fact_spec(id: &str, kind: FactKind) -> FactSpec {
     FactSpec {
         id: id.to_string(),

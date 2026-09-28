@@ -1,0 +1,42 @@
+name: set_value on a quoted YAML scalar preserves its trailing comment (HIGH regression)
+tags: [fix, yaml_path_equals, set_value, yaml, safety]
+
+# Audit HIGH regression: saphyr runs a QUOTED scalar's span to end-of-line -- past
+# the trailing whitespace and the `# comment` -- whereas a plain scalar's span is
+# tight. Splicing over the un-clamped span silently DELETED the comment and
+# COMMITTED (a comment is not part of the value, so the re-parse verifier could not
+# catch it). The resolver now clamps a quoted scalar's span to its closing quote,
+# so only the value is rewritten and the trailing comment survives verbatim.
+# (`set_value_yaml.yml` covers the plain-scalar case, which was always tight.)
+
+given:
+  tree:
+    app.yaml: |
+      db:
+        host: "old-host"  # do not lose this pin
+        port: 5432  # plain sibling, its comment must also survive
+  config: |
+    version: 1
+    rules:
+      - id: host
+        kind: yaml_path_equals
+        paths: "**/*.yaml"
+        path: "$['db']['host']"
+        equals: "new-host"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: host, level: error, path: app.yaml}
+  - applied: [host]
+  - violations: []
+
+expect_tree:
+  app.yaml: |
+    db:
+      host: "new-host"  # do not lose this pin
+      port: 5432  # plain sibling, its comment must also survive

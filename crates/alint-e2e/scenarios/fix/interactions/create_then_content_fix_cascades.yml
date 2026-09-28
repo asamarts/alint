@@ -1,0 +1,51 @@
+name: file_create then a content fix on the created file cascades in one fix
+tags: [fix, interactions, file_exists, file_create, no_trailing_whitespace, file_trim_trailing_whitespace, fixpoint]
+
+# Phase-1 fixpoint cascade gate (docs/design/v0.17/fixpoint.md 1, 4). A create
+# produces a NEW file that a content rule must then fix -- but that file did not
+# exist in the pass that created it (the index was walked before the write), so a
+# single-pass fix could never trim it. The fixpoint re-walks after the create, so
+# the created file enters the index and the content rule fires against it on the
+# next pass:
+#   pass 1: has-readme creates README.md with trailing whitespace (no-ws can't
+#           see a file that isn't in the index yet)
+#   pass 2: the re-walk includes README.md; no-ws trims it; has-readme is satisfied
+# One `alint fix` runs the whole cascade and converges. Proves the re-walk closes
+# the create -> content dependency the single pass structurally cannot.
+
+given:
+  tree:
+    src:
+      main.rs: "fn main() {}\n"
+  config: |
+    version: 1
+    rules:
+      - id: has-readme
+        kind: file_exists
+        paths: README.md
+        root_only: true
+        level: error
+        fix:
+          file_create:
+            content: "# demo   \n"
+      - id: no-ws
+        kind: no_trailing_whitespace
+        paths: README.md
+        level: error
+        fix:
+          file_trim_trailing_whitespace: {}
+
+when: [fix, check]
+
+expect:
+  # Both rules apply within the single fix, across two internal passes: the
+  # create lands first, then the re-walk lets the trim land on the created file.
+  - applied: [has-readme, no-ws]
+  # After the cascade the tree is clean: README.md exists AND has no trailing
+  # whitespace, so neither rule fires.
+  - violations: []
+
+expect_tree:
+  README.md: "# demo\n"
+  src:
+    main.rs: "fn main() {}\n"

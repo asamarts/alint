@@ -1,0 +1,43 @@
+name: set_value rewrites an HCL scalar to the required value, preserving layout
+tags: [fix, hcl_path_equals, set_value]
+
+# The located structured setter (Phase 2). `hcl_path_equals` requires
+# `$.terraform.required_version` to equal ">= 1.5"; the file has ">= 1.0", so
+# `set_value` splices just the value string. `set_value` is Safe (a scalar
+# replacing an existing scalar), so a bare `fix` applies it; the trailing
+# `check` proves the tree now satisfies the rule, and `expect_tree` proves only
+# the value changed (the block, comment, and indentation survive).
+
+given:
+  tree:
+    main.tf: |
+      terraform {
+        # pin the CLI version
+        required_version = ">= 1.0"
+      }
+  config: |
+    version: 1
+    rules:
+      - id: tf-version
+        kind: hcl_path_equals
+        paths: "**/*.tf"
+        path: "$.terraform.required_version"
+        equals: ">= 1.5"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: tf-version, level: error, path: main.tf}
+  - applied: [tf-version]
+  - violations: []
+
+expect_tree:
+  main.tf: |
+    terraform {
+      # pin the CLI version
+      required_version = ">= 1.5"
+    }

@@ -55,6 +55,13 @@ const S12: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../xtask/src/bench/scenarios/s12_v010_per_file.yml"
 ));
+// A fix scenario: one content fixer (trim trailing whitespace). The
+// `materialize_fixable` setup makes every `.rs` line a violation, so
+// `fix --dry-run` re-reads every source file through the fixer's collect step.
+const SFIX_TRIM: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../xtask/src/bench/scenarios/sfix_trim.yml"
+));
 
 fn workspace_target() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target")
@@ -107,6 +114,42 @@ fn materialize(scenario: &str, config: &str, n: usize) {
     std::fs::write(dest.join(".alint.yml"), config).unwrap();
 }
 
+/// setup for the `fix` cell: like [`materialize`], then inject a trailing space
+/// before every newline in every `.rs` file, so every source line is a
+/// `no_trailing_whitespace` violation and `fix --dry-run` re-reads every file
+/// through the fixer's collect step (the read-heavy path). The transform is
+/// deterministic over the fixed-seed tree, so the fixable tree is byte-stable
+/// run to run and `Ir` stays comparable. Setup is not part of the callgrind
+/// measurement, so the rewrite is free.
+fn materialize_fixable(scenario: &str, config: &str, n: usize) {
+    materialize(scenario, config, n);
+    inject_trailing_ws(&tree_path(scenario, n));
+}
+
+fn inject_trailing_ws(dir: &Path) {
+    let Ok(read) = std::fs::read_dir(dir) else {
+        return;
+    };
+    for entry in read.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            inject_trailing_ws(&path);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("rs") {
+            let Ok(bytes) = std::fs::read(&path) else {
+                continue;
+            };
+            let mut out = Vec::with_capacity(bytes.len() + bytes.len() / 32 + 1);
+            for &b in &bytes {
+                if b == b'\n' {
+                    out.push(b' '); // trailing space -> a violation on that line
+                }
+                out.push(b);
+            }
+            let _ = std::fs::write(&path, out);
+        }
+    }
+}
+
 // Per-PR gate runs 1k + 10k (seconds under valgrind). The 100k tier is heavier
 // (~100s/cell) and gated behind the `det-100k` feature for release-time runs
 // (`cargo bench -p alint-bench --bench det_check --features det-100k`).
@@ -136,6 +179,29 @@ fn check(scenario: &str, config: &str, n: usize) -> Command {
 
 binary_benchmark_group!(name = check_grp, benchmarks = check);
 
+// `alint fix --dry-run` end to end over a fixable tree. Pairs with the
+// wall-clock `fix_throughput.rs` (which the deterministic Ir signal here cannot
+// replace: callgrind is I/O-blind, so a collect read-path regression that adds
+// syscalls but not instructions stays flat here). One scenario at the per-PR
+// sizes; 100k is release-gated like the check cells.
+#[binary_benchmark(setup = materialize_fixable)]
+#[bench::fix_trim_1k("sfix-trim", SFIX_TRIM, 1_000)]
+#[bench::fix_trim_10k("sfix-trim", SFIX_TRIM, 10_000)]
+#[cfg_attr(
+    feature = "det-100k",
+    bench::fix_trim_100k("sfix-trim", SFIX_TRIM, 100_000)
+)]
+fn fix(scenario: &str, config: &str, n: usize) -> Command {
+    let _ = config; // consumed by `materialize_fixable` (setup)
+    Command::new(alint_bin())
+        .arg("fix")
+        .arg("--dry-run")
+        .arg(tree_path(scenario, n))
+        .build()
+}
+
+binary_benchmark_group!(name = fix_grp, benchmarks = fix);
+
 main!(
     config = BinaryBenchmarkConfig::default().tool(
         Callgrind::default()
@@ -148,5 +214,5 @@ main!(
             // moving net cycles <1%, so gating them only false-positives.
             .soft_limits([(EventKind::Ir, 2.0), (EventKind::EstimatedCycles, 5.0)]),
     ),
-    binary_benchmark_groups = check_grp
+    binary_benchmark_groups = [check_grp, fix_grp]
 );

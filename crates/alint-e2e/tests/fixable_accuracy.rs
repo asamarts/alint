@@ -1,0 +1,401 @@
+//! Per-violation fixability accuracy (close-off item 2).
+//!
+//! `check` tags a violation `fixable` so the user can trust `alint fix` will
+//! resolve it. That promise is per-VIOLATION, not per-rule: `filename_case`
+//! under `snake` flags both `myFile.rs` (which `fix` renames to `my_file.rs`)
+//! and `café.rs` (which has no valid snake target, so `fix` honestly skips it).
+//! Before this gate the engine tagged BOTH fixable because the rule declared a
+//! fixer; now it consults [`Fixer::can_fix`] per violation.
+//!
+//! This drives the REAL `filename_case` rule + `FileRenameFixer` through the
+//! engine (the whole chain the human renderer's unit tests stand in for) and
+//! asserts the flag lands on the convertible violation only.
+
+use std::path::Path;
+
+use alint_core::{Engine, RuleEntry, WalkOptions, walk};
+use alint_testkit::treespec::{TreeSpec, materialize};
+
+const CONFIG: &str = "\
+version: 1
+rules:
+  - id: snake-names
+    kind: filename_case
+    paths: \"**/*.rs\"
+    case: snake
+    level: warning
+    fix:
+      file_rename: {}
+";
+
+fn run_check(root: &Path) -> alint_core::Report {
+    run_check_with(root, CONFIG)
+}
+
+fn run_check_with(root: &Path, config_yaml: &str) -> alint_core::Report {
+    let config_path = root.join(".alint.yml");
+    std::fs::write(&config_path, config_yaml).unwrap();
+    let cache = alint_dsl::extends::Cache::at(root.join(".alint-cache"));
+    let opts = alint_dsl::LoadOptions::with_cache(cache);
+    let config = alint_dsl::load_with(&config_path, &opts).unwrap();
+
+    let registry = alint_rules::builtin_registry();
+    let mut entries: Vec<RuleEntry> = Vec::new();
+    for spec in &config.rules {
+        entries.push(RuleEntry::new(registry.build(spec).unwrap()));
+    }
+    let engine = Engine::from_entries(entries, registry);
+    let index = walk(root, &WalkOptions::default()).unwrap();
+    engine.run(root, &index).unwrap()
+}
+
+#[test]
+fn check_tags_only_the_convertible_stem_fixable() {
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    // Two .rs files that both violate `snake`: one convertible, one not.
+    let tree: TreeSpec = serde_yaml_ng::from_str("myFile.rs: \"\"\ncafé.rs: \"\"\n").unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check(root);
+
+    // One rule result, two violations. The rule DOES declare a fixer, so the
+    // per-rule flag is true -- the point is that the per-violation flags differ.
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "snake-names")
+        .expect("snake-names produced a result");
+    assert!(
+        result.is_fixable,
+        "the rule declares a fixer (per-rule flag)"
+    );
+    assert_eq!(result.violations.len(), 2, "both files are flagged");
+
+    let fixable_of = |needle: &str| -> bool {
+        result
+            .violations
+            .iter()
+            .find(|v| {
+                v.path
+                    .as_deref()
+                    .is_some_and(|p| p.to_string_lossy().contains(needle))
+            })
+            .unwrap_or_else(|| panic!("no violation for {needle}: {:?}", result.violations))
+            .is_fixable
+    };
+
+    assert!(
+        fixable_of("myFile"),
+        "convertible stem myFile.rs must be tagged fixable"
+    );
+    assert!(
+        !fixable_of("café"),
+        "unconvertible stem café.rs must NOT be tagged fixable (fix skips it)"
+    );
+
+    // The user-facing count must match: exactly one auto-fixable violation.
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}
+
+#[test]
+fn check_does_not_tag_an_unsafe_file_remove_auto_fixable() {
+    // Round-7 (tier honesty): `file_remove` is Unsafe, so a bare `alint fix` only
+    // SUGGESTS the deletion (needs --unsafe-fixes). `check` must therefore NOT tag
+    // the violation `fixable` nor count it "auto-fixable" -- promising "run alint
+    // fix to resolve" a violation a bare fix leaves untouched is the false-promise
+    // this guards. (The rule still declares a fixer, so the per-rule flag holds.)
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-remove-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    let tree: TreeSpec = serde_yaml_ng::from_str("stale.bak: \"junk\\n\"\n").unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: no-bak\n    kind: file_absent\n    paths: \"**/*.bak\"\n    level: error\n    fix:\n      file_remove: {}\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "no-bak")
+        .expect("no-bak produced a result");
+    assert!(
+        result.is_fixable,
+        "the rule declares a fixer (per-rule flag)"
+    );
+    assert_eq!(result.violations.len(), 1);
+    assert!(
+        !result.violations[0].is_fixable,
+        "an Unsafe file_remove violation must NOT be auto-fixable in check (bare fix only suggests it)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(
+        fixable_count, 0,
+        "nothing is auto-fixable by a bare fix here"
+    );
+}
+
+#[test]
+fn check_tags_only_the_sortable_ordered_block_violation_fixable() {
+    // Phase-4 `sort` honesty (per-violation, like the `filename_case` case above):
+    // `ordered_block` emits entry findings (out-of-order / duplicate) AND a
+    // structural "unclosed block" finding. `sort` reorders entries but cannot
+    // invent a missing `end` marker, so its `can_fix` declines the unclosed
+    // finding (via the sentinel `baseline_key`). `check` must tag ONLY the
+    // sortable entry finding fixable -- promising "run alint fix" for the unclosed
+    // one is the false promise this guards. Drives the REAL rule + fixer through
+    // the engine's `mark_fixability`, not a unit stand-in.
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-sort-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    // An UNCLOSED block (no `end`) whose entries are ALSO out of order: two
+    // findings, exactly one of them sort-fixable.
+    let tree: TreeSpec =
+        serde_yaml_ng::from_str("deps.txt: \"# keep-sorted start\\ncharlie\\nalpha\\n\"\n")
+            .unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: keep-sorted\n    kind: ordered_block\n    paths: \"**/*.txt\"\n    start: \"# keep-sorted start\"\n    end: \"# keep-sorted end\"\n    level: error\n    fix:\n      sort: {}\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "keep-sorted")
+        .expect("keep-sorted produced a result");
+    assert!(
+        result.is_fixable,
+        "the rule declares a fixer (per-rule flag)"
+    );
+    assert_eq!(
+        result.violations.len(),
+        2,
+        "entry + unclosed: {:?}",
+        result.violations
+    );
+
+    let find = |needle: &str| {
+        result
+            .violations
+            .iter()
+            .find(|v| v.message.contains(needle))
+            .unwrap_or_else(|| panic!("no violation matching {needle:?}: {:?}", result.violations))
+    };
+    assert!(
+        find("out of order").is_fixable,
+        "the out-of-order entry is sort-fixable"
+    );
+    assert!(
+        !find("unclosed").is_fixable,
+        "the unclosed-block finding is NOT sort-fixable (sort can't add an `end`)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}
+
+#[test]
+fn check_tags_only_the_missing_require_line_fixable_under_insert_line() {
+    // Phase-4 `insert_line` honesty (the e2e routing gate the auditors flagged as
+    // missing): a markerless `ordered_block` with `require:` emits BOTH a
+    // sortedness ENTRY finding (out-of-order) AND a missing-required-line REQUIRE
+    // finding. `insert_line` can ADD a line but not REORDER, so its `can_fix`
+    // accepts ONLY the REQUIRE finding. `check` must tag only that one fixable.
+    // Forces `applicability: safe` so `is_fixable` reflects the per-violation
+    // ROUTING, not the op's default tier (the honesty gate is tier-agnostic, like
+    // the indent_style case below).
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-insert-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    // Unsorted (charlie before alpha) AND missing `bravo`: two findings, exactly
+    // one insert_line-fixable.
+    let tree: TreeSpec = serde_yaml_ng::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: allow\n    kind: ordered_block\n    paths: \"**/*.txt\"\n    require: [\"bravo\"]\n    level: error\n    fix:\n      insert_line:\n        applicability: safe\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "allow")
+        .expect("allow produced a result");
+    assert_eq!(
+        result.violations.len(),
+        2,
+        "entry + require: {:?}",
+        result.violations
+    );
+    let find = |needle: &str| {
+        result
+            .violations
+            .iter()
+            .find(|v| v.message.contains(needle))
+            .unwrap_or_else(|| panic!("no violation matching {needle:?}: {:?}", result.violations))
+    };
+    assert!(
+        find("required line").is_fixable,
+        "the missing required line is insert_line-fixable"
+    );
+    assert!(
+        !find("out of order").is_fixable,
+        "the sortedness finding is NOT insert_line-fixable (insert_line cannot reorder)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}
+
+#[test]
+fn check_tags_only_the_sortable_violation_fixable_under_sort_with_require() {
+    // The mirror routing: the SAME two findings under `fix: sort`. `sort` reorders
+    // entries but cannot ADD a missing `require:` line, so its `can_fix` accepts
+    // ONLY the ENTRY finding -- the exact opposite of `insert_line` above. Guards
+    // that a `sort`+`require:` rule never falsely promises `fix` will add the line.
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-sortreq-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    let tree: TreeSpec = serde_yaml_ng::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
+    materialize(&tree, root).unwrap();
+
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: allow\n    kind: ordered_block\n    paths: \"**/*.txt\"\n    require: [\"bravo\"]\n    level: error\n    fix:\n      sort: {}\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "allow")
+        .expect("allow produced a result");
+    assert_eq!(result.violations.len(), 2, "{:?}", result.violations);
+    let find = |needle: &str| {
+        result
+            .violations
+            .iter()
+            .find(|v| v.message.contains(needle))
+            .unwrap_or_else(|| panic!("no violation matching {needle:?}: {:?}", result.violations))
+    };
+    assert!(
+        find("out of order").is_fixable,
+        "the sortedness finding is sort-fixable"
+    );
+    assert!(
+        !find("required line").is_fixable,
+        "the missing required line is NOT sort-fixable (sort cannot add a line)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(fixable_count, 1, "exactly one violation is auto-fixable");
+}
+
+#[test]
+fn check_tags_only_the_reindentable_indent_style_violation_fixable() {
+    // Phase-4 `indent_style` honesty: the reindent fix converts a PURE-TAB lead
+    // (K tabs -> K*width spaces) but declines the ambiguous cases (a pure-space
+    // WIDTH-MISMATCH: round up or down?). `check` must tag ONLY the pure-tab file
+    // fixable. Drives the REAL rule + fixer through the engine's `mark_fixability`.
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-fixable-accuracy-indent-")
+        .tempdir()
+        .unwrap();
+    let root = tmp.path();
+    // `good_tab.py`: a pure-tab lead (fixable). `bad_width.py`: 3 spaces under
+    // width 4, no tab (WidthMismatch, ambiguous -> not fixable). One finding each.
+    let tree: TreeSpec = serde_yaml_ng::from_str(
+        "good_tab.py: \"x:\\n\\ta()\\n\"\nbad_width.py: \"x:\\n   a()\\n\"\n",
+    )
+    .unwrap();
+    materialize(&tree, root).unwrap();
+
+    // `indent_style` defaults to Unsafe (so a bare fix tags nothing fixable, like
+    // file_remove -- covered by the test above). Opt into `applicability: safe`
+    // here so the per-violation can_fix DISTINCTION (pure-tab fixable vs
+    // width-mismatch unfixable) is what governs the `is_fixable` tag.
+    let report = run_check_with(
+        root,
+        "version: 1\nrules:\n  - id: ind\n    kind: indent_style\n    paths: \"**/*.py\"\n    style: spaces\n    width: 4\n    level: error\n    fix:\n      indent_style:\n        applicability: safe\n",
+    );
+    let result = report
+        .results
+        .iter()
+        .find(|r| &*r.rule_id == "ind")
+        .expect("ind produced a result");
+    assert!(
+        result.is_fixable,
+        "the rule declares a fixer (per-rule flag)"
+    );
+    assert_eq!(
+        result.violations.len(),
+        2,
+        "one finding per file: {:?}",
+        result.violations
+    );
+
+    let fixable_of = |needle: &str| -> bool {
+        result
+            .violations
+            .iter()
+            .find(|v| {
+                v.path
+                    .as_deref()
+                    .is_some_and(|p| p.to_string_lossy().contains(needle))
+            })
+            .unwrap_or_else(|| panic!("no violation for {needle}: {:?}", result.violations))
+            .is_fixable
+    };
+    assert!(
+        fixable_of("good_tab"),
+        "a pure-tab lead is reindent-fixable"
+    );
+    assert!(
+        !fixable_of("bad_width"),
+        "a width-mismatch is NOT reindent-fixable (round up or down is ambiguous)"
+    );
+    let fixable_count = report
+        .results
+        .iter()
+        .flat_map(|r| &r.violations)
+        .filter(|v| v.is_fixable)
+        .count();
+    assert_eq!(
+        fixable_count, 1,
+        "exactly one indent violation is auto-fixable"
+    );
+}

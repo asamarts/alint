@@ -1,0 +1,47 @@
+name: sort reorders a keep-sorted ordered_block in place
+tags: [fix, ordered_block, sort]
+
+# ordered_block flags the out-of-order entries between the markers; `sort` is
+# Safe (a keep-sorted block's meaning is order-independent), so a bare `fix`
+# APPLIES it -- reordering the entries under the lexical comparator while leaving
+# the markers and the surrounding lines (`head` / `tail`) exactly in place -> the
+# block is sorted -> the second check is clean (converges, and is idempotent).
+
+given:
+  tree:
+    deps.txt: |
+      head
+      # keep-sorted start
+      charlie
+      alpha
+      bravo
+      # keep-sorted end
+      tail
+  config: |
+    version: 1
+    rules:
+      - id: keep-sorted
+        kind: ordered_block
+        paths: "**/deps.txt"
+        start: "# keep-sorted start"
+        end: "# keep-sorted end"
+        level: error
+        fix: { sort: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: keep-sorted, level: error, path: deps.txt}
+  - applied: [keep-sorted]
+  - violations: []
+
+expect_tree:
+  deps.txt: |
+    head
+    # keep-sorted start
+    alpha
+    bravo
+    charlie
+    # keep-sorted end
+    tail

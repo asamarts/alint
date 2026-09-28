@@ -1,4 +1,5 @@
-use std::collections::{HashMap, HashSet};
+use std::cell::RefCell;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -8,9 +9,13 @@ use rayon::prelude::*;
 
 use crate::error::{Error, Result};
 use crate::facts::{FactSpec, FactValues, evaluate_facts};
+use crate::located_fix::{self, LocatedEdit, LocatedOutcome};
 use crate::registry::RuleRegistry;
-use crate::report::{FixItem, FixReport, FixRuleResult, FixStatus, Report};
-use crate::rule::{Context, FixContext, FixOutcome, Rule, RuleResult, Violation};
+use crate::report::{FIX_ERROR_PREFIX, FixItem, FixReport, FixRuleResult, FixStatus, Report};
+use crate::rule::{
+    Applicability, Context, FixContext, FixEdit, FixOutcome, Fixer, ReadForFix, Rule, RuleResult,
+    Violation, read_for_fix, write_atomic,
+};
 use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
 
@@ -244,6 +249,11 @@ pub struct Engine {
     /// engine bypasses every changed-set short-circuit. See
     /// [`Engine::with_changed_paths`] for the contract.
     changed_paths: Option<HashSet<PathBuf>>,
+    /// When set (`fix --baseline`), the loaded baseline: the fix pass SKIPS
+    /// (surfaces, never applies) any violation the baseline suppresses, so `fix`
+    /// resolves only NEW findings -- matching `check --baseline`. `None` means
+    /// "fix everything". See [`Engine::with_fix_baseline`].
+    fix_baseline: Option<crate::baseline::Baseline>,
 }
 
 impl Engine {
@@ -257,6 +267,7 @@ impl Engine {
             vars: HashMap::new(),
             fix_size_limit: Some(1 << 20),
             changed_paths: None,
+            fix_baseline: None,
         }
     }
 
@@ -269,6 +280,7 @@ impl Engine {
             vars: HashMap::new(),
             fix_size_limit: Some(1 << 20),
             changed_paths: None,
+            fix_baseline: None,
         }
     }
 
@@ -276,6 +288,28 @@ impl Engine {
     pub fn with_fix_size_limit(mut self, limit: Option<u64>) -> Self {
         self.fix_size_limit = limit;
         self
+    }
+
+    /// Make the fix pass baseline-aware (`fix --baseline`): a violation the
+    /// `baseline` suppresses is SKIPPED (reported as `baselined`, never applied),
+    /// so `fix` resolves only new findings. Classification reuses
+    /// [`crate::baseline::apply`] per rule (the fingerprint includes the rule id,
+    /// so per-rule application equals report-level), per fixpoint pass, on the
+    /// current file content -- identical to how `check --baseline` suppresses.
+    #[must_use]
+    pub fn with_fix_baseline(mut self, baseline: crate::baseline::Baseline) -> Self {
+        self.fix_baseline = Some(baseline);
+        self
+    }
+
+    /// The `fix_size_limit` (bytes) a bare `fix` pass enforces: a file larger
+    /// than this is skipped rather than fixed. `None` disables the limit.
+    /// Exposed so the SARIF proposed-edit computation
+    /// ([`crate::proposed_fix::attach_proposed_edits`]) can apply the SAME guard
+    /// and never advertise a fix for a file `fix` would skip.
+    #[must_use]
+    pub fn fix_size_limit(&self) -> Option<u64> {
+        self.fix_size_limit
     }
 
     #[must_use]
@@ -361,7 +395,7 @@ impl Engine {
         phase!(t_git, "git_setup");
 
         let t_filter = Instant::now();
-        let filtered_index = self.build_filtered_index(index);
+        let filtered_index = self.build_filtered_index(index, None);
         phase!(
             t_filter,
             "build_filtered_index",
@@ -480,7 +514,7 @@ impl Engine {
                     if entry.rule.as_per_file().is_some() {
                         return None;
                     }
-                    if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
+                    if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, None) {
                         return None;
                     }
                     let ctx = pick_ctx(
@@ -717,6 +751,7 @@ impl Engine {
             // were dropped, so a silently-passing per-file rule was
             // missing from "All N rule(s) passed" (the count read as 0).
             let violations = bucket.remove(&idx).unwrap_or_default();
+            let (violations, is_fixable) = mark_fixability(violations, entry.rule.fixer());
             results.push((
                 idx,
                 RuleResult::new(
@@ -724,7 +759,7 @@ impl Engine {
                     entry.rule.level(),
                     entry.rule.policy_url().map(Arc::from),
                     violations,
-                    entry.rule.fixer().is_some(),
+                    is_fixable,
                 ),
             ));
         }
@@ -753,7 +788,7 @@ impl Engine {
             if entry.rule.as_per_file().is_none() {
                 continue;
             }
-            if self.skip_for_changed(entry.rule.as_ref(), index) {
+            if self.skip_for_changed(entry.rule.as_ref(), index, None) {
                 continue;
             }
             if let Some(expr) = &entry.when {
@@ -877,6 +912,7 @@ impl Engine {
         let mut by_idx: HashMap<usize, RuleResult> = when_errors.into_iter().collect();
         for (idx, entry) in &live {
             if let Some(violations) = bucket.remove(idx) {
+                let (violations, is_fixable) = mark_fixability(violations, entry.rule.fixer());
                 by_idx.insert(
                     *idx,
                     RuleResult::new(
@@ -884,7 +920,7 @@ impl Engine {
                         entry.rule.level(),
                         entry.rule.policy_url().map(Arc::from),
                         violations,
-                        entry.rule.fixer().is_some(),
+                        is_fixable,
                     ),
                 );
             }
@@ -905,19 +941,455 @@ impl Engine {
     /// [`FixStatus::Unfixable`] entries so the caller sees them in the
     /// report. Rules that pass (no violations) are omitted from the
     /// result, same as [`Engine::run`]'s usual behaviour.
+    ///
+    /// `threshold` is the highest [`Applicability`] tier the caller opted into
+    /// applying (`Safe` for a bare `alint fix`, `Unsafe` for `--unsafe-fixes`);
+    /// it gates the located-edit regime. No Phase-0 op consults it (all are
+    /// `Safe` and whole-file), but it is live, not inert: the dormant located
+    /// pass below is threshold-driven.
     #[allow(clippy::too_many_lines)]
-    pub fn fix(&self, root: &Path, index: &FileIndex, dry_run: bool) -> Result<FixReport> {
+    pub fn fix(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        walk_opts: &crate::WalkOptions,
+        dry_run: bool,
+        threshold: Applicability,
+    ) -> Result<FixReport> {
+        // Non-convergence cap (docs/design/v0.17/fixpoint.md 2): hard-stop after
+        // this many re-walk passes and report exit 2. Declared first so the
+        // `items_after_statements` lint stays quiet.
+        const MAX_PASSES: usize = 10;
+        if dry_run {
+            // Single-pass preview: a dry run writes nothing, so there is no
+            // changed tree to re-walk. It shows the first pass; a real `fix` may
+            // do more (docs/design/v0.17/fixpoint.md 2). No stage sink.
+            return self
+                .fix_run(
+                    root,
+                    index,
+                    &std::collections::HashSet::new(),
+                    true,
+                    threshold,
+                    false,
+                    None,
+                )
+                .map(|(report, _staged)| report);
+        }
+        // Byte-level fixpoint (docs/design/v0.17/fixpoint.md): re-walk and re-fix
+        // until a pass applies nothing (`applied() == 0`), bounded by MAX_PASSES.
+        // There is no apply-once heuristic: a fix's OWN idempotence is what makes
+        // a pass stop applying -- whole-file fixers return `Skipped` when there is
+        // nothing left to do, `replace` drops a self-reintroducing match, and a
+        // located batch that nets no byte change reports `Skipped` (below). So a
+        // normalizing / self-guarding fixer converges in a pass or two, a `replace`
+        // that re-forms a match across a splice boundary keeps making progress
+        // until the file is clean, and a config that genuinely never settles keeps
+        // changing the tree until the cap fires -- reported as non-convergence
+        // (exit 2), never silently "applied" while a violation stands.
+        let mut results: Vec<FixRuleResult> = Vec::new();
+        // Violation keys whose fix has already `Applied` in an earlier pass; a
+        // later pass must not overwrite that outcome with a "nothing to do" skip
+        // (the fix DID land). See the report rule below.
+        let mut locked: std::collections::HashSet<String> = std::collections::HashSet::new();
+        let mut owned_index: Option<FileIndex> = None;
+        let mut converged = false;
+        // The rules that APPLIED something in the most recent pass. On a cap-out
+        // these are the culprits: a pass that applies nothing converges and
+        // breaks, so the final pass of a non-convergent run always applied >=1.
+        let mut last_applied_rules: Vec<Arc<str>> = Vec::new();
+        // Violation keys the CONVERGED pass still saw (its residual). Used to
+        // reconcile the aggregate below: a non-Applied item whose violation is
+        // gone by convergence (resolved by another rule's fix on a later pass)
+        // must be dropped, or `fix` reports a phantom finding and fails an
+        // otherwise-clean tree.
+        let mut final_keys: std::collections::HashSet<String> = std::collections::HashSet::new();
+        // `--changed` created-file tracking (2b): a path present now that was NOT in
+        // the pre-fix tree was made by a fix in scope this run. Such files join the
+        // effective changed set each pass so a create-then-fix cascade can complete
+        // (they are not in the git diff, so per-file rules would otherwise stay
+        // confined away from them). Empty and unused when `--changed` is inactive;
+        // recomputed from each re-walk against the original paths, so a file a later
+        // pass deletes drops back out.
+        let track_created = self.changed_paths.is_some();
+        let orig_paths: std::collections::HashSet<PathBuf> = if track_created {
+            index.entries.iter().map(|e| e.path.to_path_buf()).collect()
+        } else {
+            std::collections::HashSet::new()
+        };
+        let mut created: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        for _pass in 0..MAX_PASSES {
+            let cur = owned_index.as_ref().unwrap_or(index);
+            let (report, _buf) = self.fix_run(root, cur, &created, false, threshold, true, None)?;
+            // F4 tripwire (audit 2026-09-20): the cross-pass merge below keys items
+            // by `violation_key`, which for a path-bearing, keyless violation
+            // collapses to `(rule_id, path)` (line/column/message ignored). Every
+            // SHIPPED fixable rule is safe: a multi-finding fixable rule
+            // (`*_path_matches`) sets a per-value `baseline_key` AND its
+            // identical-value findings are truly indistinguishable (no line), while
+            // the first-offender / whole-file rules emit one finding per file. A
+            // FUTURE multi-finding fixable rule that distinguishes its findings only
+            // by line/column/message under a COARSE (path) key would let one item
+            // silently supersede another in the merge. Fail loudly in debug/tests
+            // before it ships: within one rule result, two items whose violations
+            // differ must not share a `violation_key`.
+            #[cfg(debug_assertions)]
+            for rr in &report.results {
+                // Only FIXABLE rules are merged/locked by violation_key; a
+                // non-fixable rule's items are appended without dedup and never
+                // Applied, so a key collision among its findings is benign (they
+                // all survive the reconciliation). Guarding on all rules panicked
+                // `fix` on valid multi-finding keyless NON-fixable rules
+                // (for_each_match, import_gate, ...) -- audit 2026-09-21.
+                if self.fixer_for(&rr.rule_id).is_none() {
+                    continue;
+                }
+                let mut seen: HashMap<String, (Option<usize>, Option<usize>, &str)> =
+                    HashMap::new();
+                for it in &rr.items {
+                    let id = (
+                        it.violation.line,
+                        it.violation.column,
+                        it.violation.message.as_ref(),
+                    );
+                    let key = Self::violation_key(&rr.rule_id, &it.violation);
+                    if let Some(prev) = seen.insert(key, id) {
+                        assert!(
+                            prev == id,
+                            "fixable rule {:?} emits distinct violations that collide on \
+                             violation_key ({prev:?} vs {id:?}); give them a distinguishing \
+                             baseline_key or the fixpoint merge will drop one (audit F4)",
+                            rr.rule_id
+                        );
+                    }
+                }
+            }
+            let applied = report.applied();
+            last_applied_rules = report
+                .results
+                .iter()
+                .filter(|rr| {
+                    rr.items
+                        .iter()
+                        .any(|i| matches!(i.status, FixStatus::Applied(_)))
+                })
+                .map(|rr| Arc::clone(&rr.rule_id))
+                .collect();
+            let all_keys: std::collections::HashSet<String> = report
+                .results
+                .iter()
+                .flat_map(|rr| {
+                    rr.items
+                        .iter()
+                        .map(move |it| Self::violation_key(&rr.rule_id, &it.violation))
+                })
+                .collect();
+            // Merge this pass into the aggregate (docs/design/v0.17/fixpoint.md 7).
+            // An `Applied` for a violation WINS and is locked: a later pass that
+            // finds nothing left to do (its idempotence guard yields a `Skipped`)
+            // must not mask the fix that actually landed. A violation never yet
+            // Applied keeps its LAST status, so a transient state is superseded by
+            // the real outcome once a later pass acts on it. Items sharing one
+            // violation identity WITHIN a pass (a located `Applied` plus its
+            // isolation-conflict `Skipped`) are all kept: the lock is applied only
+            // AFTER this pass's items are merged, so the sibling skip is not
+            // dropped, and it does not re-appear (the located batch that produced
+            // it made progress, so the next pass's re-eval differs).
+            let touched: std::collections::HashSet<&String> =
+                all_keys.iter().filter(|k| !locked.contains(*k)).collect();
+            for rr in &mut results {
+                rr.items.retain(|it| {
+                    !touched.contains(&Self::violation_key(&rr.rule_id, &it.violation))
+                });
+            }
+            let mut newly_locked: Vec<String> = Vec::new();
+            for rr in report.results {
+                for item in rr.items {
+                    let key = Self::violation_key(&rr.rule_id, &item.violation);
+                    if locked.contains(&key) {
+                        continue; // an earlier pass's `Applied` for this violation wins
+                    }
+                    if matches!(item.status, FixStatus::Applied(_)) {
+                        newly_locked.push(key);
+                    }
+                    push_fix_item(&mut results, &rr.rule_id, rr.level, item);
+                }
+            }
+            locked.extend(newly_locked);
+            if applied == 0 {
+                converged = true;
+                final_keys = all_keys;
+                break;
+            }
+            // Something landed; re-walk so the next pass sees the new tree.
+            owned_index = Some(crate::walker::walk(root, walk_opts)?);
+            if track_created {
+                // Recompute the created set from the fresh tree: any path not in the
+                // pre-fix tree was created by a fix this run (2b). Recomputing (vs.
+                // accumulating) means a file a later pass DELETES drops back out.
+                let fresh = owned_index.as_ref().expect("just assigned");
+                created = fresh
+                    .entries
+                    .iter()
+                    .map(|e| e.path.to_path_buf())
+                    .filter(|p| !orig_paths.contains(p))
+                    .collect();
+            }
+        }
+        // Budget exhausted without an `applied()==0` pass. A slow-but-convergent
+        // config may have reached a fixed point on the very last budgeted pass
+        // (there was no room for the confirming pass). Confirm with a NON-MUTATING
+        // dry-run: if it would apply nothing, the fix DID converge -- do not brand
+        // a clean tree non-convergent (which would exit 2). A genuinely
+        // non-convergent config (fixes undoing each other) still shows work here
+        // and stays non-convergent.
+        if !converged {
+            let cur = owned_index.as_ref().unwrap_or(index);
+            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, false, None)?;
+            if confirm.applied() == 0 {
+                converged = true;
+                final_keys = confirm
+                    .results
+                    .iter()
+                    .flat_map(|rr| {
+                        rr.items
+                            .iter()
+                            .map(move |it| Self::violation_key(&rr.rule_id, &it.violation))
+                    })
+                    .collect();
+            }
+        }
+        // Reconcile the residual against the converged final state (see
+        // `final_keys` above): keep every `Applied` (the audit trail of what
+        // changed) and every non-Applied item whose violation the final pass still
+        // saw; drop a non-Applied item whose violation is gone -- it was resolved
+        // by another rule's fix on a later pass, so reporting it would fail an
+        // otherwise-clean tree with a finding the user cannot even locate (e.g. a
+        // size-skip on a file another rule deleted).
+        //
+        // A fix ERROR is NOT special-cased. A PERSISTENT write error (a read-only
+        // target, ENOSPC) keeps re-firing, so its violation stays in `final_keys`
+        // and is kept -> exit 1, as intended. An error whose file another rule
+        // then removed is MOOT (the file is gone, the tree is in the desired
+        // state), so its key leaves `final_keys` and it is dropped -> exit 0,
+        // agreeing with `check`. Keeping it here would strand a phantom I/O error
+        // on a clean tree.
+        if converged {
+            for rr in &mut results {
+                rr.items.retain(|it| {
+                    matches!(it.status, FixStatus::Applied(_))
+                        || final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
+                });
+            }
+        }
+        // A rule whose every item was superseded (and not re-emitted) drops out,
+        // matching `fix_run`'s "rules that pass are omitted".
+        results.retain(|rr| !rr.items.is_empty());
+        if !converged {
+            let mut stuck: Vec<&str> = last_applied_rules.iter().map(Arc::as_ref).collect();
+            stuck.sort_unstable();
+            stuck.dedup();
+            eprintln!(
+                "alint: error: fix did not settle after {MAX_PASSES} passes; these rules were \
+                 still applying (a non-convergent config whose fixes undo each other, or a very \
+                 slow one): {}. re-run `alint fix` to continue if it is only slow, or `alint \
+                 check` to see what remains.",
+                stuck.join(", ")
+            );
+        }
+        Ok(FixReport {
+            results,
+            non_convergent: !converged,
+        })
+    }
+
+    /// Compose the fixes without writing, and hand back what each file would
+    /// become: `(repo-relative path, old bytes, new bytes)` for every file a
+    /// fixer would change. Powers `alint fix --diff`. Runs the same compose
+    /// pass as [`fix`](Self::fix) with the flush suppressed, so the diff
+    /// reflects what a real `fix` at this `threshold` would write, plus the
+    /// [`FixReport`] (for the exit predicate).
+    ///
+    /// Fidelity caveat (single-pass, whole-file-op-first). Whole-file ops
+    /// (rename/remove) are *recorded* in a stage, not performed, so they don't
+    /// mutate the on-disk tree the way a real `fix` does mid-pass. If a config
+    /// applies a whole-file op to a file BEFORE a content rule that also matches
+    /// it, the real one-pass `fix` renames/removes the file first (and the
+    /// content rule then sees the vacated path via the stale index, doing
+    /// nothing until a rerun), whereas the stage shows BOTH the whole-file op and
+    /// a content edit to the pre-op path. Preview-only (no corruption), and the
+    /// dangerous content-first order is faithful (the content edit's
+    /// `has_pending_write` makes the whole-file op yield in both the stage and
+    /// the real fix). Fully reconciling both orders needs the Phase-1 re-walk.
+    ///
+    /// # Errors
+    /// Propagates any hard error from the fix pass (walk / scope resolution).
+    pub fn stage_fixes(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        threshold: Applicability,
+    ) -> Result<(FixReport, Vec<StagedFix>)> {
+        // Whole-file fixers (create / remove / rename) write directly rather
+        // than through the compose buffer, so they would mutate the tree during
+        // a preview. The stage sink makes them record their `FixEdit` instead;
+        // `Some(&sink)` puts every direct-write fixer into that record-not-write
+        // mode (see `FixContext::stage_ops`), which is what keeps `--diff` from
+        // touching disk.
+        let stage_ops = RefCell::new(Vec::new());
+        // Single pass: a `--diff` preview shows what one fix pass would compose;
+        // it does not re-walk (there is no changed tree to walk), so it cannot
+        // preview a multi-pass cascade -- documented in `stage_fixes`' caveat.
+        let (report, buffer) = self.fix_run(
+            root,
+            index,
+            /* created */ &std::collections::HashSet::new(),
+            /* dry_run */ false,
+            threshold,
+            /* flush */ false,
+            Some(&stage_ops),
+        )?;
+
+        // Compose-buffer entries are in-place content edits. Keys are resolved
+        // absolute write targets; present them repo-relative, paired with the
+        // current on-disk (unwritten) bytes.
+        let canon_root = std::fs::canonicalize(root).unwrap_or_else(|_| root.to_path_buf());
+        let mut staged: Vec<StagedFix> = buffer
+            .into_iter()
+            .map(|(target, new)| StagedFix {
+                path: target
+                    .strip_prefix(&canon_root)
+                    .unwrap_or(&target)
+                    .to_path_buf(),
+                old: std::fs::read(&target).unwrap_or_default(),
+                new,
+                kind: StagedKind::Modify,
+            })
+            .collect();
+
+        // Whole-file ops recorded by the stage sink. A fixer only reaches the
+        // sink on the path where it would really act (create only when absent,
+        // remove/rename only when present), so `old`/`new` follow from the op.
+        for edit in stage_ops.into_inner() {
+            match edit {
+                FixEdit::CreateFile { path, content } => staged.push(StagedFix {
+                    path,
+                    old: Vec::new(),
+                    new: content,
+                    kind: StagedKind::Create,
+                }),
+                FixEdit::DeleteFile { path } => {
+                    let old = std::fs::read(root.join(&path)).unwrap_or_default();
+                    staged.push(StagedFix {
+                        path,
+                        old,
+                        new: Vec::new(),
+                        kind: StagedKind::Delete,
+                    });
+                }
+                FixEdit::RenameFile { from, to } => {
+                    let old = std::fs::read(root.join(&from)).unwrap_or_default();
+                    staged.push(StagedFix {
+                        path: to,
+                        new: old.clone(),
+                        old,
+                        kind: StagedKind::Rename { from },
+                    });
+                }
+                // A chmod: content is unchanged, so `old`/`new` are the current
+                // bytes and the diff renders the mode change from the recorded pair.
+                FixEdit::SetMode { path, mode } => {
+                    #[cfg(unix)]
+                    let old_mode = {
+                        use std::os::unix::fs::PermissionsExt;
+                        std::fs::metadata(root.join(&path)).map_or(0, |m| m.permissions().mode())
+                    };
+                    #[cfg(not(unix))]
+                    let old_mode = 0u32;
+                    let content = std::fs::read(root.join(&path)).unwrap_or_default();
+                    staged.push(StagedFix {
+                        path,
+                        new: content.clone(),
+                        old: content,
+                        kind: StagedKind::Chmod {
+                            old_mode,
+                            new_mode: mode,
+                        },
+                    });
+                }
+                // Content-shaped edits belong in the compose buffer, not here;
+                // ignore defensively so a future mis-wired fixer can't smuggle a
+                // content write past the diff.
+                FixEdit::SetContent { .. } | FixEdit::ReplaceRange { .. } => {}
+            }
+        }
+
+        // Deterministic output: the compose buffer is sorted, the sink is
+        // push-ordered, so re-sort the union by the presented path.
+        staged.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok((report, staged))
+    }
+
+    /// Identity key for grouping a violation's report items ACROSS fixpoint
+    /// passes (docs/design/v0.17/fixpoint.md 7). Reuses the baseline fingerprint
+    /// (it folds in `rule_id` + path + the rule's stable identity via
+    /// `baseline_key`). It is NOT a termination device -- the byte-level fixpoint
+    /// converges on "a pass applied nothing", not on this key -- so its coarseness
+    /// (a path-bearing keyless violation keys on `(rule_id, path)`, message and
+    /// line ignored) is harmless FOR SHIPPED RULES: it only decides which earlier
+    /// report item a later pass's item supersedes or which `Applied` outcome to
+    /// lock, and every fixable rule either emits one finding per `(rule_id, path)`
+    /// or (`*_path_matches`) sets a per-value `baseline_key` whose collisions are
+    /// truly identical findings. A future multi-finding fixable rule that
+    /// distinguishes findings only by line/message under a coarse key would break
+    /// that; the F4 tripwire in `fix` (the fixpoint driver) asserts it in debug.
+    /// `file_bytes` is `None` (no re-read); the discriminator is the rule's
+    /// `baseline_key` or, absent one, the path (or the message for a pathless
+    /// violation).
+    fn violation_key(rule_id: &str, v: &Violation) -> String {
+        crate::baseline::violation_fingerprint(
+            rule_id,
+            v.path.as_deref(),
+            v.line,
+            v.baseline_key.as_deref(),
+            &v.message,
+            None,
+        )
+    }
+
+    // `created` (2b) is the eighth parameter; the signature stays flat rather than
+    // bundling into a struct because every caller passes a distinct, local value and
+    // the grouping would not clarify anything at the call sites.
+    #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+    fn fix_run(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        // Files THIS `fix` run created on an earlier pass (2b): they join the
+        // `--changed` set so a create-then-fix cascade completes. Empty for a
+        // single-pass caller (`--dry-run` / `--diff`) and for a full (non-changed)
+        // fix, where it has no effect.
+        created: &HashSet<PathBuf>,
+        dry_run: bool,
+        threshold: Applicability,
+        flush: bool,
+        stage_ops: Option<&RefCell<Vec<FixEdit>>>,
+    ) -> Result<(FixReport, BTreeMap<PathBuf, Vec<u8>>)> {
         self.ensure_manifest_scope_resolvable()?;
         if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
-            return Ok(FixReport {
-                results: Vec::new(),
-            });
+            return Ok((
+                FixReport {
+                    results: Vec::new(),
+                    non_convergent: false,
+                },
+                BTreeMap::new(),
+            ));
         }
 
         let fact_values = evaluate_facts(&self.facts, root, index)?;
         let git_tracked = self.collect_git_tracked_if_needed(root);
         let git_blame = self.build_blame_cache_if_needed(root);
-        let filtered_index = self.build_filtered_index(index);
+        let filtered_index = self.build_filtered_index(index, Some(created));
         let git_tracked_indexes = self.build_git_tracked_indexes(index, git_tracked.as_ref());
         let full_ctx = Context {
             root,
@@ -967,6 +1439,13 @@ impl Engine {
             iter: None,
             env: None,
         };
+        // Compose mode for a real (non-dry-run) pass: content fixers route
+        // their whole-file writes into this buffer instead of hitting disk, so
+        // a file touched by several fixers in config order composes in memory
+        // and is flushed with a single atomic write per file (below). A
+        // `--dry-run` pass has no buffer and writes nothing, exactly as before.
+        let compose_buf: Option<RefCell<BTreeMap<PathBuf, Vec<u8>>>> =
+            (!dry_run).then(|| RefCell::new(BTreeMap::new()));
         let mut fix_ctx = FixContext {
             root,
             dry_run,
@@ -974,6 +1453,8 @@ impl Engine {
             // Set per-entry inside the loop below, so each fixer confines its
             // config-declared paths against the OWNING rule's permission.
             allow_out_of_root: false,
+            compose: compose_buf.as_ref(),
+            stage_ops,
         };
 
         // Same `scope_filter.changed_since:` resolution as `run`, so a
@@ -1003,8 +1484,36 @@ impl Engine {
         }
 
         let mut results: Vec<FixRuleResult> = Vec::new();
-        for entry in &self.entries {
-            if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index) {
+        // Accumulator for the located-edit regime, filled by fixers that opt in
+        // via `collects_located_edits` and applied once per file after the loop.
+        // Phase 0 stays empty (no shipped fixer opts in), so the located pass is
+        // a genuine no-op here.
+        let mut located_batches: BTreeMap<PathBuf, Vec<LocatedEdit>> = BTreeMap::new();
+        // Byte-consistency for the located pass (Phase 1): the edits' byte
+        // offsets are computed against the file's bytes AT COLLECT TIME. Capture
+        // those bytes per file so `apply` splices against the exact bytes the
+        // offsets index -- never a re-read that a whole-file fixer may have
+        // changed in between (stale-offset corruption). If two rules collect for
+        // one file against DIFFERENT bytes (a whole-file fixer buffered it mid-
+        // loop), the batch is inconsistent: mark it deferred and skip it this
+        // pass (it re-applies on a rerun / the Phase-1 fixpoint), never corrupt.
+        let mut located_bytes: BTreeMap<PathBuf, Vec<u8>> = BTreeMap::new();
+        let mut located_deferred: std::collections::HashSet<PathBuf> =
+            std::collections::HashSet::new();
+        // W4 (`fix --baseline`): per-file byte cache for the baseline
+        // content-fingerprint, so a file is read at most once per pass for
+        // classification. Unused (empty) when no fix-baseline is active.
+        let mut fp_cache: HashMap<PathBuf, Option<Vec<u8>>> = HashMap::new();
+        for (rule_index, entry) in self.entries.iter().enumerate() {
+            // Skip a rule scoped ENTIRELY outside the changed set (plus files this
+            // run created), exactly as `check --changed` does, so `fix` and `check`
+            // run the same rules and agree. A rule with SOME in-scope target still
+            // runs; its OUT-of-scope violations are demoted to Suggestions in the
+            // whole-file status loop below (2b), not applied (blast radius) and not
+            // dropped (the old silent behavior, which made `fix` exit 0 while
+            // `check` reported them and exited 1). `Some(created)` keeps a rule
+            // alive for a file a fix in scope created (its cascade must finish).
+            if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, Some(created)) {
                 continue;
             }
             let ctx = pick_ctx(
@@ -1035,35 +1544,501 @@ impl Engine {
                 Ok(v) => v,
                 Err(e) => vec![Violation::new(format!("rule error: {e}"))],
             };
+            // W4 (`fix --baseline`): SKIP -- surface, never apply -- any violation
+            // the baseline grandfathers, so `fix` resolves only NEW findings. Reuse
+            // `baseline::apply` on THIS rule's violations: the fingerprint includes
+            // the rule id (so per-rule application equals report-level), computed on
+            // the CURRENT file content each pass -- identical to how
+            // `check --baseline` suppresses. The grandfathered findings are reported
+            // as a benign `baselined` skip (they do not fail the exit), and only the
+            // live ones reach the fixer.
+            let violations = if let Some(bl) = self.fix_baseline.as_ref() {
+                let single = crate::Report {
+                    results: vec![crate::RuleResult {
+                        rule_id: Arc::from(entry.rule.id()),
+                        level: entry.rule.level(),
+                        policy_url: None,
+                        violations,
+                        notes: Vec::new(),
+                        is_fixable: false,
+                    }],
+                };
+                let mut applied = crate::baseline::apply(&single, bl, |rid, v| {
+                    let bytes = match v.path.as_ref() {
+                        Some(p) => fp_cache
+                            .entry(p.to_path_buf())
+                            .or_insert_with(|| {
+                                let full = root.join(p);
+                                let size = std::fs::metadata(&full).map_or(0, |m| m.len());
+                                crate::read_capped_or_skip(&full, size)
+                            })
+                            .as_deref(),
+                        None => None,
+                    };
+                    crate::baseline::fingerprint(rid, v, bytes)
+                });
+                if !applied.suppressed.is_empty() {
+                    results.push(FixRuleResult {
+                        rule_id: Arc::from(entry.rule.id()),
+                        level: entry.rule.level(),
+                        items: applied
+                            .suppressed
+                            .into_iter()
+                            .map(|s| FixItem {
+                                violation: s.violation,
+                                status: FixStatus::baselined(format!(
+                                    "{} grandfathered by the baseline (not fixed; run without \
+                                     --baseline to fix it, or re-run `alint baseline`)",
+                                    crate::report::BASELINED_SKIP_PREFIX
+                                )),
+                            })
+                            .collect(),
+                    });
+                }
+                // Only the live (new) violations proceed to the fixer.
+                applied
+                    .live
+                    .results
+                    .pop()
+                    .map_or_else(Vec::new, |r| r.violations)
+            } else {
+                violations
+            };
             if violations.is_empty() {
                 continue;
             }
+            // `--changed` blast-radius confinement (2b). A full-index rule
+            // (existence / cross-file, `requires_full_index() == true`) is handed
+            // the FULL index by `pick_ctx` even under `--changed`, because its
+            // *check* verdict must consider the whole tree (an unchanged committed
+            // `.env` should still fire). But the FIX must not silently widen the
+            // blast radius: a fix whose target is OUTSIDE the changed set (and the
+            // files this run created) is DEMOTED to a Suggestion in the whole-file
+            // status loop below (`writes_outside_changed`), not applied (would
+            // delete/rewrite an untouched committed file) and not dropped (the older
+            // behavior, which silently hid a required out-of-scope write). An
+            // in-scope target -- a changed file, or one a fix in scope created this
+            // run -- applies normally. The located regime (per-file only today) is
+            // confined by the filtered index, so out-of-scope violations never reach
+            // it; the demote lives in the whole-file loop that full-index fixers use.
             let fixer = entry.rule.fixer();
             fix_ctx.allow_out_of_root = entry.allow_out_of_root;
-            let items: Vec<FixItem> = violations
-                .into_iter()
-                .map(|v| {
-                    let status = match fixer {
-                        Some(f) => match f.apply(&v, &fix_ctx) {
-                            Ok(FixOutcome::Applied(s)) => FixStatus::Applied(s),
-                            Ok(FixOutcome::Skipped(s)) => FixStatus::Skipped(s),
-                            Err(e) => FixStatus::Skipped(format!("fix error: {e}")),
-                        },
-                        None => FixStatus::Unfixable,
+            // Located-edit fixers (Phase 1+) route through the batched
+            // located_fix path instead of `apply`: collect their byte-range
+            // edits per file (size-guarded via read_for_fix -- invariant 4 on
+            // the new path), tag each with the rule index and its ordinal for
+            // the deterministic total order, and defer application until after
+            // the loop so a file touched by several rules is spliced once. No
+            // Phase-0 fixer opts in, so this branch is never entered here.
+            if fixer.is_some_and(Fixer::collects_located_edits) {
+                let f = fixer.expect("guarded by is_some_and above");
+                // `--changed` BLAST-RADIUS INVARIANT (whole-phase audit, F1/LG-1): the
+                // located branch confines `--changed` PURELY via the filtered index
+                // (`pick_ctx` hands a per-file rule the changed-filtered ctx); it never
+                // consults `writes_outside_changed`. Sound ONLY while every located
+                // fixer hosts on a PER-FILE rule. A future located fixer on a
+                // `requires_full_index()` / git-tracked rule would get the FULL index
+                // under `--changed`, and its edits would splice into out-of-diff files
+                // with NO demote -- a silent blast-radius escape. `replace` (the sole
+                // located fixer) hosts on `file_content_forbidden` (per-file), and the
+                // fix-op/kind gate refuses `replace` on any other kind, so this holds
+                // today. The escape only exists UNDER `--changed` (without it there is
+                // no blast radius to escape), so the tripwire is gated on it; a real
+                // per-file located `replace` under `--changed` exercises the passing
+                // path (`located_replace_under_changed_is_confined_to_the_diff`). Pin
+                // it (docs/design/v0.17/fixpoint.md Phase-2 pre-reqs).
+                debug_assert!(
+                    self.changed_paths.is_none() || entry.rule.as_per_file().is_some(),
+                    "located fixer on non-per-file rule {:?} under `--changed`: located \
+                     confinement assumes a per-file host; wire writes_outside_changed \
+                     into the located branch before shipping such a fixer",
+                    entry.rule.id()
+                );
+                let mut by_file: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
+                for v in violations {
+                    let Some(key) = v.path.as_deref().map(Path::to_path_buf) else {
+                        continue;
                     };
-                    FixItem {
-                        violation: v,
-                        status,
+                    by_file.entry(key).or_default().push(v);
+                }
+                // Violations the located fixer DECLINED (collected no edit for) --
+                // reported as skips so a standing violation is not silently
+                // dropped (see below).
+                let mut declined: Vec<FixItem> = Vec::new();
+                for (file, file_violations) in by_file {
+                    let abs = root.join(&file);
+                    let bytes = match read_for_fix(&abs, &file, &fix_ctx) {
+                        Ok(ReadForFix::Bytes(b)) => b,
+                        // Over the `fix_size_limit`: emit a Skip PER VIOLATION so a
+                        // standing violation is not silently dropped. The whole-file
+                        // dispatch surfaces the same over-size skip (via the fixer's
+                        // own `read_for_fix`); without this the located path would
+                        // report "0 unfixable", exit 0, and leave the violation on
+                        // disk while `check` (which reads to a far larger cap) still
+                        // fails -- a false negative on files between fix_size_limit
+                        // and the check read cap. `Skipped` carries the reason.
+                        Ok(ReadForFix::Skipped(outcome)) => {
+                            let reason = match outcome {
+                                FixOutcome::Skipped(s) | FixOutcome::Applied(s) => s,
+                            };
+                            for v in file_violations {
+                                declined.push(FixItem {
+                                    violation: v,
+                                    status: FixStatus::declined(reason.clone()),
+                                });
+                            }
+                            continue;
+                        }
+                        // An I/O read error at fix time (a file readable at walk
+                        // time -- persistently-unreadable files are dropped by the
+                        // walker -- but not now: a TOCTOU race, or a special file).
+                        // Report it as a fix error PER VIOLATION so the located path
+                        // matches the whole-file dispatch (which surfaces the same
+                        // `read_for_fix` error as a `FIX_ERROR_PREFIX` skip) instead
+                        // of silently dropping the violation.
+                        Err(e) => {
+                            for v in file_violations {
+                                declined.push(FixItem {
+                                    violation: v,
+                                    status: FixStatus::errored(format!(
+                                        "{FIX_ERROR_PREFIX} could not read {}: {e}",
+                                        file.display()
+                                    )),
+                                });
+                            }
+                            continue;
+                        }
+                    };
+                    // Capture the collect-time bytes; a second rule reading
+                    // different bytes for the same file poisons the batch.
+                    match located_bytes.get(&file) {
+                        Some(prev) if prev != &bytes => {
+                            located_deferred.insert(file.clone());
+                        }
+                        Some(_) => {}
+                        None => {
+                            located_bytes.insert(file.clone(), bytes.clone());
+                        }
                     }
-                })
-                .collect();
+                    let edits = f.collect_edits(&file_violations, &file, &bytes, root);
+                    if edits.is_empty() {
+                        // The located fixer collected NO edit for violations it was
+                        // handed -- e.g. `replace` dropped a self-re-matching
+                        // replacement (the fix would re-introduce the forbidden
+                        // pattern). Report each violation as skipped, matching the
+                        // whole-file dispatch which always emits one item per
+                        // violation. Without this the violation produces no report
+                        // item at all, so a STANDING forbidden pattern is reported
+                        // as "0 unfixable" and `fix` exits 0 while `check` fails.
+                        for v in file_violations {
+                            declined.push(FixItem {
+                                violation: v,
+                                status: FixStatus::declined(format!(
+                                    "{}: no applicable fix ({} declined)",
+                                    file.display(),
+                                    f.describe()
+                                )),
+                            });
+                        }
+                        continue;
+                    }
+                    for (ordinal, collected) in edits.into_iter().enumerate() {
+                        located_batches
+                            .entry(file.clone())
+                            .or_default()
+                            .push(LocatedEdit {
+                                rule_index,
+                                violation_index: ordinal,
+                                collected,
+                            });
+                    }
+                }
+                if !declined.is_empty() {
+                    results.push(FixRuleResult {
+                        rule_id: Arc::from(entry.rule.id()),
+                        level: entry.rule.level(),
+                        items: declined,
+                    });
+                }
+                continue;
+            }
+            let mut items: Vec<FixItem> = Vec::with_capacity(violations.len());
+            for v in violations {
+                let status = match fixer {
+                    // `--changed` confinement (2b): this fix would write OUTSIDE the
+                    // changed set (and the files this run created), so demote it to a
+                    // Suggestion carrying the proposed edit -- whatever its tier --
+                    // rather than applying it (widening the blast radius) or dropping
+                    // it (the old silent behavior). `fix_edit` supplies the edit
+                    // (`file_remove` ignores the bytes; `file_create` builds a create
+                    // edit). Tried FIRST; the guard is `false` for a full (non-
+                    // changed) fix, so that path is byte-for-byte unchanged.
+                    Some(f)
+                        if self.writes_outside_changed(entry.rule.as_ref(), &v, index, created) =>
+                    {
+                        // A withheld fix (its target is outside the --changed set) is
+                        // a Suggestion carrying the proposed edit when the fixer has
+                        // one; an editless op (`git_untrack`, no `fix_edit`) still
+                        // suggests with `edit: None`, not a decline.
+                        FixStatus::Suggested {
+                            summary: format!(
+                                "{} (outside --changed scope; not auto-applied)",
+                                f.describe()
+                            ),
+                            edit: f.fix_edit(&v, &[], fix_ctx.root),
+                        }
+                    }
+                    // Applied tier at the current threshold: run the fixer.
+                    Some(f) if f.applicability().applies_at(threshold) => {
+                        match f.apply(&v, &fix_ctx) {
+                            Ok(FixOutcome::Applied(s)) => FixStatus::Applied(s),
+                            Ok(FixOutcome::Skipped(s)) => FixStatus::declined(s),
+                            Err(e) => FixStatus::errored(format!("{FIX_ERROR_PREFIX} {e}")),
+                        }
+                    }
+                    // Available but not applied at this threshold: surface it as a
+                    // Suggestion (so `fix --diff --unsafe-fixes` can preview it and
+                    // the check-side formats can emit it) rather than silently
+                    // applying a destructive fix. The hint is tier-specific: an
+                    // `Unsafe` fixer below the threshold IS applied by
+                    // `--unsafe-fixes`, but a `Suggestion`-tier fixer never
+                    // auto-applies, so telling the user to pass `--unsafe-fixes`
+                    // would be wrong. `fix_edit` supplies the edit when the fixer has
+                    // one (`file_remove` ignores the bytes); an editless op
+                    // (`git_untrack`: `git rm --cached` has no worktree edit) still
+                    // suggests with `edit: None` and the tier hint -- NOT a
+                    // misleading "not applicable here" decline, since it IS
+                    // applicable via `--unsafe-fixes` (F1 audit).
+                    Some(f) if f.applicability().suggested_at(threshold) => {
+                        let hint = if f.applicability() == Applicability::Unsafe {
+                            " (requires --unsafe-fixes)"
+                        } else {
+                            " (suggestion only; not auto-applied)"
+                        };
+                        FixStatus::Suggested {
+                            summary: format!("{}{hint}", f.describe()),
+                            edit: f.fix_edit(&v, &[], fix_ctx.root),
+                        }
+                    }
+                    // A fixer whose tier neither applies nor is suggested here
+                    // (`Never`) -- collected for provenance only.
+                    Some(f) => {
+                        FixStatus::declined(format!("{} is not applied at this tier", f.describe()))
+                    }
+                    None => FixStatus::Unfixable,
+                };
+                items.push(FixItem {
+                    violation: v,
+                    status,
+                });
+            }
             results.push(FixRuleResult {
                 rule_id: Arc::from(entry.rule.id()),
                 level: entry.rule.level(),
                 items,
             });
         }
-        Ok(FixReport { results })
+
+        // Apply the located-edit batches collected above. Per file, the edits
+        // are tier-filtered against `threshold`, ordered, overlap-skipped,
+        // verified, and spliced by located_fix, then written through the compose
+        // buffer so they flush once alongside the whole-file edits. Phase 0:
+        // `located_batches` is empty, so this is a no-op -- but `threshold` is
+        // genuinely consumed and the path is exercised by the engine's fixture
+        // test. Result items are grouped back to their rule and appended.
+        //
+        // Byte-consistency (Phase 1): the offsets index the bytes captured in
+        // `located_bytes` at collect time. Splice against THOSE, not a re-read --
+        // a whole-file fixer may have buffered a change to the same file after
+        // collection, which would make the offsets stale (corruption). If the
+        // file is poisoned (inconsistent reads across rules) or its current bytes
+        // differ from the captured ones (a whole-file fixer changed it since),
+        // DEFER the batch: report each edit as skipped and leave the file for a
+        // rerun / the Phase-1 fixpoint. Never splice into bytes the offsets do
+        // not index.
+        if !located_batches.is_empty() {
+            let mut located_items: BTreeMap<usize, Vec<FixItem>> = BTreeMap::new();
+            for (file, batch) in located_batches {
+                let abs = root.join(&file);
+                let deferred = located_deferred.contains(&file);
+                let current = match read_for_fix(&abs, &file, &fix_ctx) {
+                    Ok(ReadForFix::Bytes(b)) => Some(b),
+                    Ok(ReadForFix::Skipped(_)) | Err(_) => None,
+                };
+                let original = located_bytes.get(&file);
+                // Defer unless the file is consistent AND its current bytes still
+                // equal the captured bytes the offsets index. With the Phase-1
+                // fixpoint active (`Engine::fix`), the re-walk IS the rerun: this
+                // batch is retried against the flushed bytes on the next pass, so
+                // no provisional "rerun to apply" item is emitted here -- the retry
+                // pass reports the real outcome (applied, or a genuine terminal
+                // skip like an isolation conflict). Emitting one would either
+                // duplicate that outcome or, if the same concurrent change resolves
+                // the source violation (e.g. the file is removed), strand a stale
+                // skip that wrongly drives a nonzero exit. A single-pass caller
+                // (`--dry-run` / `--diff`) writes nothing, so this branch cannot
+                // fire there; the batch simply applies against consistent bytes.
+                if deferred || current.as_ref() != original {
+                    // In a real multi-pass `fix` the batch is retried on the next
+                    // pass against the flushed bytes (silent + correct). A
+                    // single-pass STAGE (`--diff`) has no next pass, so the
+                    // deferred located edits are absent from the preview -- and the
+                    // located offsets index the collect-time bytes, so splicing
+                    // them onto the (whole-file-changed) current bytes would
+                    // corrupt. Rather than silently omit them (a consumer applying
+                    // the previewed patch would keep the violation), warn. Full
+                    // multi-pass `--diff` fidelity is a follow-up.
+                    if stage_ops.is_some() {
+                        eprintln!(
+                            "alint: warning: --diff preview omits {} located edit(s) in {} \
+                             that a later fix pass would apply (a whole-file fix changed the \
+                             file first); run `alint fix` to apply them.",
+                            batch.len(),
+                            file.display()
+                        );
+                    }
+                    continue;
+                }
+                let original = original.expect("current == original implies Some").clone();
+                let (new_bytes, outcomes) =
+                    located_fix::apply_file_edits(&original, batch, threshold);
+                let batch_changed = new_bytes != original;
+                // `--dry-run` reports the outcomes but writes nothing: skip the
+                // stage entirely (commit_write in a dry run has no compose buffer
+                // and would write straight to disk, exactly what dry-run forbids).
+                if !dry_run && batch_changed {
+                    if let Err(source) = fix_ctx.commit_write(&abs, &new_bytes) {
+                        eprintln!("alint: could not stage {}: {source}", file.display());
+                    }
+                }
+                for (edit, outcome) in outcomes {
+                    let status = located_status(
+                        &edit.collected.edit,
+                        edit.collected.applicability,
+                        outcome,
+                        dry_run,
+                    );
+                    // Per-EDIT discriminators derived from the edit's byte range.
+                    // `range_key` distinguishes two edits on ONE file: without it
+                    // they collapse to the same `violation_key` (`(rule_id, path)`,
+                    // Phase-2 pre-req 1), letting an `Applied` for one node lock-mask
+                    // a standing `Skipped` for another across fixpoint passes. Keying
+                    // each item by its range keeps them distinct. `is_identity` flags
+                    // a no-op rewrite (its replacement equals the bytes it spans).
+                    // `ReplaceFixer` emits disjoint, non-identity ranges, so both are
+                    // dormant for `replace`; they arm for a multi-node located fixer
+                    // (Phase-2 `set_value`).
+                    let (range_key, is_identity) = match &edit.collected.edit {
+                        FixEdit::ReplaceRange { range, content, .. } => (
+                            format!("{}..{}", range.start, range.end),
+                            original
+                                .get(range.clone())
+                                .is_some_and(|orig| orig == content.as_slice()),
+                        ),
+                        _ => (String::new(), false),
+                    };
+                    // A PER-EDIT identity rewrite is a no-op even when OTHER edits in
+                    // the batch changed the file: report it as a skip, not `Applied`,
+                    // so the byte-level fixpoint (converges on "a pass applied
+                    // nothing") does not read a no-op as progress and re-walk
+                    // forever. The old whole-file `batch_changed` check missed a
+                    // MIXED real+identity batch (Phase-2 pre-req 2); the per-edit
+                    // check subsumes it -- disjoint edits cannot cancel, so an
+                    // unchanged file means every edit was an identity.
+                    let status = if is_identity && matches!(status, FixStatus::Applied(_)) {
+                        FixStatus::declined(format!(
+                            "{}: located edit at {range_key} left its span unchanged",
+                            file.display()
+                        ))
+                    } else {
+                        status
+                    };
+                    located_items
+                        .entry(edit.rule_index)
+                        .or_default()
+                        .push(FixItem {
+                            violation: Violation::new(format!(
+                                "located edit at {range_key} in {}",
+                                file.display()
+                            ))
+                            .with_path(file.clone())
+                            .with_baseline_key(range_key),
+                            status,
+                        });
+                }
+            }
+            for (rule_index, items) in located_items {
+                let entry = &self.entries[rule_index];
+                results.push(FixRuleResult {
+                    rule_id: Arc::from(entry.rule.id()),
+                    level: entry.rule.level(),
+                    items,
+                });
+            }
+        }
+
+        // Flush the compose buffer: one atomic write per file any content fixer
+        // touched, in deterministic (BTreeMap) order. Keys are the resolved
+        // absolute write targets (a symlink and its in-tree target share one
+        // key), written directly. `flush` is false for a stage (`--diff`) so the
+        // buffer is left unwritten for `stage_fixes` to diff; `--dry-run` has no
+        // buffer, so both are no-ops there.
+        //
+        // A file that cannot be written is NOT fatal: it is collected, and every
+        // Applied item that resolves to it is downgraded to Skipped, so the rest
+        // of the pass still persists and reports. This matches the direct-write
+        // path, where a failed `write_atomic` inside a fixer surfaces as
+        // `Skipped("fix error: ...")` and the other fixers proceed (a single
+        // read-only file must not abort the whole run or lose unrelated fixes).
+        if flush {
+            if let Some(buf) = &compose_buf {
+                let mut failed: Vec<PathBuf> = Vec::new();
+                for (target, bytes) in buf.borrow().iter() {
+                    if let Err(source) = write_atomic(target, bytes) {
+                        eprintln!("alint: could not write {}: {source}", target.display());
+                        failed.push(target.clone());
+                    }
+                }
+                if !failed.is_empty() {
+                    for rule in &mut results {
+                        for item in &mut rule.items {
+                            // Keying note: `failed` holds write-time canonical
+                            // targets; this re-derives `resolve_write_target` at
+                            // report time. If the file (or its parent) vanished
+                            // between the failed write and here, the report-time
+                            // canonicalize falls back to the non-canonical path
+                            // and won't match, so the item stays `Applied`. That
+                            // needs a write failure on a target that then
+                            // disappears -- exotic, and the common case (a
+                            // read-only file, permission denied) leaves the file
+                            // extant so the keys match. A whole-file op can no
+                            // longer vanish a composed file itself (it yields via
+                            // `has_pending_write`), which removes the in-engine
+                            // route to the mismatch.
+                            let hits_failed = item.violation.path.as_deref().is_some_and(|p| {
+                                failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
+                            });
+                            if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
+                                item.status = FixStatus::errored(format!(
+                                    "{FIX_ERROR_PREFIX} file could not be written"
+                                ));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+        Ok((
+            // A single `fix_run` never sets non-convergence: that is the
+            // fixpoint loop's verdict, assembled in `Engine::fix` from the whole
+            // sequence of passes. A raw pass (and `stage_fixes` / `--diff`, which
+            // is single-pass) is always `false`.
+            FixReport {
+                results,
+                non_convergent: false,
+            },
+            compose_buf.map_or_else(BTreeMap::new, RefCell::into_inner),
+        ))
     }
 
     /// Collect git's tracked-paths set, but only if at least one
@@ -1117,12 +2092,23 @@ impl Engine {
     /// said they care about (the `--changed` set). Returns `None`
     /// when no changed-set is configured — callers fall back to
     /// the full index.
-    fn build_filtered_index(&self, full: &FileIndex) -> Option<FileIndex> {
+    /// Build the `--changed`-filtered index used to confine per-file rules to the
+    /// working-tree diff. `created` (2b) is the set of files THIS `fix` run created
+    /// on an earlier pass: they are not in the git diff, but a fix in scope made
+    /// them, so they join the changed set and a per-file content rule can complete
+    /// a create-then-fix cascade on them (the design's "changed set plus files a
+    /// fix in scope created", auto-fix.md 5.7). `None` (the `check` path) confines
+    /// to the diff alone.
+    fn build_filtered_index(
+        &self,
+        full: &FileIndex,
+        created: Option<&HashSet<PathBuf>>,
+    ) -> Option<FileIndex> {
         let set = self.changed_paths.as_ref()?;
         let entries = full
             .entries
             .iter()
-            .filter(|e| set.contains(&*e.path))
+            .filter(|e| set.contains(&*e.path) || created.is_some_and(|c| c.contains(&*e.path)))
             .cloned()
             .collect();
         Some(FileIndex::from_entries(entries))
@@ -1224,14 +2210,69 @@ impl Engine {
     /// satisfies it. Cross-file rules return `path_scope = None`
     /// per the roadmap contract — so they always return `false`
     /// here (i.e. never skipped).
-    fn skip_for_changed(&self, rule: &dyn Rule, index: &FileIndex) -> bool {
+    fn skip_for_changed(
+        &self,
+        rule: &dyn Rule,
+        index: &FileIndex,
+        created: Option<&HashSet<PathBuf>>,
+    ) -> bool {
         let Some(set) = &self.changed_paths else {
             return false;
         };
         let Some(scope) = rule.path_scope() else {
             return false;
         };
-        !set.iter().any(|p| scope.matches(p, index))
+        // A file THIS `fix` run created (2b) joins the changed set, so a rule scoped
+        // ENTIRELY to created files is not skipped -- its cascade can complete.
+        // `check` passes `None` (nothing is created during a check), so `check` and
+        // `fix` skip the same rules on the original tree; `fix` only additionally
+        // keeps a rule alive for files it creates.
+        !set.iter()
+            .chain(created.into_iter().flatten())
+            .any(|p| scope.matches(p, index))
+    }
+
+    /// Whether a fix for `violation` under `rule` would write OUTSIDE the
+    /// `--changed` blast radius (the diff plus files this run created). Only
+    /// meaningful when `--changed` is active (`changed_paths` set); returns
+    /// `false` otherwise, so a full `fix` is unaffected. A path-bearing violation
+    /// is judged by its own path; a PATHLESS one (a create whose target comes from
+    /// config, e.g. `file_exists`) is judged by the rule's scope matching some
+    /// in-scope path -- the same test [`skip_for_changed`] uses. A rule with no
+    /// scope for a pathless violation cannot be confined (an additive create with a
+    /// config-chosen target), so it is treated as in-scope. Out-of-scope writes are
+    /// demoted to Suggestions in the fix loop rather than applied (would widen the
+    /// blast radius) or dropped silently (2b, auto-fix.md 5.7).
+    ///
+    /// SYMLINK write-through (by design, whole-phase audit F2): this judges the
+    /// LOGICAL `violation.path` (what the diff names), not the resolved physical
+    /// target [`write_atomic`] writes through to. If an in-scope path is a symlink
+    /// to an out-of-diff file, the write follows the link (`write_atomic` resolves
+    /// symlinks so the link node is preserved) and physically lands outside the
+    /// changed set. That matches how `--changed` membership is defined (git reports
+    /// logical paths) and how a fix WITHOUT `--changed` already writes through
+    /// symlinks; the demote gate is a blast-radius policy on named paths, not a
+    /// physical-containment sandbox.
+    fn writes_outside_changed(
+        &self,
+        rule: &dyn Rule,
+        violation: &Violation,
+        index: &FileIndex,
+        created: &HashSet<PathBuf>,
+    ) -> bool {
+        let Some(set) = &self.changed_paths else {
+            return false;
+        };
+        match violation.path.as_deref() {
+            Some(p) => !(set.contains(p) || created.contains(p)),
+            None => match rule.path_scope() {
+                Some(scope) => !set
+                    .iter()
+                    .chain(created.iter())
+                    .any(|p| scope.matches(p, index)),
+                None => false,
+            },
+        }
     }
 
     /// Resolve every distinct `scope_filter.changed_since:` ref across
@@ -1392,6 +2433,114 @@ impl Engine {
     }
 }
 
+/// One file a fix pass would change, captured by [`Engine::stage_fixes`] for
+/// `alint fix --diff`: the repo-relative `path` and the `old` / `new` byte
+/// contents (the composed result of every fixer that touched it), so a caller
+/// can render a diff without the change being written. [`kind`](Self::kind)
+/// distinguishes an in-place content edit from a whole-file create / delete /
+/// rename so the renderer can use the `/dev/null` and rename conventions.
+#[derive(Debug, Clone)]
+pub struct StagedFix {
+    pub path: PathBuf,
+    pub old: Vec<u8>,
+    pub new: Vec<u8>,
+    pub kind: StagedKind,
+}
+
+/// How a [`StagedFix`] changes its file, so a diff renderer can pick the right
+/// header convention (git uses `/dev/null` for a create/delete and explicit
+/// `rename from`/`rename to` lines for a rename).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StagedKind {
+    /// An existing file's contents change in place (the content-fixer path).
+    Modify,
+    /// A new file (`old` is empty; the diff's `---` side is `/dev/null`).
+    Create,
+    /// A removed file (`new` is empty; the diff's `+++` side is `/dev/null`).
+    Delete,
+    /// A rename from `from` to [`StagedFix::path`]; `old`/`new` are the file's
+    /// bytes (equal when the rename doesn't also rewrite content).
+    Rename { from: PathBuf },
+    /// A permission-bit change (`chmod`); `old`/`new` bytes are the (unchanged)
+    /// file content, and the diff renders a git-style `old mode` / `new mode` pair.
+    Chmod { old_mode: u32, new_mode: u32 },
+}
+
+/// Append a fix item to the fixpoint's aggregated results, grouping by
+/// `rule_id` so there is exactly one [`FixRuleResult`] per rule across all
+/// passes. This is the append half of the loop's keep-last merge: the caller
+/// has already retained-out any earlier item this pass supersedes, so appending
+/// here cannot duplicate a superseded violation. See docs/design/v0.17/fixpoint.md 7.
+fn push_fix_item(
+    results: &mut Vec<FixRuleResult>,
+    rule_id: &Arc<str>,
+    level: crate::Level,
+    item: FixItem,
+) {
+    if let Some(rr) = results.iter_mut().find(|r| r.rule_id == *rule_id) {
+        rr.items.push(item);
+    } else {
+        results.push(FixRuleResult {
+            rule_id: Arc::clone(rule_id),
+            level,
+            items: vec![item],
+        });
+    }
+}
+
+/// Map a located edit's [`LocatedOutcome`] to its reported [`FixStatus`], with a
+/// summary derived from the edit's path. A Phase-1 op that emits located edits
+/// can carry a richer summary; Phase 0 never reaches this with real data (no
+/// fixer opts into the located path), so the generic wording is only exercised
+/// by the engine's fixture test.
+fn located_status(
+    edit: &FixEdit,
+    tier: Applicability,
+    outcome: LocatedOutcome,
+    dry_run: bool,
+) -> FixStatus {
+    let path = located_edit_path(edit);
+    match outcome {
+        LocatedOutcome::Applied => FixStatus::Applied(if dry_run {
+            format!("would edit {path}")
+        } else {
+            format!("edited {path}")
+        }),
+        LocatedOutcome::Suggested => FixStatus::Suggested {
+            // Tier-specific hint, matching the whole-file suggested path: an
+            // Unsafe edit IS applied by `--unsafe-fixes`; a Suggestion-tier edit
+            // never auto-applies. Avoids the formatter's "(suggested: suggested
+            // ...)" doubling.
+            summary: if tier == Applicability::Unsafe {
+                format!("rewrite {path} (requires --unsafe-fixes)")
+            } else {
+                format!("rewrite {path} (suggestion only; not auto-applied)")
+            },
+            // A located edit always has an editor-expressible form (a byte-range
+            // ReplaceRange), so the suggestion always carries it.
+            edit: Some(edit.clone()),
+        },
+        LocatedOutcome::SkippedConflict => FixStatus::declined(format!(
+            "edit to {path} skipped: conflicts with another edit"
+        )),
+        LocatedOutcome::Dropped => {
+            FixStatus::declined(format!("edit to {path} not applicable at this tier"))
+        }
+    }
+}
+
+/// The display path a located edit touches, for its status summary.
+fn located_edit_path(edit: &FixEdit) -> String {
+    match edit {
+        FixEdit::ReplaceRange { path, .. }
+        | FixEdit::SetContent { path, .. }
+        | FixEdit::CreateFile { path, .. }
+        | FixEdit::DeleteFile { path }
+        | FixEdit::SetMode { path, .. } => path.display().to_string(),
+        FixEdit::RenameFile { from, to } => format!("{} -> {}", from.display(), to.display()),
+    }
+}
+
 /// Pick the [`Context`] a rule should evaluate against:
 /// `full_ctx` if it [`requires_full_index`](Rule::requires_full_index),
 /// otherwise the changed-only filtered context (falling back to
@@ -1450,18 +2599,51 @@ fn run_entry(
     Some(run_one(entry.rule.as_ref(), ctx))
 }
 
+/// Stamp each violation's per-violation fixability ([`Violation::is_fixable`])
+/// from the rule's fixer, and return the rule-level flag ("the rule declares a
+/// fixer") alongside. Centralizes the two-level derivation for the `RuleResult`
+/// assembly sites.
+///
+/// `is_fixable` means "a bare `alint fix` would resolve THIS violation", so it
+/// is BOTH per-violation convertibility ([`Fixer::can_fix`] -- an unconvertible
+/// `café.rs` under `snake` is not fixable even though its rule has a fixer) AND
+/// tier-gated at the default (`Safe`) threshold: an `Unsafe` fixer such as
+/// `file_remove` only *suggests* under a bare `fix`, so its violations are not
+/// tagged/counted "auto-fixable" by `check` (that would promise a resolution a
+/// bare `fix` never delivers -- `--unsafe-fixes` is required, which `check` does
+/// not assume). The rule-level [`RuleResult::is_fixable`] ("the rule declares a
+/// fixer") is independent and still backs the machine formats.
+fn mark_fixability(
+    mut violations: Vec<Violation>,
+    fixer: Option<&dyn Fixer>,
+) -> (Vec<Violation>, bool) {
+    match fixer {
+        Some(f) => {
+            // The default bare-`fix` threshold. An Unsafe/Suggestion/Never tier
+            // does not apply here, so those violations are not "auto-fixable".
+            let applies_by_default = f.applicability().applies_at(Applicability::Safe);
+            for v in &mut violations {
+                v.is_fixable = applies_by_default && f.can_fix(v);
+            }
+            (violations, true)
+        }
+        None => (violations, false),
+    }
+}
+
 fn run_one(rule: &dyn Rule, ctx: &Context<'_>) -> RuleResult {
     let violations = match rule.evaluate(ctx) {
         Ok(v) => v,
         Err(e) => vec![Violation::new(format!("rule error: {e}"))],
     };
     // `new` partitions any note-flagged violations into `notes`.
+    let (violations, is_fixable) = mark_fixability(violations, rule.fixer());
     RuleResult::new(
         Arc::from(rule.id()),
         rule.level(),
         rule.policy_url().map(Arc::from),
         violations,
-        rule.fixer().is_some(),
+        is_fixable,
     )
 }
 
@@ -1581,6 +2763,799 @@ mod tests {
         )
     }
 
+    // ---- Fixture for the located-edit regime (dormant in Phase 0) ----
+    //
+    // Exercises the engine wiring that no shipped fixer reaches yet: a fixer
+    // that opts into `collects_located_edits` and returns two byte-disjoint
+    // `ReplaceRange` edits tagged into ONE isolation group. The engine must
+    // collect them, splice through `located_fix`, write the result, and report.
+
+    #[derive(Debug)]
+    struct LocatedFixture {
+        app: Applicability,
+    }
+
+    impl crate::rule::Fixer for LocatedFixture {
+        fn describe(&self) -> String {
+            "fixture located fixer".to_string()
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            // Never called: the engine routes located fixers through collect_edits.
+            Ok(FixOutcome::Skipped("unused".to_string()))
+        }
+        fn collects_located_edits(&self) -> bool {
+            true
+        }
+        fn collect_edits(
+            &self,
+            _violations: &[Violation],
+            file: &Path,
+            _bytes: &[u8],
+            _root: &Path,
+        ) -> Vec<crate::rule::CollectedEdit> {
+            let app = self.app;
+            let mk =
+                move |range: std::ops::Range<usize>, content: &str| crate::rule::CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: file.to_path_buf(),
+                        range,
+                        content: content.as_bytes().to_vec(),
+                    },
+                    applicability: app,
+                    verify: crate::rule::EditVerifier::None,
+                    isolation_group: Some(1),
+                };
+            // Disjoint, but same isolation group: the earlier-ordered edit wins.
+            vec![mk(0..1, "X"), mk(4..5, "Y")]
+        }
+    }
+
+    #[derive(Debug)]
+    struct LocatedRule {
+        id: String,
+        scope: Scope,
+        fixer: LocatedFixture,
+    }
+
+    impl Rule for LocatedRule {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            Some(&self.scope)
+        }
+        fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            let mut out = Vec::new();
+            for entry in ctx.index.files() {
+                if self.scope.matches(&entry.path, ctx.index) {
+                    out.push(Violation::new("located hit").with_path(entry.path.clone()));
+                }
+            }
+            Ok(out)
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(&self.fixer)
+        }
+    }
+
+    fn located_rule_with(app: Applicability) -> Box<dyn Rule> {
+        Box::new(LocatedRule {
+            id: "loc".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            fixer: LocatedFixture { app },
+        })
+    }
+
+    fn located_rule() -> Box<dyn Rule> {
+        located_rule_with(Applicability::Safe)
+    }
+
+    // ---- Fixture for a MIXED real+identity located batch (Phase-2 pre-reqs) ----
+    //
+    // Two DISJOINT, non-grouped edits so both apply: one changes bytes, one is an
+    // identity rewrite (its replacement equals the bytes it spans). Exercises the
+    // per-edit no-op downgrade (pre-req 2) and the per-edit range keying (pre-req 1)
+    // that arm for a multi-node located fixer (Phase-2 `set_value`); `ReplaceFixer`
+    // triggers neither.
+    #[derive(Debug)]
+    struct MixedBatchFixture;
+
+    impl crate::rule::Fixer for MixedBatchFixture {
+        fn describe(&self) -> String {
+            "fixture mixed-batch located fixer".to_string()
+        }
+        fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            Ok(FixOutcome::Skipped("unused".to_string()))
+        }
+        fn collects_located_edits(&self) -> bool {
+            true
+        }
+        fn collect_edits(
+            &self,
+            _violations: &[Violation],
+            file: &Path,
+            _bytes: &[u8],
+            _root: &Path,
+        ) -> Vec<crate::rule::CollectedEdit> {
+            let mk =
+                move |range: std::ops::Range<usize>, content: &str| crate::rule::CollectedEdit {
+                    edit: FixEdit::ReplaceRange {
+                        path: file.to_path_buf(),
+                        range,
+                        content: content.as_bytes().to_vec(),
+                    },
+                    applicability: Applicability::Safe,
+                    verify: crate::rule::EditVerifier::None,
+                    isolation_group: None, // disjoint + independent -> BOTH apply
+                };
+            // On "01234567": 0..1 -> "X" CHANGES a byte; 4..5 -> "4" is an IDENTITY
+            // rewrite (file[4] == '4'). apply_file_edits applies both (disjoint, no
+            // group), so the file DID change -- the old whole-file `batch_changed`
+            // reported the identity edit `Applied` too; the per-edit check skips it.
+            vec![mk(0..1, "X"), mk(4..5, "4")]
+        }
+    }
+
+    #[derive(Debug)]
+    struct MixedBatchRule {
+        id: String,
+        scope: Scope,
+        fixer: MixedBatchFixture,
+    }
+
+    impl Rule for MixedBatchRule {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            Some(&self.scope)
+        }
+        fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            let mut out = Vec::new();
+            for entry in ctx.index.files() {
+                if self.scope.matches(&entry.path, ctx.index) {
+                    out.push(Violation::new("mixed hit").with_path(entry.path.clone()));
+                }
+            }
+            Ok(out)
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(&self.fixer)
+        }
+    }
+
+    #[test]
+    fn located_mixed_real_and_identity_batch_downgrades_only_the_identity_edit() {
+        // Phase-2 pre-req 2 (per-edit no-op downgrade): a batch mixing a REAL edit
+        // with an IDENTITY edit must report the real one Applied and the identity
+        // one Skipped. The old whole-file `batch_changed` reported BOTH Applied
+        // because the file DID change (only the real edit moved a byte). Pre-req 1
+        // (per-edit range keying): the two items must carry DISTINCT `violation_key`s
+        // so an Applied for one node cannot lock-mask a standing Skipped for another.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let rule: Box<dyn Rule> = Box::new(MixedBatchRule {
+            id: "mixed".into(),
+            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+            fixer: MixedBatchFixture,
+        });
+        let report = Engine::new(vec![rule], RuleRegistry::new())
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        // The real edit landed; the identity edit changed nothing.
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"X1234567"
+        );
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        let applied = items
+            .iter()
+            .filter(|i| matches!(i.status, FixStatus::Applied(_)))
+            .count();
+        let skipped = items
+            .iter()
+            .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
+            .count();
+        assert_eq!(
+            applied, 1,
+            "only the real edit is Applied; the identity edit is a per-edit no-op"
+        );
+        assert_eq!(skipped, 1, "the identity edit is downgraded to Skipped");
+        // Pre-req 1: two edits on one file get DISTINCT keys (range-keyed), not a
+        // single `(rule, path)` that could lock-mask one behind the other.
+        let keys: std::collections::HashSet<String> = items
+            .iter()
+            .map(|it| Engine::violation_key("mixed", &it.violation))
+            .collect();
+        assert_eq!(
+            keys.len(),
+            2,
+            "two located edits on one file must have distinct violation_keys"
+        );
+        // The identity edit is not read as progress, so the fixpoint converges.
+        assert!(
+            !report.non_convergent,
+            "a mixed real+identity batch converges (the identity edit is a no-op)"
+        );
+    }
+
+    #[test]
+    fn located_regime_applies_batch_and_excludes_isolation_group() {
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        // First edit (0..1 -> X) applied; the second (same group) is a conflict.
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"X1234567"
+        );
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Applied(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
+                .count(),
+            1
+        );
+        // The batch applies on pass 1 and the identity re-collect on pass 2 nets
+        // no change (the no-op downgrade), so the loop CONVERGES -- it must not
+        // churn to the cap.
+        assert!(
+            !report.non_convergent,
+            "the located batch converges; it must not be flagged non-convergent"
+        );
+    }
+
+    #[test]
+    fn located_identity_edit_reports_skip_and_converges() {
+        // Gate for the located no-op downgrade (engine.rs `batch_changed`): a
+        // located batch that nets NO byte change (every edit is an identity
+        // rewrite) must report `Skipped`, not `Applied`, so `applied()==0` and the
+        // byte-level fixpoint converges. Without the downgrade the identity edit
+        // reports `Applied` -> `applied()>0` -> re-walk forever -> the cap fires
+        // (spurious non_convergent). Here the file already reads "X123Y567", so the
+        // fixture's edits (0..1->"X", 4..5->"Y") are both identities.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"X123Y567").unwrap();
+        let report = Engine::new(vec![located_rule()], RuleRegistry::new())
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert!(
+            !report.non_convergent,
+            "an all-identity located batch must converge (no-op), not cap"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"X123Y567",
+            "an identity batch must leave the file byte-identical"
+        );
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert!(
+            !items.is_empty()
+                && items
+                    .iter()
+                    .all(|i| matches!(i.status, FixStatus::Skipped { .. })),
+            "every identity edit reports Skipped, none Applied"
+        );
+    }
+
+    #[test]
+    fn located_regime_honors_the_size_guard_on_the_collect_step() {
+        // A file over the fix_size_limit is not edited (invariant 4), AND the
+        // violation on it must be REPORTED as a size-skip -- not silently dropped.
+        // The whole-file path surfaces the same skip; without parity a large file
+        // with a forbidden pattern would pass `fix` (exit 0) while `check` (which
+        // reads to a far larger cap) flags it -- an audit-found false negative.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine =
+            Engine::new(vec![located_rule()], RuleRegistry::new()).with_fix_size_limit(Some(4));
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567",
+            "over-limit file must be left untouched"
+        );
+        // The size-skipped violation is reported exactly once, as a Skip (so it
+        // drives the exit code), and the loop converges (nothing applies).
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert_eq!(
+            items.len(),
+            1,
+            "the size-skipped violation is reported once"
+        );
+        assert!(
+            matches!(items[0].status, FixStatus::Skipped { .. }),
+            "reported as a Skip, not Applied or silently dropped"
+        );
+        assert!(
+            !report.non_convergent,
+            "a size-skip converges: nothing applies"
+        );
+    }
+
+    #[test]
+    fn located_regime_dry_run_reports_but_does_not_write() {
+        // R-audit-4: the located application must NOT write in --dry-run (a dry
+        // run has no compose buffer, so an unguarded commit_write would hit
+        // disk). It still reports the outcome, as "would edit".
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                /* dry_run */ true,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567",
+            "dry-run must not touch the file"
+        );
+        // Still reported: one "would edit" Applied + one conflict Skipped.
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert!(
+            items
+                .iter()
+                .any(|i| matches!(&i.status, FixStatus::Applied(s) if s.starts_with("would edit")))
+        );
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn located_regime_threshold_gates_unsafe_edits_through_the_engine() {
+        // The threshold reaches located_fix through the engine: an Unsafe edit
+        // is a Suggestion under a Safe threshold (not written), and applies once
+        // the caller opts into Unsafe.
+        let mk = || {
+            let tmp = tempfile::tempdir().unwrap();
+            std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+            tmp
+        };
+
+        // Safe threshold: both Unsafe edits are Suggestions; file untouched.
+        let tmp = mk();
+        let report = Engine::new(
+            vec![located_rule_with(Applicability::Unsafe)],
+            RuleRegistry::new(),
+        )
+        .fix(
+            tmp.path(),
+            &idx(&["a.txt"]),
+            &crate::WalkOptions::default(),
+            false,
+            Applicability::Safe,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567"
+        );
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+        assert_eq!(
+            items
+                .iter()
+                .filter(|i| matches!(i.status, FixStatus::Suggested { .. }))
+                .count(),
+            2,
+            "both Unsafe edits are suggestions below the Safe threshold"
+        );
+
+        // Unsafe threshold: the batch applies (one edit; the other is an
+        // isolation conflict), and the file is written.
+        let tmp = mk();
+        Engine::new(
+            vec![located_rule_with(Applicability::Unsafe)],
+            RuleRegistry::new(),
+        )
+        .fix(
+            tmp.path(),
+            &idx(&["a.txt"]),
+            &crate::WalkOptions::default(),
+            false,
+            Applicability::Unsafe,
+        )
+        .unwrap();
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"X1234567"
+        );
+    }
+
+    #[test]
+    fn stage_fixes_composes_without_writing() {
+        // stage_fixes (for --diff) runs the compose pass but does NOT flush:
+        // it returns the composed (old, new) per file, and disk is untouched.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
+        let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
+        let (_report, staged) = engine
+            .stage_fixes(tmp.path(), &idx(&["a.txt"]), Applicability::Safe)
+            .unwrap();
+        // Disk is unchanged: nothing was flushed.
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            b"01234567",
+            "stage_fixes must not write"
+        );
+        // One staged change carries old + the composed new bytes.
+        assert_eq!(staged.len(), 1);
+        assert_eq!(staged[0].path, std::path::Path::new("a.txt"));
+        assert_eq!(staged[0].old, b"01234567");
+        assert_eq!(staged[0].new, b"X1234567");
+        // A content edit is an in-place modify.
+        assert_eq!(staged[0].kind, StagedKind::Modify);
+    }
+
+    // ---- Fixture for the byte-level fixpoint: convergence + cap (Phase 1) ----
+    //
+    // A rule whose fix always applies (appends a byte) and never self-guards. With
+    // `stop_at: None` it never stops -> the pure non-convergent config the cap
+    // exists to bound. With `stop_at: Some(n)` it stops firing once the file
+    // reaches n bytes -> a fixer that makes PROGRESS over several passes and then
+    // converges, which is exactly the multi-pass case a premature "one apply per
+    // file" cutoff would have wrongly abandoned. The violation is PATHLESS with a
+    // constant message; termination is byte-level (a pass that changes nothing
+    // converges), so the message only groups report items, it does not gate the
+    // loop.
+    #[derive(Debug)]
+    struct GrowFixer {
+        target: PathBuf,
+    }
+    impl crate::rule::Fixer for GrowFixer {
+        fn describe(&self) -> String {
+            "append one byte".to_string()
+        }
+        fn apply(&self, _v: &Violation, ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            // Direct append: each application grows the file by one byte, so a pass
+            // that runs it changes the tree (the loop's progress signal). Honour
+            // `dry_run` like a real fixer -- report "would apply" but do NOT write
+            // (the fixpoint's non-mutating cap-confirmation pass relies on this).
+            if !ctx.dry_run {
+                let mut bytes = std::fs::read(&self.target).unwrap_or_default();
+                bytes.push(b'x');
+                std::fs::write(&self.target, &bytes).unwrap();
+            }
+            Ok(FixOutcome::Applied("grew by one byte".to_string()))
+        }
+        fn fix_edit(&self, _v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+            None
+        }
+    }
+
+    #[derive(Debug)]
+    struct GrowRule {
+        id: String,
+        fixer: GrowFixer,
+        // `None`: always violates -> the fixer applies every pass -> the cap fires.
+        // `Some(n)`: violates only while the file is under n bytes, so the fixer
+        // makes progress for n passes and then the pass finds nothing to do and
+        // the loop converges.
+        stop_at: Option<usize>,
+    }
+    impl Rule for GrowRule {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            None
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            let len = std::fs::read(&self.fixer.target).map_or(0, |b| b.len());
+            if self.stop_at.is_some_and(|n| len >= n) {
+                return Ok(Vec::new()); // resolved: nothing left to grow
+            }
+            Ok(vec![Violation::new("keeps growing")])
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(&self.fixer)
+        }
+    }
+
+    fn grow_engine(target: &Path, stop_at: Option<usize>) -> Engine {
+        Engine::new(
+            vec![Box::new(GrowRule {
+                id: "grow".into(),
+                fixer: GrowFixer {
+                    target: target.to_path_buf(),
+                },
+                stop_at,
+            })],
+            RuleRegistry::new(),
+        )
+    }
+
+    fn grow_fix(target: &Path, stop_at: Option<usize>) -> FixReport {
+        std::fs::write(target, b"").unwrap();
+        let root = target.parent().unwrap();
+        grow_engine(target, stop_at)
+            .fix(
+                root,
+                &idx(&["grow.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap()
+    }
+
+    #[test]
+    fn fix_bails_at_the_cap_on_a_nonconvergent_config() {
+        // A config whose fix keeps changing the tree without settling must not loop
+        // forever: the byte-level fixpoint hard-stops at MAX_PASSES (10) and flags
+        // non-convergence (which the CLI maps to exit 2). Whatever landed before the
+        // cap stays on disk -- the cap stops the loop, it does not roll back.
+        // (docs/design/v0.17/fixpoint.md 2, 5.)
+        let tmp = tempfile::tempdir().unwrap();
+        let report = grow_fix(&tmp.path().join("grow.txt"), /* stop_at */ None);
+        assert!(
+            report.non_convergent,
+            "a config that never settles must hit the cap and report non-convergence"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("grow.txt")).unwrap().len(),
+            10,
+            "exactly MAX_PASSES (10) applications land before the cap stops the loop"
+        );
+    }
+
+    #[test]
+    fn fix_converges_after_several_progressing_passes() {
+        // The property the removed apply-once heuristic used to break: a fixer that
+        // makes progress on the SAME file over MULTIPLE passes must be allowed to
+        // keep going until it is done, not cut off after the first apply. Here the
+        // fixer appends until the file reaches 3 bytes, then the rule stops firing;
+        // the loop must CONVERGE (not cap) with the file fully grown. A "one apply
+        // per file" cutoff would have stopped at 1 byte and either left the job
+        // half-done or (if it still reported success) hidden it -- the F1 bug class.
+        let tmp = tempfile::tempdir().unwrap();
+        let report = grow_fix(&tmp.path().join("grow.txt"), /* stop_at */ Some(3));
+        assert!(
+            !report.non_convergent,
+            "a fixer that finishes in a few progressing passes must converge, not cap"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("grow.txt")).unwrap().len(),
+            3,
+            "the fix must run to completion across passes (3 bytes), not stop after one"
+        );
+        assert_eq!(
+            report.applied(),
+            1,
+            "the multi-pass progressive fix on one violation is reported EXACTLY once \
+             (Applied-wins locks the key; passes 2-3 do not duplicate it)"
+        );
+    }
+
+    #[test]
+    fn fix_converges_exactly_at_the_pass_cap() {
+        // Regression for the audit finding that a slow-but-convergent config which
+        // reaches its fixed point on the LAST budgeted pass was branded
+        // non-convergent (exit 2) even though the tree is CLEAN -- there was no
+        // room in the budget for the confirming `applied()==0` pass. The
+        // non-mutating dry-run cap-confirmation must recognise convergence here.
+        // `stop_at == MAX_PASSES` needs exactly the whole budget of applying
+        // passes and then is done.
+        let tmp = tempfile::tempdir().unwrap();
+        let report = grow_fix(&tmp.path().join("grow.txt"), /* stop_at */ Some(10));
+        assert!(
+            !report.non_convergent,
+            "a config that reaches its fixed point exactly at the cap must NOT be \
+             branded non-convergent (the tree is clean)"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("grow.txt")).unwrap().len(),
+            10,
+            "the fix ran to completion (10 bytes); the dry-run confirmation did not write"
+        );
+    }
+
+    #[test]
+    fn cap_confirm_preserves_a_standing_unfixable_at_the_boundary() {
+        // At the cap-confirmation boundary a GENUINE unfixable that still stands
+        // must survive the residual reconciliation. `grow` reaches its fixed point
+        // exactly at the cap (converged via the dry-run confirm), while a no-fixer
+        // error rule leaves an unfixable standing on another file -- the confirm's
+        // `final_keys` must include it, else it is dropped and `fix` exits 0 on a
+        // dirty tree (false negative). Gates the confirm-path `final_keys`
+        // population, which `fix_converges_exactly_at_the_pass_cap` (a clean tree,
+        // Applied-only) does not exercise.
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("grow.txt");
+        std::fs::write(&target, b"").unwrap();
+        std::fs::write(tmp.path().join("keep.rs"), b"x").unwrap();
+        let engine = Engine::new(
+            vec![
+                Box::new(GrowRule {
+                    id: "grow".into(),
+                    fixer: GrowFixer {
+                        target: target.clone(),
+                    },
+                    stop_at: Some(10),
+                }),
+                stub("nofix", "**/*.rs"), // Error level, no fixer -> Unfixable
+            ],
+            RuleRegistry::new(),
+        );
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["grow.txt", "keep.rs"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert!(
+            !report.non_convergent,
+            "grow reaches its fixed point at the cap; the run is not non-convergent"
+        );
+        assert!(
+            report.has_unfixable_errors(),
+            "the standing no-fixer error must survive reconciliation on the confirm path"
+        );
+        assert_eq!(std::fs::read(&target).unwrap().len(), 10);
+    }
+
+    // A rule that is its own fixer: it fires while `file` (relative to the run
+    // root) exists, and its fixer either ERRORS (a fix I/O error) or DELETES the
+    // file. Used to reach the exotic case the reconciliation's write-error
+    // carve-out guards: a fix error on a file that ANOTHER rule then removes.
+    #[derive(Debug)]
+    enum FixAction {
+        Err,
+        Delete,
+    }
+    #[derive(Debug)]
+    struct ActionRule {
+        id: String,
+        file: PathBuf, // relative to the run root
+        action: FixAction,
+    }
+    impl crate::rule::Fixer for ActionRule {
+        fn describe(&self) -> String {
+            "test action".to_string()
+        }
+        fn apply(&self, _v: &Violation, ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+            match self.action {
+                FixAction::Err => Err(crate::error::Error::Other("simulated fix I/O error".into())),
+                FixAction::Delete => {
+                    std::fs::remove_file(ctx.root.join(&self.file)).ok();
+                    Ok(FixOutcome::Applied("deleted".to_string()))
+                }
+            }
+        }
+        fn fix_edit(&self, _v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+            None
+        }
+    }
+    impl Rule for ActionRule {
+        fn id(&self) -> &str {
+            &self.id
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            None
+        }
+        fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            if ctx.root.join(&self.file).exists() {
+                Ok(vec![Violation::new("stands").with_path(self.file.clone())])
+            } else {
+                Ok(Vec::new()) // resolved once the file is gone
+            }
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(self)
+        }
+    }
+
+    #[test]
+    fn reconciliation_drops_a_moot_fix_error_when_the_file_is_removed() {
+        // A fix that errored on X because ANOTHER rule removed X is MOOT: X is
+        // gone, the tree is in the desired state, and `check` on it is clean. So
+        // `fix` must also converge clean (exit 0), NOT strand a phantom I/O error
+        // on the deleted file. A PERSISTENT error (X still standing) would instead
+        // stay in `final_keys` and be kept -- that path is exercised by
+        // fix_robustness.rs. Here `errs` errors on x.txt while `removes` deletes
+        // it, so x.txt leaves the converged residual and the error is reconciled
+        // away.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("x.txt"), b"hi").unwrap();
+        let engine = Engine::new(
+            vec![
+                Box::new(ActionRule {
+                    id: "errs".into(),
+                    file: PathBuf::from("x.txt"),
+                    action: FixAction::Err,
+                }),
+                Box::new(ActionRule {
+                    id: "removes".into(),
+                    file: PathBuf::from("x.txt"),
+                    action: FixAction::Delete,
+                }),
+            ],
+            RuleRegistry::new(),
+        );
+        let report = engine
+            .fix(
+                tmp.path(),
+                &idx(&["x.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert!(
+            !report.non_convergent,
+            "x.txt is removed -> the rules stop firing -> converges"
+        );
+        assert!(
+            !report.had_fix_error(),
+            "a fix error on a file another rule REMOVED is moot and must be dropped (fix agrees with check: exit 0)"
+        );
+        assert!(
+            !report.has_unfixable_errors(),
+            "no residual on the clean tree"
+        );
+    }
+
     #[test]
     fn run_empty_returns_empty_report() {
         let engine = Engine::new(Vec::new(), RuleRegistry::new());
@@ -1661,6 +3636,115 @@ mod tests {
         // one), so it sees both files.
         assert_eq!(report.results.len(), 1);
         assert_eq!(report.results[0].violations.len(), 2);
+    }
+
+    #[test]
+    fn build_filtered_index_includes_changed_and_created_files() {
+        // 2b: the `--changed`-filtered index (which confines per-file rules) must
+        // include BOTH the diff files AND files this fix run created, so a per-file
+        // content rule can complete a create-then-fix cascade on a created file
+        // (which is not in the git diff). `None` (the `check` path) confines to the
+        // diff alone. Teeth: drop `|| created.is_some_and(...)` and `made.txt` is
+        // no longer visible.
+        let mut changed = HashSet::new();
+        changed.insert(std::path::PathBuf::from("a.txt"));
+        let engine = Engine::new(vec![], RuleRegistry::new()).with_changed_paths(changed);
+        let full = idx(&["a.txt", "b.txt", "made.txt"]);
+        let mut created = HashSet::new();
+        created.insert(std::path::PathBuf::from("made.txt"));
+
+        let fi = engine
+            .build_filtered_index(&full, Some(&created))
+            .expect("a changed set is present");
+        let paths: std::collections::HashSet<std::path::PathBuf> =
+            fi.entries.iter().map(|e| e.path.to_path_buf()).collect();
+        assert!(
+            paths.contains(std::path::Path::new("a.txt")),
+            "changed file kept"
+        );
+        assert!(
+            paths.contains(std::path::Path::new("made.txt")),
+            "a file this run created joins the changed set (2b)"
+        );
+        assert!(
+            !paths.contains(std::path::Path::new("b.txt")),
+            "an untouched, uncreated file stays confined out"
+        );
+
+        // The `check` path (no created set) sees only the diff file.
+        let fi_check = engine.build_filtered_index(&full, None).unwrap();
+        let check_paths: std::collections::HashSet<std::path::PathBuf> = fi_check
+            .entries
+            .iter()
+            .map(|e| e.path.to_path_buf())
+            .collect();
+        assert!(check_paths.contains(std::path::Path::new("a.txt")));
+        assert!(
+            !check_paths.contains(std::path::Path::new("made.txt")),
+            "check does not carry created files (nothing is created during a check)"
+        );
+    }
+
+    #[test]
+    fn writes_outside_changed_judges_a_fix_by_its_target() {
+        // 2b: a path-bearing fix is in scope iff its path is in the changed set OR
+        // was created by this fix run; anything else is out of scope and is demoted
+        // to a Suggestion in the fix loop. With no `--changed` set, confinement is
+        // inactive so nothing is ever out of scope (a full fix is unaffected).
+        let mut changed = HashSet::new();
+        changed.insert(std::path::PathBuf::from("a.txt"));
+        let engine = Engine::new(vec![], RuleRegistry::new()).with_changed_paths(changed);
+        // The rule is only consulted for a PATHLESS violation; for path-bearing ones
+        // the violation's own path decides, so any stub rule serves here.
+        let rule = stub("r", "**/*");
+        let index = idx(&["a.txt", "made.txt", "other.txt"]);
+        let mut created = HashSet::new();
+        created.insert(std::path::PathBuf::from("made.txt"));
+        let v = |p: &str| Violation::new("x").with_path(std::path::PathBuf::from(p));
+
+        assert!(
+            !engine.writes_outside_changed(rule.as_ref(), &v("a.txt"), &index, &created),
+            "a changed file is in scope"
+        );
+        assert!(
+            !engine.writes_outside_changed(rule.as_ref(), &v("made.txt"), &index, &created),
+            "a file this run created is in scope (2b)"
+        );
+        assert!(
+            engine.writes_outside_changed(rule.as_ref(), &v("other.txt"), &index, &created),
+            "an untouched, uncreated file is out of scope -> demoted to a Suggestion"
+        );
+
+        // A PATHLESS violation (a create, whose target comes from config not the
+        // violation) is judged by the rule's `path_scope`: in scope iff the scope
+        // matches some changed-or-created path. `stub` exposes a `Rule::path_scope`.
+        let pathless = Violation::new("needs creating");
+        let in_scope_rule = stub("in", "a.txt"); // scope matches the changed a.txt
+        let created_scope_rule = stub("cr", "made.txt"); // scope matches a created file
+        let out_scope_rule = stub("out", "zzz.txt"); // scope matches nothing in scope
+        assert!(
+            !engine.writes_outside_changed(in_scope_rule.as_ref(), &pathless, &index, &created),
+            "a pathless create whose scope is in the changed set is in scope"
+        );
+        assert!(
+            !engine.writes_outside_changed(
+                created_scope_rule.as_ref(),
+                &pathless,
+                &index,
+                &created
+            ),
+            "a pathless create whose scope matches a created file is in scope (2b)"
+        );
+        assert!(
+            engine.writes_outside_changed(out_scope_rule.as_ref(), &pathless, &index, &created),
+            "a pathless create whose scope matches nothing in scope is out of scope -> demoted"
+        );
+
+        let full_engine = Engine::new(vec![], RuleRegistry::new());
+        assert!(
+            !full_engine.writes_outside_changed(rule.as_ref(), &v("other.txt"), &index, &created),
+            "a full (non-changed) fix never demotes for scope"
+        );
     }
 
     #[test]

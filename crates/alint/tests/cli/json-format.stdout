@@ -15,7 +15,8 @@
       "fixable": false,
       "violations": [
         {
-          "message": "expected a file matching [README.md] at the repo root"
+          "message": "expected a file matching [README.md] at the repo root",
+          "fixable": false
         }
       ]
     }

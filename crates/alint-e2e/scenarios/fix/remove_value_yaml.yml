@@ -1,0 +1,45 @@
+name: remove_value deletes a single-line YAML entry, keeping siblings + comments
+tags: [fix, yaml_path_absent, remove_value, yaml]
+
+# YAML `remove_value` deletes the target key's WHOLE physical line (saphyr is
+# read-only, so this is a conservative hand-rolled line scan). Deleting `debug`
+# takes its trailing `# drop` comment WITH it, and leaves the leading `# cfg`
+# comment, the `server:` header, the `host` (+ its `# keep` comment) and `port`
+# siblings byte-locally intact -- never over-deleting a neighbour (block mappings
+# are one entry per line; the resolver requires the key to own its line + a
+# single-line scalar value). `remove_value` is Unsafe by default; this rule
+# promotes it to `safe` so a bare `fix` applies. (Was deferred before follow-up 1.)
+
+given:
+  tree:
+    app.yaml: |
+      # cfg
+      server:
+        host: localhost  # keep
+        debug: true  # drop
+        port: 8080
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: yaml_path_absent
+        paths: "**/*.yaml"
+        path: "$['server']['debug']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: app.yaml}
+  - applied: [no-debug]
+  - violations: []
+
+expect_tree:
+  app.yaml: |
+    # cfg
+    server:
+      host: localhost  # keep
+      port: 8080

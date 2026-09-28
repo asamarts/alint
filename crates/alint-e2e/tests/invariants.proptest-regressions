@@ -1,0 +1,7 @@
+# Seeds for failure cases proptest has generated in the past. It is
+# automatically read and these particular cases re-run before any
+# novel cases are generated.
+#
+# It is recommended to check this file in to source control so that
+# everyone who runs the test benefits from these saved cases.
+cc 9371d0446b7524da6e49347f56f0a47961a4b95725e10a9c8025b5688da37a58 # shrinks to base = Scenario { name: "property-single-fixable", tags: ["proptest"], given: Given { tree: TreeSpec { root: {"_trig": Dir({"Pascal.md": File("# doc\n"), "Pascal.rs": File("fn x() {}\n"), "junk.bak": File("junk\n"), "sink.txt": File("\u{feff}a\u{202e}\u{200b}  \r\n\n\n\n\nb")})} }, config: "version: 1\nrules:\n  - id: fa-a\n    kind: file_absent\n    paths: \"**/*.bak\"\n    level: warning\n    fix:\n      file_remove: {}\n", git: None }, when: [], expect: [], expect_tree: None, expect_tree_mode: Strict, docs: None }

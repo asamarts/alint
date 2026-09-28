@@ -1,0 +1,35 @@
+name: file_strip_bom converges on a stacked BOM (two leading marks)
+tags: [fix, no_bom, file_strip_bom, encoding, idempotence]
+
+# Non-convergence regression (Phase-0 round-3 audit, finding F3). A file can
+# carry a *stack* of BOMs -- a tool prepends a UTF-8 BOM to a file that already
+# had one. The old fixer removed exactly one mark, leaving a leading BOM that
+# `no_bom` re-flags, so a second `fix` kept applying (never a fixed point). The
+# fixer now strips the whole leading BOM run in one shot; the final `check`
+# asserts the tree is clean after a single fix.
+
+given:
+  tree:
+    docs:
+      a.md: "\uFEFF\uFEFF# heading\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-bom
+        kind: no_bom
+        paths: "docs/**/*.md"
+        level: warning
+        fix:
+          file_strip_bom: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-bom, level: warning, path: docs/a.md}
+  - applied: [no-bom]
+  - violations: []
+
+expect_tree:
+  docs:
+    a.md: "# heading\n"

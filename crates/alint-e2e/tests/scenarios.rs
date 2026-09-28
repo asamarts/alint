@@ -51,6 +51,13 @@ fn scenario(fixture: Fixture<&str>) {
     let path = fixture.path();
     let scenario = Scenario::from_yaml(fixture.content())
         .unwrap_or_else(|e| panic!("scenario at {path}: parse error: {e}"));
+    // Enforce the corpus-authoring lint here (NOT inside `run_scenario`, which
+    // the property harness calls with intentionally assertion-free scenarios):
+    // every hand-written corpus scenario must have `when`/`expect` length parity
+    // and must assert the effect of any fix it runs.
+    scenario
+        .validate()
+        .unwrap_or_else(|e| panic!("scenario at {path}: invalid: {e}"));
     if let Some(reason) = should_skip_for_os(&scenario) {
         eprintln!("skipping {path}: {reason}");
         return;

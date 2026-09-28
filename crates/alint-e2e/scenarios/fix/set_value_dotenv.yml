@@ -1,0 +1,38 @@
+name: set_value rewrites a dotenv value, preserving export + comment + siblings
+tags: [fix, dotenv_path_equals, set_value, dotenv]
+
+# The third structured format (hand-rolled re-scan; the `.env` parser keeps no
+# spans). `set_value` overwrites only the value token at `$.NODE_ENV`, so the
+# `export ` prefix, the sibling `PORT` line, and its inline comment all survive.
+# The new value is simple, so it serializes bare (no quotes). Safe (a scalar
+# replacing an existing scalar), so a bare `fix` applies.
+
+given:
+  tree:
+    .env: |
+      export NODE_ENV=development
+      PORT=3000 # server port
+  config: |
+    version: 1
+    rules:
+      - id: node-env
+        kind: dotenv_path_equals
+        paths: "**/.env"
+        path: "$.NODE_ENV"
+        equals: "production"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: node-env, level: error, path: .env}
+  - applied: [node-env]
+  - violations: []
+
+expect_tree:
+  .env: |
+    export NODE_ENV=production
+    PORT=3000 # server port

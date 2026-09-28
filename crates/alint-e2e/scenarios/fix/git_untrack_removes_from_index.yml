@@ -1,0 +1,35 @@
+name: git_untrack removes a committed build artifact from the git index
+# git_untrack is Unsafe + spawning: the `fix_unsafe` step raises the threshold to
+# Unsafe so it applies. A build artifact that was committed (tracked) but should
+# not be is untracked by `git rm --cached` and kept on disk;
+# file_absent(git_tracked_only) then no longer sees it in the tracked set, so the
+# tree converges. (No `.gitignore` here: alint's walker skips gitignored paths, so
+# the tracked-but-forbidden file must be a WALKED, tracked one -- exactly the case
+# git_tracked_only exists to catch, distinct from a locally-built untracked copy.)
+tags: [fix, file_absent, git_untrack, git_tracked_only, applicability]
+
+given:
+  tree:
+    build:
+      out.o: "OBJ\n"
+  git:
+    add: [build/out.o]
+    commit: true
+  config: |
+    version: 1
+    rules:
+      - id: no-tracked-build
+        kind: file_absent
+        paths: "build/**"
+        git_tracked_only: true
+        level: error
+        fix:
+          git_untrack: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: no-tracked-build, level: error, path: build/out.o}
+  - applied: [no-tracked-build]
+  - violations: []

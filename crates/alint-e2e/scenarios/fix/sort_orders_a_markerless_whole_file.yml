@@ -1,0 +1,35 @@
+name: sort orders a markerless whole-file list
+tags: [fix, ordered_block, sort, markerless]
+
+# With no `start` / `end` markers the whole file is one sorted list (the
+# CODEOWNERS / allow-list shape). `sort` reorders every line under the lexical
+# comparator. Safe -> a bare `fix` applies it -> converges.
+
+given:
+  tree:
+    CODEOWNERS: |
+      charlie
+      alpha
+      bravo
+  config: |
+    version: 1
+    rules:
+      - id: sorted-file
+        kind: ordered_block
+        paths: "**/CODEOWNERS"
+        level: error
+        fix: { sort: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: sorted-file, level: error, path: CODEOWNERS}
+  - applied: [sorted-file]
+  - violations: []
+
+expect_tree:
+  CODEOWNERS: |
+    alpha
+    bravo
+    charlie

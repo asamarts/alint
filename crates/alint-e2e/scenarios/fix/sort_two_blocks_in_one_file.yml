@@ -1,0 +1,56 @@
+name: sort converges a file with two ordered_blocks (F4 regression)
+tags: [fix, ordered_block, sort, fixpoint]
+
+# REGRESSION (found by CLI probing of the sort op): a file with TWO out-of-order
+# blocks makes `ordered_block` emit two fixable findings on one path. The
+# fixpoint merge keys fixable findings by violation_key, which for a KEY-LESS
+# path-bearing finding collapses to (rule_id, path) -- so the two blocks collided
+# and `alint fix` PANICKED (engine F4 tripwire). The rule now tags each finding
+# with a per-block baseline_key when it is fixable, so the two findings stay
+# distinct. A single whole-file `sort` apply orders BOTH blocks (and preserves the
+# `MIDDLE` line between them) -> the second check is clean (converges). Safe, so a
+# bare `fix` applies it.
+
+given:
+  tree:
+    deps.txt: |
+      # keep-sorted start
+      bravo
+      alpha
+      # keep-sorted end
+      MIDDLE
+      # keep-sorted start
+      delta
+      charlie
+      # keep-sorted end
+  config: |
+    version: 1
+    rules:
+      - id: keep-sorted
+        kind: ordered_block
+        paths: "**/deps.txt"
+        start: "# keep-sorted start"
+        end: "# keep-sorted end"
+        level: error
+        fix: { sort: {} }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: keep-sorted, level: error, path: deps.txt}
+      - {rule: keep-sorted, level: error, path: deps.txt}
+  - applied: [keep-sorted]
+  - violations: []
+
+expect_tree:
+  deps.txt: |
+    # keep-sorted start
+    alpha
+    bravo
+    # keep-sorted end
+    MIDDLE
+    # keep-sorted start
+    charlie
+    delta
+    # keep-sorted end

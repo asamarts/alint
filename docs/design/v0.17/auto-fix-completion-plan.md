@@ -1,0 +1,979 @@
+# v0.17 auto-fix: completion plan and priorities
+
+Status: **living plan** as of 2026-09-21. Branch: `phase-0-fix-engine` (the
+long-lived v0.17 integration line). This document is the SSOT for what remains to
+cut v0.17, written after an arc-wide adversarial audit; it supersedes the
+warn-then-flip `file_remove` sections of
+[`auto-fix-implementation-plan.md`](../auto-fix-implementation-plan.md) (§4 W5,
+§5, §11 R-FILEREMOVE, §12) and [`auto-fix.md`](../auto-fix.md) §9 (see §2 below).
+
+## 1. Where the arc stands
+
+**Complete and independently audited:**
+
+- **Phase 0** (fix-engine foundation): tiers (`Applicability`),
+  `CollectedEdit`/`EditVerifier`, the fixpoint driver, `--unsafe-fixes` /
+  `--fix-only` / `--diff` / `--dry-run`, report + exit plumbing, the two-op
+  guard, the coverage gate, the Kani overlap-skip proof.
+- **Phase 1**: the located `replace` op, the active fixpoint, `--changed`
+  write-confinement, the LSP `replace` code action, W2 content-fixer trust
+  (remote-`extends:` demotion, R-RETRO).
+- **Phase 2** (flagship): `set_value` / `remove_value` across all 8 formats
+  (HCL, XML, dotenv, INI, TOML, properties, JSON, YAML) + `replace` on the 8
+  `*_path_matches` kinds; whole-doc multi-rule coalescing (`minimal_replace`).
+- **W3 (SARIF `result.fixes[]`)**: `check --format sarif` advertises the
+  concrete fix each fixable finding would apply, derived from the REAL pipeline
+  (so it equals what `alint fix` writes).
+- **Phase 3 `chmod` (first metadata op)**: `fix: { chmod: {} }` on
+  `executable_bit` / `shebang_has_executable` sets or clears the Unix `0o111`
+  bits, preserving every other bit. Safe by default; Unix-only; `fix --diff`
+  renders a git-style `old mode`/`new mode` pair. Drawn by the property net
+  (single_fixable strategy + a planted shebang trigger) so convergence /
+  idempotence / dry-run purity are asserted across 3000 cases.
+- **Phase 3 `git_untrack` (first SPAWNING op -> the W2 spawn gate is LIVE)**:
+  `fix: { git_untrack: {} }` on `file_absent` runs `git rm --cached` to drop a
+  committed artifact from the index while keeping it on disk (converges with
+  `git_tracked_only: true`). Unsafe by default; refused from any non-top-level
+  source. The empty `SPAWNING_FIX_OPS` SSOT is now `["git_untrack"]`, wired to
+  `reject_spawning_fix_ops_in` (+ template / finalize / nested backstops) and both
+  R-SPAWNGATE tests (the parity gate + the RCE canary). An index-only op has no
+  worktree-diff form, so no `FixEdit` variant was needed.
+
+- **Phase 3 `command` fix (second SPAWNING op)**: `fix: { command: { run: [...] }
+  }` on the `command` rule runs a user-supplied fix command (e.g. `eslint --fix
+  {path}`), reusing the spawn gate. Unsafe by default, Safe-promotable in the
+  user's own top-level config. Convergence-EXEMPT (an arbitrary command's
+  idempotence is the author's business), so excluded from the property net +
+  `CONVERGENCE_EXEMPT`, with its own fire/silent tests.
+
+- **Phase 3 `dir_create` (Safe)**: `fix: { dir_create: {} }` on `dir_exists`
+  creates the required literal directory when missing (glob/multi/`..` rejected at
+  load; the host's violation is path-less, so the fixer carries the target). Safe,
+  fixed-behavior, converges + idempotent (joins the property net).
+
+**21 fix ops ship:** `set_value`, `remove_value`, `replace`, `file_create`,
+`file_remove`, `file_rename`, `file_prepend`, `file_append`,
+`file_trim_trailing_whitespace`, `file_strip_bom`, `file_normalize_line_endings`,
+`file_collapse_blank_lines`, `file_append_final_newline`, `file_strip_bidi`,
+`file_strip_zero_width`, `chmod`, `git_untrack`, `command`, `dir_create`,
+`sync_from` (cross-file mirror + value propagation), `relocate`.
+
+**Arc-wide audit (2026-09-20, 4 independent agents).** The core algorithms held
+up under adversarial probing (no silent corruption or uncaught over-deletion was
+reproducible across ~150 fixtures; the verify/demote cascade, overlap-skip,
+fixpoint, `--changed` confinement, and W2 provenance are sound). Fixed 4
+cross-cutting seam bugs (LSP verify/tier bypass; `--diff` silent drop of a
+deferred located edit; HCL BOM skip; `--fix-only` json flag) and filled the
+highest-value coverage gaps (`replace` × the other 6 formats, located+whole-file
+composition, the dead `FixDryRun` corpus step, structured non-convergence exit-2,
+W2 `file_prepend`/`file_append` demotion, `fix --baseline` rejection). Test count
+2648 green. Findings + fixes are in commits `1092e2fb`, `89098fb2`, `da256d28`,
+`0bfe00b3`.
+
+## 2. "Deferred to v0.18" -> v0.17: already resolved
+
+The one auto-fix item the plan deferred to v0.18 was the `file_remove` Safe ->
+Unsafe default flip. **It is already in v0.17** (commit `266c88f9`, which lands
+the flip "at the v0.17 fix-engine rework, a natural breaking point, rather than
+after a separate deprecation-warning release"). `file_remove` is Unsafe today; a
+bare `fix` only suggests it, `--unsafe-fixes` applies it; the scenarios
+(`file_remove_unsafe_by_default.yml`, `..._unsafe_flag_applies.yml`) assert this.
+There is **no deprecation-warning release** and **no v0.18 flip** -- so the
+"pull v0.18 into v0.17" request is satisfied.
+
+Docs reconciliation (done): the stale warn-then-flip prose in
+`auto-fix-implementation-plan.md` (§4 W5, §5 op-classification, §11 R-FILEREMOVE,
+and both §12 bullets -- Phase 0 and the flip paragraph) and `auto-fix.md` §9 has
+been corrected to the shipped reality (each spot marked SUPERSEDED or pointing at
+the flip commit `266c88f9`), so the design record no longer claims a deprecation
+warning or a v0.18 migration.
+
+## 3. Remaining v0.17 work, prioritized
+
+### P0 - Finish Phase 2's tail (W3 remainder + W4)
+
+- **W3b - `agent` / `json` `proposed_edit`. DONE + AUDIT-HARDENED.** `agent`
+  (always) and `json` (behind the new `--include-fixes` flag) now carry a
+  `proposed_edit` array (`{path, region, inserted}`) -- the same Safe-only edits
+  SARIF advertises, reusing the format-agnostic `attach_proposed_edits`. Gate:
+  `agent_and_json_carry_proposed_edit_per_the_include_fixes_flag`.
+  - **Independent P0 fidelity audit (2 agents, 2026-09-20) -> 7 findings fixed.**
+    THE FIDELITY INVARIANT (machine surfaces == what `alint fix` writes) had
+    diverged because `attach_proposed_edits` derived edits PER RULE while `fix`
+    composes PER FILE. Fixed: (CRITICAL) two located rules whose spans overlap on
+    one file now batch into one overlap-deconflicting pass, so no overlapping edit
+    `fix` skips is advertised; (HIGH) whole-file normalizers are threaded per file
+    in config order (each sees the previous one's output), so no spurious
+    `final_newline`-after-trim edit; (HIGH) `cmd_check` now wires
+    `fix_size_limit`; (MEDIUM) the per-node `replace` verify round-trips keys with
+    `'`/`\`/controls (was silently demoting safe fixes); (MEDIUM) a `no_bom`
+    empty-region no-op is omitted; (LOW) F3 baseline-fingerprint change noted in
+    CHANGELOG; (LOW) a non-UTF-8 byte-fix stays unadvertised (documented). Two A1
+    interactions caught by grounding were fixed first: the located `replace`
+    fidelity + the LSP keyless fix-all fallback. Gates in `sarif_fixes.rs` +
+    `structured.rs`. Per-edit granularity preserved.
+- **W3 tier scope: RESOLVED -> Safe-only (DECISION 2026-09-20).** The SARIF /
+  agent / json machine surfaces advertise ONLY Safe (applyable) fixes -- the
+  DoD's original "all tiers" is superseded, because SARIF has no machine-honored
+  per-fix safety field, so a third-party auto-applier could apply an Unsafe edit
+  blind. This is the CURRENT behavior (gated on per-violation `is_fixable`), so
+  W3b requires no tier change: `agent`/`json` simply surface the same Safe-only
+  proposed edits SARIF already does. alint's OWN `fix` keeps the full tier
+  control (Unsafe fixes shown as suggestions, applied only with
+  `--unsafe-fixes`). Docs (auto-fix.md 5.7 / §9, plan §7) reconciled.
+- **W4 - baseline-aware `fix`. DONE + AUDIT-HARDENED (`--baseline`).** `fix
+  --baseline` (and a config `baseline:` key) SKIPS the grandfathered findings and
+  resolves only NEW ones -- classified by reusing `baseline::apply` per rule (the
+  fingerprint includes the rule id, so per-rule == report-level), per fixpoint
+  pass, on the current content (identical to `check --baseline`). A grandfathered
+  finding is a benign `baselined` skip (`SkipKind::Baselined`, excluded from
+  `has_unresolved`), so it does not fail the exit -- a converged `fix --baseline`
+  with only accepted debt left exits 0. Gates: `fix_baseline.rs` (10 tests) +
+  `report` units.
+  **Follow-up:** `--strict-baseline` (stale-fail across a fixpoint) and
+  `--show-baselined` (suppressed visibility) for `fix` are still `check`-only
+  (loudly rejected, not silent). Extends ADR-0006.
+  - **Independent adversarial audit (2 agents, 2026-09-20) -> 5 findings fixed:**
+    (1) CRITICAL: the located `StructuredFixer` ignored its `violations` arg and
+    re-derived every failing node, so `fix --baseline` REWROTE grandfathered
+    `*_path_matches` nodes -- fixed with count-aware correlation on the shared
+    `matches_baseline_key` + per-node (not whole-query) verify. (2) HIGH / (3)
+    MEDIUM: the skip exit-code class was sniffed from a forgeable reason PREFIX
+    (`baselined:` / `fix error:`), so a filename could flip the exit code -- now
+    a structural `SkipKind`. (4) MEDIUM: three whole-file-fixer rules
+    (no_zero_width_chars, no_bidi_controls, max_consecutive_blank_lines) lacked a
+    path `baseline_key` and stripped grandfathered occurrences -- now keyed on the
+    path (the file is the unit of accepted debt). (5) LOW: a debug tripwire now
+    asserts the `violation_key` no-collision invariant the fixpoint merge relies
+    on. All five have regression gates; the baseline classifier and per-rule ==
+    report-level equivalence audited CLEAN.
+
+### P1 - Phase 3 (metadata, VCS, repo-scale cross-file)
+
+- **`chmod`. DONE (commit `9643891e`).** `SetMode` on `executable_bit`
+  (direction from `require:`) and `shebang_has_executable` (always +x);
+  `executable_has_shebang` stays fix-less (ambiguous target). The `ChmodFixer`
+  does the `set_permissions` itself and records `StagedKind::Chmod` for the
+  git-style `--diff`; dry-run / `--diff` short-circuit before touching disk.
+  Gates: property net (single_fixable + planted `_trig/needsx.sh`), 2 e2e
+  scenarios (+x and -x), unit tests (set/clear/idempotent, dry-run, stage,
+  fix_edit), fix_spec cases + `w2_content_injecting_ssot` (`chmod` in
+  FIXED_BEHAVIOR_FIX_OPS) + facts.json (auto_fix_ops 16). No ruleset bytes, so
+  no W2 trust surface.
+
+- **`git_untrack`. DONE (commit `f0688643`).** The FIRST spawning fix op on
+  `file_absent`: `git rm --cached` via a new `alint_core::git::untrack_path`
+  (idempotent, `--` option-injection guard, non-git-repo skip). Unsafe by
+  default. **The W2 spawn gate is now LIVE**: `SPAWNING_FIX_OPS = ["git_untrack"]`
+  + `reject_spawning_fix_ops_in` (rules at every `require:` depth) +
+  `reject_spawning_fix_op_templates_in` + a `finalize` backstop, wired in
+  `loader.rs` (extends) and `nested.rs`. R-SPAWNGATE landed as TWO tests in two
+  files: the parity gate `coverage_audit_fix_spawn_gate.rs` (the fixer that
+  spawns == `SPAWNING_FIX_OPS`; the rule gate now skips `fixers/`) and the RCE
+  canary `crates/alint/tests/fix_spawn_gate.rs` (drives the real binary in `fix
+  --unsafe-fixes`; every smuggled vector refused, the tracked file stays tracked;
+  a positive control proves a trusted top-level git_untrack untracks). The W2
+  partition gate is now three-way (content / spawning / fixed). An index-only op
+  has no worktree-diff form, so no `FixEdit` variant was added.
+  - **AUDIT-HARDENED (commit `c12c0b64`; 3 independent agents -- the spawn gate got
+    a clean bill on 25+ bypass vectors). Fixed:** (CRITICAL) `git rm --cached --
+    <path>` glob-expands the path as a git PATHSPEC (`--` blocks options, NOT
+    globbing; `*` crosses `/`), so a `[id].tsx`/`*`-named file collaterally
+    untracked siblings / emptied the index -- fixed with `GIT_LITERAL_PATHSPECS=1`
+    (a trap for EVERY future git-shelling fixer). (MED) dry-run/`--diff` now routes
+    through git's own `--dry-run` so it can't diverge from the real run on a
+    staged-differs path. (MED) chmod `--diff` rendered an invalid git mode for a
+    suid file + downgraded a binary chmod to a summary -- fixed with a
+    pre-content-gate render + canonical `100644`/`100755`. (MED) an editless Unsafe
+    suggestion (git_untrack) was a misleading skip, not a `requires --unsafe-fixes`
+    suggestion -- `FixStatus::Suggested.edit` is now `Option`. (LOW) the finalize
+    template backstop now recurses `require:` like the per-source gate.
+  - **Fast-follow:** the optional `.gitignore` append (`gitignore: bool`, default
+    true per the op table) is deferred -- untrack alone converges; the append adds
+    content-mutation + `--diff`-hunk work worth its own increment.
+
+- **`command` fix. DONE (commit `e315b72d`).** The SECOND spawning op: `fix: {
+  command: { run: [...] } }` on the `command` rule lifts its fix rejection and
+  runs a user-supplied fix command (`CommandFixFixer` reusing `spawn::run_capturing`;
+  exit 0 -> Applied, non-zero/spawn-error/timeout -> fix error; dry-run/`--diff`
+  report "would run" and spawn nothing; no `fix_edit`). **Unsafe by default,
+  Safe-promotable** in the user's own top-level config (asamarts's call -- uniform
+  with file_remove/git_untrack, reusing `reject_fix_promotion_in`, no new gate).
+  Second entry in `SPAWNING_FIX_OPS` (belt-and-suspenders atop the top-level-only
+  `command` rule kind). Convergence-EXEMPT (`CONVERGENCE_EXEMPT = ["command"]`,
+  excluded from the property net), with its own fire/silent tests + the e2e fire
+  scenario + the parity gate (`command` -> `command_ops.rs`).
+  - **AUDIT-HARDENED (commit `777c84ba`; 3 agents -- injection + trust gate got a
+    clean bill). Fixed:** (behavior) a non-converging command-fix re-ran the
+    command to the 10-pass fixpoint cap -- now the fixer reports `Applied` only when
+    it CHANGES `{path}` (Skip = the idempotence signal), so it runs <=2x; (MED) a
+    failing command's output was surfaced uncapped (64 MiB) -- now truncated to 16
+    KiB. Filled coverage: non-command-kind extends refusal (H1), Safe-promoted +
+    default-suggested tiers (H2), the silent half (M1), the TimedOut arm (M2), the
+    editless `--dry-run` preview (M3), chmod default tier (L3). Docs: timeout
+    default 30, the templated program token, the auto-fix.md chmod tier.
+
+- **`dir_create`. DONE (commit `3aed5abf`) + AUDIT-HARDENED (3 independent
+  agents + own probe -- path confinement was the CRITICAL miss).** Safe fix on
+  `dir_exists`: `DirCreateFixer` (in `fixers/file_ops.rs`) creates the required
+  literal directory. `dir_exists` fires a PATH-LESS violation, so the fixer
+  carries the target; `build()` requires `paths` to be one literal dir (glob /
+  multiple / `..` rejected at load). No-op skip when the dir already exists; no
+  `fix_edit` (an empty dir has no worktree-diff form). Converges + idempotent ->
+  in the property net; fixed-behavior in the partition.
+  - **C1 (CRITICAL, own probe -> agents escalated): out-of-root write.** An
+    absolute `paths: "/tmp/x"` or a symlinked-parent `paths: "link/sub"` made
+    `ctx.root.join(dir)` mkdir OUTSIDE the repo. Since `dir_create` is
+    fixed-behavior it is honored from an untrusted `extends:`, so a remote
+    ruleset could mkdir anywhere on a bare `alint fix`. FIX: route through the
+    shared `creators::confine_fix_path` (lexical + filesystem symlink-parent
+    check); out-of-root now needs a top-level `allow_out_of_root`.
+  - **H1: `git_tracked_only` never converges** (git cannot track an empty dir)
+    and **H2: `root_only` + a nested path never converges.** Both now
+    **rejected at `build()`** with an actionable message (H1 points at a
+    `.gitkeep` via `file_create`).
+  - **M1: broken-symlink errno leak** -> explicit symlink guard returns a clean
+    `Skipped` ("exists but is not a directory (a symlink)"), so the fixer truly
+    refuses to clobber a non-directory. **M2: no stage-mode test** -> added.
+  - Gates: 13 fixer units (was 4; +7 for confinement / symlink / stage / broken
+    symlink) + build-reject tests + e2e + generator.
+
+- **`sync_from`. DONE.** The first CROSS-FILE content fix op, on
+  `cross_file` `relation: identical`: overwrite a drifted target with the
+  canonical `source:` so the rule converges (the workspace LICENSE-mirroring
+  case). `SyncFromFixer` (in `fixers/cross_file_ops.rs`) is a content fixer -- it
+  routes a whole-file write through the compose buffer (`SetContent` for the
+  editor / SARIF / `--diff` surfaces), so it needs no `apply`-direct-write path.
+  **`Unsafe` by default** (a whole-file overwrite can discard uncommitted target
+  content), and **content-injecting** in the W2 partition (the ruleset's `source:`
+  chooses which file overwrites which, so an untrusted remote demotes it to a
+  suggestion). `cross_file` grew a `fixer: Option<SyncFromFixer>` + `fn fixer`;
+  `build()` accepts `sync_from` ONLY on `relation: identical` with
+  `skip_header_lines: 0` and a single-file source (a value / set / resolves
+  relation, or a preserved header, is rejected at load -- a whole-file copy has no
+  single "correct bytes" there / would clobber the kept header). Both endpoints
+  are confined via the shared `confine_fix_path` (an absolute / symlinked-parent
+  `source:` or target can't read or write out of tree -- built in from the start,
+  not a post-audit fix). Converges + idempotent (target := source -> identical ->
+  no violation; a second pass finds them equal -> Skip), so it is IN the property
+  net (`rule_sync_from` + a planted `_trig/sync_src.txt` / `_trig/sync_dst.txt`
+  pair, applied under `--unsafe-fixes`). Gates: 13 fixer units (mirror / binary /
+  dry-run / stage-compose / confinement x2 / missing-source / self-copy /
+  allow_out_of_root / fix_edit x2 / tier) + 4 build tests + 2 e2e (applied +
+  suggested) + facts.json (auto_fix_ops 20). **The whole-file overwrite is the
+  deliberate scope: cross-file value propagation (`equals`) is a SEPARATE, harder
+  increment (a located value patch with the injectable-writer seam), and a
+  header-preserving sync is a deferred follow-up.**
+  - **AUDIT-HARDENED (3 independent agents + own 11-probe pass). 1 HIGH + 1 LOW
+    fixed:** (HIGH) `read_for_fix` (alint-core) did a bare `std::fs::read` with NO
+    non-regular-file guard, so a FIFO named as a `sync_from` `targets:` LIST entry
+    (a config-verbatim path that skips the walker's special-file filter) HUNG `fix`
+    forever -- including the `--dry-run` / `--diff` previews. `check` was safe
+    (`read_capped` refuses non-regular), so the fixer diverged. FIX: `read_for_fix`
+    now refuses a non-regular file (a `metadata().is_file()` guard, mirroring
+    `read_capped`/`open_regular`) -> a clean Skip; this hardens EVERY fixer, not
+    just sync_from. (LOW) no `w2_remote_sync_from_is_demoted_to_suggestion` test
+    existed (every sibling content op has one) and `declared_content_tier` lacked a
+    `SyncFrom` arm -- the demotion WORKED but nothing locked it in; both added.
+    Agents confirmed the rest SOUND: confinement (absolute + symlinked-parent),
+    convergence (incl. mutually-referential swap/cycle rules), tier honesty,
+    machine-surface Safe-only gating, and the untrusted-remote demotion firing.
+
+- **`cross_file.rs` split into a `cross_file/` module (spec / eval / mod).** The
+  file had passed 2000 lines (the dogfooded `rust-file-max-lines` limit); split by
+  responsibility with co-located tests, all three files well under. Faithful
+  refactor (a third agent verified 39==39 tests preserved + byte-identical
+  production code); `xtask` `rule_source_files` now resolves a `<stem>/mod.rs`
+  directory module so alint.org's source links stay valid.
+
+- **`sync_from` on `equals` (value propagation). DONE (Phase 1).** Extends
+  `sync_from` to the value relation: propagate the source's single extracted
+  scalar into each drifting target's node, per format. `CrossFileValueFixer` (in
+  `fixers/cross_file_ops.rs`) is a WHOLE-FILE `apply` fixer that reuses the located
+  resolver INTERNALLY -- it builds a `StructuredFixer::set` for the target node,
+  takes its located edit, and applies + verifies it via `located_fix::
+  apply_file_edits`, then `commit_write`s the whole result. **Design finding
+  (recorded in `cross-file-value-propagation.md`): a located `collect_edits` fixer
+  must NOT host on `cross_file` -- the engine's located branch assumes per-file
+  hosts and would silently escape the `--changed` blast radius on a
+  `requires_full_index` rule (engine.rs:1633-1656). The whole-file `apply` approach
+  routes through the existing blast-radius-demoted path, so NO engine change.**
+  `cross_file`'s `fixer` field widened to `Option<Box<dyn Fixer>>` (identical ->
+  `SyncFromFixer`, equals -> the value fixer). `build()` accepts equals + all
+  STRUCTURED target extracts (all 8 formats via the `StructuredFixer` reuse);
+  regex-extract targets are the Phase-2 follow-up (rejected at load); a set /
+  resolves relation is rejected. Unsafe + content-injecting (W2 covers `sync_from`
+  already). Gates: 6 fixer units (propagate / idempotent / not-one-value / dry-run
+  / confine / tier) + 3 build tests (accepts equals+structured, rejects
+  regex-target, rejects set) + an e2e (`sync_from_equals_propagates_a_value`,
+  applied under `--unsafe-fixes` + convergent). No facts change (still `sync_from`,
+  op count 20). Design doc: `docs/design/v0.17/cross-file-value-propagation.md`.
+  - **AUDIT-HARDENED (2 independent agents + own ~12-probe pass). 1 MED + 1 LOW +
+    an LSP gap, all fixed; the load-bearing `--changed` claim VERIFIED live.**
+    (MED, F1) the fixer always writes a `Value::String` (extraction yields text),
+    so a NUMERIC/BOOL target node was silently coerced to a quoted string and
+    `check` went false-green -- FIX: a type-preservation guard declines a
+    non-string scalar node (the `equals` check compares only string leaves, so a
+    coercion is the only thing that "converges", masking the mismatch; a typed pin
+    belongs in same-file `set_value`). (LOW, F2) `--changed` over-demoted a
+    `./`-prefixed LIST target that IS the changed file (config-verbatim path vs
+    git-canonical diff spelling) -- FIX: normalize the list path at the single
+    resolution point (`resolve_targets`), so the violation path AND the fixer's
+    stored target path both match the diff. (LSP, 4c) the value fixer had no
+    `fix_edit`, so the LSP could never offer it even Safe-promoted (SARIF/agent DO
+    advertise it via the compose pass) -- FIX: implemented `fix_edit` (a
+    `SetContent` reusing `propagated_bytes`); changes only the LSP. Added: the W2
+    demotion test for the EQUALS form, the value fixer's `--changed`-demote CLI
+    test (the "no engine change" claim's gate), type-coercion + non-scalar-skip +
+    fix_edit units, a JSON e2e, and two stale-comment fixes. Agents confirmed SOUND:
+    all 8 formats, PutGet verify (special chars / control chars demote), source +
+    target confinement (incl. a real FIFO), compose + loud non-convergence, tier
+    honesty across human/sarif/agent/json, and the partition gate.
+  - **Phase 2 DONE: regex-extract targets.** `ValueTargets` now carries the whole
+    `Extract` (structured or regex); `propagated_bytes` dispatches to
+    `propagate_structured` (Phase 1) or `propagate_regex` (new). The regex path
+    rewrites EACH match's capture group 1 to the source value via a `ReplaceRange`
+    batch through `apply_file_edits`, then RE-EXTRACTS to verify (a value that
+    breaks the surrounding pattern -- e.g. a `"` inside a `"([^"]+)"` capture, or a
+    digit into a `[a-z]+` capture -- fails and declines, never writing a value the
+    check would still reject); requires valid UTF-8 (byte-offset-safe). `build()`
+    accepts a structured OR regex target extract; a `lines`/`whole_file` target is
+    rejected (no single value). Gates: 4 regex fixer units + a build-accept +
+    a `lines`-reject build test + a regex e2e (`sync_from_equals_regex`, a README
+    badge + Dockerfile `ARG`). The value-propagation feature is now complete.
+  - **AUDIT-HARDENED (2 independent agents + own probing). 1 CRITICAL + 2 HIGH,
+    all fixed -- the value fixer was re-deriving edits from raw bytes without
+    correlating to the check (the located-fixer-correlation lesson, violated).**
+    (CRITICAL) making `cross_file: equals` fixable exposed that it emits KEYLESS
+    multi-findings per path (a non-literal `${...}` NOTE + a keyless "no literal
+    value" violation) that collide on `violation_key` -- `alint fix` PANICKED in
+    debug (a plain `image: myapp:${VERSION}` config) / silently dropped one in
+    release. FIX: the notes now carry a `reason`-discriminated `baseline_key`
+    (`eval.rs`), so every finding on a path is uniquely keyed. (HIGH) the fixer
+    CLOBBERED non-literal `${...}` captures the check deliberately skips, and
+    (HIGH/MED) it IGNORED `normalize:`, over-writing a capture the check deemed
+    correct (`2.5.7`->`2.5.0` under `semver-minor`). FIX: an `is_drift` guard --
+    the fixer rewrites a capture/node ONLY if the check flagged it (LITERAL and
+    normalize-different from the source); the fixer now carries the rule's
+    `normalize`, and the regex re-extract verify is normalize + literal aware.
+    Also F-1 (a "matched nothing" regex now says so, not "no capture group 1").
+    Gates: non-literal-skip (regex + structured), normalize-correlation,
+    multi-capture, no-match, non-UTF-8, mixed-list build, and a
+    `sync_from_equals_skips_a_template` e2e (the debug panic gate). Agents
+    confirmed the re-extract verify SOUND (verify-pass implies check-pass) + byte
+    offsets, confinement, --changed, tiers all hold.
+
+- **`relocate` (lockfile relocate). DONE.** A new fix op (`FixSpec::Relocate`,
+  #21) hosted on `file_absent`: when the rule flags a file in a SUBDIRECTORY, move
+  it back to the repository root keeping its basename -- the "a lockfile drifted
+  into a member directory" case (`paths: "**/*/Cargo.lock"` + `fix: { relocate:
+  {} }`). Design decisions: (a) HOST = reuse `file_absent` (the violation carries
+  the subdir path), joining `file_remove` / `git_untrack` in its `match &spec.fix`
+  -- no new rule kind, the smaller and self-contained option; a dedicated
+  `file_at_root` kind was considered and left as a future option. (b) MECHANISM =
+  `RelocateFixer` modeled on `FileRenameFixer` (a shared PURE `resolve_relocate_
+  target` feeds `apply` + `fix_edit` + `can_fix`; emits `FixEdit::RenameFile` to
+  root; honors dry-run + `--diff` stage via the `stage_ops` sink). (c) TIER =
+  Unsafe by default (a rename moves a real file, destination inferred),
+  Safe-promotable; FIXED-BEHAVIOR in W2 (no ruleset bytes, no spawn -- honored
+  from any source, gated only by its tier). (d) UNAMBIGUOUS-ONLY: an already-at-
+  root file (nowhere to move, `X->X` never converges) is `can_fix`-false and
+  Skipped; an occupied root slot is a fix-time collision Skip (never clobbered,
+  and the same-file case that `FileRenameFixer` needs cannot arise -- source is in
+  a subdir, target at root); a staged-collision (two nested files, one root slot)
+  skips the second so `--diff` never emits a self-conflicting patch. Convergence
+  requires a SUBDIRECTORY-anchored pattern (`**/*/Cargo.lock`, not `**/Cargo.lock`);
+  the docs + the fixspec doccomment say so. Gate cascade: `FixSpec::Relocate` +
+  `RelocateFixSpec` + `op_name` + `ALL_OP_NAMES` + the `cases` op-name test
+  (config.rs); `file_absent` build arm + `build_accepts_relocate_fix`; W2
+  fixed-behavior partition (`FIXED_BEHAVIOR_FIX_OPS`) + `w2_remote_relocate_is_not_
+  demoted` (with an explicit `declared_content_tier` arm for teeth); property net
+  (`rule_relocate` + a planted nested `_trig/reloctrig.txt`, drawn into the
+  convergence / idempotence / dry-run-purity laws); fix-coverage e2e (4 scenarios:
+  moves-a-nested-lockfile [convergent], suggested-under-bare-fix, skips-when-root-
+  slot-taken, declines-a-root-level-file); 9 `RelocateFixer` unit tests; facts.json
+  20->21; README count (26 + 60) + prose; CHANGELOG. No standalone design doc (a
+  focused op like `dir_create`); the decisions live here.
+  - **AUDIT-HARDENED (2 independent worktree-isolated agents, both base-verified at
+    the tip + own CLI probing).** Both verdicts: **sound and safe to ship** -- no
+    data-loss, no clobber of a real committed file, dry-run/stage disk-pure,
+    converges + idempotent; and the gate cascade is sound with every claimed
+    invariant asserted with teeth (the W2 classification -- the highest-risk area --
+    is correct and genuinely enforced: an untrusted remote cannot promote relocate
+    to Safe, clobber, retarget onto an arbitrary name (dest is always root + the
+    ORIGINAL basename), or path-traverse). All findings were LOW except two MED
+    preview/scope edges, all either FIXED, by-design, or shared-with-`FileRenameFixer`.
+    FIXED this round: (1) collision check now uses `symlink_metadata` not `exists()`,
+    so a DANGLING symlink at the root slot is never clobbered (Agent A #4); (2) a
+    DESTINATION `has_pending_write` guard, so a self-contradictory `file_create`
+    root/X + relocate nested/X->root/X config yields instead of racing the flush
+    (Agent B F4) -- both stricter than `FileRenameFixer`, with a backport follow-up;
+    (3) the docs-manifest `count_canonical_auto_fix_ops` now keys off
+    `FixSpec::ALL_OP_NAMES` (was a `pub struct *Fixer` text-count equal only by
+    coincidence -- a future struct-reuse would have drifted the published count from
+    facts/README; Agent B F1); (4) `dir_exists` `build_rejects_an_incompatible_fix_op`
+    now covers `relocate` (proving its only valid host is `file_absent`; Agent B F3);
+    (5) the README line-60 "N ops covering" prose count is now gated (Agent B F2).
+    By-design / accepted (documented, NOT bugs): Agent A #2 (`--changed
+    --unsafe-fixes` creates the root `to` target -- a rename's target is intrinsically
+    new; the engine correctly keys the blast-radius demote on the in-scope
+    violation/`from` path, and an UNTOUCHED nested file IS demoted to a suggestion;
+    demoting on the `to` would make every rename un-fixable under `--changed` and
+    regress `file_rename`); Agent A #3 (the fixer does no self-confinement -- the
+    target is confined by construction via `file_name`, and the source comes from
+    the walker's root-stripped, symlink-pruned index, so `..`-escape is unreachable
+    through the only host, matching `file_remove`/`file_rename`); Agent A #5 /
+    Agent B F5 (`can_fix`-true + `apply`-Skipped for a taken slot is intentional and
+    mirrors `FileRenameFixer`; `fix_is_idempotent` is vacuous for every Unsafe op
+    because it runs at the Safe threshold -- `fix_unsafe_converges` is the real
+    idempotence teeth).
+
+- **`create_and_register` (cross-file create-and-register). IN PROGRESS -- the LAST
+  Phase-3 op.** Design doc: `docs/design/v0.17/cross-file-create-and-register.md`
+  (asamarts approved the shape 2026-09-24). A new `cross_file` `relation: registered`
+  + `fix: { create_and_register: {} }`: a workspace member must both EXIST and be
+  REGISTERED in a manifest list (`$.workspace.members`). **KEY MODEL (asamarts):
+  two idempotent postconditions -- `exists` (repair = create from `content_from:`)
+  and `registered` (repair = append to the list) -- each applied ONLY if unmet;
+  "create only if it doesn't exist" is not a mode flag, just the existence repair,
+  a no-op whenever the member already exists (always so for a glob-discovered one).**
+  So the common case (existing-but-unregistered) degrades to a single-file list
+  append; the 5.2.4 multi-file transaction engages only when a create actually
+  fires (a missing NAMED source). Unsafe + content-injecting.
+  - **Phase 1a -- the `registered` CHECK. DONE (commit `6cbdd63b`).** The relation
+    + `check_registered` (filesystem-path source -> per-target subset check) +
+    `register_as` templating + the source-glob / shape validations + schema regen
+    (worked through a stale-base-`Relation` `$defs` gen-schema collision). 3 e2e +
+    4 build tests.
+  - **Phase 1b -- the register-only FIX. DONE (this commit).** `create_and_register`
+    (`FixSpec::CreateAndRegister`, #22): a `CreateAndRegisterFixer` (whole-file
+    apply, content-injecting, Unsafe-default) appends each missing member the check
+    recorded IN ITS `baseline_key` (the check->fixer channel, so the fixer never
+    re-globs and can't diverge from the check's gitignore-aware member set) to the
+    target's array via a new `structured_fix::document_append` (TOML via `toml_edit`,
+    format-preserving + idempotent; JSON/YAML decline as a fast-follow). The target
+    `extract` selects elements with a trailing `[*]`; the fixer strips it to the
+    array path. Full gate cascade (FixSpec + op_name + ALL_OP_NAMES + cases; W2
+    content-injecting + `w2_remote_create_and_register_is_demoted`; property net
+    `rule_create_and_register` + planted `_trig/reg_manifest.toml` + `_trig/reg_member`;
+    3 build tests; 2 fix e2e [convergent + suggested-under-bare]; facts 21->22;
+    README 26+60; CHANGELOG; options snapshot). Full preflight green.
+  - **Phase 1b AUDIT-HARDENED (2 independent worktree-isolated agents base-verified
+    at 7b86e51b + own CLI probing).** Verdict: SECURE (W2 demotion, confinement,
+    TOML-injection escaping, `--changed` blast-radius all sound -- proven), gate
+    cascade structurally sound (W2 teeth by mutation, property net 115/115
+    fired+converged), but NOT fully correct -- fixed 2 HIGH + several MED, all gated:
+    (1 HIGH, PRE-EXISTING+SHARED) `finalize`'s blanket `\n`->`\r\n` DOUBLED the `\r`
+    toml_edit keeps INSIDE a multi-line string -> INVALID TOML on a uniformly-CRLF
+    manifest (also reachable via set_value/remove_value); FIX = normalize `\r\n`->`\n`
+    first. (2 HIGH) `normalize:` made the fixer register the NORMALIZED value (a path
+    that doesn't exist) while `check` falsely went green; FIX = REJECT `normalize` on
+    `registered` (compare verbatim). (A#1 HIGH) the flagship `files: "crates/*"`
+    matched LOOSE files (README/.gitkeep) -> corrupt members; FIX = document the
+    manifest-anchored `crates/*/Cargo.toml` + `register_as: {dir}` pattern everywhere
+    + a loose-file-exclusion e2e gate. (A#2/B#5 MED) a multi-match target query
+    (`$..members[*]`) appended to the WRONG array; FIX = reject a non-static array
+    query at build. (A#4 MED) `--baseline` un-grandfathered siblings because the
+    per-target key encoded the whole missing set; FIX = ONE violation PER-MEMBER with
+    a stable per-member key (viable because read_for_fix is compose-aware, so N
+    appends to one file accumulate). (A#6) a `./`-prefixed named source read as
+    missing; FIX = normalize_confined it. (A#7) a zero-match glob silently passed;
+    FIX = fire "matched no files". (B#3) added a post-splice re-parse+member-present
+    verify (declines rather than write corrupt/wrong bytes). Gates: CRLF+multiline
+    finalize test (append + set_value), loose-file-exclusion e2e, normalize-reject +
+    multi-match-reject build tests. **DEFERRED (documented): A#5 (register into an
+    ABSENT `members` array -- create the array) -> Phase 2 alongside the create half;
+    A#5a (can_fix over-promises when the array is absent -- inherent fix-time state
+    like FileRenameFixer, fails LOUD not silent); B#4 (a new element in a MULTI-LINE
+    array is appended inline after the last, not on its own line -- valid TOML, a
+    formatter tidies).** **REUSABLE LESSONS: (1) `finalize`'s CRLF restore must
+    normalize `\r\n`->`\n` before `\n`->`\r\n`, or it doubles a `\r\n` toml_edit keeps
+    inside a multi-line string (invalid TOML) -- a PRE-EXISTING bug all 3 toml_edit
+    whole-doc ops share; (2) a value fixer must register the RAW value, never a
+    normalized one -- reject `normalize` where the fixer echoes the compared value;
+    (3) per-member (not per-target-with-a-list) baseline keys keep each finding's
+    fingerprint stable so partial progress doesn't un-grandfather siblings; (4) an
+    array-locating JSONPath for a fixer must be STATIC (one array) -- reject residual
+    wildcards, or the check unions while the fix targets the first.**
+  - **Phase 2 -- create-if-missing (the "two-postcondition create"). DONE (this
+    commit; asamarts chose this over the full 5.2.4 transaction via AskUserQuestion).**
+    KEY DECISION: the `exists` and `registered` conditions are already INDEPENDENT
+    idempotent findings, so a missing NAMED member is handled by TWO fixes the
+    fixpoint applies -- create the file (an existence finding, from `content`/
+    `content_from`) + append its path (a registration finding) -- with NO multi-file
+    transaction and NO engine write-step rework. `CreateAndRegisterFixSpec` gained
+    `content`/`content_from`; the fixer carries an `Option<ContentSourceSpec>` and
+    dispatches on the finding kind (`existence_member` vs `missing_members`):
+    `create_member` mirrors `FileCreateFixer`'s confinement + no-clobber + symlink
+    guards + parent creation (reuses `resolve_source_bytes`, now `pub(crate)`);
+    `fix_edit` emits a `CreateFile`. The check now emits a registration finding for a
+    missing NAMED member too (removed the exists-only filter), so both postconditions
+    fire. `build` rejects `content` on a GLOB source (inert -- a glob never yields a
+    missing member) + the content XOR. Gates: an e2e (missing named member ->
+    created + registered -> converges) + 3 build tests. **DEFERRED (documented): the
+    full 5.2.4 all-or-nothing transaction + injectable-writer engine seam (a
+    ROBUSTNESS layer, not needed for the model -- the write phase can't be truly
+    atomic anyway); JSON/YAML `document_append`; creating a missing `members` array.**
+  - **Phase 2 AUDIT-HARDENED (round 2; 2 worktree-isolated agents base-verified at
+    383e8af5 + own CLI probing).** Both agents + own probing independently reproduced
+    ONE HIGH integration bug + minor items. **HIGH (the decisive one): the
+    uncoordinated two-postcondition model registered a PHANTOM member.** Removing the
+    existence filter (Phase 2) made a missing NAMED member get a registration finding
+    that fired even when the create was WITHHELD (no `content`, an unreadable
+    `content_from`, a root-escaping `source.file`, a `--changed` skew) -> the manifest
+    listed a nonexistent (or `../`-out-of-tree) member, BREAKING cargo, reported green,
+    non-convergent. FIX = RE-ADD the existence filter: registration is a
+    POSTCONDITION-ordered consequence of existence -- a missing member is registered
+    only AFTER the create-half makes it exist (the fixpoint re-walks and the next pass
+    fires the registration), and a member that can't be created is NEVER registered
+    (no phantom; also drops a root-escaping named source, which never resolves in the
+    index). Create-half SECURITY was CLEAN in both audits (no out-of-root create, no
+    clobber, symlink refusal, no `content_from` exfiltration, W2 demotion, dry-run/
+    `--diff` purity). Also fixed: 6 create-half unit tests (the create half had ZERO),
+    a phantom-prevention e2e gate, stale Phase-1b-register-only doc comments + the
+    `describe()` string. Deferred/documented (LOW, both agents): a dangling-symlink
+    PARENT yields a hard "fix error" not a clean Skip (SHARED with FileCreateFixer's
+    `create_dir_all`); `content`/`content_from` not in the JSON schema `fix` `oneOf`
+    (PRE-EXISTING -- 7 of ~22 ops are, `deny_unknown_fields` catches typos at load).
+    **REUSABLE LESSON: in a two-postcondition fix where one postcondition is a
+    PREREQUISITE of the other (a member must EXIST before it can be REGISTERED), gate
+    the dependent finding on the prerequisite and let the FIXPOINT sequence the
+    repairs -- do NOT emit both unconditionally, or a withheld prerequisite fix leaves
+    the dependent one applied as a corrupt half-state.**
+  - Each phase: full preflight + an independent adversarial audit round.
+
+After create-and-register: Phase 3 is COMPLETE; on to Phase 4.
+
+### P2 - Phase 4 (ordering, canonicalization, headers)
+
+IN PROGRESS (one op at a time). Ops: `sort` / `dedup` (on `ordered_block`),
+`indent_style` (lift the `indent_style.rs` rejection), a gitignore/gitattributes
+`insert_line`, `insert_header` (on `file_header`, comment-style/shebang/xml-decl/
+.license aware). Risk: low-medium. The clean deterministic wins; a good final phase.
+
+- **`sort` (first Phase-4 op, Safe). DELIVERED.** `fix: { sort: {} }` on
+  `ordered_block`: a whole-file rewrite that re-sorts each marked block's entries
+  under the rule's own `comparator` (dropping duplicates when `unique`), reusing
+  the rule's `start` / `end` / `comparator` / `unique` / `select` so what `sort`
+  reorders is exactly what the check flags out of order. Non-entry lines (markers,
+  blanks, `select`-excluded comments) and every line's terminator (LF vs CRLF) +
+  the file's trailing-newline state are preserved (the fix only PERMUTES entry
+  bodies across their slots, keeping each slot's ending positional; `unique`
+  deletes the surplus slot). `Safe` + fixed-behavior in the W2 partition (it
+  reorders the file's OWN lines -- no ruleset-authored bytes -- so it is honored
+  from any source, unlike `create_and_register`). Correlation held by a SHARED
+  entry predicate (`is_entry_line`) between the check and the fixer's `scan_blocks`
+  + a check->fix->converge e2e. The one non-`sort`-fixable finding -- an unclosed
+  block (a `start` with no `end`) -- carries a sentinel `baseline_key`
+  (`ordered_block\0unclosed\0<line>`) so `can_fix` declines it and `check` does not
+  advertise it fixable (proven through the engine in `fixable_accuracy.rs`); entry
+  findings stay key-less so making the rule fixable does not un-grandfather
+  baselines. A post-sort `is_monotonic` verify skips a block a non-strict-weak
+  comparator (pathological mixed-`numeric`) could not fully order, so `fix` never
+  writes a file `check` would still flag. Full gate cascade + preflight green.
+  - **Audit round 1 (CLI probing) HIGH -- F4 multi-block panic, FIXED.** A file
+    with TWO out-of-order blocks made `ordered_block` emit two FIXABLE findings on
+    one path; the fixpoint merge keys fixable findings by `violation_key`, which
+    for a key-LESS path-bearing finding collapses to `(rule_id, path)`, so the two
+    collided and `alint fix` PANICKED (engine F4 tripwire). The single-block
+    tests/scenarios/property-trigger all missed it. Fix: the check now tags EVERY
+    finding with a per-block `baseline_key` (`entry`/`unclosed` + start line) --
+    but ONLY when the rule is fixable (`self.fixer.is_some()`), so a check-only
+    ordered_block keeps its offending-line fingerprint (no baseline churn) and only
+    adding a `sort` fix re-baselines it. Regression-gated three ways: a unit test
+    (`fixable_rule_keys_two_blocks_distinctly`), an e2e scenario
+    (`sort_two_blocks_in_one_file.yml`), and the property-net trigger now has TWO
+    blocks.
+  - **Audit round 2 (2 worktree-isolated agents + own re-probing). F1 multi-block
+    panic INDEPENDENTLY CORROBORATED by the correctness agent = already fixed in
+    round 1. Six more fixed:** (a) **[HIGH]** a `unique` sort DELETED non-identical
+    lines at `Safe` (equality is on the trimmed/folded value, so `Foo`/`foo` or
+    `  a`/`a` collapse) -- silent data loss under a bare `fix`; now `unique`
+    defaults `Unsafe` like every sibling deleter (pure reorder stays `Safe`;
+    explicit `applicability:` overrides). (b) **[MED]** a remote `extends:` could
+    aim a `Safe` reorder at an order-significant file (`.gitignore`/`CODEOWNERS`)
+    to change its meaning; moved `sort` FIXED_BEHAVIOR -> CONTENT_INJECTING (demoted
+    from an untrusted remote, like `sync_from`). (c) **[MED, F3]** `numeric` sorted
+    u64-range integers (snowflakes) LEXICALLY (`leading_int` was `i64`) -> now
+    `i128`; a pre-existing CHECK bug the fix amplified. (d) **[MED, F2]** a `unique`
+    dedup deleting the last no-terminator line spuriously added a final newline ->
+    now preserved. (e) **[LOW-MED]** the per-block key embedded a line number ->
+    now the block ORDINAL (line-number-free, stable cross-pass). (f) **[LOW]** two
+    pre-existing ARCHITECTURE.md fix-op rows corrected. `is_monotonic` confirmed
+    unreachable for the total built-in comparators (2500+ fuzz iters clean). Gates:
+    `build_defaults_the_deleting_unique_sort_to_unsafe`, `w2_remote_sort_is_demoted_to_suggestion`,
+    `sorted_numeric_orders_u64_range_ids`, `leading_int_parses_beyond_i64`,
+    `sorted_unique_deleting_last_line_preserves_no_final_newline` + the dedup e2e now
+    uses `fix_unsafe`.
+  `dedup` (order-preserving, without sort) and `indent_style` / `insert_line` /
+  `insert_header` remain. `dedup` folds naturally into `sort`'s `unique` path, so a
+  standalone order-preserving `dedup` is only needed for the "keep insertion order,
+  drop repeats" case.
+
+- **`indent_style` (2nd Phase-4 op). IN PROGRESS (asamarts chose the width-based
+  scope, 2026-09-24).** Lifts the deferred `indent_style.rs` fix rejection. The
+  deferral was a real fork -- converting tabs<->spaces needs a tab-width -- which
+  the rule's own `width:` resolves for the common case. Scope: op `fix: {
+  indent_style: {} }`, wired ONLY for `style: spaces` + a `width: N` (>0); build
+  REJECTS the fix for `style: tabs` or a missing/zero width ("needs style: spaces +
+  a width -- the spaces-per-tab is otherwise unknown"). The fixer converts a line
+  whose leading whitespace is PURE TABS (K tabs, no spaces) to K*N spaces (resolves
+  WrongChar AND lands on a multiple of N). It DECLINES (leaves) the genuinely
+  ambiguous bad lines: a MIXED tab+space lead (round the trailing spaces? unknown)
+  and a pure-space WIDTH-MISMATCH (round up or down? unknown). Honesty: the check,
+  when fixable (`self.fixer.is_some()`), tags the first-bad-line finding with a
+  `baseline_key` = fixable (pure-tab) / unfixable (mixed / width-mismatch) so
+  `can_fix` declines the ambiguous ones (like `sort`'s unclosed sentinel); one
+  finding per file (first bad line), so NO F4 multi-finding issue. `apply` is
+  whole-file: converts EVERY pure-tab line -> N spaces (Applied if it changed a
+  line, else Skipped); width/mixed lines surface separately on re-check and are
+  reported unfixable -> honest, convergent. Tier **Unsafe** (audit round-3, see
+  below). W2 **CONTENT_INJECTING** (demoted from an untrusted remote): applying
+  the SORT lessons proactively -- a remote could AIM a reindent at an
+  indent-SIGNIFICANT file (a `Makefile` recipe needs a literal tab; converting it
+  is a HARD build break), the same "aim it at your files" risk that demotes `sort`.
+  Preserves line endings + the trailing-newline state (only the leading run is
+  rewritten). Full new-fix-op gate cascade. Op #24.
+  - **Audit round-3 (2 worktree agents + own probing). 1 HIGH (SHARED with `sort`)
+    + tier reversal + 4 more, all fixed:**
+    - **[HIGH, F1 -- also fixed in `sort`] `apply` had no `can_fix` guard.** The
+      engine calls `apply` for EVERY violation (gated only on the tier, not
+      `can_fix`). When the reported finding is UNFIXABLE but another line/block is
+      fixable, the whole-file `apply` changed bytes + returned `Applied`; the engine
+      locked the key and DROPPED the residual on the next pass -> `alint fix` exited
+      0 with a dirty tree. Found by the correctness agent on `indent_style`; my own
+      probing confirmed the IDENTICAL latent bug in the already-shipped `sort`
+      (unclosed-emits-first + unsorted block). FIX: a `can_fix` guard at the top of
+      both `apply`s (Skip when the reported finding is not repairable). Gated by a
+      unit test + an e2e for each (`*_not_suppressed` / `*_surfaces_an_unclosed_residual`).
+    - **[MED] Tier Safe -> UNSAFE (reversed my own approved-Safe proposal).** Both
+      my P8 probe AND the honesty agent reproduced a bare `alint fix` silently
+      HARD-breaking a `Makefile` (recipe tab -> spaces). The CONTENT_INJECTING
+      demotion only guards the REMOTE path; a LOCAL misconfig got full Safe
+      auto-apply. `file_remove`'s "a mis-aimed op is catastrophic = Unsafe" logic
+      applies. Now Unsafe by default; per-rule `applicability: safe` opts back in.
+    - **[MED] constant `baseline_key` over-suppressed baselines.** A bare constant
+      key collapsed every fixable indent finding on a file to ONE fingerprint, so
+      `check --baseline` silently suppressed a genuinely-NEW violation. FIX: the key
+      is now a `fixable`/`unfixable` PREFIX + the offending line, so `can_fix` still
+      matches the prefix while the fingerprint stays per-line (matching the key-less
+      path). (`sort`'s per-block-ordinal keys never had this.)
+    - **[LOW] F2** a tab-only lone-CR-at-EOF line (blank to the check) was
+      reindented -> strip the trailing lone `\r` in the fixer too.
+    - **[LOW] F3** an absurd `width` (a remote's `1000000000`) allocated a multi-GB
+      string -> cap the fixer's `width` at 256.
+    - **[LOW] #3** `width: 0` (schema `min=1` is advisory) silently disabled the
+      multiple check -> rejected at load for ANY indent_style rule.
+
+- **`insert_line` (3rd Phase-4 op). DELIVERED (asamarts chose the host,
+  2026-09-24).** `insert_line` inserts a missing REQUIRED exact line at its SORTED
+  position -- the differentiator over `file_append` (append-at-EOF, which already
+  covers order-insensitive "ensure a line exists"). Host: **extend `ordered_block`
+  with a `require: [exact lines]` field** (asamarts's pick over a new rule /
+  extending file_content_matches): the block must CONTAIN each required line, and
+  the fix inserts a missing one at its sorted position using the rule's existing
+  `comparator`. Scope v1: **MARKERLESS ordered_block only** (`start`/`end` both
+  unset -- the whole file is one sorted list, the `CODEOWNERS` / allow-list case);
+  `require:` with a marker is rejected at load (a multi-block insert target is
+  ambiguous -- fast-follow). Check: after the sortedness scan, each `require:` line
+  whose TRIMMED form is not an entry emits a "missing required line" finding, keyed
+  per require-line (F4). Fix `insert_line`: whole-file; for each missing required
+  line, splice it (verbatim, with the file's line ending) at the position where the
+  comparator places it among the entries; idempotent (re-check finds it present).
+  `can_fix` is TRUE only for the missing-required-line findings -- an out-of-order
+  entry is NOT insert_line-fixable (that is `sort`'s job; pair two rules for a
+  fully-managed list), and the F1 `apply` can_fix-guard is baked in from the start.
+  Tier **Unsafe** (audit round-1 tier reversal, asamarts's call 2026-09-24; see
+  below). W2 **CONTENT_INJECTING** (the `require:` lines ARE ruleset-authored bytes
+  -- the clearest injection case; demoted from an untrusted remote). Op #25. Full
+  gate cascade + the round-1/2/3 lessons applied proactively.
+
+  - **Audit round 1 (2 worktree-isolated agents pinned to `092b2354` + own P1-P14
+    CLI probing), 2026-09-24. 1 HIGH + 1 MED + 3 LOW, ALL FIXED/RESOLVED.**
+    - **HIGH -- unbounded-duplication runaway (both agents).** A `require:` line
+      that can never round-trip to an entry was re-inserted every fixpoint pass to
+      the MAX_PASSES cap, exiting 2 with a corrupted (and compounding) file; the
+      `--dry-run` preview hid it. TWO triggers: (a) a `select:`-mismatched line
+      (incl. a whitespace-anchored `select:`, since `require:` lines are trimmed),
+      (b) an EMBEDDED-NEWLINE line (splits on re-read via `str::lines()`). FIX:
+      `parse_require` now takes `select` and rejects, at load, any require line that
+      is not an entry under `select` OR carries a `\n`/`\r` -- mirrors the existing
+      marker/empty guards. The load-time rejection is the ONLY correct fix: an
+      inserted non-entry is invisible to BOTH the presence scan and the insert
+      idempotence check (both gate on `is_entry_line`), so no runtime clamp helps.
+    - **MED -- false "unclosed" diagnostic (correctness agent).** `sort`'s `apply`
+      declines BOTH unclosed and require findings but printed a hardcoded "unclosed
+      ordered_block" skip reason, sending a markerless `require:` user hunting for a
+      nonexistent `end`. FIX: branch the skip reason on the key prefix.
+    - **MED (tier) -- Safe was wrong (honesty agent).** `insert_line` adds
+      ruleset-authored content at a COMPUTED position, load-bearing in the
+      order-sensitive formats it targets (a `.gitignore` negation must FOLLOW its
+      pattern; a bare Safe fix inserted `!keep.log` BEFORE `*.log`, a non-functional
+      negation). Surfaced to asamarts as a fork; **asamarts chose Unsafe** (matches
+      the `indent_style` precedent). Now default Unsafe: bare `fix` suggests,
+      `--unsafe-fixes` or per-rule `applicability: safe` (for order-tolerant
+      `CODEOWNERS`) applies. Scenarios moved to `fix_unsafe` + a new
+      `insert_line_suggested_under_bare_fix.yml` gates the tier.
+    - **LOW -- no e2e honesty gate for the REQUIRE/ENTRY routing (honesty agent).**
+      Added two `fixable_accuracy` gates (insert_line direction + the sort+require
+      mirror), forced `applicability: safe` so they assert ROUTING not tier.
+    - **LOW -- exact-string presence vs comparator (correctness agent).** By design
+      (a verbatim-insert feature); DOCUMENTED as intentional + pinned by
+      `require_presence_is_exact_string_not_comparator_equality` (proves it also
+      CONVERGES, no runaway).
+    - **LOW/latent -- `require:` key-name collision with nested-rule `require:`
+      blocks the W2 scans recurse (honesty agent).** Benign today (scalars skipped
+      by `.as_mapping()`); added a protective comment at the demote scan.
+
+- **`insert_header` (4th / LAST Phase-4 op). DELIVERED (asamarts chose to build it
+  over wrapping the arc, and chose tier Safe, 2026-09-24).** Op #26. Host: **extend
+  `file_header`** (joins `file_prepend` in its `fix` match; the rule's `fixer` field
+  became `Option<Box<dyn Fixer>>` to hold either). Content from `content` /
+  `content_from` (same `ContentSourceSpec` as `file_prepend`). The differentiator:
+  it inserts the header AFTER a leading UTF-8 BOM, shebang (`#!...` line), or XML
+  declaration (`<?xml ...?>`) via `header_insert_offset` -- so it never displaces a
+  line that must stay first (a `file_prepend` puts a license above a shebang,
+  breaking it). For a file with none of those prefixes it inserts at BOF, exactly
+  like `file_prepend`. **Tier Safe** (asamarts's call: the position is DETERMINISTIC
+  and canonical -- unlike `insert_line`'s risky sorted-SEARCH -- and the content is
+  an inert comment; and `file_prepend`, the cruder op it refines, is Safe, so the
+  safer op must not be harder to apply). W2 **CONTENT_INJECTING** (header bytes are
+  ruleset-authored, like `file_prepend`). **Runaway-SAFE by construction:** the
+  idempotency guard checks the EXACT bytes it would insert (`existing[off..]
+  .starts_with(header)`), which always round-trips what `apply` writes -- so a
+  repeated fix is a guaranteed no-op (no `insert_line`-style lossy-predicate
+  runaway). A one-line shebang with no trailing newline gets a separating newline;
+  a bare BOM does NOT (that is a plain BOF insert). Full gate cascade: config
+  (variant + `InsertHeaderFixSpec` {content/content_from/applicability} + op_name +
+  ALL_OP_NAMES + cases); DSL W2 (CONTENT_INJECTING + `declared_content_tier` arm +
+  `w2_remote_insert_header_is_demoted`); `InsertHeaderFixer` in `fixers/creators.rs`
+  (+ 11 units); `file_header` build arm (+ build-wiring test); property net
+  (`rule_file_header_insert_header` + planted `_trig/hdrtrig.sh`); 2 e2e
+  (after-shebang, after-xml-decl); facts 25->26; README (headline + prose);
+  CHANGELOG; ARCHITECTURE + rules.md tables. gen-schema unchanged (`FixSpec` is
+  Deserialize-only, not schemars-derived). Also fixed a STALE `InsertLineFixSpec`
+  doc-comment ("Safe" -> "Unsafe") + stale testkit comments left by the insert_line
+  tier flip.
+  - **Audit round 1 (2 worktree-isolated agents pinned to `3fa96558` + own P1-P6 CLI
+    probing), 2026-09-25. 1 HIGH + 2 LOW, all fixed/addressed.**
+    - **HIGH (BOTH agents independently) -- idempotency guard not marker-safe -> a
+      DOUBLE insert.** When the header CONTENT itself begins with a skippable prefix
+      (`#!` / `<?xml`), a later fixpoint pass's `header_insert_offset` re-parses the
+      just-inserted header AS that prefix and returns an `off` BEYOND it, so the
+      `existing[off..].starts_with(header)` guard checks the wrong spot and stacks a
+      SECOND copy (two `<?xml>` decls = INVALID XML; duplicate shebang). Bounded at 2
+      (then converges), Safe-tier, exit 0, and `--diff` (single-pass) showed only ONE
+      -- silent. `file_prepend` is immune (its guard anchors at a FIXED BOF position).
+      Only fires when the header does not satisfy `pattern` after one insert (a
+      misconfig / anchored pattern). FIX: the idempotency guard now checks BOTH the
+      computed `off` AND the after-BOM top (`after_bom.starts_with(header)`) -- the
+      latter catches a header that is itself a skippable prefix. Unit test
+      `insert_header_does_not_double_when_content_is_itself_a_skippable_prefix` (xml/
+      shebang/BOM+xml/multi-line) gates it. (Property net CANNOT gate this: the double
+      needs a NON-convergent config, which the convergence law forbids sampling -- the
+      unit test that calls the fixer twice is the correct gate.)
+    - **LOW -- empty `content: ""`** accepted -> misleading "already present" skip +
+      never converges. FIX: rejected at build (`insert_header content must not be
+      empty`) + test.
+    - **LOW/MED -- `^`-anchored `pattern` never converges** (the header lands on line
+      2 after a shebang, so an absolute-line-1 `^` pattern can't match), yet `check`
+      tags it fixable. Same class as `file_prepend`'s content-must-satisfy-pattern
+      limitation (`can_fix` is a convertibility verdict, not a satisfiability proof);
+      the line-2 placement makes `^` specifically unsatisfiable. DOCUMENTED (rules.md
+      / config.rs / CHANGELOG): the `pattern` must match below line 1 (unanchored or
+      `(?m)`).
+    - **Doc precision (agent F3):** reworded "strictly safer than file_prepend" ->
+      "at least as safe, and safer on a shebang/xml file"; "blindly at BOF" ->
+      "at BOF (after any BOM; blind to a shebang/xml-decl)"; the "guaranteed no-op"
+      claim is now TRUE post-fix (guard anchors on two positions).
+    - Verified CORRECT by the agents (each gate teeth-tested): W2 demotion + promotion
+      refusal + `content_from` confinement; op-count consistency (all 26); fixable/
+      unsafe honesty tagging; every gate REDS when the op is broken.
+
+Phase 4 is now FEATURE-COMPLETE (sort, indent_style, insert_line, insert_header =
+26 ops). After the insert_header audit round, the arc is ready to wrap.
+
+### Coverage follow-ups (tracked from the audit; regression-prevention)
+
+The core algorithms held and the highest-value gaps are filled; these remain
+(not blocking, but wanted for the "comprehensive suite" bar):
+
+- `fix --base <ref>` (only working-tree `--changed` is tested).
+- CRLF e2e goldens for the structured ops (units cover HCL/dotenv/TOML/properties
+  only; no structured CRLF e2e).
+- LSP tier/W2 gate test: a session `extends:`-ing an untrusted remote asserts the
+  demoted whole-file content fixer is not offered as a quick-fix (the located
+  demote is now gated by `code_action_withholds_a_fix_the_pipeline_would_demote`;
+  the whole-file W2 case needs a remote-`extends:` LSP fixture).
+- `--diff` of a located edit in isolation; `located_deferred` poisoning;
+  `located_status` per-`LocatedOutcome`-arm unit test.
+- Structured `replace` in the proptest catalogue (GetPut/PutGet); a unit-level
+  localized-equivalence proptest for the resolvers; a `minimal_replace`
+  reconstruction proptest.
+- CLI fix-report snapshots (`--diff`, `--fix-only`, json/markdown fix reports).
+- json rule-level vs SARIF/agent per-violation fixability consistency doc-test.
+- Gate hardening: make `ALL_OP_NAMES` type-derived (e.g. `strum::EnumCount`) so a
+  new `FixSpec` variant can't slip past the fix-coverage gate.
+- W4 baseline-fix interactions the audit verified CLEAN but left un-gated (heavier
+  fixtures, no behavior gap): non-convergence WITH a baseline present -> exit 2
+  (baselined skips must not fake convergence); `--changed` + `--baseline`
+  precedence (a grandfathered-and-out-of-scope finding surfaces as the benign
+  baselined skip, not an out-of-scope Suggestion); a baselined skip surviving a
+  multi-pass cascade exactly once (not dropped, not duplicated).
+
+### Engineering follow-ups
+
+- **Full multi-pass `--diff` fidelity** (currently a deferred located edit warns
+  on stderr; a faithful preview would re-collect against the composed bytes or
+  run the stage as a fixpoint).
+- **LSP UX for Unsafe fixes: RESOLVED (option b, DECISION 2026-09-20).** Unsafe
+  fixes are still offered as quick-fixes (human-in-the-loop) but their title is
+  labeled `(unsafe)` and they are never marked preferred, so the click is a
+  visible, deliberate opt-in (the LSP analogue of `--unsafe-fixes`) rather than a
+  silent one-click apply of a behavior-changing edit. Safe fixes are unchanged.
+  Suggestion / W2-demoted fixes remain excluded (audit HIGH-1/HIGH-2).
+- **TOML array-of-tables fixability** (`[[x]]` inner values are unfixable today:
+  `toml_::navigate_mut` handles only `Key`).
+- **`structured_fix/mod.rs` `formats/` split** (~1820 lines, nearing the 2000
+  cap).
+- **`fix --dry-run` collision-awareness (generic; from the relocate audit, Agent A
+  #1).** A plain `--dry-run` has no stage sink, so the staged-collision dedupe
+  (stage-mode-only) does not run: N nested files sharing a basename each report
+  "would move -> root/X", over-counting vs the real `fix` (1 applied, N-1 skipped)
+  and disagreeing with `--diff` (which dedupes). Bare `fix` (suggestion mode)
+  likewise suggests all N to the same slot via the stateless per-violation
+  `fix_edit`. No data risk (the real apply dedupes via the collision check), purely
+  preview/count fidelity. relocate makes it a NORMAL case (two stray lockfiles in a
+  monorepo), but the fix is generic (shared with `file_rename`/`file_create`): give
+  the `--dry-run` branch in `Engine::fix` a throwaway `stage_ops` sink so the
+  collision guard fires there too. Its own focused change + a CLI-count gate; NOT
+  bundled into the relocate op (would under-test the other affected ops).
+- **Backport relocate's stricter no-clobber guards to `FileRenameFixer`.** relocate
+  now uses `symlink_metadata` (not `exists()`) for the target-collision check (so a
+  dangling symlink is never clobbered) and guards `has_pending_write` on the
+  DESTINATION as well as the source (so a same-pass composed write to the target is
+  not raced). `FileRenameFixer` still uses `exists()` + a source-only pending-write
+  guard (the shared baseline the audit flagged as Agent A #4 / Agent B F4). Both are
+  pathological, but the guards are cheap and safe; apply the same two to
+  `FileRenameFixer` for parity.
+- **Docs (RELEASE-BLOCKING for v0.17): `docs/site/concepts/adoption/fixing.md` is
+  arc-stale.** It still says "The twelve ops" and lists only the 7 content + 5
+  path ops (its frontmatter `description:` too), missing the NINE added across the
+  arc: `set_value`, `remove_value`, `replace`, `chmod`, `git_untrack`, `command`,
+  `dir_create`, `sync_from`, `relocate`. This is pre-existing, arc-wide drift (not
+  a `relocate` regression), so it wants ONE comprehensive rewrite of the catalogue
+  section + the `fix_size_limit` coverage list (the located structured ops read
+  the target too) at release, not a per-op patch that would leave "twelve"
+  inconsistent. The README (26 + 60) and CHANGELOG are current; this site page is
+  the gap. (No count-gate catches it -- the prose "twelve" is not machine-checked;
+  consider a `num_before("ops")` gate on this page as part of the fix.)
+
+## 4. Deferred-and-special items (§10): keep deferred
+
+Each needs explicit opt-in + its own design record; none is v0.18-bound, and
+several have no Safe form, so pulling them into v0.17 wholesale would balloon
+scope without a clear win. Recommend they STAY out of v0.17 unless a specific one
+is prioritized:
+
+- **Reference/version pinning** + **regenerate-from-command**: reach outside the
+  tree (top-level-only, spawn-gated, or a future WASM plugin).
+- **JSON-Schema-guided fill** (`json_schema_passes`): synthesizing a doc to
+  satisfy a schema is ambiguous -> Suggestion at most.
+- **Whole-file reprint**, **`line_max_width` reflow**, **encoding transcode**:
+  out of scope / Suggestion at most.
+- **`unique_by` collision auto-resolution**: no Safe fix (ambiguous survivor).
+
+## 5. Recommended order to cut v0.17
+
+1. **W3b + W4** (P0): small, completes Phase 2's DoD; land with the "all-tiers"
+   decision.
+2. **Docs reconciliation** (§2): correct the file_remove warn/flip prose.
+3. **Phase 3**, then **Phase 4** (each its own PR to the integration line).
+4. **Coverage + engineering follow-ups**: fold the tracked items in alongside the
+   phase that touches their code (e.g. the LSP tier test with any LSP work; the
+   `--diff` fidelity with Phase 3's write-path rework).
+5. **DoD sweep + release**: all blocking rungs green; downstream artifacts
+   updated (docs-export / rule pages / `facts.json` / the gen-X `--check`
+   artifacts); CHANGELOG `[Unreleased]` -> `[0.17.0]` finalized (the `file_remove`
+   breaking entry already sits there); version bump; `ROADMAP.md`/`roadmap.json`
+   v0.17 entry finalized; tag v0.17. **Then** the release is not live until
+   alint.org's install-pins + prose claims are bumped (the STALE DOCS BUNDLE
+   guard blocks deploy otherwise) -- see the general `RELEASING.md` process and
+   the `alint.org` pin-bump step.
+
+## 6. Decisions
+
+**Resolved:**
+- **SARIF/machine tier scope -> Safe-only** (2026-09-20). Machine surfaces
+  advertise only Safe fixes; alint's own `fix` keeps full tier control. See §3 P0.
+- **LSP Unsafe UX -> option b** (2026-09-20). Unsafe fixes offered but labeled
+  `(unsafe)` + never auto-preferred. Implemented; see §3 engineering.
+- **§10 pull-in -> keep all deferred** (2026-09-20). No §10 item is a clean Safe
+  win (out-of-scope / ambiguous / Suggestion-only / a security surface); each
+  stays demand-gated with its own future design record. See §4.
+- **W3b `agent` gating -> `agent` always-on** (2026-09-20). `agent` carries
+  `proposed_edit` always (mirroring its always-on `fix_command`); `json` carries
+  it behind `--include-fixes`. Applies when W3b is built.
+
+_All open decisions are resolved; the plan is ready to execute (start with P0)._
+
+## 7. Release readiness (v0.17.0) -- arc feature-complete, 2026-09-25
+
+The auto-fix arc is **FEATURE-COMPLETE and VERIFIED**. This section is the current
+release-readiness assessment (§5 is the historical order, now executed). Branch
+`phase-0-fix-engine` @ `522dc9bf`, **132 commits ahead of `origin/main`**.
+
+### Arc status -- DONE + certified
+
+- **26 fix ops** (was 12 at the arc's start): the 12 baseline (7 content-hygiene +
+  5 path/prepend/append) plus the 14 added across the arc -- `replace`, `set_value`,
+  `remove_value`, `chmod`, `git_untrack`, `command`, `dir_create`, `sync_from`,
+  `relocate`, `create_and_register`, `sort`, `indent_style`, `insert_line`,
+  `insert_header`. All Phase 0-4 work COMPLETE; every op audit-hardened (2
+  worktree-isolated agents + own CLI probing per increment).
+- **Certification on `522dc9bf` (clean tree, in sync):** `cargo test --workspace` =
+  **2938 tests / 87 suites, 0 failures**; `cargo fmt --check`, workspace `clippy -D
+  warnings`, `rustdoc -D warnings` all clean; `gen-facts --check` (26) + `gen-schema
+  --check` clean; dogfood = only the 4 pre-existing `rust-file-max-lines` warnings
+  (main.rs / engine.rs / alint-dsl tests.rs / docs_export.rs). Op-count coherent at
+  26 across `ALL_OP_NAMES` / `op_name` / facts.json / README (headline + prose) /
+  rules.md / ARCHITECTURE. The drift gates (readme_claims, rules_md_drift,
+  schema_drift, fix_coverage, the W2 3-way partition, the property-net op-coverage)
+  passing IS the "no drift across 132 commits" proof.
+
+### Release blockers (ordered, with current state)
+
+1. **`docs/site/concepts/adoption/fixing.md` rewrite -- RELEASE-BLOCKING (docs).**
+   Arc-stale: the `## The twelve ops` section (+ the frontmatter `description`) list
+   only the original **12** ops; the **14** arc ops and their new categories (located
+   value edits, cross-file, metadata/VCS, spawning, ordering, header, reindent) are
+   absent. Needs one code-verified rewrite to the 26-op surface (per the
+   concepts-redesign practice: CODE-VERIFY every claim, prose signal-free). Deploys
+   via docs-bundle without a release, but belongs to the v0.17 story. Own increment.
+2. **Version bump `0.16.1` -> `0.17.0`.** `bash ci/scripts/bump-version.sh 0.17.0`
+   edits `Cargo.toml [workspace.package].version` + README pins (GH Action / docker /
+   pre-commit rev) + `npm/package.json` + `editors/zed/{Cargo.toml,extension.toml}` +
+   `Cargo.lock`; then `gen-facts` refreshes `facts.json alint_version`. Preflight:
+   `check-version-pins.sh`, `check-workspace-dep-floors.sh`. (The `0.16.1` strings in
+   `examples/**` are unrelated data -- apache-RAT `RAT_VERSION`, `zone.js` -- do NOT
+   touch. `SECURITY.md`'s "as of v0.16.1" advisory line updates with the release.)
+3. **CHANGELOG `[Unreleased]` -> `[0.17.0]`** + date. (The `file_remove` breaking
+   entry + all 4 Phase-4 op entries already sit under `[Unreleased]`.)
+4. **`ROADMAP.md` / `roadmap.json`** v0.17 entry finalized (gen-roadmap).
+5. **Merge 132 commits to `main`** (PR from `phase-0-fix-engine`). The large one;
+   CI must be green on the merge. `main` is the release line.
+6. **Release execution (asamarts-authorized, OUTWARD-FACING):** commit + `git tag
+   v0.17.0` -> CI publishes to crates.io / npm / PyPI / Homebrew / Docker / editor
+   channels (per `RELEASING.md` + the distribution memories). Needs explicit go;
+   do not tag/publish autonomously.
+7. **alint.org pin-bump (post-tag, completes the release):** bump alint.org's
+   install-pins + prose claims to `v0.17.0` (as `asamarts`) and verify live -- else
+   the STALE DOCS BUNDLE guard blocks the docs deploy. See `RELEASING.md` §
+   "Documentation and site-drift" + the `alint.org` pin-bump note.
+
+### Recommended order
+
+fixing.md rewrite (1) -> version bump + CHANGELOG + ROADMAP (2-4, one release-prep
+commit) -> merge PR to main (5) -> **[asamarts go]** tag + publish (6) -> alint.org
+pin-bump + verify live (7). Steps 1-5 are safe/reversible; 6-7 are the
+outward-facing release and gated on explicit authorization.

@@ -1,0 +1,46 @@
+name: sync_from on equals propagates into a regex-capture target (Phase 2)
+# A version-of-truth propagated into UNSTRUCTURED files via a regex capture: a
+# README badge and a Dockerfile ARG. The fixer rewrites each match's capture group
+# 1 to the source value, preserving the surrounding pattern, then re-extracts to
+# verify. Unsafe, so `fix_unsafe` applies it; the tree converges.
+tags: [fix, cross_file, sync_from, applicability]
+
+given:
+  tree:
+    VERSION: "2.5.0\n"
+    README.md: |
+      # Proj
+      ![ver](https://img.shields.io/badge/version-1.0.0-blue)
+    Dockerfile: |
+      FROM base
+      ARG VERSION=1.0.0
+  config: |
+    version: 1
+    rules:
+      - id: pin-version-everywhere
+        kind: cross_file
+        relation: equals
+        source: { file: VERSION, extract: { regex: "^([0-9.]+)" } }
+        targets:
+          - { file: README.md, extract: { regex: "badge/version-([0-9.]+)-" } }
+          - { file: Dockerfile, extract: { regex: "ARG VERSION=([0-9.]+)" } }
+        level: error
+        fix: { sync_from: {} }
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: pin-version-everywhere, level: error, path: README.md}
+      - {rule: pin-version-everywhere, level: error, path: Dockerfile}
+  - applied: [pin-version-everywhere]
+  - violations: []
+
+expect_tree:
+  VERSION: "2.5.0\n"
+  README.md: |
+    # Proj
+    ![ver](https://img.shields.io/badge/version-2.5.0-blue)
+  Dockerfile: |
+    FROM base
+    ARG VERSION=2.5.0

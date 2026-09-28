@@ -1,0 +1,32 @@
+name: cross_file registered maps a matched file to its list value via register_as
+# The source globs the crate MANIFESTS (crates/*/Cargo.toml, files), and
+# `register_as: "{dir}"` maps each match to its parent directory -- the value that
+# belongs in workspace.members. crates/foo/Cargo.toml -> "crates/foo", which is
+# absent from members, so the root manifest is flagged.
+tags: [cross_file, registered]
+
+given:
+  tree:
+    Cargo.toml: "[workspace]\nmembers = [\"crates/bar\"]\n"
+    crates:
+      bar:
+        Cargo.toml: "[package]\nname = \"bar\"\n"
+      foo:
+        Cargo.toml: "[package]\nname = \"foo\"\n"
+  config: |
+    version: 1
+    rules:
+      - id: manifests-registered
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*/Cargo.toml" }
+        register_as: "{dir}"
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: manifests-registered, level: error, path: Cargo.toml}

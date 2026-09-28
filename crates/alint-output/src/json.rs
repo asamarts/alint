@@ -2,7 +2,7 @@ use std::borrow::Cow;
 use std::io::Write;
 use std::path::Path;
 
-use alint_core::{FixReport, FixStatus, Level, Report};
+use alint_core::{FixReport, FixStatus, Level, ProposedEdit, Report};
 use serde::Serialize;
 
 use crate::BaselineMarks;
@@ -83,6 +83,17 @@ struct JsonViolation<'a> {
     line: Option<usize>,
     #[serde(skip_serializing_if = "Option::is_none")]
     column: Option<usize>,
+    /// Whether a bare `alint fix` resolves THIS specific violation (a Safe,
+    /// applicable fix). PER-VIOLATION, unlike the rule-level `fixable` (which only
+    /// means the rule declares a fixer): an Unsafe fix, or one whose `can_fix`
+    /// declines this finding, is `false` here but may leave the rule `fixable`.
+    /// Matches the `agent` format's `fix_available` and the human `[fixable]` tag.
+    fixable: bool,
+    /// The concrete Safe fix(es) alint would apply to resolve this violation
+    /// (source region + replacement text). Present only under `--include-fixes`
+    /// and only for a fixable finding; a note never carries one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    proposed_edit: Option<&'a [ProposedEdit]>,
 }
 
 pub fn write_json(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
@@ -123,6 +134,9 @@ pub fn write_json_with_baseline(
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
+                    fixable: v.is_fixable,
+                    proposed_edit: (!v.proposed_edits.is_empty())
+                        .then_some(v.proposed_edits.as_slice()),
                 })
                 .collect(),
             notes: r
@@ -133,6 +147,8 @@ pub fn write_json_with_baseline(
                     message: v.message.as_ref(),
                     line: v.line,
                     column: v.column,
+                    fixable: false, // notes are non-violations; never auto-fixable
+                    proposed_edit: None, // notes are non-violations; no fix
                 })
                 .collect(),
         })
@@ -181,6 +197,17 @@ struct FixSummary {
     applied: usize,
     skipped: usize,
     unfixable: usize,
+    /// Fixes available but not applied (below the tier threshold, a
+    /// suggestion, or verification-demoted). Always present (a machine
+    /// format keeps a stable envelope); `0` when none.
+    suggested: usize,
+    /// `true` when the fix loop hit its pass cap without settling (a
+    /// non-convergent config). This is the ONLY structured signal of the
+    /// distinct exit 2 ("fix could not complete"): without it a capped run --
+    /// whose items are mostly `applied` because the fixes kept re-firing --
+    /// is indistinguishable in this envelope from a clean run. Always present;
+    /// `false` for a converged run. See docs/design/v0.17/fixpoint.md.
+    non_convergent: bool,
 }
 
 #[derive(Serialize)]
@@ -217,7 +244,10 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
                 .map(|it| {
                     let (status, detail) = match &it.status {
                         FixStatus::Applied(s) => ("applied", Some(s.as_str())),
-                        FixStatus::Skipped(s) => ("skipped", Some(s.as_str())),
+                        FixStatus::Skipped { reason: s, .. } => ("skipped", Some(s.as_str())),
+                        FixStatus::Suggested { summary, .. } => {
+                            ("suggested", Some(summary.as_str()))
+                        }
                         FixStatus::Unfixable => ("unfixable", None),
                     };
                     JsonFixItem {
@@ -238,6 +268,8 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
             applied: report.applied(),
             skipped: report.skipped(),
             unfixable: report.unfixable(),
+            suggested: report.suggested(),
+            non_convergent: report.non_convergent,
         },
         results,
     };
@@ -290,6 +322,37 @@ mod tests {
         assert!(
             !out.contains("\"notes\""),
             "empty notes must be omitted: {out}"
+        );
+    }
+
+    #[test]
+    fn fix_json_renders_suggested_status_and_detail() {
+        use alint_core::{FixEdit, FixItem, FixReport, FixRuleResult};
+        use std::path::PathBuf;
+        let report = FixReport {
+            non_convergent: false,
+            results: vec![FixRuleResult {
+                rule_id: "demo".into(),
+                level: Level::Error,
+                items: vec![FixItem {
+                    violation: Violation::new("v").with_path(PathBuf::from("a.txt")),
+                    status: FixStatus::Suggested {
+                        summary: "would set $.x to 1".into(),
+                        edit: Some(FixEdit::SetContent {
+                            path: PathBuf::from("a.txt"),
+                            content: Vec::new(),
+                        }),
+                    },
+                }],
+            }],
+        };
+        let mut buf = Vec::new();
+        write_fix_json(&report, &mut buf).unwrap();
+        let s = String::from_utf8(buf).unwrap();
+        assert!(s.contains("\"suggested\""), "status should render: {s}");
+        assert!(
+            s.contains("would set $.x to 1"),
+            "detail should render: {s}"
         );
     }
 

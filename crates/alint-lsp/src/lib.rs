@@ -20,9 +20,11 @@
 //!   and `policy_url` from the per-file cache of the last-published
 //!   findings.
 //! - **Code actions** offer an "Apply fix" quick-fix for any violation
-//!   whose rule declares a fixer, returning a `WorkspaceEdit`
-//!   ([`alint_core::Fixer::fix_edit`] → [`alint_core::FixEdit`]) the
-//!   editor applies to the buffer.
+//!   whose rule declares a fixer, returning a `WorkspaceEdit` the editor
+//!   applies to the buffer. A whole-file fixer maps via
+//!   [`alint_core::Fixer::fix_edit`] → [`alint_core::FixEdit`]; a *located*
+//!   fixer (e.g. `replace`) maps its `collect_edits` byte ranges to UTF-16
+//!   `TextEdit`s (one per match) so a single action rewrites every occurrence.
 //! - **Watched files** (`didChangeWatchedFiles`) reload the session, so
 //!   `.alint.yml` edits take effect without saving an open document.
 //!
@@ -47,8 +49,10 @@ use tower_lsp::lsp_types::{
 };
 use tower_lsp::{Client, LanguageServer, LspService, Server, jsonrpc::Result as JsonRpcResult};
 
+use alint_core::located_fix::{self, LocatedEdit, LocatedOutcome};
 use alint_core::{
-    Engine, Error, FileIndex, FixEdit, Level, RuleEntry, RuleResult, Violation, WalkOptions, walk,
+    Applicability, CollectedEdit, Engine, Error, FileIndex, FixEdit, Level, RuleEntry, RuleResult,
+    Violation, WalkOptions, walk,
 };
 
 /// One cached finding for a file: enough to publish a diagnostic and to
@@ -481,6 +485,13 @@ impl LanguageServer for Backend {
 
         let bytes = text.as_bytes();
         let mut actions: CodeActionResponse = Vec::new();
+        // Parallel to `actions`: whether each offered fix is Unsafe-tier. An Unsafe
+        // quick-fix is labeled `(unsafe)` and never auto-preferred, so the click is
+        // a visible, explicit opt-in (the LSP analogue of `--unsafe-fixes`) rather
+        // than a silent one-click apply of a behavior-changing edit (e.g. a file
+        // delete). Only Safe and Unsafe tiers reach here -- Suggestion / demoted
+        // fixes are already filtered out below.
+        let mut unsafe_flags: Vec<bool> = Vec::new();
         for finding in &findings {
             if !finding.fixable || !ranges_overlap(finding.range, selection) {
                 continue;
@@ -488,30 +499,87 @@ impl LanguageServer for Backend {
             let Some(fixer) = session.engine.fixer_for(&finding.rule_id) else {
                 continue;
             };
+            let unsafe_fix = fixer.applicability() == Applicability::Unsafe;
             let mut violation = Violation::new(finding.message.clone()).with_path(rel.clone());
             // Preserve the reported location so range-scoped fixers act on
             // the right line/column (not just whole-file fixers).
             violation.line = finding.line;
             violation.column = finding.column;
-            let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
-                continue;
+            // A LOCATED fixer (Phase 1 `replace`) emits byte-range edits via
+            // `collect_edits`, not `fix_edit`. Collect ALL of them for this file and
+            // map each byte range to a UTF-16 `TextEdit` -- one multi-edit
+            // `WorkspaceEdit`, so the code action rewrites every occurrence, matching
+            // `alint fix` (the diagnostic is one-per-file but the located fix is
+            // per-match). The synthetic `violation` carries NO baseline_key, so the
+            // structured fixer's W4 violation-set correlation finds an empty budget
+            // and falls back to fixing every occurrence -- exactly the "fix all"
+            // action wanted here. A whole-file fixer keeps the `fix_edit` -> edit path.
+            let workspace_edit = if fixer.collects_located_edits() {
+                // Run the SAME pipeline `alint fix` uses (tier-filter -> overlap-skip
+                // -> post-splice verify/demote) and offer ONLY the surviving edits.
+                // Without this the LSP would one-click-apply a fix the engine
+                // refuses -- a partial removal that leaves the violation, an
+                // unverifiable `replace`, or a below-threshold / W2-demoted
+                // (Suggestion-tier) untrusted-remote content fixer.
+                let batch: Vec<LocatedEdit> = fixer
+                    .collect_edits(std::slice::from_ref(&violation), &rel, bytes, &session.root)
+                    .into_iter()
+                    .enumerate()
+                    .map(|(i, ce)| LocatedEdit {
+                        rule_index: 0,
+                        violation_index: i,
+                        collected: ce,
+                    })
+                    .collect();
+                let (_, outcomes) =
+                    located_fix::apply_file_edits(bytes, batch, Applicability::Unsafe);
+                let applied: Vec<CollectedEdit> = outcomes
+                    .into_iter()
+                    .filter(|(_, outcome)| *outcome == LocatedOutcome::Applied)
+                    .map(|(le, _)| le.collected)
+                    .collect();
+                match located_edits_to_workspace_edit(&applied, &text, &rel, &session.root) {
+                    Some(we) => we,
+                    None => continue,
+                }
+            } else {
+                // Whole-file / file-op fixer: gate on its tier so a Suggestion-tier
+                // fixer -- notably a W2-demoted content fixer from an untrusted
+                // remote `extends:` -- is not offered as an ordinary quick-fix
+                // (demotion drops it to Suggestion; a bare `alint fix` only
+                // suggests it, never auto-writes).
+                if !fixer.applicability().applies_at(Applicability::Unsafe) {
+                    continue;
+                }
+                let Some(edit) = fixer.fix_edit(&violation, bytes, &session.root) else {
+                    continue;
+                };
+                match fix_edit_to_workspace_edit(&edit, &session.root) {
+                    Some(we) => we,
+                    None => continue,
+                }
             };
-            let Some(workspace_edit) = fix_edit_to_workspace_edit(&edit, &session.root) else {
-                continue;
+            let title = if unsafe_fix {
+                format!("alint: fix `{}` (unsafe)", finding.rule_id)
+            } else {
+                format!("alint: fix `{}`", finding.rule_id)
             };
             actions.push(CodeActionOrCommand::CodeAction(CodeAction {
-                title: format!("alint: fix `{}`", finding.rule_id),
+                title,
                 kind: Some(CodeActionKind::QUICKFIX),
                 diagnostics: Some(vec![finding_to_diagnostic(finding)]),
                 edit: Some(workspace_edit),
                 ..CodeAction::default()
             }));
+            unsafe_flags.push(unsafe_fix);
         }
         if actions.is_empty() {
             return Ok(None);
         }
-        // A single fix is the obvious one to apply.
-        if actions.len() == 1 {
+        // A single SAFE fix is the obvious one to apply (some clients auto-apply
+        // the preferred action); an Unsafe fix is never auto-preferred -- applying
+        // it must stay a deliberate choice.
+        if actions.len() == 1 && !unsafe_flags[0] {
             if let CodeActionOrCommand::CodeAction(action) = &mut actions[0] {
                 action.is_preferred = Some(true);
             }
@@ -764,6 +832,76 @@ fn whole_document() -> Range {
     Range::new(Position::new(0, 0), Position::new(u32::MAX, u32::MAX))
 }
 
+/// Convert a byte offset into `text` (valid UTF-8) to an LSP [`Position`]:
+/// 0-indexed line, and a character column counted in UTF-16 code units (the LSP
+/// default position encoding). A non-BMP scalar (e.g. an emoji) is two UTF-16
+/// units, so a byte or `char` count would misplace the edit. `'\n'` ends a line and
+/// resets the column; a lone `'\r'` counts as an ordinary character. A range that
+/// spans several lines (a multi-line `replace` pattern, e.g. `(?s)foo.bar`) is
+/// handled -- start and end are converted independently. An offset at or past the
+/// end of `text` clamps to the final position.
+fn byte_offset_to_position(text: &str, byte_offset: usize) -> Position {
+    let mut line: u32 = 0;
+    let mut character: u32 = 0;
+    for (idx, ch) in text.char_indices() {
+        if idx >= byte_offset {
+            return Position::new(line, character);
+        }
+        if ch == '\n' {
+            line += 1;
+            character = 0;
+        } else {
+            character += u32::try_from(ch.len_utf16()).unwrap_or(0);
+        }
+    }
+    Position::new(line, character)
+}
+
+/// Map a located fixer's collected byte-range edits (Phase 1 `replace`) to an LSP
+/// [`WorkspaceEdit`] for one file: each [`FixEdit::ReplaceRange`] becomes a
+/// [`TextEdit`] whose range is the byte offsets converted to UTF-16 positions
+/// against `text` (the current buffer, which is what the offsets index).
+/// `collect_edits` yields DISJOINT, left-to-right matches, so the `TextEdit`s never
+/// overlap -- exactly what the LSP requires of a single edit set. Returns `None`
+/// when there are no range edits, a replacement isn't UTF-8, or the path can't
+/// become a URI, so the caller offers no action rather than a partial one.
+fn located_edits_to_workspace_edit(
+    edits: &[CollectedEdit],
+    text: &str,
+    rel: &Path,
+    root: &Path,
+) -> Option<WorkspaceEdit> {
+    let uri = Url::from_file_path(root.join(rel)).ok()?;
+    let mut text_edits = Vec::new();
+    for ce in edits {
+        // Every located fixer today (ReplaceFixer, the only one) emits ReplaceRange.
+        // A future located fixer that emitted a whole-file edit here would have it
+        // silently dropped -- pin the invariant so that regresses LOUDLY in debug,
+        // and skip (never mis-apply) in release.
+        let FixEdit::ReplaceRange { range, content, .. } = &ce.edit else {
+            debug_assert!(false, "located edit is not a ReplaceRange: {:?}", ce.edit);
+            continue;
+        };
+        let new_text = String::from_utf8(content.clone()).ok()?;
+        let start = byte_offset_to_position(text, range.start);
+        let end = byte_offset_to_position(text, range.end);
+        text_edits.push(TextEdit {
+            range: Range::new(start, end),
+            new_text,
+        });
+    }
+    if text_edits.is_empty() {
+        return None;
+    }
+    let mut changes = HashMap::new();
+    changes.insert(uri, text_edits);
+    Some(WorkspaceEdit {
+        changes: Some(changes),
+        document_changes: None,
+        change_annotations: None,
+    })
+}
+
 /// Map a core [`FixEdit`] to an LSP [`WorkspaceEdit`]. Content edits use
 /// the widely-supported `changes` map; create/delete/rename use resource
 /// operations (the client must advertise `resourceOperations` support).
@@ -824,6 +962,14 @@ fn fix_edit_to_workspace_edit(edit: &FixEdit, root: &Path) -> Option<WorkspaceEd
                 }),
             )]))
         }
+        // A `ReplaceRange` reaches the LSP through `collect_edits` (a located
+        // fixer's real path), mapped to UTF-16 `TextEdit`s by
+        // `located_edits_to_workspace_edit` -- NOT through `fix_edit`, which no
+        // located fixer implements (it returns `None`). So a `ReplaceRange` here
+        // is unreachable, and there is no buffer context to map its byte offsets
+        // anyway. A `chmod` (`SetMode`) has no LSP `WorkspaceEdit` representation at
+        // all. Both map to `None`.
+        FixEdit::ReplaceRange { .. } | FixEdit::SetMode { .. } => None,
     }
 }
 
@@ -865,6 +1011,8 @@ mod tests {
             column,
             is_note: false,
             baseline_key: None,
+            is_fixable: false,
+            proposed_edits: Vec::new(),
         }
     }
 
@@ -1120,5 +1268,495 @@ mod tests {
             content: vec![0xff, 0xfe],
         };
         assert!(fix_edit_to_workspace_edit(&edit, &repo_root()).is_none());
+    }
+
+    #[test]
+    fn byte_offset_to_position_counts_utf16_code_units() {
+        // ASCII, single line.
+        assert_eq!(byte_offset_to_position("hello", 0), Position::new(0, 0));
+        assert_eq!(byte_offset_to_position("hello", 3), Position::new(0, 3));
+        assert_eq!(byte_offset_to_position("hello", 5), Position::new(0, 5)); // clamps at end
+        // Multi-line: the offset just after '\n' is line 1, character 0.
+        let two = "ab\ncd";
+        assert_eq!(byte_offset_to_position(two, 2), Position::new(0, 2)); // before '\n'
+        assert_eq!(byte_offset_to_position(two, 3), Position::new(1, 0)); // 'c'
+        assert_eq!(byte_offset_to_position(two, 5), Position::new(1, 2)); // end of "cd"
+        // R-UTF16: U+1F600 is 4 UTF-8 bytes but TWO UTF-16 code units, so a byte- or
+        // `char`-based column would misplace an edit after it.
+        let emoji = "a\u{1F600}b";
+        assert_eq!(byte_offset_to_position(emoji, 1), Position::new(0, 1)); // before the emoji
+        assert_eq!(
+            byte_offset_to_position(emoji, 5),
+            Position::new(0, 3),
+            "the emoji is two UTF-16 units, so 'b' is at character 3"
+        );
+        // CRLF: '\r' counts as an ordinary character; a position after the CRLF is
+        // line 1, character 0 (so a match on the next line lands correctly).
+        let crlf = "ab\r\ncd";
+        assert_eq!(byte_offset_to_position(crlf, 2), Position::new(0, 2)); // end of line-0 text
+        assert_eq!(byte_offset_to_position(crlf, 4), Position::new(1, 0)); // 'c' after \r\n
+        // Empty text: only the origin is reachable.
+        assert_eq!(byte_offset_to_position("", 0), Position::new(0, 0));
+    }
+
+    #[test]
+    fn located_edits_map_to_utf16_text_edits() {
+        // A non-BMP char BEFORE the edit range: a byte- or char-based column would be
+        // wrong. The located edit replaces the 4-byte "TODO" with "DONE".
+        let root = repo_root();
+        let text = "x\u{1F600} TODO\n";
+        let todo = text.find("TODO").unwrap();
+        let edit = CollectedEdit {
+            edit: FixEdit::ReplaceRange {
+                path: PathBuf::from("a.txt"),
+                range: todo..todo + 4,
+                content: b"DONE".to_vec(),
+            },
+            applicability: alint_core::Applicability::Unsafe,
+            verify: alint_core::EditVerifier::None,
+            isolation_group: None,
+        };
+        let ws = located_edits_to_workspace_edit(&[edit], text, Path::new("a.txt"), &root).unwrap();
+        let changes = ws.changes.expect("a located edit uses the changes map");
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let edits = &changes[&uri];
+        assert_eq!(edits.len(), 1);
+        assert_eq!(edits[0].new_text, "DONE");
+        // 'x'=0, emoji=cols 1-2 (two units), ' '=3, so "TODO" starts at character 4.
+        assert_eq!(
+            edits[0].range.start,
+            Position::new(0, 4),
+            "the emoji counts as two UTF-16 units"
+        );
+        assert_eq!(edits[0].range.end, Position::new(0, 8));
+        assert!(ws.document_changes.is_none());
+    }
+
+    #[test]
+    fn located_edit_spanning_a_newline_maps_to_a_multi_line_range() {
+        // A `(?s)`-style pattern can match across a line break; the resulting
+        // `TextEdit` range must cross lines. Replace "foo\nbar" (bytes 0..7) with "X".
+        let root = repo_root();
+        let text = "foo\nbar\n";
+        let edit = CollectedEdit {
+            edit: FixEdit::ReplaceRange {
+                path: PathBuf::from("a.txt"),
+                range: 0..7,
+                content: b"X".to_vec(),
+            },
+            applicability: alint_core::Applicability::Unsafe,
+            verify: alint_core::EditVerifier::None,
+            isolation_group: None,
+        };
+        let ws = located_edits_to_workspace_edit(&[edit], text, Path::new("a.txt"), &root).unwrap();
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let te = &ws.changes.unwrap()[&uri][0];
+        assert_eq!(te.range.start, Position::new(0, 0));
+        assert_eq!(
+            te.range.end,
+            Position::new(1, 3),
+            "the range crosses into line 1, character 3 (past 'bar')"
+        );
+        assert_eq!(te.new_text, "X");
+    }
+
+    #[test]
+    fn located_edits_with_no_range_edits_yield_none() {
+        // A located fixer that collected nothing offers NO action (not an empty one).
+        assert!(
+            located_edits_to_workspace_edit(&[], "abc", Path::new("a.txt"), &repo_root()).is_none()
+        );
+    }
+
+    #[tokio::test]
+    async fn code_action_offers_the_located_replace_fix_end_to_end() {
+        // Drive the real async `code_action` for a located fixer: a genuine
+        // `file_content_forbidden` + `replace` session, an open buffer with the
+        // forbidden pattern, and a diagnostic over it. The response must carry a
+        // quick-fix whose `WorkspaceEdit` replaces the match with a UTF-16 `TextEdit`.
+        // Gates the routing (`collects_located_edits` branch) + state handling that
+        // the mapper unit tests don't reach. `code_action` touches only `self.state`
+        // (never `self.client`), so it runs without a live LSP socket.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+             paths: \"*.txt\"\n    pattern: \"TODO\"\n    level: error\n    \
+             fix: { replace: { replacement: \"DONE\" } }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let finding = Finding {
+            range: Range::new(Position::new(0, 2), Position::new(0, 3)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "no-todo".to_string(),
+            message: "forbidden".to_string(),
+            line: Some(1),
+            column: Some(3),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents.insert(uri.clone(), "x TODO\n".to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 2), Position::new(0, 3)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend
+            .code_action(params)
+            .await
+            .expect("code_action ok")
+            .expect("an action is offered");
+        assert_eq!(
+            resp.len(),
+            1,
+            "exactly one quick-fix for the replace violation"
+        );
+        let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
+            panic!("expected a CodeAction, not a Command");
+        };
+        let ws = action
+            .edit
+            .as_ref()
+            .expect("the action carries a workspace edit");
+        let changes = ws
+            .changes
+            .as_ref()
+            .expect("a located edit uses the changes map");
+        let tes = &changes[&uri];
+        assert_eq!(tes.len(), 1, "one TextEdit for the single TODO");
+        assert_eq!(tes[0].new_text, "DONE");
+        // "x TODO": 'x'=0, ' '=1, "TODO" occupies characters 2..6.
+        assert_eq!(tes[0].range.start, Position::new(0, 2));
+        assert_eq!(tes[0].range.end, Position::new(0, 6));
+    }
+
+    #[tokio::test]
+    async fn code_action_offers_a_structured_set_value_fix() {
+        // Follow-up 4: the structured located fixers (`set_value`/`remove_value`/
+        // `replace` on the `*_path_*` kinds) reach the editor through the SAME
+        // `collects_located_edits` branch as `replace`. Drive `code_action` for a
+        // real `json_path_equals` + `set_value` session: the response must carry a
+        // quick-fix whose `TextEdit` rewrites just the value span.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: port\n    kind: json_path_equals\n    \
+             paths: \"*.json\"\n    path: \"$.port\"\n    equals: 9090\n    level: error\n    \
+             fix: { set_value: {} }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::from_file_path(root.join("app.json")).unwrap();
+        let finding = Finding {
+            range: Range::new(Position::new(0, 9), Position::new(0, 13)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "port".to_string(),
+            message: "value at path does not equal expected".to_string(),
+            line: Some(1),
+            column: Some(10),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents
+                .insert(uri.clone(), "{\"port\": 8080}".to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 9), Position::new(0, 13)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend
+            .code_action(params)
+            .await
+            .expect("code_action ok")
+            .expect("an action is offered");
+        let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
+            panic!("expected a CodeAction");
+        };
+        let ws = action.edit.as_ref().expect("workspace edit");
+        let tes = &ws.changes.as_ref().expect("changes map")[&uri];
+        assert_eq!(tes.len(), 1, "one TextEdit for the value span");
+        assert_eq!(tes[0].new_text, "9090");
+        // `{"port": 8080}`: `8080` occupies UTF-16 columns 9..13.
+        assert_eq!(tes[0].range.start, Position::new(0, 9));
+        assert_eq!(tes[0].range.end, Position::new(0, 13));
+    }
+
+    #[tokio::test]
+    async fn code_action_withholds_a_fix_the_pipeline_would_demote() {
+        // Audit HIGH: the LSP must not offer a quick-fix the engine refuses. It
+        // now routes located edits through `apply_file_edits` (the same verify /
+        // overlap / tier pipeline `alint fix` uses) and offers only survivors. A
+        // `remove_value` batch that can only partially remove is demoted
+        // all-or-nothing (the `Absent` verify fails), so `alint fix` writes
+        // nothing -- the code action must offer nothing, never a partial (here:
+        // secret-leaking) removal.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-secret\n    kind: hcl_path_absent\n    \
+             paths: \"*.tf\"\n    path: \"$..secret\"\n    level: error\n    \
+             fix: { remove_value: { applicability: safe } }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::from_file_path(root.join("main.tf")).unwrap();
+        // A top-level secret + two block secrets: the block members can't be
+        // removed, so the whole batch demotes.
+        let content =
+            "secret = \"top\"\nitem {\n  secret = \"a\"\n}\nitem {\n  secret = \"b\"\n}\n";
+        let finding = Finding {
+            range: Range::new(Position::new(0, 0), Position::new(0, 6)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "no-secret".to_string(),
+            message: "secret present".to_string(),
+            line: Some(1),
+            column: Some(1),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents.insert(uri.clone(), content.to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 0), Position::new(0, 6)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend.code_action(params).await.expect("code_action ok");
+        assert!(
+            resp.is_none(),
+            "a fix the pipeline demotes must not be offered; got: {resp:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn code_action_labels_an_unsafe_fix_and_does_not_prefer_it() {
+        // An Unsafe fix (here `replace`, default Unsafe) IS offered as a quick-fix
+        // (human-in-the-loop), but its title is labeled `(unsafe)` and it is NOT
+        // marked preferred -- so clicking it is a visible, deliberate opt-in (the
+        // LSP analogue of `--unsafe-fixes`), never an editor auto-apply.
+        use tower_lsp::lsp_types::{
+            CodeActionContext, PartialResultParams, TextDocumentIdentifier, WorkDoneProgressParams,
+        };
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().to_path_buf();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+             paths: \"*.txt\"\n    pattern: \"TODO\"\n    level: error\n    \
+             fix: { replace: { replacement: \"DONE\" } }\n",
+        )
+        .unwrap();
+        let session = build_session(&root)
+            .expect("build_session ok")
+            .expect("config present");
+        let (service, _socket) = LspService::new(Backend::new);
+        let backend = service.inner();
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let finding = Finding {
+            range: Range::new(Position::new(0, 2), Position::new(0, 6)),
+            severity: DiagnosticSeverity::ERROR,
+            rule_id: "no-todo".to_string(),
+            message: "forbidden".to_string(),
+            line: Some(1),
+            column: Some(3),
+            policy_url: None,
+            fixable: true,
+            per_file: true,
+        };
+        {
+            let mut st = backend.state.lock();
+            st.root = Some(root.clone());
+            st.session = Some(Arc::new(session));
+            st.open.insert(uri.clone());
+            st.documents.insert(uri.clone(), "x TODO\n".to_string());
+            st.diagnostics.insert(uri.clone(), vec![finding]);
+        }
+        let params = CodeActionParams {
+            text_document: TextDocumentIdentifier { uri: uri.clone() },
+            range: Range::new(Position::new(0, 2), Position::new(0, 6)),
+            context: CodeActionContext {
+                diagnostics: vec![],
+                only: None,
+                trigger_kind: None,
+            },
+            work_done_progress_params: WorkDoneProgressParams::default(),
+            partial_result_params: PartialResultParams::default(),
+        };
+        let resp = backend
+            .code_action(params)
+            .await
+            .expect("code_action ok")
+            .expect("an action is offered");
+        let CodeActionOrCommand::CodeAction(action) = &resp[0] else {
+            panic!("expected a CodeAction");
+        };
+        assert_eq!(action.title, "alint: fix `no-todo` (unsafe)");
+        assert_ne!(
+            action.is_preferred,
+            Some(true),
+            "an Unsafe fix must not be auto-preferred"
+        );
+    }
+
+    #[test]
+    fn located_lsp_path_maps_a_real_replace_fixer_to_utf16_text_edits() {
+        // End-to-end for the located `code_action` path: a REAL `file_content_forbidden`
+        // + `replace` rule, its `ReplaceFixer::collect_edits`, mapped to UTF-16
+        // `TextEdit`s -- the exact sequence `code_action` runs for a located fixer.
+        // A non-BMP char precedes the matches so the UTF-16 column mapping is
+        // load-bearing, and there are TWO occurrences so the per-match multi-edit
+        // behavior (not just the diagnostic's first match) is exercised.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+             paths: \"*.txt\"\n    pattern: \"TODO\"\n    level: error\n    \
+             fix: { replace: { replacement: \"DONE\" } }\n",
+        )
+        .unwrap();
+        let session = build_session(root)
+            .expect("build_session succeeds")
+            .expect("a config is present");
+        let fixer = session
+            .engine
+            .fixer_for("no-todo")
+            .expect("no-todo declares a fixer");
+        assert!(
+            fixer.collects_located_edits(),
+            "replace is a located fixer, so code_action takes the collect_edits path"
+        );
+        let text = "x\u{1F600} TODO and TODO\n";
+        let violation = Violation::new("forbidden").with_path(PathBuf::from("a.txt"));
+        let edits = fixer.collect_edits(
+            std::slice::from_ref(&violation),
+            Path::new("a.txt"),
+            text.as_bytes(),
+            root,
+        );
+        let ws = located_edits_to_workspace_edit(&edits, text, Path::new("a.txt"), root)
+            .expect("the located edits map to a workspace edit");
+        let changes = ws.changes.expect("located edits use the changes map");
+        let uri = Url::from_file_path(root.join("a.txt")).unwrap();
+        let tes = &changes[&uri];
+        assert_eq!(tes.len(), 2, "both TODO occurrences become TextEdits");
+        assert!(tes.iter().all(|te| te.new_text == "DONE"));
+        // 'x'=0, emoji=cols 1-2 (two UTF-16 units), ' '=3 -> first TODO at character 4.
+        assert_eq!(tes[0].range.start, Position::new(0, 4));
+    }
+
+    #[test]
+    fn code_action_offers_every_match_for_a_path_matches_replace() {
+        // Regression (audit 2026-09-20): the located `replace` fixer now correlates
+        // its edits to the violation SET (W4). `code_action` synthesizes a
+        // positional violation with NO baseline_key, so the fixer falls back to
+        // fixing every occurrence -- otherwise the empty correlation budget would
+        // leave the LSP offering NO `*_path_matches` fix.
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nrules:\n  - id: v-pins\n    kind: json_path_matches\n    \
+             paths: \"*.json\"\n    path: \"$.deps.*\"\n    matches: \"^v\"\n    level: error\n    \
+             fix: { replace: { pattern: \"^\", replacement: \"v\", applicability: safe } }\n",
+        )
+        .unwrap();
+        let session = build_session(root)
+            .expect("build_session succeeds")
+            .expect("a config is present");
+        let fixer = session
+            .engine
+            .fixer_for("v-pins")
+            .expect("v-pins declares a fixer");
+        assert!(fixer.collects_located_edits());
+        let text = "{\"deps\": {\"a\": \"1.0\", \"b\": \"2.0\"}}";
+        // As `code_action` builds it: a positional path-bearing violation, NO key.
+        let violation = Violation::new("v-pins").with_path(PathBuf::from("app.json"));
+        let edits = fixer.collect_edits(
+            std::slice::from_ref(&violation),
+            Path::new("app.json"),
+            text.as_bytes(),
+            root,
+        );
+        let ws = located_edits_to_workspace_edit(&edits, text, Path::new("app.json"), root)
+            .expect("the located edits map to a workspace edit");
+        let changes = ws.changes.expect("located edits use the changes map");
+        let uri = Url::from_file_path(root.join("app.json")).unwrap();
+        assert_eq!(
+            changes[&uri].len(),
+            2,
+            "both failing nodes are offered (the keyless fix-all fallback)"
+        );
     }
 }

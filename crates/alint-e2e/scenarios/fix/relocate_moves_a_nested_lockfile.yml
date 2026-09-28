@@ -1,0 +1,39 @@
+name: relocate moves a nested lockfile back to the repository root
+# file_absent(paths: "**/*/Cargo.lock") flags a lockfile that drifted DOWN into a
+# workspace member -- it belongs at the repo root. relocate is Unsafe (a rename
+# moves a real file and the destination is inferred), so `fix_unsafe` raises the
+# threshold to apply it: the nested file is moved to the root `Cargo.lock`, which
+# no longer matches the subdir-anchored pattern -> the tree converges. The
+# `**/*/Cargo.lock` pattern needs at least one leading directory, so it never
+# matches the relocated root file (the convergence guarantee).
+tags: [fix, file_absent, relocate, applicability]
+
+given:
+  tree:
+    crates:
+      widget:
+        Cargo.lock: "# lock v1\n"
+        lib.rs: "// widget\n"
+  config: |
+    version: 1
+    rules:
+      - id: lockfile-at-root
+        kind: file_absent
+        paths: "**/*/Cargo.lock"
+        level: error
+        fix:
+          relocate: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - violations:
+      - {rule: lockfile-at-root, level: error, path: crates/widget/Cargo.lock}
+  - applied: [lockfile-at-root]
+  - violations: []
+
+expect_tree:
+  Cargo.lock: "# lock v1\n"
+  crates:
+    widget:
+      lib.rs: "// widget\n"

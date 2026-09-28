@@ -1,0 +1,40 @@
+name: replace on hcl_path_matches rewrites the value at the path to satisfy matches (hcl)
+tags: [fix, hcl_path_matches, replace, hcl]
+
+# Arc-wide audit coverage gap: `replace` on `*_path_matches` was tested end-to-end
+# ONLY for JSON, yet each format has its own value-span resolver + `serialize_scalar`.
+# The value must start with `v`; the fix prepends one (decode -> regex-substitute ->
+# re-serialize -> splice the value span), and the sibling `name` is untouched.
+
+given:
+  tree:
+    main.tf: |
+      version = "1.2.3"
+      name    = "app"
+  config: |
+    version: 1
+    rules:
+      - id: v-prefix
+        kind: hcl_path_matches
+        paths: "**/*.tf"
+        path: "$.version"
+        matches: "^v"
+        level: error
+        fix:
+          replace:
+            pattern: "^"
+            replacement: "v"
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: v-prefix, level: error, path: main.tf}
+  - applied: [v-prefix]
+  - violations: []
+
+expect_tree:
+  main.tf: |
+    version = "v1.2.3"
+    name    = "app"

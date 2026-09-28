@@ -1,0 +1,33 @@
+name: insert_header inserts a required header AFTER an XML declaration
+tags: [fix, file_header, insert_header]
+
+# The XML counterpart to the shebang case: `insert_header` places the header
+# comment AFTER the `<?xml ...?>` declaration (which an XML parser requires first),
+# not above it. Safe, so a bare `fix` applies it -> the second check is clean.
+
+given:
+  tree:
+    doc.xml: "<?xml version=\"1.0\"?>\n<root/>\n"
+  config: |
+    version: 1
+    rules:
+      - id: xml-license
+        kind: file_header
+        paths: "**/*.xml"
+        pattern: "Copyright"
+        lines: 5
+        level: error
+        fix:
+          insert_header:
+            content: "<!-- Copyright 2026 acme -->\n"
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: xml-license, level: error, path: doc.xml}
+  - applied: [xml-license]
+  - violations: []
+
+expect_tree:
+  doc.xml: "<?xml version=\"1.0\"?>\n<!-- Copyright 2026 acme -->\n<root/>\n"

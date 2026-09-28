@@ -1,0 +1,39 @@
+name: remove_value deletes an INI key line, keeping its section + siblings
+tags: [fix, ini_path_absent, remove_value, ini]
+
+# `remove_value` deletes the whole `debug = yes` physical line (a single-line
+# key owns exactly its one line), leaving the `[server]` header and the sibling
+# `host` / `port` keys intact. `remove_value` is Unsafe by default; this rule
+# promotes it to `safe` so a bare `fix` applies.
+
+given:
+  tree:
+    app.ini: |
+      [server]
+      host = localhost
+      debug = yes
+      port = 8080
+  config: |
+    version: 1
+    rules:
+      - id: no-debug
+        kind: ini_path_absent
+        paths: "**/*.ini"
+        path: "$['server']['debug']"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-debug, level: error, path: app.ini}
+  - applied: [no-debug]
+  - violations: []
+
+expect_tree:
+  app.ini: |
+    [server]
+    host = localhost
+    port = 8080

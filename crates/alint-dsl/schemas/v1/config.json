@@ -21,7 +21,7 @@
         },
         {
           "const": "numeric",
-          "description": "Leading-integer order; entries without a leading integer fall back to `lexical` so a mixed block degrades predictably rather than panicking.",
+          "description": "Leading-integer order; entries without a leading integer (or with one too large even for `i128` -- 39+ digits) fall back to `lexical` so a mixed block degrades predictably rather than panicking.",
           "type": "string"
         }
       ]
@@ -237,6 +237,11 @@
         {
           "const": "resolves",
           "description": "Each extracted source path must exist on disk (file or dir).",
+          "type": "string"
+        },
+        {
+          "const": "registered",
+          "description": "Each SOURCE member (a filesystem path from `source.file` / `source.files`, templated by `register_as`) must be an element of every target's list (the structured array the target `extract` locates). Unlike the value/set relations, the source is a set of filesystem PATHS, not values extracted from file contents. Fixable via `create_and_register` (create a missing named member, append an unregistered one).",
           "type": "string"
         }
       ]
@@ -716,6 +721,15 @@
                 }
               ],
               "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (default `safe`). A content op reached through a remote `extends:` not listed in `trusted_extends:` is demoted to `suggestion`; an inherited config may only demote, never promote.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
                 "content": {
                   "description": "Literal bytes to write. Mutually exclusive with `content_from`. Pass \"\" for an empty file.",
                   "type": "string"
@@ -747,7 +761,17 @@
           "properties": {
             "file_remove": {
               "additionalProperties": false,
-              "properties": {},
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. `file_remove` defaults to `unsafe` (a bare `alint fix` surfaces the deletion as a suggestion; `--unsafe-fixes` applies it). Set `safe` in your OWN top-level config to auto-apply; an inherited (`extends:`'d) config may only demote to `suggestion`/`never`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -774,6 +798,15 @@
                 }
               ],
               "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (default `safe`). A content op reached through a remote `extends:` not listed in `trusted_extends:` is demoted to `suggestion`; an inherited config may only demote, never promote.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
                 "content": {
                   "description": "Bytes to insert at the start of each violating file. Mutually exclusive with `content_from`. A trailing newline is the caller's responsibility.",
                   "type": "string"
@@ -809,6 +842,15 @@
                 }
               ],
               "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (default `safe`). A content op reached through a remote `extends:` not listed in `trusted_extends:` is demoted to `suggestion`; an inherited config may only demote, never promote.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
                 "content": {
                   "description": "Bytes to append to each violating file. Mutually exclusive with `content_from`. A leading newline is the caller's responsibility.",
                   "type": "string"
@@ -943,6 +985,92 @@
           },
           "required": [
             "file_collapse_blank_lines"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "replace": {
+              "additionalProperties": false,
+              "description": "Rewrite each span matching a search regex with `replacement`. Wired to `file_content_forbidden` (a violation there means the banned pattern is present, so replacing each occurrence removes/rewrites it; the search is the rule's own `pattern:`) and to `*_path_matches` (the value at `path:` is rewritten by the fix's own `pattern:` so it satisfies the rule's `matches:`). A located edit, Unsafe by default (a regex rewrite is not behavior-preserving): a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` applies it.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. Defaults to `unsafe`; set `safe` in your OWN top-level config when the rewrite is provably a normalization (an inherited config may only demote to `suggestion`/`never`).",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
+                "pattern": {
+                  "description": "For `*_path_matches` only (REQUIRED there): the search regex applied to the scalar value at `path:` (the rule's `matches:` stays the check + re-verify target). Not used by `file_content_forbidden` / `file_content_matches`, which search the whole file with the host rule's own pattern.",
+                  "type": "string"
+                },
+                "replacement": {
+                  "description": "Replacement template written in place of each match. Supports the regex crate's `$1` / `${name}` capture references; write `$$` for a literal `$`.",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "replacement"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "replace"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "set_value": {
+              "additionalProperties": false,
+              "description": "Overwrite the value at the host `*_path_equals` rule's `path:` with its `equals:` value, format-preservingly (a located byte-range splice). Safe by default, but only a scalar replacing an existing scalar is applied at tier; object/array values, zero-match insertion, and nested creation decline. Content-injecting (it writes the rule's `equals` bytes), so a remote `extends:` demotes it to `suggestion`.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. Defaults to `safe`; an inherited config may only demote to `suggestion`/`never`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "set_value"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "remove_value": {
+              "additionalProperties": false,
+              "description": "Delete the node the host `*_path_absent` rule's `path:` selects, along with its format-specific separator (the whole `key = value` line, a trailing comma, an XML element). A located edit, Unsafe by default (a deletion is not behavior-preserving); a user may promote it to `safe` in their OWN top-level config.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override. Defaults to `unsafe`; an inherited config may only demote to `suggestion`/`never`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "remove_value"
           ],
           "type": "object"
         }
@@ -1297,6 +1425,14 @@
         "normalize": {
           "$ref": "#/$defs/NormalizeSpec",
           "description": "A normalize transform, or an ordered list of transforms applied left-to-right (`[trim, semver-minor]`). `semver-major` / `semver-minor` keep only the leading MAJOR / MAJOR.MINOR band."
+        },
+        "register_as": {
+          "default": null,
+          "description": "For `relation: registered` only: the value to look for (and, on fix, add) in each target list, as a `{path}` / `{dir}` / `{stem}` template over the matched member path. Defaults to `{path}` (the matched path verbatim), so a `files: \"crates/*\"` of directories needs no `register_as`; a source that names a `.../Cargo.toml` uses `{dir}` to register the parent directory.",
+          "type": [
+            "string",
+            "null"
+          ]
         },
         "relation": {
           "$ref": "#/$defs/Relation",
@@ -3611,6 +3747,17 @@
         "paths": {
           "$ref": "#/$defs/paths_spec"
         },
+        "require": {
+          "default": null,
+          "description": "Exact lines that must be PRESENT in the block (in addition to it being sorted). A missing one is repaired by the `insert_line` fix, which splices it at its sorted position. Currently supported only for a MARKERLESS rule (the whole file is one sorted list -- the `CODEOWNERS` / allow-list shape). Presence is EXACT-string (trimmed), independent of `comparator`: under `lexical-ci`, requiring `bravo` is NOT satisfied by an existing `Bravo` (the distinct case-variant is inserted) -- a required line is inserted verbatim, so it must match itself exactly. For the same reason, with `select:` set every required line must itself match `select:` (else the inserted line could never be recognized as an entry); a non-matching line is rejected at load.",
+          "items": {
+            "type": "string"
+          },
+          "type": [
+            "array",
+            "null"
+          ]
+        },
         "select": {
           "default": null,
           "description": "Regex; when set, only lines inside a block matching it are sortable entries (others, such as comments or group headers, pass through). The sectioned / keep-sorted-subset shape.",
@@ -4356,6 +4503,13 @@
       "description": "Reusable rule shapes referenced by `extends_template:` in `rules:` entries. Each template carries an `id:` and any other rule-spec fields; `{{vars.<name>}}` placeholders in those fields substitute from each instance's `vars:` map at expansion time. Templates are leaf-only - a template may not itself `extends_template:` another. Templates merge through the `extends:` chain by id, so a downstream config can override an upstream template's body.",
       "items": {
         "$ref": "#/$defs/template"
+      },
+      "type": "array"
+    },
+    "trusted_extends": {
+      "description": "Remote `extends:` URLs (matched with or without the `#sha256-` integrity fragment) whose content-injecting fixers (`replace`, `file_create`, `file_prepend`, `file_append`) are honored at their declared tier instead of demoted to a suggestion. By default a content fixer reached through a remote `extends:` may only PROPOSE an edit -- it never auto-writes third-party bytes into your files; listing the URL here opts it back into auto-applying. Honored only from the user's own top-level config (and `.alint.d/` drop-ins): a `trusted_extends:` from an `extends:`'d or nested config is refused, because a ruleset must not allowlist itself.",
+      "items": {
+        "type": "string"
       },
       "type": "array"
     },

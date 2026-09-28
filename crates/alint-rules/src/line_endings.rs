@@ -76,6 +76,12 @@ impl PerFileRule for LineEndingsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content: the `file_normalize_line_endings` fixer refuses
+        // it, so `check` and `fix` must agree on scope (else a binary is flagged
+        // fixable forever but never fixed).
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         let Some(line_no) = first_mismatched_line(bytes, self.target) else {
             return Ok(Vec::new());
         };
@@ -132,9 +138,15 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let target: LineEndingTarget = opts.target.into();
     let scope = Scope::from_spec(spec)?;
     let fixer = match &spec.fix {
-        Some(FixSpec::FileNormalizeLineEndings { .. }) => {
-            Some(FileNormalizeLineEndingsFixer::new(target))
-        }
+        Some(FixSpec::FileNormalizeLineEndings {
+            file_normalize_line_endings,
+        }) => Some(
+            FileNormalizeLineEndingsFixer::new(target).with_applicability(
+                file_normalize_line_endings
+                    .applicability
+                    .unwrap_or(alint_core::Applicability::Safe),
+            ),
+        ),
         Some(other) => {
             return Err(Error::rule_config(
                 &spec.id,

@@ -1,0 +1,42 @@
+name: set_value rewrites an XML element's text, preserving structure + comments
+tags: [fix, xml_path_equals, set_value, xml]
+
+# The second format (roxmltree spans). `set_value` splices only the target
+# element's text range, so the comment, sibling elements, and indentation all
+# survive. Safe (scalar replacing an existing scalar), so a bare `fix` applies.
+
+given:
+  tree:
+    config.xml: |
+      <config>
+        <!-- keep this comment -->
+        <version>1.0</version>
+        <name>app</name>
+      </config>
+  config: |
+    version: 1
+    rules:
+      - id: ver
+        kind: xml_path_equals
+        paths: "**/*.xml"
+        path: "$.config.version"
+        equals: "2.0"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: ver, level: error, path: config.xml}
+  - applied: [ver]
+  - violations: []
+
+expect_tree:
+  config.xml: |
+    <config>
+      <!-- keep this comment -->
+      <version>2.0</version>
+      <name>app</name>
+    </config>

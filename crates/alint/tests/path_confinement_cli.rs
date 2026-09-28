@@ -276,3 +276,38 @@ fn fixer_content_from_out_of_root_is_refused() {
         "content_from exfiltrated an out-of-root secret into the repo: {leaked:?}"
     );
 }
+
+#[test]
+fn content_providing_fixers_refuse_out_of_root_content_from() {
+    // AUDIT M3: `file_create`'s content_from confinement is covered above; the
+    // sibling content-providing ops (`file_prepend`, `insert_header`, and, sharing
+    // the identical `resolve_source_bytes` path, `file_append`) must refuse an
+    // out-of-root `content_from:` too -- never prepend/insert a secret into a file.
+    let base = tempfile::Builder::new()
+        .prefix("alint-exfil2-")
+        .tempdir()
+        .unwrap();
+    let repo = base.path().join("repo");
+    std::fs::create_dir_all(&repo).unwrap();
+    std::fs::write(base.path().join("secret.txt"), "TOPSECRET\n").unwrap();
+    std::fs::write(repo.join("pre.txt"), "body\n").unwrap();
+    std::fs::write(repo.join("hdr.txt"), "body\n").unwrap();
+    std::fs::write(
+        repo.join(".alint.yml"),
+        "version: 1\nrules:\n  \
+         - id: pre\n    kind: file_header\n    paths: [\"pre.txt\"]\n    pattern: \"NEEDLE\"\n    \
+         level: error\n    fix: { file_prepend: { content_from: \"../secret.txt\" } }\n  \
+         - id: hdr\n    kind: file_header\n    paths: [\"hdr.txt\"]\n    pattern: \"NEEDLE\"\n    \
+         level: error\n    fix: { insert_header: { content_from: \"../secret.txt\" } }\n",
+    )
+    .unwrap();
+
+    run(&repo, &["fix", "."]);
+    for f in ["pre.txt", "hdr.txt"] {
+        let content = std::fs::read_to_string(repo.join(f)).unwrap_or_default();
+        assert!(
+            !content.contains("TOPSECRET"),
+            "{f}: content_from exfiltrated an out-of-root secret: {content:?}"
+        );
+    }
+}
