@@ -1134,7 +1134,12 @@ mod tests {
         assert!(tmp.path().join("foo.rs").exists());
     }
 
-    #[cfg(unix)]
+    // Linux-only: creating a file with a NON-UTF-8 name requires a filesystem that
+    // permits non-Unicode names. Linux does; macOS/APFS and Windows reject it at
+    // write time, so the fixture cannot exist there (a bare `#[cfg(unix)]` still
+    // reached macOS and panicked on the write). Matches how `weird_path_formats_cli`
+    // gates its non-UTF-8 cases.
+    #[cfg(target_os = "linux")]
     #[test]
     fn file_rename_skips_a_non_utf8_extension_rather_than_dropping_it() {
         // Phase-0 audit: a UTF-8 stem with a non-UTF-8 extension must NOT rename
