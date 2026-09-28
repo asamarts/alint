@@ -115,13 +115,17 @@ fn default_options_snapshot_matches() {
         return;
     }
 
-    // Git's `core.autocrlf` may convert the checked-in LF
-    // snapshot to CRLF on Windows checkout; the in-memory
-    // `actual` always uses `\n`. Normalise so the comparison
-    // measures content drift, not line-ending drift.
-    let expected = std::fs::read_to_string(&path)
-        .unwrap_or_default()
-        .replace("\r\n", "\n");
+    // Normalise cross-platform incidentals so the comparison measures OPTION-VALUE
+    // drift, not platform rendering. Two of them:
+    //  - `\r\n` -> `\n`: `core.autocrlf` may convert the checked-in LF snapshot to
+    //    CRLF on Windows checkout, while the in-memory `actual` always uses `\n`.
+    //  - `\\` -> `/`: a `PathBuf` option Debug-prints with the OS separator, so a
+    //    target like `src/highlight.c` reads back as `src\highlight.c` on Windows.
+    // Applied to BOTH sides, so a real default-value change is still caught (both
+    // normalise identically); the snapshot FILE stays canonical (LF, `/`).
+    let normalize = |s: &str| s.replace("\r\n", "\n").replace("\\\\", "/");
+    let expected = normalize(&std::fs::read_to_string(&path).unwrap_or_default());
+    let actual = normalize(&actual);
 
     if expected != actual {
         let diff = first_diverging_window(&expected, &actual, 6);
