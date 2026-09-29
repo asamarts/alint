@@ -168,7 +168,9 @@ S3 -- and old S5's fix ASPECT moves to S5fix while its check kinds move to S2.)
    repoint to the new anchors (constraint 6).
 6. **`s3_1m_full` trajectory assert (`coverage_audit_benchmarks_trajectory.rs` +
    `render-history.py`)**: repoint the "newest publish has this cell" anchor to the
-   new workspace scenario at `1m`/`full`.
+   new workspace scenario (S4) at `1m`/`full` -- cell key `s4_1m_full` (see the
+   `cell_keys` derivation under Phase C; the anchor is S4 because it is the release
+   scenario every publish captures).
 7. **`bench-record.yml` scenario-derivation glob -- a LIVE BUG (reproduced).** The
    `ls xtask/src/bench/scenarios/s*.yml` glob (`bench-record.yml:310`; the `sed`
    extraction is `:311`) now also matches `sfix_trim.yml`, whose name has no digit
@@ -255,8 +257,24 @@ compile breaks against old crates).
 
 **Backfill procedure, per past tag `vX`:**
 1. `git worktree add /tmp/at-vX vX && (cd /tmp/at-vX && cargo build --release -p alint)` -- build that tag's alint in isolation (rustc 1.97.0).
-2. From the CURRENT checkout: `xtask bench-scale --alint-binary /tmp/at-vX/target/release/alint --scenarios <applicable> --modes <applicable> --out <MAIN>/vX ...` with the kbench pins. Pass `--scenarios` explicitly per the ragged floor (an old binary `bail!`s on a kind it lacks) and drop `fix`/`SFIX` for any pre-consolidation tag (no fix ops).
-3. The `--out <MAIN>/vX` writes into the new series' **own fresh path**, so it never collides with the old results (which move to legacy only in Phase C).
+2. From the CURRENT checkout, with the kbench pins (`ALINT_BENCH_DROP_CACHES=1
+   TMPDIR=/bench`):
+   ```
+   xtask bench-scale --alint-binary /tmp/at-vX/target/release/alint \
+     --scenarios <applicable> --modes full,changed \
+     --sizes 1k,10k,100k --include-1m --out <MAIN>/vX
+   ```
+   - **`--include-1m` is MANDATORY for the full grid.** 1m is `is_opt_in()`, so
+     without the flag `dispatch_bench_scale` (`main.rs:480`) silently `retain`s it OUT
+     -- even if you list `1m` in `--sizes`. The flag also auto-adds M1, so
+     `--sizes 1k,10k,100k --include-1m` is the canonical full-grid form. (Verified
+     the hard way: a run missing the flag produces 24 cells, not 32, and no error.)
+   - Pass `--scenarios` explicitly per the ragged floor (an old binary `bail!`s on a
+     kind it lacks) and drop `fix`/`SFIX` for any pre-consolidation tag (no fix ops).
+   - seed / warmup / runs / diff_pct all DEFAULT to the legacy `args`
+     (0xA11E47 / 3 / 10 / 10.0), so they need not be passed. 1m auto-reduces to
+     warmup 1 / runs 3 (`run.rs:328`), matching the legacy `samples=3` at 1m.
+3. The `--out <MAIN>/vX` writes into the new series' **own fresh path**, so it never collides with the old results (which move to legacy only in Phase C). `results.json` is CLOBBERED per invocation (`output.rs:22`, `fs::write`) -- one invocation must cover all of a version's scenarios/sizes; there is no cross-invocation merge.
 
 (Caveat: with `--alint-binary` the results fingerprint's `alint_version` still reads
 the current workspace Cargo.toml, not the measured binary -- cosmetic, since
@@ -300,11 +318,16 @@ not a data move of the new (and never a backfill into a dir holding old data --
   render only sees its own ids, so the guard (`measured` subset of `SCENARIOS`) is
   satisfied without carrying the old ids in the main `SCENARIOS`. Add `FIRST_VERSION`
   floors for the 5 new ids (per the ragged matrix).
-- **Site + `trajectory.json` (G5):** repoint `cell_keys` to the new main anchors
-  (e.g. `s4_workspace_1m_full`), bump `schema_version` 1->2 (the module's own rule),
-  update the `== 1` pin in `coverage_audit_benchmarks_trajectory.rs:91` + the
-  `s3_1m_full` anchor -> the new main cell, and point `benchmarks.astro` at the new
-  series with a legacy link (a coordinated alint.org site-repo edit).
+- **Site + `trajectory.json` (G5):** repoint `render-history.py`'s hardcoded
+  `cell_keys` list to the new scenarios. Each entry is a `(json_key, scenario_label)`
+  tuple and the JSON key is the label LOWERCASED (the harness writes `scenario="S4"`
+  via `Scenario::label()`, render-history keys on that verbatim), so the new list is
+  `[("s1_1m_full","S1"), ("s2_1m_full","S2"), ("s3_1m_full","S3"), ("s4_1m_full","S4")]`
+  -- NOT `s4_workspace_1m_full` (that long id is the YAML filename, never a cell key).
+  Bump `schema_version` 1->2 (the module's own rule), update the `== 1` pin in
+  `coverage_audit_benchmarks_trajectory.rs:91` + repoint the top-row `s3_1m_full`
+  assert -> `s4_1m_full` (S4 is the release anchor), and point `benchmarks.astro` at
+  the new series with a legacy link (a coordinated alint.org site-repo edit).
 - **Scenario YAMLs:** only NOW delete the old 14 from the active path (they remain in
   git history + the legacy results).
 
@@ -366,6 +389,30 @@ Author a
 13. Full current-version run (1k/10k/100k/1m) into the MAIN series path.
 14. **Past-version backfill** into the MAIN series per the ragged floors (see the
     Past-version backfill section).
+
+**Execution status (2026-09-28):**
+- Smoke + mechanism PROVEN: `--alint-binary` runs the new scenarios on a past binary
+  (v0.16.0, 1k, 8 sane cells -- s1/full 8.96 ms vs legacy 7.7 ms). `--include-1m` then
+  verified to restore the 1m size to the parsed matrix.
+- **Measured cost (the deciding factor):** `s3_relational` scales cleanly linear --
+  454 ms / 4.7 s / 46.7 s at 1k / 10k / 100k (it absorbed old S14's 3x `file_graph`) --
+  so `s3@1m` is ~8 min mean/cell -> ~7 h across the 7 S3-capable tags. Every other
+  scenario at 1m is cheap (s1 ~3.9 s, s2 ~18 s, s4-anchor ~15 s). 1m is the whole cost.
+- **Decision (asamarts): FULL 1M, faithful to the legacy depth.** All scenarios at all
+  ragged-applicable versions incl `s3@1m` (~12 h total: ~2.2 h builds + ~10 h benches).
+  Chosen over "1M-except-s3 (~5 h, needs a merge tweak)" and "cap-at-100k (~3.5 h)".
+- **Execution shape:** one detached kbench driver, **resumable** (skips any version
+  whose `results.json` already has the expected cell count -- 32 for S1-S4 tags, 24 for
+  S1/S2/S4 tags), **newest-first** (value priority; s3@1m trajectory lands first), and
+  **serial** (build XOR bench at any instant -- a concurrent `cargo build` would steal
+  CPU from a live measurement and contaminate it). Stages at `/tmp/kbench-main-series/`
+  -> pulled to `docs/benchmarks/macro/results/next/linux-x86_64/vX/` (the `next/` prefix
+  is invisible to the current tests, which read `results/linux-x86_64/v*`).
+- **Current-checkout nuance:** the working tree stamps `v0.16.1` (Cargo.toml) but
+  carries the unreleased v0.17 fix ops, so a current-checkout run is THROWAWAY
+  validation, never committed. The committed MAIN top row is `v0.16.0` (backfilled from
+  the published tag; S1-S4, no SFIX). `sfix_all` has NO published version until v0.17
+  ships, so it is `n/a` across the whole historical trajectory -- correct, not a gap.
 
 ### Phase C -- migrate old to legacy (only AFTER Phase B verifies good)
 15. Per the **Legacy migration** section: move the old S1-S14 results to the legacy
