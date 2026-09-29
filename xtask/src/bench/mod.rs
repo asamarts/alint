@@ -67,6 +67,11 @@ pub struct ScaleArgs {
     pub out: Option<PathBuf>,
     pub quick: bool,
     pub json_only: bool,
+    /// A PRE-BUILT alint binary to benchmark instead of building from the current
+    /// checkout. Used by the past-version backfill: the CURRENT harness measures an
+    /// OLD alint binary (built separately from its tag). `None` = build the current
+    /// checkout (the normal path).
+    pub alint_binary: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

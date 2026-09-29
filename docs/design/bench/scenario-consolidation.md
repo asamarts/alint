@@ -243,18 +243,25 @@ them.
 
 ## Past-version backfill (the new MAIN series across releases)
 
-The harness has **no version selector** -- `Tool::Alint` always builds + runs the
-CURRENT checkout (`run.rs:39` -> `build_release_binary`; the version is derived from
-the workspace `Cargo.toml`, not chosen). `--docker` is NOT a past-version mechanism
-(it builds alint from the mounted current source; it only pins competitor + toolchain
-versions). So backfilling = for each past tag: checkout, graft the new bench
-subsystem, build that tag's alint, run the new scenarios, write into the MAIN series.
-This mirrors the v0.10-v0.13 manual-backfill precedent (`bench-host-migration.md`
-step 3), which grafted only `run.rs`; here the graft is larger (the whole new
-`xtask/src/bench/` tree + the 5 YAMLs + `Mode::Fix` + the git-polyglot generator),
-and `--scenarios` must be passed explicitly (the old ref's `s*.yml` glob emits the
-old ids). The backfill writes to the new series' **own fresh path**, so it never
-collides with the still-present old results (which move to legacy only in Phase C).
+Out of the box the harness has no version selector -- `Tool::Alint` builds + runs
+the CURRENT checkout (`run.rs` -> `build_release_binary`), and `--docker` builds from
+the mounted current source too (it only pins competitor + toolchain versions). So a
+**`--alint-binary <path>` flag was added** (Phase A follow-on, commit below): it
+skips the build and measures a SUPPLIED binary, so the CURRENT harness (new
+scenarios, `Mode::Fix`, git-polyglot generator) benchmarks an OLD alint. This beats
+the "graft the whole subsystem" approach (`bench-host-migration.md` step 3 grafted
+only `run.rs`; grafting the whole new `xtask/src/bench/` tree would risk cross-version
+compile breaks against old crates).
+
+**Backfill procedure, per past tag `vX`:**
+1. `git worktree add /tmp/at-vX vX && (cd /tmp/at-vX && cargo build --release -p alint)` -- build that tag's alint in isolation (rustc 1.97.0).
+2. From the CURRENT checkout: `xtask bench-scale --alint-binary /tmp/at-vX/target/release/alint --scenarios <applicable> --modes <applicable> --out <MAIN>/vX ...` with the kbench pins. Pass `--scenarios` explicitly per the ragged floor (an old binary `bail!`s on a kind it lacks) and drop `fix`/`SFIX` for any pre-consolidation tag (no fix ops).
+3. The `--out <MAIN>/vX` writes into the new series' **own fresh path**, so it never collides with the old results (which move to legacy only in Phase C).
+
+(Caveat: with `--alint-binary` the results fingerprint's `alint_version` still reads
+the current workspace Cargo.toml, not the measured binary -- cosmetic, since
+render-history keys on the `--out` dir name `vX`; a follow-up could shell
+`<binary> --version`.)
 
 **The matrix is RAGGED (feature availability -- verified against real tags):**
 - **`sfix_all`: consolidation release onward ONLY.** Its 24 ops are the unreleased

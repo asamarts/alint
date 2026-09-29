@@ -138,6 +138,12 @@ enum Commands {
         /// Override the image with `ALINT_BENCH_IMAGE=...`.
         #[arg(long)]
         docker: bool,
+        /// Benchmark a PRE-BUILT alint binary at this path instead of building
+        /// from the current checkout. For past-version backfill: build an old
+        /// tag's alint separately, then point this at it so the CURRENT
+        /// harness measures that OLD binary. Incompatible with `--docker`.
+        #[arg(long)]
+        alint_binary: Option<PathBuf>,
     },
     /// Materialize a synthetic tree (persistent) for manual experimentation.
     GenFixture {
@@ -340,9 +346,22 @@ fn main() -> Result<()> {
             quick,
             json_only,
             docker,
+            alint_binary,
         } => dispatch_bench_scale(
-            &sizes, include_1m, &scenarios, &modes, &tools, warmup, runs, seed, diff_pct, out,
-            quick, json_only, docker,
+            &sizes,
+            include_1m,
+            &scenarios,
+            &modes,
+            &tools,
+            warmup,
+            runs,
+            seed,
+            diff_pct,
+            out,
+            quick,
+            json_only,
+            docker,
+            alint_binary,
         ),
         Commands::GenFixture {
             files,
@@ -409,7 +428,15 @@ fn dispatch_bench_scale(
     quick: bool,
     json_only: bool,
     docker: bool,
+    alint_binary: Option<PathBuf>,
 ) -> Result<()> {
+    if docker && alint_binary.is_some() {
+        bail!(
+            "--alint-binary is incompatible with --docker: the docker image builds \
+             alint from the mounted (current) source, so it cannot benchmark a \
+             pre-built binary. Run --alint-binary directly on the host."
+        );
+    }
     if docker {
         // The `--docker` path forwards args verbatim into the
         // image's entrypoint. Skip host-side parse so the
@@ -479,6 +506,7 @@ fn dispatch_bench_scale(
         out,
         quick,
         json_only,
+        alint_binary,
     })
 }
 

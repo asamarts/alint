@@ -36,7 +36,18 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
     }
 
     ensure_hyperfine()?;
-    let alint_bin = build_release_binary()?;
+    // A supplied `--alint-binary` (past-version backfill) is measured as-is; the
+    // normal path builds the current checkout.
+    let alint_bin = match &args.alint_binary {
+        Some(path) => {
+            if !path.is_file() {
+                bail!("--alint-binary {} is not a file", path.display());
+            }
+            eprintln!("[xtask] using pre-built alint binary: {}", path.display());
+            path.clone()
+        }
+        None => build_release_binary()?,
+    };
     let fingerprint = fingerprint::capture(&args.tools);
 
     eprintln!(
