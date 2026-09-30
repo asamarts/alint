@@ -337,7 +337,7 @@ impl Scenario {
         Ok(())
     }
 
-    /// Single-file overlay paths this scenario's [`setup_overlay`]
+    /// Single-file overlay paths this scenario's [`Self::setup_overlay`]
     /// writes, relative to the tree root.
     fn overlay_files(self) -> &'static [&'static str] {
         match self {
@@ -347,7 +347,7 @@ impl Scenario {
         }
     }
 
-    /// Subtree overlay paths this scenario's [`setup_overlay`] writes,
+    /// Subtree overlay paths this scenario's [`Self::setup_overlay`] writes,
     /// relative to the tree root (removed with `remove_dir_all`).
     fn overlay_dirs(self) -> &'static [&'static str] {
         match self {
