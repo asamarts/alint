@@ -669,20 +669,10 @@
     "vercel-turbo": 91
   },
   "bench_scenario_rule_counts": {
-    "S1": 8,
-    "S10": 5,
-    "S11": 3,
-    "S12": 4,
-    "S13": 2,
-    "S14": 7,
-    "S2": 8,
-    "S3": 32,
-    "S4": 5,
-    "S5": 4,
-    "S6": 13,
-    "S7": 6,
-    "S8": 34,
-    "S9": 26
+    "S1": 16,
+    "S2": 20,
+    "S3": 16,
+    "S4": 50
   },
   "bundled_rulesets": [
     "agent-context",
