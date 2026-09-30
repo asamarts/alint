@@ -10,7 +10,7 @@ alint ships a [pre-commit](https://pre-commit.com/) hook. The recommended path i
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint-pre-commit
-    rev: v0.16.1
+    rev: v0.17.0
     hooks:
       - id: alint
 ```
@@ -36,7 +36,7 @@ Pin to a tagged release. Updating the `rev:` is how you upgrade alint:
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint-pre-commit
-    rev: v0.16.1
+    rev: v0.17.0
     hooks:
       - id: alint
         # Pass extra args here if you need to:
@@ -52,7 +52,7 @@ If you would rather not pull from PyPI, point `repo:` at the alint repository it
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint
-    rev: v0.16.1
+    rev: v0.17.0
     hooks:
       - id: alint
 ```

@@ -10,7 +10,16 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.16.1** (2026-09-04): the PyPI distribution channel. alint is
+**Latest release: v0.17.0** (2026-09-30): the auto-fix arc. `alint fix` now repairs
+violations across 26 fix ops (up from 12), spanning located `replace`, structured
+`set_value` / `remove_value`, metadata (`chmod`), VCS (`git_untrack`), plugin
+`command`, cross-file (`sync_from`, `relocate`, `create_and_register`), and ordering
+/ header ops (`sort`, `indent_style`, `insert_line`, `insert_header`), each on a Safe
+or Unsafe tier gated by `--unsafe-fixes`. A three-way trust partition keeps
+content-injecting and spawning fixers out of untrusted remote or nested rulesets, the
+LSP offers the located `replace` as a code action, and the benchmark harness is
+consolidated to 5 scenarios including a dedicated auto-fix pass. The prior v0.16.1
+(2026-09-04) added the PyPI distribution channel: alint is
 now installable via `uvx` / `pipx` / `uv tool` / `pip`, with a fast `language: python`
 pre-commit hook, each wheel embedding the prebuilt attested binary. It builds on the
 v0.16.0 config-format coverage arc plus a parser-hardening cycle: XML becomes a

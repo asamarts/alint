@@ -64,7 +64,7 @@ Most bundled rulesets are gated by ecosystem facts (`has_rust`, `has_node`, `has
 - **8 output formats**: `human`, `json` (stable schema), `sarif` (GitHub Code Scanning), `github` (inline PR annotations), `markdown` (PR comments), `junit` (CI test reports), `gitlab` (Code Quality), `agent` (LLM-shaped JSON with `agent_instruction` per violation).
 - **JSON Schemas**: config at [`schemas/v1/config.json`](schemas/v1/config.json) for editor autocomplete; report shapes at [`schemas/v1/check-report.json`](schemas/v1/check-report.json) and [`schemas/v1/fix-report.json`](schemas/v1/fix-report.json) for downstream tooling.
 - **Telemetry-free.** No network access at runtime, except the user-explicit `extends: https://...` URLs (SRI-pinned). Reproducible builds (`Cargo.lock` committed, pinned toolchain). See [SECURITY.md](SECURITY.md) for the threat model.
-- **Official GitHub Action**: [`asamarts/alint@v0.16.1`](https://github.com/asamarts/alint).
+- **Official GitHub Action**: [`asamarts/alint@v0.17.0`](https://github.com/asamarts/alint).
 
 ## Where alint shines
 
@@ -163,7 +163,7 @@ A distroless multi-arch image (`linux/amd64`, `linux/arm64`) is published to ghc
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:latest
 
 # Pin to an exact version:
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.16.1 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.17.0 check
 ```
 
 The image runs as the distroless `nonroot` user (UID 65532); host files must be world-readable. To apply fixes and preserve host ownership, pass `-u`:
@@ -172,7 +172,7 @@ The image runs as the distroless `nonroot` user (UID 65532); host files must be 
 docker run --rm -u $(id -u):$(id -g) -v "$PWD:/repo" ghcr.io/asamarts/alint:latest fix
 ```
 
-Also published: the bare semver (`:0.16.1`), the `:<major>.<minor>` rolling channel, and the raw git tag (`:v0.16.1`).
+Also published: the bare semver (`:0.17.0`), the `:<major>.<minor>` rolling channel, and the raw git tag (`:v0.17.0`).
 
 ## Usage
 
@@ -300,15 +300,15 @@ All rulesets ship with non-blocking defaults (`info` / `warning` for recommendat
 Inline PR annotations (default):
 
 ```yaml
-- uses: asamarts/alint@v0.16.1
+- uses: asamarts/alint@v0.17.0
 ```
 
 All inputs (all optional):
 
 ```yaml
-- uses: asamarts/alint@v0.16.1
+- uses: asamarts/alint@v0.17.0
   with:
-    version: v0.16.1        # alint release tag (default: latest)
+    version: v0.17.0        # alint release tag (default: latest)
     path: .                # directory to lint (default: .)
     format: github         # human | json | sarif | github | markdown | junit | gitlab | agent (default: github)
     config: |              # extra config path(s), one per line
@@ -320,7 +320,7 @@ All inputs (all optional):
 Upload findings to GitHub Code Scanning:
 
 ```yaml
-- uses: asamarts/alint@v0.16.1
+- uses: asamarts/alint@v0.17.0
   id: alint
   with:
     format: sarif
@@ -338,7 +338,7 @@ Add to your `.pre-commit-config.yaml`. The [`alint-pre-commit`](https://github.c
 ```yaml
 repos:
   - repo: https://github.com/asamarts/alint-pre-commit
-    rev: v0.16.1
+    rev: v0.17.0
     hooks:
       - id: alint
 ```

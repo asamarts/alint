@@ -23,7 +23,7 @@ alint check
 ```
 
 The npm package version tracks alint releases exactly: `npm install
-@asamarts/alint@0.16.1` downloads alint v0.16.1.
+@asamarts/alint@0.17.0` downloads alint v0.17.0.
 
 ## Supported platforms
 
