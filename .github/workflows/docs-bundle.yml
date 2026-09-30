@@ -254,7 +254,7 @@ jobs:
           done < <(find target/docs-bundle/rules target/docs-bundle/concepts -type f -name '*.md' 2>/dev/null)
           echo "Refreshed ${refreshed} rule + concept reference page(s) from origin/main ($(git rev-parse --short origin/main))."
 
-      - name: Refresh cross-version trajectory from main's bench results
+      - name: Refresh cross-version trajectory + bench rule-counts from main
         run: |
           set -euo pipefail
           # The bundle's docs are built from the release TAG (above), but the
@@ -280,7 +280,15 @@ jobs:
           git checkout origin/main -- docs/benchmarks xtask/scripts/render-history.py
           python3 xtask/scripts/render-history.py \
             --json-out "$(pwd)/target/docs-bundle/benchmarks-trajectory.json"
-          echo "Trajectory refreshed from origin/main ($(git rev-parse --short origin/main))."
+          # The /benchmarks/ page's per-scenario rule counts read facts.json's
+          # `bench_scenario_rule_counts`. Those track the consolidated 5-scenario
+          # set (S1-S4), which lands on main with the consolidation and is ABSENT
+          # from the release tag's facts.json (the bundle otherwise keeps the tag's
+          # facts.json for version-count consistency). Surgically overlay JUST that
+          # field from main so the page's counts match the new scenarios; every
+          # other facts.json field stays at the release tag.
+          python3 -c "import json,subprocess; b=json.load(open('target/docs-bundle/facts.json')); m=json.loads(subprocess.check_output(['git','show','origin/main:facts.json'])); b['bench_scenario_rule_counts']=m['bench_scenario_rule_counts']; json.dump(b,open('target/docs-bundle/facts.json','w'),indent=2,ensure_ascii=False); open('target/docs-bundle/facts.json','a').write('\n')"
+          echo "Trajectory + bench rule-counts refreshed from origin/main ($(git rev-parse --short origin/main))."
 
       - name: Push to docs-bundle branch
         env:
