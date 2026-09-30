@@ -14,6 +14,14 @@ each. The `bench-record.yml` workflow runs this script
 automatically before opening its PR so HISTORY.md never falls out
 of date with the published bench corpus.
 
+This renders the CONSOLIDATED 5-scenario series (S1 layout / S2
+content / S3 relational-graph / S4 workspace, plus the fix-mode
+SFIX scenario which has no published data until the v0.17 fix
+engine ships). The pre-consolidation 14-scenario kbench series is
+FROZEN at `docs/benchmarks/legacy/` and rendered from
+`docs/benchmarks/macro/results/legacy/` with this script's
+git-history predecessor; it is not re-rendered.
+
 Usage:
     python3 xtask/scripts/render-history.py [--arch linux-x86_64] \
         [--changelog CHANGELOG.md] \
@@ -27,7 +35,7 @@ import json
 import os
 import re
 import sys
-from typing import Dict, Iterable, List, Tuple
+from typing import Dict, List, Tuple
 
 Cell = Tuple[str, str, str, str]    # (version, scenario, size, mode)
 Stat = Tuple[float, float]           # (mean_ms, stddev_ms)
@@ -156,17 +164,8 @@ def parse_changelog(path: str) -> Dict[str, Tuple[str, str]]:
                 flush()
                 cur_para = []
                 in_para = False
-                # Sentinel so we don't accidentally start a new
-                # paragraph for the same version.
-                cur_version_locked = cur_version
                 cur_version = None
                 cur_date = None
-                # Re-arm `cur_version` only when we hit the next
-                # `##` header. To do that we need to NOT reset to
-                # None — actually we DO reset, the next `##` sets
-                # it again. The `_locked` var is unused; left for
-                # the reader to grok the intent.
-                _ = cur_version_locked
                 continue
             cur_para.append(stripped)
 
@@ -176,84 +175,50 @@ def parse_changelog(path: str) -> Dict[str, Tuple[str, str]]:
 SIZES = ["1k", "10k", "100k", "1m"]
 MODES = ["full", "changed"]
 
-# (id, title, intro)
+# (id, title, intro) — the CONSOLIDATED 5-scenario set (see
+# docs/design/bench/scenario-consolidation.md). Each new scenario
+# absorbs several of the old 14; the pre-consolidation series is
+# frozen at docs/benchmarks/legacy/.
+#
+# SFIX (the dedicated fix-mode scenario) is intentionally ABSENT
+# here: it runs `fix` mode, not `full`/`changed`, so it does not
+# fit the size-x-mode table below, and it has no published data
+# until the v0.17 fix engine ships. When v0.17's bench-record lands
+# an SFIX row, the recurrence guard in render() will fire (loudly,
+# by design) so its fix-mode representation gets designed then.
 SCENARIOS = [
     (
-        "S1", "Filename hygiene",
-        "Eight filename-only rules (`filename_case`, `filename_regex`). Pure walker plus glob match — no content read. Narrowest scope alint shares with `ls-lint`, used as the competitive-comparison anchor. Catches walker and scope-match regressions.",
+        "S1", "Layout & path",
+        "Walker + `GlobSet` + path/metadata rules with little or no content read — the cheapest dispatch path and the `ls-lint` / `grep` competitive anchor. Consolidates the old filename-hygiene, `scope_filter`-shape, and existence/size scenarios; a subset carries `scope_filter: { has_ancestor }` so the non-per-file-rule scope_filter dispatch shape stays covered. Catches walker / glob / scope-match regressions.",
     ),
     (
-        "S2", "Existence + content",
-        "Eight existence + content rules (`file_exists`, `file_absent`, `file_content_forbidden`, `file_max_size`). Walker plus per-file content scan over narrow scopes. Repolinter-comparable shape. Catches content-rule regressions on common shapes.",
+        "S2", "Per-file content",
+        "Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whole content mix — per-line kinds, forbidden-pattern scans, `ordered_block` / `import_gate`, and structured XML against a single `.csproj` overlay. Consolidates the old dense content-fan-out and v0.10 per-file scenarios. The perf signal is how flat the per-rule cost stays as the mix grows.",
     ),
     (
-        "S3", "Workspace bundle",
-        "`extends: oss-baseline + rust + monorepo + cargo-workspace` (~34 rules). Heavy mix — content rules over `**/*.rs`, cross-file `for_each_dir` over `crates/*`, `toml_path_matches` per crate. Realistic monorepo workload; the v0.9.5 cliff (`investigations/2026-05-cross-file-rules/`) lived here.",
+        "S3", "Cross-file, relational & graph",
+        "Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for_each_*` / `dir_only_contains` / `every_matching_has`) + `file_graph` build/traversal ×3 + `for_each_match` + `cross_file` set-union + single-shot spawn (`command: [\"true\"]`). Consolidates the old cross-file, v0.10 cross-file, single-shot, and v0.12 graph/featureset scenarios. The heaviest scenario; the index/graph build is the perf signal, so `changed` mode is ~as costly as `full`. **New at v0.12.0** (the graph kinds land at v0.12).",
     ),
     (
-        "S4", "Agent-era hygiene",
-        "Five rules from the v0.6 `agent-hygiene` bundled ruleset (`file_absent`, `file_content_forbidden`). Filename plus content fan-out over agent-shaped trees. Catches agent-era rule shapes.",
-    ),
-    (
-        "S5", "Fix-pass content edits",
-        "Four content-edit rules under `--fix` (`final_newline`, `no_trailing_whitespace`, `line_endings`, `no_bom`). Read, transform, atomic-rename. The only `--fix`-mode bench. Catches fix-pipeline regressions.",
-    ),
-    (
-        "S6", "Per-file content fan-out",
-        "Thirteen content rules over `**/*.rs`. Per-file dispatch path width — every `.rs` file hit by every rule on a single read. Stresses the v0.9.3 dispatch-flip read-coalescing path. Catches per-file inner-loop regressions S3 doesn't surface.",
-    ),
-    (
-        "S7", "Cross-file relational",
-        "Six cross-file relational kinds (`pair`, `unique_by`, `for_each_dir`, `for_each_file`, `dir_only_contains`, `every_matching_has`). Various fan-out shapes over the synthetic monorepo. Catches the next O(D × N) cliff after the v0.9.5 path-index fix; the v0.9.7 → v0.9.8 transition's headline cell.",
-    ),
-    (
-        "S8", "Git overlay",
-        "S3 reshape plus `git_no_denied_paths` and `git_tracked_only` over a real git repo. Same as S3 but with `Engine::collect_git_tracked_if_needed` and `BlameCache` active. Catches git-aware dispatch regressions at scale.",
-    ),
-    (
-        "S9", "Nested polyglot",
-        "Three competing ecosystem rulesets: `extends: rust + node + python` (~26 rules) over a polyglot tree (Rust under `crates/`, Node under `packages/`, Python under `apps/`). Per-rule `scope_filter: { has_ancestor: <manifest> }` ancestor walks. The dispatch shape the v0.9.6 `scope_filter:` primitive was designed for — without it, every `**/*.py` rule from python@v1 fires on every `.py` file in the tree. **New in v0.9.6.**",
-    ),
-    (
-        "S10", "scope_filter outside per-file dispatch",
-        "Five rules from outside the `PerFileRule` dispatch path (`file_max_size`, `no_empty_files`, `no_symlinks`, `filename_case`, `filename_regex`) each with `scope_filter: { has_ancestor: <manifest> }` over the polyglot tree. Per-rule `evaluate()` iterating `ctx.index.files()` with both path-glob AND scope_filter narrowing — the dispatch shape v0.9.9 wired through (v0.9.8 silently dropped `scope_filter:` on these 17 rule kinds). **New in v0.9.9.**",
-    ),
-    (
-        "S11", "v0.10 cross-file dispatch class",
-        "Three v0.10 cross-file kinds (`registry_paths_resolve`, `cross_file_value_equals`, `pair_hash`) over the regular synthetic monorepo with a `manifest.sha256` overlay. Exercises the whole-repo entry points the v0.10 cross-file engine uses, plus the new `crate::extract` / `crate::io::read_capped` helpers. Adds to S7 (the v0.2-era cross-file family: `pair` / `unique_by` / `for_each_*` / `dir_only_contains` / `every_matching_has`) by covering the v0.10 additions. **New in v0.10.0.**",
-    ),
-    (
-        "S12", "v0.10 per-file dispatch class",
-        "Three v0.10 per-file kinds (`ordered_block`, `import_gate`, `xml_path_equals` + `xml_path_matches`) over `**/*.rs` plus a single root-level `.csproj` overlay (per-package fan-out skipped to keep cross-version file counts stable). Exercises the per-file dispatch path made fast by v0.9.3, with the v0.10-new extraction / regex / XML structured-query paths. Adds to S6 (dense content fan-out on `**/*.rs`) by covering the v0.10 additions independently of S6's pure-content baseline. **New in v0.10.0.**",
-    ),
-    (
-        "S13", "v0.10 single-shot dispatch class",
-        "Two v0.10 single-shot kinds (`generated_file_fresh`, `command_idempotent`) declared with `command: [\"true\"]` so the row measures `crate::spawn::run_capturing` (fork / exec / concurrent pipe-drain / wait / stdout-parse), not the user's tool. Single-shot rules add a fixed cost per run; tree walk dominates the row. Signal of interest is cross-version stability of the spawn path — regressions in `crate::spawn` or the engine's single-shot dispatch surface here in isolation. **New in v0.10.0.**",
-    ),
-    (
-        "S14", "v0.12 featureset",
-        "A single deliberately-mixed scenario exercising every file-shape rule kind / mode the v0.12 cycle added, so one row catches a regression anywhere in the v0.12 surface. Where S11-S13 are per-dispatch-class, this is per-feature-set — the v0.12 analogue of running the whole new vocabulary over the macro tree once. **New in v0.12.0.**",
+        "S4", "Workspace bundle",
+        "The realistic mixed workload and the release anchor: `extends:` the bundled rulesets (oss-baseline + rust + monorepo + cargo-workspace + git-aware + polyglot) over a POLYGLOT + GIT tree (`crates/` + `packages/` + `apps/`, initialised as a real repo) with `nested_configs` on. Consolidates the old realistic-monorepo, git-overlay, and nested-polyglot scenarios. The `s4_1m_full` cell is the trajectory anchor every publish captures.",
     ),
 ]
 
 # Per-scenario "this is the first version where the scenario exists".
 # Older versions render `n/a` (vs `—` which means "version exists but
 # wasn't measured at that size"). Extend when adding a scenario; no
-# need to enumerate every prior tag.
+# need to enumerate every prior tag. The consolidated series starts at
+# v0.10.0 (the kbench corpus floor); S1/S2/S4 exist across all of it,
+# S3's graph kinds land at v0.12.0.
 FIRST_VERSION: Dict[str, str] = {
-    "S9": "v0.9.6",
-    "S10": "v0.9.9",
-    "S11": "v0.10.0",
-    "S12": "v0.10.0",
-    "S13": "v0.10.0",
-    "S14": "v0.12.0",
+    "S3": "v0.12.0",
+    # SFIX: "v0.17.0" — teed up for when the fix scenario gets a row.
 }
 
-# Manual cells from the published v0.5.6 markdown (no JSON exists).
-MANUAL = {
-    ("v0.5.6", "S3", "1m", "full"):    (569078.0, 60911.0),
-    ("v0.5.6", "S3", "1m", "changed"): (528103.0, 2537.0),
-}
+# Manual pre-results.json cells belong only to the retired 3900X series
+# (`linux-x86_64-ryzen-3900x`); the canonical kbench series is measured.
+MANUAL: Dict[Cell, Stat] = {}
 
 # Host fingerprint per published arch series, for the HISTORY header line.
 # `linux-x86_64` is the canonical kbench series (2026-07 onward); the retired
@@ -265,10 +230,6 @@ FINGERPRINT = {
 
 
 def load_arch(base: str, arch: str) -> Dict[Cell, Stat]:
-    # The v0.5.6 MANUAL cells are 3900X numbers (that release predates the
-    # results.json format). They belong only to the retired 3900X series
-    # (`linux-x86_64-ryzen-3900x`); the canonical kbench `linux-x86_64`
-    # series starts at v0.10 and must not inherit a foreign-host baseline row.
     data = dict(MANUAL) if arch == "linux-x86_64-ryzen-3900x" else {}
     arch_dir = os.path.join(base, arch)
     if not os.path.isdir(arch_dir):
@@ -304,6 +265,17 @@ def fmt(data: Dict[Cell, Stat], v: str, s: str, sz: str, m: str) -> str:
     return f"{mean/1000:.1f} s ± {sd/1000:.1f}"
 
 
+# The four headline trajectory cells: 1M/full for each check scenario.
+# json_key = the scenario label lowercased (the harness writes
+# scenario="S1".."S4" via Scenario::label(); render keys on that).
+HEADLINE_CELLS = [
+    ("s1_1m_full", "S1"),
+    ("s2_1m_full", "S2"),
+    ("s3_1m_full", "S3"),
+    ("s4_1m_full", "S4"),
+]
+
+
 def render(
     data: Dict[Cell, Stat],
     changelog_headlines: Dict[str, Tuple[str, str]] | None = None,
@@ -324,7 +296,8 @@ def render(
     # measured in the corpus MUST have a SCENARIOS entry, else its section is
     # skipped and HISTORY.md under-reports the matrix while nothing complains.
     # Fail loudly so bench-record.yml's re-render surfaces a new scenario that
-    # needs a hand-written intro here.
+    # needs a hand-written intro here. (A future SFIX/fix-mode row trips this
+    # on purpose — see the SCENARIOS note.)
     known = {sid for sid, _title, _intro in SCENARIOS}
     measured = {k[1] for k in data}
     missing = sorted(measured - known, key=lambda s: int(s[1:]) if s[1:].isdigit() else 0)
@@ -344,6 +317,11 @@ def render(
         f"to `{arch}` ({FINGERPRINT.get(arch, 'see METHODOLOGY.md')}) —",
         "see [`METHODOLOGY.md`](METHODOLOGY.md) for the hardware contract and why",
         "cross-machine comparisons need like-for-like.",
+        "",
+        "This is the consolidated 5-scenario series (S1 layout / S2 content /",
+        "S3 relational-graph / S4 workspace; the fix-mode SFIX scenario has no",
+        "published data until the v0.17 fix engine ships). The pre-consolidation",
+        "14-scenario history is frozen at [`legacy/HISTORY.md`](legacy/HISTORY.md).",
         "",
         "## How to read this file",
         "",
@@ -368,35 +346,30 @@ def render(
         "",
         "## Cross-version headline trajectory",
         "",
-        "1M cells across the most-stressed scenarios. S3 is the realistic-monorepo",
-        "anchor; S7 is the cross-file-relational cliff that v0.9.5's path-index fix",
-        "didn't fully cover (and v0.9.8 targets directly); S9 is the nested-polyglot",
-        "scenario the v0.9.6 `scope_filter:` primitive exists for.",
+        "1M/full cells across all four check scenarios. S4 (workspace bundle) is the",
+        "realistic-monorepo release anchor every publish captures; S3 (cross-file,",
+        "relational & graph) is the heaviest, graph-dominated scenario; S1/S2 track",
+        "the walk-bound and per-file-content paths.",
         "",
-        "| Version | Date | 1M S3 full | 1M S6 full | 1M S7 full | 1M S9 full | Headline change |",
+        "| Version | Date | 1M S1 full | 1M S2 full | 1M S3 full | 1M S4 full | Headline change |",
         "|---|---|---:|---:|---:|---:|---|",
     ]
-    # Date table — one row per version present on disk.
-    # Manual fallbacks for versions older than CHANGELOG.md
-    # carries (or for one-off bench-only entries like v0.5.6/.7).
-    # CHANGELOG-parsed headlines win when both are defined, so
-    # new releases need no script edit.
-    fallback_headlines = {
-        "v0.5.7": ("2026-03", "First publish-grade `bench-scale` matrix at 1k/10k/100k."),
-        "v0.5.6": ("2026-03", "Prep run that captured the only pre-v0.9 1M S3 numbers."),
-    }
-    headlines = dict(fallback_headlines)
+    # Date table — one row per version present on disk. CHANGELOG-parsed
+    # headlines win when defined, so new releases need no script edit.
+    headlines: Dict[str, Tuple[str, str]] = {}
     if changelog_headlines:
         headlines.update(changelog_headlines)
     for v in versions_present:
         date, headline = headlines.get(v, ("?", "—"))
-        cells = [fmt(data, v, sx, "1m", "full") for sx in ("S3", "S6", "S7", "S9")]
+        cells = [fmt(data, v, sx, "1m", "full") for sx in ("S1", "S2", "S3", "S4")]
         marker = "**" if v == versions_present[0] else ""
         out.append(f"| {marker}{v}{marker} | {date} | {' | '.join(cells)} | {headline} |")
     out += [
         "",
-        "Earlier history (v0.7.x, v0.8.x): no measured perf change beyond v0.5.7;",
-        "see [CHANGELOG.md](../../CHANGELOG.md) for the contemporaneous notes.",
+        "Pre-consolidation history (the 14-scenario kbench series v0.10.0-v0.16.0, and",
+        "the retired 3900X series before it) lives in",
+        "[`legacy/HISTORY.md`](legacy/HISTORY.md) and on",
+        "[alint.org/benchmarks-1](https://alint.org/benchmarks-1/).",
         "",
         "---",
         "",
@@ -419,10 +392,9 @@ def render(
     out += [
         "## How to add a row",
         "",
-        "When a release tag lands, the `bench-record.yml` workflow (introduced in",
-        "v0.9.7) auto-runs the publish-grade matrix on the self-hosted Linux runner",
-        "and opens a PR with the new per-version dir. The maintainer re-renders this",
-        "file from the merged data:",
+        "When a release tag lands, the `bench-record.yml` workflow auto-runs the",
+        "publish-grade matrix on the self-hosted Linux runner and opens a PR with the",
+        "new per-version dir. The maintainer re-renders this file from the merged data:",
         "",
         "```sh",
         "python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md",
@@ -433,12 +405,10 @@ def render(
         "",
         "## Cross-version perf investigations",
         "",
-        "- v0.9.5 cliff (S3 1M): [`investigations/2026-05-cross-file-rules/`](investigations/2026-05-cross-file-rules/)",
-        "  — surfaced the +28-37 % regression vs v0.5.6 and the lazy-path-index fix.",
-        "- v0.9.5 → v0.9.8 cliff (S7 1M): [`investigations/2026-05-cross-file-rules-v2/`](investigations/2026-05-cross-file-rules-v2/)",
-        "  — surfaced the residual O(D × N) shape in `dir_only_contains` /",
-        "  `dir_contains` after the v0.9.5 fix; v0.9.8 closes it via",
-        "  `FileIndex::children_of`. *(Investigation written alongside v0.9.8.)*",
+        "Pre-consolidation cliff investigations (v0.9.5 cross-file, v0.9.8 O(D × N),",
+        "the 1M writeback-contention artifact) are catalogued against the frozen",
+        "14-scenario series in [`legacy/HISTORY.md`](legacy/HISTORY.md); the raw",
+        "diagnostic data stays under [`investigations/`](investigations/).",
     ]
     return "\n".join(out) + "\n"
 
@@ -455,34 +425,25 @@ def render_trajectory_json(
     `src/pages/benchmarks.astro` over in the site repo) so the
     trajectory table refreshes automatically on every main push
     instead of drifting until a maintainer hand-edits HTML rows.
-    Schema is locked behind `schema_version: 1`; field additions
-    are non-breaking, removals/semantic changes bump the version.
+    Schema is `schema_version: 2` (v2 = consolidated 5-scenario
+    series with `s1..s4_1m_full` cell keys; v1 was the frozen
+    14-scenario series with `s3/s6/s7/s9_1m_full`). Field additions
+    are non-breaking; removals/semantic changes bump the version.
 
-    The four cell columns mirror the markdown table: 1M S3/S6/S7/S9
-    in `full` mode — the headline "1M cells across the most-stressed
-    scenarios" view, not the full per-scenario matrix. Consumers
-    that want the full matrix render HISTORY.md directly.
+    The four cell columns mirror the markdown table: 1M S1/S2/S3/S4
+    in `full` mode. Consumers that want the full matrix render
+    HISTORY.md directly.
     """
-    fallback_headlines = {
-        "v0.5.7": ("2026-03", "First publish-grade `bench-scale` matrix at 1k/10k/100k."),
-        "v0.5.6": ("2026-03", "Prep run that captured the only pre-v0.9 1M S3 numbers."),
-    }
-    headlines = dict(fallback_headlines)
+    headlines: Dict[str, Tuple[str, str]] = {}
     if changelog_headlines:
         headlines.update(changelog_headlines)
 
     versions_present = sorted({k[0] for k in data}, key=semver_key, reverse=True)
     rows = []
-    cell_keys = [
-        ("s3_1m_full", "S3"),
-        ("s6_1m_full", "S6"),
-        ("s7_1m_full", "S7"),
-        ("s9_1m_full", "S9"),
-    ]
     for v in versions_present:
         date, headline = headlines.get(v, ("?", "—"))
         cells = {}
-        for json_key, scenario in cell_keys:
+        for json_key, scenario in HEADLINE_CELLS:
             stat = data.get((v, scenario, "1m", "full"))
             if stat is None:
                 # Scenarios that don't exist at this tag, AND scenarios
@@ -505,7 +466,7 @@ def render_trajectory_json(
             "cells": cells,
         })
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "arch": arch,
         "rows": rows,
     }
@@ -545,8 +506,7 @@ def main() -> int:
     # characters. Windows' default stdout codepage is cp1252 and
     # would raise UnicodeEncodeError on `sys.stdout.write(...)`.
     # Force UTF-8 so the script works the same on Linux (CI / dev),
-    # macOS (CI), and Windows (cross-platform CI). reconfigure() is
-    # Python 3.7+ which is below alint's MSRV expectations anyway.
+    # macOS (CI), and Windows (cross-platform CI).
     if hasattr(sys.stdout, "reconfigure"):
         sys.stdout.reconfigure(encoding="utf-8")
 

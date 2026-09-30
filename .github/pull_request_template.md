@@ -22,7 +22,7 @@ Body: keep this template; delete the bracketed [example] lines and fill in.
 - [ ] `cargo doc --no-deps --workspace` with `RUSTDOCFLAGS=-D warnings` clean
 - [ ] [If touching rules] new pass + fail e2e scenarios under `crates/alint-e2e/scenarios/check/<family>/`
 - [ ] [If touching rules] coverage_audit_* tests still pass
-- [ ] [If touching engine perf hot paths] ran `xtask bench-scale --scenarios S1,S6,S7 --sizes 100k --warmup 3 --runs 10` and pasted the delta vs main below
+- [ ] [If touching engine perf hot paths] ran `xtask bench-scale --scenarios S1,S2,S3 --sizes 100k --warmup 3 --runs 10` and pasted the delta vs main below
 
 ## Linked issues
 

@@ -14,14 +14,16 @@
 //!
 //! This test runs `render-history.py --json-out <tmp>` and asserts:
 //! - The renderer exits cleanly.
-//! - Output is valid JSON with `schema_version: 1`.
+//! - Output is valid JSON with `schema_version: 2` (the consolidated
+//!   5-scenario series; v1 was the frozen 14-scenario series).
 //! - The top row's version matches the highest semver-sorted dir
 //!   under `docs/benchmarks/macro/results/linux-x86_64/`. If a new
 //!   release dir lands but doesn't surface as the top row, the
 //!   alint.org page would silently stay on the older version.
-//! - The top row has a non-null `s3_1m_full` cell — that's the
-//!   anchor scenario every release captures, so a missing value
-//!   means bench-record.yml ran but didn't publish full data.
+//! - The top row has a non-null `s4_1m_full` cell — S4 (workspace
+//!   bundle) is the anchor scenario every release captures, so a
+//!   missing value means bench-record.yml ran but didn't publish
+//!   full data.
 //!
 //! Skipped (not failed) if `python3` isn't on PATH, since the
 //! renderer is Python and not every contributor's local env has it.
@@ -88,8 +90,8 @@ fn benchmarks_trajectory_renders_with_latest_version_on_top() {
     let parsed: serde_json::Value = serde_json::from_str(&body).expect("parse trajectory JSON");
 
     assert_eq!(
-        parsed["schema_version"], 1,
-        "schema_version drift; consumers pin to v1",
+        parsed["schema_version"], 2,
+        "schema_version drift; consumers pin to v2 (consolidated 5-scenario series)",
     );
 
     let rows = parsed["rows"].as_array().expect("rows is an array");
@@ -127,13 +129,13 @@ fn benchmarks_trajectory_renders_with_latest_version_on_top() {
         on_disk[0],
     );
 
-    // The S3 anchor scenario is captured by every release.
-    // Missing data on the top row means bench-record.yml ran but
-    // didn't publish full results — a partial publish that we want
+    // The S4 (workspace bundle) anchor scenario is captured by every
+    // release. Missing data on the top row means bench-record.yml ran
+    // but didn't publish full results — a partial publish that we want
     // to catch at CI time.
     assert!(
-        !rows[0]["cells"]["s3_1m_full"].is_null(),
-        "top row ({top_version}) has no s3_1m_full cell — partial bench publish?",
+        !rows[0]["cells"]["s4_1m_full"].is_null(),
+        "top row ({top_version}) has no s4_1m_full cell — partial bench publish?",
     );
 }
 
