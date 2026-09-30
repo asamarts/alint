@@ -319,7 +319,7 @@ fn example_rule_counts(root: &Path) -> Result<BTreeMap<String, usize>> {
 /// Lets the benchmarks page interpolate each scenario's "N rules" label from
 /// the current ruleset instead of a hand-typed `~34` that silently drifts as
 /// the bundled rulesets a scenario `extends:` grow (P3 bench-count contract /
-/// documentation-drift.md). Only the stable synthetic S1-S14 configs are
+/// documentation-drift.md). Only the stable synthetic S1-S4 configs are
 /// counted; a real-repo pass's rule count (e.g. the nixpkgs run) is a
 /// point-in-time measurement, tracked like the case-study historical numbers.
 fn bench_scenario_rule_counts(root: &Path) -> Result<BTreeMap<String, usize>> {
@@ -710,8 +710,9 @@ mod tests {
         );
         assert_eq!(
             on_disk.len(),
-            14,
-            "expected the 14 synthetic bench scenarios"
+            4,
+            "expected the 4 numbered synthetic bench scenarios (S1-S4; the fix-only \
+             sfix_all.yml is excluded by the s<N>_ regex)"
         );
 
         for (id, count) in &f.bench_scenario_rule_counts {

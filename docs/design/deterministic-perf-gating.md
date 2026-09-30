@@ -44,11 +44,14 @@ very-high deltas — RECALIBRATED 2026-06-08 to diagnostic-only + an `EstimatedC
 (`crates/alint-bench/benches/det_check.rs`):
 - `alint check <tree>` under Callgrind + Cachegrind, setup fn materializes the
   fixed `gen-monorepo` tree (reuse `crates/alint-bench/src/tree.rs`, seed `0xA11E47`)
-- **Scenario coverage (widened per decision 2):** a broad subset of S1–S14 —
-  walk (S1), per-file content (S2, S5, S6), per-file v0.10/v0.12 kinds (S12, S14),
-  cross-file (S7, S11), git (S8), polyglot/scope_filter (S9, S10). Per-PR gate runs
-  **1k + 10k**; the **100k tier is added at release time** (still load-immune, just
-  slower under valgrind).
+- **Scenario coverage:** the consolidated check scenarios (see
+  [bench/scenario-consolidation.md](bench/scenario-consolidation.md)) — walk-bound
+  layout (S1 = `s1_layout`), per-file content (S2 = `s2_content`), and the
+  cross-file / relational / graph mix (S3 = `s3_relational`) — plus the dedicated
+  fix-mode scenario (`sfix_all`, all 24 non-spawning fix ops), which gates the fix
+  engine's determinism. Per-PR gate runs **1k + 10k**; the **100k tier is added at
+  release time** (still load-immune, just slower under valgrind). (Earlier "DONE"
+  notes below name the pre-consolidation S1–S14 ids — historical.)
 
 ## Gating policy (mirrors `gate.rs` gating-vs-advisory split)
 

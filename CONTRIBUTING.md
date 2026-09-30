@@ -172,8 +172,8 @@ Every new rule kind needs:
 - Coverage via `coverage_audit_*.rs` (the audit tests will fail if a new rule
   kind ships without scenarios, which is intentional)
 
-For per-file rules, add the rule to the `S6` macro bench scenario list if it's
-a content rule that fans out over `**/*.rs`.
+For per-file rules, add the rule to the `S2` (`s2_content`) macro bench scenario
+if it's a content rule that fans out over `**/*.rs`.
 
 ### PR conventions
 

@@ -36,7 +36,18 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
     }
 
     ensure_hyperfine()?;
-    let alint_bin = build_release_binary()?;
+    // A supplied `--alint-binary` (past-version backfill) is measured as-is; the
+    // normal path builds the current checkout.
+    let alint_bin = match &args.alint_binary {
+        Some(path) => {
+            if !path.is_file() {
+                bail!("--alint-binary {} is not a file", path.display());
+            }
+            eprintln!("[xtask] using pre-built alint binary: {}", path.display());
+            path.clone()
+        }
+        None => build_release_binary()?,
+    };
     let fingerprint = fingerprint::capture(&args.tools);
 
     eprintln!(
@@ -52,31 +63,41 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
 
     let mut rows: Vec<Row> = Vec::new();
     for &size in &args.sizes {
-        // Some scenarios (S8) need a real git repo; in that
-        // case the tree generator runs `git init && git add -A
-        // && git commit` as part of materialisation. Decide
-        // up-front whether ANY scenario in this run wants a
-        // git repo — if so, build the git-aware tree once and
-        // reuse it across scenarios. If not, the cheaper
-        // non-git generator suffices.
-        let needs_git_repo = args.scenarios.iter().any(|s| s.requires_git_repo());
+        // Some scenarios (the consolidated S4) need a real git
+        // repo; in that case the tree generator runs `git init &&
+        // git add -A && git commit` as part of materialisation.
+        // A scenario is served by the polyglot tree iff it
+        // `requires_polyglot_tree`, else by the regular tree — so
+        // route each tree's git requirement to the tree that
+        // actually serves the git-needing scenario. Today only S4
+        // needs git AND it is polyglot, so `polyglot_needs_git` is
+        // the live path and `regular_needs_git` stays false; the
+        // split keeps a future git-on-regular scenario correct.
         let needs_polyglot_tree = args.scenarios.iter().any(|s| s.requires_polyglot_tree());
+        let needs_regular_tree = args.scenarios.iter().any(|s| !s.requires_polyglot_tree());
+        let polyglot_needs_git = args
+            .scenarios
+            .iter()
+            .any(|s| s.requires_polyglot_tree() && s.requires_git_repo());
+        let regular_needs_git = args
+            .scenarios
+            .iter()
+            .any(|s| !s.requires_polyglot_tree() && s.requires_git_repo());
         let (pkgs, fpp) = size.monorepo_shape();
 
         // Build the regular monorepo tree if any non-polyglot
-        // scenario is in this run. S9 (polyglot) gets its own
-        // tree below. Most runs use only one of the two; mixing
-        // S9 with non-S9 scenarios in the same invocation builds
-        // both trees up-front and dispatches per-scenario.
-        let needs_regular_tree = args.scenarios.iter().any(|s| !s.requires_polyglot_tree());
+        // scenario is in this run. Polyglot scenarios (S4) get
+        // their own tree below. Most runs use only one of the two;
+        // mixing them in one invocation builds both up-front and
+        // dispatches per-scenario.
         let regular_tree = if needs_regular_tree {
             eprintln!(
                 "[xtask] generating {}monorepo tree of {} files (seed={:#x})...",
-                if needs_git_repo { "git-aware " } else { "" },
+                if regular_needs_git { "git-aware " } else { "" },
                 size.file_count(),
                 args.seed,
             );
-            Some(if needs_git_repo {
+            Some(if regular_needs_git {
                 alint_bench::tree::generate_git_monorepo(pkgs, fpp, args.seed)
                     .with_context(|| format!("generating {} git-tree", size.label()))?
             } else {
@@ -88,18 +109,26 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
         };
         let polyglot_tree = if needs_polyglot_tree {
             eprintln!(
-                "[xtask] generating polyglot monorepo tree of {} files (seed={:#x})...",
+                "[xtask] generating {}polyglot monorepo tree of {} files (seed={:#x})...",
+                if polyglot_needs_git { "git-aware " } else { "" },
                 size.file_count(),
                 args.seed ^ 0xB011_F11E,
             );
-            Some(
+            Some(if polyglot_needs_git {
+                alint_bench::tree::generate_git_nested_polyglot_monorepo(
+                    pkgs,
+                    fpp,
+                    args.seed ^ 0xB011_F11E,
+                )
+                .with_context(|| format!("generating {} git polyglot tree", size.label()))?
+            } else {
                 alint_bench::tree::generate_nested_polyglot_monorepo(
                     pkgs,
                     fpp,
                     args.seed ^ 0xB011_F11E,
                 )
-                .with_context(|| format!("generating {} polyglot tree", size.label()))?,
-            )
+                .with_context(|| format!("generating {} polyglot tree", size.label()))?
+            })
         } else {
             None
         };
@@ -144,15 +173,16 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
             let tree_for_scenario = if scenario.requires_polyglot_tree() {
                 polyglot_tree
                     .as_ref()
-                    .expect("polyglot tree built when any S9-like scenario in run")
+                    .expect("polyglot tree built when any polyglot scenario in run")
             } else {
                 regular_tree
                     .as_ref()
-                    .expect("regular tree built when any non-S9 scenario in run")
+                    .expect("regular tree built when any non-polyglot scenario in run")
             };
             let tree_root = tree_for_scenario.root().to_path_buf();
-            // Per-scenario fixture overlay (write tiny data files
-            // the scenario's rules reference; no-op for S1..S10).
+            // Per-scenario fixture overlay (write the data files
+            // the scenario's rules reference; no-op for S1 / S4,
+            // and S2 / S3 / SFIX each plant a deterministic fixture).
             // Paired with `teardown_overlay` after the inner loop
             // so the overlay never leaks into the next scenario
             // running on the same shared tree.
@@ -361,12 +391,12 @@ fn run_one(
 /// `.git/` so the race is doubly impossible, but the
 /// belt-and-suspenders is cheap.
 ///
-/// **Idempotent re-entry.** When the matrix includes S8 (the
-/// only `requires_git_repo` scenario), the tree was already
-/// generated as a git repo with an initial commit by
-/// `generate_git_monorepo`. In that case `git init` is a no-op
-/// (re-init is silently OK), but `git commit` would fail with
-/// "nothing to commit" because every file is already in HEAD.
+/// **Idempotent re-entry.** When the matrix includes S4 (the
+/// only `requires_git_repo` scenario), the polyglot tree was
+/// already generated as a git repo with an initial commit by
+/// `generate_git_nested_polyglot_monorepo`. In that case `git
+/// init` is a no-op (re-init is silently OK), but `git commit`
+/// would fail with "nothing to commit" — every file is in HEAD.
 /// We probe `git rev-parse --verify HEAD`: if it succeeds (HEAD
 /// exists), we skip the add+commit pair entirely — the existing
 /// initial commit IS the bench base. The follow-up file-touch
@@ -397,7 +427,7 @@ fn init_git_for_changed_mode(root: &Path) -> Result<()> {
 
 /// True iff the repo at `root` already has at least one commit
 /// reachable from HEAD. Used by [`init_git_for_changed_mode`]
-/// to skip the add+commit pair when an S8 git-aware tree
+/// to skip the add+commit pair when an S4 git-aware tree
 /// already supplied the bench base.
 fn has_initial_commit(root: &Path) -> bool {
     Command::new("git")

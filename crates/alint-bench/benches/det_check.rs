@@ -31,36 +31,34 @@ use gungraun::{
 const SEED: u64 = 10_559_047;
 
 // The real scenario configs, shared with the wall-clock bench (minimal drift —
-// one source of truth). A spread of dispatch classes that exercise the regular
-// gen-monorepo tree: S1 = filename-only (isolates the walker); S2 = existence +
-// content; S6 = dense per-file content; S7 = cross-file relational; S12 = the
-// v0.10 per-file dispatch class.
+// one source of truth). A spread of dispatch classes over the regular
+// gen-monorepo tree: s1 = layout/walk-bound (isolates the walker); s2 = per-file
+// content; s3 = cross-file relational + graph. (s4_workspace is deliberately
+// excluded: its `extends:` pulls the bundled rulesets shipped in the binary,
+// whose rule set evolves per release — a moving target unfit for a fixed
+// deterministic Ir gate.)
 const S1: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../xtask/src/bench/scenarios/s1_filename.yml"
+    "/../../xtask/src/bench/scenarios/s1_layout.yml"
 ));
 const S2: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../xtask/src/bench/scenarios/s2_existence_content.yml"
+    "/../../xtask/src/bench/scenarios/s2_content.yml"
 ));
-const S6: &str = include_str!(concat!(
+const S3: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../xtask/src/bench/scenarios/s6_per_file_content.yml"
+    "/../../xtask/src/bench/scenarios/s3_relational.yml"
 ));
-const S7: &str = include_str!(concat!(
+// The consolidated auto-fix scenario. `materialize_fixable` makes every `.rs`
+// line a trailing-whitespace violation, so the `**/*.rs`-scoped content fixers
+// re-read every source file through the fixer's collect step (the read-heavy
+// path). The `sfix/`-scoped ops (structured / cross-file / path) no-op here —
+// this tree has no `sfix/` subtree — which is fine: the collect read cost is
+// what this deterministic gate tracks; full 24-op coverage is the wall-clock
+// `bench-scale` SFIX scenario's job.
+const SFIX_ALL: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
-    "/../../xtask/src/bench/scenarios/s7_cross_file_relational.yml"
-));
-const S12: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../xtask/src/bench/scenarios/s12_v010_per_file.yml"
-));
-// A fix scenario: one content fixer (trim trailing whitespace). The
-// `materialize_fixable` setup makes every `.rs` line a violation, so
-// `fix --dry-run` re-reads every source file through the fixer's collect step.
-const SFIX_TRIM: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/../../xtask/src/bench/scenarios/sfix_trim.yml"
+    "/../../xtask/src/bench/scenarios/sfix_all.yml"
 ));
 
 fn workspace_target() -> PathBuf {
@@ -160,15 +158,9 @@ fn inject_trailing_ws(dir: &Path) {
 #[bench::s2_1k("s2", S2, 1_000)]
 #[bench::s2_10k("s2", S2, 10_000)]
 #[cfg_attr(feature = "det-100k", bench::s2_100k("s2", S2, 100_000))]
-#[bench::s6_1k("s6", S6, 1_000)]
-#[bench::s6_10k("s6", S6, 10_000)]
-#[cfg_attr(feature = "det-100k", bench::s6_100k("s6", S6, 100_000))]
-#[bench::s7_1k("s7", S7, 1_000)]
-#[bench::s7_10k("s7", S7, 10_000)]
-#[cfg_attr(feature = "det-100k", bench::s7_100k("s7", S7, 100_000))]
-#[bench::s12_1k("s12", S12, 1_000)]
-#[bench::s12_10k("s12", S12, 10_000)]
-#[cfg_attr(feature = "det-100k", bench::s12_100k("s12", S12, 100_000))]
+#[bench::s3_1k("s3", S3, 1_000)]
+#[bench::s3_10k("s3", S3, 10_000)]
+#[cfg_attr(feature = "det-100k", bench::s3_100k("s3", S3, 100_000))]
 fn check(scenario: &str, config: &str, n: usize) -> Command {
     let _ = config; // consumed by `materialize` (setup); not needed to build the command
     Command::new(alint_bin())
@@ -185,16 +177,19 @@ binary_benchmark_group!(name = check_grp, benchmarks = check);
 // syscalls but not instructions stays flat here). One scenario at the per-PR
 // sizes; 100k is release-gated like the check cells.
 #[binary_benchmark(setup = materialize_fixable)]
-#[bench::fix_trim_1k("sfix-trim", SFIX_TRIM, 1_000)]
-#[bench::fix_trim_10k("sfix-trim", SFIX_TRIM, 10_000)]
+#[bench::fix_all_1k("sfix-all", SFIX_ALL, 1_000)]
+#[bench::fix_all_10k("sfix-all", SFIX_ALL, 10_000)]
 #[cfg_attr(
     feature = "det-100k",
-    bench::fix_trim_100k("sfix-trim", SFIX_TRIM, 100_000)
+    bench::fix_all_100k("sfix-all", SFIX_ALL, 100_000)
 )]
 fn fix(scenario: &str, config: &str, n: usize) -> Command {
     let _ = config; // consumed by `materialize_fixable` (setup)
+    // Mirror the wall-clock `Mode::Fix` invocation: `--unsafe-fixes` so every
+    // op applies through compose, `--dry-run` so nothing is written.
     Command::new(alint_bin())
         .arg("fix")
+        .arg("--unsafe-fixes")
         .arg("--dry-run")
         .arg(tree_path(scenario, n))
         .build()

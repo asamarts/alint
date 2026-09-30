@@ -91,14 +91,16 @@ enum Commands {
         /// Include the 1M-file size (multi-GB working set, slow).
         #[arg(long)]
         include_1m: bool,
-        /// Comma-separated scenarios. Default `S1,S2,S3` is the
-        /// publication trio (filename / existence+content /
-        /// workspace bundle). `S4` (agent-era hygiene) and `S5`
-        /// (fix-pass) are opt-in for characterization runs.
-        #[arg(long, default_value = "S1,S2,S3", value_delimiter = ',')]
+        /// Comma-separated scenarios. Default `S1,S2,S3,S4,SFIX` is the
+        /// full consolidated set: the four check scenarios (S1 layout /
+        /// S2 content / S3 relational / S4 workspace) plus the dedicated
+        /// auto-fix scenario (SFIX). SFIX only produces rows under `fix`
+        /// mode (see `Tool::supports`), so keep `fix` in `--modes` for it.
+        #[arg(long, default_value = "S1,S2,S3,S4,SFIX", value_delimiter = ',')]
         scenarios: Vec<String>,
-        /// Comma-separated modes (full,changed).
-        #[arg(long, default_value = "full,changed", value_delimiter = ',')]
+        /// Comma-separated modes (full, changed, fix). `fix` pairs only
+        /// with the SFIX scenario; the check scenarios take full/changed.
+        #[arg(long, default_value = "full,changed,fix", value_delimiter = ',')]
         modes: Vec<String>,
         /// Comma-separated tools (alint, ls-lint, or `all`).
         /// Default `alint` (preserves v0.5.6's alint-only
@@ -136,6 +138,12 @@ enum Commands {
         /// Override the image with `ALINT_BENCH_IMAGE=...`.
         #[arg(long)]
         docker: bool,
+        /// Benchmark a PRE-BUILT alint binary at this path instead of building
+        /// from the current checkout. For past-version backfill: build an old
+        /// tag's alint separately, then point this at it so the CURRENT
+        /// harness measures that OLD binary. Incompatible with `--docker`.
+        #[arg(long)]
+        alint_binary: Option<PathBuf>,
     },
     /// Materialize a synthetic tree (persistent) for manual experimentation.
     GenFixture {
@@ -338,9 +346,22 @@ fn main() -> Result<()> {
             quick,
             json_only,
             docker,
+            alint_binary,
         } => dispatch_bench_scale(
-            &sizes, include_1m, &scenarios, &modes, &tools, warmup, runs, seed, diff_pct, out,
-            quick, json_only, docker,
+            &sizes,
+            include_1m,
+            &scenarios,
+            &modes,
+            &tools,
+            warmup,
+            runs,
+            seed,
+            diff_pct,
+            out,
+            quick,
+            json_only,
+            docker,
+            alint_binary,
         ),
         Commands::GenFixture {
             files,
@@ -407,7 +428,15 @@ fn dispatch_bench_scale(
     quick: bool,
     json_only: bool,
     docker: bool,
+    alint_binary: Option<PathBuf>,
 ) -> Result<()> {
+    if docker && alint_binary.is_some() {
+        bail!(
+            "--alint-binary is incompatible with --docker: the docker image builds \
+             alint from the mounted (current) source, so it cannot benchmark a \
+             pre-built binary. Run --alint-binary directly on the host."
+        );
+    }
     if docker {
         // The `--docker` path forwards args verbatim into the
         // image's entrypoint. Skip host-side parse so the
@@ -477,6 +506,7 @@ fn dispatch_bench_scale(
         out,
         quick,
         json_only,
+        alint_binary,
     })
 }
 

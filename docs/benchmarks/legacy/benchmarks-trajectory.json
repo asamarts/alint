@@ -1,0 +1,303 @@
+{
+  "schema_version": 1,
+  "arch": "linux-x86_64",
+  "rows": [
+    {
+      "version": "v0.16.0",
+      "date": "2026-09-02",
+      "headline": "This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18119.733386626667,
+          "stddev_ms": 163.53384922186748,
+          "display": "18.12 s ± 0.16"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17330.04284410667,
+          "stddev_ms": 17.281609996486406,
+          "display": "17.33 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16177.696593800001,
+          "stddev_ms": 46.21470615123037,
+          "display": "16.18 s ± 0.05"
+        },
+        "s9_1m_full": {
+          "mean_ms": 12007.831071060002,
+          "stddev_ms": 163.72118350994424,
+          "display": "12.01 s ± 0.16"
+        }
+      }
+    },
+    {
+      "version": "v0.15.0",
+      "date": "2026-08-16",
+      "headline": "v0.15 makes rules legible and monorepos first-class.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18105.34794508,
+          "stddev_ms": 144.97312034459836,
+          "display": "18.11 s ± 0.14"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17603.364582566664,
+          "stddev_ms": 213.93333114529048,
+          "display": "17.60 s ± 0.21"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16058.859545293333,
+          "stddev_ms": 189.04125617185755,
+          "display": "16.06 s ± 0.19"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11966.624482199999,
+          "stddev_ms": 320.71179397716327,
+          "display": "11.97 s ± 0.32"
+        }
+      }
+    },
+    {
+      "version": "v0.14.2",
+      "date": "2026-08-06",
+      "headline": "A fixes-and-hardening patch on top of 0.14.1.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18328.36010014,
+          "stddev_ms": 147.51345062169503,
+          "display": "18.33 s ± 0.15"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17348.08608825333,
+          "stddev_ms": 19.2315417660513,
+          "display": "17.35 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16187.329738740002,
+          "stddev_ms": 228.92918563332353,
+          "display": "16.19 s ± 0.23"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11873.2182505,
+          "stddev_ms": 86.91882188163285,
+          "display": "11.87 s ± 0.09"
+        }
+      }
+    },
+    {
+      "version": "v0.14.1",
+      "date": "2026-07-24",
+      "headline": "A performance patch.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18015.608202213334,
+          "stddev_ms": 135.13824190191295,
+          "display": "18.02 s ± 0.14"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17271.424259573334,
+          "stddev_ms": 76.49473448392604,
+          "display": "17.27 s ± 0.08"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16243.558706433334,
+          "stddev_ms": 172.5488861524647,
+          "display": "16.24 s ± 0.17"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11767.94167816,
+          "stddev_ms": 34.67928064665226,
+          "display": "11.77 s ± 0.03"
+        }
+      }
+    },
+    {
+      "version": "v0.14.0",
+      "date": "2026-07-18",
+      "headline": "The adoption release. **Baseline mode** (`alint baseline` + `alint check --baseline`) grandfathers a repo's existing violations behind a content-fingerprinted snapshot, so `alint check` reports and gates only on *new* findings — alint becomes a blocking merge gate on an established codebase without a flag-day cleanup, and for SARIF the suppressed findings are *marked, not deleted*, so GitHub Code Scanning dismisses them instead of flapping fixed-then-reopened.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 18629.234210399998,
+          "stddev_ms": 163.81242030233554,
+          "display": "18.63 s ± 0.16"
+        },
+        "s6_1m_full": {
+          "mean_ms": 17864.639899299997,
+          "stddev_ms": 10.643565144038483,
+          "display": "17.86 s ± 0.01"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16243.785455813335,
+          "stddev_ms": 128.1452280731269,
+          "display": "16.24 s ± 0.13"
+        },
+        "s9_1m_full": {
+          "mean_ms": 12199.738352993336,
+          "stddev_ms": 64.66545061189407,
+          "display": "12.20 s ± 0.06"
+        }
+      }
+    },
+    {
+      "version": "v0.13.0",
+      "date": "2026-06-17",
+      "headline": "This release turns the documented surface into generated, drift-proof contracts.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 17641.650023866663,
+          "stddev_ms": 111.92800237929758,
+          "display": "17.64 s ± 0.11"
+        },
+        "s6_1m_full": {
+          "mean_ms": 16662.51157234667,
+          "stddev_ms": 23.964616329729903,
+          "display": "16.66 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16263.652013826668,
+          "stddev_ms": 167.22741728418606,
+          "display": "16.26 s ± 0.17"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11355.235887693334,
+          "stddev_ms": 6.82033623747881,
+          "display": "11.36 s ± 0.01"
+        }
+      }
+    },
+    {
+      "version": "v0.12.0",
+      "date": "2026-06-07",
+      "headline": "The case-study-driven rule-kind expansion, paired with a security cycle that hardens path handling into a real boundary.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 17519.731135213333,
+          "stddev_ms": 140.45624338390263,
+          "display": "17.52 s ± 0.14"
+        },
+        "s6_1m_full": {
+          "mean_ms": 16711.488611573335,
+          "stddev_ms": 20.619076957771348,
+          "display": "16.71 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16129.359379626667,
+          "stddev_ms": 288.63943826442966,
+          "display": "16.13 s ± 0.29"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11475.142063486668,
+          "stddev_ms": 36.46179518887562,
+          "display": "11.48 s ± 0.04"
+        }
+      }
+    },
+    {
+      "version": "v0.11.0",
+      "date": "2026-05-28",
+      "headline": "The LSP + editor-integration release.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 17574.673437486665,
+          "stddev_ms": 71.45777415555624,
+          "display": "17.57 s ± 0.07"
+        },
+        "s6_1m_full": {
+          "mean_ms": 16740.578540379996,
+          "stddev_ms": 103.95622152573068,
+          "display": "16.74 s ± 0.10"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16285.524851906668,
+          "stddev_ms": 112.4465166315094,
+          "display": "16.29 s ± 0.11"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11489.79284654,
+          "stddev_ms": 49.546133435320755,
+          "display": "11.49 s ± 0.05"
+        }
+      }
+    },
+    {
+      "version": "v0.10.2",
+      "date": "2026-05-21",
+      "headline": "Targeted follow-up to v0.10.1.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 17496.103857333335,
+          "stddev_ms": 15.411204001530644,
+          "display": "17.50 s ± 0.02"
+        },
+        "s6_1m_full": {
+          "mean_ms": 16620.77468582,
+          "stddev_ms": 17.132060556504285,
+          "display": "16.62 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16331.81475284,
+          "stddev_ms": 31.041188197472618,
+          "display": "16.33 s ± 0.03"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11416.552291180002,
+          "stddev_ms": 54.53583421353985,
+          "display": "11.42 s ± 0.05"
+        }
+      }
+    },
+    {
+      "version": "v0.10.1",
+      "date": "2026-05-20",
+      "headline": "Small post-release follow-up to v0.10.0.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 17485.285072833332,
+          "stddev_ms": 268.6656958110981,
+          "display": "17.49 s ± 0.27"
+        },
+        "s6_1m_full": {
+          "mean_ms": 16619.16470858,
+          "stddev_ms": 16.00522105064003,
+          "display": "16.62 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16246.560490726668,
+          "stddev_ms": 174.95496135948423,
+          "display": "16.25 s ± 0.17"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11456.985810913333,
+          "stddev_ms": 66.39736994836335,
+          "display": "11.46 s ± 0.07"
+        }
+      }
+    },
+    {
+      "version": "v0.10.0",
+      "date": "2026-05-20",
+      "headline": "The \"case-study coverage push\" minor.",
+      "cells": {
+        "s3_1m_full": {
+          "mean_ms": 17637.454533419997,
+          "stddev_ms": 32.04431120614837,
+          "display": "17.64 s ± 0.03"
+        },
+        "s6_1m_full": {
+          "mean_ms": 16699.879258193334,
+          "stddev_ms": 15.54806646904849,
+          "display": "16.70 s ± 0.02"
+        },
+        "s7_1m_full": {
+          "mean_ms": 16351.893171046666,
+          "stddev_ms": 141.0356312174561,
+          "display": "16.35 s ± 0.14"
+        },
+        "s9_1m_full": {
+          "mean_ms": 11420.300858539998,
+          "stddev_ms": 30.287989537639426,
+          "display": "11.42 s ± 0.03"
+        }
+      }
+    }
+  ]
+}
