@@ -11,7 +11,8 @@ name: bench-record
 #
 # Two layers per run:
 # - macro: `xtask bench-scale --include-1m --warmup 3 --runs 10` over
-#   the full S1-S14 × {1k,10k,100k,1m} × {full,changed} matrix.
+#   the consolidated S1-S4 × {1k,10k,100k,1m} × {full,changed} matrix,
+#   plus the SFIX fix-mode scenario.
 # - micro: `cargo bench -p alint-bench --features fs-benches` over the
 #   12 criterion benches EXPLICITLY (not a bare `-p alint-bench`, which
 #   would also fire the gungraun det_engine/det_check benches), then
@@ -443,7 +444,11 @@ jobs:
           # bench data we just restored). Sanity check: emit a
           # warning if the new version's row doesn't appear in
           # the output (CHANGELOG.md missing the entry).
-          python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md
+          # Write to a temp then mv, so a render-history failure (e.g. the
+          # recurrence guard tripping on a new scenario id) never truncates
+          # the committed HISTORY.md via the `>` redirect under set -e.
+          python3 xtask/scripts/render-history.py > docs/benchmarks/HISTORY.md.tmp
+          mv docs/benchmarks/HISTORY.md.tmp docs/benchmarks/HISTORY.md
           if ! grep -q "^| \*\*${OUT_LABEL}\*\*" docs/benchmarks/HISTORY.md; then
             echo "::warning ::render-history.py did not produce a row for ${OUT_LABEL}; CHANGELOG.md may be missing the entry. HISTORY.md updated anyway."
           fi
@@ -454,7 +459,7 @@ jobs:
           # step; include it in the same commit so the PR is
           # one-merge-completes-everything.
           git add docs/benchmarks/HISTORY.md
-          git commit -m "docs(bench): publish ${OUT_LABEL} matrix (S1-S14 at 1k/10k/100k/1m × full/changed) + HISTORY.md refresh"
+          git commit -m "docs(bench): publish ${OUT_LABEL} matrix (S1-S4 × {full,changed} + SFIX × fix, 1k/10k/100k/1m) + HISTORY.md refresh"
           git push origin "$branch" --force
 
           # Render a per-cell summary the maintainer pastes into HISTORY.md.
@@ -468,9 +473,9 @@ jobs:
 
           ## What landed
 
-          - \`docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}/\` — full
-            publish-grade hyperfine matrix (S1-S14 × {1k, 10k, 100k, 1m} × {full,
-            changed}) at \`--warmup 3 --runs 10\`.
+          - \`docs/benchmarks/macro/results/linux-x86_64/${OUT_LABEL}/\` — the
+            consolidated publish-grade hyperfine matrix (S1-S4 × {1k, 10k, 100k,
+            1m} × {full, changed}, plus SFIX × fix) at \`--warmup 3 --runs 10\`.
           - \`docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/criterion/\`
             — trimmed criterion snapshot from \`cargo bench -p alint-bench\`.
           - \`docs/benchmarks/HISTORY.md\` — auto-refreshed via

@@ -314,10 +314,16 @@ not a data move of the new (and never a backfill into a dir holding old data --
 - **HISTORY page:** render the old series ONCE into a frozen legacy HISTORY page (a
   static snapshot or `render-history` against the legacy path); the new MAIN HISTORY
   (5 scenarios, backfilled) becomes the default page. Cross-link the two.
-- **render-history recurrence guard:** with legacy + main in SEPARATE paths, each
-  render only sees its own ids, so the guard (`measured` subset of `SCENARIOS`) is
-  satisfied without carrying the old ids in the main `SCENARIOS`. Add `FIRST_VERSION`
-  floors for the 5 new ids (per the ragged matrix).
+- **render-history recurrence guard + SFIX:** with legacy + main in SEPARATE paths,
+  each render only sees its own ids, so the guard (`measured` subset of `SCENARIOS`) is
+  satisfied without carrying the old ids in the main `SCENARIOS`. `SCENARIOS` = the 4
+  check scenarios **plus SFIX**; SFIX renders a fix-mode table (via `modes_for()`) with
+  `FIRST_VERSION["SFIX"] = v0.17.0`, so it is `n/a` for every pre-v0.17 tag. SFIX is
+  INCLUDED (not deferred): omitting it would let bench-record's
+  `render-history > HISTORY.md` hard-fail the guard the first time a v0.17 SFIX row
+  lands and TRUNCATE HISTORY.md to empty (the `>` runs under `set -e`) -- so
+  bench-record also now writes via a temp + `mv`. `FIRST_VERSION` floors: S3 = v0.12.0,
+  SFIX = v0.17.0 (per the ragged matrix).
 - **Site + `trajectory.json` (G5):** repoint `render-history.py`'s hardcoded
   `cell_keys` list to the new scenarios. Each entry is a `(json_key, scenario_label)`
   tuple and the JSON key is the label LOWERCASED (the harness writes `scenario="S4"`

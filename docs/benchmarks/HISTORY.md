@@ -169,7 +169,7 @@ Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for
 
 ## S4 — Workspace bundle
 
-The realistic mixed workload and the release anchor: `extends:` the bundled rulesets (oss-baseline + rust + monorepo + cargo-workspace + git-aware + polyglot) over a POLYGLOT + GIT tree (`crates/` + `packages/` + `apps/`, initialised as a real repo) with `nested_configs` on. Consolidates the old realistic-monorepo, git-overlay, and nested-polyglot scenarios. The `s4_1m_full` cell is the trajectory anchor every publish captures.
+The realistic mixed workload and the release anchor: `extends:` six bundled rulesets (oss-baseline + rust + node + python + monorepo + cargo-workspace) over a POLYGLOT + GIT tree (`crates/` + `packages/` + `apps/`, initialised as a real repo) with `nested_configs` on and two inline git-aware rules. Consolidates the old realistic-monorepo, git-overlay, and nested-polyglot scenarios. The `s4_1m_full` cell is the trajectory anchor every publish captures.
 
 ### S4 — full
 
@@ -202,6 +202,26 @@ The realistic mixed workload and the release anchor: `extends:` the bundled rule
 | v0.10.2 | 35 ms ± 2 | 100 ms ± 2 | 846 ms ± 14 | 9.34 s ± 0.01 |
 | v0.10.1 | 36 ms ± 1 | 118 ms ± 1 | 831 ms ± 2 | 9.39 s ± 0.02 |
 | v0.10.0 | 35 ms ± 1 | 98 ms ± 1 | 833 ms ± 5 | 9.40 s ± 0.06 |
+
+## SFIX — Auto-fix
+
+The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `command` / `git_untrack`), run as `alint fix --unsafe-fixes --dry-run` so every op's compute + compose path runs while nothing is written. The only fix-mode scenario -- closes the historical zero-macro-fix-coverage gap. Rendered as a `fix`-mode table (not `full`/`changed`); `n/a` for every tag before the v0.17 fix engine. **New at v0.17.0.**
+
+### SFIX — fix
+
+| Version | 1k | 10k | 100k | 1M |
+|---|---:|---:|---:|---:|
+| **v0.16.0** | n/a | n/a | n/a | n/a |
+| v0.15.0 | n/a | n/a | n/a | n/a |
+| v0.14.2 | n/a | n/a | n/a | n/a |
+| v0.14.1 | n/a | n/a | n/a | n/a |
+| v0.14.0 | n/a | n/a | n/a | n/a |
+| v0.13.0 | n/a | n/a | n/a | n/a |
+| v0.12.0 | n/a | n/a | n/a | n/a |
+| v0.11.0 | n/a | n/a | n/a | n/a |
+| v0.10.2 | n/a | n/a | n/a | n/a |
+| v0.10.1 | n/a | n/a | n/a | n/a |
+| v0.10.0 | n/a | n/a | n/a | n/a |
 
 ## How to add a row
 

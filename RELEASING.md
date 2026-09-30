@@ -308,8 +308,8 @@ Helix / Eclipse are docs-only (config snippets): nothing to publish.
 > only the wall-clock bench caught it
 > ([`docs/benchmarks/investigations/2026-07-v0.14-s2-harness-artifact/`](docs/benchmarks/investigations/2026-07-v0.14-s2-harness-artifact/)).
 > So a wall-clock regression the deterministic gate does not confirm is *not*
-> automatically contamination. If the flagged cells are content-read-heavy (S2 / S6 /
-> S12) and the diff touched the read / open / spawn path, disambiguate with a syscall
+> automatically contamination. If the flagged cells are content-read-heavy (S2 /
+> S3) and the diff touched the read / open / spawn path, disambiguate with a syscall
 > count or a same-box quiescent A/B, not the deterministic gate alone.
 
 `bench-record.yml` opens a PR titled `docs(bench): <tag> bench-scale results`

@@ -33,7 +33,10 @@ const SEED: u64 = 10_559_047;
 // The real scenario configs, shared with the wall-clock bench (minimal drift —
 // one source of truth). A spread of dispatch classes over the regular
 // gen-monorepo tree: s1 = layout/walk-bound (isolates the walker); s2 = per-file
-// content; s3 = cross-file relational + graph.
+// content; s3 = cross-file relational + graph. (s4_workspace is deliberately
+// excluded: its `extends:` pulls the bundled rulesets shipped in the binary,
+// whose rule set evolves per release — a moving target unfit for a fixed
+// deterministic Ir gate.)
 const S1: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../xtask/src/bench/scenarios/s1_layout.yml"

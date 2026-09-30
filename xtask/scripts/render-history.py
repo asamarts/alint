@@ -175,17 +175,23 @@ def parse_changelog(path: str) -> Dict[str, Tuple[str, str]]:
 SIZES = ["1k", "10k", "100k", "1m"]
 MODES = ["full", "changed"]
 
+
+def modes_for(sid: str) -> List[str]:
+    """SFIX runs `fix` mode only; the check scenarios run full + changed."""
+    return ["fix"] if sid == "SFIX" else MODES
+
 # (id, title, intro) — the CONSOLIDATED 5-scenario set (see
 # docs/design/bench/scenario-consolidation.md). Each new scenario
 # absorbs several of the old 14; the pre-consolidation series is
 # frozen at docs/benchmarks/legacy/.
 #
-# SFIX (the dedicated fix-mode scenario) is intentionally ABSENT
-# here: it runs `fix` mode, not `full`/`changed`, so it does not
-# fit the size-x-mode table below, and it has no published data
-# until the v0.17 fix engine ships. When v0.17's bench-record lands
-# an SFIX row, the recurrence guard in render() will fire (loudly,
-# by design) so its fix-mode representation gets designed then.
+# SFIX is the dedicated fix-mode scenario: it runs `fix` mode (not
+# `full`/`changed`), so render() gives it a fix-mode table via
+# modes_for(). It has no published data until the v0.17 fix engine
+# ships, so FIRST_VERSION gates it to `n/a` for every earlier tag.
+# It is INCLUDED here (not deferred) so bench-record's render-history
+# does not hard-fail the recurrence guard -- and truncate HISTORY.md
+# via `> HISTORY.md` -- the first time a real SFIX row lands.
 SCENARIOS = [
     (
         "S1", "Layout & path",
@@ -201,7 +207,11 @@ SCENARIOS = [
     ),
     (
         "S4", "Workspace bundle",
-        "The realistic mixed workload and the release anchor: `extends:` the bundled rulesets (oss-baseline + rust + monorepo + cargo-workspace + git-aware + polyglot) over a POLYGLOT + GIT tree (`crates/` + `packages/` + `apps/`, initialised as a real repo) with `nested_configs` on. Consolidates the old realistic-monorepo, git-overlay, and nested-polyglot scenarios. The `s4_1m_full` cell is the trajectory anchor every publish captures.",
+        "The realistic mixed workload and the release anchor: `extends:` six bundled rulesets (oss-baseline + rust + node + python + monorepo + cargo-workspace) over a POLYGLOT + GIT tree (`crates/` + `packages/` + `apps/`, initialised as a real repo) with `nested_configs` on and two inline git-aware rules. Consolidates the old realistic-monorepo, git-overlay, and nested-polyglot scenarios. The `s4_1m_full` cell is the trajectory anchor every publish captures.",
+    ),
+    (
+        "SFIX", "Auto-fix",
+        "The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `command` / `git_untrack`), run as `alint fix --unsafe-fixes --dry-run` so every op's compute + compose path runs while nothing is written. The only fix-mode scenario -- closes the historical zero-macro-fix-coverage gap. Rendered as a `fix`-mode table (not `full`/`changed`); `n/a` for every tag before the v0.17 fix engine. **New at v0.17.0.**",
     ),
 ]
 
@@ -213,7 +223,9 @@ SCENARIOS = [
 # S3's graph kinds land at v0.12.0.
 FIRST_VERSION: Dict[str, str] = {
     "S3": "v0.12.0",
-    # SFIX: "v0.17.0" — teed up for when the fix scenario gets a row.
+    # SFIX first ships with the v0.17 fix engine; no earlier tag has a
+    # fix-mode row, so every pre-v0.17 SFIX cell renders `n/a`.
+    "SFIX": "v0.17.0",
 }
 
 # Manual pre-results.json cells belong only to the retired 3900X series
@@ -377,7 +389,7 @@ def render(
     # Per-scenario sections
     for sid, title, intro in SCENARIOS:
         out += [f"## {sid} — {title}", "", intro, ""]
-        for mode in MODES:
+        for mode in modes_for(sid):
             out += [
                 f"### {sid} — {mode}",
                 "",

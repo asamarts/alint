@@ -434,12 +434,14 @@ const REPOLINTER_S2_CONFIG: &str = r#"{
 }
 "#;
 
-/// `.ls-lint.yml` body for scenario S1 — the same eight
-/// filename rules alint S1 enforces, expressed in ls-lint's
-/// extension-keyed shape. Both engines walk the tree once and
-/// match each file's basename against the configured class
-/// per extension; the work shapes line up cleanly.
-const LS_LINT_S1_CONFIG: &str = r"# ls-lint config — S1 (filename hygiene), equivalent to xtask/src/bench/scenarios/s1_filename.yml.
+/// `.ls-lint.yml` body for scenario S1 — the eight filename rules
+/// that are the ls-lint-expressible SUBSET of alint's `s1_layout`
+/// scenario. Both engines walk the tree once and match each file's
+/// basename against the configured class per extension; that filename
+/// work lines up cleanly. `s1_layout`'s non-filename rules (existence
+/// / size / `scope_filter`) have no ls-lint equivalent, so the S1
+/// competitive cell compares filename-hygiene work only.
+const LS_LINT_S1_CONFIG: &str = r"# ls-lint config — the filename subset of xtask/src/bench/scenarios/s1_layout.yml.
 ls:
   .rs: snake_case
   .tsx: PascalCase
