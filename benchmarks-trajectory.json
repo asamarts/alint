@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.17.0",
+      "date": "?",
+      "headline": "—",
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4071.061841146666,
+          "stddev_ms": 52.20862808565771,
+          "display": "4.07 s ± 0.05"
+        },
+        "s2_1m_full": {
+          "mean_ms": 18750.99142155333,
+          "stddev_ms": 63.259859058040114,
+          "display": "18.75 s ± 0.06"
+        },
+        "s3_1m_full": {
+          "mean_ms": 475297.3235834866,
+          "stddev_ms": 2993.537324057734,
+          "display": "475.3 s ± 3.0"
+        },
+        "s4_1m_full": {
+          "mean_ms": 16564.92044218,
+          "stddev_ms": 226.69927712481714,
+          "display": "16.56 s ± 0.23"
+        }
+      }
+    },
+    {
       "version": "v0.16.0",
       "date": "2026-09-02",
       "headline": "This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service.",
