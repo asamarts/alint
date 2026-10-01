@@ -145,7 +145,7 @@ views {
     dev -> alintBin 'alint check .'
     alintBin -> dsl 'load .alint.yml + resolve extends (cache, cycle-detect, SRI)'
     dsl -> dsl 'reject spawning kinds in extends (ADR-0004)'
-    alintBin -> core 'evaluate facts (parallel, cached) + filter rules by when'
+    alintBin -> core 'evaluate facts (once, cached) + filter rules by when'
     alintBin -> core 'parallel walk -> FileIndex (sorted, deterministic)'
     parallel {
       core -> rules 'per-file dispatch: read each file once -> evaluate_file'
@@ -192,7 +192,7 @@ views {
   dynamic view factsFlow {
     title 'Facts evaluation + when gating'
 
-    alintBin -> core 'evaluate facts in parallel (any_file_exists, count_files, custom, ...)'
+    alintBin -> core 'evaluate facts once (any_file_exists, count_files, custom, ...)'
     core -> core 'cache fact values keyed on input hashes'
     core -> core 'evaluate each rule when: clause over facts / vars / ctx'
     core -> core 'drop rules whose when is false'
@@ -247,7 +247,7 @@ views {
     title 'Walk + gitignore + git-tracked filtering'
 
     alintBin -> core 'parallel walk (ignore crate WalkBuilder.build_parallel)'
-    core -> core 'honor .gitignore + .alintignore + ignore: globs'
+    core -> core 'honor .gitignore/.ignore + ignore: globs'
     core -> core 'merge thread-local FileEntry vecs + deterministic sort'
     core -> core 'build lazy indices: path set, parent->children, git-tracked'
     core -> rules 'FileIndex (+ git-tracked filtered views) ready'

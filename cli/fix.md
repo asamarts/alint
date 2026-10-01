@@ -1,11 +1,39 @@
 ---
 title: 'alint fix'
-description: 'Apply automatic fixes for violations whose rules declare one. alint fix CLI reference and flags.'
+description: 'alint fix applies the automatic fixes that rules declare, like appending a final newline or renaming a file into the right case. Preview with a dry run.'
 ---
+
+`alint fix` runs the same checks as `alint check`, then applies the fix each
+failing rule declares: create or remove a file, prepend or append content,
+trim trailing whitespace, normalize line endings, rename a file into the
+configured case, and so on. Rules without a fixer are reported and left alone.
 
 How `alint fix` applies fixes and re-checks:
 
 <likec4-view view-id="fixFlow"></likec4-view>
+
+## Examples
+
+Show what would change, without writing anything:
+
+```bash
+alint fix --dry-run
+```
+
+Apply every available fix:
+
+```bash
+alint fix
+```
+
+Limit the pass to the files changed on this branch. Existence and cross-file
+rules still see the whole tree, so their fixes can reach other files:
+
+```bash
+alint fix --changed --base origin/main
+```
+
+## Reference
 
 ```
 Apply automatic fixes for violations whose rules declare one
@@ -15,13 +43,10 @@ Usage: alint fix [OPTIONS] [PATH]
 Arguments:
   [PATH]
           Root of the repository to operate on
-          
+
           [default: .]
 
 Options:
-  -c, --config <CONFIG>
-          Path to a config file
-
       --dry-run
           Print what would be done without writing anything
 
@@ -29,107 +54,28 @@ Options:
           Restrict the fix pass to files in the working-tree diff (see `alint check --changed`).
           Cross-file + existence rules still see the full tree
 
-  -f, --format <FORMAT>
-          Output format
-          
-          [default: human]
-
       --base <REF>
           Base ref for `--changed`. Implies `--changed`
 
-      --no-gitignore
-          Disable .gitignore handling (overrides config)
+      --unsafe-fixes
+          Also apply Unsafe-tier fixes, not just Safe ones. Unsafe fixes may be destructive or
+          change behavior, so they are opt-in: without this flag they are surfaced as suggestions
+          instead of applied. `file_remove` (the fix for `file_absent` / `no_empty_files` /
+          `no_submodules` / `no_symlinks`) is Unsafe, so this flag is what applies it
 
-      --fail-on-warning
-          Treat warnings as errors for exit-code purposes
+      --fix-only
+          Report only the fixes that were applied: suppress the residual (skipped / unfixable)
+          findings and exit 0 unless a fix errored. For "apply what you can and move on" workflows
 
-      --show-notes
-          List informational notes in full on stderr.
-          
-          Notes are non-violation findings — e.g. entries a rule skipped rather than failed on. By
-          default only a one-line count is shown.
-
-      --color <WHEN>
-          When to emit ANSI color codes in human output.
-          
-          `auto` (the default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`. Only affects the
-          `human` format; `json` / `sarif` / `github` / `markdown` / `junit` / `gitlab` / `agent`
-          are always plain bytes.
-          
-          [default: auto]
-          [possible values: auto, always, never]
-
-      --ascii
-          Force ASCII glyphs in human output.
-          
-          E.g. `x` instead of `✗`. Auto-enabled when `TERM=dumb`.
-
-      --compact
-          Compact one-line-per-violation human output.
-          
-          Suitable for piping into editors / grep / `wc -l`. Format: `path:line:col: level: rule-id:
-          message` (the `:line:col` is omitted for findings with no specific location).
-
-      --width <COLS>
-          Override the human-output column width.
-          
-          Default: detected terminal width (TTY only) or 80. Useful for reproducible captures
-          (asciinema/screen recordings) and for piping into fixed-width log viewers. Clamped to [40,
-          120].
-
-      --no-docs
-          Suppress per-violation `docs:` URLs in human output.
-          
-          Useful for narrow terminals, screen recordings, and CI logs where long URLs disrupt visual
-          alignment. URLs remain in JSON / SARIF / GitHub / markdown output regardless.
-
-      --progress <WHEN>
-          When to render progress on stderr for slow operations.
-          
-          Currently just `alint suggest`. `auto` (the default) renders when stderr is a TTY;
-          `always` forces; `never` silences. Progress always lives on stderr — `--format` JSON
-          output on stdout stays byte-clean.
-          
-          [default: auto]
-          [possible values: auto, always, never]
-
-  -q, --quiet
-          Suppress progress and stderr summary lines.
-          
-          Alias for `--progress=never` plus suppression of the "found N proposals in Ts" footer that
-          `suggest` prints.
-
-      --baseline <FILE>
-          Suppress violations recorded in a baseline file.
-          
-          See `alint baseline` to create one; only new violations are reported. Pre-existing
-          findings are grandfathered so `check` can gate a legacy repo on new violations only. A
-          missing or unreadable baseline is an error (never a silent no-op). The path is resolved
-          relative to the current directory (not the checked PATH); the `baseline:` config key, by
-          contrast, resolves against the repo root.
-
-      --strict-baseline
-          With `--baseline`, fail on stale baseline entries.
-          
-          Exits 1 when the baseline has stale entries: recorded findings that no longer fire,
-          usually because they were fixed. Forces the committed baseline to stay exactly accurate.
-          Off by default: fixing things never fails the build.
-
-      --show-baselined
-          With `--baseline`, list suppressed findings on stderr.
-          
-          Lists them in full, rather than just a one-line count. Parallels `--show-notes`.
-
-      --only <RULE_ID>
-          Restrict the run to the named rule id(s).
-          
-          Taken from the effective config (repeatable). Other rules are skipped entirely. An id that
-          matches no loaded rule is an error, so typos fail loudly rather than silently linting
-          nothing. Applies to `check` and `fix` (the `agent` format emits `fix --only <rule-id>`);
-          rejected on any other subcommand. Global, so the bare `alint --only <id>` lints the
-          current directory like `alint check --only <id>` — to lint a different path, use the
-          explicit form `alint check --only <id> <path>`.
-
-  -h, --help
-          Print help (see a summary with '-h')
+      --diff
+          Show a unified diff of the fixes that would be applied, writing nothing. Reflects the
+          composed result at the chosen tier; the exit code matches a real `fix`. Output is a
+          unified diff regardless of `--format`
 ```
+
+The [global options](/docs/cli/#global-options) apply to `alint fix` too, where they are relevant.
+
+## See also
+
+- [Fixing](/docs/concepts/adoption/fixing/): how fixes are chosen and applied
+- [Fix operations](/docs/concepts/fix-operations/): the fix ops and their options

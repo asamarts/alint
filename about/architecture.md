@@ -1,5 +1,6 @@
 ---
 title: Architecture
+description: 'How alint works inside: the rule model, the config DSL, the single-pass execution model, the crate layout, plugins, and output formats.'
 ---
 
 > Status: Living design document. Describes alint's internals for contributors

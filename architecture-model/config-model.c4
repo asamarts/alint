@@ -32,6 +32,7 @@ model {
       f_templates = field 'templates'
       f_allow_out_of_root = field 'allow_out_of_root'
       f_baseline = field 'baseline'
+      f_trusted_extends = field 'trusted_extends'
     }
 
     rule = entity 'RuleSpec' 'A rule record: id, kind, level, message, policy_url, when, ...'

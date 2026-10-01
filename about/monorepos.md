@@ -21,7 +21,7 @@ The diagram below shows how nested `.alint.yml` files layer by directory and how
 | pnpm / yarn / npm workspaces | Strong | Same: `node@v1` plus workspace conventions. |
 | Polyglot OSS monorepos (Rust + Node + Python + Go + Java) | Strong | Multi-ecosystem rulesets layer cleanly; each is fact-gated, so unused languages contribute nothing. |
 | Lerna / Nx / Turborepo | Good | Treat as workspaces; bundled adoption + nested configs. |
-| Bazel / Buck2 / Pants hyperscale monorepos | Partial | Tree-shape rules apply. Package-iteration rules currently iterate every directory matching a glob; a per-iteration `when:` filter ("only iterate dirs containing a `BUILD` file") is on the v0.5 roadmap. |
+| Bazel / Buck2 / Pants hyperscale monorepos | Partial | Tree-shape rules apply, and `for_each_dir` / `for_each_file` accept a per-iteration `when_iter:` filter ("only iterate dirs containing a `BUILD` file"). The design center is workspace-tier monorepos, not 1M-file Bazel scale. |
 | Custom-build kernels (Linux, Chromium, FreeBSD) | Partial | Tree-shape rules apply. Expect to write more custom rules and fewer ecosystem extends. |
 
 If your top concern is build-graph correctness, dependency resolution, or code-level safety, the [Honest limits](#honest-limits) section below is the part to read first. alint isn't the right tool for those, and we'd rather you know now than after wiring it in.
@@ -38,7 +38,7 @@ If your top concern is build-graph correctness, dependency resolution, or code-l
 | Supply-chain signals | OpenSSF Scorecard | Adjacent, with overlap. alint's `ci/github-actions@v1` enforces Scorecard's Token-Permissions and Pinned-Dependencies checks at PR time; Scorecard runs as a periodic audit. They report the same finding from different angles. |
 | Repo conventions / community health | Repolinter (archived 2026-02-06) | alint covers the same ground under active maintenance, with structured-query primitives, bundled rulesets, and auto-fix. |
 | Pre-commit framework | pre-commit | alint ships a `.pre-commit-hooks.yaml` (`alint` + `alint-fix` hooks). |
-| GitHub Actions | (the platform) | alint ships an [official action](../integrations/github-actions/) and emits SARIF + GitHub annotations natively. |
+| GitHub Actions | (the platform) | alint ships an [official action](/docs/integrations/github-actions/) and emits SARIF + GitHub annotations natively. |
 
 The boundary that holds across the table: **alint reasons about the tree as data, not the build graph as logic, not the code as semantics.**
 
@@ -51,8 +51,8 @@ A progression the design points toward: start small, add layers as the value jus
 3. **CI hardening.** Add `ci/github-actions@v1` to require `permissions.contents: read` and SHA-pinned actions in every workflow.
 4. **Field-level overrides.** When a bundled rule almost fits but you want it as a warning instead of an error, override just the `level:` (the rest of the rule inherits).
 5. **Custom structured-query rules.** Write a few `json_path_*` / `yaml_path_*` / `toml_path_*` rules for repo-specific invariants, e.g., every `Cargo.toml` declares `edition = "2024"`.
-6. **Pre-commit + GHA wiring.** Run alint locally via the [pre-commit hook](../integrations/pre-commit/) so contributors catch issues before pushing.
-7. **Tighten absence rules with `git_tracked_only: true`.** Stop noisy false positives on locally-built artifacts (`target/`, `node_modules/`). See the [walker and `.gitignore`](../concepts/walker-and-gitignore/) page for the full semantics.
+6. **Pre-commit + GHA wiring.** Run alint locally via the [pre-commit hook](/docs/integrations/pre-commit/) so contributors catch issues before pushing.
+7. **Tighten absence rules with `git_tracked_only: true`.** Stop noisy false positives on locally-built artifacts (`target/`, `node_modules/`). See the [walker and git](/docs/concepts/targeting/the-walker-and-git/) page for the full semantics.
 8. **Turn on `nested_configs: true` for monorepos.** Subtree-local conventions live in nested `.alint.yml` files; the root config focuses on tree-wide invariants.
 
 ## Honest limits
@@ -61,8 +61,7 @@ Things alint deliberately does not do, and what to use instead.
 
 - **Build graph and dependency analysis.** Bazel, Buck2, Pants, and `cargo deny` already do this well. alint reads your `BUILD` / `Cargo.toml` / `package.json` files as data, not as graphs. It can require they exist and have certain keys, but it won't tell you if your dependency graph has a cycle.
 - **Code-content linting.** ESLint, Clippy, ruff, gofmt, Prettier cover the language surface. alint checks file existence, naming, headers, and forbidden-pattern matches, not the meaning of the code.
-- **Per-package iteration with conditions on the iteration itself.** Today, `for_each_dir` iterates every directory matching a `paths:` glob; the inner rules then short-circuit if a marker file is missing. A per-iteration `when:` predicate ("iterate only directories that contain a `BUILD` file") is on the v0.5 roadmap. Until then, `every_matching_has` covers the most common case (one anchor file in a directory ⇒ another file required nearby).
-- **Tested scale ceiling.** alint's walker is fast (it honors `.gitignore` and reads files in parallel) but the design center is workspace-tier monorepos, not 1M-file Bazel monorepos. An incremental `--changed` mode that diffs against a base ref (so PR-time runs stay sub-second on large trees) is on the v0.5 roadmap; until then, plan for full-tree latency on each invocation. Published scale benchmarks are tracked as part of the same cut.
+- **Tested scale ceiling.** alint's walker is fast (it honors `.gitignore` and reads files in parallel), and `--changed` diffs against a base ref so PR-time runs stay fast on large trees. The design center is still workspace-tier monorepos, not 1M-file Bazel monorepos; plan for whole-tree runs at that scale.
 
 If a limit above describes your concern, alint isn't the right tool. Reaching for the right neighbor will save you time.
 
@@ -167,7 +166,7 @@ rules:
     level: error
 ```
 
-`every_matching_has` works well for known-shape glob patterns like `services/*` or `apps/*`. For arbitrary-depth Bazel packages (`BUILD` files anywhere in the tree), the per-iteration `when:` filter on `for_each_dir` planned for v0.5 lands the right idiom: "for every directory containing a `BUILD` file, require X."
+`every_matching_has` works well for known-shape glob patterns like `services/*` or `apps/*`. For arbitrary-depth Bazel packages (`BUILD` files anywhere in the tree), the per-iteration `when_iter:` filter on `for_each_dir` is the right idiom: "for every directory containing a `BUILD` file, require X."
 
 ### Manifest-derived scoping (v0.15+)
 

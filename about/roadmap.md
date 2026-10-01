@@ -1,5 +1,6 @@
 ---
 title: Roadmap
+description: 'What each alint version shipped, from the v0.1 MVP to the latest release, and what is planned after it.'
 ---
 
 > This roadmap is scope-based; dates are deliberately omitted. Each version is a

@@ -1,5 +1,6 @@
 ---
 title: Rule authoring
+description: 'The checklist for adding a rule kind, bundled ruleset, or rule-kind alias to alint so the coverage audits stay green and CI passes.'
 ---
 
 This page is the checklist for adding a new rule kind, bundled ruleset, or

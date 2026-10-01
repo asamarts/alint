@@ -1,11 +1,11 @@
 {
   "format_version": 2,
-  "alint_version": "0.16.1",
+  "alint_version": "0.17.0",
   "counts": {
     "rule_kinds": 105,
     "families": 13,
     "bundled_rulesets": 22,
-    "auto_fix_ops": 12,
+    "auto_fix_ops": 26,
     "output_formats": 8,
     "subcommands": 12
   },
@@ -536,8 +536,8 @@
     "commented_out_code": "commented_out_code",
     "content_forbidden": "file_content_forbidden",
     "content_matches": "file_content_matches",
-    "cross_file": "cross_file",
-    "cross_file_value_equals": "cross_file",
+    "cross_file": "cross_file/mod",
+    "cross_file_value_equals": "cross_file/mod",
     "dir_absent": "dir_absent",
     "dir_contains": "dir_contains",
     "dir_exists": "dir_exists",
@@ -615,7 +615,7 @@
     "no_symlinks": "no_symlinks",
     "no_trailing_whitespace": "no_trailing_whitespace",
     "no_zero_width_chars": "no_zero_width_chars",
-    "ordered_block": "ordered_block",
+    "ordered_block": "ordered_block/mod",
     "pair": "pair",
     "pair_changed_together": "pair_changed_together",
     "pair_hash": "pair_hash",

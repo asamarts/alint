@@ -1,5 +1,6 @@
 ---
 title: Changelog
+description: 'Every alint release, newest first: new rule kinds and rulesets, CLI and config changes, fixes, and performance notes.'
 ---
 
 All notable changes to alint are documented here. The format is based on
@@ -7,6 +8,288 @@ All notable changes to alint are documented here. The format is based on
 to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
+
+## [0.17.0] - 2026-10-01
+
+### Added
+
+- New `replace` auto-fix op for `file_content_forbidden`: rewrites each span
+  matching the rule's `pattern:` with a `replacement` template (regex `$1` /
+  `${name}` capture references). It is the first *located* fix -- one byte-range
+  edit per match, spliced in a single pass -- and is `Unsafe` by default (a regex
+  rewrite is not behavior-preserving), so a bare `alint fix` surfaces it as a
+  suggestion and `alint fix --unsafe-fixes` applies it. Example: rewrite
+  `console.log` to `logger.debug`, or strip a banned token. A replacement that
+  would itself still match the forbidden pattern (e.g. `foo` -> `foofoo`, or a
+  zero-width pattern) is left unfixed with a warning rather than applied, so the
+  fix never loops or grows the file.
+- The LSP now offers the located `replace` fix as an editor code action. Its
+  byte-range edits are mapped to LSP `TextEdit`s with UTF-16 character positions
+  (so a fix after a non-BMP character such as an emoji lands in the right place),
+  and every occurrence in the file becomes one `TextEdit` in a single
+  `WorkspaceEdit`, so applying the action rewrites them all at once.
+- New `trusted_extends:` top-level config key: a list of remote `extends:` URLs
+  whose content-injecting fixers (`replace` / `file_create` / `file_prepend` /
+  `file_append`) are honored at their declared tier instead of demoted to a
+  suggestion (see the security note under Changed). Use it to opt a company's
+  internal ruleset host back into auto-applying its own content fixes. Only your
+  own top-level config (or a `.alint.d/` drop-in) may grant trust; a ruleset may
+  not allowlist itself. A per-rule `applicability:` field was also added to the
+  `file_create` / `file_prepend` / `file_append` fix ops.
+- New located structured fix ops `set_value` (for the `*_path_equals` kinds) and
+  `remove_value` (for the `*_path_absent` kinds): they edit a structured config
+  value in place, preserving comments, key order, and line endings by splicing
+  only the target node's byte range rather than re-serializing the document.
+  `set_value` rewrites the value at the rule's `path:` to its `equals:` (Safe for
+  a scalar replacing an existing scalar; object/array/insertion cases decline);
+  `remove_value` deletes the matched node with its separator (Unsafe by default).
+  Available for **HCL** now; the other structured formats surface the violation
+  but decline the fix until their span resolvers land. `set_value` is
+  content-injecting, so a remote `extends:` demotes it under the trust boundary
+  above.
+- New `chmod` auto-fix op for `executable_bit` and `shebang_has_executable`
+  (`fix: { chmod: {} }`): sets or clears the Unix executable bits (`0o111`) to
+  match the rule, preserving every other permission bit. `executable_bit` picks
+  the direction from `require:`; `shebang_has_executable` always sets +x. Safe by
+  default (the rule explicitly requires the state, the change is reversible, and
+  only `0o111` changes); a per-rule `applicability:` can demote it. Unix-only, as
+  the rules are; `alint fix --diff` previews it as a git-style `old mode`/`new
+  mode` change.
+- New `git_untrack` auto-fix op for `file_absent` (`fix: { git_untrack: {} }`):
+  runs `git rm --cached` to drop a committed-but-forbidden path from git's index
+  while leaving it on disk, for the "a build artifact got committed and should be
+  untracked" hygiene case (pair it with `git_tracked_only: true` so the rule
+  converges once the path leaves the tracked set). It is the first *spawning* fix
+  op, so -- exactly like a `kind: command` rule -- it is refused from any
+  non-top-level source (an `extends:`'d or bundled ruleset, a `templates:` block,
+  or a nested `.alint.yml`) to keep an adopted ruleset from shelling out on a bare
+  `alint fix`; declare it only in your own top-level config. `Unsafe` by default
+  (it restructures the git index), so a bare `alint fix` surfaces it as a
+  suggestion and `alint fix --unsafe-fixes` applies it.
+- The `command` plugin rule can now carry a fix (`fix: { command: { run: [...] }
+  }`): a user-supplied fix command run per violation, with the same `{path}` /
+  `{dir}` / `{stem}` templates (and option-injection guard) as the rule's
+  `command:`. Pair a checker with its fixer, e.g. check `eslint {path}`, fix
+  `eslint --fix {path}`. Like `git_untrack` it is a spawning fix -- refused from
+  any non-top-level source, so an adopted ruleset can never run a command on your
+  `alint fix` -- and `Unsafe` by default (a bare `alint fix` suggests; a top-level
+  `applicability: safe` opts a specific rule into running on a bare fix). Its
+  idempotence is the command author's business, so it is exempt from the harness's
+  convergence requirement.
+- New `dir_create` auto-fix op for `dir_exists` (`fix: { dir_create: {} }`):
+  creates the required directory (recursively) when it is missing. `Safe` by
+  default (an empty directory is benign). The rule's `paths` must be one literal
+  directory (a glob or multiple patterns is ambiguous and rejected at load). Note
+  that git does not track an empty directory, so pair it with a `file_create` of a
+  `.gitkeep` if the directory must persist in the repo.
+- New `sync_from` auto-fix op for `cross_file` (`fix: { sync_from: {} }`), with
+  two behaviors by relation:
+  - On **`relation: identical`** it overwrites a drifted target with the canonical
+    `source:` file so the two are byte-identical again -- the workspace
+    LICENSE-mirroring case, where each crate's copy must match the root one.
+  - On **`relation: equals`** it PROPAGATES the source's single extracted value
+    into each drifting target, preserving the rest of the file -- the "one source
+    of truth, propagate to N others" case (e.g. a workspace version to each crate's
+    `$.package.version`). Works for a structured target extract (any
+    toml/json/yaml/xml/ini/hcl/dotenv/properties JSONPath -- rewrites the located
+    node) and a regex target extract (rewrites each match's capture group 1, then
+    re-verifies -- e.g. a version in a README badge or a Dockerfile `ARG`).
+  `Unsafe` by default (a whole-file overwrite / a ruleset-chosen value can change
+  the target), so a bare `alint fix` suggests it and `alint fix --unsafe-fixes`
+  applies it. `identical` requires `skip_header_lines: 0`; a set / resolves
+  relation is rejected at load. Both the source read and the target write are
+  confined to the repo root.
+- New `relocate` auto-fix op for `file_absent` (`fix: { relocate: {} }`): moves a
+  file the rule flagged in a subdirectory back to the repository root, keeping its
+  basename -- the "a lockfile drifted into a member directory" case (a `Cargo.lock`
+  / `package-lock.json` / `poetry.lock` belongs at the workspace root, so a rule
+  like `paths: "**/*/Cargo.lock"` flags a nested one and `relocate` moves it up).
+  `Unsafe` by default (a rename moves a real file and the destination is inferred),
+  so a bare `alint fix` suggests it and `alint fix --unsafe-fixes` applies it; a
+  per-rule Safe promotion is available from top-level config. Only the unambiguous
+  case is fixed: a file already at the root, an occupied root slot, or an
+  undecodable basename is reported for a human, never clobbered. Anchor the
+  pattern to subdirectories (`**/*/Cargo.lock`, not `**/Cargo.lock`) so the
+  relocated root file converges.
+- New `cross_file` `relation: registered` + `create_and_register` auto-fix op: a
+  workspace member (a filesystem path from `source.file` / `source.files`, mapped
+  through `register_as`) must be listed in each target's manifest array. The check
+  flags an unregistered member; the fix APPENDS it to the list.
+
+      - id: members-registered
+        kind: cross_file
+        relation: registered
+        source: { files: "crates/*/Cargo.toml" }   # each crate (by its manifest)
+        register_as: "{dir}"                        # register its directory
+        targets:
+          - { file: Cargo.toml, extract: { toml: "$.workspace.members[*]" } }
+        fix: { create_and_register: {} }
+
+  The target `extract` selects the array elements with a trailing `[*]` (so the
+  check sees each element and the fix locates the array); the array path must be
+  static (one array). `register_as` templates the value with `{path}` (default) /
+  `{dir}` / `{stem}`. Prefer a manifest-anchored source glob
+  (`crates/*/Cargo.toml`, not a bare `crates/*`), since a bare directory glob also
+  matches loose files under the directory. `create_and_register` is `Unsafe` by
+  default (it mutates a manifest), `Safe`-promotable, and content-injecting (an
+  untrusted remote `extends:` demotes it to a suggestion). The fix appends TOML
+  lists (format-preserving via `toml_edit`, skipping a member already present). For
+  a NAMED `source.file` that is MISSING, a `content:` / `content_from:` on the fix
+  also CREATES the member's file -- existence and registration are two independent,
+  idempotent postconditions, each repaired only if unmet, so a missing member is
+  both created and registered. JSON / YAML list-append and creating a missing
+  `members` array are follow-ups.
+- New `sort` auto-fix op for `ordered_block` (`fix: { sort: {} }`): reorders the
+  entries of each marked block (or, with no `start` / `end` markers, the whole
+  file -- the `CODEOWNERS` / allow-list shape) under the rule's `comparator`,
+  dropping duplicates when the rule sets `unique:`. It reuses the rule's own
+  `start` / `end` / `comparator` / `unique` / `select`, so what `sort` reorders
+  is exactly what the check flags out of order; markers, blank lines, and
+  `select`-excluded lines (comments, group headers) stay in place, and every
+  line keeps its exact terminator (LF vs CRLF) and the file its trailing-newline
+  state. A pure reorder is `Safe` (behavior-preserving), so a bare `alint fix`
+  applies it; but a `unique` sort DELETES lines -- and equality is on the
+  comparator (trimmed / case-folded), so a dropped line need not be byte-identical
+  to its survivor -- so `unique` defaults to `Unsafe` like every other deleting
+  fixer (a bare `fix` suggests it, `--unsafe-fixes` applies it). A per-rule
+  `applicability:` overrides either default. Because a remote `extends:` could aim
+  a reorder at an order-significant file such as `.gitignore` (negation order) or
+  `CODEOWNERS` (last-match precedence) to change its meaning, a `sort` from an
+  untrusted (non-`trusted_extends:`) remote is demoted to a suggestion, exactly
+  like `sync_from`; your own top-level config applies it at its tier. The one
+  `ordered_block` finding `sort` cannot repair -- an unclosed block (a `start`
+  with no `end`) -- is reported but not advertised as auto-fixable, since `sort`
+  cannot invent a missing marker.
+- New `indent_style` auto-fix op for the `indent_style` rule (`fix: {
+  indent_style: {} }`): reindents tab-indented lines to spaces. It is wired ONLY
+  for a `style: spaces` + `width: N` rule (the `width` supplies the spaces-per-tab)
+  and converts a line whose leading whitespace is PURE TABS to `N` spaces per tab
+  (1 tab -> N, 2 tabs -> 2N), preserving the rest of the line, its terminator, and
+  the trailing-newline state. It declines the genuinely ambiguous cases -- a mixed
+  tab+space lead, or a pure-space run that isn't a multiple of `width` (round up or
+  down?) -- so `check` does not advertise those as auto-fixable. A `tabs`-style or
+  width-less rule with a `fix` is rejected at load (spaces->tabs has no
+  spaces-per-tab). This lifts the previous "reindentation is deferred" rejection.
+  **`Unsafe` by default**: a pure-tab reindent is behavior-preserving for the
+  common code file, but a mis-aimed one HARD-breaks an indent-significant file --
+  a `Makefile` recipe requires a literal tab, so converting it to spaces silently
+  breaks the build -- so, like `file_remove`, a bare `alint fix` suggests it and
+  `--unsafe-fixes` (or a per-rule `applicability: safe`) applies it. And, like
+  `sort`, an untrusted remote `extends:` cannot auto-apply it (it is demoted to a
+  suggestion, since a remote could aim it at your files).
+- New `require:` field on `ordered_block` + a new `insert_line` auto-fix op
+  (`fix: { insert_line: {} }`): `require:` lists exact lines the block must
+  contain, and `insert_line` splices a missing one at its SORTED position (using
+  the rule's `comparator`) -- the differentiator over `file_append`, which only
+  appends at end-of-file. It is the "a managed sorted list (a `CODEOWNERS`, an
+  allow-list) must contain these entries, in order" shape; pair it with a second
+  `fix: { sort: {} }` rule to also reorder existing entries. Supported for a
+  MARKERLESS `ordered_block` only (the whole file is one sorted list); `require:`
+  with a `start`/`end` marker is rejected at load (a multi-block insert target is
+  ambiguous). A missing-required-line finding is reported and auto-fixable
+  independently of the sortedness findings (an out-of-order entry is `sort`'s job,
+  not `insert_line`'s). **`Unsafe` by default**: it adds ruleset-authored content
+  at a COMPUTED position, which is load-bearing in the order-sensitive formats it
+  targets (a `.gitignore` negation must FOLLOW its pattern), so a bare `fix`
+  suggests it and `--unsafe-fixes` (or a per-rule `applicability: safe`, e.g. for
+  an order-tolerant `CODEOWNERS`) applies it; the `require:` lines are also
+  ruleset-authored, so an untrusted remote's `insert_line` is demoted to a
+  suggestion. Presence is exact-string (independent of `comparator`); a `require:`
+  line that could never round-trip to an entry -- one carrying an embedded line
+  break, or (with `select:`) one that does not itself match `select:` -- is
+  rejected at load, so a fix can never re-insert it forever.
+- New `insert_header` auto-fix op for `file_header` (`fix: { insert_header: {
+  content: ... } }`): the position-aware alternative to `file_prepend` (same
+  `content` / `content_from`). It inserts the required header AFTER a leading UTF-8
+  BOM, shebang (`#!...`), or XML declaration (`<?xml ...?>`), so it never displaces
+  a line that must stay first -- unlike `file_prepend`, which would push a shebang
+  off line 1. For a file with none of those prefixes it inserts at BOF, exactly
+  like `file_prepend`. **`Safe` by default** (the insertion point is the one
+  canonical header spot and the content is inert -- at least as safe as the `Safe`
+  `file_prepend` it refines, and safer on a file with a shebang / XML declaration);
+  the header bytes are ruleset-authored, so an untrusted remote's `insert_header` is
+  demoted to a suggestion. Its idempotency guard anchors on both the insertion point
+  and the file top, so a repeated fix is a guaranteed no-op even when the header
+  content itself begins with a `#!` / `<?xml` prefix. Because the header can land
+  below line 1, the rule's `pattern` must be able to match below the first line (use
+  an unanchored pattern or `(?m)`, not a `^`-anchored one).
+
+### Changed
+
+- **Breaking:** `file_remove` (the fix for `file_absent`, `no_empty_files`,
+  `no_submodules`, `no_symlinks`, and the bundled `hygiene/no-tracked-artifacts`
+  ruleset) is now **Unsafe** rather than Safe. A bare `alint fix` no longer
+  deletes files; it surfaces the removal as a suggestion. Apply removals with
+  `alint fix --unsafe-fixes`, or promote a specific rule back to auto-applied
+  with `fix: { file_remove: { applicability: safe } }` in your own top-level
+  config (an `extends:`'d ruleset may not promote it). Deleting a whole file
+  irreversibly is a poor default for an unattended fix. `--unsafe-fixes`, which
+  was previously inert, now gates this tier.
+- `alint fix --changed` now SURFACES a required out-of-scope write as a suggestion
+  instead of silently dropping it. When a full-index rule (e.g. `file_absent` +
+  `file_remove`) would fix a file OUTSIDE the working-tree diff, that fix is no
+  longer quietly discarded; it is reported as a suggestion (apply it with a full
+  `alint fix`), so `fix --changed` and `check --changed` now agree on which
+  violations stand. A file that a fix in scope CREATES during the run joins the
+  changed set, so a create-then-fix cascade completes under `--changed` instead of
+  leaving the created file half-fixed. Writes to files inside the diff are applied
+  exactly as before, and no file OUTSIDE the diff is ever modified or deleted (an
+  in-scope fix may still additively create a new file, e.g. a required file, which
+  is the one write the confinement model permits beyond the diff).
+- **Security / breaking:** a **content-injecting** fixer (`replace`, `file_create`,
+  `file_prepend`, `file_append`) reached through a **remote `https:// extends:`**
+  now DEMOTES to a suggestion -- it may propose an edit but no longer auto-writes
+  third-party-authored bytes into your files. Fixers from your own tree (top-level,
+  local-path / nested `extends:`) and first-party bundled rulesets are unaffected,
+  as are the fixed-behavior fixers (the hygiene normalizers, `file_remove`,
+  `file_rename`, `chmod`) from any source. Opt a specific remote back in with
+  `trusted_extends:` (above). This retroactively affects `file_create` /
+  `file_prepend` / `file_append` reached via a remote `extends:` (they previously
+  auto-applied).
+- Baseline fingerprints for `no_zero_width_chars`, `no_bidi_controls`, and
+  `max_consecutive_blank_lines` now key on the file path (the file is the unit of
+  accepted debt), matching `no_trailing_whitespace`, so `alint fix --baseline`
+  never strips a grandfathered occurrence when a new one appears ahead of it. This
+  CHANGES those three rules' fingerprint: a baseline recorded by an older alint
+  will show a soft "stale entry" note for them on upgrade -- re-run `alint
+  baseline` to re-tighten. Other rules' baselines are unaffected.
+
+### Fixed
+
+- The `ordered_block` `numeric` comparator now orders integers larger than
+  `i64::MAX` (u64-range identifiers such as Discord/Twitter snowflakes, nanosecond
+  timestamps) NUMERICALLY. It parsed the leading integer as `i64`, so a value over
+  ~9.2e18 failed to parse and silently fell back to a byte-wise (lexical) order --
+  which put `10000000000000000000` before `9999999999999999999`. It now parses as
+  `i128` (only a 39+-digit integer still degrades to lexical), so both `check` and
+  the new `sort` fix order such lists correctly.
+- `alint check` now tags a violation `fixable` (and counts it as "auto-fixable")
+  only when a bare `alint fix` would actually resolve that specific violation,
+  rather than whenever its rule declares a fixer. Two cases that were falsely
+  advertised as fixable no longer are: a `filename_case` violation on a stem with
+  no valid target under the requested convention (e.g. `café.rs` under `snake`),
+  and an `Unsafe`-tier `file_remove` violation (which a bare `fix` only suggests,
+  pending `--unsafe-fixes`). The "N auto-fixable" total, the `fixable` tag, and
+  the `agent` format's per-violation `fix_available` / `fix_command` all now match
+  what a bare `alint fix` applies.
+- A symlink cycle in the tree (a `sub/up -> ..` parent link, a self-loop, or a
+  mutual loop) no longer aborts the entire `alint check` / `alint fix` run with
+  exit 2. The offending link is skipped, like a dangling symlink, so the rest of
+  the repository is still linted and fixed.
+- `alint fix --diff` now emits the git extended-header form for an empty-file
+  create or delete (a `.keep` / `py.typed` marker, or removing an empty file), so
+  `git apply` no longer silently drops it from a multi-file patch.
+- `alint fix --fix-only` now surfaces a fix that was attempted and errored (e.g.
+  a write into a read-only directory) instead of silently dropping it with the
+  benign residuals; previously the run exited nonzero with a report that read as
+  a clean success and no cause anywhere.
+- `alint fix --diff` now summarizes (rather than echoing) file content that
+  carries raw terminal-control bytes (ESC, BEL, ...), so a diff of an untrusted
+  repo -- or of a config-controlled `replace` replacement -- can no longer inject
+  a screen-clear / banner-forge sequence into the terminal.
+- A malformed single-op `fix:` block (a missing required field or an unknown
+  field, e.g. `replace:` without `replacement`) now names the offending op in
+  the error instead of the misleading "a map with exactly one fix op".
 
 ## [0.16.1] - 2026-09-04
 
@@ -1619,7 +1902,7 @@ informational-notes channel surfaced via `--show-notes`.
   number. alint only claims `env`/`vars`/`ctx` spans (and close typos
   of `env`/`vars`); foreign `{{...}}` templates — Go's `{{json .}}`,
   cookiecutter, etc. — pass through verbatim. See
-  [variable interpolation](https://alint.org/docs/concepts/variable-interpolation/).
+  [variable interpolation](https://alint.org/docs/configuration/variable-interpolation/).
 - **`env.X` namespace in `when:` expressions.** `when: env.CI == "true"`
   gates a rule on an environment variable, alongside the existing
   `facts.` / `vars.` namespaces. Resolved at evaluation time; an unset
@@ -3078,7 +3361,7 @@ SHA + verify" cycle, not a blanket version bump.
 S3 / S6 / S8 wins are likely jsonschema 0.46's Validator
 performance work and lockfile patch updates compounding.
 1m/full all within ±5 % (most slightly faster). Full numbers in
-[`docs/benchmarks/macro/results/linux-x86_64/v0.9.13/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.13/)
+[`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.13/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.13/)
 once the bench-record workflow lands the canonical capture.
 
 ### Held for v0.9.14+
@@ -3354,7 +3637,7 @@ predicates. The bug class can no longer recur.
   rule iteration shape is unchanged (one `if !scope.matches(p,
   idx) { continue; }` per file), only the field layout is
   flatter. Full numbers in
-  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.10/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.10/).
+  [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.10/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.10/).
 
 ### Held for v0.9.11+
 
@@ -3447,7 +3730,7 @@ the `for_each_dir` literal-path bypass introduced in v0.9.8.
   cost of an in-scope vs out-of-scope check shifts). The
   point of S10 is regression detection, not a speedup
   headline. Full numbers in
-  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.9/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.9/).
+  [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.9/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.9/).
 
 ### Internal
 
@@ -3472,7 +3755,7 @@ backfill (1M S7 was stuck at ~614 s across all three releases).
 - See [`docs/benchmarks/HISTORY.md`](docs/benchmarks/HISTORY.md)
   per-scenario tables for the full v0.9.5 → v0.9.8 trajectory
   and the bench captures under
-  [`docs/benchmarks/macro/results/linux-x86_64/v0.9.8/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.8/).
+  [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.8/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.8/).
 
 ### Added
 
@@ -3711,7 +3994,7 @@ monorepo + cargo-workspace`, hyperfine `--warmup 1 --runs 3`:
 
 Also ~50–80× faster than the published v0.5.6 baseline (the
 fastest 1M S3 numbers ever shipped). Full numbers under
-[`docs/benchmarks/macro/results/linux-x86_64/v0.9.5/`](docs/benchmarks/macro/results/linux-x86_64/v0.9.5/).
+[`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.5/`](docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.9.5/).
 
 ### Engine (.5)
 
@@ -3930,7 +4213,7 @@ paths), `structured_path` (which backs `json_path_*`,
 - Pre-v0.9.4 baseline frozen at
   `docs/benchmarks/archive/v0.9-development-baselines/baseline-v0.9.3/criterion/`.
   v0.9.4 numbers at
-  `docs/benchmarks/micro/results/linux-x86_64/v0.9.4/criterion/`.
+  `docs/benchmarks/micro/results/linux-x86_64-ryzen-3900x/v0.9.4/criterion/`.
 
 ## [0.9.3] - 2026-04-30
 
@@ -5117,7 +5400,7 @@ Schema-compatible; every v0.5.6 config runs unchanged.
   `ALINT_BENCH_IMAGE=...`.
 
 - **First competitive numbers** under
-  `docs/benchmarks/macro/results/linux-x86_64/v0.5.7/`. Same
+  `docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.7/`. Same
   fingerprint as v0.5.6's alint-only publication; rows
   for ls-lint / repolinter / grep added at the
   scenarios + sizes each tool supports. Headline
@@ -5133,7 +5416,7 @@ Schema-compatible; every v0.5.6 config runs unchanged.
   matrix; the new `Tool` column makes pivoting trivial.
 
 - **Published 1M-file numbers** under
-  `docs/benchmarks/macro/results/linux-x86_64/v0.5.6/1m/results.md`.
+  `docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.6/1m/results.md`.
   Six rows (`1m × {S1,S2,S3} × {full,changed}`) on the
   same hardware as v0.5.6's 1k/10k/100k publication.
   Headlines: 1m / S1 / full ≈ 3.5s, 1m / S2 / full ≈ 10s,
@@ -5218,7 +5501,7 @@ runs unchanged.
   files to "touch" in `--changed`-mode benches.
 
 - **First published numbers**:
-  `docs/benchmarks/macro/results/linux-x86_64/v0.5.7/` with 18 rows
+  `docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/v0.5.7/` with 18 rows
   (3 sizes × 3 scenarios × 2 modes) on AMD Ryzen 9 3900X /
   62 GB / ext4 / Linux 6.1. Companion
   `docs/benchmarks/{README.md,RUNNING.md,macro/README.md} (post-reorg layout)`
@@ -5840,7 +6123,7 @@ keys.
   are intersected with `git ls-files`'s output so only files /
   directories actually in git's index participate. Closes the
   approximation gap documented on the
-  [walker-and-gitignore concept page](https://alint.org/docs/concepts/walker-and-gitignore/):
+  [walker-and-git concept page](https://alint.org/docs/concepts/targeting/the-walker-and-git/):
   a `dir_absent` rule on `**/target` with `git_tracked_only: true`
   fires only when `target/` was actually committed, never on a
   developer's locally-built `target/` (gitignored or not). Outside
@@ -6782,7 +7065,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.17.0...HEAD
+[0.17.0]: https://github.com/asamarts/alint/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/asamarts/alint/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/asamarts/alint/compare/v0.15.2...v0.16.0
 [0.15.2]: https://github.com/asamarts/alint/compare/v0.15.1...v0.15.2

@@ -1,11 +1,44 @@
 ---
 title: 'alint check'
-description: 'Run linters against the current (or given) directory. Default command. alint check CLI reference and flags.'
+description: 'alint check lints a repository against its .alint.yml: the whole tree or only changed files, with exit codes and output formats built for CI.'
 ---
+
+`alint check` is the default command: it walks the repository once, evaluates
+every rule in the effective config (after `extends:`), and exits non-zero when
+an error-level rule fails. Run it bare locally, with `--changed` as a fast
+pre-commit or PR gate, and with a machine format in CI.
 
 The pipeline `alint check` runs:
 
 <likec4-view view-id="checkFlow"></likec4-view>
+
+## Examples
+
+Lint the repository in the current directory:
+
+```bash
+alint check
+```
+
+A fast PR gate, where per-file rules check only the files changed on this branch:
+
+```bash
+alint check --changed --base origin/main
+```
+
+SARIF for GitHub code scanning:
+
+```bash
+alint check --format sarif > alint.sarif
+```
+
+Fail only on violations that aren't in the committed baseline:
+
+```bash
+alint check --baseline .alint-baseline.json
+```
+
+## Reference
 
 ```
 Run linters against the current (or given) directory. Default command
@@ -15,13 +48,10 @@ Usage: alint check [OPTIONS] [PATH]
 Arguments:
   [PATH]
           Root of the repository to lint. Defaults to the current directory
-          
+
           [default: .]
 
 Options:
-  -c, --config <CONFIG>
-          Path to a config file
-
       --changed
           Restrict the check to files in the working-tree diff. Without `--base`, uses `git ls-files
           --modified --others --exclude-standard` (right shape for pre-commit). With `--base`, uses
@@ -33,105 +63,13 @@ Options:
       --base <REF>
           Base ref for `--changed` (uses three-dot `<base>...HEAD`, i.e. merge-base diff). Implies
           `--changed`
-
-  -f, --format <FORMAT>
-          Output format
-          
-          [default: human]
-
-      --no-gitignore
-          Disable .gitignore handling (overrides config)
-
-      --fail-on-warning
-          Treat warnings as errors for exit-code purposes
-
-      --show-notes
-          List informational notes in full on stderr.
-          
-          Notes are non-violation findings — e.g. entries a rule skipped rather than failed on. By
-          default only a one-line count is shown.
-
-      --color <WHEN>
-          When to emit ANSI color codes in human output.
-          
-          `auto` (the default) inspects TTY + `NO_COLOR` + `CLICOLOR_FORCE`. Only affects the
-          `human` format; `json` / `sarif` / `github` / `markdown` / `junit` / `gitlab` / `agent`
-          are always plain bytes.
-          
-          [default: auto]
-          [possible values: auto, always, never]
-
-      --ascii
-          Force ASCII glyphs in human output.
-          
-          E.g. `x` instead of `✗`. Auto-enabled when `TERM=dumb`.
-
-      --compact
-          Compact one-line-per-violation human output.
-          
-          Suitable for piping into editors / grep / `wc -l`. Format: `path:line:col: level: rule-id:
-          message` (the `:line:col` is omitted for findings with no specific location).
-
-      --width <COLS>
-          Override the human-output column width.
-          
-          Default: detected terminal width (TTY only) or 80. Useful for reproducible captures
-          (asciinema/screen recordings) and for piping into fixed-width log viewers. Clamped to [40,
-          120].
-
-      --no-docs
-          Suppress per-violation `docs:` URLs in human output.
-          
-          Useful for narrow terminals, screen recordings, and CI logs where long URLs disrupt visual
-          alignment. URLs remain in JSON / SARIF / GitHub / markdown output regardless.
-
-      --progress <WHEN>
-          When to render progress on stderr for slow operations.
-          
-          Currently just `alint suggest`. `auto` (the default) renders when stderr is a TTY;
-          `always` forces; `never` silences. Progress always lives on stderr — `--format` JSON
-          output on stdout stays byte-clean.
-          
-          [default: auto]
-          [possible values: auto, always, never]
-
-  -q, --quiet
-          Suppress progress and stderr summary lines.
-          
-          Alias for `--progress=never` plus suppression of the "found N proposals in Ts" footer that
-          `suggest` prints.
-
-      --baseline <FILE>
-          Suppress violations recorded in a baseline file.
-          
-          See `alint baseline` to create one; only new violations are reported. Pre-existing
-          findings are grandfathered so `check` can gate a legacy repo on new violations only. A
-          missing or unreadable baseline is an error (never a silent no-op). The path is resolved
-          relative to the current directory (not the checked PATH); the `baseline:` config key, by
-          contrast, resolves against the repo root.
-
-      --strict-baseline
-          With `--baseline`, fail on stale baseline entries.
-          
-          Exits 1 when the baseline has stale entries: recorded findings that no longer fire,
-          usually because they were fixed. Forces the committed baseline to stay exactly accurate.
-          Off by default: fixing things never fails the build.
-
-      --show-baselined
-          With `--baseline`, list suppressed findings on stderr.
-          
-          Lists them in full, rather than just a one-line count. Parallels `--show-notes`.
-
-      --only <RULE_ID>
-          Restrict the run to the named rule id(s).
-          
-          Taken from the effective config (repeatable). Other rules are skipped entirely. An id that
-          matches no loaded rule is an error, so typos fail loudly rather than silently linting
-          nothing. Applies to `check` and `fix` (the `agent` format emits `fix --only <rule-id>`);
-          rejected on any other subcommand. Global, so the bare `alint --only <id>` lints the
-          current directory like `alint check --only <id>` — to lint a different path, use the
-          explicit form `alint check --only <id> <path>`.
-
-  -h, --help
-          Print help (see a summary with '-h')
 ```
+
+The [global options](/docs/cli/#global-options) apply to `alint check` too, where they are relevant.
+
+## See also
+
+- [Changed mode](/docs/concepts/targeting/changed-mode/): what `--changed` narrows and what it doesn't
+- [Severity and exit codes](/docs/concepts/start-here/severity-and-exit-codes/)
+- [Output formats](/docs/reference/output-formats/)
+- [GitHub Actions](/docs/integrations/github-actions/) and [pre-commit](/docs/integrations/pre-commit/)
