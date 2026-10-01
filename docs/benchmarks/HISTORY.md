@@ -40,7 +40,7 @@ the walk-bound and per-file-content paths.
 
 | Version | Date | 1M S1 full | 1M S2 full | 1M S3 full | 1M S4 full | Headline change |
 |---|---|---:|---:|---:|---:|---|
-| **v0.17.0** | ? | 4.07 s ± 0.05 | 18.75 s ± 0.06 | 475.3 s ± 3.0 | 16.56 s ± 0.23 | — |
+| **v0.17.0** | 2026-10-01 | 4.07 s ± 0.05 | 18.75 s ± 0.06 | 475.3 s ± 3.0 | 16.56 s ± 0.23 | This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations. |
 | v0.16.0 | 2026-09-02 | 4.05 s ± 0.07 | 18.33 s ± 0.03 | 474.7 s ± 0.8 | 16.46 s ± 0.17 | This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service. |
 | v0.15.0 | 2026-08-16 | 4.18 s ± 0.09 | 18.51 s ± 0.08 | 474.4 s ± 1.4 | 16.47 s ± 0.04 | v0.15 makes rules legible and monorepos first-class. |
 | v0.14.2 | 2026-08-06 | 4.13 s ± 0.05 | 19.10 s ± 0.41 | 473.6 s ± 1.5 | 16.34 s ± 0.01 | A fixes-and-hardening patch on top of 0.14.1. |
