@@ -8,10 +8,10 @@ costs that micro-benchmarks deliberately exclude.
 ## How to run
 
 ```sh
-xtask bench-scale                           # default: 1k/10k/100k × S1/S2/S3 × full/changed
+xtask bench-scale                           # default: 1k/10k/100k, all five scenarios (S1-S4 full+changed, SFIX fix)
 xtask bench-scale --include-1m              # adds the multi-GB 1M size
-xtask bench-scale --tools all               # alint + ls-lint + grep + Repolinter on supported scenarios
-xtask bench-scale --scenarios S6,S7,S8      # opt-in to characterization scenarios
+xtask bench-scale --scenarios S1,S4         # a subset by ID (S1, S2, S3, S4, SFIX)
+xtask bench-scale --tools all               # alint + ls-lint + grep + Repolinter, each on the scenarios it supports
 ```
 
 See [`../RUNNING.md`](../RUNNING.md) for the full flag list and the
@@ -20,29 +20,30 @@ publication-grade convention.
 ## Scenario catalogue
 
 Each scenario is a single config YAML under
-`xtask/src/bench/scenarios/`, embedded in the xtask binary so a fresh
-clone produces byte-identical configs.
+`xtask/src/bench/scenarios/` (`s1_layout.yml`, `s2_content.yml`,
+`s3_relational.yml`, `s4_workspace.yml`, `sfix_all.yml`), embedded in the
+xtask binary so a fresh clone produces byte-identical configs. The
+`Scenario` enum in `xtask/src/bench/mod.rs` is the source of truth; rule
+counts come from `facts.json`'s `bench_scenario_rule_counts`.
 
-> **v0.17 consolidation.** The scenario set was consolidated from 14 to 5:
-> **S1** layout/path, **S2** per-file content, **S3** cross-file/relational/graph,
-> **S4** workspace bundle (polyglot + git), and **SFIX** — a dedicated auto-fix
-> scenario run under `fix` mode (`alint fix --unsafe-fixes --dry-run` over all 24
-> non-spawn fix ops). The table below documents the pre-v0.17 S1-S14 set; the
-> full catalogue rewrite lands with the results migration. The current cost axes
-> are described in `xtask/src/bench/mod.rs`'s `Scenario` enum.
+> **v0.17 consolidation.** The set was consolidated from the pre-v0.17
+> S1-S14 to the five below, spanning four check cost axes plus a dedicated
+> auto-fix pass. The IDs are **reused**: pre-v0.17 `S1`-`S14` are a different
+> set; their per-scenario overviews and numbers are preserved in
+> [`../legacy/HISTORY.md`](../legacy/HISTORY.md), and the raw result dirs in
+> `results/legacy/`.
 
-| ID | Rules | Dispatch shape | Why it exists | Catches |
-|---|---|---|---|---|
-| **S1** | 8 filename-only (`filename_case`, `filename_regex`) | Pure walker + glob match; no content read | Narrowest scope alint shares with `ls-lint` — competitive comparison | Walker / scope-match regressions |
-| **S2** | 8 existence + content (`file_exists`, `file_absent`, `file_content_forbidden`, `file_max_size`) | Walker + per-file content scan over narrow scopes | Repolinter-comparable shape | Content-rule regressions on common shapes |
-| **S3** | Workspace bundle: `extends: oss-baseline + rust + monorepo + cargo-workspace` (32 effective rules) | Heavy mix — content rules over `**/*.rs`, cross-file `for_each_dir` over `crates/*`, `toml_path_matches` per crate | Realistic monorepo workload | Mixed regressions; the v0.9.5 cliff that triggered the path-index fix lived here |
-| **S4** | 5 agent-era hygiene rules (`file_absent`, `file_content_forbidden`) | Filename + content fan-out over agent-shaped trees | Mirrors the v0.6 `agent-hygiene` bundled ruleset | Agent-era rule shapes |
-| **S5** | 4 fix-pass content edits (`final_newline`, `no_trailing_whitespace`, `line_endings`, `no_bom`) | `--fix` end-to-end: read, transform, atomic-rename | The `--fix`-mode bench (superseded in v0.17 by the consolidated **SFIX** scenario, which covers all 24 non-spawn fix ops) | Fix-pipeline regressions |
-| **S6** | 13 content rules over `**/*.rs` | Per-file dispatch path width — every `.rs` file hit by every rule on a single read | Stresses the read-coalescing path; v0.9.3 dispatch flip's design target | Per-file inner-loop regressions S3 doesn't surface |
-| **S7** | 6 cross-file relational kinds (`pair`, `unique_by`, `for_each_dir`, `for_each_file`, `dir_only_contains`, `every_matching_has`) | Various fan-out shapes over the synthetic monorepo | Catches the next O(D × N) cliff after the v0.9.5 path-index fix | Cross-file dispatch shapes the path-index doesn't cover |
-| **S8** | S3 reshape + `git_no_denied_paths` + `git_tracked_only` over a real git repo | Same as S3 but with `Engine::collect_git_tracked_if_needed` + `BlameCache` active | v0.7-era `git ls-files` regression had no scale gate; this fixes that | Git-aware dispatch regressions at scale |
-| **S9** | Three competing ecosystem rulesets: `extends: rust + node + python` (≈26 rules) over a polyglot tree (Rust under `crates/`, Node under `packages/`, Python under `apps/`) | Per-rule `scope_filter: { has_ancestor: <manifest> }` ancestor walks against the v0.9.5 path-index, three rulesets competing for each file | The dispatch shape the v0.9.6 `scope_filter:` primitive was designed for — without it, every `**/*.py` rule from python@v1 fires on every `.py` file in the tree | Scope_filter walk regressions; ecosystem-fact mis-broadening |
-| **S10** | 5 rules from outside the PerFileRule dispatch path (`file_max_size`, `no_empty_files`, `no_symlinks`, `filename_case`, `filename_regex`) each with `scope_filter: { has_ancestor: <manifest> }` over the polyglot tree | Per-rule `evaluate()` iterating `ctx.index.files()` with both path-glob AND scope_filter narrowing; rules NOT routed through engine's per-file partition | The dispatch shape v0.9.9 wired through (v0.9.8 silently dropped `scope_filter:` on these 17 rule kinds — engine's per-file gate doesn't fire on them); narrows broad-glob rules from the entire tree to one ecosystem subtree | `scope_filter` regressions on rules that bypass the per-file dispatch path — same bug class as v0.9.6's silent no-op, just on a different rule set |
+| ID | Rules | Cost axis and dispatch shape | Tool anchor | Absorbs (pre-v0.17) |
+|---|---:|---|---|---|
+| **S1** | 16 | Layout and path (walk-bound): filename class, existence / absence, path metadata, and a `scope_filter` shape. Walker + `GlobSet` with little or no content read, the cheapest path. | `ls-lint`, `grep` | old S1 / S10 + the layout half of S2 / S4 |
+| **S2** | 20 | Per-file content: the 13 content kinds + forbidden-content patterns + `ordered_block` / `import_gate` / `xml_path_*` over `**/*.rs` (plus one `.csproj` overlay). The per-file dispatch fan-out. | `grep`, `repolinter` | old S2 / S5 / S6 / S12 |
+| **S3** | 16 | Cross-file, relational and graph: `pair` / `unique_by` / the `for_each_*` family / registry / `cross_file` / `pair_hash`, three `file_graph` build-and-traverse passes, and one single-shot command spawn. The heaviest scenario. | — | old S7 / S11 / S13 / S14 |
+| **S4** | 50 | Workspace bundle (realistic; release anchor): `extends` the `oss-baseline` + `rust` + `node` + `python` + `monorepo` + `cargo-workspace` rulesets over a POLYGLOT + GIT tree, `nested_configs` on, with the two git-aware rules inline. | — | old S3 / S8 / S9 |
+| **SFIX** | 24 fix ops | Auto-fix (dedicated): `alint fix --unsafe-fixes --dry-run` over all 24 non-spawn fix ops (`FixSpec::ALL_OP_NAMES` minus the spawning ops) on the planted `sfix/` fixture. Runs under `fix` mode only. | — | old S5 (4-op fix pass) + the deterministic `sfix_trim` |
+
+S2 / S3 / SFIX each plant a deterministic fixture overlay
+(`Scenario::setup_overlay`); S1 / S4 need none. S4 is the only scenario
+that `requires_polyglot_tree` + `requires_git_repo`.
 
 ## Tool matrix
 
@@ -52,7 +53,7 @@ supports; unsupported combinations are filtered out automatically.
 
 | Tool | Supports | Notes |
 |---|---|---|
-| `alint` | every (scenario, mode) | The harness defaults to alint-only. |
+| `alint` | S1-S4 (full + changed); SFIX (fix only) | The harness defaults to alint-only. |
 | `ls-lint` | S1 / full | Filename hygiene only. Closest single-tool competitor on S1. |
 | `grep` | S1 / full, S2 / full | Pure regex pipeline; useful as a "lower bound" reference. Doesn't model rule semantics. |
 | `repolinter` | S2 / full | The retired-2026 ancestor. Run via Docker per `bench-docker.yml` workflow. |
@@ -80,8 +81,8 @@ a published image that pins:
 - `hyperfine` — pinned `1.20.0`.
 - `rustc` — pinned via `rust-toolchain.toml` at image-build time.
 
-A given image tag (e.g. `0.9.5`) is therefore the canonical
-*"competitive bench environment for v0.9.5."* Bumping any tool's
+A given image tag (e.g. `0.17.0`) is therefore the canonical
+*"competitive bench environment for v0.17.0."* Bumping any tool's
 version requires re-publishing the image and re-running the
 competitive numbers — the image tag IS the methodology version.
 
@@ -98,7 +99,7 @@ competitive numbers — the image tag IS the methodology version.
 
 The image is built + pushed by `bench-docker.yml` on tag pushes
 and on manual workflow-dispatch. Image tags follow the alint
-release tags 1:1 (`v0.9.5` → `ghcr.io/asamarts/alint-bench:0.9.5`),
+release tags 1:1 (`v0.17.0` → `ghcr.io/asamarts/alint-bench:0.17.0`),
 plus a rolling `latest`. The `xtask --docker` flag's bind-mount
 shape is documented in the Dockerfile header.
 
@@ -132,37 +133,37 @@ produces deterministic Cargo-workspace-shaped trees:
 tree at a fixed path for ad-hoc profile work — see
 [`../investigations/README.md`](../investigations/README.md).
 
-S8 uses a parallel `generate_git_monorepo` variant that runs
+S4 uses the git-aware polyglot generator
+(`generate_git_nested_polyglot_monorepo`), which runs
 `git init && git add -A && git commit` after generation so the engine's
-git-aware paths actually fire.
+git-aware rules (`git_no_denied_paths` / `git_tracked_only`) and
+`BlameCache` actually fire.
 
 ## Where results live
 
 ```
 results/
-└── linux-x86_64/
-    ├── v0.5.6/1m/                ← only 1m subset captured at v0.5.6
-    ├── v0.5.7/                   ← 1k/10k/100k publication
-    │   ├── 1k/results.md
-    │   ├── 10k/results.md
-    │   ├── 100k/results.md
-    │   ├── index.md              ← aggregated summary
-    │   └── results.json          ← machine-readable for cross-version diffs
-    ├── v0.9.4/
-    └── v0.9.5/                   ← latest published
+├── linux-x86_64/                ← the consolidated 5-scenario series (kbench)
+│   ├── v0.10.0/results.json
+│   ├── …
+│   └── v0.17.0/results.json     ← latest published
+├── legacy/
+│   └── linux-x86_64/            ← the pre-v0.17 14-scenario results
+└── linux-x86_64-ryzen-3900x/    ← the older 3900X host, pre-kbench
 ```
 
-Each per-version dir is the output of one `xtask bench-scale` run with
-the publication-grade flags (`--warmup 3 --runs 10` by default; v0.9.5
-used `--warmup 1 --runs 3` because the path-index fix dropped wall time
-below where 10 measurements add meaningful signal). The `index.md`
-header carries the full hardware fingerprint.
+Each per-version `results.json` is the output of one `xtask bench-scale`
+run with the publication-grade flags (`--warmup 3 --runs 10`, auto-reduced
+to `--warmup 1 --runs 3` at the 1M size). Its `fingerprint` header carries
+the full hardware and tool-version provenance; the cross-version headline
+table is rendered into [`../HISTORY.md`](../HISTORY.md) by
+`xtask/scripts/render-history.py`.
 
 ## Adding a new scenario
 
 1. Author `xtask/src/bench/scenarios/s<N>_<topic>.yml` following the
-   shape of S6 / S7 / S8 (header comment explaining the dispatch shape
-   the scenario stresses).
+   shape of the existing scenario files (header comment explaining the
+   dispatch shape the scenario stresses).
 2. Extend `xtask::bench::Scenario` with the new variant in `mod.rs`
    (parse / label / description / config_yaml; if it needs a real git
    repo, set `requires_git_repo()` to `true`).
