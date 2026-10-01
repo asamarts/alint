@@ -12,7 +12,7 @@ title: Roadmap
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.17.0** (2026-09-30): the auto-fix arc. `alint fix` now repairs
+**Latest release: v0.17.0** (2026-10-01): the auto-fix arc. `alint fix` now repairs
 violations across 26 fix ops (up from 12), spanning located `replace`, structured
 `set_value` / `remove_value`, metadata (`chmod`), VCS (`git_untrack`), plugin
 `command`, cross-file (`sync_from`, `relocate`, `create_and_register`), and ordering
