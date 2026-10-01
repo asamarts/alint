@@ -8,6 +8,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.17.0] - 2026-10-01
 
+This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.
+
 ### Added
 
 - New `replace` auto-fix op for `file_content_forbidden`: rewrites each span
