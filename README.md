@@ -51,7 +51,7 @@ alint fix              # apply them
 
 A config is a list of rules, but you rarely write them all by hand. `extends:` composes **rulesets**, and alint ships 22 of them compiled into the binary, so there is no download and no network round trip. Most are gated on what the repo actually contains, so listing the Rust ruleset in a repo with no Rust does nothing. You layer your own rules on top, and override or switch off anything you inherit.
 
-A rule is three things: a **kind** (the check to run, such as `file_exists`, `filename_case`, or `pair`), the **paths** it applies to, and a **severity**. There are 105 kinds across 13 families. A rule can also carry a `when:` condition (run only on the default branch, or only when some file exists) and a `fix:`.
+A rule is three things: a **kind** (the check to run, such as `file_exists`, `filename_case`, or `pair`), the **paths** it applies to, and a **severity**. There are 105 rule kinds across 13 families. A rule can also carry a `when:` condition (run only on the default branch, or only when some file exists) and a `fix:`.
 
 ```yaml
 # .alint.yml
@@ -67,7 +67,7 @@ rules:
     level: error
 ```
 
-Under the hood, alint walks the repository once, in parallel, honoring `.gitignore`, and reads each file's bytes at most once. That is why a 100,000-file workspace bundle checks in about a second and a half and a million files in under twenty seconds ([benchmarks, measured per release](https://alint.org/benchmarks/)). The engine, the rules, the eight output formats, and a language server for editors are all one binary, with no plugin system and nothing from Node, the JVM, or Python in the path. The [concepts guide](https://alint.org/docs/concepts/) and [ARCHITECTURE.md](docs/design/ARCHITECTURE.md) go deeper.
+Under the hood, alint walks the repository once, in parallel, honoring `.gitignore`, and reads each file's bytes at most once. That is why a 100,000-file workspace bundle checks in about a second and a half and a million files in under twenty seconds ([benchmarks, measured per release](https://alint.org/benchmarks/)). The engine, the rules, the output formatters, and a language server for editors are all one binary, with no plugin system and nothing from Node, the JVM, or Python in the path. The [concepts guide](https://alint.org/docs/concepts/) and [ARCHITECTURE.md](docs/design/ARCHITECTURE.md) go deeper.
 
 ## What it can check
 
@@ -86,9 +86,9 @@ When no kind fits, the `command` kind runs a tool you already trust and turns it
 
 ## Fixing, not just finding
 
-Plenty of violations are mechanical: a missing final newline, a stray byte-order mark, an unsorted `CODEOWNERS`, a license header sitting above the shebang instead of below it. `alint fix` repairs those in place. The ones that need a human decision it shows you or suggests, rather than guessing.
+Plenty of violations are mechanical: a missing final newline, a stray byte-order mark, an unsorted `CODEOWNERS`, a license header sitting above the shebang instead of below it. `alint fix` repairs those in place, with 26 ops covering content hygiene, structured-config edits, file and git operations, and list ordering. The ones that need a human decision it shows you or suggests, rather than guessing.
 
-Every fix carries a safety tier, so a bare `alint fix` never surprises you:
+Each of the 26 auto-fix ops carries a safety tier, so a bare `alint fix` never surprises you:
 
 - **Safe** fixes apply on a plain `alint fix`: whitespace and newline hygiene, line endings, header placement, sorting a marked block, reindentation.
 - **Unsafe** fixes change meaning or remove content, so they wait for `alint fix --unsafe-fixes`: deleting a file, a regex `replace`, dropping a committed artifact from git's index. (As of v0.17, removing a file is Unsafe. A plain `alint fix` now *suggests* the deletion rather than doing it.)
@@ -96,7 +96,7 @@ Every fix carries a safety tier, so a bare `alint fix` never surprises you:
 
 Preview with `alint fix --dry-run`, or `alint fix --diff` for the exact edits. alint batches a file's edits in memory, writes each file once, and re-runs until the tree stops changing; a size limit (1 MiB by default) skips oversize files rather than rewriting them.
 
-Because `extends:` can pull a ruleset from a URL, a fix that injects content (`replace`, `file_create`, `file_prepend`) from a remote or nested ruleset is demoted to a suggestion unless you list that source under `trusted_extends:`, and a fix that shells out is refused from anywhere but your own top-level config. There are 26 fix ops in total, each noted in the [rule reference](https://alint.org/docs/rules/).
+Because `extends:` can pull a ruleset from a URL, a fix that injects content (`replace`, `file_create`, `file_prepend`) from a remote or nested ruleset is demoted to a suggestion unless you list that source under `trusted_extends:`, and a fix that shells out is refused from anywhere but your own top-level config. Every op is listed in the [rule reference](https://alint.org/docs/rules/).
 
 ## Adopt it without a flag day
 
@@ -108,11 +108,11 @@ You do not have to fix everything the first time alint runs. `alint baseline` re
 - **Commits.** A [pre-commit](https://alint.org/docs/integrations/pre-commit/) hook (a prebuilt wheel, no toolchain) checks every commit; a manual `alint-fix` hook repairs on request.
 - **Your editor.** `alint lsp` is a language server (diagnostics, hover-to-explain, apply-fix code actions), with packaged extensions for VS Code, JetBrains, and Zed and ready configs for Neovim, Sublime Text, Emacs, and Helix.
 - **Coding agents.** The `agent` output format carries a per-violation instruction and fix command, and `alint export-agents-md` keeps the directives in `AGENTS.md` or `CLAUDE.md` in step with the rules alint enforces, so the agent and CI agree on the contract.
-- **Any CI.** [Eight output formats](https://alint.org/docs/reference/output-formats/) cover most pipelines: `human`, `json`, `sarif`, `github`, `markdown`, `junit`, `gitlab`, and `agent`. Exit codes are stable: `0` clean, `1` violations, `2` config error, `3` internal.
+- **Any CI.** [8 output formats](https://alint.org/docs/reference/output-formats/) cover most pipelines: `human`, `json`, `sarif`, `github`, `markdown`, `junit`, `gitlab`, and `agent`. Exit codes are stable: `0` clean, `1` violations, `2` config error, `3` internal.
 
 ## Bundled rulesets
 
-Twenty-two rulesets ship inside the binary, pinned to the version of alint you run and reachable as `alint://bundled/<name>@v1`. They group into:
+alint ships 22 bundled ecosystem rulesets inside the binary, pinned to the version you run and reachable as `alint://bundled/<name>@v1`. They group into:
 
 - **Ecosystem baselines**, each gated so it is a no-op off-ecosystem: `rust`, `node`, `python`, `go`, `java`, `dotnet`, `php`, plus the always-on `oss-baseline` (the README / LICENSE / hygiene starting point, and a clean migration target for Repolinter).
 - **Monorepo overlays**: a `monorepo` base plus `cargo-workspace`, `pnpm-workspace`, and `yarn-workspace` overlays that scope per-member checks to real package directories.
@@ -181,7 +181,7 @@ alint is telemetry-free and makes no network access at runtime, except for the `
 
 - [Concepts](https://alint.org/docs/concepts/): the rule model, scopes, and `when:` conditions
 - [Rule reference](https://alint.org/docs/rules/) and [bundled rulesets](https://alint.org/docs/bundled-rulesets/)
-- [CLI](https://alint.org/docs/cli/) and [configuration schema](https://alint.org/docs/configuration/)
+- [CLI](https://alint.org/docs/cli/) (all 12 subcommands) and the [configuration schema](https://alint.org/docs/configuration/)
 - [Cookbook](https://alint.org/docs/cookbook/): monorepos, CI hardening, package shape, custom `command` rules
 - [Architecture](https://alint.org/docs/about/architecture/) and [roadmap](https://alint.org/docs/about/roadmap/) through v1.0
 
