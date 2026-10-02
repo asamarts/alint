@@ -6,9 +6,9 @@
 
 **Enforce the rules your repository assumes but never checks.**
 
-Every repository has a shape it is supposed to keep. Every package carries a README. Workflows pin their actions to a commit SHA. Nobody commits `target/` or `node_modules/`. The lockfile lives at the root and nowhere else. Source files that need a license header have one. These rules are real, and a repo quietly rots when they slip, but they usually live in a reviewer's head or a paragraph of `CONTRIBUTING.md`, where nothing actually fails when a pull request ignores them.
+Every repository has a shape it is supposed to keep. Every package carries a README. Workflows pin their actions to a commit SHA. Nobody commits `target/` or `node_modules/`. Source files that need a license header have one. These rules are real, and a repo drifts when they slip, but they usually live in a reviewer's head or a line of `CONTRIBUTING.md`, where nothing fails when a pull request ignores them.
 
-alint writes those rules down in one `.alint.yml` and enforces them: on every pull request, in pre-commit, and in your editor. It reads the whole tree rather than one file at a time, so it sees things a per-language linter cannot: files that should or should not exist, naming conventions, values buried inside `package.json` or `Cargo.toml` or a workflow YAML, and relationships between files. It runs alongside ESLint, Clippy, or Ruff, picks up the ground that [Repolinter](https://github.com/todogroup/repolinter) left when it was archived in 2026, and ships as a single static Rust binary with no runtime to install.
+alint writes those rules down in one `.alint.yml` and enforces them: on every pull request, in pre-commit, and in your editor. It reads the whole tree instead of one file at a time, so it catches what per-language linters miss, like files that should or should not exist, naming conventions, values buried in `package.json` or `Cargo.toml` or a workflow YAML, and the relationships between files. It takes over from [Repolinter](https://github.com/todogroup/repolinter) (archived in 2026), runs alongside ESLint, Clippy, or Ruff, and ships as a single static Rust binary with nothing to install at runtime.
 
 <!-- Absolute URL on purpose: this README is also the crates.io and npm landing
      page, and neither resolves relative image paths. The GIF is generated from
@@ -45,13 +45,13 @@ alint fix --dry-run    # preview the mechanical repairs
 alint fix              # apply them
 ```
 
-`alint init` will write that file for you by detecting the ecosystems in your repo. Everything after it is optional: add rules, override severities, or switch a bundled rule off. The [60-second quickstart on alint.org](https://alint.org/docs/getting-started/quickstart/) walks through a first config end to end.
+`alint init` writes that file for you by detecting the ecosystems in your repo, so you rarely start from a blank page. The [quickstart on alint.org](https://alint.org/docs/getting-started/quickstart/) walks a first config end to end.
 
 ## How it works
 
-A config is a list of rules, but you rarely write them all by hand. `extends:` composes **rulesets**, and alint ships 22 of them compiled into the binary, so there is no download and no network round trip. Each `extends:` line pulls in a set of rules; most are gated on what the repo actually contains, so listing the Rust ruleset in a repo with no Rust is a silent no-op. From there you add, override, or disable individual rules by id.
+A config is a list of rules, but you rarely write them all by hand. `extends:` composes **rulesets**, and alint ships 22 of them compiled into the binary, so there is no download and no network round trip. Most are gated on what the repo actually contains, so listing the Rust ruleset in a repo with no Rust does nothing. You layer your own rules on top, and override or switch off anything you inherit.
 
-A rule is three things: a **kind** (the check to run, such as `file_exists`, `filename_case`, or `pair`), the **paths** it applies to, and a **severity**. alint has 105 rule kinds across 13 families. A rule can also carry a `when:` condition (run only on the default branch, only when some file exists) and a `fix:` (how to repair a violation when one is found).
+A rule is three things: a **kind** (the check to run, such as `file_exists`, `filename_case`, or `pair`), the **paths** it applies to, and a **severity**. There are 105 kinds across 13 families. A rule can also carry a `when:` condition (run only on the default branch, or only when some file exists) and a `fix:`.
 
 ```yaml
 # .alint.yml
@@ -59,26 +59,26 @@ version: 1
 extends:
   - alint://bundled/oss-baseline@v1
 rules:
-  - id: workflows-pin-actions          # your own rule, on top of the ruleset
+  - id: no-focused-tests                 # a rule of your own, on top of the ruleset
     kind: file_content_forbidden
-    paths: [".github/workflows/*.yml"]
-    pattern: 'uses:.*@v\d+$'            # a tag, not a commit SHA
-    message: "Pin third-party actions to a full commit SHA"
+    paths: ["**/*.test.ts"]
+    pattern: '\.only\('
+    message: "Remove .only() so CI runs the whole suite, not one test"
     level: error
 ```
 
-Under the hood, alint walks the repository once, in parallel, honoring `.gitignore`. It reads each file's bytes at most once and fans the rules out across cores, which is why a 100,000-file workspace bundle checks in about a second and a half and a million files in under twenty seconds ([benchmarks, per release](docs/benchmarks/HISTORY.md)). The engine, the rules, the eight output formats, and a language server for editors are all one static binary. There is no plugin system to install and nothing from Node, the JVM, or Python in the path. For the full picture, see [ARCHITECTURE.md](docs/design/ARCHITECTURE.md).
+Under the hood, alint walks the repository once, in parallel, honoring `.gitignore`, and reads each file's bytes at most once. That is why a 100,000-file workspace bundle checks in about a second and a half and a million files in under twenty seconds ([benchmarks, measured per release](https://alint.org/benchmarks/)). The engine, the rules, the eight output formats, and a language server for editors are all one binary, with no plugin system and nothing from Node, the JVM, or Python in the path. The [concepts guide](https://alint.org/docs/concepts/) and [ARCHITECTURE.md](docs/design/ARCHITECTURE.md) go deeper.
 
 ## What it can check
 
-The 105 kinds group into a handful of themes. The [rule catalogue](docs/rules.md) has every kind with a YAML example; the highlights:
+The 105 kinds group into a handful of themes. The [rule reference](https://alint.org/docs/rules/) has every one with an example; a tour of the highlights:
 
-- **Files and structure.** Require or forbid specific files and directories, cap file size, line count, directory depth, and files per directory, and forbid committed build output or OS junk.
-- **Naming.** Filename case and regex conventions, plus case-collision and Windows-reserved-name safety for cross-platform checkouts.
-- **Content and hygiene.** Required headers and footers, forbidden patterns (merge markers, debug residue), trailing whitespace, final newlines, line endings, and line width.
-- **Config values.** Read into JSON, YAML, TOML, XML, dotenv, INI, `.properties`, and HCL with RFC 9535 JSONPath: assert a value, match a pattern, require a key's absence, or validate a whole file against a JSON Schema. For example, require `package.json` to declare a `license`, or a workflow to set `permissions: contents: read`.
-- **Cross-file relationships.** The primitives few other tools offer: `pair` (every `.proto` has its generated binding), `every_matching_has` (every `packages/*` has a README and a manifest), `unique_by` (no two crates share a name), `file_graph` (no import cycles, no orphaned modules), and `generated_file_fresh` (a checked-in generated file still matches its source).
-- **Security and Unicode.** Trojan-Source bidirectional controls, zero-width characters, byte-order marks, and text-encoding sanity.
+- **Files and structure.** Require or forbid specific files and directories; cap file size, line count, directory depth, and files per directory; reject committed build output and OS junk.
+- **Naming.** Filename case and regex conventions, with case-collision and reserved-name safety for cross-platform checkouts.
+- **Content.** Required headers and footers, forbidden patterns such as merge markers or debug residue, and the everyday hygiene: trailing whitespace, final newlines, line endings, line width.
+- **Config values.** Read into JSON, YAML, TOML, XML, dotenv, INI, `.properties`, and HCL with RFC 9535 JSONPath, then assert a value, match a pattern, forbid a key, or validate the whole file against a JSON Schema. Require `package.json` to declare a `license`, or every workflow to set `permissions: contents: read`.
+- **Cross-file relationships.** The primitives most tools lack: `pair` (every `.proto` has its generated binding), `every_matching_has` (every `packages/*` has a README and a manifest), `unique_by` (no two crates share a name), `file_graph` (no import cycles or orphaned modules), and `generated_file_fresh` (a checked-in generated file still matches its source).
+- **Security and encoding.** Trojan-Source bidirectional controls, zero-width characters, byte-order marks, and text-encoding sanity.
 - **Git hygiene.** Commit-message shape, sign-off and GPG signing, denied paths, and blame age.
 - **Metadata.** Executable bits and shebangs, symlink and submodule policy, portable-filename checks.
 
@@ -86,52 +86,52 @@ When no kind fits, the `command` kind runs a tool you already trust and turns it
 
 ## Fixing, not just finding
 
-Plenty of violations are mechanical: a missing final newline, a stray byte-order mark, an unsorted `CODEOWNERS`, a license header sitting above the shebang instead of below it. `alint fix` repairs those in place. The ones that need a human decision it will show you or suggest, rather than guess.
+Plenty of violations are mechanical: a missing final newline, a stray byte-order mark, an unsorted `CODEOWNERS`, a license header sitting above the shebang instead of below it. `alint fix` repairs those in place. The ones that need a human decision it shows you or suggests, rather than guessing.
 
 Every fix carries a safety tier, so a bare `alint fix` never surprises you:
 
-- **Safe** fixes apply on a plain `alint fix`: whitespace and newline hygiene, line endings, header placement, sorting a marked block, reflowing indentation width, and so on.
-- **Unsafe** fixes change meaning or remove content, so they wait for `alint fix --unsafe-fixes`: deleting a file, a regex `replace`, dropping a committed artifact from git's index. (As of v0.17 this includes removing a file: a plain `alint fix` now *suggests* the deletion instead of doing it.)
+- **Safe** fixes apply on a plain `alint fix`: whitespace and newline hygiene, line endings, header placement, sorting a marked block, reindentation.
+- **Unsafe** fixes change meaning or remove content, so they wait for `alint fix --unsafe-fixes`: deleting a file, a regex `replace`, dropping a committed artifact from git's index. (As of v0.17, removing a file is Unsafe. A plain `alint fix` now *suggests* the deletion rather than doing it.)
 - **Suggestions** are reported but never written, for violations with no mechanical repair.
 
-Preview everything with `alint fix --dry-run`, or `alint fix --diff` for the exact edits. alint composes all of a file's edits in memory and writes each file once, atomically, then re-runs until the tree stops changing. A size limit (1 MiB by default) skips oversize files instead of rewriting them.
+Preview with `alint fix --dry-run`, or `alint fix --diff` for the exact edits. alint batches a file's edits in memory, writes each file once, and re-runs until the tree stops changing; a size limit (1 MiB by default) skips oversize files rather than rewriting them.
 
-Because `extends:` can reach a URL, fixes that inject content (`replace`, `file_create`, `file_prepend`, and friends) coming from a remote or nested ruleset are quietly demoted to suggestions unless you opt that source into `trusted_extends:`, and fixes that shell out are refused from anywhere but your own top-level config. There are 26 fix ops in all, cross-referenced from the [rule catalogue](docs/rules.md).
+Because `extends:` can pull a ruleset from a URL, a fix that injects content (`replace`, `file_create`, `file_prepend`) from a remote or nested ruleset is demoted to a suggestion unless you list that source under `trusted_extends:`, and a fix that shells out is refused from anywhere but your own top-level config. There are 26 fix ops in total, each noted in the [rule reference](https://alint.org/docs/rules/).
 
 ## Adopt it without a flag day
 
-You do not have to fix everything the first time alint runs. `alint baseline` records today's violations behind a content fingerprint, and `alint check --baseline` then passes on those and fails only on genuinely new ones. Drop it into CI as a blocking gate on day one and clean up the backlog on your own schedule, the same way you would introduce a type checker to an untyped codebase.
+You do not have to fix everything the first time alint runs. `alint baseline` records today's violations behind a content fingerprint, and `alint check --baseline` then passes on those and fails only on genuinely new ones. Turn it on as a blocking gate on day one and burn down the backlog on your own schedule, the way you would introduce a type checker to an untyped codebase.
 
 ## Where it runs
 
-- **Pull requests.** The [`asamarts/alint`](https://github.com/asamarts/alint) GitHub Action annotates changed lines inline or uploads SARIF to Code Scanning. `alint check --changed` lints only the files a PR touched.
-- **Commits.** A [pre-commit](https://pre-commit.com/) hook (a prebuilt wheel, no toolchain) checks every commit; a manual `alint-fix` hook repairs on request.
-- **Your editor.** `alint lsp` is a language server (diagnostics, hover-to-explain, apply-fix code actions) with packaged extensions for VS Code, JetBrains, and Zed, and ready configs for Neovim, Sublime Text, Emacs, and Helix.
-- **Coding agents.** The `agent` output format carries a per-violation instruction and fix command, and `alint export-agents-md` keeps the directives in `AGENTS.md` or `CLAUDE.md` in sync with the rules alint actually enforces, so the agent and CI agree on the contract.
-- **Any CI.** Eight output formats cover most pipelines: `human`, `json`, `sarif`, `github`, `markdown`, `junit`, `gitlab`, and `agent`. Exit codes are stable (`0` clean, `1` violations, `2` config error, `3` internal).
+- **Pull requests.** The [`asamarts/alint` GitHub Action](https://alint.org/docs/integrations/github-actions/) annotates changed lines inline or uploads SARIF to Code Scanning, and `alint check --changed` lints only the files a PR touched.
+- **Commits.** A [pre-commit](https://alint.org/docs/integrations/pre-commit/) hook (a prebuilt wheel, no toolchain) checks every commit; a manual `alint-fix` hook repairs on request.
+- **Your editor.** `alint lsp` is a language server (diagnostics, hover-to-explain, apply-fix code actions), with packaged extensions for VS Code, JetBrains, and Zed and ready configs for Neovim, Sublime Text, Emacs, and Helix.
+- **Coding agents.** The `agent` output format carries a per-violation instruction and fix command, and `alint export-agents-md` keeps the directives in `AGENTS.md` or `CLAUDE.md` in step with the rules alint enforces, so the agent and CI agree on the contract.
+- **Any CI.** [Eight output formats](https://alint.org/docs/reference/output-formats/) cover most pipelines: `human`, `json`, `sarif`, `github`, `markdown`, `junit`, `gitlab`, and `agent`. Exit codes are stable: `0` clean, `1` violations, `2` config error, `3` internal.
 
 ## Bundled rulesets
 
-Twenty-two rulesets ship inside the binary, pinned to the version of alint you run and reachable as `alint://bundled/<name>@v1`. They fall into a few groups:
+Twenty-two rulesets ship inside the binary, pinned to the version of alint you run and reachable as `alint://bundled/<name>@v1`. They group into:
 
-- **Ecosystem baselines**, each gated on a fact so it is a no-op off-ecosystem: `rust`, `node`, `python`, `go`, `java`, `dotnet`, `php`, plus the always-on `oss-baseline` (the README / LICENSE / hygiene starting point, and a clean migration target for Repolinter).
-- **Monorepo overlays**: a `monorepo` base plus `monorepo/cargo-workspace`, `monorepo/pnpm-workspace`, and `monorepo/yarn-workspace`, which scope per-member checks to real package directories.
-- **CI and tooling**: `ci/github-actions` (OpenSSF-guided workflow hardening), `tooling/editorconfig`, `docs/adr`, `hygiene/no-tracked-artifacts`, and `hygiene/lockfiles`.
+- **Ecosystem baselines**, each gated so it is a no-op off-ecosystem: `rust`, `node`, `python`, `go`, `java`, `dotnet`, `php`, plus the always-on `oss-baseline` (the README / LICENSE / hygiene starting point, and a clean migration target for Repolinter).
+- **Monorepo overlays**: a `monorepo` base plus `cargo-workspace`, `pnpm-workspace`, and `yarn-workspace` overlays that scope per-member checks to real package directories.
+- **CI and tooling**: `ci/github-actions` (OpenSSF-guided workflow hardening), `tooling/editorconfig`, `docs/adr`, and the `hygiene/*` artifact and lockfile sets.
 - **Compliance and governance**: `compliance/reuse`, `compliance/apache-2`, and `apache/governance` (the Apache TLP release discipline that arrow, spark, and airflow each re-implement by hand).
-- **Agent-aware**: `agent-hygiene` (the scratch docs, duplicate-versioned files, and debug residue that show up disproportionately in agent-authored commits) and `agent-context` (keeps `AGENTS.md` and friends honest).
+- **Agent-aware**: `agent-hygiene` (scratch docs, duplicate-versioned files, and debug residue that cluster in agent-authored commits) and `agent-context` (keeps `AGENTS.md` and friends honest).
 
-Every ruleset ships non-blocking by default (`info` or `warning` for recommendations, `error` only for unambiguous bugs). Redeclare a rule id in your own config to change its severity or scope, or set `level: off` to drop it. Full per-ruleset rule lists are in the [catalogue](docs/rules.md#bundled-rulesets).
+Rulesets ship non-blocking by default: `info` or `warning` for recommendations, `error` only for unambiguous bugs. Redeclare a rule id in your own config to change its severity or scope, or set `level: off`. The [bundled-ruleset reference](https://alint.org/docs/bundled-rulesets/) lists every rule in each.
 
 ## On real repositories
 
-alint ships [working configs for 30 open-source repos](examples/README.md), from single-language libraries to polyglot monorepos and 39k-file trees, each with a short writeup of what alint catches that the repo's own tooling misses. Writing them was how we found where alint earns its keep:
+alint ships [working configs for 30 open-source projects](https://alint.org/examples/), from single-language libraries to polyglot monorepos, each with a writeup of what alint catches that the project's own tooling misses. Writing them surfaced a few patterns that recur:
 
-- Projects with **verify-script sprawl.** Kubernetes hand-maintains roughly 50 `hack/verify-*.sh` scripts; a dozen declarative rules cover the structural ones. apache/airflow runs over 100 pre-commit hooks, and about 40% map cleanly onto alint.
-- Projects that **rely on a convention without checking it.** tokio has no validation scripts at all, yet alint catches 15 conventions its pipeline silently assumes. uv's 67-crate workspace discipline is enforced nowhere in CI today.
-- Projects with **mature linters but no structural layer.** astral-sh/ruff ships 900+ Python lint rules, and none of them check ruff's own `publish = false` discipline on its internal crates. dotnet/runtime carries thousands of XML manifests whose structural invariants no existing tool checks.
-- **Polyglot trees** no single per-language linter can see across: apache/arrow spans six languages, vercel/next.js is TypeScript and Rust, NixOS/nixpkgs is 39k files.
+- Projects that lean on a convention without enforcing it. tokio has no validation scripts, yet its pipeline quietly assumes conventions alint can hold to.
+- Projects drowning in hand-rolled verify scripts. Kubernetes maintains dozens of `hack/verify-*.sh`; the structural ones collapse into a handful of declarative rules.
+- Projects with excellent code linters but no structural layer. ruff ships 900+ Python rules and still cannot check that its own internal crates keep `publish = false`.
+- Polyglot trees no single per-language linter sees across: apache/arrow spans six languages, vercel/next.js is TypeScript and Rust, NixOS/nixpkgs is tens of thousands of files.
 
-Start from whichever example is closest to your repo's shape to see what a real config looks like.
+Start from the [example](https://alint.org/examples/) closest to your repo, or see [how alint compares](https://alint.org/compare/) with other tools and how to [migrate from Repolinter](https://alint.org/migrating-from/repolinter/).
 
 ## What alint is not
 
@@ -143,7 +143,7 @@ alint checks the shape and contents of a repository, not the semantics of the co
 - a commit-message linter (use [commitlint](https://commitlint.js.org/))
 - a secret scanner (use [gitleaks](https://github.com/gitleaks/gitleaks), [TruffleHog](https://github.com/trufflesecurity/trufflehog))
 
-It runs underneath these, and its rules stay focused on the filesystem so the tools above can stay focused on the code.
+It runs underneath those, and keeps its rules on the filesystem so they can keep theirs on the code.
 
 ## Install
 
@@ -157,7 +157,7 @@ brew install asamarts/alint/alint
 # crates.io
 cargo install alint
 
-# npm (also puts alint on PATH; use for Windows or a project-local dev dep)
+# npm (also puts alint on PATH; for Windows or a project-local dev dependency)
 npm install -g @asamarts/alint
 
 # PyPI (uvx / pipx / pip; the wheel embeds the binary, so no Python in the hot path)
@@ -165,23 +165,27 @@ uvx alint check
 uv tool install alint
 ```
 
-`install.sh` detects your platform, downloads the matching tarball, verifies its SHA-256, and installs to `~/.local/bin`. The npm and PyPI packages ship the same prebuilt binary (no source build); the PyPI wheel installs cleanly where the npm shim cannot, including `--ignore-scripts`, offline mirrors, and Windows. A distroless multi-arch Docker image is published to ghcr.io on every release:
+`install.sh` detects your platform, downloads the matching tarball, verifies its SHA-256, and installs to `~/.local/bin`. The npm and PyPI packages ship the same prebuilt binary; the PyPI wheel even installs cleanly where the npm shim cannot, including under `--ignore-scripts`, on offline mirrors, and on Windows. A distroless multi-arch Docker image is published to ghcr.io on every release:
 
 ```bash
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.17.0 check
 ```
 
-To build from source: `git clone https://github.com/asamarts/alint && cd alint && cargo build --release -p alint`. Full platform and channel detail is in the [installation guide](https://alint.org/docs/getting-started/installation/).
+Build from source with `cargo build --release -p alint`. Every channel and platform is covered in the [installation guide](https://alint.org/docs/getting-started/installation/).
 
 alint is telemetry-free and makes no network access at runtime, except for the `extends:` URLs you write yourself, which must be SRI-pinned. The threat model is in [SECURITY.md](SECURITY.md).
 
-## Docs
+## Documentation
 
-- [alint.org](https://alint.org) is the narrative documentation: quickstart, concepts, cookbook, and the full rule and ruleset reference.
-- [docs/rules.md](docs/rules.md) is the per-kind reference, one entry per rule kind with an example and its fix ops.
-- [ARCHITECTURE.md](docs/design/ARCHITECTURE.md) covers the rule model, the DSL, the execution model, and the crate layout.
-- [CHANGELOG.md](CHANGELOG.md) has the per-version history; [ROADMAP.md](docs/design/ROADMAP.md) has the plan through v1.0.
-- [docs/benchmarks/](docs/benchmarks/) holds the methodology and per-release, per-platform results.
+[alint.org](https://alint.org) is the narrative home. The pages worth bookmarking:
+
+- [Concepts](https://alint.org/docs/concepts/): the rule model, scopes, and `when:` conditions
+- [Rule reference](https://alint.org/docs/rules/) and [bundled rulesets](https://alint.org/docs/bundled-rulesets/)
+- [CLI](https://alint.org/docs/cli/) and [configuration schema](https://alint.org/docs/configuration/)
+- [Cookbook](https://alint.org/docs/cookbook/): monorepos, CI hardening, package shape, custom `command` rules
+- [Architecture](https://alint.org/docs/about/architecture/) and [roadmap](https://alint.org/docs/about/roadmap/) through v1.0
+
+In the repo: [CHANGELOG.md](CHANGELOG.md) for the per-version history, [docs/benchmarks/](docs/benchmarks/) for methodology and per-release results, and [SECURITY.md](SECURITY.md) for the threat model.
 
 ## Development
 
@@ -193,7 +197,7 @@ cargo run -- check         # dogfood: alint lints its own repo
 cargo bench -p alint-bench # criterion micro-benches
 ```
 
-alint is a single Cargo workspace of nine crates; only `alint` and `alint-core` are published, the rest are internal. End-to-end tests live in `crates/alint-e2e/scenarios/` as declarative YAML, so adding a scenario is adding a file, and CLI snapshots live under `crates/alint/tests/cli/` via `trycmd`. CI runs as per-job bash scripts under `ci/scripts/` that behave the same locally and in GitHub Actions. Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+alint is a single Cargo workspace of nine crates, of which only `alint` and `alint-core` are published. End-to-end tests are declarative YAML under `crates/alint-e2e/scenarios/`, so adding one is adding a file, and CLI snapshots run through `trycmd`. CI is per-job bash scripts under `ci/scripts/` that behave the same locally and on GitHub. Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
