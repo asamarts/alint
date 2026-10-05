@@ -469,13 +469,13 @@ mod tests {
     #[test]
     fn requires_body_detects_subject_only() {
         let (_, body) = split_subject_body("just a subject");
-        assert!(body.trim().is_empty());
+        assert_eq!(body.trim(), "");
     }
 
     #[test]
     fn requires_body_accepts_canonical_form() {
         let (_, body) = split_subject_body("subject\n\nbody content");
-        assert!(!body.trim().is_empty());
+        assert_ne!(body.trim(), "");
     }
 
     // ----- format_msg formatting --------------------------------

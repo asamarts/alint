@@ -342,7 +342,7 @@ mod tests {
 
         let (c, a) = parse_h3_title("`file_starts_with` / `file_ends_with`");
         assert_eq!(c, vec!["file_starts_with", "file_ends_with"]);
-        assert!(a.is_empty());
+        assert_eq!(a, [] as [String; 0]);
     }
 
     #[test]

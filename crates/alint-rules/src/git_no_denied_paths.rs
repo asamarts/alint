@@ -240,7 +240,10 @@ mod tests {
                 .is_empty(),
             "unmatched by suffix"
         );
-        assert!(wild.matches(std::path::Path::new("README.md")).is_empty());
+        assert_eq!(
+            wild.matches(std::path::Path::new("README.md")),
+            Vec::<usize>::new()
+        );
 
         let lit = build_set(&["id_rsa"]);
         assert!(
@@ -257,27 +260,30 @@ mod tests {
     #[test]
     fn double_star_glob_matches_under_any_directory() {
         let set = build_set(&["**/.env"]);
-        assert!(!set.matches(std::path::Path::new(".env")).is_empty());
-        assert!(
-            !set.matches(std::path::Path::new("apps/api/.env"))
-                .is_empty()
+        assert_ne!(
+            set.matches(std::path::Path::new(".env")),
+            Vec::<usize>::new()
+        );
+        assert_ne!(
+            set.matches(std::path::Path::new("apps/api/.env")),
+            Vec::<usize>::new()
         );
     }
 
     #[test]
     fn directory_glob_matches_under_directory() {
         let set = build_set(&["secrets/**"]);
-        assert!(
-            !set.matches(std::path::Path::new("secrets/keys.txt"))
-                .is_empty()
+        assert_ne!(
+            set.matches(std::path::Path::new("secrets/keys.txt")),
+            Vec::<usize>::new()
         );
-        assert!(
-            !set.matches(std::path::Path::new("secrets/nested/deep.txt"))
-                .is_empty()
+        assert_ne!(
+            set.matches(std::path::Path::new("secrets/nested/deep.txt")),
+            Vec::<usize>::new()
         );
-        assert!(
-            set.matches(std::path::Path::new("public/secrets-doc.md"))
-                .is_empty()
+        assert_eq!(
+            set.matches(std::path::Path::new("public/secrets-doc.md")),
+            Vec::<usize>::new()
         );
     }
 

@@ -710,7 +710,7 @@ mod tests {
     #[test]
     fn config_rule_kinds_empty_without_rules() {
         let cfg = serde_yaml_ng::from_str("version: 1\nextends: alint://bundled/x\n").unwrap();
-        assert!(config_rule_kinds(&cfg).is_empty());
+        assert_eq!(config_rule_kinds(&cfg), [] as [String; 0]);
     }
 
     #[test]

@@ -1046,7 +1046,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(f.changed_since(), Some("origin/main"));
-        assert!(f.has_ancestor_names().is_empty());
+        assert_eq!(f.has_ancestor_names(), &[] as &[PathBuf]);
     }
 
     // ── manifest-derived path scope (ADR-0010) ────────────────
@@ -1459,7 +1459,7 @@ mod tests {
             r#"{"x":1}"#
         );
         // Absent -> "".
-        assert!(read_manifest_confined(root, Path::new("missing.json")).is_empty());
+        assert_eq!(read_manifest_confined(root, Path::new("missing.json")), "");
     }
 
     #[cfg(unix)]

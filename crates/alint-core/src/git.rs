@@ -1077,7 +1077,7 @@ filename a.rs
 
     #[test]
     fn parse_commit_log_empty_input() {
-        assert!(parse_commit_log(b"").is_empty());
+        assert_eq!(parse_commit_log(b""), Vec::new());
     }
 
     #[test]
@@ -1295,7 +1295,7 @@ filename a.rs
                 // in the working tree." We don't assert the exact
                 // wording (varies across git versions); just that
                 // we got a non-empty stderr.
-                assert!(!stderr.is_empty());
+                assert_ne!(stderr, "");
             }
             other => panic!("expected BadRange, got {other:?}"),
         }

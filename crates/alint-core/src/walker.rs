@@ -1152,7 +1152,7 @@ mod tests {
     fn default_walk_options_respects_gitignore_and_no_extra_ignores() {
         let opts = WalkOptions::default();
         assert!(opts.respect_gitignore);
-        assert!(opts.extra_ignores.is_empty());
+        assert_eq!(opts.extra_ignores, Vec::<String>::new());
     }
 
     #[test]
@@ -1247,7 +1247,7 @@ mod tests {
     #[test]
     fn children_of_empty_index_returns_empty() {
         let idx = FileIndex::default();
-        assert!(idx.children_of(Path::new("anything")).is_empty());
+        assert_eq!(idx.children_of(Path::new("anything")), &[] as &[usize]);
     }
 
     #[test]
@@ -1289,7 +1289,10 @@ mod tests {
     #[test]
     fn children_of_dir_not_in_index_returns_empty() {
         let idx = synthetic_index(&[("a.rs", false)]);
-        assert!(idx.children_of(Path::new("nonexistent/dir")).is_empty());
+        assert_eq!(
+            idx.children_of(Path::new("nonexistent/dir")),
+            &[] as &[usize]
+        );
     }
 
     #[test]

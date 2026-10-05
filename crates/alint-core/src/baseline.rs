@@ -736,7 +736,7 @@ mod tests {
     fn empty_baseline_is_valid_and_suppresses_nothing() {
         let text = format!("{{\"schema_version\":{SCHEMA_VERSION}}}\n");
         let b = Baseline::load(&text).unwrap();
-        assert!(b.entries.is_empty());
+        assert_eq!(b.entries, Vec::new());
         assert_eq!(b.total(), 0);
     }
 
@@ -838,7 +838,7 @@ mod tests {
         let out = apply(&rep, &base, by_message);
         assert_eq!(out.suppressed_total, 2);
         assert_eq!(out.live.total_violations(), 1, "the 3rd X is new");
-        assert!(out.stale.is_empty());
+        assert_eq!(out.stale, Vec::new());
     }
 
     #[test]
@@ -901,7 +901,7 @@ mod tests {
         let out = apply(&rep, &Baseline::default(), by_message);
         assert_eq!(out.suppressed_total, 0);
         assert_eq!(out.live.total_violations(), 2);
-        assert!(out.stale.is_empty());
+        assert_eq!(out.stale, Vec::new());
     }
 
     #[test]
@@ -943,7 +943,7 @@ mod tests {
         let out = apply(&rep, &base, by_message);
         assert_eq!(out.suppressed_total, 5, "summed budget suppresses all five");
         assert_eq!(out.live.total_violations(), 0);
-        assert!(out.stale.is_empty());
+        assert_eq!(out.stale, Vec::new());
     }
 
     #[test]

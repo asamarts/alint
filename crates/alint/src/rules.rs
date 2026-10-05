@@ -302,15 +302,15 @@ mod tests {
         // this test pins only resolution + the primary-first invariant — a many-to-many
         // flip (a kind gaining a secondary) must not churn it.
         let cats = categories_for_kind("no_bidi_controls");
-        assert!(!cats.is_empty());
+        assert_ne!(cats, [] as [&str; 0]);
         assert_eq!(cats.first(), Some(&"security-unicode-sanity"));
         // an alias resolves to its canonical kind's categories
         assert_eq!(
             categories_for_kind("content_matches"),
             categories_for_kind("file_content_matches")
         );
-        assert!(!categories_for_kind("content_matches").is_empty());
+        assert_ne!(categories_for_kind("content_matches"), [] as [&str; 0]);
         // an unknown kind yields no categories (rather than panicking)
-        assert!(categories_for_kind("does_not_exist").is_empty());
+        assert_eq!(categories_for_kind("does_not_exist"), [] as [&str; 0]);
     }
 }

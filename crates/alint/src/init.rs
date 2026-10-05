@@ -222,7 +222,7 @@ mod tests {
     fn detects_no_languages_in_empty_dir() {
         let tmp = td();
         let det = detect(tmp.path(), false);
-        assert!(det.languages.is_empty());
+        assert_eq!(det.languages, [] as [Language; 0]);
         assert_eq!(det.workspace, None);
     }
 

@@ -421,7 +421,7 @@ mod tests {
     fn unmatched_backticks_do_not_explode() {
         let pf = prefixes(&["src/"]);
         let cands = scan_markdown_paths("`src/foo.ts unmatched", &pf);
-        assert!(cands.is_empty());
+        assert_eq!(cands, Vec::new());
     }
 
     #[test]

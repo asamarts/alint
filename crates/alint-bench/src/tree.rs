@@ -530,7 +530,7 @@ mod tests {
     #[test]
     fn select_subset_zero_fraction_is_empty() {
         let files: Vec<PathBuf> = (0..100).map(|i| PathBuf::from(format!("f{i}"))).collect();
-        assert!(select_subset(&files, 0.0, 1).is_empty());
+        assert_eq!(select_subset(&files, 0.0, 1), Vec::<&PathBuf>::new());
     }
 
     #[test]
@@ -579,6 +579,6 @@ mod tests {
         // > 1.0 clamps to 1.0
         assert_eq!(select_subset(&files, 5.0, 1).len(), 10);
         // < 0.0 clamps to 0.0
-        assert!(select_subset(&files, -0.5, 1).is_empty());
+        assert_eq!(select_subset(&files, -0.5, 1), Vec::<&PathBuf>::new());
     }
 }

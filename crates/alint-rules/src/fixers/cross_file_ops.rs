@@ -1851,7 +1851,10 @@ mod tests {
             CreateAndRegisterFixer::missing_members(&reg),
             vec!["crates/d".to_string()]
         );
-        assert!(CreateAndRegisterFixer::missing_members(&ex).is_empty());
+        assert_eq!(
+            CreateAndRegisterFixer::missing_members(&ex),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

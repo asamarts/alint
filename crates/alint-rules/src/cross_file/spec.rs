@@ -548,7 +548,7 @@ mod tests {
         // An empty list is the identity.
         assert_eq!(apply_normalize(&[], "  ABC  "), "  ABC  ");
         // `none` is dropped from the resolved list.
-        assert!(NormalizeSpec::One(Normalize::None).into_list().is_empty());
+        assert_eq!(NormalizeSpec::One(Normalize::None).into_list(), Vec::new());
         assert_eq!(
             NormalizeSpec::Many(vec![Normalize::None, Normalize::Trim]).into_list(),
             vec![Normalize::Trim]

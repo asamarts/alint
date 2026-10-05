@@ -658,7 +658,7 @@ mod tests {
         };
         let v = render(&report);
         let locs = v["runs"][0]["results"][0]["locations"].as_array().unwrap();
-        assert!(locs.is_empty());
+        assert_eq!(locs, &Vec::<serde_json::Value>::new());
     }
 
     #[test]

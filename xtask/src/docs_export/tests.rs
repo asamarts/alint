@@ -467,7 +467,7 @@ More prose.
 
     // No yaml at all: both empty.
     assert_eq!(example_first_kind("just prose"), None);
-    assert!(example_block_kinds("just prose").is_empty());
+    assert_eq!(example_block_kinds("just prose"), [] as [String; 0]);
 }
 
 /// Design invariant (docs/design/rule-categories.md): the `**Categories:**` line
@@ -967,7 +967,10 @@ fn top_level_only_lists_the_globals_no_subcommand_takes() {
         .map(|f| (*f).to_string())
         .collect();
     assert_eq!(top_level_only(&globals, &seen), ["--version"]);
-    assert!(top_level_only(&globals, &globals.keys().cloned().collect()).is_empty());
+    assert_eq!(
+        top_level_only(&globals, &globals.keys().cloned().collect()),
+        [] as [String; 0]
+    );
 
     let flags = |list: &[&str]| list.iter().map(|f| (*f).to_string()).collect::<Vec<_>>();
     assert_eq!(code_list(&flags(&[])), "");

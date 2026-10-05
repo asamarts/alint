@@ -261,7 +261,10 @@ mod tests {
         assert_eq!(v["summary"]["total_violations"], 0);
         assert_eq!(v["summary"]["passing_rules"], 0);
         assert_eq!(v["summary"]["failing_rules"], 0);
-        assert!(v["violations"].as_array().unwrap().is_empty());
+        assert_eq!(
+            v["violations"].as_array().unwrap(),
+            &Vec::<serde_json::Value>::new()
+        );
     }
 
     #[test]

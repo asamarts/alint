@@ -243,7 +243,7 @@ mod tests {
         let scan = Scan::collect(tmp.path(), &Progress::null()).unwrap();
         assert_eq!(scan.index.entries.len(), 0);
         assert!(!scan.has_git);
-        assert!(scan.detection.languages.is_empty());
+        assert_eq!(scan.detection.languages, [] as [crate::init::Language; 0]);
     }
 
     #[test]
@@ -291,7 +291,7 @@ mod tests {
         // Scan must still build — we silently degrade to an
         // empty extends list rather than fail the command.
         let scan = Scan::collect(tmp.path(), &Progress::null()).unwrap();
-        assert!(scan.extends_uris.is_empty());
+        assert_eq!(scan.extends_uris, [] as [String; 0]);
     }
 
     #[test]
