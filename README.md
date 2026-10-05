@@ -4,11 +4,13 @@
 [![CI](https://github.com/asamarts/alint/actions/workflows/ci.yml/badge.svg)](https://github.com/asamarts/alint/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
-**Enforce the rules your repository assumes but never checks.**
+**A linter for the files in your repository.**
+
+Code linters check what's inside a source file. alint checks the repository around it: files that should or shouldn't exist, naming conventions, file contents, values buried in `package.json`, `Cargo.toml` or a workflow YAML, and the relationships between files. The rules live in one `.alint.yml` and run on every pull request, in pre-commit and in your editor.
 
 Every repository has a shape it is supposed to keep. Every package carries a README. Workflows pin their actions to a commit SHA. Nobody commits `target/` or `node_modules/`. Source files that need a license header have one. These rules are real, and a repo drifts when they slip, but they usually live in a reviewer's head or a line of `CONTRIBUTING.md`, where nothing fails when a pull request ignores them.
 
-alint writes those rules down in one `.alint.yml` and enforces them: on every pull request, in pre-commit, and in your editor. It reads the whole tree instead of one file at a time, so it catches what per-language linters miss, like files that should or should not exist, naming conventions, values buried in `package.json` or `Cargo.toml` or a workflow YAML, and the relationships between files. It takes over from [Repolinter](https://github.com/todogroup/repolinter) (archived in 2026), runs alongside ESLint, Clippy, or Ruff, and ships as a single static Rust binary with nothing to install at runtime.
+alint writes those rules down and enforces them. It takes over from [Repolinter](https://github.com/todogroup/repolinter) (archived in 2026), runs alongside ESLint, Clippy, or Ruff, and ships as a single static Rust binary with nothing to install at runtime.
 
 <!-- Absolute URL on purpose: this README is also the crates.io and npm landing
      page, and neither resolves relative image paths. The GIF is generated from
