@@ -25,6 +25,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- Docs-bundle publishing now keeps generated rule indexes pinned to the
+  released rule-page set, rejects dangling rule-index links before publishing,
+  serializes every trigger that writes the shared branch, and uses a
+  non-forced push so a stale writer cannot overwrite a newer bundle.
+
 - Cache-backed `scope_filter.changed_since` and manifest-derived predicates are
   now resolved for nested `require:` rules as well as top-level rules. Deeply
   nested rule trees are also validated recursively during config loading, so an
