@@ -363,23 +363,18 @@ rules:
     command: ["pylint", "--rcfile=tensorflow/tools/ci_build/pylintrc", "{path}"]
 ```
 
-**Repo-specific vs bundled split:**
+**Current config split:**
 
-- **40 tensorflow-specific rules** (`tensorflow-*` prefix): 1
-  cross-language structural (`tensorflow-language-subdirs-present`)
-  + 4 TFLite per-source ↔ per-test parity (Swift / ObjC / Java /
-  Python) + 5 API-parity registry (golden v1 + v2 presence +
-  non-empty + canonical-marker) + 3 Bazel build-system + 6
-  governance / config-presence + 2 pip-lockfile + 2 CI-script
-  presence + 6 `command:` shellouts (buildifier, pylint,
-  clang-format, codespell, api-compatibility-test, plus a few
-  smaller helpers) + 11 long-tail (no-tabs-in-py,
-  no-trailing-whitespace, final-newline, no-bidi-in-cc-sources, …).
-- **44 bundled rules** from the 6 extended rulesets (15 + 3 + 9 + 3
-  + 11 + 3 = 44 with overlap dedup).
+- **19 repository-specific rules** are declared in `.alint.yml`.
+- **37 bundled rules** come from the 4 extended rulesets: 15 from
+  `oss-baseline`, 8 from `python`, 3 from `ci/github-actions`, and 11
+  from `hygiene/no-tracked-artifacts`. The local
+  `python-manifest-exists` rule overrides the bundled rule of the same ID,
+  producing 55 effective rules after deduplication.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 83
-rule(s) loaded`. Pitfall checks: the magic comment is present (line
+**Current validation (alint 0.17.0, 2026-10-06):** `alint
+validate-config` reports `✓ Config valid: 55 rule(s) loaded`. Pitfall
+checks: the magic comment is present (line
 1); all `command:` rules use `command:` and integer `timeout:`;
 the `pair` rule uses `partner:` (not `secondary:`); all patterns
 use single-quoted YAML scalars (no YAML literal block scalars —
@@ -609,12 +604,13 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 
 - **alint version pin:** 0.9.20 (current, 2026-05-10). Original
   capture under v0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
-- **`.alint.yml` in this directory:** **shipped — 19
+- **Current `.alint.yml` in this directory:** **shipped — 19
   repo-specific rules, 4 bundled rulesets folded in via `extends:`,
   55 effective rules loaded.**
-  `alint validate-config` confirms `✓ Config valid: 55 rule(s)
-  loaded`. **Historical live-tree recheck:** performed in this batch under
-  v0.9.17 — see §6 for the 21,436-violation breakdown. Under v0.9.20
+  `alint validate-config` under alint 0.17.0 on 2026-10-06 confirms
+  `✓ Config valid: 55 rule(s) loaded`. **Historical live-tree recheck:**
+  performed in this batch under v0.9.17 — see §6 for the 21,436-violation
+  breakdown. Under v0.9.20
   the B3 rewrite reduced the original 700 findings but was later removed
   because 287 valid BUILD files still failed it. The ~20k historical
   shellout-failure synthesised counts (buildifier /

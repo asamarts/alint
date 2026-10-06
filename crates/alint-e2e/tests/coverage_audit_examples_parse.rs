@@ -30,6 +30,8 @@
 //!   as a when-language parse error
 //! - `JSONPath` dashed-key dot-notation — surfaces as a `JSONPath`
 //!   parse error
+//! - README paragraphs labelled as current validation but carrying a stale
+//!   effective-rule count
 //!
 //! What it deliberately does NOT catch:
 //! - Tool-not-on-PATH errors from `command:` rules — those would
@@ -184,6 +186,84 @@ fn every_example_carries_the_yaml_language_server_directive() {
          Documented in `docs/development/CONFIG-AUTHORING.md` § \"Editor LSP via the JSON Schema\".",
         missing.len(),
         missing.join("\n  - "),
+    );
+}
+
+/// A historical validation count may remain in a dated case-study section,
+/// but a paragraph explicitly labelled "Current validation" must agree with
+/// the effective config that ships beside it. This catches documentation drift
+/// when rules are added, retired, or deduplicated through `extends:`.
+#[test]
+fn current_example_readme_validation_counts_match_configs() {
+    let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples");
+    let markers = ["**Current validation", "**Current config validation"];
+    let mut checked = 0;
+    let mut stale = Vec::new();
+
+    for entry in fs::read_dir(examples_dir).unwrap() {
+        let case_study_dir = entry.unwrap().path();
+        let config_path = case_study_dir.join(".alint.yml");
+        let readme_path = case_study_dir.join("README.md");
+        if !config_path.is_file() || !readme_path.is_file() {
+            continue;
+        }
+
+        let effective_count = alint_dsl::load(&config_path).unwrap().rules.len();
+        let readme = fs::read_to_string(&readme_path).unwrap();
+        for marker in markers {
+            let mut remainder = readme.as_str();
+            while let Some(marker_offset) = remainder.find(marker) {
+                let from_marker = &remainder[marker_offset..];
+                let excerpt_end = [from_marker.find("\n\n"), from_marker.find("\n- ")]
+                    .into_iter()
+                    .flatten()
+                    .min()
+                    .unwrap_or(from_marker.len());
+                let excerpt = &from_marker[..excerpt_end];
+                let normalized = excerpt.split_whitespace().collect::<Vec<_>>().join(" ");
+                let Some((_, after_label)) = normalized.split_once("Config valid:") else {
+                    stale.push(format!(
+                        "{}: {marker:?} paragraph has no `Config valid: N rule(s) loaded` claim",
+                        case_study_dir.file_name().unwrap().to_string_lossy(),
+                    ));
+                    break;
+                };
+                let digits: String = after_label
+                    .trim_start()
+                    .chars()
+                    .take_while(char::is_ascii_digit)
+                    .collect();
+                let documented_count = digits.parse::<usize>().unwrap_or_else(|_| {
+                    panic!(
+                        "{}: could not parse current validation count after `Config valid:`",
+                        readme_path.display(),
+                    )
+                });
+                checked += 1;
+                if documented_count != effective_count {
+                    stale.push(format!(
+                        "{}: current README says {documented_count} rules, config loads {effective_count}",
+                        case_study_dir.file_name().unwrap().to_string_lossy(),
+                    ));
+                }
+                remainder = &from_marker[marker.len()..];
+            }
+        }
+    }
+
+    assert!(
+        checked >= 4,
+        "expected at least the four reconciled case studies to carry current validation claims",
+    );
+    assert!(
+        stale.is_empty(),
+        "current case-study validation claims drifted from their configs:\n  - {}",
+        stale.join("\n  - "),
     );
 }
 

@@ -379,21 +379,17 @@ rules:
     require: [{ kind: command, command: ["golangci-lint", "run", "{dir}/..."] }]
 ```
 
-**Repo-specific vs bundled split:**
+**Current config split:**
 
-- **13 repo-specific rules** in `.alint.yml` (the `k8s-*` prefix
-  identifies them in `alint list` output): boilerplate (×2), file-sizes,
-  staging meta files, package names, shellcheck, spelling, gofmt,
-  golangci-lint, golangci-lint-config-shape, govulncheck, owners-fmt,
-  mock-source-pair.
-- **36 bundled rules** from the 4 extended rulesets (some IDs overlap,
-  which is why `alint list` reports 49 not 50): 15 from oss-baseline + 8
-  from go + 3 from ci/github-actions + 11 from hygiene/no-tracked-artifacts
-  − overlap = 36 effective rule IDs after dedup.
+- **25 repository-specific rules** are declared in `.alint.yml`.
+- **33 bundled rules** come from the 3 extended rulesets: 15 from
+  `oss-baseline`, 7 from `go`, and 11 from
+  `hygiene/no-tracked-artifacts`.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 49 rule(s)
-loaded`. Pitfall checks: the magic comment is present (line 1); the
-`command:` rules use `command:` (not `argv:`) and integer `timeout:`
+**Current validation (alint 0.17.0, 2026-10-06):** `alint
+validate-config` reports `✓ Config valid: 58 rule(s) loaded`. Pitfall
+checks: the magic comment is present (line 1); the `command:` rules use
+`command:` (not `argv:`) and integer `timeout:`
 (not duration strings); the `pair` rule uses `partner:` (not
 `secondary:`). The 3 regex pitfalls that surfaced 34,420 FPs against
 the v0.9.17 walk were fixed in v0.9.18 (commit c5b6df32) — current
@@ -630,11 +626,15 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   c5b6df32) and shipped bundled-rule refinements A1-A6 that eliminated
   ~10k FPs across the case-study set; v0.9.19/v0.9.20 added width-aware
   human output and the bundled-rule message audit.
-- **Rule count:** **49** (13 custom + 4 bundled rulesets — `oss-baseline`
+- **Historical rule count:** **49** (13 custom + 4 bundled rulesets — `oss-baseline`
   15, `go` 8, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11;
   some rule IDs overlap which is why the grand total is 49 rather than
   the arithmetic sum of 50)
-- **`alint validate-config`:** ✓ Config valid: 49 rule(s) loaded
+- **Historical `alint validate-config`:** ✓ Config valid: 49 rule(s) loaded
+- **Current config validation (alint 0.17.0, 2026-10-06):** ✓ Config
+  valid: 58 rule(s) loaded (25 declared rules + 3 current bundled
+  rulesets). This is a config/schema revalidation, not a new live-tree
+  findings measurement.
 - **Live-tree recheck status:** Counts in §6 reflect the 2026-05-07
   v0.9.17 walk; the 34,420 FPs from the 3 pitfall-#22-class regex bugs
   are RESOLVED in v0.9.18 (current `.alint.yml` carries the corrected

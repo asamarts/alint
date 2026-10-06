@@ -420,19 +420,17 @@ rules:
     timeout: 600
 ```
 
-**Repo-specific vs bundled split:**
+**Current config split:**
 
-- **25 repo-specific rules** in `.alint.yml` (the `vscode-*` prefix
-  identifies them in `alint list` output): copyrights ×2, vscode-dts
-  filename grammar + copyright + module shape, 7 governance/config
-  pinning, line-endings ×3, tsconfig invariants ×2, package.json
-  scripts ×4, workflow permissions, plus the 3 `command:` shellouts.
-- **42 bundled rules** from the 6 extended rulesets (some IDs
-  overlap, which is why `alint list` reports 67 not 67+25).
+- **28 repository-specific rules** are declared in `.alint.yml`.
+- **40 bundled rules** come from the 5 extended rulesets: 15 from
+  `oss-baseline`, 8 from `node`, 3 from `ci/github-actions`, 11 from
+  `hygiene/no-tracked-artifacts`, and 3 from `tooling/editorconfig`.
 
-**Validation:** `alint validate-config` reports
-`✓ Config valid: 67 rule(s) loaded`. Pitfall checks: the magic
-comment is present (line 1); the `command:` rules use `command:` (not
+**Current validation (alint 0.17.0, 2026-10-06):** `alint
+validate-config` reports `✓ Config valid: 68 rule(s) loaded`. Pitfall
+checks: the magic comment is present (line 1); the `command:` rules use
+`command:` (not
 `argv:`) and integer `timeout:` (not duration strings); the regex
 patterns use `\s+` to bridge lines (avoids pitfall #14 —
 single-quoted YAML `\n` non-expansion). **Importantly: NO `pattern:
@@ -625,12 +623,17 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   `.alint.yml` itself was not modified in batch B1 (it never carried
   pitfall #22 — both copyright-header rules use single-quoted scalars
   with `\s+` bridging, the canonical correct pattern).
-- **Rule count:** **67** (25 custom + 6 bundled rulesets — `oss-baseline`
+- **Historical rule count:** **67** (25 custom + 6 bundled rulesets —
+  `oss-baseline`
   15, `node` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts`
   11, `tooling/editorconfig` 3, `agent-context` 5; some rule IDs
   overlap which is why the grand total is 67 rather than the
   arithmetic sum)
-- **`alint validate-config`:** ✓ Config valid: 67 rule(s) loaded
+- **Historical `alint validate-config`:** ✓ Config valid: 67 rule(s) loaded
+- **Current config validation (alint 0.17.0, 2026-10-06):** ✓ Config
+  valid: 68 rule(s) loaded (28 declared rules + 5 current bundled
+  rulesets). This is a config/schema revalidation, not a new live-tree
+  findings measurement.
 - **Live-tree recheck status:** Counts in §6 reflect the 2026-05-07
   v0.9.17 walk; the 19 `hygiene-no-js-build-outputs` FPs are RESOLVED
   in v0.9.18 (bundled-rule refinement A1). The 2 real fixture copyright

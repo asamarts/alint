@@ -362,19 +362,15 @@ rules:
     matches: '^@prettier/plugin-'
 ```
 
-**Repo-specific vs bundled split:**
+**Current config split:**
 
-- **22 prettier-specific rules** in `.alint.yml`: 1 deps-pinned + 6
-  command shellouts (yarn lint, prettier, eslint, cspell,
-  format-test, actionlint analogue) + 5 changelog gates + 5 structural
-  layout gates + 5 root-config presence + 3 package.json shape
-  rules.
-- **46 bundled rules** from the 6 extended rulesets (some IDs overlap,
-  which is why `alint list` reports 68 not 76): 15 + 9 + 3 + 11 + 5 +
-  3 = 46, no overlap.
+- **25 repository-specific rules** are declared in `.alint.yml`.
+- **40 bundled rules** come from the 5 extended rulesets: 15 from
+  `oss-baseline`, 8 from `node`, 3 from `ci/github-actions`, 11 from
+  `hygiene/no-tracked-artifacts`, and 3 from `tooling/editorconfig`.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 68
-rule(s) loaded`. Pitfall checks:
+**Current validation (alint 0.17.0, 2026-10-06):** `alint
+validate-config` reports `✓ Config valid: 65 rule(s) loaded`. Pitfall checks:
 
 - Magic comment present (line 1).
 - `command:` rules use `command:` (not `argv:`) and integer
@@ -560,13 +556,17 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 
 - **alint version:** `0.9.20` (current as of 2026-05-10). Originally
   validated against `0.9.17` (2026-05-07).
-- **Rule count:** **68** (22 custom + 6 bundled rulesets — `oss-baseline`
+- **Historical rule count:** **68** (22 custom + 6 bundled rulesets — `oss-baseline`
   15, `node` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts`
   11, `agent-context` 5, `tooling/editorconfig` 3 = 46 bundled). The
   v0.9.18 fix wave (A1-A6) did not change this count; v0.9.19/v0.9.20
   changed only output width handling + bundled-rule message text.
-- **`alint validate-config`:** ✓ Config valid: 68 rule(s) loaded
+- **Historical `alint validate-config`:** ✓ Config valid: 68 rule(s) loaded
   (v0.9.17-era; not re-run for v0.9.20).
+- **Current config validation (alint 0.17.0, 2026-10-06):** ✓ Config
+  valid: 65 rule(s) loaded (25 declared rules + 5 current bundled
+  rulesets). This is a config/schema revalidation, not a new live-tree
+  findings measurement.
 - **Live-tree recheck:** **performed at v0.9.17** — see §6 for the
   111-violation breakdown (2 false-positive `node_modules/` test
   fixtures + ~13 warnings + 75 cosmetic info-level findings; **5
