@@ -56,22 +56,22 @@ the canonical per-release performance history on a different host.
 
 | Tool | Scenario | 1k mean | 10k mean | 100k mean | 100k / 1k |
 |---|---|---:|---:|---:|---:|
-| alint | S1 layout/path | 10.8 ms | 48.2 ms | 425.4 ms | 39.41× |
-| ls-lint | S1 filename hygiene | 35.0 ms | 67.7 ms | 371.0 ms | 10.59× |
-| shell (`find` + grep) | S1 layout/path approximation | 21.8 ms | 74.7 ms | 463.0 ms | 21.21× |
-| alint | S2 per-file content | 18.0 ms | 119.7 ms | 1,198.1 ms | 66.71× |
-| shell (`test` + `find` + ripgrep) | S2 approximation | 26.8 ms | 72.6 ms | 480.5 ms | 17.95× |
-| Repolinter | S2 existence/content subset | 394.2 ms | 1,394.3 ms | 13,374.7 ms | 33.93× |
+| alint | S1 layout/path | 11.5 ms | 50.7 ms | 453.7 ms | 39.55× |
+| ls-lint | S1 filename hygiene | 33.0 ms | 63.7 ms | 331.5 ms | 10.05× |
+| shell (`find` + grep) | S1 layout/path approximation | 22.3 ms | 76.7 ms | 481.1 ms | 21.53× |
+| alint | S2 per-file content | 19.6 ms | 121.5 ms | 1,213.5 ms | 62.07× |
+| shell (`test` + `find` + ripgrep) | S2 approximation | 27.4 ms | 75.6 ms | 486.4 ms | 17.72× |
+| Repolinter | S2 existence/content subset | 383.3 ms | 1,403.2 ms | 13,627.2 ms | 35.55× |
 
 All six ratios are comfortably above the 2× diagnostic floor. The corrected
-ls-lint series now grows 10.59× from 1k to 100k instead of the invalid 0.98×.
+ls-lint series now grows 10.05× from 1k to 100k instead of the invalid 0.98×.
 The tools do not implement identical rule sets, so the table characterizes
 their supported workload shapes; it is not a claim of semantic equivalence.
 
-Hyperfine flagged the first measured Repolinter 100k sample (16.141 s) as
-slower than the rest. It is retained in the raw result rather than discarded;
-the cell's 8.5% coefficient of variation remains inside the macro gate's 10%
-quality ceiling for 100k rows.
+The slowest Repolinter 100k sample (15.841 s) is retained in the raw result
+rather than discarded. The cell's 7.1% coefficient of variation remains inside
+the macro gate's 10% quality ceiling for 100k rows, and the complete report
+passes `xtask bench-gate` with no advisory or gating failures.
 
 Raw sample timings, aggregate statistics, row identities, and the complete
 machine/tool fingerprint are in [`results/index.md`](results/index.md) and
@@ -98,4 +98,4 @@ ALINT_BENCH_IMAGE=alint-bench:issue-270 \
 The run completed without a readiness or flat-scaling warning. Its fingerprint
 records Linux/x86_64, AMD Ryzen 9 3900X (24 logical cores), 62 GB RAM, overlay
 filesystem, rustc 1.88.0, Hyperfine 1.20.0, ls-lint 2.2.3, Repolinter 0.11.2
-on Node.js 20.20.2, ripgrep 15.1.0, and alint 0.17.0 at `fb4407a6`.
+on Node.js 20.20.2, ripgrep 15.1.0, and alint 0.17.0 at `997e925c`.

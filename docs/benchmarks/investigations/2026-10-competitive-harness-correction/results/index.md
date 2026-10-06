@@ -5,12 +5,12 @@
 **RAM:** 62 GB<br>
 **FS:** `overlay`<br>
 **rustc:** `rustc 1.88.0 (6b00bc388 2025-06-23)`<br>
-**alint:** `0.17.0` (fb4407a6)<br>
+**alint:** `0.17.0` (997e925c)<br>
 **hyperfine:** `1.20.0`<br>
 **Tools:** alint=`0.17.0`, ls-lint=`ls-lint v2.2.3`, repolinter=`0.11.2; node v20.20.2`, shell=`find (GNU findutils) 4.9.0; grep (GNU grep) 3.8; ripgrep 15.1.0`<br>
 **Seed:** `0xa11e47`<br>
 **Warmup/runs:** 3 / 10<br>
-**Generated:** `unix:1791312069`<br>
+**Generated:** `unix:1791323640`<br>
 
 Cross-machine variance is expected; see `docs/benchmarks/METHODOLOGY.md`. Compare numbers like-for-like (same fingerprint), never absolutely.
 
@@ -25,21 +25,21 @@ Per-size detail under `<size>/results.md`. JSON: `results.json`.
 
 | Tool | Size | Scenario | Mode | Mean | Stddev | Min | Max | Samples |
 |---|---|---|---|---:|---:|---:|---:|---:|
-| alint | 1k | S1 | full | 10.8 | 0.6 | 10.3 | 11.8 | 10 |
-| ls-lint | 1k | S1 | full | 35.0 | 1.4 | 33.2 | 37.2 | 10 |
-| shell | 1k | S1 | full | 21.8 | 0.4 | 21.2 | 22.3 | 10 |
-| alint | 1k | S2 | full | 18.0 | 0.8 | 16.8 | 18.9 | 10 |
-| shell | 1k | S2 | full | 26.8 | 0.8 | 25.8 | 28.4 | 10 |
-| repolinter | 1k | S2 | full | 394.2 | 13.2 | 372.6 | 419.9 | 10 |
-| alint | 10k | S1 | full | 48.2 | 1.0 | 46.9 | 49.6 | 10 |
-| ls-lint | 10k | S1 | full | 67.7 | 2.2 | 65.4 | 73.2 | 10 |
-| shell | 10k | S1 | full | 74.7 | 0.9 | 73.3 | 76.6 | 10 |
-| alint | 10k | S2 | full | 119.7 | 2.5 | 115.7 | 122.9 | 10 |
-| shell | 10k | S2 | full | 72.6 | 0.9 | 71.4 | 74.3 | 10 |
-| repolinter | 10k | S2 | full | 1394.3 | 18.2 | 1358.5 | 1415.4 | 10 |
-| alint | 100k | S1 | full | 425.4 | 6.2 | 417.3 | 436.9 | 10 |
-| ls-lint | 100k | S1 | full | 371.0 | 26.8 | 332.7 | 417.8 | 10 |
-| shell | 100k | S1 | full | 463.0 | 4.2 | 455.9 | 469.8 | 10 |
-| alint | 100k | S2 | full | 1198.1 | 21.5 | 1174.3 | 1244.9 | 10 |
-| shell | 100k | S2 | full | 480.5 | 4.4 | 472.6 | 487.4 | 10 |
-| repolinter | 100k | S2 | full | 13374.7 | 1136.9 | 12743.7 | 16141.1 | 10 |
+| alint | 1k | S1 | full | 11.5 | 0.8 | 10.3 | 12.8 | 10 |
+| ls-lint | 1k | S1 | full | 33.0 | 1.6 | 31.0 | 36.6 | 10 |
+| shell | 1k | S1 | full | 22.3 | 0.5 | 21.6 | 22.9 | 10 |
+| alint | 1k | S2 | full | 19.6 | 1.0 | 18.2 | 21.6 | 10 |
+| shell | 1k | S2 | full | 27.4 | 1.0 | 26.1 | 28.7 | 10 |
+| repolinter | 1k | S2 | full | 383.3 | 9.2 | 366.2 | 396.3 | 10 |
+| alint | 10k | S1 | full | 50.7 | 2.2 | 48.7 | 56.5 | 10 |
+| ls-lint | 10k | S1 | full | 63.7 | 1.3 | 61.4 | 66.3 | 10 |
+| shell | 10k | S1 | full | 76.7 | 3.4 | 72.6 | 82.8 | 10 |
+| alint | 10k | S2 | full | 121.5 | 2.8 | 117.0 | 126.2 | 10 |
+| shell | 10k | S2 | full | 75.6 | 1.6 | 74.1 | 78.6 | 10 |
+| repolinter | 10k | S2 | full | 1403.2 | 38.2 | 1344.2 | 1455.8 | 10 |
+| alint | 100k | S1 | full | 453.7 | 17.5 | 438.3 | 501.3 | 10 |
+| ls-lint | 100k | S1 | full | 331.5 | 6.1 | 322.4 | 342.2 | 10 |
+| shell | 100k | S1 | full | 481.1 | 6.0 | 476.1 | 494.4 | 10 |
+| alint | 100k | S2 | full | 1213.5 | 13.8 | 1187.1 | 1231.0 | 10 |
+| shell | 100k | S2 | full | 486.4 | 13.2 | 475.8 | 518.0 | 10 |
+| repolinter | 100k | S2 | full | 13627.2 | 963.0 | 12643.0 | 15841.1 | 10 |
