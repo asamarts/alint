@@ -96,22 +96,24 @@ one-release migration and a per-rule Safe override from top-level config.
 
 **3. A fixer trust boundary distinct from the kind-level spawn gate.** A fixer is a new trust
 surface, and the existing `SPAWNING_RULE_KINDS` allowlist gates the rule **kind**, not a
-**fixer** attached to a non-spawning kind. We will add a fix-level gate keyed on
-capability and provenance. **Fixed-behavior fixers** (the seven normalizers, rename-to-case,
-`file_remove`, `chmod`, `dir_create`) inject no bytes and do not spawn, so they are honored at
-their tier from any source (this keeps bundled rulesets' trailing-whitespace / final-newline fixes
-auto-applying). **Content-injecting fixers** (`replace`, `set_value`, `sync_from`, `insert_header`,
-create/prepend/append-with-content) are honored from top-level config, local-path `extends:`, and
-first-party bundled rulesets, but **demoted to Suggestion** from a remote-URL `extends:`, with a
-top-level `trusted_extends:` allowlist to opt specific remote sources back in. **Spawning fixers**
-(`git_untrack`, a `command`-backed fix, regenerate-from-command) are **refused at load** from any
+**fixer** attached to a non-spawning kind. The fix-level gate is keyed on capability and
+provenance. **Fixed-behavior fixers** (`file_remove`, `dir_create`, `relocate`, `remove_value`, and
+the security-positive bidi/zero-width removals) inject no ruleset bytes, cannot be dangerously
+aimed at a Safe tier, and do not spawn, so they are honored at their tier from any source.
+**Content-injecting or remotely aimable fixers** (`replace`, `set_value`, `sync_from`,
+create/prepend/append-with-content, sorting/reindent/rename operations, the context-sensitive
+hygiene normalizers, and `chmod`) are honored from top-level config, local-path `extends:`, and
+first-party bundled rulesets, but **demoted to Suggestion** from a remote-URL `extends:` or nested
+config. A top-level `trusted_extends:` allowlist opts specific remote sources back in.
+**Spawning fixers** (`git_untrack` and command execution) are **refused at load** from any
 non-top-level source. Applicability promotion is top-level-only (an inherited fixer may be demoted
-but never promoted). This provenance does **not** exist in the loader today (rules are merged into
-one id-keyed list with no source tag; `allow_out_of_root` is a top-level policy matched by
-id/kind, and inherited-rule safety is done by rejecting-and-dropping at load, not by tagging
-origin): the spawning-fixer *refusal* fits that existing reject-at-load pattern, but the
-content-fixer *demotion* and `trusted_extends:` require new per-source provenance threaded through
-`merge()` onto `RuleSpec` / `RuleEntry` to fix time. It is new, security-load-bearing plumbing.
+but never promoted).
+
+The implementation rewrites fixers on each untrusted raw source and carries a private monotonic
+untrusted-source bit through id-based field merges and template expansion. `finalize()` caps the
+effective fixer and removes the bit before building `RuleSpec`, so no provenance field is needed
+at fix time and mixed-source templates cannot bypass the boundary. This is distinct from the
+reject-at-load spawn gate and remains security-load-bearing plumbing.
 
 ## Consequences
 
@@ -128,8 +130,8 @@ ARCHITECTURE's "walk once per invocation" invariant for `fix`) instead of a loop
 format needs its own span resolver and value serializer because the lossy `serde_json::Value`
 pipeline cannot be reused for write-back; multi-file fixes are all-or-nothing through the verify
 phase but only best-effort through the per-file write phase (no cross-file journal); `fix` becomes
-baseline-aware; new per-source provenance plumbing must be threaded through the loader for the
-content-fixer trust gate (it does not exist today); carrying fixes in `check --format sarif` /
+baseline-aware; the content-fixer trust gate adds private, monotonic source provenance to the raw
+loader composition path; carrying fixes in `check --format sarif` /
 `agent` adds edit computation to `check` when those formats are selected; and each new op or status
 must update the gated downstream artifacts (`schemas/*.json`, `facts.json auto_fix_ops`, README
 counts, `docs/rules.md`, ARCHITECTURE.md) plus land a gated `fix` perf-bench. Reclassifying

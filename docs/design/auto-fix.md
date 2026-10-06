@@ -638,41 +638,27 @@ could ship a fix that silently injects bytes into the user's files or shells out
 - **Applicability promotion** toward Safe/Unsafe is top-level-only: an inherited fixer may be
   demoted but never promoted. `allow_out_of_root` remains top-level-only, unchanged.
 
-**This gate is new plumbing, not a reuse of an existing mechanism (correcting an earlier draft).**
-Today the loader `merge()`s every source's rules into one id-keyed list with **no source tag**,
-and `RuleSpec` / `RuleEntry` carry no origin field; `allow_out_of_root` is a top-level policy
-matched by id/kind, and inherited-rule safety is enforced by **rejecting dangerous keys at load**
-(`reject_command_rules_in`, `reject_custom_facts_in` in `loader.rs` abort the whole load with an
-error that names the offending source, rather than dropping one rule and continuing), so no
-provenance needs to survive the merge. Two consequences: (1) the spawning-fixer **refusal** fits
-that existing reject-at-load pattern directly, scanning each `extends:`-ed rule's `fix:` block; but
-(2) the content-fixer **demotion** *keeps* the rule, so its four-way source (top-level /
-local-path / bundled / remote-URL) must be newly threaded through `merge()` onto `RuleSpec` /
-`RuleEntry` and carried to fix time, and `trusted_extends:` is a new top-level config key. This is
-security-load-bearing work to build, not a mechanism to inherit.
+**This gate is security-load-bearing plumbing, not a reuse of the kind-level spawn gate.**
+Spawning-fixer **refusal** follows the existing reject-at-load pattern: scan each inherited
+source's rule/template mappings and abort with an error that names the source. Content-fixer
+**demotion** is different because it keeps the rule, so source trust must survive composition long
+enough to cap the effective fixer. `trusted_extends:` is the top-level-only authority that decides
+whether a particular remote receives content-write trust; it never grants process authority.
 
-**Shipped design and its one known residual (load-time cap, chosen over fix-time provenance).**
-The demotion is implemented as a *load-time cap*, not the fix-time provenance the previous
-paragraph sketches: an untrusted remote's content-injecting fixers are rewritten to `suggestion`
-on the raw config during `load_recursive` -- across BOTH its `rules[]` (inline `fix:` blocks) and
-its `templates[]` (a template's `fix:` splices into its referencing rule at `finalize`, *after*
-this cap, so both are scanned) -- before any `RuleSpec` / `RuleEntry` is built. That is simpler
-than threading a four-way source tag through `merge()` to fix time, and it covers every case where
-the untrusted *content* is authored by the untrusted source. Its one residual: the cap keys on
-where the fixer content is DEFINED, not on which rule USES it. A rule from an untrusted remote that
-`extends_template:`s a template defined by a TRUSTED source (the user's own top-level config -- no
-bundled ruleset ships a `templates:` block today) acquires that template's fixer at its declared
-tier at `finalize`, because the trusted template was never demoted and the untrusted rule carried
-no inline fixer to demote. The untrusted rule then picks which of the user's files the
-(trusted-template-shaped) auto-write lands on via its host kind / scope / pattern; if the template
-exposes a `{{vars.*}}` hole in its fix content, the untrusted instance's `vars:` fill it, so the
-injected bytes can be attacker-chosen rather than the user's own. This is bounded and
-targeted-only: it needs the user to have authored a content-fix template, the remote to know that
-template's id (and var names), and the user to already `extends:` the remote -- and there is no
-public or bundled template id to target. It is pinned by
-`w2_known_residual_remote_rule_instantiating_a_trusted_template` (alint-dsl `tests.rs`); the
-deferred fix-time-provenance approach (tag each rule's origin, demote its EFFECTIVE fixer after
-template expansion) closes it, and closing it flips that test.
+**Shipped design (source-local cap plus finalize-time effective cap).** An untrusted remote's or
+nested config's content-injecting fixers are first rewritten to `suggestion` on their raw mappings.
+Both `rules[]` and `templates[]` are scanned. Those mappings also receive a private, monotonic
+untrusted-source bit: id-based field merges combine it with logical OR, template expansion carries
+it from either the instance or the template, and `finalize()` removes it only after demoting the
+effective fixer. `RuleSpec` / `RuleEntry` therefore need no runtime origin field, but a later trusted
+field override cannot erase an earlier untrusted contribution. This closes both mixed-source
+template cases: an untrusted rule instantiating a trusted fixer-bearing template, and a trusted
+rule instantiating a template partly defined by an untrusted source. The tests
+`w2_remote_rule_instantiating_a_trusted_template_is_demoted`,
+`w2_untrusted_rule_provenance_survives_a_trusted_field_merge`,
+`w2_untrusted_template_provenance_survives_a_trusted_field_merge`, and
+`nested_rule_instantiating_a_root_template_is_demoted` pin the boundary; the allowlisted-remote
+counterexample verifies that `trusted_extends:` deliberately retains its declared content tier.
 
 ### 5.6 DSL, CLI, and downstream surface
 

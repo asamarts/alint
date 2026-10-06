@@ -910,15 +910,22 @@ const REMOTE_REPLACE: &str = "version: 1\nrules:\n  - id: no-todo\n    \
      level: error\n    fix: { replace: { replacement: DONE } }\n";
 
 fn load_extending(remote_body: &str, top_extra: &str) -> alint_core::Config {
+    load_extending_top(
+        remote_body,
+        &format!("version: 1\n{{url}}\n{top_extra}rules: []\n"),
+    )
+}
+
+/// Load an exact top-level body around a seeded remote. `{url}` is replaced by
+/// the generated `extends:` line, allowing tests that need top-level rules rather
+/// than the empty list used by [`load_extending`].
+fn load_extending_top(remote_body: &str, top_body: &str) -> alint_core::Config {
     let tmp = tempfile::tempdir().unwrap();
     let cache = extends::Cache::at(tmp.path().join("cache"));
     let url = seed_remote(&cache, remote_body);
     let config_path = tmp.path().join(".alint.yml");
-    std::fs::write(
-        &config_path,
-        format!("version: 1\nextends: [\"{url}\"]\n{top_extra}rules: []\n"),
-    )
-    .unwrap();
+    let extends_line = format!("extends: [\"{url}\"]");
+    std::fs::write(&config_path, top_body.replace("{url}", &extends_line)).unwrap();
     // Keep the tempdir alive for the duration of the load by leaking it into the
     // cache path (the cache is read during load); simplest is to load before drop.
     let opts = LoadOptions::with_cache(cache);
@@ -1242,18 +1249,11 @@ fn w2_remote_content_fixer_via_template_is_demoted() {
 }
 
 #[test]
-fn w2_known_residual_remote_rule_instantiating_a_trusted_template() {
-    // KNOWN RESIDUAL of the load-time cap (whole-phase audit W2-1, LOW,
-    // targeted-only; auto-fix.md 5.5, loader.rs demotion site). The cap demotes an
-    // untrusted remote's OWN content fixers (inline `fix:` + its own `templates:`),
-    // keying on where the CONTENT is defined. It does NOT re-examine which rule
-    // USES a fixer after template expansion, so an untrusted remote rule that
-    // `extends_template:`s a template defined by the TRUSTED top-level config
-    // acquires that (never-demoted) fixer at its declared tier -- and, through a
-    // `{{vars.*}}` hole, with attacker-chosen bytes. This test PINS the residual so
-    // it cannot drift silently: the deferred fix-time-provenance approach would
-    // close it, flipping this assert to `Some(Suggestion)` (update the docs then).
-    //
+fn w2_remote_rule_instantiating_a_trusted_template_is_demoted() {
+    // The source-local cap cannot see a fixer this remote rule acquires only when
+    // `finalize` expands the trusted root template. The raw rule's monotonic
+    // provenance marker must survive merge + expansion and cap the EFFECTIVE
+    // fixer, including bytes supplied through a template variable.
     // The user's top-level config authors the parameterized content-fix template;
     // the untrusted remote authors only a rule that instantiates it and fills the
     // `{{vars.text}}` hole with its own bytes.
@@ -1265,15 +1265,11 @@ fn w2_known_residual_remote_rule_instantiating_a_trusted_template() {
         fix: { replace: { replacement: \"{{vars.text}}\" } }\n";
     let cfg = load_extending(remote, top_template);
     let rule = cfg.rules.iter().find(|r| r.id == "pwned").unwrap();
-    // NOT demoted: the trusted template's `replace` keeps its declared tier
-    // (unset -> defaults to Unsafe, auto-applies under --unsafe-fixes), not
-    // `suggestion`. If a future provenance fix demotes it, this becomes
-    // `Some(Suggestion)` -- update this test and auto-fix.md 5.5 together.
     assert_eq!(
         declared_content_tier(rule),
-        None,
-        "KNOWN RESIDUAL: a remote rule instantiating a TRUSTED template's content \
-         fixer is not demoted by the load-time cap (auto-fix.md 5.5)"
+        Some(alint_core::Applicability::Suggestion),
+        "an untrusted rule instantiating a trusted template must have its effective \
+         content fixer demoted after expansion"
     );
     // And the injected bytes are the remote's own (var-hole amplification), proving
     // this is arbitrary-byte injection, not merely triggering the user's own fixer.
@@ -1286,6 +1282,66 @@ fn w2_known_residual_remote_rule_instantiating_a_trusted_template() {
         }
         other => panic!("expected a Replace fixer, got {other:?}"),
     }
+}
+
+#[test]
+fn w2_trusted_remote_rule_instantiating_a_trusted_template_keeps_tier() {
+    // `trusted_extends:` deliberately restores content authority for the named
+    // remote, including a fixer acquired from a root template. It still does not
+    // grant process-spawning authority (covered by the independent spawn tests).
+    let remote = "version: 1\nrules:\n  - id: allowed\n    \
+        extends_template: user_inject\n    paths: \"*.txt\"\n    \
+        vars:\n      text: APPROVED\n";
+    let top = "trusted_extends: [\"https://example.invalid/remote.yml\"]\n\
+        templates:\n  - id: user_inject\n    kind: file_content_forbidden\n    \
+        pattern: TODO\n    level: error\n    \
+        fix: { replace: { replacement: \"{{vars.text}}\" } }\n";
+    let cfg = load_extending(remote, top);
+    let rule = cfg.rules.iter().find(|r| r.id == "allowed").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        None,
+        "an allowlisted remote's effective content fixer keeps its declared tier"
+    );
+}
+
+#[test]
+fn w2_untrusted_template_provenance_survives_a_trusted_field_merge() {
+    // The inverse mixed-source case: the remote contributes part of a template,
+    // while the trusted root supplies its fixer and instantiates it. Template
+    // provenance must OR across the id-based field merge, or the trusted rule
+    // would auto-apply a target shape partly controlled by the remote.
+    let remote = "version: 1\ntemplates:\n  - id: mixed\n    \
+        kind: file_content_forbidden\n    pattern: TODO\nrules: []\n";
+    let top = "version: 1\n{url}\ntemplates:\n  - id: mixed\n    level: error\n    \
+        fix: { replace: { replacement: DONE } }\nrules:\n  - id: use-mixed\n    \
+        extends_template: mixed\n    paths: \"*.txt\"\n";
+    let cfg = load_extending_top(remote, top);
+    let rule = cfg.rules.iter().find(|r| r.id == "use-mixed").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "untrusted template provenance must survive a trusted field merge"
+    );
+}
+
+#[test]
+fn w2_untrusted_rule_provenance_survives_a_trusted_field_merge() {
+    // A remote can supply the target shape while the root later adds only the
+    // fixer to the same rule id. The source-local pass sees no remote fixer, so
+    // the rule marker itself must survive the merge and cap the composed fixer.
+    let remote = "version: 1\nrules:\n  - id: mixed-rule\n    \
+        kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: TODO\n    \
+        level: error\n";
+    let top = "version: 1\n{url}\nrules:\n  - id: mixed-rule\n    \
+        fix: { replace: { replacement: DONE } }\n";
+    let cfg = load_extending_top(remote, top);
+    let rule = cfg.rules.iter().find(|r| r.id == "mixed-rule").unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "untrusted rule provenance must survive a trusted field merge"
+    );
 }
 
 #[test]
@@ -2253,6 +2309,42 @@ fn nested_config_demotes_a_content_fixer_to_suggestion() {
         declared_content_tier(rule),
         Some(alint_core::Applicability::Suggestion),
         "a nested content fixer must be demoted to suggestion, not auto-applied"
+    );
+}
+
+#[test]
+fn nested_rule_instantiating_a_root_template_is_demoted() {
+    // A nested rule has no inline fixer to cap before template expansion. Its
+    // provenance marker must survive scoping and cause the root template's
+    // effective content fixer to become Suggestion at finalize.
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &root_cfg,
+        "version: 1\nnested_configs: true\ntemplates:\n  - id: inject\n    \
+         kind: file_content_forbidden\n    pattern: TODO\n    level: error\n    \
+         fix: { replace: { replacement: DONE } }\nrules: []\n",
+    )
+    .unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: nested-template\n    extends_template: inject\n    \
+         paths: \"*.txt\"\n",
+    )
+    .unwrap();
+
+    let cfg = load(&root_cfg).unwrap();
+    let rule = cfg
+        .rules
+        .iter()
+        .find(|r| r.id == "nested-template")
+        .unwrap();
+    assert_eq!(
+        declared_content_tier(rule),
+        Some(alint_core::Applicability::Suggestion),
+        "a nested rule's root-template fixer must be capped after expansion"
     );
 }
 

@@ -191,12 +191,13 @@ Five threads span phases; scheduled inside the phases.
   can actually emit a Suggestion.)
 - **W2 - Trust and provenance (security).** Per ADR-0017 decision 3, split by first-subject:
   - **Content-fixer demotion + `trusted_extends:`** (**Phase 1**, with `replace`, the first
-    content-injecting *new* op reachable via `extends:`). Thread the four-way source (top-level /
-    local-path+nested / bundled / remote-URL) captured at the single classification site
-    `loader.rs:143-158` onto `RuleSpec` / `RuleEntry` (neither has an origin field today). Content
-    fixers from a **remote-URL** `extends:` demote to Suggestion (honored from the user's own tree
-    and first-party bundled rulesets); `trusted_extends:` opts specific remotes back in; promotion is
-    top-level-only. **This also retroactively demotes the three EXISTING inline-content ops**
+    content-injecting *new* op reachable via `extends:`). **As built:** untrusted remote and nested
+    raw mappings receive a private monotonic bit that is ORed through id merges, carried through
+    template expansion, and consumed when `finalize()` demotes the effective fixer. No source field
+    reaches `RuleSpec` / `RuleEntry`. Content fixers from a **remote-URL** `extends:` demote to
+    Suggestion (honored from the user's own tree and first-party bundled rulesets);
+    `trusted_extends:` opts specific remotes back in; promotion is top-level-only. **This also
+    retroactively demotes the three EXISTING inline-content ops**
     (`file_create`/`file_prepend`/`file_append`) from a remote `extends:` (R-RETRO). The test matrix
     pins all four provenance classes + `trusted_extends:` promotion + the negative.
   - **Spawning-fixer refusal** (**Phase 3**, with `git_untrack`/`command`-fix, the first spawning fix
@@ -360,8 +361,8 @@ gate. First Unsafe op.
    the fix path only** (`check` still walks once) - update both sites here (R-WALK).
 3. LSP: map `ReplaceRange` to a minimal `TextEdit`, converting the byte offset to UTF-16
    line/character from the `bytes` the fixer receives (R-UTF16).
-4. W2 content-fixer trust (section 4; R-PROV): provenance onto `RuleSpec`/`RuleEntry`; remote-URL content
-   fixers -> Suggestion; `trusted_extends:`; **also demote the existing
+4. W2 content-fixer trust (section 4; R-PROV): raw-mapping provenance through merge and template
+   expansion; remote-URL content fixers -> Suggestion; `trusted_extends:`; **also demote the existing
    `file_create`/`file_prepend`/`file_append` from a remote `extends:`** (R-RETRO, a migration note).
 
 **Downstream artifacts.** `config.json` `$defs/fix` (+`replace`) + `FixSpec::ALL`; new `*Fixer`
@@ -565,7 +566,7 @@ Not numbered phases; each needs an explicit opt-in and its own design record.
 | R-FILEREMOVE | the `file_remove`->Unsafe flip reds every existing scenario that asserts a default `fix` removes a file; the no-op DoD misses it | RESOLVED: the flip (`266c88f9`) migrated the enumerated scenarios to the Unsafe default in v0.17 (W5) |
 | R-DETGATE | the deterministic perf gate is advisory and I/O-blind; the collect step is read-heavy and a dry-run cell is single-pass | pair with a `fix_throughput.rs` wall-clock/syscall cell; the perf rung (7) is advisory, not blocking - not a must-be-green DoD gate |
 | R-UTF16 | LSP `Position.character` is UTF-16; a `ReplaceRange` needs offset -> UTF-16 conversion | convert from the fixer's bytes; multi-byte / emoji / CRLF tests in Phase 1 |
-| R-PROV | the content-fixer trust demotion needs per-source provenance that does not exist in the loader today | build it at the single classification site (Phase 1 W2); adversarial four-provenance-class tests |
+| R-PROV | the content-fixer trust demotion needs provenance to survive field merge and template expansion without granting broader runtime authority | resolved with a private monotonic raw-mapping bit consumed at `finalize`; adversarial source-class and mixed-template tests |
 | R-SPAWNGATE | the spawn gate is TWO tests (parity + `extends:`-refusal) in two files; conflating them ships only half | Phase 3: a `SPAWNING_FIX_OPS` parity gate (mirrors `coverage_audit_spawn_gate.rs`) AND an `extends:`-refusal canary (mirrors `crates/alint/tests/spawn_gate.rs`) |
 | R-ROXML / R-EXE | a `roxmltree` bump past 0.20 reintroduces a stack overflow; regenerated help snapshots strip the trycmd `[EXE]` placeholder | keep the 0.20 pin (verify `xml_deeply_nested`); hand-restore `alint[EXE]` after every `TRYCMD=overwrite` |
 | R-WALK | the Phase 1 re-walk amends ARCHITECTURE's "walk once per invocation" invariant (`:39`, `:353`) | Phase 1 updates both sites for the fix path only; `check` stays "walk once" |

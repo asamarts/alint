@@ -38,6 +38,16 @@ use alint_core::{Config, Error, FactSpec, Result};
 use serde::Deserialize;
 use serde_yaml_ng::Mapping;
 
+/// Internal raw-mapping marker carried through composition until template
+/// expansion. It is deliberately not part of the public config schema or the
+/// typed [`RuleSpec`]: [`RawConfig::finalize`] consumes it before deserializing
+/// the effective rule.
+///
+/// The marker is monotonic. [`merge`] combines it with logical OR, so a later
+/// field override cannot accidentally erase the fact that an untrusted remote
+/// or nested source helped define the effective rule/template.
+const UNTRUSTED_FIX_SOURCE_MARKER: &str = "__alint_internal_untrusted_fix_source";
+
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
 /// files. Embedded at build time from the in-crate copy at
 /// `crates/alint-dsl/schemas/v1/config.json`, which is kept byte-identical
@@ -330,7 +340,17 @@ impl RawConfig {
                 .get("id")
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
-            let expanded = expand_template(m, &templates_by_id)?;
+            let mut expanded = expand_template(m, &templates_by_id)?;
+            // A source-local cap is not enough: an untrusted rule can instantiate
+            // a fixer-bearing trusted template, and a trusted rule can instantiate
+            // a template partly defined by an untrusted source. Carry one bit of
+            // provenance through merge + expansion, then cap the EFFECTIVE fixer.
+            // Remove the private marker before RuleSpec deserialization so it never
+            // leaks into the public DSL or runtime model.
+            let untrusted_fix_source = take_untrusted_fix_source(&mut expanded);
+            if untrusted_fix_source {
+                demote_content_fixers_in_rule(&mut expanded);
+            }
             let spec: alint_core::RuleSpec = serde_yaml_ng::from_value(
                 serde_yaml_ng::Value::Mapping(expanded),
             )
@@ -417,16 +437,26 @@ fn expand_template(
         })
         .unwrap_or_default();
 
+    let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
     let mut expanded = (*template).clone();
     expanded = substitute_template_vars(expanded, &vars);
     expanded.remove("id");
 
     for (k, v) in rule {
         let key = k.as_str().unwrap_or_default();
-        if matches!(key, "extends_template" | "vars") {
+        if matches!(
+            key,
+            "extends_template" | "vars" | UNTRUSTED_FIX_SOURCE_MARKER
+        ) {
             continue;
         }
         expanded.insert(k.clone(), v.clone());
+    }
+    if untrusted_fix_source {
+        expanded.insert(
+            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            serde_yaml_ng::Value::Bool(true),
+        );
     }
     Ok(expanded)
 }
@@ -730,6 +760,52 @@ pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
 pub(crate) fn demote_content_fixers_in(rules: &mut [Mapping]) {
     for rule in rules.iter_mut() {
         demote_content_fixers_in_rule(rule);
+    }
+}
+
+/// Tag raw rule/template mappings whose eventual effective fixer must be capped
+/// after composition and template expansion. The source-local demotion still
+/// happens immediately; this marker closes mixed-source cases where the fixer is
+/// acquired only later.
+pub(crate) fn mark_untrusted_fix_sources_in(mappings: &mut [Mapping]) {
+    for mapping in mappings {
+        mapping.insert(
+            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            serde_yaml_ng::Value::Bool(true),
+        );
+    }
+}
+
+fn has_untrusted_fix_source(mapping: &Mapping) -> bool {
+    mapping
+        .get(UNTRUSTED_FIX_SOURCE_MARKER)
+        .and_then(serde_yaml_ng::Value::as_bool)
+        .unwrap_or(false)
+}
+
+fn take_untrusted_fix_source(mapping: &mut Mapping) -> bool {
+    mapping
+        .remove(UNTRUSTED_FIX_SOURCE_MARKER)
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+}
+
+/// Field-merge one raw rule/template mapping while preserving the monotonic
+/// provenance bit. Treating the marker like an ordinary last-wins YAML field
+/// would let a later mapping erase an earlier untrusted contribution.
+fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
+    let untrusted_fix_source =
+        has_untrusted_fix_source(existing) || has_untrusted_fix_source(&incoming);
+    for (key, value) in incoming {
+        if key.as_str() != Some(UNTRUSTED_FIX_SOURCE_MARKER) {
+            existing.insert(key, value);
+        }
+    }
+    if untrusted_fix_source {
+        existing.insert(
+            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            serde_yaml_ng::Value::Bool(true),
+        );
     }
 }
 
@@ -1143,9 +1219,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
             continue;
         };
         if let Some(existing) = templates_by_id.get_mut(&id) {
-            for (k, v) in m {
-                existing.insert(k, v);
-            }
+            merge_mapping_fields(existing, m);
         } else {
             template_order.push(id.clone());
             templates_by_id.insert(id, m);
@@ -1177,9 +1251,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
             // are replaced wholesale, which matches user
             // expectation — overriding `fix.file_create.content`
             // alone would be too surprising.
-            for (k, v) in m {
-                existing.insert(k, v);
-            }
+            merge_mapping_fields(existing, m);
         } else {
             rule_order.push(id.clone());
             rules_by_id.insert(id, m);

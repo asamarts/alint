@@ -228,6 +228,10 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     // SILENT auto-apply, matching this module's stated "as untrusted as an
     // `extends:`'d ruleset" trust model (audit: nested-config HIGH).
     crate::demote_content_fixers_in(&mut config.rules);
+    // Preserve that source trust through root-template expansion. Without this
+    // marker a nested rule with `extends_template:` could acquire a root template's
+    // content fixer only after the source-local demotion above had already run.
+    crate::mark_untrusted_fix_sources_in(&mut config.rules);
 
     // Glob patterns are platform-agnostic (always `/`); on
     // Windows `rel_dir.to_string_lossy()` would emit `\` and we'd

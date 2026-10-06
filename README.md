@@ -98,7 +98,7 @@ Each of the 26 auto-fix ops carries a safety tier, so a bare `alint fix` never s
 
 Preview with `alint fix --dry-run`, or `alint fix --diff` for the exact edits. alint batches a file's edits in memory, writes each file once, and re-runs until the tree stops changing; a size limit (1 MiB by default) skips oversize files rather than rewriting them.
 
-Because `extends:` can pull a ruleset from a URL, a fix that injects content (`replace`, `file_create`, `file_prepend`) from a remote or nested ruleset is demoted to a suggestion unless you list that source under `trusted_extends:`, and a fix that shells out is refused from anywhere but your own top-level config. Every op is listed in the [rule reference](https://alint.org/docs/rules/).
+Because `extends:` can pull a ruleset from a URL, a fix that injects or remotely aims content (`replace`, `file_create`, `file_prepend`, and similar operations) from a remote or nested ruleset is demoted to a suggestion unless you list that source under `trusted_extends:`. The cap is applied to the effective fixer after field composition and template expansion, while a fix that shells out is refused from anywhere but your own top-level config. Every op is listed in the [rule reference](https://alint.org/docs/rules/).
 
 ## Adopt it without a flag day
 
