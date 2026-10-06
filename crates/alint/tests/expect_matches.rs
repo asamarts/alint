@@ -291,7 +291,10 @@ fn nested_scope_assertion_is_checked_per_parent_iteration() {
     );
     let stdout = String::from_utf8_lossy(&missing.stdout);
     assert!(stdout.contains("package-readmes"), "{stdout}");
-    assert!(stdout.contains("packages/a/README.md"), "{stdout}");
+    assert!(
+        stdout.replace('\\', "/").contains("packages/a/README.md"),
+        "{stdout}"
+    );
 
     std::fs::write(dir.path().join("packages/a/README.md"), "safe\n").unwrap();
     let matched = run(dir.path(), &["check"]);
