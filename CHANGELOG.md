@@ -15,6 +15,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   existence and selector rules whose empty sets already have kind-specific
   meaning.
 
+### Fixed
+
+- Cache-backed `scope_filter.changed_since` and manifest-derived predicates are
+  now resolved for nested `require:` rules as well as top-level rules. Deeply
+  nested rule trees are also validated recursively during config loading, so an
+  invalid descendant cannot remain hidden when its parent selector matches
+  nothing.
+
 ## [0.17.0] - 2026-10-01
 
 This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.

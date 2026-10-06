@@ -1115,6 +1115,76 @@ mod tests {
     }
 
     #[test]
+    fn build_session_preserves_expect_matches_findings() {
+        let dir = tempfile::tempdir().unwrap();
+        let config_path = dir.path().join(".alint.yml");
+        std::fs::write(
+            &config_path,
+            r#"version: 1
+rules:
+  - id: required-doc
+    kind: file_content_forbidden
+    paths: required.md
+    pattern: stale
+    expect_matches: true
+    level: error
+"#,
+        )
+        .unwrap();
+
+        let session = build_session(dir.path())
+            .expect("build_session succeeds")
+            .expect("config present");
+        let report = session
+            .engine
+            .run(&session.root, &session.index)
+            .expect("scope assertion evaluates");
+        assert_eq!(report.results.len(), 1, "{report:?}");
+        assert_eq!(report.results[0].violations.len(), 1, "{report:?}");
+        assert!(
+            report.results[0].violations[0]
+                .message
+                .contains("matched none"),
+            "{report:?}"
+        );
+
+        let by_path = group_findings(
+            &session.root,
+            &report.results,
+            &session.engine,
+            &session.config_path,
+        );
+        assert_eq!(by_path[&config_path].len(), 1, "{by_path:?}");
+        assert!(!by_path[&config_path][0].fixable);
+    }
+
+    #[test]
+    fn build_session_rejects_invalid_deeply_nested_rule() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(
+            dir.path().join(".alint.yml"),
+            r#"version: 1
+rules:
+  - id: outer
+    kind: for_each_dir
+    select: packages/*
+    require:
+      - kind: for_each_dir
+        select: "{path}/*"
+        require:
+          - kind: file_exists
+            paths: "{path}/README.md"
+            expect_matches: true
+    level: error
+"#,
+        )
+        .unwrap();
+
+        let error = build_session(dir.path()).expect_err("invalid descendant must fail loading");
+        assert!(error.contains("expect_matches"), "{error}");
+    }
+
+    #[test]
     fn group_findings_anchors_pathless_to_config() {
         use alint_core::{Engine, RuleResult};
         let engine = Engine::new(vec![], alint_core::RuleRegistry::new());

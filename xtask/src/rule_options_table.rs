@@ -144,15 +144,46 @@ pub(crate) fn options_section(
         }
     }
     let _ = writeln!(&mut out);
-    if has_paths {
+    let expect_matches_visible = released.is_none_or(|rel| rel >= (0, 18, 0));
+    let expect_matches_supported = branch
+        .get("properties")
+        .and_then(|p| p.get("kind"))
+        .is_none_or(|kind| {
+            let unsupported = ["file_exists", "file_absent", "dir_exists", "dir_absent"];
+            let canonical = kind.get("const").and_then(serde_json::Value::as_str);
+            let aliases = kind.get("enum").and_then(serde_json::Value::as_array);
+            !canonical.is_some_and(|kind| unsupported.contains(&kind))
+                && !aliases.is_some_and(|kinds| {
+                    kinds.iter().any(|kind| {
+                        kind.as_str()
+                            .is_some_and(|kind| unsupported.contains(&kind))
+                    })
+                })
+        });
+    if has_paths && expect_matches_visible && expect_matches_supported {
         let _ = writeln!(
             &mut out,
             "Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative."
         );
-    } else {
+    } else if has_paths && expect_matches_visible {
+        let _ = writeln!(
+            &mut out,
+            "Plus the common `paths`, `level`, `id`, and `when` fields. This existence rule does not support `expect_matches`, because an empty match set is part of the rule's own semantics. This table is generated from the JSON Schema; option types and defaults are authoritative."
+        );
+    } else if has_paths {
+        let _ = writeln!(
+            &mut out,
+            "Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative."
+        );
+    } else if expect_matches_visible {
         let _ = writeln!(
             &mut out,
             "Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative."
+        );
+    } else {
+        let _ = writeln!(
+            &mut out,
+            "Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative."
         );
     }
     out
@@ -616,6 +647,40 @@ mod tests {
         );
         // No released version (local/dev preview): nothing is gated.
         assert!(options_section(&branch, &schema, None).contains("`root_only`"));
+
+        // The common-field footer obeys the same release gate as table rows.
+        let with_paths = json!({
+            "properties": {
+                "kind": { "const": "demo" },
+                "paths": { "$ref": "#/$defs/paths_spec" }
+            }
+        });
+        assert!(
+            !options_section(&with_paths, &schema, Some((0, 17, 0))).contains("expect_matches")
+        );
+        assert!(options_section(&with_paths, &schema, Some((0, 18, 0))).contains("expect_matches"));
+    }
+
+    #[test]
+    fn options_section_does_not_advertise_expect_matches_for_existence_rules() {
+        let schema = json!({});
+        for kind in ["file_exists", "file_absent", "dir_exists", "dir_absent"] {
+            let branch = json!({
+                "properties": {
+                    "kind": { "const": kind },
+                    "paths": { "$ref": "#/$defs/paths_spec" }
+                }
+            });
+            let out = options_section(&branch, &schema, None);
+            assert!(
+                out.contains("does not support `expect_matches`"),
+                "{kind}: {out}"
+            );
+            assert!(
+                !out.contains("and `expect_matches` fields"),
+                "{kind}: {out}"
+            );
+        }
     }
 
     #[test]

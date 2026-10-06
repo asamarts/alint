@@ -68,6 +68,10 @@ impl Rule for ForEachFileRule {
         validate_nested_require(&self.id, self.level, &self.require, registry)
     }
 
+    fn nested_rule_specs(&self) -> &[CompiledNestedSpec] {
+        &self.require
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(
             ForEachParent::new(&self.id, self.level, self.message.as_deref()),

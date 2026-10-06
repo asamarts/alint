@@ -77,6 +77,10 @@ impl Rule for EveryMatchingHasRule {
         validate_nested_require(&self.id, self.level, &self.require, registry)
     }
 
+    fn nested_rule_specs(&self) -> &[CompiledNestedSpec] {
+        &self.require
+    }
+
     fn requires_full_index(&self) -> bool {
         // Cross-file: every entry matching `select` must satisfy
         // `require`, regardless of whether it (or its required

@@ -126,6 +126,9 @@ struct GitTrackedIndexes {
 /// assertions) to emit verbatim.
 type LivePerFileEntries<'a> = (Vec<(usize, &'a RuleEntry)>, Vec<(usize, RuleResult)>);
 
+/// Visitor used while walking top-level and recursively nested runtime rules.
+type RuleTreeVisitor<'a> = dyn FnMut(&dyn Rule, Option<&crate::RuleSpec>) -> Result<()> + 'a;
+
 /// A rule bundled with an optional `when` expression. Rules with a `when`
 /// that evaluates to false at runtime are skipped (no `RuleResult` is
 /// produced) — same observable effect as `level: off`, but gated on facts.
@@ -137,8 +140,8 @@ pub struct RuleEntry {
     /// config-scoped tooling (`alint explain`, `alint list`) can render the
     /// rule's configured detail — kind, `paths:`, `message:`, `when:` source, and
     /// kind-specific options — from one source of truth rather than a handful of
-    /// ad-hoc per-field copies. Read only by display code, never on the check
-    /// hot path.
+    /// ad-hoc per-field copies. The engine also reads `expect_matches` while
+    /// evaluating the rule's configuration-integrity assertion.
     ///
     /// `None` for entries built without a spec (`Engine::new`, nested/iterator
     /// child rules); such entries render as if every display field were empty.
@@ -337,9 +340,10 @@ impl Engine {
     /// rules) still see the full index but are skipped when
     /// their [`Rule::path_scope`] doesn't intersect the set.
     ///
-    /// An empty set short-circuits to a no-op report — there's
-    /// nothing to lint. Pass `None` (or omit) to disable
-    /// `--changed` semantics entirely.
+    /// An empty set normally short-circuits to a no-op report — there's nothing
+    /// to lint. Rules with `expect_matches: true` still evaluate their full-tree
+    /// scope assertion so an empty diff cannot hide a vacuous configuration.
+    /// Pass `None` (or omit) to disable `--changed` semantics entirely.
     #[must_use]
     pub fn with_changed_paths(mut self, set: HashSet<PathBuf>) -> Self {
         self.changed_paths = Some(set);
@@ -386,7 +390,7 @@ impl Engine {
         // an empty report rather than walk the entries list at
         // all. Saves the fact-evaluation pass too.
         if self.changed_paths.as_ref().is_some_and(HashSet::is_empty)
-            && !self.entries.iter().any(RuleEntry::expect_matches)
+            && !self.any_expect_matches()?
         {
             return Ok(Report {
                 results: Vec::new(),
@@ -478,7 +482,7 @@ impl Engine {
         // file-only / dir-aware indexes) — each is a fresh FileIndex with empty
         // caches, and the declared set is independent of which files it holds.
         self.resolve_changed_paths(root, index)?;
-        self.resolve_manifest_paths(root, index);
+        self.resolve_manifest_paths(root, index)?;
         let alt_indexes = [
             filtered_index.as_ref(),
             git_tracked_indexes
@@ -900,7 +904,7 @@ impl Engine {
         // Per-file rules may carry `scope_filter.changed_since:`; resolve
         // (and cache) the diff before any `Scope::matches` reads it.
         self.resolve_changed_paths(root, index)?;
-        self.resolve_manifest_paths(root, index);
+        self.resolve_manifest_paths(root, index)?;
 
         let ctx = Context {
             root,
@@ -1415,7 +1419,7 @@ impl Engine {
     ) -> Result<(FixReport, BTreeMap<PathBuf, Vec<u8>>)> {
         self.ensure_manifest_scope_resolvable()?;
         if self.changed_paths.as_ref().is_some_and(HashSet::is_empty)
-            && !self.entries.iter().any(RuleEntry::expect_matches)
+            && !self.any_expect_matches()?
         {
             return Ok((
                 FixReport {
@@ -1500,7 +1504,7 @@ impl Engine {
         // Same `scope_filter.changed_since:` resolution as `run`, so a
         // fix pass respects per-rule diff scoping too.
         self.resolve_changed_paths(root, index)?;
-        self.resolve_manifest_paths(root, index);
+        self.resolve_manifest_paths(root, index)?;
         // Propagate BOTH resolved caches onto every alternate index the fix loop
         // may `pick_ctx` (see `run`): the `--changed` filtered index and the
         // git-tracked file-only / dir-aware indexes, so `fix` respects manifest
@@ -2336,6 +2340,58 @@ impl Engine {
         }
     }
 
+    /// Visit every configured rule, including recursively nested `require:`
+    /// rules synthesized with stable placeholder path tokens. Nested selectors
+    /// build their children lazily during evaluation, but scope-filter caches
+    /// must be populated before any rule evaluates; exposing the nested specs
+    /// through [`Rule::nested_rule_specs`] lets this preparation pass discover
+    /// the same effective runtime scopes ahead of dispatch.
+    fn visit_rule_tree(
+        &self,
+        rule: &dyn Rule,
+        spec: Option<&crate::RuleSpec>,
+        visit: &mut RuleTreeVisitor<'_>,
+    ) -> Result<()> {
+        visit(rule, spec)?;
+        if rule.nested_rule_specs().is_empty() {
+            return Ok(());
+        }
+
+        let tokens = crate::template::PathTokens::from_path(Path::new("_"));
+        for (idx, compiled) in rule.nested_rule_specs().iter().enumerate() {
+            let nested_spec = compiled
+                .spec
+                .instantiate(rule.id(), idx, rule.level(), &tokens);
+            let nested_rule = self.registry.build(&nested_spec).map_err(|e| {
+                Error::rule_config(
+                    rule.id(),
+                    format!(
+                        "nested rule #{idx} (`{}`) could not be prepared: {e}",
+                        compiled.spec.kind
+                    ),
+                )
+            })?;
+            self.visit_rule_tree(nested_rule.as_ref(), Some(&nested_spec), visit)?;
+        }
+        Ok(())
+    }
+
+    fn visit_all_rules(&self, visit: &mut RuleTreeVisitor<'_>) -> Result<()> {
+        for entry in &self.entries {
+            self.visit_rule_tree(entry.rule.as_ref(), entry.spec.as_deref(), visit)?;
+        }
+        Ok(())
+    }
+
+    fn any_expect_matches(&self) -> Result<bool> {
+        let mut found = false;
+        self.visit_all_rules(&mut |_rule, spec| {
+            found |= spec.is_some_and(|spec| spec.expect_matches);
+            Ok(())
+        })?;
+        Ok(found)
+    }
+
     /// Resolve every distinct `scope_filter.changed_since:` ref across
     /// the rule set and cache each `<ref>...HEAD` diff on the index,
     /// once per run (before any `Scope::matches` reads it). A ref that
@@ -2347,36 +2403,36 @@ impl Engine {
         if index.changed_paths_initialized() {
             return Ok(());
         }
-        let mut refs: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
-        for entry in &self.entries {
+        let mut refs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        self.visit_all_rules(&mut |rule, _spec| {
             // Per-file rules expose their scope via `PerFileRule::path_scope`
             // (the `Rule::path_scope` default is `None`); rule-major rules
             // expose it via `Rule::path_scope`. changed_since is a per-file
             // concept, so prefer the per-file scope, falling back to the
             // rule-level one.
-            let scope = entry
-                .rule
+            let scope = rule
                 .as_per_file()
                 .map(super::rule::PerFileRule::path_scope)
-                .or_else(|| entry.rule.path_scope());
+                .or_else(|| rule.path_scope());
             if let Some(scope) = scope
                 && let Some(filter) = scope.scope_filter()
                 && let Some(since) = filter.changed_since()
             {
-                refs.insert(since);
+                refs.insert(since.to_string());
             }
-        }
+            Ok(())
+        })?;
         if refs.is_empty() {
             return Ok(());
         }
         let mut map = std::collections::HashMap::new();
         for since in refs {
-            match crate::git::collect_changed_paths_checked(root, since) {
+            match crate::git::collect_changed_paths_checked(root, &since) {
                 Ok(Some(set)) => {
-                    map.insert(since.to_string(), set);
+                    map.insert(since, set);
                 }
                 Ok(None) => {
-                    map.insert(since.to_string(), std::collections::HashSet::new());
+                    map.insert(since, std::collections::HashSet::new());
                 }
                 Err(crate::git::CommitRangeError::BadRange { stderr }) => {
                     return Err(crate::error::Error::Other(format!(
@@ -2409,29 +2465,29 @@ impl Engine {
     /// excludes nothing) — the exact silent-no-op class fuzzing found on rule
     /// kinds that apply a scope but forgot to expose it (see `Rule::path_scope`).
     fn ensure_manifest_scope_resolvable(&self) -> Result<()> {
-        for entry in &self.entries {
-            let Some(sf) = entry.scope_filter() else {
-                continue;
+        self.visit_all_rules(&mut |rule, spec| {
+            let Some(sf) = spec.and_then(|spec| spec.scope_filter.as_ref()) else {
+                return Ok(());
             };
             if sf.include_manifest_paths.is_none() && sf.exclude_manifest_paths.is_none() {
-                continue;
+                return Ok(());
             }
-            if entry.rule.as_per_file().is_none() && entry.rule.path_scope().is_none() {
+            if rule.as_per_file().is_none() && rule.path_scope().is_none() {
                 return Err(Error::rule_config(
-                    entry.rule.id(),
+                    rule.id(),
                     "this rule kind does not support `scope_filter.include_manifest_paths` / \
                      `exclude_manifest_paths`: it exposes no per-file scope for the engine to \
                      resolve, so the manifest set would silently never apply"
                         .to_string(),
                 ));
             }
-        }
-        Ok(())
+            Ok(())
+        })
     }
 
-    fn resolve_manifest_paths(&self, root: &Path, index: &FileIndex) {
+    fn resolve_manifest_paths(&self, root: &Path, index: &FileIndex) -> Result<()> {
         if index.manifest_paths_initialized() {
-            return;
+            return Ok(());
         }
         // Group predicates by cache key: rules sharing a `(source, extract,
         // derive_target)` config resolve once. BTreeMap keeps the resolution
@@ -2439,25 +2495,28 @@ impl Engine {
         // `expect_nonempty` (the resolved SET doesn't depend on them), so a group
         // can mix `include` and `exclude` predicates over the same manifest.
         let mut groups: std::collections::BTreeMap<
-            &str,
-            Vec<&crate::scope_filter::ManifestPredicate>,
+            String,
+            Vec<crate::scope_filter::ManifestPredicate>,
         > = std::collections::BTreeMap::new();
-        for entry in &self.entries {
-            let scope = entry
-                .rule
+        self.visit_all_rules(&mut |rule, _spec| {
+            let scope = rule
                 .as_per_file()
                 .map(super::rule::PerFileRule::path_scope)
-                .or_else(|| entry.rule.path_scope());
+                .or_else(|| rule.path_scope());
             if let Some(scope) = scope
                 && let Some(filter) = scope.scope_filter()
             {
                 for pred in filter.manifest_predicates() {
-                    groups.entry(pred.cache_key()).or_default().push(pred);
+                    groups
+                        .entry(pred.cache_key().to_string())
+                        .or_default()
+                        .push(pred.clone());
                 }
             }
-        }
+            Ok(())
+        })?;
         if groups.is_empty() {
-            return;
+            return Ok(());
         }
         let mut map = std::collections::HashMap::new();
         for (key, group) in groups {
@@ -2472,7 +2531,7 @@ impl Engine {
             // set". A direct confined read matches `registry_paths_resolve` /
             // `file_graph`, which read their sources via `read_capped(root.join())`
             // regardless of the walk. Absent / oversized / escaping -> empty set.
-            let rep = group[0];
+            let rep = &group[0];
             let set = crate::scope_filter::ManifestSet::from_paths(rep.resolve_set(
                 &crate::scope_filter::read_manifest_confined(root, rep.source()),
             ));
@@ -2480,7 +2539,11 @@ impl Engine {
             // expects a non-empty set must be flagged even when an `exclude`
             // sharing the manifest sorted first (the empty-include silent no-op is
             // exactly the footgun `expect_nonempty` guards).
-            if set.is_empty() && group.iter().any(|p| p.warns_on_empty()) {
+            if set.is_empty()
+                && group
+                    .iter()
+                    .any(crate::scope_filter::ManifestPredicate::warns_on_empty)
+            {
                 tracing::warn!(
                     "scope_filter.include_manifest_paths: `{}` resolved to no paths (the manifest \
                      is missing, unreadable, or declares none), so the rule matches nothing. Set \
@@ -2488,9 +2551,10 @@ impl Engine {
                     rep.source().display()
                 );
             }
-            map.insert(key.to_string(), set);
+            map.insert(key, set);
         }
         index.set_manifest_paths(map);
+        Ok(())
     }
 }
 

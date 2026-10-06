@@ -183,6 +183,8 @@ rules:
 
 This assertion always measures the full repository, even when the command uses `--changed`; the underlying per-file rule still evaluates only changed files. That separation prevents both failure modes: a renamed or deleted target is still caught in an incremental CI run, while a valid target outside the diff does not cause a false empty-scope finding. A false `when:` gate disables both the rule and its assertion.
 
+By default, the finding identifies the configured scope and whether a `scope_filter:` removed its remaining candidates. A rule-level `message:` replaces that text, just as it does for the rule's ordinary findings.
+
 `expect_matches` is supported on rules with an enumerable file `paths:` scope, including nested `require:` rules (where it is checked once per active parent iteration). It is deliberately rejected at config load for `file_exists`, `file_absent`, directory-existence rules, and selector/cross-file rules: those kinds already assign their own meaning to an empty set or select through fields other than `paths:`. Use the existence rule itself for presence, and use the selector kind's own completeness behavior where available.
 
 #### `scope_filter` *(per-file rules, v0.9.6+)*

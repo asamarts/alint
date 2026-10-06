@@ -89,6 +89,26 @@ fn empty_scope_is_backward_compatible_by_default_and_fails_when_opted_in() {
 }
 
 #[test]
+fn empty_scope_uses_the_rules_custom_message() {
+    let dir = tempfile::tempdir().unwrap();
+    write_config(
+        dir.path(),
+        &content_rule(
+            "    expect_matches: true\n    message: Required documentation scope is empty.\n",
+        ),
+    );
+
+    let out = run(dir.path(), &["check"]);
+    assert_eq!(code(&out), 1, "{}", String::from_utf8_lossy(&out.stderr));
+    let stdout = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        stdout.contains("Required documentation scope is empty."),
+        "{stdout}"
+    );
+    assert!(!stdout.contains("matched none"), "{stdout}");
+}
+
+#[test]
 fn false_when_gate_disables_the_scope_assertion() {
     let dir = tempfile::tempdir().unwrap();
     write_config(
@@ -303,6 +323,183 @@ fn nested_scope_assertion_is_checked_per_parent_iteration() {
         0,
         "{}",
         String::from_utf8_lossy(&matched.stdout)
+    );
+}
+
+#[test]
+fn empty_changed_set_does_not_hide_a_nested_scope_assertion() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    write_config(
+        dir.path(),
+        "  - id: package-readmes\n\
+         \x20   kind: for_each_dir\n\
+         \x20   select: packages/*\n\
+         \x20   require:\n\
+         \x20     - kind: file_content_forbidden\n\
+         \x20       paths: \"{path}/README.md\"\n\
+         \x20       expect_matches: true\n\
+         \x20       pattern: forbidden\n\
+         \x20   level: error\n",
+    );
+    git(dir.path(), &["init", "-q"]);
+    git(dir.path(), &["add", "."]);
+    git(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=alint test",
+            "-c",
+            "user.email=alint@example.invalid",
+            "commit",
+            "-qm",
+            "fixture",
+        ],
+    );
+
+    let out = run(dir.path(), &["check", "--changed"]);
+    assert_eq!(code(&out), 1, "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        String::from_utf8_lossy(&out.stdout).contains("matched none"),
+        "{}",
+        String::from_utf8_lossy(&out.stdout)
+    );
+
+    let fix = run(dir.path(), &["fix", "--dry-run", "--changed"]);
+    assert_eq!(
+        code(&fix),
+        1,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&fix.stdout),
+        String::from_utf8_lossy(&fix.stderr)
+    );
+    assert!(
+        String::from_utf8_lossy(&fix.stdout).contains("unfixable"),
+        "{}",
+        String::from_utf8_lossy(&fix.stdout)
+    );
+}
+
+#[test]
+fn nested_scope_assertion_resolves_manifest_derived_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    std::fs::write(dir.path().join("packages/a/README.md"), "safe\n").unwrap();
+    std::fs::write(
+        dir.path().join("manifest.json"),
+        r#"{"files":["packages/a/README.md"]}"#,
+    )
+    .unwrap();
+    write_config(
+        dir.path(),
+        "  - id: package-readmes\n\
+         \x20   kind: for_each_dir\n\
+         \x20   select: packages/*\n\
+         \x20   require:\n\
+         \x20     - kind: file_content_forbidden\n\
+         \x20       paths: \"{path}/README.md\"\n\
+         \x20       expect_matches: true\n\
+         \x20       pattern: forbidden\n\
+         \x20       scope_filter:\n\
+         \x20         include_manifest_paths:\n\
+         \x20           source: manifest.json\n\
+         \x20           extract: { json: \"$.files[*]\" }\n\
+         \x20   level: error\n",
+    );
+
+    let out = run(dir.path(), &["check"]);
+    assert_eq!(
+        code(&out),
+        0,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn nested_scope_assertion_resolves_changed_since_scope() {
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("packages/a")).unwrap();
+    std::fs::write(dir.path().join("seed.txt"), "seed\n").unwrap();
+    git(dir.path(), &["init", "-q"]);
+    git(dir.path(), &["add", "."]);
+    git(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=alint test",
+            "-c",
+            "user.email=alint@example.invalid",
+            "commit",
+            "-qm",
+            "base",
+        ],
+    );
+
+    std::fs::write(dir.path().join("packages/a/README.md"), "safe\n").unwrap();
+    write_config(
+        dir.path(),
+        "  - id: package-readmes\n\
+         \x20   kind: for_each_dir\n\
+         \x20   select: packages/*\n\
+         \x20   require:\n\
+         \x20     - kind: file_content_forbidden\n\
+         \x20       paths: \"{path}/README.md\"\n\
+         \x20       expect_matches: true\n\
+         \x20       pattern: forbidden\n\
+         \x20       scope_filter:\n\
+         \x20         changed_since: HEAD~1\n\
+         \x20   level: error\n",
+    );
+    git(dir.path(), &["add", "."]);
+    git(
+        dir.path(),
+        &[
+            "-c",
+            "user.name=alint test",
+            "-c",
+            "user.email=alint@example.invalid",
+            "commit",
+            "-qm",
+            "add package",
+        ],
+    );
+
+    let out = run(dir.path(), &["check"]);
+    assert_eq!(
+        code(&out),
+        0,
+        "stdout: {}\nstderr: {}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+}
+
+#[test]
+fn deeply_nested_unsupported_expect_matches_fails_validation() {
+    let dir = tempfile::tempdir().unwrap();
+    write_config(
+        dir.path(),
+        "  - id: outer\n\
+         \x20   kind: for_each_dir\n\
+         \x20   select: packages/*\n\
+         \x20   require:\n\
+         \x20     - kind: for_each_dir\n\
+         \x20       select: \"{path}/*\"\n\
+         \x20       require:\n\
+         \x20         - kind: file_exists\n\
+         \x20           paths: \"{path}/README.md\"\n\
+         \x20           expect_matches: true\n\
+         \x20   level: error\n",
+    );
+
+    let out = run(dir.path(), &["validate-config"]);
+    assert_eq!(code(&out), 1, "{}", String::from_utf8_lossy(&out.stdout));
+    assert!(
+        String::from_utf8_lossy(&out.stderr).contains("expect_matches"),
+        "{}",
+        String::from_utf8_lossy(&out.stderr)
     );
 }
 

@@ -115,6 +115,10 @@ impl Rule for ForEachDirRule {
         validate_nested_require(&self.id, self.level, &self.require, registry)
     }
 
+    fn nested_rule_specs(&self) -> &[CompiledNestedSpec] {
+        &self.require
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(
             ForEachParent::new(&self.id, self.level, self.message.as_deref()),
@@ -190,7 +194,13 @@ pub(crate) fn validate_nested_require(
     let tokens = alint_core::template::PathTokens::from_path(std::path::Path::new("_"));
     for (idx, compiled) in require.iter().enumerate() {
         let synthesized = compiled.spec.instantiate(parent_id, idx, level, &tokens);
-        registry.build(&synthesized).map_err(|e| {
+        let nested_rule = registry.build(&synthesized).map_err(|e| {
+            Error::rule_config(
+                parent_id,
+                format!("nested rule #{idx} (`{}`): {e}", compiled.spec.kind),
+            )
+        })?;
+        nested_rule.validate_nested(registry).map_err(|e| {
             Error::rule_config(
                 parent_id,
                 format!("nested rule #{idx} (`{}`): {e}", compiled.spec.kind),

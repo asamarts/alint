@@ -370,6 +370,16 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         Ok(())
     }
 
+    /// Nested `require:` specs owned by this rule, if any.
+    ///
+    /// The engine walks this tree before evaluation so cache-backed scope
+    /// predicates (`changed_since` and manifest-derived paths) used by nested
+    /// per-file rules are resolved just like their top-level counterparts.
+    /// Cross-file selector rules override this alongside [`Self::validate_nested`].
+    fn nested_rule_specs(&self) -> &[crate::CompiledNestedSpec] {
+        &[]
+    }
+
     /// In `--changed` mode, return `true` to evaluate this rule
     /// against the **full** [`FileIndex`] rather than the
     /// changed-only filtered subset. Default `false` (per-file
@@ -473,12 +483,12 @@ pub fn expect_matches_violation(
     } else {
         ""
     };
-    Some(
-        Violation::new(format!(
+    let message = spec.message.clone().unwrap_or_else(|| {
+        format!(
             "expected rule scope to match at least one file, but `{rendered_scope}` matched none{qualifier}"
-        ))
-        .with_baseline_key("expect_matches"),
-    )
+        )
+    });
+    Some(Violation::new(message).with_baseline_key("expect_matches"))
 }
 
 /// File-major dispatch entry-point for a per-file rule.
