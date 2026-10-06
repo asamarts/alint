@@ -13,8 +13,12 @@
 #   - README.md
 #   - action.yml (the baked GitHub Action binary version)
 #   - SECURITY.md
-#   - docs/site/integrations/{docker,github-actions,pre-commit}.md
+#   - docs/site/integrations/{docker,pre-commit}.md
 #   - docs/site/getting-started/installation.md
+#
+# GitHub Action snippets are release-tag SHA pins and are checked separately
+# against ci/action-doc-pin.env. They cannot follow the workspace version in a
+# pre-tag version-bump commit because a commit cannot contain its own SHA.
 #
 # Files deliberately excluded (intentional historical refs):
 #   - CHANGELOG.md (per-version release entries)
@@ -54,7 +58,6 @@ SCOPE=(
   README.md
   SECURITY.md
   docs/site/integrations/docker.md
-  docs/site/integrations/github-actions.md
   docs/site/integrations/pre-commit.md
   docs/site/getting-started/installation.md
 )
@@ -87,9 +90,6 @@ for f in "${SCOPE[@]}"; do
     continue
   fi
   pins=$(grep -nE "$PIN_REGEX" "$f" || true)
-  if [[ "$f" == "docs/site/integrations/github-actions.md" ]]; then
-    pins=$(printf '%s\n' "$pins" | grep 'asamarts/alint@' || true)
-  fi
   drift=$(printf '%s\n' "$pins" | grep -vE "(v|:)${WS_ESCAPED}([^0-9.]|$)" || true)
   if [[ -n "$drift" ]]; then
     echo "[version-pin] $f: stale pin (workspace is $WORKSPACE_VER)" >&2
@@ -97,6 +97,86 @@ for f in "${SCOPE[@]}"; do
     failed=1
   fi
 done
+
+# GitHub Action documentation has a separate post-release pin. Validate both
+# halves: the SHA must be the immutable commit behind the declared tag, and
+# every copy-paste snippet must use exactly that pair. A made-up 40-character
+# value otherwise looks supply-chain-safe while GitHub cannot resolve it.
+ACTION_PIN_FILE=ci/action-doc-pin.env
+if [[ ! -f "$ACTION_PIN_FILE" ]]; then
+  echo "[version-pin] $ACTION_PIN_FILE: NOT FOUND" >&2
+  failed=1
+else
+  # shellcheck disable=SC1090 -- repository-owned, fixed-shape data file.
+  source "$ACTION_PIN_FILE"
+  if [[ ! "${ACTION_DOC_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
+     [[ ! "${ACTION_DOC_SHA:-}" =~ ^[0-9a-f]{40}$ ]] ||
+     [[ ! "${ACTION_DOC_REQUIRES_EXPLICIT_VERSION:-}" =~ ^(true|false)$ ]]; then
+    echo "[version-pin] $ACTION_PIN_FILE: malformed action pin metadata" >&2
+    failed=1
+  else
+    tag="v${ACTION_DOC_VERSION}"
+    tag_sha=$(git rev-parse --verify "${tag}^{commit}" 2>/dev/null || true)
+    if [[ -z "$tag_sha" ]]; then
+      echo "[version-pin] $ACTION_PIN_FILE: tag $tag is unavailable; fetch tags before running this check" >&2
+      failed=1
+    elif [[ "$ACTION_DOC_SHA" != "$tag_sha" ]]; then
+      echo "[version-pin] $ACTION_PIN_FILE: SHA $ACTION_DOC_SHA != $tag commit $tag_sha" >&2
+      failed=1
+    fi
+    tagged_default=$(git show "${tag}:action.yml" 2>/dev/null |
+      awk '
+        /^  version:$/ { in_version=1; next }
+        in_version && /^    default:/ {
+          value=$0
+          sub(/^[[:space:]]*default:[[:space:]]*/, "", value)
+          gsub(/"/, "", value)
+          print value
+          exit
+        }
+      ' || true)
+    expected_explicit=true
+    if [[ "$tagged_default" == "v${ACTION_DOC_VERSION}" ]]; then
+      expected_explicit=false
+    fi
+    if [[ "$ACTION_DOC_REQUIRES_EXPLICIT_VERSION" != "$expected_explicit" ]]; then
+      echo "[version-pin] $ACTION_PIN_FILE: requires-explicit-version=$ACTION_DOC_REQUIRES_EXPLICIT_VERSION, but $tag action.yml defaults to ${tagged_default:-<empty>}" >&2
+      failed=1
+    fi
+
+    action_doc_files=(docs/site/integrations/github-actions.md docs/rules.md)
+    uses_count=0
+    explicit_count=0
+    for f in "${action_doc_files[@]}"; do
+      if [[ ! -f "$f" ]]; then
+        echo "[version-pin] $f: NOT FOUND (Action-doc file missing)" >&2
+        failed=1
+        continue
+      fi
+      file_uses=$(grep -cE 'uses:[[:space:]]*asamarts/alint@[0-9a-f]{40}[[:space:]]+# v[0-9]+\.[0-9]+\.[0-9]+' "$f" || true)
+      uses_count=$((uses_count + file_uses))
+      mismatched=$(grep -nE 'uses:[[:space:]]*asamarts/alint@' "$f" |
+        grep -vF "asamarts/alint@${ACTION_DOC_SHA} # v${ACTION_DOC_VERSION}" || true)
+      if [[ -n "$mismatched" ]]; then
+        echo "[version-pin] $f: Action pin differs from $ACTION_PIN_FILE" >&2
+        echo "$mismatched" | sed 's/^/    /' >&2
+        failed=1
+      fi
+      file_explicit=$(grep -cE "^[[:space:]]+version:[[:space:]]+v${ACTION_DOC_VERSION//./\\.}([[:space:]#]|$)" "$f" || true)
+      explicit_count=$((explicit_count + file_explicit))
+    done
+    if [[ "$uses_count" -eq 0 ]]; then
+      echo "[version-pin] no documented asamarts/alint Action pins found" >&2
+      failed=1
+    elif [[ "$ACTION_DOC_REQUIRES_EXPLICIT_VERSION" == true && "$explicit_count" -ne "$uses_count" ]]; then
+      echo "[version-pin] v${ACTION_DOC_VERSION} requires one explicit version input per Action snippet ($explicit_count for $uses_count)" >&2
+      failed=1
+    elif [[ "$ACTION_DOC_REQUIRES_EXPLICIT_VERSION" == false && "$explicit_count" -ne 0 ]]; then
+      echo "[version-pin] v${ACTION_DOC_VERSION} bakes its binary version; remove $explicit_count redundant version input(s)" >&2
+      failed=1
+    fi
+  fi
+fi
 
 if [[ -f npm/package.json ]]; then
   NPM_VER=$(awk -F'"' '/^[[:space:]]*"version":/ { print $4; exit }' npm/package.json)
@@ -131,4 +211,4 @@ if [[ "$failed" -ne 0 ]]; then
   exit 1
 fi
 
-echo "[version-pin] OK — all ${#SCOPE[@]} install-snippet files + npm/package.json + Zed manifests pin to $WORKSPACE_VER"
+echo "[version-pin] OK — ${#SCOPE[@]} workspace-version files, the published Action SHA, npm/package.json, and Zed manifests are consistent"

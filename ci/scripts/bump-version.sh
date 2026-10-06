@@ -86,7 +86,6 @@ SNIPPET_FILES=(
   README.md
   SECURITY.md
   docs/site/integrations/docker.md
-  docs/site/integrations/github-actions.md
   docs/site/integrations/pre-commit.md
   docs/site/getting-started/installation.md
 )
@@ -186,5 +185,6 @@ echo "  3. alint.org repo (separate): bump src/pages/index.astro JSON-LD softwar
 echo "  4. alint.org repo (separate): bump src/pages/roadmap.astro 'Latest release: vX.Y.Z'"
 echo "  5. alint.org repo (separate): bump src/content/docs/docs/index.mdx 'vX.Y.Z latest' badge"
 echo "  6. verify (alint.org): bash scripts/check-version-pins.sh"
+echo "  7. after publishing the tag, update ci/action-doc-pin.env and the GitHub Action snippets"
 echo
 echo "==> ok to commit + release"

@@ -50,6 +50,13 @@ cargo run -q -p xtask -- gen-categories --check
 echo "==> Running xtask gen-roadmap --check"
 cargo run -q -p xtask -- gen-roadmap --check
 
+# The Action examples are SHA-pinned, but a syntactically valid 40-character
+# value can still name no GitHub commit. Validate every snippet against the
+# canonical published tag recorded in ci/action-doc-pin.env. The Docs workflow
+# checks out full history and tags specifically for this gate.
+echo "==> Running ci/scripts/check-version-pins.sh"
+bash ci/scripts/check-version-pins.sh
+
 # `xtask gen-arch --check` regenerates the crate dependency graph
 # (docs/design/architecture/crate-graph.md) from `cargo metadata` and fails if
 # it drifted, and verifies the hand-modeled C4 model (workspace.dsl) still
