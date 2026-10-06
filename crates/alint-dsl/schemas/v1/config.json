@@ -116,6 +116,24 @@
       },
       "type": "object"
     },
+    "MarkdownLinksRootMapSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "description": "Repository directory corresponding to `url_prefix` (for example `docs/site`, or `.` for the repository root). Extensionless routes also try `<route>.md` and `<route>/index.md`.",
+          "type": "string"
+        },
+        "url_prefix": {
+          "description": "Root-absolute URL prefix to validate, including leading and trailing slashes (for example `/docs/`). Other root-absolute URLs are ignored.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url_prefix",
+        "dir"
+      ],
+      "type": "object"
+    },
     "Normalize": {
       "oneOf": [
         {
@@ -271,24 +289,6 @@
           "type": "array"
         }
       ]
-    },
-    "RootMapSpec": {
-      "additionalProperties": false,
-      "properties": {
-        "dir": {
-          "description": "Repository directory corresponding to `url_prefix` (for example `docs/site`). Extensionless routes also try `<route>.md` and `<route>/index.md`.",
-          "type": "string"
-        },
-        "url_prefix": {
-          "description": "Root-absolute URL prefix to validate, including leading and trailing slashes (for example `/docs/`). Other root-absolute URLs are ignored.",
-          "type": "string"
-        }
-      },
-      "required": [
-        "url_prefix",
-        "dir"
-      ],
-      "type": "object"
     },
     "SelectSpec": {
       "anyOf": [
@@ -3520,7 +3520,7 @@
         "root": {
           "anyOf": [
             {
-              "$ref": "#/$defs/RootMapSpec"
+              "$ref": "#/$defs/MarkdownLinksRootMapSpec"
             },
             {
               "type": "null"

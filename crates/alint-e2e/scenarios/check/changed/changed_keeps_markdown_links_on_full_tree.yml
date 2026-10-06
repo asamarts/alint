@@ -1,0 +1,35 @@
+name: --changed rechecks the complete Markdown link graph
+tags: [check, check_changed, changed, markdown_links_resolve, cross_file]
+
+# The broken link lives in a committed, unchanged source document while the
+# diff contains only an unrelated untracked file. The rule has no changed-set
+# path-scope optimisation because a changed/deleted target can invalidate any
+# otherwise-unchanged source document.
+
+given:
+  tree:
+    README.md: |
+      # Demo
+
+      See the [missing guide](docs/guide.md).
+    notes.txt: "unrelated change\n"
+  config: |
+    version: 1
+    rules:
+      - id: docs-links
+        kind: markdown_links_resolve
+        paths: "**/*.md"
+        level: error
+  git:
+    init: true
+    add: [README.md]
+    commit: true
+    # notes.txt is untracked, so the changed set does not intersect `paths`.
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: docs-links, level: error, path: README.md}
+  - violations:
+      - {rule: docs-links, level: error, path: README.md}

@@ -2,14 +2,18 @@
 //!
 //! Unlike `markdown_paths_resolve`, which checks path-shaped inline-code
 //! claims, this rule understands Markdown inline links, images, reference
-//! definitions, and explicit reference uses. It deliberately ignores fenced
-//! and indented code, inline code spans, front matter, and HTML comments.
+//! definitions, and explicit reference uses. Parsing is delegated to a
+//! `CommonMark` parser so code blocks, code spans, front matter, HTML comments,
+//! escaping, nested labels, and multiline constructs follow rendered-Markdown
+//! semantics rather than a second ad-hoc grammar.
 
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
+use std::cell::RefCell;
+use std::ops::Range;
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 
 use alint_core::{Context, Error, Level, Result, Rule, RuleSpec, Scope, Violation};
+use pulldown_cmark::{BrokenLink, Event, LinkType, Options as MarkdownOptions, Parser, Tag};
 use serde::Deserialize;
 
 #[derive(Debug, Clone, Copy, Default, Deserialize, PartialEq, Eq, schemars::JsonSchema)]
@@ -25,13 +29,13 @@ enum RelativeMode {
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
-struct RootMapSpec {
+struct MarkdownLinksRootMapSpec {
     /// Root-absolute URL prefix to validate, including leading and trailing
     /// slashes (for example `/docs/`). Other root-absolute URLs are ignored.
     url_prefix: String,
     /// Repository directory corresponding to `url_prefix` (for example
-    /// `docs/site`). Extensionless routes also try `<route>.md` and
-    /// `<route>/index.md`.
+    /// `docs/site`, or `.` for the repository root). Extensionless routes also
+    /// try `<route>.md` and `<route>/index.md`.
     dir: String,
 }
 
@@ -46,7 +50,7 @@ struct Options {
     /// Optional mapping from root-absolute rendered URLs to repository source
     /// files. This validates only URLs beneath the declared prefix.
     #[serde(default)]
-    root: Option<RootMapSpec>,
+    root: Option<MarkdownLinksRootMapSpec>,
 }
 
 crate::options_schema_for!(Options);
@@ -76,6 +80,20 @@ impl Rule for MarkdownLinksResolveRule {
     // checks the complete documentation graph, and LSP refreshes it on save.
     fn requires_full_index(&self) -> bool {
         true
+    }
+
+    // This cross-file rule deliberately has no `path_scope`: in changed mode,
+    // deleting an otherwise-unmodified target must still re-check every source
+    // document. Its source side is nevertheless an enumerable file scope, so
+    // the common opt-in empty-scope assertion remains meaningful.
+    fn supports_expect_matches(&self) -> bool {
+        true
+    }
+
+    fn scope_matches_any(&self, index: &alint_core::FileIndex) -> bool {
+        index
+            .files()
+            .any(|entry| self.scope.matches(&entry.path, index))
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
@@ -161,6 +179,11 @@ impl MarkdownLinksResolveRule {
             return None;
         }
         let decoded = percent_decode(path_part);
+        // URL paths use `/` on every host. Treat literal or percent-encoded
+        // backslashes as separators too, so traversal and lookup semantics do
+        // not change between Unix and Windows runners (and match browsers that
+        // normalize backslashes in special-scheme URLs).
+        let decoded = decoded.replace('\\', "/");
 
         if decoded.starts_with('/') {
             let map = self.root_map.as_ref()?;
@@ -168,7 +191,7 @@ impl MarkdownLinksResolveRule {
             let mapped = if suffix.is_empty() {
                 map.dir.clone()
             } else {
-                let Some(relative) = alint_core::normalize_confined(Path::new(suffix)) else {
+                let Some(relative) = normalize_link_path(Path::new(suffix)) else {
                     return Some(format!(
                         "root-absolute Markdown link `{raw_target}` escapes its configured source directory"
                     ));
@@ -191,12 +214,12 @@ impl MarkdownLinksResolveRule {
         }
 
         let base = source.parent().unwrap_or_else(|| Path::new(""));
-        let Some(resolved) = alint_core::normalize_confined(&base.join(decoded.as_ref())) else {
+        let Some(resolved) = normalize_link_path(&base.join(&decoded)) else {
             return Some(format!(
                 "relative Markdown link `{raw_target}` escapes the repository root"
             ));
         };
-        if ctx.index.contains_path(&resolved) {
+        if resolved.as_os_str().is_empty() || ctx.index.contains_path(&resolved) {
             None
         } else {
             Some(format!(
@@ -229,10 +252,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                     "`root.url_prefix` must start and end with `/` (for example `/docs/`)",
                 ));
             }
-            let Some(dir) = alint_core::normalize_confined(Path::new(&root.dir)) else {
+            let Some(dir) = (!root.dir.is_empty())
+                .then(|| normalize_link_path(Path::new(&root.dir)))
+                .flatten()
+            else {
                 return Err(Error::rule_config(
                     &spec.id,
-                    "`root.dir` must be a non-empty repository-relative path",
+                    "`root.dir` must be a repository-relative directory (use `.` for the repository root)",
                 ));
             };
             Some(RootMap {
@@ -254,7 +280,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 }
 
 fn rendered_route_exists(ctx: &Context<'_>, mapped: &Path) -> bool {
-    if ctx.index.contains_path(mapped) {
+    if mapped.as_os_str().is_empty() || ctx.index.contains_path(mapped) {
         return true;
     }
     if mapped.extension().is_none() {
@@ -268,6 +294,28 @@ fn rendered_route_exists(ctx: &Context<'_>, mapped: &Path) -> bool {
         }
     }
     false
+}
+
+/// Normalize a repository-relative link path while allowing the repository
+/// root itself as a valid directory target. The shared `normalize_confined`
+/// helper intentionally rejects an empty result because most rule references
+/// need a concrete file; Markdown links are the exception (`..` may validly
+/// resolve from a top-level directory to the repository root).
+fn normalize_link_path(path: &Path) -> Option<PathBuf> {
+    let mut out = PathBuf::new();
+    for component in path.components() {
+        match component {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !out.pop() {
+                    return None;
+                }
+            }
+            Component::Normal(component) => out.push(component),
+            Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+    Some(out)
 }
 
 fn has_uri_scheme(target: &str) -> bool {
@@ -332,340 +380,150 @@ struct ScanResult {
     undefined_references: Vec<UndefinedReference>,
 }
 
-#[derive(Debug)]
-struct ReferenceUse {
-    label: String,
-    line: usize,
-    column: usize,
-}
-
-/// Extract live Markdown links while retaining byte offsets for diagnostics.
+/// Extract live Markdown links while retaining source offsets for diagnostics.
+///
+/// `pulldown-cmark` owns the grammar decisions here. In particular, malformed
+/// link-looking prose is not treated as a link, only the first duplicate
+/// reference definition is active, and links nested in any valid code block or
+/// metadata block never reach this event stream.
 fn scan_markdown(text: &str) -> ScanResult {
-    let visible = mask_non_link_regions(text);
-    let line_starts = line_starts(&visible);
-    let mut result = ScanResult::default();
-    let mut definitions = HashSet::new();
-
-    for (line_idx, line) in visible.split_inclusive('\n').enumerate() {
-        if let Some((label, target, target_col)) = parse_reference_definition(line) {
-            definitions.insert(normalize_label(&label));
-            result.links.push(LinkTarget {
-                target,
-                line: line_idx + 1,
-                column: target_col,
+    // A UTF-8 BOM is transparent document metadata. `pulldown-cmark` expects
+    // metadata delimiters at byte zero, so omit it from parsing while adding
+    // its byte width back to every reported source span.
+    let markdown = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let source_offset = text.len() - markdown.len();
+    let undefined_references = RefCell::new(Vec::new());
+    let callback = |broken: BrokenLink<'_>| {
+        if matches!(
+            broken.link_type,
+            LinkType::Reference
+                | LinkType::ReferenceUnknown
+                | LinkType::Collapsed
+                | LinkType::CollapsedUnknown
+        ) {
+            let span = absolute_span(broken.span, source_offset);
+            let offset = reference_label_offset(text, &span);
+            let (line, column) = offset_location(text, offset);
+            undefined_references.borrow_mut().push(UndefinedReference {
+                label: broken.reference.into_string(),
+                line,
+                column,
             });
         }
+        None
+    };
+
+    let mut options = MarkdownOptions::empty();
+    options.insert(
+        MarkdownOptions::ENABLE_YAML_STYLE_METADATA_BLOCKS
+            | MarkdownOptions::ENABLE_PLUSES_DELIMITED_METADATA_BLOCKS
+            | MarkdownOptions::ENABLE_FOOTNOTES,
+    );
+    let mut parser =
+        Parser::new_with_broken_link_callback(markdown, options, Some(callback)).into_offset_iter();
+    let mut result = ScanResult::default();
+
+    for (event, span) in parser.by_ref() {
+        let Event::Start(
+            Tag::Link {
+                link_type: LinkType::Inline,
+                dest_url,
+                ..
+            }
+            | Tag::Image {
+                link_type: LinkType::Inline,
+                dest_url,
+                ..
+            },
+        ) = event
+        else {
+            continue;
+        };
+        let span = absolute_span(span, source_offset);
+        let offset = inline_destination_offset(text, &span);
+        let (line, column) = offset_location(text, offset);
+        result.links.push(LinkTarget {
+            target: dest_url.into_string(),
+            line,
+            column,
+        });
     }
 
-    scan_inline_links(&visible, &line_starts, &mut result.links);
+    // Reference definitions are populated as the parser advances. Read them
+    // only after exhausting the event stream, including definitions that are
+    // never referenced by body text.
+    for (_, definition) in parser.reference_definitions().iter() {
+        let span = absolute_span(definition.span.clone(), source_offset);
+        let offset = definition_destination_offset(text, &span);
+        let (line, column) = offset_location(text, offset);
+        result.links.push(LinkTarget {
+            target: definition.dest.to_string(),
+            line,
+            column,
+        });
+    }
+
+    drop(parser);
+    result.undefined_references = undefined_references.into_inner();
     result.links.sort_by_key(|link| (link.line, link.column));
-    let references = scan_reference_uses(&visible, &line_starts);
-    result.undefined_references = references
-        .into_iter()
-        .filter(|reference| !definitions.contains(&normalize_label(&reference.label)))
-        .map(|reference| UndefinedReference {
-            label: reference.label,
-            line: reference.line,
-            column: reference.column,
-        })
-        .collect();
     result
 }
 
-fn mask_non_link_regions(text: &str) -> String {
-    let mut out = text.as_bytes().to_vec();
-    let mut offset = 0;
-    let mut in_fence: Option<(u8, usize)> = None;
-    let mut in_frontmatter = false;
-    let mut frontmatter_possible = true;
-    let mut in_comment = false;
-
-    for line in text.split_inclusive('\n') {
-        let content = line.strip_suffix('\n').unwrap_or(line);
-        let trimmed = content.trim();
-
-        if frontmatter_possible {
-            frontmatter_possible = false;
-            if trimmed == "---" {
-                in_frontmatter = true;
-                blank(&mut out, offset, offset + line.len());
-                offset += line.len();
-                continue;
-            }
-        } else if in_frontmatter {
-            blank(&mut out, offset, offset + line.len());
-            if trimmed == "---" {
-                in_frontmatter = false;
-            }
-            offset += line.len();
-            continue;
-        }
-
-        let fence_text = content.trim_start_matches(' ');
-        let indent = content.len() - fence_text.len();
-        if indent <= 3
-            && let Some((marker, count)) = fence_run(fence_text)
-        {
-            match in_fence {
-                None => in_fence = Some((marker, count)),
-                Some((open, required))
-                    if marker == open
-                        && count >= required
-                        && fence_text[count..].trim().is_empty() =>
-                {
-                    in_fence = None;
-                }
-                Some(_) => {}
-            }
-            blank(&mut out, offset, offset + line.len());
-            offset += line.len();
-            continue;
-        }
-        if in_fence.is_some() || content.starts_with("    ") || content.starts_with('\t') {
-            blank(&mut out, offset, offset + line.len());
-            offset += line.len();
-            continue;
-        }
-
-        let bytes = content.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if in_comment {
-                if let Some(end) = find_bytes(bytes, i, b"-->") {
-                    blank(&mut out, offset + i, offset + end + 3);
-                    i = end + 3;
-                    in_comment = false;
-                } else {
-                    blank(&mut out, offset + i, offset + bytes.len());
-                    break;
-                }
-            } else if bytes[i..].starts_with(b"<!--") {
-                if let Some(end) = find_bytes(bytes, i + 4, b"-->") {
-                    blank(&mut out, offset + i, offset + end + 3);
-                    i = end + 3;
-                } else {
-                    blank(&mut out, offset + i, offset + bytes.len());
-                    in_comment = true;
-                    break;
-                }
-            } else if bytes[i] == b'`' {
-                let run = byte_run(bytes, i, b'`');
-                if let Some(close) = find_exact_run(bytes, i + run, b'`', run) {
-                    blank(&mut out, offset + i, offset + close + run);
-                    i = close + run;
-                } else {
-                    i += run;
-                }
-            } else {
-                i += 1;
-            }
-        }
-        offset += line.len();
-    }
-    // CommonMark code spans may cross a line break. The per-line pass above
-    // handles the overwhelmingly common case while it has comment state; this
-    // second pass closes any still-visible matching backtick run globally.
-    mask_multiline_code_spans(&mut out);
-    String::from_utf8(out).expect("masking valid UTF-8 with ASCII spaces preserves UTF-8")
+fn absolute_span(span: Range<usize>, offset: usize) -> Range<usize> {
+    span.start + offset..span.end + offset
 }
 
-fn mask_multiline_code_spans(bytes: &mut [u8]) {
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'`' {
-            i += 1;
-            continue;
-        }
-        let run = byte_run(bytes, i, b'`');
-        if let Some(close) = find_exact_run(bytes, i + run, b'`', run) {
-            blank(bytes, i, close + run);
-            i = close + run;
-        } else {
-            i += run;
+/// Find the destination start within a parser-confirmed inline link. This is
+/// diagnostic-only: resolution always uses the parser's decoded `dest_url`.
+fn inline_destination_offset(text: &str, span: &Range<usize>) -> usize {
+    let source = &text[span.clone()];
+    let bytes = source.as_bytes();
+    for close in (0..bytes.len().saturating_sub(1)).rev() {
+        if bytes[close] == b']' && bytes.get(close + 1) == Some(&b'(') {
+            let rest = &source[close + 2..];
+            let whitespace = rest.len() - rest.trim_start().len();
+            let angle = usize::from(rest[whitespace..].starts_with('<'));
+            return span.start + close + 2 + whitespace + angle;
         }
     }
+    span.start
 }
 
-fn scan_inline_links(text: &str, starts: &[usize], out: &mut Vec<LinkTarget>) {
-    let bytes = text.as_bytes();
-    let mut i = 0;
-    while i + 1 < bytes.len() {
-        if bytes[i] != b']' || bytes[i + 1] != b'(' || is_escaped(bytes, i) {
-            i += 1;
-            continue;
-        }
-        if find_link_opener(bytes, i).is_none() {
-            i += 2;
-            continue;
-        }
-        let mut cursor = i + 2;
-        let mut depth = 1usize;
-        while cursor < bytes.len() {
-            if bytes[cursor] == b'\\' {
-                cursor = (cursor + 2).min(bytes.len());
-                continue;
-            }
-            match bytes[cursor] {
-                b'(' => depth += 1,
-                b')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        break;
-                    }
-                }
-                _ => {}
-            }
-            cursor += 1;
-        }
-        if depth != 0 {
+/// Find the destination start within a parser-confirmed reference definition.
+/// Definitions may put the destination on the following line.
+fn definition_destination_offset(text: &str, span: &Range<usize>) -> usize {
+    let source = &text[span.clone()];
+    let bytes = source.as_bytes();
+    let mut close = 1;
+    while close < bytes.len() {
+        if bytes[close] == b']' && !is_escaped(bytes, close) {
             break;
         }
-        if let Some((target, relative_start)) = parse_destination(&text[i + 2..cursor]) {
-            let absolute = i + 2 + relative_start;
-            let (line, column) = offset_location(starts, absolute);
-            out.push(LinkTarget {
-                target,
-                line,
-                column,
-            });
-        }
-        i = cursor + 1;
+        close += 1;
     }
+    if bytes.get(close + 1) != Some(&b':') {
+        return span.start;
+    }
+    let rest = &source[close + 2..];
+    let whitespace = rest.len() - rest.trim_start().len();
+    let angle = usize::from(rest[whitespace..].starts_with('<'));
+    span.start + close + 2 + whitespace + angle
 }
 
-fn scan_reference_uses(text: &str, starts: &[usize]) -> Vec<ReferenceUse> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::new();
-    let mut i = 0;
-    while i + 2 < bytes.len() {
-        if bytes[i] != b']' || bytes[i + 1] != b'[' || is_escaped(bytes, i) {
-            i += 1;
-            continue;
-        }
-        let Some(open) = find_link_opener(bytes, i) else {
-            i += 2;
-            continue;
-        };
-        let Some(close_rel) = text[i + 2..].find(']') else {
-            break;
-        };
-        let close = i + 2 + close_rel;
-        if text[i + 2..close].contains('\n') {
-            i += 2;
-            continue;
-        }
-        let explicit = &text[i + 2..close];
-        let label = if explicit.is_empty() {
-            &text[open + 1..i]
-        } else {
-            explicit
-        };
-        if !label.trim().is_empty() {
-            let (line, column) = offset_location(starts, i + 1);
-            out.push(ReferenceUse {
-                label: unescape_markdown(label.trim()),
-                line,
-                column,
-            });
-        }
-        i = close + 1;
-    }
-    out
+fn reference_label_offset(text: &str, span: &Range<usize>) -> usize {
+    text[span.clone()]
+        .rfind("][")
+        .map_or(span.start, |offset| span.start + offset + 1)
 }
 
-fn parse_reference_definition(line: &str) -> Option<(String, String, usize)> {
-    let without_newline = line.strip_suffix('\n').unwrap_or(line);
-    let trimmed = without_newline.trim_start_matches(' ');
-    let indent = without_newline.len() - trimmed.len();
-    if indent > 3 || !trimmed.starts_with('[') {
-        return None;
-    }
-    let close = find_unescaped(trimmed.as_bytes(), 1, b']')?;
-    if trimmed.as_bytes().get(close + 1) != Some(&b':') {
-        return None;
-    }
-    let label = unescape_markdown(trimmed[1..close].trim());
-    // GitHub-style footnote definitions use the same `[label]: body` shape,
-    // but their body is prose rather than a link destination.
-    if label.is_empty() || label.starts_with('^') {
-        return None;
-    }
-    let rest = &trimmed[close + 2..];
-    let (target, start) = parse_destination(rest)?;
-    Some((label, target, indent + close + 2 + start + 1))
-}
-
-/// Parse one `CommonMark` destination and ignore any following link title.
-fn parse_destination(input: &str) -> Option<(String, usize)> {
-    let start = input.len() - input.trim_start().len();
-    let rest = &input[start..];
-    if rest.is_empty() {
-        return None;
-    }
-    if let Some(angle) = rest.strip_prefix('<') {
-        let close = find_unescaped(angle.as_bytes(), 0, b'>')?;
-        let target = unescape_markdown(&angle[..close]);
-        return (!target.is_empty()).then_some((target, start + 1));
-    }
-    let bytes = rest.as_bytes();
-    let mut end = 0;
-    while end < bytes.len() {
-        if bytes[end] == b'\\' && end + 1 < bytes.len() {
-            end += 2;
-            continue;
-        }
-        if bytes[end].is_ascii_whitespace() {
-            break;
-        }
-        end += 1;
-    }
-    let target = unescape_markdown(&rest[..end]);
-    (!target.is_empty()).then_some((target, start))
-}
-
-fn normalize_label(label: &str) -> String {
-    label
-        .split_whitespace()
-        .collect::<Vec<_>>()
-        .join(" ")
-        .to_lowercase()
-}
-
-fn unescape_markdown(input: &str) -> String {
-    let bytes = input.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'\\' && i + 1 < bytes.len() && bytes[i + 1].is_ascii_punctuation() {
-            out.push(bytes[i + 1]);
-            i += 2;
-        } else {
-            out.push(bytes[i]);
-            i += 1;
-        }
-    }
-    String::from_utf8(out).expect("removing ASCII escape bytes preserves UTF-8")
-}
-
-fn line_starts(text: &str) -> Vec<usize> {
-    let mut starts = vec![0];
-    starts.extend(text.match_indices('\n').map(|(idx, _)| idx + 1));
-    starts
-}
-
-fn offset_location(starts: &[usize], offset: usize) -> (usize, usize) {
-    let line_idx = starts.partition_point(|&start| start <= offset) - 1;
-    (line_idx + 1, offset - starts[line_idx] + 1)
-}
-
-fn find_link_opener(bytes: &[u8], close: usize) -> Option<usize> {
-    let line_start = bytes[..close]
-        .iter()
-        .rposition(|&byte| byte == b'\n')
-        .map_or(0, |idx| idx + 1);
-    (line_start..close)
-        .rev()
-        .find(|&idx| bytes[idx] == b'[' && !is_escaped(bytes, idx))
+/// Convert a UTF-8 byte offset to one-based Unicode-scalar line and column.
+/// This keeps diagnostics aligned for links following non-ASCII prose.
+fn offset_location(text: &str, offset: usize) -> (usize, usize) {
+    let before = &text[..offset.min(text.len())];
+    let line = before.bytes().filter(|&byte| byte == b'\n').count() + 1;
+    let line_start = before.rfind('\n').map_or(0, |idx| idx + 1);
+    let column = text[line_start..offset.min(text.len())].chars().count() + 1;
+    (line, column)
 }
 
 fn is_escaped(bytes: &[u8], idx: usize) -> bool {
@@ -676,54 +534,6 @@ fn is_escaped(bytes: &[u8], idx: usize) -> bool {
         cursor -= 1;
     }
     slashes % 2 == 1
-}
-
-fn fence_run(text: &str) -> Option<(u8, usize)> {
-    let marker = *text.as_bytes().first()?;
-    if !matches!(marker, b'`' | b'~') {
-        return None;
-    }
-    let count = byte_run(text.as_bytes(), 0, marker);
-    (count >= 3).then_some((marker, count))
-}
-
-fn byte_run(bytes: &[u8], start: usize, byte: u8) -> usize {
-    bytes[start..].iter().take_while(|&&b| b == byte).count()
-}
-
-fn find_exact_run(bytes: &[u8], start: usize, byte: u8, len: usize) -> Option<usize> {
-    let mut i = start;
-    while i < bytes.len() {
-        if bytes[i] != byte {
-            i += 1;
-            continue;
-        }
-        let run = byte_run(bytes, i, byte);
-        if run == len {
-            return Some(i);
-        }
-        i += run;
-    }
-    None
-}
-
-fn find_unescaped(bytes: &[u8], start: usize, needle: u8) -> Option<usize> {
-    (start..bytes.len()).find(|&idx| bytes[idx] == needle && !is_escaped(bytes, idx))
-}
-
-fn find_bytes(bytes: &[u8], start: usize, needle: &[u8]) -> Option<usize> {
-    bytes[start..]
-        .windows(needle.len())
-        .position(|window| window == needle)
-        .map(|idx| start + idx)
-}
-
-fn blank(bytes: &mut [u8], start: usize, end: usize) {
-    for byte in &mut bytes[start..end] {
-        if *byte != b'\n' && *byte != b'\r' {
-            *byte = b' ';
-        }
-    }
 }
 
 #[cfg(test)]
@@ -741,8 +551,10 @@ mod tests {
     fn scanner_finds_inline_image_definition_and_undefined_reference() {
         let result = scan_markdown(
             "[inline](../a.md \"title\") ![image](img/a.png)\n\
+             \n\
              [guide]: <guide.md> 'title'\n\
              [^note]: prose that is not a link destination\n\
+             \n\
              [defined][guide] [missing][nowhere]\n",
         );
         assert_eq!(
@@ -757,7 +569,7 @@ mod tests {
             result.undefined_references,
             [UndefinedReference {
                 label: "nowhere".into(),
-                line: 4,
+                line: 6,
                 column: 27,
             }]
         );
@@ -777,11 +589,76 @@ mod tests {
     }
 
     #[test]
+    fn scanner_uses_commonmark_structure_in_nested_and_multiline_content() {
+        let result = scan_markdown(concat!(
+            "> ```md\n",
+            "> [quoted fence](hidden.md)\n",
+            "> ```\n",
+            "\n",
+            "- item\n",
+            "\n",
+            "        [indented](hidden.md)\n",
+            "\n",
+            "[multiline\nlabel](guide.md)\n",
+            "[malformed](not-a-link.md\"without whitespace\")\n",
+        ));
+        assert_eq!(
+            result
+                .links
+                .iter()
+                .map(|link| link.target.as_str())
+                .collect::<Vec<_>>(),
+            ["guide.md"]
+        );
+    }
+
+    #[test]
+    fn scanner_handles_metadata_variants_and_yaml_end_marker() {
+        for text in [
+            "---\ntitle: '[hidden](bad.md)'\n...\n[live](good.md)\n",
+            "\u{feff}---\ntitle: '[hidden](bad.md)'\n---\n[live](good.md)\n",
+            "+++\ntitle = '[hidden](bad.md)'\n+++\n[live](good.md)\n",
+        ] {
+            let result = scan_markdown(text);
+            assert_eq!(result.links.len(), 1, "{result:#?}");
+            assert_eq!(result.links[0].target, "good.md");
+            assert_eq!(result.links[0].line, 4);
+        }
+    }
+
+    #[test]
+    fn scanner_uses_only_the_active_reference_definition() {
+        let result = scan_markdown(
+            "[use][duplicate]\n\
+             \n\
+             [duplicate]: good.md\n\
+             [duplicate]: missing.md\n",
+        );
+        assert_eq!(
+            result
+                .links
+                .iter()
+                .map(|link| link.target.as_str())
+                .collect::<Vec<_>>(),
+            ["good.md"]
+        );
+        assert_eq!(result.undefined_references, []);
+    }
+
+    #[test]
+    fn scanner_reports_unicode_columns_and_decodes_entities() {
+        let result = scan_markdown("café [target](space&#x20;name.md)\n");
+        assert_eq!(result.links.len(), 1);
+        assert_eq!(result.links[0].target, "space name.md");
+        assert_eq!((result.links[0].line, result.links[0].column), (1, 15));
+    }
+
+    #[test]
     fn relative_links_resolve_from_source_directory_and_decode_urls() {
         let (tmp, idx) = tempdir_with_files(&[
             (
                 "docs/guide.md",
-                b"[readme](../README.md) [space](space%20name.md)\n",
+                b"[readme](../README.md) [space](space%20name.md) [root](..)\n",
             ),
             ("README.md", b"# readme\n"),
             ("docs/space name.md", b"# space\n"),
@@ -794,15 +671,16 @@ mod tests {
     fn missing_and_escaping_relative_links_fire_per_link() {
         let (tmp, idx) = tempdir_with_files(&[(
             "docs/guide.md",
-            b"[missing](missing.md) and [escape](../../outside.md)\n",
+            b"[missing](missing.md) [escape](../../outside.md) [encoded](..%5C..%5Coutside.md)\n",
         )]);
         let rule = build(&spec("")).unwrap();
         let violations = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
-        assert_eq!(violations.len(), 2);
+        assert_eq!(violations.len(), 3);
         assert_eq!(violations[0].line, Some(1));
         assert_eq!(violations[0].column, Some(11));
         assert!(violations[0].message.contains("docs/missing.md"));
         assert!(violations[1].message.contains("escapes"));
+        assert!(violations[2].message.contains("escapes"));
     }
 
     #[test]
@@ -831,7 +709,10 @@ mod tests {
         std::fs::create_dir_all(tmp.path().join("docs/site/api")).unwrap();
         std::fs::write(
             tmp.path().join("docs/site/source.md"),
-            "[about](/docs/about/) [api](/docs/api/) [bad](/docs/missing/) [escape](/docs/%2E%2E/secret.md)\n",
+            "[about](/docs/about/) [api](/docs/api/) [bad](/docs/missing/) \
+             [root](/docs/./) \
+             [escape](/docs/%2E%2E/secret.md) \
+             [encoded](/docs/%2E%2E%5Csecret.md)\n",
         )
         .unwrap();
         std::fs::write(tmp.path().join("docs/site/about.md"), "# about\n").unwrap();
@@ -842,9 +723,10 @@ mod tests {
         ))
         .unwrap();
         let violations = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
-        assert_eq!(violations.len(), 2, "{violations:#?}");
+        assert_eq!(violations.len(), 3, "{violations:#?}");
         assert!(violations[0].message.contains("docs/site/missing"));
         assert!(violations[1].message.contains("escapes"));
+        assert!(violations[2].message.contains("escapes"));
     }
 
     #[test]
@@ -852,5 +734,25 @@ mod tests {
         assert!(build(&spec("root: { url_prefix: docs, dir: docs/site }\n")).is_err());
         assert!(build(&spec("root: { url_prefix: /docs/, dir: ../outside }\n")).is_err());
         assert!(build(&spec("scope_filter: { has_ancestor: package.json }\n")).is_err());
+    }
+
+    #[test]
+    fn root_map_can_target_repository_root() {
+        let (tmp, idx) = tempdir_with_files(&[
+            ("source.md", b"[root](/) [readme](/README.md)\n"),
+            ("README.md", b"# readme\n"),
+        ]);
+        let rule = build(&spec("root: { url_prefix: /, dir: . }\n")).unwrap();
+        assert!(rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn whole_graph_rule_supports_expect_matches_without_changed_scope_skipping() {
+        let rule = build(&spec("")).unwrap();
+        let index = index_with_dirs(&[("README.txt", false)]);
+        assert!(rule.requires_full_index());
+        assert!(rule.path_scope().is_none());
+        assert!(rule.supports_expect_matches());
+        assert!(!rule.scope_matches_any(&index));
     }
 }

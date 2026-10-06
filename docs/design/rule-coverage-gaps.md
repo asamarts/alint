@@ -322,11 +322,11 @@ this is a clean new kind (reference file plus a glob of peers).
 ### Family E: docs, accessibility, and i18n structural
 
 A markdown and docs-hygiene family. `markdown_links_resolve` now covers live link / image /
-reference destinations, undefined explicit reference labels, code/comment/front-matter
-exclusion, source-relative resolution, and rendered-site URL policy. `markdown_paths_resolve`
-remains the separate checker for backticked path claims. Alt text and heading/front-matter
-structure remain gaps; they can extend the same light scanner rather than introducing a full
-Markdown AST.
+reference destinations, undefined explicit reference labels, CommonMark-aware
+code/comment/front-matter exclusion, source-relative resolution, and rendered-site URL policy.
+`markdown_paths_resolve` remains the separate checker for backticked path claims. Alt text and
+heading/front-matter structure remain gaps; they can extend the same parser event stream without
+introducing a separate Markdown grammar.
 
 | Gap | Detects | Scope | Expr | Fix |
 |---|---|---|---|---|
@@ -516,7 +516,7 @@ Four reusable substrates unlock disproportionate coverage, so they should be seq
   (an IN cross-file check).
 - **A duplicate-aware / spanned structured parser** (shared with the auto-fix bridge) unlocks
   `no_duplicate_keys` (B1).
-- **The shipped Markdown link scanner**, extended with heading / front-matter recognition,
+- **The shipped CommonMark link scanner**, extended with heading / front-matter recognition,
   unlocks the remaining Family E checks without a second parser.
 - **A single `constraint` kind** (extract relations from a glob, then assert a dependency;
   section 2.4) generalizes `cross_file` and `registry_paths_resolve` (not `unique_by`, whose

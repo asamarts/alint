@@ -1,0 +1,20 @@
+name: markdown_links_resolve can require its source scope to match
+tags: [check, markdown_links_resolve, cross_file, expect_matches, failing]
+
+given:
+  tree:
+    README.txt: "no Markdown files\n"
+  config: |
+    version: 1
+    rules:
+      - id: docs-links
+        kind: markdown_links_resolve
+        paths: "docs/**/*.md"
+        expect_matches: true
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: docs-links, level: error}

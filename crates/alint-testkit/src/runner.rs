@@ -220,7 +220,11 @@ fn run_step(step: Step, root: &Path) -> Result<StepOutcome> {
             continue;
         }
         let rule = registry.build(spec)?;
-        let mut entry = RuleEntry::new(rule);
+        // Match the production CLI/LSP loading path: runtime features that
+        // depend on common config (`expect_matches` today, explain/list
+        // projection in production) need the originating spec on the entry.
+        // Omitting it made scenario tests silently bypass empty-scope checks.
+        let mut entry = RuleEntry::new(rule).with_spec(std::sync::Arc::new(spec.clone()));
         if let Some(src) = &spec.when {
             let expr = alint_core::when::parse(src)?;
             entry = entry.with_when(expr);

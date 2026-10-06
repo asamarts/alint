@@ -12,7 +12,9 @@ given:
       # Project
 
       See [the guide](docs/guide.md "Guide") and ![logo](docs/logo.svg).
+
       [reference]: docs/guide.md?view=full#start
+
       Continue with [the reference][reference].
       External links such as [alint](https://alint.org) stay offline.
 
