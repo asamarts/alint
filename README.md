@@ -4,7 +4,7 @@
 [![CI](https://github.com/asamarts/alint/actions/workflows/ci.yml/badge.svg)](https://github.com/asamarts/alint/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0%20OR%20MIT-blue)](#license)
 
-**A linter for the files in your repository.**
+**A general linter.**
 
 Code linters check what's inside a source file. alint checks the repository around it: files that should or shouldn't exist, naming conventions, file contents, values buried in `package.json`, `Cargo.toml` or a workflow YAML, and the relationships between files. The rules live in one `.alint.yml` and run on every pull request, in pre-commit and in your editor.
 
