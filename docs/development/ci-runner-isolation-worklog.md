@@ -312,3 +312,40 @@ records alint-owned workflow/design/test changes and their immutable commits.
   only as a temporary, explicit owner-approved incident action after a
   demonstrated required operation fails; never restore it for convenience.
   Any unexpected local-route behavior leaves `alint-runner` stopped.
+
+## 2026-10-06
+
+### 00:43–00:50 EDT — main CI queue incident diagnosed and repaired in source
+
+- Owner read-back confirmed that the intentionally held `alint-runner` was
+  offline/idle and the separate `kbench-bench` runner was online/idle. No
+  listener, service, registration or runner setting was changed.
+- Main CI run `37263495301` had completed its hosted entry jobs, queued its Docs
+  job on the offline fixed label, then—after a newer push cancelled Docs—queued
+  the `if: always()` Summary job on the same offline label. That stale summary
+  retained the concurrency slot. Four newer main CI runs were consequently
+  cancelled in sequence, and current run `37402500900` remained pending with no
+  jobs. Coverage run `37402500728` was independently queued on the held runner.
+- The ordinary cancel endpoint acknowledged the stale run but left its queued
+  Summary in place. The owner API's force-cancel endpoint then completed that
+  exact run as cancelled, releasing the concurrency slot; no other run or
+  repository state was cancelled or changed.
+- The separate red Kani runs (`36428250859`, `37322014683`, `37361013059`)
+  failed before model checking because the pinned official wrapper parsed the
+  second whitespace token from `Kani Rust Verifier 0.68.0` as the version. Main
+  already bypassed that wrapper and installed 0.68.0 directly. Owner-dispatched
+  run `37415222438` validated the current workflow and both proof harnesses on
+  hosted capacity successfully.
+- Updated ordinary non-PR CI to use `ubuntu-latest` during the documented local
+  hold, made Summary permanently hosted so an unavailable local route cannot
+  deadlock concurrency again, and moved trusted push/manual coverage to hosted
+  capacity while preserving the pre-assignment PR skip. Box-specific benchmark
+  jobs continue to skip whenever the route reports hosted capacity.
+- Extended the routing harness to require hosted non-PR routing, hosted
+  coverage, and an unconditionally hosted Summary. Updated the as-built design
+  contract. All eight shell harnesses, workflow YAML parsing, actionlint 1.7.12,
+  `git diff --check`, and the complete preflight passed. Preflight covered fmt,
+  clippy, the full workspace tests and doctests, API/docs export, generated
+  schema/facts/categories/roadmap/architecture checks, LikeC4/Mermaid/Node
+  checks, version/dependency/secret gates and dogfood. Dogfood retained four
+  advisory line-count warnings; no policy or threshold was weakened.

@@ -20,7 +20,7 @@ route() {
   local author_id=$5 sender_id=$6 actor_id=$7 local_pr_capacity_enabled=$8
 
   if [[ "$event_name" != pull_request ]]; then
-    printf 'local\n'
+    printf 'hosted\n'
   elif [[ "$event_repo" == "$repo_id" &&
           "$base_repo" == "$repo_id" &&
           "$head_repo" == "$repo_id" ]] &&
@@ -46,8 +46,8 @@ expect_route() {
   fi
 }
 
-# Existing non-PR behavior is deliberately unchanged by this containment.
-expect_route push-local local push '' '' '' '' '' '' false
+# Non-PR CI stays hosted while the persistent listener is intentionally held.
+expect_route push-held hosted push '' '' '' '' '' '' false
 
 expect_route asamarts-same-repo-held hosted pull_request \
   "$repo_id" "$repo_id" "$repo_id" \
@@ -138,7 +138,7 @@ def expression(document: str, start: str, end: str, name: str) -> str:
 ci_policy = expression(
     ci,
     r'^\s{10}IS_ADMITTED_PR: >-\n',
-    r'^\s{10}# Capacity switch',
+    r'^\s{10}# PR capacity switch',
     'ci.yml',
 )
 coverage_policy = expression(
@@ -147,6 +147,25 @@ coverage_policy = expression(
     r'^\s{4}runs-on:',
     'coverage.yml',
 )
+
+if not re.search(
+    r'if \[ "\$EVENT_NAME" != "pull_request" \]; then\s*'
+    r'echo \'runner=\["ubuntu-latest"\]\' >> "\$GITHUB_OUTPUT"\s*'
+    r'echo \'hosted=true\' >> "\$GITHUB_OUTPUT"',
+    ci,
+):
+    print('[ci-pr-routing] non-PR events are not routed to held-state hosted capacity', file=sys.stderr)
+    raise SystemExit(1)
+
+summary = expression(
+    ci,
+    r'^  summary:\n',
+    r'^    steps:\n',
+    'ci.yml summary',
+)
+if 'runs-on:ubuntu-latest' not in summary:
+    print('[ci-pr-routing] always-run summary must remain on hosted capacity', file=sys.stderr)
+    raise SystemExit(1)
 
 for name, actual, expected in (
     ('ci.yml', ci_policy, normalize(expected_ci)),
@@ -159,7 +178,6 @@ for name, actual, expected in (
 allowed_ci_selectors = {
     'ubuntu-latest',
     '${{ fromJSON(needs.changes.outputs.runner) }}',
-    "${{ needs.changes.outputs.runner && fromJSON(needs.changes.outputs.runner) || 'ubuntu-latest' }}",
 }
 ci_selectors = re.findall(r'^\s+runs-on:\s*(.+?)\s*$', ci, re.MULTILINE)
 unexpected = sorted(set(ci_selectors) - allowed_ci_selectors)
@@ -168,7 +186,7 @@ if unexpected:
     raise SystemExit(1)
 
 coverage_selectors = re.findall(r'^\s+runs-on:\s*(.+?)\s*$', coverage, re.MULTILINE)
-if coverage_selectors != ['[self-hosted, linux, alint]']:
+if coverage_selectors != ['ubuntu-latest']:
     print(f'[ci-pr-routing] coverage runner selector drifted: {coverage_selectors}', file=sys.stderr)
     raise SystemExit(1)
 PY

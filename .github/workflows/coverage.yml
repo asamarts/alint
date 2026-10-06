@@ -31,6 +31,9 @@ jobs:
     # false capacity switch so its future disposable route cannot silently
     # broaden admission. This is defence in depth, not scheduling authority.
     # See docs/design/v0.14/ci-fork-pr-isolation.md.
+    # The persistent `alint` listener is intentionally offline pending the
+    # disposable-runner cutover. Main/manual coverage remains useful and safe
+    # on ephemeral hosted capacity; PR coverage stays skipped by this guard.
     if: >-
       ${{
         github.event_name != 'pull_request' ||
@@ -43,13 +46,10 @@ jobs:
           contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))
         )
       }}
-    runs-on: [self-hosted, linux, alint]
-    # Self-fail fast if the runner ever hangs again, instead of sitting at the
-    # 360-min GitHub default and holding the single self-hosted runner. 90 min
-    # comfortably covers a cold-cache, parallelism-capped instrumented build
-    # (typical warm runs finish in minutes); well under bench's 360 / mutants'
-    # 240. The pids-limit + CARGO_BUILD_JOBS fixes should keep hangs from
-    # recurring — this is the belt-and-suspenders net.
+    runs-on: ubuntu-latest
+    # Self-fail fast if an instrumented build hangs. 90 minutes comfortably
+    # covers a cold-cache, parallelism-capped run and is well under GitHub's
+    # default job timeout.
     timeout-minutes: 90
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7

@@ -1,6 +1,7 @@
 # CI PR isolation — keep unapproved code off local runners
 
-Status: **canonical routing corrected; all PRs hosted while local capacity is held.** The
+Status: **canonical routing corrected; ordinary CI uses hosted capacity while the local
+runner is held.** The
 original fork routing landed in #106 after audit finding H6. A September 2026
 review found two gaps: same-repository bot PRs passed its repository-name test,
 and the design incorrectly treated `pull_request` workflow YAML as immutable
@@ -66,31 +67,35 @@ The desired end state is:
   one-job VM with an independently admitted job and unique non-default runner
   registration;
 - all other PRs run portable jobs on GitHub-hosted ephemeral capacity, while
-  box-only jobs and local coverage remain skipped/held;
+  box-only jobs and PR coverage remain skipped/held;
 - release, publication, Codecov upload and other write/secret effects stay
   separate from PR compute; and
 - a missing identity, API failure, broker mismatch, label collision or absent
   qualified guest leaves the local job queued/held. It never falls back to the
   legacy listener.
 
-This correction deliberately preserves existing non-PR route behavior in the
-workflow while the replacement is designed. For PRs, the exact identity
-predicate is retained but an explicit false capacity switch sends even admitted
-human PRs to hosted portable CI until MN-167 qualifies the replacement. Push,
-tag, schedule and manual events need their own exact principal/ref contracts
-before local provisioning; “not a PR” is not sufficient admission for the
-future broker.
+While the persistent listener is held, ordinary push/tag CI also uses hosted
+capacity. This avoids leaving main runs queued indefinitely and, because the
+workflow has `cancel-in-progress`, avoids an unavailable always-run summary
+holding the concurrency group while every newer run is cancelled behind it.
+For PRs, the exact identity predicate is retained but an explicit false capacity
+switch sends even admitted human PRs to hosted portable CI until MN-167
+qualifies the replacement. Push, tag, schedule and manual events need their own
+exact principal/ref contracts before local provisioning; “not a PR” is not
+sufficient admission for the future broker.
 
 ## 3. Current containment
 
 The `changes` job always starts on `ubuntu-latest`. Its first step, before any
 checkout, evaluates only GitHub context values. It retains the exact admitted-
 identity predicate, but `LOCAL_PR_CAPACITY_ENABLED` is explicitly false while
-the legacy listener is held. Every PR therefore emits `ubuntu-latest` and
+the legacy listener is held. Every event therefore emits `ubuntu-latest` and
 `hosted=true`; portable downstream jobs consume that one output. Box-only jobs
-require `hosted != 'true'`. `coverage.yml` repeats the exact admission
-predicate behind an explicit false capacity term in its job-level `if`, so
-every PR skips before runner assignment.
+require `hosted != 'true'`. The always-run summary is unconditionally hosted so
+it cannot deadlock the workflow if local routing returns later and that capacity
+is unavailable. `coverage.yml` repeats the exact admission predicate behind an
+explicit false capacity term in its job-level `if`, so every PR skips before
+runner assignment; trusted push/manual coverage runs on `ubuntu-latest`.
 
 `hosted` describes the selected executor rather than the contributor's trust.
 That distinction is load-bearing: an approved human PR still needs Node setup
@@ -108,13 +113,13 @@ this host through that label.
 
 ### Per-job canonical disposition
 
-| Job | Approved PR | Other PR |
-|---|---|---|
-| `changes` (routing/change detection) | GitHub-hosted | GitHub-hosted |
-| `fmt`, `clippy`, `test`, `audit`, `deny`, `supply-chain`, `build`, `docs`, `dogfood`, `examples`, `shell-tests`, `summary` | GitHub-hosted while capacity is held | GitHub-hosted |
-| `bench-smoke`, `perf-gate` | skipped by `hosted` guard while capacity is held | skipped by `hosted` guard |
-| `editors` | GitHub-hosted | GitHub-hosted |
-| `coverage` | skipped before assignment while capacity is held | skipped before assignment |
+| Job | Approved PR | Other PR | Push/tag/manual |
+|---|---|---|---|
+| `changes` (routing/change detection) | GitHub-hosted | GitHub-hosted | GitHub-hosted while capacity is held |
+| `fmt`, `clippy`, `test`, `audit`, `deny`, `supply-chain`, `build`, `docs`, `dogfood`, `examples`, `shell-tests`, `summary` | GitHub-hosted while capacity is held | GitHub-hosted | GitHub-hosted while capacity is held |
+| `bench-smoke`, `perf-gate` | skipped by `hosted` guard while capacity is held | skipped by `hosted` guard | skipped by `hosted` guard while capacity is held |
+| `editors` | GitHub-hosted | GitHub-hosted | GitHub-hosted |
+| `coverage` | skipped before assignment while capacity is held | skipped before assignment | GitHub-hosted |
 
 The route step is intentionally inline. A checked-out repository script is PR
 code and cannot be trusted to choose a runner. The mirrored coverage predicate
@@ -132,11 +137,12 @@ from the warm box:
   cache produced by an unapproved route may be executed by a later privileged
   or local job without independent provenance validation.
 
-Coverage remains held for unapproved PRs because the existing instrumented
-build depends on local tuning and the combined job also has a Codecov upload
-effect. The target design separates secretless coverage computation from an
-independently authorized upload. Bench smoke and deterministic perf remain
-box-specific signals and are skipped outside an approved route.
+Coverage remains held for every PR because the combined job also has a Codecov
+upload effect. Trusted push/manual coverage uses hosted capacity with its
+existing parallelism cap and timeout. The target design separates secretless
+PR coverage computation from an independently authorized upload. Bench smoke
+and deterministic perf remain box-specific signals and are skipped on hosted
+routes.
 
 ### Token authority is independent of runner placement
 
@@ -182,10 +188,11 @@ Before merging, run the routing harness, all shell harnesses, a YAML parse,
 workflow lint where an admitted `actionlint` is available, and the repository
 preflight. The owner PR itself must show that an admitted human receives the
 complete portable hosted graph while box-only jobs and coverage skip. After
-merging, observe an actual bot/unapproved PR with the same executor result and
-no local worker. The prior owner-PR run already recorded the admitted local
-legs safely queued while the listener was offline; changing the canonical
-route to hosted restores portable validation without restarting it.
+merging, observe a main push completing on hosted capacity and an actual
+bot/unapproved PR with the same executor result and no local worker. The prior
+owner-PR run already recorded the admitted local legs safely queued while the
+listener was offline; changing the canonical route to hosted restores portable
+validation without restarting it.
 
 The disposable cutover later requires live positive and negative canaries. Its
 base-controlled broker must independently verify repository, workflow, event,

@@ -36,6 +36,9 @@ jobs:
   # pull_request workflow YAML comes from the PR merge context and can itself
   # be edited. The legacy fixed-label listener therefore stays offline until a
   # base-controlled broker creates a unique disposable one-job registration.
+  # While it is offline, non-PR runs use hosted capacity too; otherwise a main
+  # push can queue indefinitely and block every newer run in this concurrency
+  # group.
   # See docs/design/v0.14/ci-fork-pr-isolation.md.
   changes:
     name: Detect Changes
@@ -71,14 +74,14 @@ jobs:
                 contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))
               )
             }}
-          # Capacity switch, not an authorization boundary. Keep false while
+          # PR capacity switch, not an authorization boundary. Keep false while
           # the fixed-label listener is held; MN-167 may replace this only
           # after base-controlled disposable admission passes its canaries.
           LOCAL_PR_CAPACITY_ENABLED: "false"
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
-            echo 'hosted=false' >> "$GITHUB_OUTPUT"
+            echo 'runner=["ubuntu-latest"]' >> "$GITHUB_OUTPUT"
+            echo 'hosted=true' >> "$GITHUB_OUTPUT"
           elif [ "$IS_ADMITTED_PR" = "true" ] &&
                [ "$LOCAL_PR_CAPACITY_ENABLED" = "true" ]; then
             echo 'runner=["self-hosted","linux","alint"]' >> "$GITHUB_OUTPUT"
@@ -444,10 +447,10 @@ jobs:
       - examples
       - shell-tests
       - editors
-    # Defensive default: `summary` is `if: always()`, so it evaluates runs-on
-    # even when `changes` is cancelled before the route step (empty `runner`);
-    # fall back to ubuntu-latest so a clean cancel can't fail on fromJSON('').
-    runs-on: ${{ needs.changes.outputs.runner && fromJSON(needs.changes.outputs.runner) || 'ubuntu-latest' }}
+    # Keep this bookkeeping job hosted even after local capacity returns. An
+    # always-run summary must not remain queued on an unavailable local runner
+    # and hold the workflow's concurrency slot indefinitely.
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - env:
