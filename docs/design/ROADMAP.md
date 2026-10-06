@@ -1163,7 +1163,7 @@ four. **All four shipped in v0.11.0.**
   every CNCF / LF-hosted project that requires DCO.
 - **`git_commit_no_fixup`**, fail on residual `fixup!` /
   `squash!` / `amend!` commits left after rebase. Catches the
-  "I forgot to rebase before push" PR shape.
+  a contributor forgetting to rebase before pushing.
 - **`git_commit_author_allowlist`**, author email or name
   matches a pattern. Use cases: enforce committer identity
   against an org domain, exclude bot accounts, gate against

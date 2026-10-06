@@ -231,8 +231,8 @@ The `categories` list makes the contract self-contained: it carries each categor
 slug, title, and display order, so a standalone consumer can map a `rule_categories`
 slug back to its title and order without re-slugifying, and it is the source the site's
 `FAMILY_ORDER` (order plus labels) is validated against. The legacy `families` titles
-list stays for back-compat; `counts.families` stays 13 and `counts.rule_kinds` is
-unchanged (see Counting semantics).
+list stays for back-compat; `counts.families` stays 13, while canonical kinds and
+aliases have separate counts (see Counting semantics).
 
 ### Rule-page frontmatter and cross-listing
 
@@ -277,15 +277,14 @@ alias is present to harvest.
 
 ## Counting semantics
 
-Many-to-many changes only per-category membership, not the headline counts. One
-pre-existing subtlety must be surfaced so the catalog is not mistaken for a drift:
+Many-to-many changes only per-category membership, not the underlying rule surface.
+A later count-contract correction makes the pre-existing alias distinction explicit:
 
-- `counts.rule_kinds` = 105, unchanged by categorization. That figure counts distinct
-  `kind:` spellings in `all_kinds.yaml`, which INCLUDE the 11 alias spellings, so the
-  canonical kinds number 94.
+- `counts.rule_kinds` = 94 canonical kinds; `counts.rule_aliases` = 11. The
+  `rule_kinds` list retains all 105 accepted spellings for backward compatibility.
 - The catalog (`alint rules list` and the family Overview pages) lists the 94 CANONICAL
   kinds, each annotating its aliases, so its row count is intentionally lower than the
-  105 headline. The gap is exactly the 11 aliases, not missing rules.
+  accepted-name list. The gap is exactly the 11 aliases, not missing rules.
 - `counts.families` = number of categories = 13, unchanged.
 - The sum of per-category kind counts now exceeds the canonical count (that is the
   point) and is not a headline number.

@@ -1,6 +1,6 @@
 ---
 title: Changed mode
-description: "How alint check --changed restricts a run to the files in a diff for per-file rules, while cross-file and existence rules keep evaluating the whole tree so they stay correct."
+description: Limit per-file checks to a diff while preserving whole-tree evaluation for cross-file and existence rules.
 sidebar:
   order: 3
 ---

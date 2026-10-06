@@ -2414,26 +2414,25 @@ fn write_manifest(target_dir: &Path) -> Result<()> {
     let sha = git_sha().unwrap_or_else(|| "unknown".to_string());
     let version = env!("CARGO_PKG_VERSION");
     let now = now_iso();
-    let rule_kinds_total = counts::count_canonical_rule_kinds()?;
+    let rule_kinds_total = counts::count_canonical_rule_kinds();
+    let rule_aliases_total = counts::count_rule_aliases();
     let bundled_rulesets_total = counts::count_canonical_bundled_rulesets()?;
     let subcommands_total = counts::count_canonical_subcommands()?;
     let output_formats_total = counts::count_canonical_output_formats()?;
     // Infallible (reads `FixSpec::ALL_OP_NAMES`, a compile-time constant), so no `?`.
     let auto_fix_ops_total = counts::count_canonical_auto_fix_ops();
 
-    // format_version BUMPED 2 -> 3 (Phase 2.6 of the drift audit) so
-    // alint.org's drift gate can affirmatively detect the three new
-    // count fields. The alint.org side's sync-from-alint.mjs widened
-    // its accepted-versions set to {1,2,3} BEFORE this bump landed
-    // so CF Pages builds don't silently fail the way they did during
-    // the 2026-05-22 v2 bump.
+    // format_version BUMPED 3 -> 4 for the canonical-kind/alias split.
+    // alint.org widens its accepted-versions set before this producer-side
+    // change lands, following the compatibility-first v3 rollout.
     let json = format!(
         "{{\n  \
          \"alint_version\": \"{version}\",\n  \
          \"git_sha\": \"{sha}\",\n  \
          \"generated_at\": \"{now}\",\n  \
-         \"format_version\": 3,\n  \
+         \"format_version\": 4,\n  \
          \"rule_kinds_total\": {rule_kinds_total},\n  \
+         \"rule_aliases_total\": {rule_aliases_total},\n  \
          \"bundled_rulesets_total\": {bundled_rulesets_total},\n  \
          \"subcommands_total\": {subcommands_total},\n  \
          \"output_formats_total\": {output_formats_total},\n  \

@@ -234,7 +234,7 @@ MANUAL: Dict[Cell, Stat] = {}
 
 # Host fingerprint per published arch series, for the HISTORY header line.
 # `linux-x86_64` is the canonical kbench series (2026-07 onward); the retired
-# 3900X dev-box series lives at `linux-x86_64-ryzen-3900x` (alint.org/benchmarks-1).
+# 3900X dev-box series lives at `linux-x86_64-ryzen-3900x` in this repository.
 FINGERPRINT = {
     "linux-x86_64": "Intel Core i7-6700HQ 4-core / 15 GB / ext4 / rustc 1.97.0",
     "linux-x86_64-ryzen-3900x": "AMD Ryzen 9 3900X 12-core / 62 GB / ext4 / rustc 1.95",
@@ -335,6 +335,12 @@ def render(
         "published data until the v0.17 fix engine ships). The pre-consolidation",
         "14-scenario history is frozen at [`legacy/HISTORY.md`](legacy/HISTORY.md).",
         "",
+        "> **Invalid historical competitor rows.** The v0.5.7 ls-lint rows never loaded",
+        "> their `.ls-lint.yml`; they measured an immediate config error and must not be",
+        "> used for comparison. The harness now passes an explicit config path, uses",
+        "> `-warn`, and verifies a planted finding before timing. The rows remain in the",
+        "> raw historical report for provenance.",
+        "",
         "## How to read this file",
         "",
         "Each scenario gets its own section with:",
@@ -380,8 +386,8 @@ def render(
         "",
         "Pre-consolidation history (the 14-scenario kbench series v0.10.0-v0.16.0, and",
         "the retired 3900X series before it) lives in",
-        "[`legacy/HISTORY.md`](legacy/HISTORY.md) and on",
-        "[alint.org/benchmarks-1](https://alint.org/benchmarks-1/).",
+        "[`legacy/HISTORY.md`](legacy/HISTORY.md); its raw results remain under",
+        "[`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/).",
         "",
         "---",
         "",

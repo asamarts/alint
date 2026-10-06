@@ -389,7 +389,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
                 "alint: warning: rule {:?}: `since: {raw}` uses the deprecated v0.9.21 \
                  `${{VAR}}` interpolation syntax. The canonical v0.11+ form is `{}`; \
                  the `${{VAR}}` form will be removed in v1.0. \
-                 See https://alint.org/docs/configuration/#variable-interpolation.",
+                 See https://alint.org/docs/configuration/variable-interpolation/.",
                 spec.id,
                 posix_to_env_template(raw),
             );

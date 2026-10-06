@@ -63,8 +63,8 @@ the walk-bound and per-file-content paths.
 
 Pre-consolidation history (the 14-scenario kbench series v0.10.0-v0.16.0, and
 the retired 3900X series before it) lives in
-[`legacy/HISTORY.md`](legacy/HISTORY.md) and on
-[alint.org/benchmarks-1](https://alint.org/benchmarks-1/).
+[`legacy/HISTORY.md`](legacy/HISTORY.md); its raw results remain under
+[`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/).
 
 ---
 

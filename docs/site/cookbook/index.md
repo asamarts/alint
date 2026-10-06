@@ -9,7 +9,7 @@ Each pattern below is meant to be copied into a `.alint.yml` and customized. If 
 
 ## 1. One-line baseline from a bundled ruleset
 
-The shortest useful `.alint.yml`: adopt the OSS-hygiene baseline and nothing else. Good for "we just want README / LICENSE / no merge markers" rigour on a fresh repo.
+The shortest useful `.alint.yml`: adopt the OSS-hygiene baseline and nothing else. Good for enforcing README, LICENSE, and no-merge-marker basics on a fresh repository.
 
 ```yaml
 version: 1
@@ -43,11 +43,11 @@ extends:
   - alint://bundled/oss-baseline@v1
 
 rules:
-  # Turn a warning into a blocking error for our repo:
+  # Turn a warning into a blocking error for this repository:
   - id: oss-license-exists
     level: error
 
-  # Silence a rule we've deliberately opted out of:
+  # Silence a rule that this repository deliberately opts out of:
   - id: oss-code-of-conduct-exists
     level: off
 ```
@@ -316,7 +316,7 @@ rules:
 
 ## 13. Ban risky characters / files outright
 
-The security-family rules catch categories that are almost never intentional. Trojan-Source (CVE-2021-42574), zero-width tricks, and stray merge markers all lead to "I didn't write that" incidents.
+The security-family rules catch categories that are almost never intentional. Trojan-Source (CVE-2021-42574), zero-width tricks, and stray merge markers all create changes that do not match an author's visible intent.
 
 ```yaml
 version: 1

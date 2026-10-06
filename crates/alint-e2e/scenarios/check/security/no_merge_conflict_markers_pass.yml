@@ -10,7 +10,7 @@ given:
   tree:
     src:
       a.rs: "pub fn a() {}\n"
-      docs.md: "Conflict discussion: we use <<<<<< for ... (inline, no col-1 marker)\n"
+      docs.md: "Conflict discussion: the example uses <<<<<< for ... (inline, no col-1 marker)\n"
   config: |
     version: 1
     rules:

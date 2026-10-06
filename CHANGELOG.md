@@ -36,6 +36,23 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   invalid descendant cannot remain hidden when its parent selector matches
   nothing.
 
+### Changed
+
+- **Rule-kind counts now distinguish implementations from aliases.**
+  `facts.json` format v3 reports 95 canonical rule kinds in
+  `counts.rule_kinds` and 11 alternative spellings in
+  `counts.rule_aliases`; its `rule_kinds` list retains all 106 accepted names
+  for compatibility. The generated docs `manifest.json` format is v4 and
+  carries the same split as `rule_kinds_total` / `rule_aliases_total`.
+
+### Fixed
+
+- **Documentation audit follow-up.** Search descriptions are plain text and
+  capped at 158 characters by a regression test; malformed changelog code
+  spans, a stale runtime documentation URL, duplicate migration links, retired
+  benchmark routes, stale benchmark headlines, and mixed-era Kubernetes case
+  study claims are corrected.
+
 ## [0.17.0] - 2026-10-01
 
 This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.
@@ -882,7 +899,7 @@ read hang.
   metacharacters, a control byte, and a non-UTF-8 byte through all eight
   formats. (E2E sweep)
 - **Markdown output no longer splits a heading on a newline-in-path.** A file
-  whose name contains a `\n`/`\r` (legal on Unix) broke out of the `## \`path\``
+  whose name contains a `\n`/`\r` (legal on Unix) broke out of the `` ## `path` ``
   inline-code heading, orphaning the rest onto a following line. `md_inline_code`
   now collapses those control chars to a space (inline code is single-line), and
   the weird-path matrix asserts every Markdown heading stays complete. (review
@@ -3070,7 +3087,7 @@ configs before they shipped to launch readers).
   enforces the LSP-magic-comment line on every example.
 - **`crates/alint-e2e/tests/coverage_audit_rules_md_drift.rs` —
   per-ruleset table drift audit.** Walks every YAML under
-  `crates/alint-dsl/rulesets/v1/`, parses every `### `alint://bundled/...@v1``
+  `crates/alint-dsl/rulesets/v1/`, parses every `` ### `alint://bundled/...@v1` ``
   section in `docs/rules.md`, asserts identical rule-id sets per
   ruleset. Caught the same drift class on 3 more rulesets the day
   it landed (ci/github-actions, agent-hygiene, agent-context); all
@@ -6003,8 +6020,8 @@ outputs byte-equivalent for full-tree runs.
 
 - **`alint check --changed [--base=<ref>]`** and the same
   flags on `alint fix`. With `--base`, the changed-set is
-  derived from `git diff --name-only --relative
-  <base>...HEAD` (three-dot — merge-base diff, the right
+  derived from `git diff --name-only --relative <base>...HEAD`
+  (three-dot — merge-base diff, the right
   shape for PR checks). Without `--base`, it's
   `git ls-files --modified --others --exclude-standard`
   (working-tree diff, the right shape for pre-commit). The

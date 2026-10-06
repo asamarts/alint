@@ -1,6 +1,6 @@
 ---
 title: Concepts
-description: A map of alint's model, from the rule record and how files are targeted, through composition and cross-file rules, to fixing, baselines, and the agent surface.
+description: A map of alint's model, from rules and file targeting through composition, cross-file checks, fixing, baselines, and agent workflows.
 sidebar:
   order: 1
 ---

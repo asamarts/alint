@@ -53,7 +53,7 @@ alint fix              # apply them
 
 A config is a list of rules, but you rarely write them all by hand. `extends:` composes **rulesets**, and alint ships 22 of them compiled into the binary, so there is no download and no network round trip. Most are gated on what the repo actually contains, so listing the Rust ruleset in a repo with no Rust does nothing. You layer your own rules on top, and override or switch off anything you inherit.
 
-A rule is three things: a **kind** (the check to run, such as `file_exists`, `filename_case`, or `pair`), the **paths** it applies to, and a **severity**. There are 106 rule kinds across 13 families. A rule can also carry a `when:` condition (run only on the default branch, or only when some file exists) and a `fix:`.
+A rule is three things: a **kind** (the check to run, such as `file_exists`, `filename_case`, or `pair`), the **paths** it applies to, and a **severity**. There are 95 rule kinds across 13 families, plus 11 aliases. A rule can also carry a `when:` condition (run only on the default branch, or only when some file exists) and a `fix:`.
 
 ```yaml
 # .alint.yml
@@ -73,7 +73,7 @@ Under the hood, alint walks the repository once, in parallel, honoring `.gitigno
 
 ## What it can check
 
-The 106 kinds group into a handful of themes. The [rule reference](https://alint.org/docs/rules/) has every one with an example; a tour of the highlights:
+The 95 rule kinds group into a handful of themes. The [rule reference](https://alint.org/docs/rules/) has every one with an example; a tour of the highlights:
 
 - **Files and structure.** Require or forbid specific files and directories; cap file size, line count, directory depth, and files per directory; reject committed build output and OS junk.
 - **Naming.** Filename case and regex conventions, with case-collision and reserved-name safety for cross-platform checkouts.

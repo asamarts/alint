@@ -1,15 +1,15 @@
 ---
 title: Kinds, families, and categories
-description: "alint ships 94 rule kinds (105 with aliases), grouped one way by family (one home each) and another way by category (cross-cutting tags you can filter on)."
+description: "alint ships 94 rule kinds plus 11 aliases, grouped by one-home families and by cross-cutting categories."
 sidebar:
   order: 3
 ---
 
-Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct kinds** (105 counting aliases), and it organizes them two ways at once. Each kind has one home **family**, and each kind is tagged into one or more **categories**. Same thirteen names, two different relationships.
+Every rule names a `kind`: the built-in check it runs. alint ships **94 rule kinds** plus 11 aliases, and it organizes the canonical kinds two ways at once. Each kind has one home **family**, and each kind is tagged into one or more **categories**. Same thirteen names, two different relationships.
 
 <svg class="alint-kinds" viewBox="0 0 460 440" role="img" aria-labelledby="kfc-t kfc-d" xmlns="http://www.w3.org/2000/svg">
 <title id="kfc-t">Kinds, families, and categories</title>
-<desc id="kfc-d">Each rule kind belongs to exactly one family (its colored home group) but can be tagged into several categories. file_exists is in the Existence family and the existence category. no_bidi_controls is in the Security / Unicode sanity family, tagged security-unicode-sanity and encoding. dir_contains is in the Cross-file family, tagged cross-file and structure. filename_case is in the Naming family and the naming category. 105 kinds, 13 families, 13 categories.</desc>
+<desc id="kfc-d">Each of 94 rule kinds belongs to exactly one family (its colored home group) but can be tagged into several categories. Eleven aliases provide alternate names. file_exists is in the Existence family and the existence category. no_bidi_controls is in the Security / Unicode sanity family, tagged security-unicode-sanity and encoding. dir_contains is in the Cross-file family, tagged cross-file and structure. filename_case is in the Naming family and the naming category.</desc>
 <style>
   .alint-kinds { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-kinds { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -25,7 +25,7 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct
   @media (prefers-reduced-motion:reduce){ .alint-kinds .extra { animation:none; } }
 </style>
 <text class="ui ac" x="18" y="15">one family, many categories</text>
-<text class="ui mut" x="18" y="33">105 kinds &#183; 13 families &#183; 13 categories</text>
+<text class="ui mut" x="18" y="33">94 kinds + 11 aliases &#183; 13 families &#183; 13 categories</text>
 <rect class="card" x="20" y="46" width="420" height="62" rx="8"/><rect x="20" y="46" width="6" height="58" rx="2" fill="#3b82f6"/>
 <text class="mono tx" x="38" y="72" font-size="14">file_exists</text>
 <rect x="330" y="56" width="92" height="22" rx="11" fill="#3b82f6"/><text class="ui" x="376" y="71" text-anchor="middle" fill="#fff">Existence</text>
@@ -52,7 +52,7 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 distinct
 
 ## Kinds are the checks
 
-A `kind` is the built-in implementation a rule invokes: `file_exists`, `no_bidi_controls`, `filename_case`, `json_schema_passes`, and 90 more. Every rule declares exactly one, and the `kind` is what decides which extra fields the rule accepts (a `file_header` takes a `pattern`, a `file_max_size` takes a byte limit). A handful of kinds have **aliases**, second names for the same implementation, which is why the catalog counts 105 entries for 94 distinct checks.
+A `kind` is the built-in implementation a rule invokes: `file_exists`, `no_bidi_controls`, `filename_case`, `json_schema_passes`, and 90 more. Every rule declares exactly one, and the `kind` is what decides which extra fields the rule accepts (a `file_header` takes a `pattern`, a `file_max_size` takes a byte limit). Eleven **aliases** provide alternate names for existing implementations; they are counted separately from the 94 kinds.
 
 ## Families are the home group
 

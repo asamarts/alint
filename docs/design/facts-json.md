@@ -10,7 +10,7 @@ Pages because the consumer and producer disagreed on a hand-counted number.
 ## 1. Problem
 
 alint asserts its own surface area as prose in many places — the README sentence
-("105 rule kinds across 13 families, 22 bundled ecosystem rulesets, 13 auto-fix
+("94 rule kinds across 13 families, plus 11 aliases; 22 bundled ecosystem rulesets, 26 auto-fix
 ops, 8 output formats", "12 subcommands"), `docs/site/about/index.md`, and the
 alint.org marketing site (a separate, private repo). Every one of these is a
 hand-maintained number that drifts the instant a rule kind, fixer, formatter, or
@@ -41,13 +41,14 @@ volatile fields, so it is committed and content-diff gated like the schema.
 
 ```json
 {
-  "format_version": 2,
-  "alint_version": "0.15.2",
+  "format_version": 3,
+  "alint_version": "0.17.0",
   "counts": {
-    "rule_kinds": 105,
+    "rule_kinds": 94,
+    "rule_aliases": 11,
     "families": 13,
     "bundled_rulesets": 22,
-    "auto_fix_ops": 12,
+    "auto_fix_ops": 26,
     "output_formats": 8,
     "subcommands": 12
   },
@@ -55,6 +56,7 @@ volatile fields, so it is committed and content-diff gated like the schema.
   "families": ["Existence", "Content", "..."],
   "categories": [{ "slug": "existence", "title": "Existence", "order": 0 }, { "slug": "content", "title": "Content", "order": 1 }],
   "rule_categories": { "commented_out_code": ["git-hygiene", "content"], "cross_file": ["cross-file"] },
+  "rule_aliases": { "content_matches": "file_content_matches", "header": "file_header" },
   "bundled_rulesets": ["apache/governance", "go", "rust", "..."],
   "output_formats": ["agent", "github", "gitlab", "human", "json", "junit", "markdown", "sarif"],
   "subcommands": ["check", "explain", "export-agents-md", "..."],
@@ -62,15 +64,15 @@ volatile fields, so it is committed and content-diff gated like the schema.
 }
 ```
 
-Every list is sorted for deterministic output. The five list-backed counts
-satisfy `counts.X == X.len()` as an enforced invariant; `auto_fix_ops` is
-count-only (the `*Fixer` struct names are an internal detail, not a public
-catalogue).
+Every list is sorted for deterministic output. The accepted-name `rule_kinds`
+list retains aliases for backward compatibility, with the enforced invariant
+`counts.rule_kinds + counts.rule_aliases == rule_kinds.len()`. The other
+list-backed counts equal their list lengths; `auto_fix_ops` is count-only.
 
-The live `manifest.json` shape is **left untouched** — alint.org's sync depends
-on it, and the 2026-05-22 incident showed that changing the producer ahead of
-the consumer breaks CF Pages. `facts.json` ships *alongside* `manifest.json`;
-adopting it on the site (WS5) is a separate, paced change in that repo.
+`facts.json` ships alongside the volatile build-time `manifest.json`. Contract
+changes use a compatibility-first rollout: alint.org accepts the next manifest
+version before alint emits it. Manifest v4 carries the same canonical kind and
+alias counts as facts.json v3.
 
 ## 3. Semantics
 
@@ -80,12 +82,14 @@ uses, so `facts.json` can never disagree with the README:
 | Field | Source of truth |
 |---|---|
 | `alint_version` | `env!("CARGO_PKG_VERSION")` (workspace version) |
-| `rule_kinds` | distinct `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml` |
+| `rule_kinds` (count) | canonical entries in the generated category bridge |
+| `rule_aliases` (count and map) | `ALIAS_TO_CANONICAL` in the generated category bridge |
+| `rule_kinds` (list) | accepted `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml`, aliases included |
 | `families` | non-meta `## ` headings in `docs/rules.md` |
 | `bundled_rulesets` | `.yml` files (recursive) under `crates/alint-dsl/rulesets/v1/` |
 | `output_formats` | variants of `enum Format` in `crates/alint-output/src/lib.rs`, lowercased |
 | `subcommands` | `CLI_REFERENCE_SUBCMDS` (itself pinned to `enum Command` by a test) |
-| `auto_fix_ops` (count) | `pub struct *Fixer` declarations under `crates/alint-rules/src/fixers/` |
+| `auto_fix_ops` (count) | `FixSpec::ALL_OP_NAMES` in `alint-core` |
 | `fact_predicates` | the `FactSpec::name()` arms in `crates/alint-core/src/facts.rs` |
 
 `gen-facts` (no flag) rewrites `facts.json`. `gen-facts --check` regenerates
@@ -125,9 +129,10 @@ are promoted to `pub(crate)`; the `all_kinds.yaml` / `docs/rules.md` / rulesets
 / fixers walks are small and live in `facts.rs`.
 
 No new dependencies (`serde`, `serde_json` already in `xtask`). `facts.json` is a
-new tracked file at the repo root. `manifest.json` and `write_manifest` are not
-touched. Constitution invariants: none affected (no engine, DSL, or trust-gate
-change).
+tracked file at the repo root. The original implementation left `manifest.json`
+untouched; manifest v4 later added the same canonical-kind/alias split after the
+site accepted the new version. Constitution invariants are unaffected (no engine,
+DSL, or trust-gate change).
 
 ## 6. Tests
 
@@ -135,9 +140,10 @@ In `xtask` (`facts.rs` `#[cfg(test)]`):
 
 - `gen_facts_check_passes_on_committed_tree` — `run(true)` succeeds on the
   committed file (idempotency / freshness; mirrors the schema test).
-- `facts_json_counts_match_list_lengths` — the five list-backed counts equal
-  their list lengths; lists are sorted and de-duplicated.
-- `facts_counts_agree_with_readme_audit_sources` — recompute each count the way
+- `counts_equal_list_lengths_and_lists_are_sorted` — canonical kinds plus aliases
+  equal the accepted-name list length; other list-backed counts equal their list
+  lengths; lists are sorted and de-duplicated.
+- `counts_match_readme_claims` — recompute each count the way
   `coverage_audit_readme_claims` does and assert equality, binding `facts.json`
   to the same truth as the README.
 

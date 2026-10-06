@@ -1,7 +1,7 @@
 # Benchmark host migration: 3900X dev box -> kbench (2026-07-15)
 
-Status: **Complete** (corpus published 2026-07-16; the alint.org /benchmarks-1
-legacy page is the one remaining follow-up). Decision made 2026-07-15: `kbench` (a dedicated,
+Status: **Complete** (corpus published 2026-07-16 and the retired series retained
+under [`docs/benchmarks/macro/results/linux-x86_64-ryzen-3900x/`](../../benchmarks/macro/results/linux-x86_64-ryzen-3900x/)). Decision made 2026-07-15: `kbench` (a dedicated,
 quiet Intel i7-6700HQ laptop) becomes THE canonical alint benchmark host; the
 3900X dev box is retired from benching (it was contended daytime, which
 repeatedly contaminated CI bench-record runs). Fingerprint + rationale:
@@ -38,7 +38,7 @@ on kbench.
 4. **Publish + re-baseline the corpus.** When the backfill is gate-green:
    move the 3900X series (`macro/results/linux-x86_64/` and the micro
    equivalent) to `linux-x86_64-ryzen-3900x/` (full 27-version macro / 23-version
-   micro history retained, with a README pointing to alint.org/benchmarks-1),
+   micro history retained, with a README pointing to the in-repository history),
    then publish the kbench results into `linux-x86_64/<tag>/` so the live series
    is fully kbench and internally consistent. The `results.json` fingerprint
    records the i7-6700HQ; the drop_caches flag is documented in `METHODOLOGY.md`

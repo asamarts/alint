@@ -130,32 +130,17 @@ pub(super) fn strip_nested_braces(input: &str) -> String {
     out
 }
 
-/// Canonical rule-kind count = distinct `kind:` values in the
-/// `all_kinds.yaml` test fixture. This is the same source-of-truth that
-/// `coverage_audit_readme_claims::readme_rule_kinds_count_matches_fixture`
-/// pins README.md against, so this manifest field can never drift from
-/// the README claim (the test would fail first). alint.org's
-/// `check-version-pins.sh` consumes this value to gate the cross-repo
-/// `<N>` rule-kind claim on every static landing.
-pub(super) fn count_canonical_rule_kinds() -> Result<usize> {
-    let path = crate::bench_release::workspace_root()?
-        .join("crates")
-        .join("alint-dsl")
-        .join("tests")
-        .join("fixtures")
-        .join("all_kinds.yaml");
-    let text = fs::read_to_string(&path).with_context(|| format!("read {}", path.display()))?;
-    let mut kinds: std::collections::HashSet<String> = std::collections::HashSet::new();
-    for raw in text.lines() {
-        let line = raw.trim_start();
-        if let Some(rest) = line.strip_prefix("kind:") {
-            let value = rest.trim().trim_end_matches(',');
-            if !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '_') {
-                kinds.insert(value.to_string());
-            }
-        }
-    }
-    Ok(kinds.len())
+/// Canonical rule-kind count = generated category entries, one per canonical
+/// rule kind. Aliases have their own count below. The categories generator
+/// gates this bridge against the registry, docs, and accepted-name fixture.
+pub(super) fn count_canonical_rule_kinds() -> usize {
+    alint_rules::categories::KIND_CATEGORIES.len()
+}
+
+/// Accepted aliases, kept separate so "rule kinds" means implementations,
+/// not every spelling accepted by `kind:`.
+pub(super) fn count_rule_aliases() -> usize {
+    alint_rules::categories::ALIAS_TO_CANONICAL.len()
 }
 
 /// Canonical bundled-ruleset count = recursive `.yml` file count under

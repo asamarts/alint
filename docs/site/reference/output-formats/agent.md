@@ -1,6 +1,6 @@
 ---
 title: The agent output format
-description: "The alint check --format agent report: a flat violations array, a templated agent_instruction per finding, lowercase severities, stable behind schema_version 1."
+description: "Use the agent report's flat violation list, per-finding instructions, lowercase severities, and versioned schema."
 sidebar:
   label: agent
   order: 2

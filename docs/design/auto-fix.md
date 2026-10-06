@@ -73,7 +73,7 @@ and (from Phase 1) fixpoint iteration.
 
 ### 1.1 The numbers
 
-As of v0.16.1 (`facts.json`): 105 rule kinds (94 distinct + 11 aliases), 13 families,
+As of v0.16.1: 94 rule kinds plus 11 aliases, 13 families,
 22 bundled rulesets, **12 fix ops**, 8 output formats. Only **16 distinct kinds (19 counting
 aliases) attach a fixer**. Each fixable builder accepts exactly one op and rejects any other
 at load (`fix.<op> is not compatible with <kind>`).

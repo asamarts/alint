@@ -1,6 +1,6 @@
 ---
 title: The walker and git
-description: "How alint discovers files by walking the tree through git's own ignore rules, why the walked tree can diverge from git's index, and how git_tracked_only switches a rule to the index."
+description: Learn how alint walks through Git ignore rules, why the result can differ from the index, and when to require tracked files.
 sidebar:
   order: 1
 ---

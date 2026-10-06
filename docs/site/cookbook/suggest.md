@@ -1,6 +1,6 @@
 ---
 title: Suggesting rules
-description: How `alint suggest` scans a repo for antipatterns and existing tooling, then proposes bundled rulesets and rule entries to adopt. Covers the signals, confidence levels, and review-only output.
+description: Scan a repository for structural signals, then review suggested bundled rulesets and individual rules before adopting them.
 sidebar:
   order: 10
 ---

@@ -166,12 +166,15 @@ fn every_site_doc_has_parseable_yaml_frontmatter() {
 /// generated page's.
 #[test]
 fn every_site_doc_has_its_own_description() {
+    const MAX_DESCRIPTION_CHARS: usize = 158;
+
     let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .and_then(|p| p.parent())
         .unwrap()
         .to_path_buf();
     let mut missing: Vec<String> = Vec::new();
+    let mut invalid: Vec<String> = Vec::new();
     let mut by_description: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
     for rel in collect_site_docs() {
@@ -188,10 +191,23 @@ fn every_site_doc_has_its_own_description() {
             .and_then(serde_yaml::Value::as_str)
             .map(str::trim)
         {
-            Some(description) if !description.is_empty() => by_description
-                .entry(description.to_string())
-                .or_default()
-                .push(rel),
+            Some(description) if !description.is_empty() => {
+                let chars = description.chars().count();
+                if chars > MAX_DESCRIPTION_CHARS {
+                    invalid.push(format!(
+                        "{rel}: description is {chars} characters (maximum {MAX_DESCRIPTION_CHARS})"
+                    ));
+                }
+                if description.contains('`') {
+                    invalid.push(format!(
+                        "{rel}: description contains a Markdown backtick, which renders literally in search snippets"
+                    ));
+                }
+                by_description
+                    .entry(description.to_string())
+                    .or_default()
+                    .push(rel);
+            }
             _ => missing.push(rel),
         }
     }
@@ -201,9 +217,10 @@ fn every_site_doc_has_its_own_description() {
         .map(|(description, pages)| format!("{pages:?} share {description:?}"))
         .collect();
     assert!(
-        missing.is_empty() && shared.is_empty(),
-        "site docs need their own `description:` (the search snippet):\n\
-         without one: {missing:?}\nshared: {shared:#?}",
+        missing.is_empty() && shared.is_empty() && invalid.is_empty(),
+        "site docs need a unique, plain-text `description:` of at most \
+         {MAX_DESCRIPTION_CHARS} characters (the search snippet):\n\
+         without one: {missing:?}\nshared: {shared:#?}\ninvalid: {invalid:#?}",
     );
 }
 

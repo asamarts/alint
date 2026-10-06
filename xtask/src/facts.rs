@@ -2,8 +2,8 @@
 //! contract.
 //!
 //! `facts.json` is the single machine-readable manifest of alint's
-//! surface area: version, the six headline counts (rule kinds,
-//! families, bundled rulesets, auto-fix ops, output formats,
+//! surface area: version, the seven headline counts (rule kinds,
+//! aliases, families, bundled rulesets, auto-fix ops, output formats,
 //! subcommands), and catalogue lists the README, docs, and alint.org
 //! render from instead of restating numbers in prose. Every field
 //! derives from the same canonical source `coverage_audit_readme_claims`
@@ -26,7 +26,7 @@ use serde::Serialize;
 
 /// Bumped when the `facts.json` shape changes, so a downstream
 /// consumer (alint.org) can pin the schema it understands.
-const FORMAT_VERSION: u32 = 2;
+const FORMAT_VERSION: u32 = 3;
 
 #[derive(Serialize)]
 struct Facts {
@@ -51,6 +51,7 @@ struct Facts {
 #[derive(Serialize)]
 struct Counts {
     rule_kinds: usize,
+    rule_aliases: usize,
     families: usize,
     bundled_rulesets: usize,
     auto_fix_ops: usize,
@@ -122,7 +123,8 @@ fn build_facts() -> Result<Facts> {
     let bench_scenario_rule_counts = bench_scenario_rule_counts(&root)?;
 
     let counts = Counts {
-        rule_kinds: rule_kinds.len(),
+        rule_kinds: alint_rules::categories::KIND_CATEGORIES.len(),
+        rule_aliases: rule_aliases.len(),
         families: families.len(),
         bundled_rulesets: bundled_rulesets.len(),
         auto_fix_ops,
@@ -720,12 +722,23 @@ mod tests {
         }
     }
 
-    /// The five list-backed counts equal their list lengths, and every
-    /// list is sorted + de-duplicated.
+    /// Canonical kinds plus aliases equal the accepted-name list; the other
+    /// list-backed counts equal their list lengths. Every list is sorted and
+    /// de-duplicated.
     #[test]
     fn counts_equal_list_lengths_and_lists_are_sorted() {
         let f = build_facts().expect("build facts");
-        assert_eq!(f.counts.rule_kinds, f.rule_kinds.len());
+        assert_eq!(
+            f.counts.rule_kinds + f.counts.rule_aliases,
+            f.rule_kinds.len()
+        );
+        assert_eq!(f.counts.rule_aliases, f.rule_aliases.len());
+        assert!(
+            f.rule_aliases
+                .keys()
+                .all(|alias| f.rule_kinds.contains(alias)),
+            "every alias must remain in the accepted-name rule_kinds list"
+        );
         assert_eq!(f.counts.families, f.families.len());
         assert_eq!(f.counts.bundled_rulesets, f.bundled_rulesets.len());
         assert_eq!(f.counts.output_formats, f.output_formats.len());

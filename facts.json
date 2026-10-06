@@ -1,8 +1,9 @@
 {
-  "format_version": 2,
+  "format_version": 3,
   "alint_version": "0.17.0",
   "counts": {
-    "rule_kinds": 106,
+    "rule_kinds": 95,
+    "rule_aliases": 11,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 26,

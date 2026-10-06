@@ -220,8 +220,8 @@ result fingerprint.
   and `MemAvailable` that spikes one cell's CV to 40-50 %. The flag drops
   the page cache once per size phase after tree-gen; warmup re-reads the
   tree so measured runs stay warm. A large-RAM host (e.g. the now-retired
-  62 GB 3900X reference desktop, whose series lives at
-  [`/benchmarks-1/`](https://alint.org/benchmarks-1/)) never reclaims and
+  62 GB 3900X reference desktop, whose retained series lives under
+  [`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/)) never reclaims and
   must leave the flag OFF — it needs passwordless sudo for `drop_caches`
   and would only add overhead.
   Investigation: [`investigations/2026-07-1m-writeback-contention/`](investigations/2026-07-1m-writeback-contention/).

@@ -1,8 +1,8 @@
 //! Coverage audit: README.md marketing claims match their workspace
 //! source of truth.
 //!
-//! README.md makes six numeric claims about alint's surface area
-//! ("70 rule kinds across 13 families", "19 bundled ecosystem
+//! README.md makes seven numeric claims about alint's surface area
+//! ("94 rule kinds across 13 families, plus 11 aliases", "22 bundled ecosystem
 //! rulesets", "12 auto-fix ops", "8 output formats", "9 subcommands").
 //! These claims drift trivially: a new rule kind ships, a new fixer
 //! lands, a new formatter lights up, but the README copy stays at
@@ -14,7 +14,8 @@
 //!
 //! | Claim                  | Source of truth                                            |
 //! |------------------------|------------------------------------------------------------|
-//! | rule kinds             | distinct `kind:` values in `crates/alint-dsl/tests/fixtures/all_kinds.yaml` |
+//! | rule kinds             | accepted fixture kinds minus generated aliases             |
+//! | rule aliases           | `alint_rules::categories::ALIAS_TO_CANONICAL`               |
 //! | families               | non-meta `## ` headings in `docs/rules.md`                 |
 //! | bundled rulesets       | `.yml` files under `crates/alint-dsl/rulesets/v1/`          |
 //! | auto-fix ops           | `FixSpec::ALL_OP_NAMES` (the canonical fix-op list; one fixer may back several ops) |
@@ -224,15 +225,29 @@ fn readme_rule_kinds_count_matches_fixture() {
     let fixture_path = workspace_root().join("crates/alint-dsl/tests/fixtures/all_kinds.yaml");
     let fixture = fs::read_to_string(&fixture_path)
         .unwrap_or_else(|e| panic!("read {}: {e}", fixture_path.display()));
-    let actual = count_distinct_kinds(&fixture);
+    let accepted = count_distinct_kinds(&fixture);
+    let aliases = alint_rules::categories::ALIAS_TO_CANONICAL.len();
+    let actual = accepted - aliases;
 
     assert_eq!(
         claimed,
         actual,
-        "README claims {claimed} rule kinds; all_kinds.yaml has {actual} distinct kinds.\n\
-         Either bump the README claim or update the fixture.\n\
+        "README claims {claimed} rule kinds; all_kinds.yaml has {accepted} accepted names, \
+         including {aliases} aliases, leaving {actual} canonical kinds.\n\
+         Either bump the README claim or update the fixture/alias bridge.\n\
          (Source: README.md '...N rule kinds across...', fixture: {})",
         fixture_path.display()
+    );
+}
+
+#[test]
+fn readme_rule_alias_count_matches_generated_alias_map() {
+    let readme = read_readme();
+    let claimed = num_before(&readme, "aliases").expect("README must contain 'N aliases'");
+    let actual = alint_rules::categories::ALIAS_TO_CANONICAL.len();
+    assert_eq!(
+        claimed, actual,
+        "README claims {claimed} aliases; the generated registry bridge has {actual}"
     );
 }
 
@@ -409,6 +424,11 @@ fn about_page_surface_claims_match_readme() {
         about_families, readme_families,
         "docs/site/about/index.md claims {about_families} families; README.md claims \
          {readme_families}. They must agree (README is pinned to docs/rules.md)."
+    );
+    assert_eq!(
+        num_before(&about, "aliases"),
+        num_before(&readme, "aliases"),
+        "docs/site/about/index.md and README.md must claim the same alias count"
     );
 
     let readme_rulesets = num_before(&readme, "bundled ecosystem rulesets")

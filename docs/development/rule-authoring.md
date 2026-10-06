@@ -90,7 +90,7 @@ placed into a clean table cell.
 
 Adding a rule kind moves a surface-area count, so `facts.json` has to be
 regenerated with `cargo run -p xtask -- gen-facts`. That file holds the version,
-the six headline counts, and the catalogue lists that the README, the docs, and
+the seven headline counts, and the catalogue lists that the README, the docs, and
 alint.org render from. CI and the docs script run `gen-facts --check` and fail on
 drift. The same applies when you add a family, bundled ruleset, fix operation,
 output format, or subcommand.
