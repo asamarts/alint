@@ -1120,7 +1120,7 @@ mod tests {
         let config_path = dir.path().join(".alint.yml");
         std::fs::write(
             &config_path,
-            r#"version: 1
+            r"version: 1
 rules:
   - id: required-doc
     kind: file_content_forbidden
@@ -1128,7 +1128,7 @@ rules:
     pattern: stale
     expect_matches: true
     level: error
-"#,
+",
         )
         .unwrap();
 
