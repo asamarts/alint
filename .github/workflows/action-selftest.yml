@@ -1,10 +1,16 @@
 name: Action self-test
 
-# Dogfood the official GitHub Action on the alint repo itself.
-# Exercises the full install-from-release → invoke → annotate
+# Exercise the official GitHub Action against a stable fixture.
+# This covers the full install-from-release → invoke → annotate
 # chain that external consumers follow, which our in-process
-# tests don't cover. Runs on ubuntu-latest (not self-hosted) so
-# this job represents a typical external user's environment.
+# tests don't cover. The fixture intentionally uses only the
+# configuration contract shared by every binary version tested
+# here: action.yml installs the latest released binary baked into
+# the action, which can legitimately predate rule kinds added on
+# the branch under test. Current-source dogfooding remains the
+# responsibility of the normal CI jobs, which build HEAD first.
+# Runs on ubuntu-latest (not self-hosted) so this job represents a
+# typical external user's environment.
 #
 # `uses: ./` loads action.yml from the just-checked-out commit,
 # pinning each invocation to the exact commit being tested
@@ -42,9 +48,11 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - name: alint check (annotations)
         uses: ./
-        # Default format is `github` — inline annotations on
-        # the PR if run against a PR commit. Exit 0 if the repo
-        # is clean against its own `.alint.yml`.
+        with:
+          path: .github/fixtures/action-self-test
+        # Default format is `github` — inline annotations on the PR if run
+        # against a PR commit. The clean fixture makes this a success-path
+        # assertion independent of unreleased root-config features.
 
   action-sarif:
     name: sarif output
@@ -56,10 +64,11 @@ jobs:
         uses: ./
         with:
           format: sarif
+          path: .github/fixtures/action-self-test
         # Tolerate a non-zero exit: when the linted tree has violations the
         # check exits non-zero, but action.yml captures the exit code and still
         # sets `sarif-file`, and this job only asserts the SARIF file is
-        # produced + valid JSON. Repo-cleanliness is asserted by the
+        # produced + valid JSON. Fixture cleanliness is asserted by the
         # `action-default` job, not here.
         continue-on-error: true
       - name: verify SARIF file exists and parses as JSON
@@ -78,6 +87,7 @@ jobs:
         uses: ./
         with:
           format: json
+          path: .github/fixtures/action-self-test
 
   action-explicit-version:
     name: pinned version input
@@ -87,14 +97,12 @@ jobs:
       - name: alint check with explicit version input
         uses: ./
         with:
-          # Exercises install.sh's version-pinning path against
-          # a specific release tag. Must name a release whose
-          # CLI understands the repo's current `.alint.yml` —
-          # bump when adding rule kinds the pinned version won't
-          # recognize. Convention: track the previous minor
-          # (i.e. when HEAD is 0.X+1, this sits at v0.X) so
-          # the test catches CLI/.alint.yml drift one release out.
+          # Exercises install.sh's version-pinning path against a specific
+          # older release tag. The stable fixture deliberately avoids newer
+          # rule kinds so this remains a test of version selection rather
+          # than an accidental test of backward-reading HEAD's root config.
           version: v0.14.0
+          path: .github/fixtures/action-self-test
 
   action-config-single:
     name: config input (single path)
@@ -104,11 +112,12 @@ jobs:
       - name: alint check with an explicit config path
         uses: ./
         with:
-          # The repo lints clean against its own `.alint.yml` (the
-          # action-default job proves that via auto-discovery); passing it
-          # explicitly through the `config:` input exercises the
-          # single-`--config` path end to end.
-          config: .alint.yml
+          # The default job proves auto-discovery in this same fixture;
+          # passing its config explicitly exercises the single-`--config`
+          # path end to end without coupling a released binary to HEAD's
+          # root config.
+          path: .github/fixtures/action-self-test
+          config: .github/fixtures/action-self-test/.alint.yml
 
   action-config-multi-rejected:
     name: config input (multiple paths rejected)

@@ -1,0 +1,10 @@
+# Stable compatibility fixture for .github/workflows/action-selftest.yml.
+# Keep this config within the oldest explicitly tested binary's rule surface.
+version: 1
+
+rules:
+  - id: action-self-test-readme-exists
+    kind: file_exists
+    paths: README.md
+    root_only: true
+    level: error
