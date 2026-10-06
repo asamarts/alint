@@ -220,11 +220,10 @@ rules:
   # ──────────────────────────────────────────────────────────────────────
   - id: tensorflow-org-code-links-resolve
     kind: registry_paths_resolve
-    source: "tensorflow/python/framework/ops.py"
+    source: "tensorflow/**"
     extract:
       regex: 'https://www\.tensorflow\.org/code/([a-zA-Z0-9/._-]+)'
     base: "."
-    expect: file
     level: warning
     message: >-
       A https://www.tensorflow.org/code/<path> link must resolve to a real
@@ -233,9 +232,11 @@ rules:
   # ──────────────────────────────────────────────────────────────────────
   # requirements_lock CROSS-VERSION PARITY → cross_file_value_equals (NEW WIN)
   #
-  # The 5 pip-compile locks (3.10–3.14) should pin shared packages to the
-  # same version (modulo interpreter-conditional pkgs). cross_file_value_equals
-  # extracts one pin from the 3.10 lock and asserts the other 4 agree.
+  # The 3.10–3.13 pip-compile locks should pin shared packages to the same
+  # version (modulo interpreter-conditional pkgs). Python 3.14 intentionally
+  # selects a newer numpy, so it is outside this equality set.
+  # cross_file_value_equals extracts one pin from the 3.10 lock and asserts
+  # the other three agree.
   # Shown for `numpy` as the representative invariant pin; replicate per
   # package you want locked in lockstep. allow_missing_target handles a
   # package legitimately absent on one interpreter.
@@ -252,8 +253,6 @@ rules:
       - file: "requirements_lock_3_12.txt"
         extract: { regex: '(?m)^numpy==([0-9][^ ;\\]+)' }
       - file: "requirements_lock_3_13.txt"
-        extract: { regex: '(?m)^numpy==([0-9][^ ;\\]+)' }
-      - file: "requirements_lock_3_14.txt"
         extract: { regex: '(?m)^numpy==([0-9][^ ;\\]+)' }
     allow_missing_target: true
     level: warning
@@ -304,7 +303,7 @@ rules:
   - id: tensorflow-api-golden-v1-marker
     kind: file_content_matches
     paths: { include: ["tensorflow/tools/api/golden/v1/*.pbtxt"] }
-    pattern: '(?m)^path:\s*"tensorflow\.'
+    pattern: '(?m)^path:\s*"tensorflow[."]'
     level: warning
 
   # tf_version.bzl is the wheel-version source of truth.
@@ -324,6 +323,11 @@ rules:
       exclude: ["third_party/**", "tensorflow/lite/micro/**"]
     level: error
     policy_url: "https://trojansource.codes/"
+
+  - id: tensorflow-no-case-conflicts
+    kind: no_case_conflicts
+    paths: "**"
+    level: error
 
   - id: tensorflow-final-newline
     kind: final_newline

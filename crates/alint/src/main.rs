@@ -439,19 +439,35 @@ impl ChangedMode {
         if !self.enabled {
             return Ok(None);
         }
-        let set = alint_core::git::collect_changed_paths(root, self.base.as_deref()).ok_or_else(
-            || {
-                let what = self.base.as_deref().map_or_else(
-                    || "git ls-files --modified --others --exclude-standard".to_string(),
-                    |r| format!("git diff --name-only {r}...HEAD"),
-                );
+        let set = if let Some(base) = self.base.as_deref() {
+            match alint_core::git::collect_changed_paths_checked(root, base) {
+                Ok(Some(set)) => set,
+                Ok(None) => {
+                    bail!(
+                        "--changed requires a git repository (and `git` on PATH); \
+                         could not inspect repository root `{}`. Run without --changed \
+                         for a full check.",
+                        root.display()
+                    );
+                }
+                Err(alint_core::git::CommitRangeError::BadRange { stderr }) => {
+                    bail!(
+                        "--base {base:?} does not resolve to a usable commit in this clone. \
+                         A shallow CI checkout usually needs `fetch-depth: 0` or an explicit \
+                         `git fetch` for the base ref. Git said: {stderr}"
+                    );
+                }
+            }
+        } else {
+            alint_core::git::collect_changed_paths(root, None).ok_or_else(|| {
                 anyhow::anyhow!(
-                    "--changed requires a git repository (and `git` on PATH); \
-                     `{what}` failed at {}. Run without --changed for a full check.",
+                    "--changed requires a git repository (and `git` on PATH); collecting \
+                     staged, unstaged, and untracked paths failed at `{}`. Run without \
+                     --changed for a full check.",
                     root.display()
                 )
-            },
-        )?;
+            })?
+        };
         Ok(Some(set))
     }
 }
@@ -544,10 +560,11 @@ fn exclude_baseline_from_walk(
 fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> Result<ExitCode> {
     require_directory(path)?;
     let loaded = load_rules(path, cli)?;
+    let root = loaded.root.clone();
     // The `baseline:` config key, resolved against the repo root being checked.
     // The `--baseline` flag (used as given) overrides it; either one turns on
     // baseline suppression. No silent auto-detect of `.alint-baseline.json`.
-    let config_baseline = loaded.baseline.as_ref().map(|b| path.join(b));
+    let config_baseline = loaded.baseline.as_ref().map(|b| root.join(b));
     // Resolved early (was below the walk) so the baseline file can be excluded
     // from the walk. The `--baseline` flag (used as given) overrides the key.
     let effective_baseline = cli.baseline.clone().or(config_baseline);
@@ -570,7 +587,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     if let Some(bp) = &effective_baseline {
         engine = engine.with_fix_baseline(load_baseline(bp)?);
     }
-    let changed_active = match changed.resolve(path)? {
+    let changed_active = match changed.resolve(&root)? {
         Some(set) => {
             engine = engine.with_changed_paths(set);
             true
@@ -585,16 +602,16 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     };
     // Keep alint's own baseline artifact out of the walk (see the helper).
     let mut extra_ignores = loaded.extra_ignores;
-    exclude_baseline_from_walk(&mut extra_ignores, path, effective_baseline.as_deref());
+    exclude_baseline_from_walk(&mut extra_ignores, &root, effective_baseline.as_deref());
     let walk_opts = WalkOptions {
         respect_gitignore: effective_gitignore,
         extra_ignores,
     };
 
-    let index = walk(path, &walk_opts).context("walking repository")?;
+    let index = walk(&root, &walk_opts).context("walking repository")?;
     tracing::debug!(files = index.entries.len(), "walk complete");
 
-    let report = engine.run(path, &index).context("running rules")?;
+    let report = engine.run(&root, &index).context("running rules")?;
 
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
 
@@ -603,7 +620,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     let mut strict_stale_fail = false;
     let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
-        let mut reader = FileReader::new(path);
+        let mut reader = FileReader::new(&root);
         let applied =
             alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
         // Stale-entry detection is only valid on a FULL run. When `--changed`
@@ -635,7 +652,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     if matches!(format, Format::Sarif | Format::Agent)
         || (format == Format::Json && cli.include_fixes)
     {
-        alint_core::attach_proposed_edits(&engine, &mut report, path, &index);
+        alint_core::attach_proposed_edits(&engine, &mut report, &root, &index);
     }
 
     let (mut out, opts) = render_env(cli)?;
@@ -650,7 +667,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
             // No baseline, but still emit the canonical `partialFingerprints` so
             // GitHub Code Scanning can correlate alerts across runs (these were
             // baseline-only before). Same fingerprints the GitLab path uses.
-            let fps = report_fingerprints(&report, path);
+            let fps = report_fingerprints(&report, &root);
             alint_output::write_sarif_with_fingerprints(&report, Some(&fps), &mut out)
         }
         (Format::Json, Some(marks)) => alint_output::write_json_with_baseline(
@@ -665,7 +682,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
             // per-violation `violation_fingerprint` (file-content-aware, cached
             // reads), so a finding has ONE fingerprint across GitLab, SARIF, and
             // baseline mode.
-            let fps = report_fingerprints(&report, path);
+            let fps = report_fingerprints(&report, &root);
             alint_output::write_gitlab(&report, Some(&fps), &mut out)
         }
         _ => format.write_with_options(&report, &mut out, opts),
@@ -869,6 +886,7 @@ fn cmd_baseline(
         );
     }
     let loaded = load_rules(path, cli)?;
+    let root = loaded.root.clone();
 
     // Output path precedence: --output (as given) > `baseline:` config key
     // (resolved against the repo root) > the default `.alint-baseline.json`.
@@ -880,7 +898,7 @@ fn cmd_baseline(
             loaded
                 .baseline
                 .as_ref()
-                .map_or_else(|| path.join(".alint-baseline.json"), |b| path.join(b))
+                .map_or_else(|| root.join(".alint-baseline.json"), |b| root.join(b))
         },
         Path::to_path_buf,
     );
@@ -889,7 +907,7 @@ fn cmd_baseline(
         .with_facts(loaded.facts)
         .with_vars(loaded.vars);
     let mut extra_ignores = loaded.extra_ignores;
-    exclude_baseline_from_walk(&mut extra_ignores, path, Some(&out_path));
+    exclude_baseline_from_walk(&mut extra_ignores, &root, Some(&out_path));
     let walk_opts = WalkOptions {
         respect_gitignore: if cli.no_gitignore {
             false
@@ -898,10 +916,10 @@ fn cmd_baseline(
         },
         extra_ignores,
     };
-    let index = walk(path, &walk_opts).context("walking repository")?;
-    let report = engine.run(path, &index).context("running rules")?;
+    let index = walk(&root, &walk_opts).context("walking repository")?;
+    let report = engine.run(&root, &index).context("running rules")?;
 
-    let mut reader = FileReader::new(path);
+    let mut reader = FileReader::new(&root);
     let mut items: Vec<FingerprintedViolation> = Vec::new();
     for result in &report.results {
         for v in &result.violations {
@@ -1051,12 +1069,13 @@ fn cmd_fix(
         );
     }
     let loaded = load_rules(path, cli)?;
+    let root = loaded.root.clone();
     let entries = apply_only_filter(loaded.entries, only)?;
     let mut engine = Engine::from_entries(entries, loaded.registry)
         .with_facts(loaded.facts)
         .with_vars(loaded.vars)
         .with_fix_size_limit(loaded.fix_size_limit);
-    if let Some(set) = changed.resolve(path)? {
+    if let Some(set) = changed.resolve(&root)? {
         engine = engine.with_changed_paths(set);
     }
 
@@ -1070,7 +1089,7 @@ fn cmd_fix(
     let effective_baseline = cli
         .baseline
         .clone()
-        .or_else(|| loaded.baseline.as_ref().map(|b| path.join(b)));
+        .or_else(|| loaded.baseline.as_ref().map(|b| root.join(b)));
     // W4: a resolved baseline (flag or config `baseline:` key) makes `fix` skip
     // grandfathered findings and resolve only NEW ones (mirrors `check --baseline`;
     // the artifact is excluded from the walk below). Classified in engine `fix_run`.
@@ -1079,13 +1098,13 @@ fn cmd_fix(
         engine = engine.with_fix_baseline(baseline);
     }
     let mut extra_ignores = loaded.extra_ignores;
-    exclude_baseline_from_walk(&mut extra_ignores, path, effective_baseline.as_deref());
+    exclude_baseline_from_walk(&mut extra_ignores, &root, effective_baseline.as_deref());
     let walk_opts = WalkOptions {
         respect_gitignore: effective_gitignore,
         extra_ignores,
     };
 
-    let index = walk(path, &walk_opts).context("walking repository")?;
+    let index = walk(&root, &walk_opts).context("walking repository")?;
     // `--unsafe-fixes` raises the applied tier to Unsafe; the default is Safe.
     // At Safe, an Unsafe op (`file_remove`) is surfaced as a suggestion; this
     // flag is what applies it.
@@ -1114,7 +1133,7 @@ fn cmd_fix(
     // would-apply. See docs/design/v0.17/fixpoint.md.
     if diff {
         let (report, staged) = engine
-            .stage_fixes(path, &index, threshold)
+            .stage_fixes(&root, &index, threshold)
             .context("staging fixes")?;
         let (mut out, _opts) = render_env(cli)?;
         alint_output::write_fix_diff(&staged, &mut out).context("writing diff")?;
@@ -1123,7 +1142,7 @@ fn cmd_fix(
     }
 
     let report = engine
-        .fix(path, &index, &walk_opts, dry_run, threshold)
+        .fix(&root, &index, &walk_opts, dry_run, threshold)
         .context("applying fixes")?;
 
     let (mut out, opts) = render_env(cli)?;
@@ -1348,6 +1367,7 @@ fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
 
 fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
     let loaded = load_rules(path, cli)?;
+    let root = loaded.root.clone();
     let effective_gitignore = if cli.no_gitignore {
         false
     } else {
@@ -1357,9 +1377,9 @@ fn cmd_facts(path: &Path, cli: &Cli) -> Result<ExitCode> {
         respect_gitignore: effective_gitignore,
         extra_ignores: loaded.extra_ignores,
     };
-    let index = walk(path, &walk_opts).context("walking repository")?;
+    let index = walk(&root, &walk_opts).context("walking repository")?;
     let values =
-        alint_core::evaluate_facts(&loaded.facts, path, &index).context("evaluating facts")?;
+        alint_core::evaluate_facts(&loaded.facts, &root, &index).context("evaluating facts")?;
 
     let format: Format = cli.format.parse().map_err(|e: String| anyhow::anyhow!(e))?;
     // `facts` has only a human and a json shape; reject other formats rather
@@ -1567,7 +1587,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         if !cats.is_empty() {
             writeln!(out, "{dim}categories:{dim:#} {}", cats.join(", "))?;
         }
-        if let Some(summary) = rules::summary_for_kind(entry.kind()) {
+        if let Some(summary) = rules::description_for_kind(entry.kind()) {
             writeln!(out, "{dim}summary:   {dim:#} {summary}")?;
         }
         // Deep link to the kind's full docs. Family = its primary category slug
@@ -1702,7 +1722,7 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
         "id": entry.rule.id(),
         "rule_kind": entry.kind(),
         "categories": rules::categories_for_kind(entry.kind()),
-        "summary": rules::summary_for_kind(entry.kind()),
+        "summary": rules::description_for_kind(entry.kind()),
         // The docs deep link, always present in JSON (like policy_url) regardless
         // of --no-docs. Family = the primary category slug; alias -> canonical.
         "docs": rules::categories_for_kind(entry.kind()).first().map(|family| {
@@ -1792,6 +1812,10 @@ fn render_env(
 }
 
 struct LoadedConfig {
+    /// Effective repository root. When config discovery walks upward, commands
+    /// operate from the discovered config's directory rather than evaluating
+    /// root-relative rules against the caller's nested subdirectory.
+    root: PathBuf,
     entries: Vec<alint_core::RuleEntry>,
     registry: RuleRegistry,
     facts: Vec<alint_core::FactSpec>,
@@ -1966,16 +1990,24 @@ fn emit_validate_failure(
 }
 
 fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
-    let config_path = if let Some(first) = cli.config.first() {
-        first.clone()
+    let cwd_abs = std::path::absolute(cwd)
+        .with_context(|| format!("resolving repository root {}", cwd.display()))?;
+    let (config_path, root) = if let Some(first) = cli.config.first() {
+        // An explicitly-selected config does not redefine the lint root; the
+        // command's path remains authoritative.
+        (first.clone(), cwd_abs)
     } else {
-        alint_dsl::discover(cwd).ok_or_else(|| {
+        let config_path = alint_dsl::discover(cwd).ok_or_else(|| {
             anyhow::anyhow!(
                 "no .alint.yml found (searched from {}) \
                  (run `alint init` to scaffold one)",
                 cwd.display()
             )
-        })?
+        })?;
+        let root = config_path
+            .parent()
+            .map_or_else(|| cwd_abs.clone(), Path::to_path_buf);
+        (config_path, root)
     };
     tracing::debug!(?config_path, "loading config");
     let config = alint_dsl::load(&config_path)?;
@@ -2016,6 +2048,7 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         entries.push(entry);
     }
     Ok(LoadedConfig {
+        root,
         entries,
         registry,
         facts: config.facts,

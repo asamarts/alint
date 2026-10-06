@@ -22,8 +22,8 @@ use alint_core::{
 use serde::Deserialize;
 
 use crate::for_each_dir::{
-    IterateMode, SelectSpec, compile_nested_require, evaluate_for_each, parse_when_iter,
-    resolve_select, validate_nested_require,
+    ForEachParent, IterateMode, SelectSpec, compile_nested_require, evaluate_for_each,
+    parse_when_iter, resolve_select, validate_nested_require,
 };
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -64,6 +64,7 @@ pub struct EveryMatchingHasRule {
     id: String,
     level: Level,
     policy_url: Option<String>,
+    message: Option<String>,
     select_scope: Scope,
     when_iter: Option<WhenExpr>,
     require: Vec<CompiledNestedSpec>,
@@ -86,8 +87,7 @@ impl Rule for EveryMatchingHasRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(
-            &self.id,
-            self.level,
+            ForEachParent::new(&self.id, self.level, self.message.as_deref()),
             &self.select_scope,
             self.when_iter.as_ref(),
             &self.require,
@@ -115,6 +115,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         id: spec.id.clone(),
         level: spec.level,
         policy_url: spec.policy_url.clone(),
+        message: spec.message.clone(),
         select_scope,
         when_iter,
         require,
@@ -156,6 +157,7 @@ mod tests {
             id: "t".into(),
             level: Level::Error,
             policy_url: None,
+            message: None,
             select_scope: Scope::from_patterns(&["packages/*".to_string()]).unwrap(),
             when_iter: None,
             require,

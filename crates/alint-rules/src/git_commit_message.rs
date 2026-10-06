@@ -59,12 +59,11 @@ struct Options {
     /// Git ref to use as the base of the commit range. When set, validates
     /// every commit in `<since>..HEAD` instead of just HEAD. Accepts anything
     /// `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`),
-    /// tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports POSIX `${VAR}` and
-    /// `${VAR:-default}` env-var interpolation so CI can pass a SHA via an env
-    /// var (e.g. `since: ${ALINT_BASE_SHA:-origin/main}` with `ALINT_BASE_SHA`
-    /// exported in a workflow step from `github.event.pull_request.base.sha`).
-    /// The GitHub Actions double-brace template syntax `${{ ... }}` is NOT
-    /// interpolated by alint.
+    /// tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports alint's template
+    /// syntax, so CI can pass a SHA through an environment variable (for
+    /// example, `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"`).
+    /// The older POSIX `${VAR}` / `${VAR:-default}` form is deprecated and will
+    /// be removed in v1.0.
     #[serde(default)]
     since: Option<String>,
     /// When validating a range (`since:` set), include merge commits. Defaults

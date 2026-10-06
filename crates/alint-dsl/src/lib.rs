@@ -55,7 +55,13 @@ pub(crate) const DEFAULT_CONFIG_NAMES: &[&str] =
 /// Locate a config file starting at `start` and walking upward until one is
 /// found or the filesystem root is hit.
 pub fn discover(start: &Path) -> Option<PathBuf> {
-    let mut current = Some(start);
+    // Relative paths such as `.` have a lexical parent of the empty path, so
+    // walking them directly stops after one directory. Make the start absolute
+    // first so discovery from a nested working directory reaches every real
+    // ancestor. `absolute` is lexical (it need not resolve symlinks or require
+    // the path to exist), which keeps discovery predictable and inexpensive.
+    let start = std::path::absolute(start).ok()?;
+    let mut current = Some(start.as_path());
     while let Some(dir) = current {
         for name in DEFAULT_CONFIG_NAMES {
             let candidate = dir.join(name);

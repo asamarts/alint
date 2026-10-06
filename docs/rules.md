@@ -155,7 +155,7 @@ File must have at most `max_lines` lines, using the same accounting as `file_min
 
 **Categories:** Content
 
-Last `lines` lines of each file in scope must match a regex. Mirror of `file_header` anchored at the end of the file. Use for license footers, signed-off-by trailers, generated-file sentinels.
+The configured number of final lines in each file in scope must match a regex. Mirror of `file_header` anchored at the end of the file. Use for license footers, signed-off-by trailers, generated-file sentinels.
 
 Fix: `file_append` — append a declared `content`. With no fix declared, violations are unfixable.
 
@@ -314,7 +314,7 @@ Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a lin
 
 **Categories:** Security / Unicode sanity, Encoding
 
-Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
+Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
 
 ### `no_zero_width_chars`
 
@@ -372,7 +372,9 @@ Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't
 
 **Categories:** Portable metadata, Naming
 
-Reject path components Windows can't represent:
+Reject path components that Windows cannot represent.
+
+The rejected forms are:
 
 - Reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) — case-insensitive, regardless of extension. `con.txt` fails; `COM10` and `confused` correctly pass.
 - Trailing dots (`foo.`) or trailing spaces (`foo `) — Windows silently strips these on checkout.
@@ -477,12 +479,12 @@ Two modes, selected by the optional `since:` field:
 
 `since:` accepts anything `git rev-parse` resolves: a 40-char or abbreviated SHA, a branch (`origin/main`), a tag (`v1.2.3`), or a relative ref (`HEAD~5`). The rule walks `<since>..HEAD` oldest-first, validates each commit, and emits one violation per failing commit with the short SHA + a subject snippet so you know which to amend.
 
-POSIX-style env-var interpolation is supported:
+Use alint's standard template syntax for environment values:
 
-- `${VAR}` substitutes the value of `VAR`. Unset (or empty) is a hard error with a CI-friendly hint.
-- `${VAR:-default}` substitutes `VAR`, or `default` when `VAR` is unset or empty.
+- `{{env.VAR}}` requires `VAR` to be set and non-empty.
+- `{{env.VAR | default('value')}}` supplies a fallback, such as `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"` for local runs.
 
-The GitHub Actions double-brace template syntax `${{ ... }}` is **not** interpolated by alint; it has to be rendered by Actions before the YAML is read, which only works in workflow files, not in `.alint.yml`. Use the single-brace `${VAR}` form and export the var in a workflow step.
+GitHub Actions expressions are evaluated only in workflow files, not inside `.alint.yml`; export the expression to an environment variable in the workflow and read it through `{{env.VAR}}` in the alint config. The older POSIX-style `${VAR}` / `${VAR:-default}` syntax still works for this field but is deprecated and will be removed in v1.0.
 
 #### `include_merges:`
 
@@ -515,7 +517,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@v0.13.0
+        uses: asamarts/alint@aa2d643b4b852af0f24d86adcee57388121c350b # v0.17.0
 ```
 
 ### `git_commit_signed_off`
@@ -691,7 +693,7 @@ top-level config.
 
 For every matching directory / file, evaluate a nested `require:` block with the entry as context. Template tokens (`{dir}`, `{stem}`, `{ext}`, `{basename}`, `{path}`, `{parent_name}`) expand against each match. `select:` is a single glob or a list with `!`-prefixed excludes (e.g. `["src/*", "!src/internal"]`).
 
-**`when_iter:` — per-iteration filter.** Optional expression in the `when:` grammar, with one extra namespace: `iter.*` references the entry currently being iterated. Iterations whose verdict is false are skipped before any nested rule is built — the canonical use case for monorepos shaped like Cargo / pnpm / Bazel workspaces:
+**`when_iter:` — per-iteration filter.** Optional expression in the `when:` grammar, with one extra namespace: `iter.*` references the entry currently being iterated. Iterations whose verdict is false are skipped before any nested rule is built — the canonical use case for monorepos shaped like Cargo / pnpm / Bazel workspaces.
 
 The `iter` namespace exposes:
 

@@ -516,6 +516,7 @@ fn rule_meta_descriptions_are_well_formed() {
     let balanced = |s: &str| s.matches('(').count() == s.matches(')').count();
     let root = crate::workspace_root().expect("workspace root");
     let src = std::fs::read_to_string(root.join("docs/rules.md")).expect("read docs/rules.md");
+    let mut descriptions = std::collections::BTreeMap::new();
     for h2 in split_h2_sections(&src) {
         for h3 in split_h3_sections(&h2.body) {
             let (_cats, clean) = crate::categories_line::split_categories_line(&h3.body);
@@ -529,6 +530,17 @@ fn rule_meta_descriptions_are_well_formed() {
             );
             for kind in extract_kinds(&h3.title) {
                 let desc = rule_meta_description(&kind, &h2.title, &clean);
+                assert!(
+                    desc.contains(&kind),
+                    "{kind} description omits its searchable kind name: {desc:?}"
+                );
+                assert!(
+                    desc.chars().count() <= 158,
+                    "{kind} description exceeds 158 characters: {desc:?}"
+                );
+                if let Some(previous) = descriptions.insert(desc.clone(), kind.clone()) {
+                    panic!("duplicate rule descriptions for {previous} and {kind}: {desc:?}");
+                }
                 assert!(
                     desc.ends_with('.') && desc.len() > 10,
                     "{kind} description is empty/unterminated: {desc:?}"

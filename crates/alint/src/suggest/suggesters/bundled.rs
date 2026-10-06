@@ -27,6 +27,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
         id: "alint://bundled/oss-baseline@v1".into(),
         kind: ProposalKind::BundledRuleset {
             uri: "alint://bundled/oss-baseline@v1".into(),
+            except: Vec::new(),
         },
         confidence: Confidence::High,
         evidence: vec![Evidence {
@@ -61,7 +62,10 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
         };
         out.push(Proposal {
             id: uri.into(),
-            kind: ProposalKind::BundledRuleset { uri: uri.into() },
+            kind: ProposalKind::BundledRuleset {
+                uri: uri.into(),
+                except: Vec::new(),
+            },
             confidence: Confidence::High,
             evidence: vec![Evidence {
                 message: format!("Detected via {marker}."),
@@ -89,6 +93,7 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
             id: "alint://bundled/monorepo@v1".into(),
             kind: ProposalKind::BundledRuleset {
                 uri: "alint://bundled/monorepo@v1".into(),
+                except: vec!["monorepo-packages-have-readme".into()],
             },
             confidence: Confidence::High,
             evidence: vec![Evidence {
@@ -98,7 +103,10 @@ pub fn propose(scan: &Scan, progress: &Progress) -> Vec<Proposal> {
         });
         out.push(Proposal {
             id: uri.into(),
-            kind: ProposalKind::BundledRuleset { uri: uri.into() },
+            kind: ProposalKind::BundledRuleset {
+                uri: uri.into(),
+                except: Vec::new(),
+            },
             confidence: Confidence::High,
             evidence: vec![Evidence {
                 message: format!("Workspace flavor detected via {label}."),
@@ -153,5 +161,14 @@ mod tests {
         let ids: Vec<&str> = proposals.iter().map(|p| p.id.as_str()).collect();
         assert!(ids.contains(&"alint://bundled/monorepo@v1"));
         assert!(ids.contains(&"alint://bundled/monorepo/cargo-workspace@v1"));
+        let generic = proposals
+            .iter()
+            .find(|proposal| proposal.id == "alint://bundled/monorepo@v1")
+            .unwrap();
+        assert!(matches!(
+            &generic.kind,
+            ProposalKind::BundledRuleset { except, .. }
+                if except == &["monorepo-packages-have-readme"]
+        ));
     }
 }

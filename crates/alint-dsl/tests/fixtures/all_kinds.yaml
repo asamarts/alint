@@ -139,7 +139,7 @@ rules:
     expect: dir
     must_contain: Cargo.toml
     exclude_query: "$.workspace.exclude[*]"
-    orphans: { space: "crates/*/Cargo.toml", unreferenced: warn }
+    orphans: { space: "crates/*" }
     level: error
 
   - id: workspace-versions-coherent

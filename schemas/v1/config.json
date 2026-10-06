@@ -171,24 +171,6 @@
         }
       ]
     },
-    "OrphansSpec": {
-      "additionalProperties": false,
-      "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the \"new crate not wired into the workspace\" detector).",
-      "properties": {
-        "space": {
-          "description": "Glob of on-disk artefacts that should each be referenced.",
-          "type": "string"
-        },
-        "unreferenced": {
-          "$ref": "#/$defs/Severity",
-          "description": "Severity when an on-disk artefact is unreferenced: `warn` (default), `error`, or `off`."
-        }
-      },
-      "required": [
-        "space"
-      ],
-      "type": "object"
-    },
     "OutputsSpec": {
       "anyOf": [
         {
@@ -205,6 +187,20 @@
         }
       ],
       "description": "`outputs:` accepts a single glob or a list (a `Scope`)."
+    },
+    "RegistryOrphansSpec": {
+      "additionalProperties": false,
+      "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references. Findings use the rule's top-level `level`; omit `orphans` to disable the reverse check.",
+      "properties": {
+        "space": {
+          "description": "Glob of on-disk artefacts that should each be referenced.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "space"
+      ],
+      "type": "object"
     },
     "Relation": {
       "description": "The relation the source must hold to each target. `equals` is the 1:1 scalar case (the released `cross_file_value_equals`); the set relations compare extracted sets; `identical` compares whole files; `resolves` checks path existence on the filesystem.",
@@ -278,14 +274,6 @@
         }
       ],
       "description": "`select:` accepts a single glob (`\"src/*\"`) or a list with `!`-prefixed excludes (`[\"packages/*\", \"!packages/internal\"]`). A YAML string vs sequence are structurally distinct, so an untagged enum decodes them unambiguously. Shared by the select-family (`for_each_dir`, `for_each_file`, `every_matching_has`)."
-    },
-    "Severity": {
-      "enum": [
-        "warn",
-        "error",
-        "off"
-      ],
-      "type": "string"
     },
     "SourceSpec": {
       "additionalProperties": false,
@@ -1076,16 +1064,6 @@
         }
       ],
       "type": "object"
-    },
-    "git_tracked_only": {
-      "default": false,
-      "description": "When true, restrict the rule to files / directories tracked in git's index. Outside a git repo the rule becomes a silent no-op for absence-style checks. Currently supported on `file_exists`, `file_absent`, `dir_exists`, `dir_absent`; any other rule kind rejects the field at load. See https://alint.org/docs/concepts/targeting/the-walker-and-git/ for the full semantics.",
-      "type": "boolean"
-    },
-    "if_present": {
-      "default": false,
-      "description": "When true, a JSONPath query returning zero matches is silently OK - only real matches that fail the op produce violations. Use for predicates conditional on a field's presence (e.g. \"every `uses:` must be SHA-pinned\" where a workflow without `uses:` steps shouldn't be flagged).",
-      "type": "boolean"
     },
     "level": {
       "description": "Severity. `off` disables a rule (useful when overriding inherited rules).",
@@ -2672,7 +2650,7 @@
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports POSIX `${VAR}` and `${VAR:-default}` env-var interpolation so CI can pass a SHA via an env var (e.g. `since: ${ALINT_BASE_SHA:-origin/main}` with `ALINT_BASE_SHA` exported in a workflow step from `github.event.pull_request.base.sha`). The GitHub Actions double-brace template syntax `${{ ... }}` is NOT interpolated by alint.",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports alint's template syntax, so CI can pass a SHA through an environment variable (for example, `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`). The older POSIX `${VAR}` / `${VAR:-default}` form is deprecated and will be removed in v1.0.",
           "type": [
             "string",
             "null"
@@ -3990,13 +3968,13 @@
         "orphans": {
           "anyOf": [
             {
-              "$ref": "#/$defs/OrphansSpec"
+              "$ref": "#/$defs/RegistryOrphansSpec"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Enable the reverse-completeness check (see `OrphansSpec`)."
+          "description": "Enable the reverse-completeness check. Findings use the rule's top-level `level`; omit this option to disable the check."
         },
         "source": {
           "description": "The manifest/registry file (path, or a glob to run once per matching manifest) that enumerates the path entries.",

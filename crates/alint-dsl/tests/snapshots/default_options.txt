@@ -390,6 +390,7 @@ EveryMatchingHasRule {
     id: "every-pkg-has-src",
     level: Error,
     policy_url: None,
+    message: None,
     select_scope: Scope { ... },
     when_iter: None,
     require: [
@@ -912,6 +913,7 @@ ForEachDirRule {
     id: "every-module-has-mod",
     level: Error,
     policy_url: None,
+    message: None,
     select_scope: Scope { ... },
     when_iter: None,
     require: [
@@ -939,6 +941,7 @@ ForEachFileRule {
     id: "unit-has-snapshot",
     level: Warning,
     policy_url: None,
+    message: None,
     select_scope: Scope { ... },
     when_iter: None,
     require: [
@@ -2023,8 +2026,7 @@ RegistryPathsResolveRule {
     ),
     orphans: Some(
         OrphansSpec {
-            space: "crates/*/Cargo.toml",
-            unreferenced: Warn,
+            space: "crates/*",
         },
     ),
     allow_out_of_root: false,

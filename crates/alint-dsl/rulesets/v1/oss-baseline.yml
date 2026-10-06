@@ -88,7 +88,7 @@ rules:
   - id: oss-security-policy-non-empty
     # Mirrors OpenSSF Scorecard's Security-Policy check: the file
     # has to actually contain reporting guidance, not be a stub.
-    # 200 bytes is the same floor we use for LICENSE.
+    # 200 bytes is the same floor as the LICENSE rule's.
     kind: file_min_size
     paths: ["SECURITY.md", ".github/SECURITY.md", "docs/SECURITY.md"]
     min_bytes: 200

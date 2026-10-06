@@ -14,6 +14,12 @@
 
 Cross-machine variance is expected; see `docs/benchmarks/METHODOLOGY.md`. Compare numbers like-for-like (same fingerprint), never absolutely.
 
+> **Correction:** the ls-lint row is invalid. The historical harness launched
+> ls-lint outside this tree without an explicit config path, so it measured an
+> immediate missing-config error rather than a filesystem walk. The row is
+> retained only as historical data. The row labelled `grep` is a shell pipeline
+> whose recorded tool fingerprint omitted GNU find and grep.
+
 ## Rows
 
 | Tool | Scenario | Mode | Mean (ms) | Stddev | Min | Max | Samples |

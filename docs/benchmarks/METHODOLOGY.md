@@ -156,9 +156,9 @@ patterns). The synthetic tree:
 
 ### Why Docker for `--tools all` runs
 
-Comparing alint vs ls-lint vs grep vs Repolinter on a
+Comparing alint vs ls-lint vs shell pipelines vs Repolinter on a
 developer's laptop is dishonest: each laptop has a
-different `ls-lint` version, a different `grep` flavour, a
+different `ls-lint` version, different `find`, grep, and ripgrep versions, a
 different Node runtime under Repolinter. Numbers from such
 a run aren't comparable to any other machine's run.
 

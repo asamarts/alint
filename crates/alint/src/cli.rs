@@ -184,10 +184,9 @@ pub(crate) enum Command {
         /// Root of the repository to lint. Defaults to the current directory.
         #[arg(default_value = ".")]
         path: PathBuf,
-        /// Restrict the check to files in the working-tree diff.
-        /// Without `--base`, uses
-        /// `git ls-files --modified --others --exclude-standard`
-        /// (right shape for pre-commit). With `--base`, uses
+        /// Restrict the check to paths changed in Git.
+        /// Without `--base`, includes staged, unstaged, and untracked
+        /// paths (the right shape for pre-commit). With `--base`, uses
         /// `git diff --name-only <base>...HEAD` (right shape for
         /// PR checks). Cross-file rules (`pair`, `for_each_dir`,
         /// `every_matching_has`, `unique_by`, `dir_contains`,

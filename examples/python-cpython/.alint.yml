@@ -290,11 +290,11 @@ rules:
     paths:
       include: ["Misc/NEWS.d/next/*/*.rst"]
       exclude: ["Misc/NEWS.d/next/*/README.rst"]
-    pattern: '^\d{4}-\d{2}-\d{2}-\d{2}-\d{2}-\d{2}\.gh-issue-\d+\.[A-Za-z0-9_-]+\.rst$'
+    pattern: '^\d{4}-\d{2}-\d{2}(-\d{2}-\d{2}-\d{2})?\.(bpo|gh-issue)-\d+(,\d+)*\.[A-Za-z0-9_=-]+\.rst$'
     level: error
     message: |
       Misc/NEWS.d/next entries must use the blurb-generated filename:
-        YYYY-MM-DD-HH-MM-SS.gh-issue-<NUMBER>.<NONCE>.rst
+        YYYY-MM-DD[-HH-MM-SS].(bpo|gh-issue)-<NUMBER>[,<NUMBER>...].<NONCE>.rst
       Run `blurb add` to create entries with the correct shape.
 
   - id: cpython-news-no-spaces-in-path
@@ -417,7 +417,7 @@ rules:
     extract:
       # First whitespace-delimited token on lines whose attribute list
       # contains `generated`. One capture group = the path/glob column.
-      regex: '^(\S+)\s+.*\bgenerated\b'
+      regex: '(?m)^([^#\s\[]\S*/\S*)\s+.*\bgenerated\b'
     base: "."
     entries_are_globs: true
     expect: file

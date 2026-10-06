@@ -48,6 +48,57 @@ rules:
     fix: { file_remove: { applicability: safe } }
 ";
 
+const TRAILING_WHITESPACE_CONFIG: &str = "\
+version: 1
+rules:
+  - id: no-trailing
+    kind: no_trailing_whitespace
+    paths: \"**/*.txt\"
+    level: error
+    fix: { file_trim_trailing_whitespace: {} }
+";
+
+#[test]
+fn changed_mode_checks_and_fixes_a_staged_edit() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), TRAILING_WHITESPACE_CONFIG).unwrap();
+    std::fs::write(root.join("a.txt"), "clean\n").unwrap();
+    git(root, &["init", "-q"]);
+    git(root, &["add", "-A"]);
+    git(root, &["commit", "-qm", "base"]);
+
+    std::fs::write(root.join("a.txt"), "trailing   \n").unwrap();
+    git(root, &["add", "a.txt"]);
+
+    let check = Command::new(alint())
+        .args(["check", "--changed", "--compact", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint check --changed");
+    assert_eq!(
+        check.status.code(),
+        Some(1),
+        "a staged violation must be checked: {}",
+        String::from_utf8_lossy(&check.stdout)
+    );
+
+    let fix = Command::new(alint())
+        .args(["fix", "--changed", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint fix --changed");
+    assert!(
+        matches!(fix.status.code(), Some(0 | 1)),
+        "fix must run successfully: {}",
+        String::from_utf8_lossy(&fix.stderr)
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("a.txt")).unwrap(),
+        "trailing\n"
+    );
+}
+
 #[test]
 fn fix_changed_does_not_touch_files_outside_the_diff() {
     let tmp = tempfile::tempdir().unwrap();

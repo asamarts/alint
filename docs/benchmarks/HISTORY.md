@@ -10,6 +10,12 @@ S3 relational-graph / S4 workspace; the fix-mode SFIX scenario has no
 published data until the v0.17 fix engine ships). The pre-consolidation
 14-scenario history is frozen at [`legacy/HISTORY.md`](legacy/HISTORY.md).
 
+> **Invalid historical competitor rows.** The v0.5.7 ls-lint rows never loaded
+> their `.ls-lint.yml`; they measured an immediate config error and must not be
+> used for comparison. The harness now passes an explicit config path, uses
+> `-warn`, and verifies a planted finding before timing. The rows remain in the
+> raw historical report for provenance.
+
 ## How to read this file
 
 Each scenario gets its own section with:

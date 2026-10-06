@@ -24,7 +24,7 @@ The diagram below shows how nested `.alint.yml` files layer by directory and how
 | Bazel / Buck2 / Pants hyperscale monorepos | Partial | Tree-shape rules apply, and `for_each_dir` / `for_each_file` accept a per-iteration `when_iter:` filter ("only iterate dirs containing a `BUILD` file"). The design center is workspace-tier monorepos, not 1M-file Bazel scale. |
 | Custom-build kernels (Linux, Chromium, FreeBSD) | Partial | Tree-shape rules apply. Expect to write more custom rules and fewer ecosystem extends. |
 
-If your top concern is build-graph correctness, dependency resolution, or code-level safety, the [Honest limits](#honest-limits) section below is the part to read first. alint isn't the right tool for those, and we'd rather you know now than after wiring it in.
+If your top concern is build-graph correctness, dependency resolution, or code-level safety, the [Honest limits](#honest-limits) section below is the part to read first. alint isn't the right tool for those, and it's better to know that now than after wiring it in.
 
 ## How alint fits with the rest of your toolchain
 

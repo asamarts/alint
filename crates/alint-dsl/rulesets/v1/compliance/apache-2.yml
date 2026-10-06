@@ -31,7 +31,7 @@ version: 1
 
 rules:
   # The LICENSE file at the repo root must contain the
-  # Apache 2.0 text. We check by looking for the canonical
+  # Apache 2.0 text. The check looks for the canonical
   # title line; full bit-for-bit comparison would be too
   # rigid (the SPDX template, the apache.org template, and
   # GitHub's auto-init differ in trailing whitespace and

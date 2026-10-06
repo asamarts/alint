@@ -14,6 +14,13 @@
 
 Cross-machine variance is expected; see `docs/benchmarks/METHODOLOGY.md`. Compare numbers like-for-like (same fingerprint), never absolutely.
 
+> **Correction:** every ls-lint row below is invalid. The harness launched
+> ls-lint outside the generated tree without an explicit `-config`, so it timed
+> an immediate missing-config error rather than a filesystem walk. The rows are
+> retained as historical data but must not be compared. Rows labelled `grep`
+> are shell pipelines: S1 uses `find | grep`; S2 also uses ripgrep. The recorded
+> `grep=ripgrep 15.1.0` fingerprint is therefore incomplete.
+
 Per-size detail under `<size>/results.md`. JSON: `results.json`.
 
 > **1M-file numbers** (alint-only) live under

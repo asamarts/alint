@@ -82,7 +82,7 @@ impl Scan {
     /// always pass through.
     pub fn config_already_covers(&self, proposal: &Proposal) -> bool {
         match &proposal.kind {
-            ProposalKind::BundledRuleset { uri } => self.has_extends(uri),
+            ProposalKind::BundledRuleset { uri, .. } => self.has_extends(uri),
             ProposalKind::Rule { .. } => false,
         }
     }

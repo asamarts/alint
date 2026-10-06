@@ -331,16 +331,21 @@ fn run_one(
         (args.warmup, args.runs)
     };
 
-    let status = Command::new("hyperfine")
+    validate_benchmark_command(tool, tree_root, scenario, &cmd_str, &label)?;
+
+    let mut hyperfine = Command::new("hyperfine");
+    hyperfine
         .args(["--warmup", &warmup.to_string()])
         .args(["--min-runs", &runs.to_string()])
-        .args(["--max-runs", &runs.to_string()])
-        // alint exits 1 when rules fire — that's fine for the
-        // bench, we measure wall-time regardless of verdict.
-        // Synthetic trees don't satisfy `oss-baseline@v1`'s
-        // README/LICENSE rules etc., and the cost of finding
-        // those violations is exactly what we want to measure.
-        .arg("--ignore-failure")
+        .args(["--max-runs", &runs.to_string()]);
+    // Exit 1 means "lint findings" for alint and Repolinter, and "no
+    // unmatched names" for the shell baseline. ls-lint uses `-warn`, so it
+    // exits zero for findings and needs no exemption. Never ignore setup or
+    // internal failures wholesale: those are not benchmark samples.
+    if tool != Tool::LsLint {
+        hyperfine.arg("--ignore-failure=1");
+    }
+    let status = hyperfine
         .arg("--command-name")
         .arg(&label)
         .arg("--export-json")
@@ -375,6 +380,67 @@ fn run_one(
         samples: r.times.len(),
         command: r.command,
     })
+}
+
+/// Run each row once before timing it. For config-driven competitors, plant a
+/// deterministic violation and require their output to name it; this catches
+/// the "tool started but never loaded its config" failure that invalidated the
+/// original ls-lint comparison.
+fn validate_benchmark_command(
+    tool: Tool,
+    tree_root: &Path,
+    scenario: Scenario,
+    command: &str,
+    label: &str,
+) -> Result<()> {
+    let probe = match (tool, scenario) {
+        (Tool::LsLint, Scenario::S1) => Some(("alint_bench_BadName.rs", "alint_bench_BadName.rs")),
+        (Tool::Repolinter, Scenario::S2) => Some(("alint_bench_probe.rs", "alint_bench_probe.rs")),
+        _ => None,
+    };
+    let probe_path = probe.map(|(path, _)| tree_root.join(path));
+    if let Some(path) = &probe_path {
+        if path.exists() {
+            bail!(
+                "benchmark readiness probe path already exists; refusing to overwrite {}",
+                path.display()
+            );
+        }
+        fs::write(path, "// TODO: benchmark readiness probe\n")?;
+    }
+    let output = Command::new("sh")
+        .args(["-c", command])
+        .output()
+        .with_context(|| format!("readiness probe for {label}"));
+    if let Some(path) = &probe_path {
+        fs::remove_file(path)
+            .with_context(|| format!("remove readiness probe {}", path.display()))?;
+    }
+    let output = output?;
+    let code = output.status.code();
+    let allowed = match tool {
+        Tool::LsLint => code == Some(0),
+        Tool::Alint | Tool::GrepPipeline | Tool::Repolinter => matches!(code, Some(0 | 1)),
+    };
+    if !allowed {
+        bail!(
+            "benchmark readiness probe failed for {label} (exit {code:?}): {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    if let Some((_, needle)) = probe {
+        let combined = format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        if !combined.contains(needle) {
+            bail!(
+                "benchmark readiness probe for {label} did not report planted finding {needle:?}; the tool may not have loaded its config"
+            );
+        }
+    }
+    Ok(())
 }
 
 // ─── --changed-mode setup ────────────────────────────────────────────

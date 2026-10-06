@@ -102,29 +102,18 @@ rules:
       Bloated context crowds the agent's prompt budget.
     policy_url: "https://www.augmentcode.com/blog/how-to-write-good-agents-dot-md-files"
 
-  # --- Stale-path heuristic ---------------------------------------
-  # Context files reference source paths in backticks. Those
-  # paths drift as the codebase evolves. This is a heuristic
-  # reminder rule — the precise check (validate every backticked
-  # path resolves to a real file) ships in v0.7 as the
-  # `markdown_paths_resolve` rule kind.
-  #
-  # The pattern matches backticked tokens that look like
-  # workspace-relative source paths (`src/`, `crates/`,
-  # `packages/`, `apps/`, `services/`, `docs/`). Info-level so
-  # users self-audit when running `alint check`, not gate
-  # commits.
+  # --- Stale paths -------------------------------------------------
+  # Validate backticked workspace-relative paths instead of flagging
+  # every reference as a heuristic reminder. Info-level keeps stale
+  # context visible without making it a hard gate.
   - id: agent-context-no-stale-paths
     when: facts.has_agent_context
-    kind: file_content_forbidden
+    kind: markdown_paths_resolve
     paths:
       - AGENTS.md
       - CLAUDE.md
-    pattern: '(?m)`(?:src|crates|packages|apps|services|docs)/[^`]*`'
+    prefixes: ["src/", "crates/", "packages/", "apps/", "services/", "docs/"]
     level: info
     message: >-
-      Agent-context file references workspace paths in
-      backticks. Verify each path still resolves. Context
-      files commonly outlive the code they describe. (The
-      v0.7 `markdown_paths_resolve` rule kind will validate
-      this precisely.)
+      Agent-context file references a workspace path that no longer
+      resolves. Context files commonly outlive the code they describe.

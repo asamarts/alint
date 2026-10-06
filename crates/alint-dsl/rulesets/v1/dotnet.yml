@@ -155,6 +155,6 @@ rules:
     root_only: true
     level: info
     message: >-
-      .NET: ship a root .editorconfig — it is how .NET analyzer
+      .NET: ship a root .editorconfig; it is how .NET analyzer
       severities and `dotnet format` style are configured.
     policy_url: "https://learn.microsoft.com/dotnet/fundamentals/code-analysis/configuration-files"

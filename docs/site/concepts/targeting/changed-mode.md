@@ -60,7 +60,7 @@ sidebar:
 
 | Invocation | Diff source | Fits |
 |---|---|---|
-| `alint check --changed` | working tree: modified plus untracked, `--exclude-standard` | pre-commit, local dev |
+| `alint check --changed` | staged, unstaged, and untracked paths (`--exclude-standard`) | pre-commit, local dev |
 | `alint check --changed --base=main` | `main...HEAD` (three-dot, merge-base) | PR checks |
 
 The three-dot `<base>...HEAD` form diffs against the merge-base of `<base>` and `HEAD`, which is exactly what a GitHub PR calls "your changes." `--base=<ref>` implies `--changed`, so the ref is the verb's argument; you never pass both `--changed` and a bare `--base` awkwardly. The same flags work on `alint fix --changed`.
@@ -75,11 +75,12 @@ The filter narrows the file set for **per-file rules** only. Two families opt ou
 
 ## Edge cases
 
-- **Empty diff** (nothing modified, nothing untracked): the run short-circuits to an empty report in milliseconds, so a no-op pre-commit is nearly free.
+- **Empty diff** (nothing staged, modified, or untracked): the run short-circuits to an empty report in milliseconds, so a no-op pre-commit is nearly free.
 - **Outside a git repo** (or `git` missing from `PATH`): `--changed` hard-errors rather than silently falling back to a full check, because a silent full run would betray the intent the flag expressed.
 - **Deleted files** appear in the diff. A `LICENSE` you deleted is in the changed set, the walker no longer sees it on disk, and an existence rule for `LICENSE` evaluates the whole tree (which now lacks it) and fires.
+- **Partly staged files** are checked from the working tree, because that is what alint reads. The pre-commit framework temporarily stashes unstaged hunks, so its working tree matches the index while the hook runs; a hand-written hook should do the same if it needs index-exact content.
 
-`--changed` pairs naturally with [`git_tracked_only:`](/docs/concepts/targeting/the-walker-and-git/): the changed set is a working-tree concept and the tracked set is an index concept, so a rule with both fires only on tracked entries that are part of this diff.
+`--changed` pairs naturally with [`git_tracked_only:`](/docs/concepts/targeting/the-walker-and-git/): the changed set covers the index and working tree, while the tracked set records what is in the index, so a rule with both fires only on tracked entries that are part of this diff.
 
 ## In practice
 

@@ -17,8 +17,7 @@
 # Build outputs (`target/` for Maven, `build/` for Gradle) are
 # checked with `git_tracked_only: true` so a developer's
 # locally-built artefacts don't trigger the rule — only
-# committed contents do, which is the actual hygiene we care
-# about.
+# committed contents do, and those are what the rule checks.
 
 version: 1
 
@@ -73,8 +72,8 @@ rules:
     policy_url: "https://docs.gradle.org/current/userguide/gradle_wrapper.html"
 
   # --- Build outputs must not be committed --------------------------
-  # We use `git_tracked_only: true` here so the rule only fires
-  # if `target/` is *committed* — a developer's locally-built
+  # `git_tracked_only: true` makes the rule fire only if
+  # `target/` is *committed* — a developer's locally-built
   # `target/` (gitignored, no tracked content) is silently OK.
   # Same shape for Gradle's `build/`.
   - id: java-no-tracked-target
@@ -114,7 +113,7 @@ rules:
     # lives in a file named after it, in PascalCase. Some
     # repositories ship `package-info.java` / `module-info.java`
     # (lowercase, snake-shaped) — those are the only standard
-    # exceptions, so we exclude them.
+    # exceptions, so they're excluded.
     kind: filename_case
     paths:
       include: ["**/*.java"]

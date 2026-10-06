@@ -22,10 +22,19 @@ so every channel ships the same release.
 |---|---|---|
 | **VS Code** | [Marketplace](https://marketplace.visualstudio.com/items?itemName=asamarts.alint) / [Open VSX](https://open-vsx.org/extension/asamarts/alint) | The extension auto-downloads a matching `alint` binary on first run if one isn't on `PATH`. |
 | **JetBrains** (IDEA, PyCharm, GoLand, WebStorm, RustRover, CLion, Rider, Android Studio) | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/31995-alint) | Built on [LSP4IJ](https://github.com/redhat-developer/lsp4ij); one plugin covers the whole JetBrains suite. |
-| **Zed** | `zed-industries/extensions` registry (search for `alint`) | The extension is a thin wasm wrapper around the LSP server. |
 
-These three are the **packaged-extension** tier: install through the
+These are the **packaged-extension** tier: install through the
 editor's normal marketplace UI, no extra configuration needed.
+
+## Zed — source extension
+
+The repository includes a tested Zed wasm extension under
+[`editors/zed`](https://github.com/asamarts/alint/tree/main/editors/zed). It is
+not yet listed in Zed's public extension registry, so install it as a dev
+extension from a local checkout: open the command palette, choose **zed:
+install dev extension**, and select the `editors/zed` directory. The extension
+launches `alint lsp`, preferring an explicitly configured binary, then `alint`
+on `PATH`, and finally a managed download of the latest GitHub release.
 
 ## Tier 2 — config snippet, generic LSP client
 

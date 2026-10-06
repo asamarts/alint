@@ -228,10 +228,9 @@ rules:
   - id: helm-golangci-linters-sorted
     kind: ordered_block
     paths: ".golangci.yml"
-    # Region: the `enable:` list under `linters:` (the items just below the
-    # "Keep sorted alphabetically" marker comment).
-    start: '^\s*# Keep sorted alphabetically\s*$'
-    end: '^\s*exclusions:\s*$'
+    # `ordered_block` markers are literal lines, not regular expressions.
+    start: "enable:"
+    end: "exclusions:"
     level: warning
     message: >-
       The .golangci.yml linters.enable list must stay sorted alphabetically

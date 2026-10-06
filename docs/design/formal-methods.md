@@ -85,13 +85,17 @@ at its exit — the invariant as runtime-checked documentation.
 ## 4. How to run
 
 - **Properties:** `cargo test -p alint-rules` (they run as ordinary tests).
-- **Proof:** install Kani once (`cargo install --locked kani-verifier && cargo kani
-  setup`), then `cargo kani -p alint-rules --harness confine_steps_is_sound`.
+- **Proof:** install the pinned Kani release once (`cargo install --locked
+  --version 0.68.0 kani-verifier && cargo-kani setup`), then run
+  `cargo-kani -p alint-core`. This verifies every proof harness in the crate,
+  including `confine_steps_is_sound`, so newly added harnesses cannot be
+  accidentally omitted.
   `cfg(kani)` is declared in `[workspace.lints.rust]` so the `#[cfg(kani)]`
   harnesses don't warn in normal builds. CI runs the proofs on a weekly schedule
-  + manual dispatch via `.github/workflows/kani.yml` (the official
-  `model-checking/kani-github-action`), kept off the PR path so model-checking
-  time never blocks a merge.
+  + manual dispatch via `.github/workflows/kani.yml`, kept off the PR path so
+  model-checking time never blocks a merge. The workflow installs and runs Kani
+  directly because the official v1 action currently misparses Kani 0.68's
+  four-word version string.
 
 ## 5. Implementation notes
 

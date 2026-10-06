@@ -17,7 +17,7 @@ given:
         paths: reference.txt
         # SHA-256 of "hello world\n" is:
         # a948904f2f0f479b8f8197694b30184b0d2ed1c1cd2a1ec0fb85d299a192a447
-        # We assert a DIFFERENT hash to force a failure.
+        # A different hash, so the check fails.
         sha256: "0000000000000000000000000000000000000000000000000000000000000000"
         level: error
 

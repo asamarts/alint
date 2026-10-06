@@ -18,11 +18,11 @@
 //!   expect: dir                 # any (default) | file | dir
 //!   must_contain: Cargo.toml
 //!   exclude_query: "$.workspace.exclude[*]"
-//!   orphans: { space: "crates/*", unreferenced: warn }
+//!   orphans: { space: "crates/*" }
 //!   level: error
 //! ```
 
-use std::collections::HashSet;
+use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
 use alint_core::{
@@ -41,27 +41,15 @@ enum Expect {
     Dir,
 }
 
-#[derive(Debug, Clone, Copy, Deserialize, Default, PartialEq, Eq, schemars::JsonSchema)]
-#[serde(rename_all = "lowercase")]
-enum Severity {
-    #[default]
-    Warn,
-    Error,
-    Off,
-}
-
 /// Enable the reverse-completeness check: on-disk artefacts under the `space`
-/// glob that no entry references (the "new crate not wired into the workspace"
-/// detector).
+/// glob that no entry references. Findings use the rule's top-level `level`;
+/// omit `orphans` to disable the reverse check.
 #[derive(Debug, Clone, Deserialize, schemars::JsonSchema)]
+#[schemars(rename = "RegistryOrphansSpec")]
 #[serde(deny_unknown_fields)]
 struct OrphansSpec {
     /// Glob of on-disk artefacts that should each be referenced.
     space: String,
-    /// Severity when an on-disk artefact is unreferenced: `warn` (default),
-    /// `error`, or `off`.
-    #[serde(default)]
-    unreferenced: Severity,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -97,7 +85,8 @@ struct Options {
     /// before resolution is checked.
     #[serde(default)]
     exclude_query: Option<String>,
-    /// Enable the reverse-completeness check (see `OrphansSpec`).
+    /// Enable the reverse-completeness check. Findings use the rule's
+    /// top-level `level`; omit this option to disable the check.
     #[serde(default)]
     orphans: Option<OrphansSpec>,
 }
@@ -345,23 +334,40 @@ impl RegistryPathsResolveRule {
         let Some(orph) = &self.orphans else {
             return;
         };
-        if orph.unreferenced == Severity::Off {
-            return;
-        }
-        let covered_set: HashSet<&Path> = covered.iter().map(PathBuf::as_path).collect();
         let Ok(space) = Scope::from_patterns(std::slice::from_ref(&orph.space)) else {
             return;
         };
-        for e in ctx.index.files() {
-            if space.matches(&e.path, ctx.index) && !covered_set.contains(&*e.path) {
+        // `space` describes artefacts, not only files. Cargo workspaces, for
+        // example, naturally use `space: "crates/*"`, whose candidates are
+        // directories. A manifest entry covers both the exact artefact and any
+        // file underneath a referenced directory (`crates/a` covers
+        // `crates/a/Cargo.toml`).
+        // Ordered collection keeps findings deterministic even though the
+        // file index's internal representation is not part of this contract.
+        let mut candidates: BTreeSet<PathBuf> = BTreeSet::new();
+        for path in ctx
+            .index
+            .files()
+            .map(|entry| &entry.path)
+            .chain(ctx.index.dirs().map(|entry| &entry.path))
+        {
+            if space.matches(path, ctx.index) {
+                candidates.insert(path.to_path_buf());
+            }
+        }
+        for candidate in candidates {
+            let is_covered = covered
+                .iter()
+                .any(|entry| candidate == *entry || candidate.starts_with(entry));
+            if !is_covered {
                 out.push(
                     Violation::new(format!(
                         "{} is under `{}` but no entry in {} references it",
-                        e.path.display(),
+                        candidate.display(),
                         orph.space,
                         registry_rel.display(),
                     ))
-                    .with_path(e.path.clone()),
+                    .with_path(candidate),
                 );
             }
         }
@@ -769,7 +775,7 @@ mod tests {
     }
 
     #[test]
-    fn orphans_flags_unreferenced_dir() {
+    fn orphans_flags_unreferenced_dir_without_flagging_a_member() {
         let dir = tempfile::tempdir().unwrap();
         std::fs::write(
             dir.path().join("Cargo.toml"),
@@ -781,8 +787,7 @@ mod tests {
             Extract::Structured(Format::Toml, "$.workspace.members[*]".into()),
         );
         o.orphans = Some(OrphansSpec {
-            space: "crates/*/Cargo.toml".into(),
-            unreferenced: Severity::Error,
+            space: "crates/*".into(),
         });
         let r = rule(o);
         // crates/b exists on disk but isn't a member -> orphan.
@@ -792,8 +797,12 @@ mod tests {
         );
         let v = eval(&r, dir.path(), &idx);
         assert!(
-            v.iter().any(|x| x.message.contains("crates/b/Cargo.toml")),
+            v.iter().any(|x| x.message.contains("crates/b")),
             "expected crates/b flagged as orphan, got {v:?}"
+        );
+        assert!(
+            v.iter().all(|x| !x.message.contains("crates/a")),
+            "referenced member crates/a must not be flagged, got {v:?}"
         );
     }
 

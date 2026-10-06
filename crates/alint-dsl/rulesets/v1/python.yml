@@ -68,7 +68,7 @@ rules:
   # lives on setup.py / setup.cfg without a pyproject.toml at all,
   # neither rule evaluates and the project passes. When pyproject.toml
   # does exist but the enforced field is missing, the rule fires
-  # (zero-match is a violation, which is what we want here).
+  # (no match is a violation, which is the point here).
   - id: python-pyproject-declares-name
     when: facts.has_python
     kind: toml_path_matches

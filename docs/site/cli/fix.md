@@ -23,7 +23,8 @@ alint fix
 ```
 
 Limit the pass to the files changed on this branch. Existence and cross-file
-rules still see the whole tree, so their fixes can reach other files:
+rules still see the whole tree, but a fix aimed outside the changed set is
+reported as a suggestion instead of being applied:
 
 ```bash
 alint fix --changed --base origin/main

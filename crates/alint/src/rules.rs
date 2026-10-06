@@ -12,7 +12,7 @@ use std::process::ExitCode;
 use alint_core::Category;
 use alint_output::Format;
 use alint_rules::categories::{ALIAS_TO_CANONICAL, KIND_CATEGORIES};
-use alint_rules::kind_docs::KIND_SUMMARIES;
+use alint_rules::kind_docs::{KIND_DESCRIPTIONS, KIND_SUMMARIES};
 use anyhow::{Result, bail};
 
 use crate::{Cli, RulesCommand};
@@ -64,6 +64,16 @@ pub(crate) fn categories_for_kind(kind: &str) -> Vec<&'static str> {
 /// generated docs bridge (ADR-0011); shared by `alint explain` and `alint rules`.
 pub(crate) fn summary_for_kind(kind: &str) -> Option<&'static str> {
     KIND_SUMMARIES
+        .iter()
+        .find(|(k, _)| *k == canonical_kind(kind))
+        .map(|(_, s)| *s)
+        .filter(|s| !s.is_empty())
+}
+
+/// The full, cleaned opening sentence for detail surfaces such as `rules show`
+/// and `explain`; list/search surfaces use the capped summary above.
+pub(crate) fn description_for_kind(kind: &str) -> Option<&'static str> {
+    KIND_DESCRIPTIONS
         .iter()
         .find(|(k, _)| *k == canonical_kind(kind))
         .map(|(_, s)| *s)
@@ -194,7 +204,7 @@ fn show(kind: &str, format: Format, show_docs: bool) -> Result<ExitCode> {
         bail!("unknown rule kind {kind:?}. Run `alint rules list` for the catalog.");
     }
     let canonical = canonical_kind(kind);
-    let summary = summary_for_kind(kind);
+    let summary = description_for_kind(kind);
     let aliases = aliases_by_canonical()
         .get(canonical)
         .cloned()

@@ -137,6 +137,6 @@ rules:
     paths: ["vendor", "**/vendor"]
     level: warning
     message: >-
-      PHP: Composer's `vendor/` directory must not be committed —
+      PHP: Composer's `vendor/` directory must not be committed;
       add it to .gitignore and run `composer install` to restore it.
     policy_url: "https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies"

@@ -87,8 +87,9 @@ rules:
   - id: ruff-schema-json-fresh
     kind: generated_file_fresh
     file: ruff.schema.json
-    command: ["cargo", "dev", "generate-json-schema", "--mode", "check"]
+    command: ["cargo", "dev", "generate-json-schema", "--mode", "dry-run"]
     workdir: "."
+    normalize: final-newline
     timeout: 300
     level: error
     message: "{{ctx.file}} is stale — run `cargo dev generate-json-schema` and commit."
@@ -96,8 +97,9 @@ rules:
   - id: ty-schema-json-fresh
     kind: generated_file_fresh
     file: ty.schema.json
-    command: ["cargo", "dev", "generate-ty-schema", "--mode", "check"]
+    command: ["cargo", "dev", "generate-ty-schema", "--mode", "dry-run"]
     workdir: "."
+    normalize: final-newline
     timeout: 300
     level: error
     message: "{{ctx.file}} is stale — run `cargo dev generate-ty-schema` and commit."

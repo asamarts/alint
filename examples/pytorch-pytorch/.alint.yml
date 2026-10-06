@@ -94,7 +94,7 @@ rules:
     paths:
       include: [".github/**"]
       exclude: ["**/*.rst","**/*.py","**/*.md","**/*.diff","**/fb/**"]
-    pattern: '(pip|pip3|python -m pip|python3 -m pip) install [a-zA-Z0-9][A-Za-z0-9._\-]+([^/=<>~!]+)[A-Za-z0-9._\-*+!]*$'
+    pattern: '(?m)(pip|pip3|python -m pip|python3 -m pip|python3 -mpip|python -mpip) install ([a-zA-Z0-9][A-Za-z0-9._\-]+)([^/=<>~!]+)[A-Za-z0-9._\-*+!]*$'
     level: error
 
   - id: pytorch-typeignore-must-be-qualified  # lintrunner TYPEIGNORE
@@ -122,7 +122,7 @@ rules:
   # baseline. Two representative entries shown; the rest are identical shape.
   - id: pytorch-no-std-call-once              # lintrunner CALL_ONCE
     kind: file_content_forbidden
-    paths: { include: ["c10/**/*.cpp","c10/**/*.h"], exclude: ["c10/util/CallOnce.h","**/fb/**"] }
+    paths: { include: ["c10/**","aten/**","torch/csrc/**","torch/nativert/**"], exclude: ["c10/util/CallOnce.h","**/fb/**"] }
     pattern: 'std::call_once'
     level: warning
   - id: pytorch-no-quoted-include             # lintrunner INCLUDE

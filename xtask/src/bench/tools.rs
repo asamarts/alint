@@ -24,7 +24,7 @@ use super::{Mode, Scenario};
 pub enum Tool {
     Alint,
     LsLint,
-    /// `find` + `ripgrep` pipelines — the small-team status
+    /// Shell pipelines using `find`, `grep`, and (for S2) ripgrep - the small-team status
     /// quo. Universal on Unix; doesn't ship its own config so
     /// the per-scenario shell command embeds the rule set
     /// inline. Useful as a baseline for "how much does a
@@ -57,10 +57,10 @@ impl Tool {
         match s.trim().to_lowercase().as_str() {
             "alint" => Ok(Self::Alint),
             "ls-lint" | "lslint" => Ok(Self::LsLint),
-            "grep" | "grep-pipeline" | "rg" => Ok(Self::GrepPipeline),
+            "shell" | "grep" | "grep-pipeline" | "rg" => Ok(Self::GrepPipeline),
             "repolinter" => Ok(Self::Repolinter),
             other => bail!(
-                "unknown tool {other:?}; expected one of alint, ls-lint, grep, repolinter, all"
+                "unknown tool {other:?}; expected one of alint, ls-lint, shell, repolinter, all"
             ),
         }
     }
@@ -69,7 +69,7 @@ impl Tool {
         match self {
             Self::Alint => "alint",
             Self::LsLint => "ls-lint",
-            Self::GrepPipeline => "grep",
+            Self::GrepPipeline => "shell",
             Self::Repolinter => "repolinter",
         }
     }
@@ -123,13 +123,13 @@ impl Tool {
             Self::Alint => super::fingerprint::alint_version(),
             Self::LsLint => detect_via_version_flag("ls-lint", "--version"),
             Self::GrepPipeline => {
-                // The pipeline needs both `find` (POSIX) and
-                // `rg` (ripgrep) on PATH. Report the rg
-                // version as the version-string handle since
-                // it's the more interesting moving target;
-                // `find` is essentially fixed across distros.
-                detect_via_version_flag("rg", "--version")
-                    .filter(|_| Command::new("find").arg("--help").output().is_ok())
+                // S1 is `find | grep`; S2 also uses ripgrep. Record every
+                // executable that contributes instead of labelling the whole
+                // baseline with ripgrep's version.
+                let find = detect_via_version_flag("find", "--version")?;
+                let grep = detect_via_version_flag("grep", "--version")?;
+                let rg = detect_via_version_flag("rg", "--version")?;
+                Some(format!("{find}; {grep}; {rg}"))
             }
             Self::Repolinter => detect_via_version_flag("repolinter", "--version"),
         }
@@ -191,7 +191,9 @@ impl Tool {
                     Mode::Fix => format!("{bin} fix {root} --unsafe-fixes --dry-run"),
                 }
             }
-            Self::LsLint => format!("ls-lint -workdir {root}"),
+            Self::LsLint => {
+                format!("ls-lint -warn -workdir {root} -config {root}/.ls-lint.yml")
+            }
             Self::GrepPipeline => match scenario {
                 Scenario::S1 => grep_pipeline_s1(&root),
                 Scenario::S2 => grep_pipeline_s2(&root),

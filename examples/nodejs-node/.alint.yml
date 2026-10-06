@@ -152,8 +152,10 @@ rules:
     when: facts.has_node_src
     kind: ordered_block
     paths: "README.md"
-    start: '^### TSC voting members$'
-    end: '^#### TSC regular members$'
+    start: "#### TSC voting members"
+    end: "#### TSC regular members"
+    select: '^\* \['
+    comparator: lexical-ci
     level: warning
     message: "TSC voting members in README.md must stay alphabetical (backstop to lint-readme-lists.mjs)."
 
@@ -224,6 +226,7 @@ rules:
         - "test/*/index.{js,mjs,cjs}"
         - "test/*/common.{js,mjs,cjs}"
         - "test/*/eslint.config_partial.mjs"
+        - "test/async-hooks/{hook-checks,init-hooks,verify-graph}.js"
     pattern: '^test-[A-Za-z0-9][A-Za-z0-9_.-]*\.(js|mjs|cjs)$'
     level: error
 

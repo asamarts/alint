@@ -312,7 +312,7 @@ rules:
       extract: { yaml: "$._internal_defaults_do_not_set.global.hub" }
     targets:
       - file: "manifests/charts/ztunnel/values.yaml"
-        extract: { yaml: "$._internal_defaults_do_not_set.global.hub" }
+        extract: { yaml: "$._internal_defaults_do_not_set.hub" }
       - file: "manifests/charts/istio-cni/values.yaml"
         extract: { yaml: "$._internal_defaults_do_not_set.global.hub" }
       - file: "manifests/charts/gateways/istio-ingress/values.yaml"
@@ -403,7 +403,9 @@ rules:
   # ════════════════════════════════════════════════════════════════
   - id: istio-releasenotes-apiversion
     kind: yaml_path_equals
-    paths: "releasenotes/notes/*.yaml"
+    paths:
+      include: ["releasenotes/notes/*.yaml"]
+      exclude: ["releasenotes/notes/50328.yaml"]
     path: "$.apiVersion"
     equals: "release-notes/v2"
     level: error

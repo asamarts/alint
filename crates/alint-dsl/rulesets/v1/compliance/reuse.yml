@@ -23,7 +23,7 @@ rules:
   # The REUSE spec mandates a top-level `LICENSES/` directory
   # containing the full text of every license used in the
   # project (named by SPDX identifier, e.g. `LICENSES/MIT.txt`).
-  # `reuse lint` rejects a project without it; we mirror that.
+  # `reuse lint` rejects a project without it, and so does this rule.
   - id: reuse-licenses-dir-exists
     kind: dir_exists
     paths: "LICENSES"

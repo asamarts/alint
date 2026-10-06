@@ -190,7 +190,7 @@ fn schema_type_label(prop: &serde_json::Value, schema: &serde_json::Value) -> St
     }
     // 4. A `$ref` to a structured (non-enum) sub-shape.
     if let Some(rf) = prop.get("$ref").and_then(serde_json::Value::as_str) {
-        return humanize_ref_name(rf);
+        return structured_ref_label(rf, schema);
     }
     // 5. No type information at all — an untyped `serde_json::Value`
     //    option that accepts any JSON.
@@ -334,8 +334,65 @@ fn humanize_ref_name(rf: &str) -> String {
         "scope_filter" => "scope filter".to_string(),
         "fix" => "fix spec".to_string(),
         "if_present" | "template" | "fact" => "object".to_string(),
-        other => other.replace('_', " "),
+        other => split_identifier_words(other),
     }
+}
+
+/// Render small referenced objects inline so a rule page never points readers
+/// at an internal schema type name it does not define (`OrphansSpec`,
+/// `SourceSpec`, and friends). Larger/shared objects keep their friendly name.
+fn structured_ref_label(rf: &str, schema: &serde_json::Value) -> String {
+    let friendly = humanize_ref_name(rf);
+    if matches!(
+        rf.rsplit('/').next().unwrap_or(rf),
+        "string_or_string_array"
+            | "nested_rule"
+            | "extract_spec"
+            | "scope_filter"
+            | "fix"
+            | "if_present"
+            | "template"
+            | "fact"
+    ) {
+        return friendly;
+    }
+    let Some(target) = resolve_local_ref(schema, rf) else {
+        return friendly;
+    };
+    let Some(props) = target
+        .get("properties")
+        .and_then(serde_json::Value::as_object)
+    else {
+        return friendly;
+    };
+    if props.is_empty() || props.len() > 6 {
+        return friendly;
+    }
+    let mut fields: Vec<&str> = props.keys().map(String::as_str).collect();
+    fields.sort_unstable();
+    format!(
+        "object {{ {} }}",
+        fields
+            .iter()
+            .map(|field| format!("`{field}`"))
+            .collect::<Vec<_>>()
+            .join(", ")
+    )
+}
+
+fn split_identifier_words(name: &str) -> String {
+    let mut out = String::with_capacity(name.len() + 4);
+    for (idx, ch) in name.chars().enumerate() {
+        if ch == '_' {
+            out.push(' ');
+        } else {
+            if idx > 0 && ch.is_ascii_uppercase() {
+                out.push(' ');
+            }
+            out.extend(ch.to_lowercase());
+        }
+    }
+    out
 }
 
 /// A ` (>= N)` / ` (<= N)` / ` (N..M)` note from a property's numeric
@@ -414,7 +471,11 @@ mod tests {
                     { "type": "string", "const": "generic", "description": "explicit" }
                 ]},
                 // A structured (non-enum) sub-shape.
-                "extract_spec": { "type": "object", "properties": { "regex": { "type": "string" } } }
+                "extract_spec": { "type": "object", "properties": { "regex": { "type": "string" } } },
+                "OrphansSpec": { "type": "object", "properties": {
+                    "include": { "type": "array" },
+                    "exclude": { "type": "array" }
+                } }
             }
         })
     }
@@ -481,6 +542,10 @@ mod tests {
         assert_eq!(
             label(&json!({"$ref": "#/$defs/extract_spec"})),
             "extract spec"
+        );
+        assert_eq!(
+            label(&json!({"$ref": "#/$defs/OrphansSpec"})),
+            "object { `exclude`, `include` }"
         );
 
         // Untyped `serde_json::Value` -> "any value".

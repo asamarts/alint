@@ -181,7 +181,11 @@ pub fn render(detection: &Detection) -> String {
         out.push('\n');
     }
     if let Some(flavor) = detection.workspace {
-        out.push_str("  - alint://bundled/monorepo@v1\n");
+        // The generic ruleset and each workspace overlay both carry a README
+        // check. Prefer the overlay's manifest-aware selector and suppress the
+        // generic copy so a missing README produces one finding, not two.
+        out.push_str("  - url: alint://bundled/monorepo@v1\n");
+        out.push_str("    except: [monorepo-packages-have-readme]\n");
         out.push_str("  - ");
         out.push_str(flavor.ruleset());
         out.push('\n');
@@ -389,6 +393,43 @@ mod tests {
         assert!(out.contains("nested_configs: true"));
         assert!(out.contains("alint://bundled/monorepo@v1"));
         assert!(out.contains("alint://bundled/monorepo/cargo-workspace@v1"));
+    }
+
+    #[test]
+    fn every_workspace_scaffold_loads_and_deduplicates_the_readme_rule() {
+        for flavor in [
+            WorkspaceFlavor::Cargo,
+            WorkspaceFlavor::Pnpm,
+            WorkspaceFlavor::Yarn,
+        ] {
+            let tmp = td();
+            let config_path = tmp.path().join(".alint.yml");
+            let rendered = render(&Detection {
+                languages: Vec::new(),
+                workspace: Some(flavor),
+            });
+            std::fs::write(&config_path, rendered).unwrap();
+            let loaded = alint_dsl::load(&config_path)
+                .unwrap_or_else(|error| panic!("{flavor:?} scaffold did not load: {error}"));
+            assert!(
+                loaded
+                    .rules
+                    .iter()
+                    .all(|rule| rule.id != "monorepo-packages-have-readme"),
+                "{flavor:?} scaffold retained the generic README rule"
+            );
+            assert!(
+                loaded.rules.iter().any(|rule| {
+                    rule.id
+                        == match flavor {
+                            WorkspaceFlavor::Cargo => "cargo-workspace-member-has-readme",
+                            WorkspaceFlavor::Pnpm => "pnpm-workspace-member-has-readme",
+                            WorkspaceFlavor::Yarn => "yarn-workspace-member-has-readme",
+                        }
+                }),
+                "{flavor:?} scaffold omitted its manifest-aware README rule"
+            );
+        }
     }
 
     #[test]

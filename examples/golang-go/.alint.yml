@@ -73,7 +73,7 @@ rules:
         - "**/_*/**"
         - "src/runtime/_mkmalloc/**"
         - "test/**"
-    pattern: '(// Copyright [0-9]{4}(,[0-9]{4})? The Go Authors\. All rights reserved\.\n// Use of this source code is governed by a BSD-style\n// license that can be found in the LICENSE file\.|// Code generated .*DO NOT EDIT|// Generated using cgo|// (Derived from )?Inferno |// created by cgo |// Original source:|// Based on cmd/internal/obj|// Copyright \(c\) [0-9]{4} The Go Authors)'
+    pattern: '(// Copyright [0-9]{4}([-,][0-9]{4})* The Go Authors\. All rights reserved\.\n// Use of this source code is governed by a BSD-style\n// license that can be found in the LICENSE file\.|// Code generated |// DO NOT EDIT|// Generated using cgo|// (Derived from )?Inferno|// (created|Created) by cgo|// Original source:|// Based on cmd/internal/obj|// Copyright \(c\) [0-9]{4} The Go Authors|// cmd/[0-9a-z]+/|Copyright © [0-9]{4}|// Copyright [0-9]{4} Google Inc\.| \* Derived from:)'
     lines: 8
     level: warning
     message: |
@@ -137,7 +137,13 @@ rules:
       include:
         - "src/runtime/*.go"
         - "src/internal/runtime/**/*.go"
-      exclude: ["**/*_test.go", "**/testdata/**"]
+      exclude:
+        - "**/*_test.go"
+        - "**/testdata/**"
+        - "src/runtime/mk*.go"
+        - "src/runtime/wincallback.go"
+        - "src/internal/runtime/gc/scan/mkasm.go"
+        - "src/internal/runtime/gc/internal/gen/**"
     forbid: '^(fmt|os|reflect|net(/.*)?)$'
     level: error
     message: |

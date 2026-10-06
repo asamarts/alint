@@ -262,9 +262,13 @@ rules:
       - kind: file_exists
         paths: "{path}/README.md"
       - kind: file_exists
-        paths: "{path}/go.mod"
-      - kind: file_exists
         paths: "{path}/LICENSE"
+      - kind: file_exists
+        paths: "{path}/SECURITY_CONTACTS"
+      - kind: file_exists
+        paths: "{path}/code-of-conduct.md"
+      - kind: file_exists
+        paths: "{path}/.github/PULL_REQUEST_TEMPLATE.md"
     level: error
 
   # verify-pkg-names.sh — Go package names lowercase, no underscores.

@@ -84,8 +84,7 @@ unchanged; every v0.9.x config still parses.
   exclude_query: "$.workspace.exclude[*]"  # optional: entries to subtract before checking
   orphans:                             # optional reverse-completeness check
     space: "crates/*"                  # on-disk artefacts in this glob …
-    unreferenced: warn                 # … not covered by an entry → warn | error | off
-  level: error
+  level: error                         # applies to forward and orphan findings
 ```
 
 `extract` is a one-of. The three structured forms reuse the
@@ -147,7 +146,7 @@ Per matched `registry` file:
    just an empty folder" check).
 6. **Orphans** (if configured): walk `orphans.space`; any on-disk
    artefact matching it but not covered by a (post-glob-expansion)
-   entry is reported at `orphans.unreferenced` severity. This is
+   entry is reported at the rule's top-level `level`. This is
    the "new crate not added to the workspace" / "by-name shard not
    wired" detector — the highest-value half of the rule.
 
@@ -186,8 +185,8 @@ resolve-paths rule that cries wolf gets disabled.
 - **Generated registries.** A registry produced by codegen
   (Bazel-generated `BUILD`) may legitimately reference
   yet-to-be-generated outputs. `expect:`/`must_contain:` let the
-  user scope to source artefacts; `orphans.unreferenced: off` is
-  the escape hatch. Codegen-running stays alint's non-goal (see
+  user scope to source artefacts; omitting `orphans` disables the
+  reverse check. Codegen-running stays alint's non-goal (see
   `generated_file_fresh`, the sibling v0.10 primitive).
 - **Comments in line registries.** `lines` mode strips a
   configurable `comment:` prefix (default `#`) and blank lines.

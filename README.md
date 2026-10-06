@@ -108,7 +108,7 @@ You do not have to fix everything the first time alint runs. `alint baseline` re
 
 - **Pull requests.** The [`asamarts/alint` GitHub Action](https://alint.org/docs/integrations/github-actions/) annotates changed lines inline or uploads SARIF to Code Scanning, and `alint check --changed` lints only the files a PR touched.
 - **Commits.** A [pre-commit](https://alint.org/docs/integrations/pre-commit/) hook (a prebuilt wheel, no toolchain) checks every commit; a manual `alint-fix` hook repairs on request.
-- **Your editor.** `alint lsp` is a language server (diagnostics, hover-to-explain, apply-fix code actions), with packaged extensions for VS Code, JetBrains, and Zed and ready configs for Neovim, Sublime Text, Emacs, and Helix.
+- **Your editor.** `alint lsp` is a language server (diagnostics, hover-to-explain, apply-fix code actions), with marketplace extensions for VS Code and JetBrains, a source extension for Zed, and ready configs for Neovim, Sublime Text, Emacs, and Helix.
 - **Coding agents.** The `agent` output format carries a per-violation instruction and fix command, and `alint export-agents-md` keeps the directives in `AGENTS.md` or `CLAUDE.md` in step with the rules alint enforces, so the agent and CI agree on the contract.
 - **Any CI.** [8 output formats](https://alint.org/docs/reference/output-formats/) cover most pipelines: `human`, `json`, `sarif`, `github`, `markdown`, `junit`, `gitlab`, and `agent`. Exit codes are stable: `0` clean, `1` violations, `2` config error, `3` internal.
 

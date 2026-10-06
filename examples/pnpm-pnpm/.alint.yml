@@ -329,10 +329,9 @@ rules:
 
   - id: pnpm-minimum-release-age
     when: facts.has_pnpm_workspace
-    kind: yaml_path_matches
-    paths: ["pnpm-workspace.yaml"]
-    path: "$['minimumReleaseAge']"
-    matches: '^[1-9]\d*$'
+    kind: file_content_matches
+    paths: "pnpm-workspace.yaml"
+    pattern: '(?m)^minimumReleaseAge:\s*[1-9][0-9]*\b'
     level: warning
 
   - id: pnpm-trust-policy
@@ -375,7 +374,12 @@ rules:
   - id: pnpm-package-license-mit
     when: facts.has_pnpm_workspace
     kind: json_path_matches
-    paths: "{cache,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,lockfile,network,object,patching,pkg-manager,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml,bins,building,catalogs,modules-mounter,worker,auth,agent}/*/package.json"
+    paths:
+      include:
+        - "{agent,auth,bins,building,cache,catalogs,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,installing,lockfile,modules-mounter,network,object,patching,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml}/*/package.json"
+        - "{deps/compliance,deps/inspection,deps/security,engine/pm,engine/runtime,installing/dedupe,installing/linking,pnpm/artifacts,resolving/registry}/*/package.json"
+        - "{pnpm,worker}/package.json"
+      exclude: ["**/example/**", "**/test/**"]
     path: "$.license"
     matches: '^MIT$'
     level: warning
@@ -383,7 +387,12 @@ rules:
   - id: pnpm-package-type-module
     when: facts.has_pnpm_workspace
     kind: json_path_matches
-    paths: "{cache,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,lockfile,network,object,patching,pkg-manager,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml,bins,building,catalogs,modules-mounter,worker,auth,agent}/*/package.json"
+    paths:
+      include:
+        - "{agent,auth,bins,building,cache,catalogs,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,installing,lockfile,modules-mounter,network,object,patching,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml}/*/package.json"
+        - "{deps/compliance,deps/inspection,deps/security,engine/pm,engine/runtime,installing/dedupe,installing/linking,pnpm/artifacts,resolving/registry}/*/package.json"
+        - "{pnpm,worker}/package.json"
+      exclude: ["**/example/**", "**/test/**"]
     path: "$.type"
     matches: '^module$'
     level: warning
@@ -391,7 +400,12 @@ rules:
   - id: pnpm-package-engines-node
     when: facts.has_pnpm_workspace
     kind: json_path_matches
-    paths: "{cache,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,lockfile,network,object,patching,pkg-manager,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml,bins,building,catalogs,modules-mounter,worker,auth,agent}/*/package.json"
+    paths:
+      include:
+        - "{agent,auth,bins,building,cache,catalogs,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,installing,lockfile,modules-mounter,network,object,patching,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml}/*/package.json"
+        - "{deps/compliance,deps/inspection,deps/security,engine/pm,engine/runtime,installing/dedupe,installing/linking,pnpm/artifacts,resolving/registry}/*/package.json"
+        - "{pnpm,worker}/package.json"
+      exclude: ["**/example/**", "**/test/**"]
     path: "$.engines.node"
     matches: '^>=22'
     level: warning
@@ -399,7 +413,12 @@ rules:
   - id: pnpm-package-repository-shape
     when: facts.has_pnpm_workspace
     kind: json_path_matches
-    paths: "{cache,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,lockfile,network,object,patching,pkg-manager,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml,bins,building,catalogs,modules-mounter,worker,auth,agent}/*/package.json"
+    paths:
+      include:
+        - "{agent,auth,bins,building,cache,catalogs,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,installing,lockfile,modules-mounter,network,object,patching,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml}/*/package.json"
+        - "{deps/compliance,deps/inspection,deps/security,engine/pm,engine/runtime,installing/dedupe,installing/linking,pnpm/artifacts,resolving/registry}/*/package.json"
+        - "{pnpm,worker}/package.json"
+      exclude: ["**/example/**", "**/test/**"]
     path: "$.repository"
     matches: '^https://github\.com/pnpm/pnpm/tree/main/'
     level: info
@@ -407,7 +426,12 @@ rules:
   - id: pnpm-package-funding
     when: facts.has_pnpm_workspace
     kind: json_path_matches
-    paths: "{cache,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,lockfile,network,object,patching,pkg-manager,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml,bins,building,catalogs,modules-mounter,worker,auth,agent}/*/package.json"
+    paths:
+      include:
+        - "{agent,auth,bins,building,cache,catalogs,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,installing,lockfile,modules-mounter,network,object,patching,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml}/*/package.json"
+        - "{deps/compliance,deps/inspection,deps/security,engine/pm,engine/runtime,installing/dedupe,installing/linking,pnpm/artifacts,resolving/registry}/*/package.json"
+        - "{pnpm,worker}/package.json"
+      exclude: ["**/example/**", "**/test/**"]
     path: "$.funding"
     matches: 'opencollective\.com/pnpm'
     level: info
@@ -415,7 +439,12 @@ rules:
   - id: pnpm-package-keywords-pnpm
     when: facts.has_pnpm_workspace
     kind: json_path_matches
-    paths: "{cache,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,lockfile,network,object,patching,pkg-manager,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml,bins,building,catalogs,modules-mounter,worker,auth,agent}/*/package.json"
+    paths:
+      include:
+        - "{agent,auth,bins,building,cache,catalogs,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,installing,lockfile,modules-mounter,network,object,patching,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml}/*/package.json"
+        - "{deps/compliance,deps/inspection,deps/security,engine/pm,engine/runtime,installing/dedupe,installing/linking,pnpm/artifacts,resolving/registry}/*/package.json"
+        - "{pnpm,worker}/package.json"
+      exclude: ["**/example/**", "**/test/**"]
     path: "$.keywords[0]"
     matches: '^pnpm$'
     level: info
@@ -424,7 +453,13 @@ rules:
   - id: pnpm-workspace-member-has-tsconfig
     when: facts.has_pnpm_workspace
     kind: for_each_dir
-    select: "{cache,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,lockfile,network,object,patching,pkg-manager,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml,bins,building,catalogs,modules-mounter,worker,auth,agent}/*"
+    select:
+      - "{agent,auth,bins,building,cache,catalogs,cli,config,core,crypto,deps,engine,exec,fetching,fs,global,hooks,installing,lockfile,modules-mounter,network,object,patching,pkg-manifest,registry-access,releasing,resolving,shell,store,testing,text,workspace,yaml}/*"
+      - "{deps/compliance,deps/inspection,deps/security,engine/pm,engine/runtime,installing/dedupe,installing/linking,pnpm/artifacts,resolving/registry}/*"
+      - "pnpm"
+      - "worker"
+      - "!**/example/**"
+      - "!**/test/**"
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: file_exists

@@ -11,6 +11,7 @@
 #
 # Files in scope (must pin to the workspace version):
 #   - README.md
+#   - action.yml (the baked GitHub Action binary version)
 #   - SECURITY.md
 #   - docs/site/integrations/{docker,github-actions,pre-commit}.md
 #   - docs/site/getting-started/installation.md
@@ -49,6 +50,7 @@ if [[ -z "${WORKSPACE_VER:-}" ]]; then
 fi
 
 SCOPE=(
+  action.yml
   README.md
   SECURITY.md
   docs/site/integrations/docker.md
@@ -62,9 +64,11 @@ SCOPE=(
 # regex used for the SCOPE files doesn't fit.
 
 # Match any vX.Y.Z or :X.Y.Z (bare-semver-after-colon, e.g. a
-# docker tag without the `v` prefix) in scope. Exclude anything
-# that matches the workspace version exactly — what's left is
-# drift.
+# docker tag without the `v` prefix) in scope. In the GitHub Actions
+# guide, inspect only alint's own `uses:` lines: versions in comments
+# for actions/checkout and github/codeql-action belong to those actions,
+# not alint. Exclude anything that matches the workspace version exactly;
+# what's left is drift.
 #
 # We deliberately do NOT match bare `X.Y.Z` (no `v` and no `:`
 # anchor) because the integration docs sometimes mention
@@ -82,7 +86,11 @@ for f in "${SCOPE[@]}"; do
     failed=1
     continue
   fi
-  drift=$(grep -nE "$PIN_REGEX" "$f" | grep -vE "(v|:)${WS_ESCAPED}([^0-9.]|$)" || true)
+  pins=$(grep -nE "$PIN_REGEX" "$f" || true)
+  if [[ "$f" == "docs/site/integrations/github-actions.md" ]]; then
+    pins=$(printf '%s\n' "$pins" | grep 'asamarts/alint@' || true)
+  fi
+  drift=$(printf '%s\n' "$pins" | grep -vE "(v|:)${WS_ESCAPED}([^0-9.]|$)" || true)
   if [[ -n "$drift" ]]; then
     echo "[version-pin] $f: stale pin (workspace is $WORKSPACE_VER)" >&2
     echo "$drift" | sed 's/^/    /' >&2

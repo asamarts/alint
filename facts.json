@@ -662,8 +662,8 @@
     "protocolbuffers-protobuf": 45,
     "python-cpython": 78,
     "pytorch-pytorch": 61,
-    "rust-lang-rust": 68,
-    "tensorflow-tensorflow": 58,
+    "rust-lang-rust": 69,
+    "tensorflow-tensorflow": 59,
     "tokio-rs-tokio": 73,
     "vercel-next.js": 115,
     "vercel-turbo": 91

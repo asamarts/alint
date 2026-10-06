@@ -11,7 +11,7 @@ costs that micro-benchmarks deliberately exclude.
 xtask bench-scale                           # default: 1k/10k/100k, all five scenarios (S1-S4 full+changed, SFIX fix)
 xtask bench-scale --include-1m              # adds the multi-GB 1M size
 xtask bench-scale --scenarios S1,S4         # a subset by ID (S1, S2, S3, S4, SFIX)
-xtask bench-scale --tools all               # alint + ls-lint + grep + Repolinter, each on the scenarios it supports
+xtask bench-scale --tools all               # alint + ls-lint + shell + Repolinter, each on the scenarios it supports
 ```
 
 See [`../RUNNING.md`](../RUNNING.md) for the full flag list and the
@@ -35,8 +35,8 @@ counts come from `facts.json`'s `bench_scenario_rule_counts`.
 
 | ID | Rules | Cost axis and dispatch shape | Tool anchor | Absorbs (pre-v0.17) |
 |---|---:|---|---|---|
-| **S1** | 16 | Layout and path (walk-bound): filename class, existence / absence, path metadata, and a `scope_filter` shape. Walker + `GlobSet` with little or no content read, the cheapest path. | `ls-lint`, `grep` | old S1 / S10 + the layout half of S2 / S4 |
-| **S2** | 20 | Per-file content: the 13 content kinds + forbidden-content patterns + `ordered_block` / `import_gate` / `xml_path_*` over `**/*.rs` (plus one `.csproj` overlay). The per-file dispatch fan-out. | `grep`, `repolinter` | old S2 / S5 / S6 / S12 |
+| **S1** | 16 | Layout and path (walk-bound): filename class, existence / absence, path metadata, and a `scope_filter` shape. Walker + `GlobSet` with little or no content read, the cheapest path. | `ls-lint`, `shell` | old S1 / S10 + the layout half of S2 / S4 |
+| **S2** | 20 | Per-file content: the 13 content kinds + forbidden-content patterns + `ordered_block` / `import_gate` / `xml_path_*` over `**/*.rs` (plus one `.csproj` overlay). The per-file dispatch fan-out. | `shell`, `repolinter` | old S2 / S5 / S6 / S12 |
 | **S3** | 16 | Cross-file, relational and graph: `pair` / `unique_by` / the `for_each_*` family / registry / `cross_file` / `pair_hash`, three `file_graph` build-and-traverse passes, and one single-shot command spawn. The heaviest scenario. | — | old S7 / S11 / S13 / S14 |
 | **S4** | 50 | Workspace bundle (realistic; release anchor): `extends` the `oss-baseline` + `rust` + `node` + `python` + `monorepo` + `cargo-workspace` rulesets over a POLYGLOT + GIT tree, `nested_configs` on, with the two git-aware rules inline. | — | old S3 / S8 / S9 |
 | **SFIX** | 24 fix ops | Auto-fix (dedicated): `alint fix --unsafe-fixes --dry-run` over all 24 non-spawn fix ops (`FixSpec::ALL_OP_NAMES` minus the spawning ops) on the planted `sfix/` fixture. Runs under `fix` mode only. | — | old S5 (4-op fix pass) + the deterministic `sfix_trim` |
@@ -55,7 +55,7 @@ supports; unsupported combinations are filtered out automatically.
 |---|---|---|
 | `alint` | S1-S4 (full + changed); SFIX (fix only) | The harness defaults to alint-only. |
 | `ls-lint` | S1 / full | Filename hygiene only. Closest single-tool competitor on S1. |
-| `grep` | S1 / full, S2 / full | Pure regex pipeline; useful as a "lower bound" reference. Doesn't model rule semantics. |
+| `shell` | S1 / full, S2 / full | S1 uses `find` and GNU grep; S2 uses `test`, `find`, and ripgrep. Useful as a lower-bound reference, not a semantic equivalent. |
 | `repolinter` | S2 / full | The retired-2026 ancestor. Run via Docker per `bench-docker.yml` workflow. |
 
 `--tools all` expands to every available tool; tools not on PATH are
@@ -63,9 +63,9 @@ auto-skipped with a stderr note rather than aborting.
 
 ## Reproducible competitive runs (`--docker`)
 
-Comparing alint vs ls-lint vs grep vs Repolinter on a developer's
+Comparing alint vs ls-lint vs shell pipelines vs Repolinter on a developer's
 laptop is dishonest: each laptop has a different `ls-lint` version,
-a different `grep` flavour, a different Node runtime under
+different `find`, grep, and ripgrep versions, a different Node runtime under
 Repolinter, even (depending on rust-toolchain.toml) a different
 `alint`. Numbers from such a run aren't comparable to any other
 machine's run.
@@ -76,7 +76,9 @@ a published image that pins:
 
 - `alint` — built from the same workspace at image-build time.
 - `ls-lint` — pinned `v2.2.3`.
-- `ripgrep` (the `grep` tool variant) — pinned `15.1.0`.
+- GNU find and grep from the pinned Debian base image; their exact runtime
+  versions are recorded in every result fingerprint.
+- `ripgrep` (used by the S2 shell baseline) — pinned `15.1.0`.
 - `repolinter` — pinned `0.11.2`.
 - `hyperfine` — pinned `1.20.0`.
 - `rustc` — pinned via `rust-toolchain.toml` at image-build time.

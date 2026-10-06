@@ -80,3 +80,88 @@ fn config_schema_descriptions_have_no_em_dash() {
         );
     }
 }
+
+#[test]
+fn bundled_rule_messages_have_no_em_dash() {
+    let root = workspace_root();
+    let rulesets = root.join("crates/alint-dsl/rulesets/v1");
+    let mut offenders = Vec::new();
+    scan_bundled_messages(&root, &rulesets, &mut offenders);
+    offenders.sort();
+    assert!(
+        offenders.is_empty(),
+        "bundled rule messages must have no em dash (U+2014):\n{}",
+        offenders.join("\n")
+    );
+}
+
+fn scan_bundled_messages(
+    root: &std::path::Path,
+    dir: &std::path::Path,
+    offenders: &mut Vec<String>,
+) {
+    for entry in fs::read_dir(dir)
+        .expect("read rulesets directory")
+        .flatten()
+    {
+        let path = entry.path();
+        if path.is_dir() {
+            scan_bundled_messages(root, &path, offenders);
+        } else if path.extension().and_then(|s| s.to_str()) == Some("yml") {
+            let text = std::fs::read_to_string(&path).expect("read bundled ruleset");
+            let value: serde_yaml_ng::Value =
+                serde_yaml_ng::from_str(&text).expect("parse bundled ruleset");
+            scan_message_fields(root, &path, &value, None, offenders);
+        }
+    }
+}
+
+fn scan_message_fields(
+    root: &std::path::Path,
+    path: &std::path::Path,
+    value: &serde_yaml_ng::Value,
+    inherited_id: Option<&str>,
+    offenders: &mut Vec<String>,
+) {
+    match value {
+        serde_yaml_ng::Value::Mapping(map) => {
+            let id = value
+                .get("id")
+                .and_then(serde_yaml_ng::Value::as_str)
+                .or(inherited_id);
+            for (key, child) in map {
+                if key.as_str() == Some("message")
+                    && child
+                        .as_str()
+                        .is_some_and(|message| message.contains('\u{2014}'))
+                {
+                    offenders.push(format!(
+                        "{}: {}",
+                        path.strip_prefix(root).unwrap_or(path).display(),
+                        id.unwrap_or("<unknown>")
+                    ));
+                }
+                scan_message_fields(root, path, child, id, offenders);
+            }
+        }
+        serde_yaml_ng::Value::Sequence(items) => {
+            for item in items {
+                scan_message_fields(root, path, item, inherited_id, offenders);
+            }
+        }
+        _ => {}
+    }
+}
+
+#[test]
+fn bundled_message_scan_reaches_nested_rules() {
+    let value: serde_yaml_ng::Value = serde_yaml_ng::from_str(
+        "rules:\n  - id: parent\n    require:\n      - kind: file_exists\n        message: \"nested \\u2014 offender\"\n",
+    )
+    .unwrap();
+    let root = std::path::Path::new("/repo");
+    let path = root.join("rules.yml");
+    let mut offenders = Vec::new();
+    scan_message_fields(root, &path, &value, None, &mut offenders);
+    assert_eq!(offenders, ["rules.yml: parent"]);
+}

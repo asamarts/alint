@@ -8,13 +8,12 @@ branding:
 inputs:
   version:
     description: |
-      alint version to install: a release tag like `v0.1.0`, or
-      `latest`. Leave unset to install the release matching the tag
-      the action itself is pinned to — e.g. `uses: asamarts/alint@v0.12.0`
-      installs v0.12.0, so pinning the action pins the binary. Falls
-      back to `latest` when the action is pinned to a branch or SHA.
+      alint version to install: a release tag like `v0.17.0`, or
+      `latest`. Leave unset to install the release baked into this
+      action commit. A commit-SHA pin therefore pins both action code
+      and binary; set this input only to choose a different release.
     required: false
-    default: ""
+    default: "v0.17.0"
   path:
     description: Directory to lint. Defaults to the repository root.
     required: false
@@ -62,7 +61,7 @@ runs:
         ALINT_VERSION: ${{ inputs.version }}
         INSTALL_DIR: ${{ runner.temp }}/alint-bin
         # Pin install.sh to whichever ref the consumer pinned the
-        # action to (e.g. `asamarts/alint@v0.12.0`). Without this,
+        # action to (e.g. `asamarts/alint@v0.17.0`). Without this,
         # `main`'s install.sh would be fetched on every run — a
         # change to that script affects every action consumer
         # regardless of the version they pinned.
@@ -85,20 +84,17 @@ runs:
         set -euo pipefail
         if [[ -z "${ACTION_REF:-}" ]]; then
           if [[ "${SOURCE_REPO}" != "asamarts/alint" ]]; then
-            echo "::error::action_ref is empty but the action is running outside asamarts/alint (${SOURCE_REPO}). Pin the action to a tag, e.g. uses: asamarts/alint@v0.12.0" >&2
+            echo "::error::action_ref is empty but the action is running outside asamarts/alint (${SOURCE_REPO}). Pin the action to a tag, e.g. uses: asamarts/alint@v0.17.0" >&2
             exit 1
           fi
           ref="main"
         else
           ref="$ACTION_REF"
         fi
-        # Binary version: an explicit `version:` input always wins.
-        # With none, default to the release tag the action itself is
-        # pinned to (ACTION_REF like vX.Y.Z) so pinning the action
-        # pins the binary, with zero release-time maintenance. Fall
-        # back to `latest` only when the action is pinned to a non-
-        # release ref (branch / SHA / the in-repo `uses: ./`
-        # selftest), where a floating binary is the right match.
+        # Binary version: an explicit `version:` input wins; otherwise the
+        # action.yml default baked into this commit pins the matching release.
+        # Keep the fallback for local action tests that deliberately pass an
+        # empty value and for old commits whose input default was empty.
         ver="${ALINT_VERSION:-}"
         if [[ -z "$ver" ]]; then
           if [[ "${ACTION_REF:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then

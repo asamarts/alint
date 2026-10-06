@@ -93,6 +93,7 @@ pub struct ForEachDirRule {
     id: String,
     level: Level,
     policy_url: Option<String>,
+    message: Option<String>,
     select_scope: Scope,
     when_iter: Option<WhenExpr>,
     require: Vec<CompiledNestedSpec>,
@@ -116,8 +117,7 @@ impl Rule for ForEachDirRule {
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         evaluate_for_each(
-            &self.id,
-            self.level,
+            ForEachParent::new(&self.id, self.level, self.message.as_deref()),
             &self.select_scope,
             self.when_iter.as_ref(),
             &self.require,
@@ -145,6 +145,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         id: spec.id.clone(),
         level: spec.level,
         policy_url: spec.policy_url.clone(),
+        message: spec.message.clone(),
         select_scope,
         when_iter,
         require,
@@ -219,6 +220,22 @@ pub(crate) enum IterateMode {
     Both,
 }
 
+/// Parent-rule fields shared by the three nested iteration kinds. Keeping
+/// these together makes it explicit which values are inherited by nested
+/// findings and keeps the evaluator's call surface manageable.
+#[derive(Clone, Copy)]
+pub(crate) struct ForEachParent<'a> {
+    id: &'a str,
+    level: Level,
+    message: Option<&'a str>,
+}
+
+impl<'a> ForEachParent<'a> {
+    pub(crate) fn new(id: &'a str, level: Level, message: Option<&'a str>) -> Self {
+        Self { id, level, message }
+    }
+}
+
 /// Shared evaluation logic for `for_each_dir`, `for_each_file`, and
 /// `every_matching_has`. `mode` selects which entries to iterate.
 /// `when_iter` (compiled at rule-build time) gates each iteration:
@@ -233,14 +250,18 @@ pub(crate) enum IterateMode {
 /// top-to-bottom as one phased dispatcher.
 #[allow(clippy::too_many_lines)]
 pub(crate) fn evaluate_for_each(
-    parent_id: &str,
-    level: Level,
+    parent: ForEachParent<'_>,
     select_scope: &Scope,
     when_iter: Option<&WhenExpr>,
     require: &[CompiledNestedSpec],
     ctx: &Context<'_>,
     mode: IterateMode,
 ) -> Result<Vec<Violation>> {
+    let ForEachParent {
+        id: parent_id,
+        level,
+        message: parent_message,
+    } = parent;
     let Some(registry) = ctx.registry else {
         return Err(Error::Other(format!(
             "rule {parent_id}: nested-rule evaluation needs a RuleRegistry in the Context \
@@ -373,6 +394,9 @@ pub(crate) fn evaluate_for_each(
                     if v.path.is_none() {
                         v.path = Some(entry.path.clone());
                     }
+                    if let Some(message) = parent_message {
+                        v.message = message.to_string().into();
+                    }
                     violations.push(v);
                 }
                 continue;
@@ -381,6 +405,9 @@ pub(crate) fn evaluate_for_each(
             for mut v in nested_violations {
                 if v.path.is_none() {
                     v.path = Some(entry.path.clone());
+                }
+                if let Some(message) = parent_message {
+                    v.message = message.to_string().into();
                 }
                 violations.push(v);
             }
@@ -526,6 +553,7 @@ mod tests {
             id: "t".into(),
             level: Level::Error,
             policy_url: None,
+            message: None,
             select_scope: Scope::from_patterns(&[select.to_string()]).unwrap(),
             when_iter: None,
             require,

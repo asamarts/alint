@@ -46,7 +46,7 @@ rules:
     kind: file_header
     paths:
       include: ["src/**/*.{cc,h,cpp,inc}", "java/**/*.java", "objectivec/**/*.{m,h}", "rust/**/*.rs", "upb/**/*.{c,h}", "hpb/**/*.{cc,h}", "csharp/**/*.cs"]
-      exclude: ["**/*.pb.cc", "**/*.pb.h", "**/*_pb2.py", "**/third_party/**"]
+      exclude: ["**/*.pb.cc", "**/*.pb.h", "**/*.pb.cs", "**/*_pb2.py", "**/*.pbobjc.*", "upb/reflection/{cmake,stage0}/**", "csharp/src/Google.Protobuf.Test.TestProtos/OldExtensions*.cs", "**/third_party/**"]
     pattern: 'Protocol Buffers - Google''s data interchange format'
     lines: 6
     level: warning
@@ -97,7 +97,7 @@ rules:
     targets:
       - file: java/bom/pom.xml
         extract:
-          regex: '<version>([0-9][^<]*)</version>'
+          regex: '(?s)<artifactId>protobuf-bom</artifactId>\s*<version>([^<]+)</version>'
     level: error
     message: >-
       The Bazel-side PROTOBUF_JAVA_VERSION must equal java/bom/pom.xml's

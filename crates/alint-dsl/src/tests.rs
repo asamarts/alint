@@ -2487,6 +2487,22 @@ fn discover_walks_up_to_find_ancestor_config() {
 }
 
 #[test]
+fn discover_walks_up_from_a_relative_start() {
+    let cwd = std::env::current_dir().unwrap();
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-discover-")
+        .tempdir_in(&cwd)
+        .unwrap();
+    std::fs::write(tmp.path().join(".alint.yml"), "version: 1\nrules: []\n").unwrap();
+    let nested = tmp.path().join("a/b/c");
+    std::fs::create_dir_all(&nested).unwrap();
+    let relative = nested.strip_prefix(&cwd).unwrap();
+
+    let found = discover(relative).expect("ancestor config should be found");
+    assert_eq!(found, tmp.path().join(".alint.yml"));
+}
+
+#[test]
 fn discover_returns_none_when_no_config_exists() {
     let tmp = tempfile::tempdir().unwrap();
     // Empty tempdir, no parents have config either.

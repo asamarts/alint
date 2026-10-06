@@ -325,7 +325,7 @@ rules:
 
   - id: angular-package-name-is-scoped
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: json_path_matches
@@ -340,7 +340,7 @@ rules:
 
   - id: angular-package-version-is-placeholder
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: json_path_matches
@@ -356,7 +356,7 @@ rules:
 
   - id: angular-package-license-mit
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: json_path_matches
@@ -370,7 +370,7 @@ rules:
 
   - id: angular-package-repository-directory-matches
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: json_path_matches
@@ -384,7 +384,7 @@ rules:
 
   - id: angular-package-engines-node-pinned
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: json_path_matches
@@ -399,7 +399,7 @@ rules:
 
   - id: angular-package-has-index-ts
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: file_exists
@@ -412,7 +412,7 @@ rules:
 
   - id: angular-package-has-public-api-ts
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: file_exists
@@ -424,7 +424,7 @@ rules:
 
   - id: angular-package-has-build-bazel
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: file_exists
@@ -437,7 +437,7 @@ rules:
 
   - id: angular-package-has-package-md
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: file_exists
@@ -449,7 +449,7 @@ rules:
 
   - id: angular-package-has-public-api-golden
     kind: for_each_dir
-    select: "packages/*"
+    select: ["packages/*", "!packages/benchpress", "!packages/zone.js"]
     when_iter: 'iter.has_file("package.json")'
     require:
       - kind: file_exists

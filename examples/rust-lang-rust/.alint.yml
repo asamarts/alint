@@ -178,14 +178,16 @@ rules:
     kind: toml_path_matches
     paths:
       include:
-        - "Cargo.toml"
         - "compiler/**/Cargo.toml"
         - "library/**/Cargo.toml"
         - "src/**/Cargo.toml"
       exclude:
-        - "src/llvm-project/**"
-        - "src/gcc/**"
-        - "src/tools/{cargo,clippy,miri,rust-analyzer,rustfmt}/**"
+        - "library/Cargo.toml"
+        - "compiler/rustc_codegen_{cranelift,gcc}/**"
+        - "library/{backtrace,compiler-builtins,portable-simd,stdarch}/**"
+        - "src/{gcc,llvm-project}/**"
+        - "src/doc/{book,edition-guide,embedded-book,nomicon,reference,rust-by-example,rustc-dev-guide}/**"
+        - "src/tools/{cargo,clippy,enzyme,libcxx-version,miri,rust-analyzer,rustc-perf,rustfmt}/**"
     path: "$.package.edition"
     matches: '^(2021|2024)$'
     level: error
@@ -253,7 +255,7 @@ rules:
     paths:
       include: ["tests/crashes/**/*.rs"]
       exclude: ["tests/crashes/auxiliary/**"]
-    pattern: '^//@ known-bug:'
+    pattern: '(?m)^//@ known-bug:'
     level: error
 
   # ==========================================================================
@@ -287,13 +289,17 @@ rules:
   - id: rust-tidy-no-test-in-stdlib
     kind: file_content_forbidden
     paths:
-      include: ["library/{core,alloc,std}/src/**/*.rs"]
+      include: ["library/**/*.rs"]
       exclude:
-        - "library/{core,alloc,std}/src/**/tests.rs"
-        - "library/{core,alloc,std}/src/**/tests/**"
-    pattern: '^\s*#\[(test|bench)\]'
+        - "library/{backtrace,compiler-builtins,portable-simd,stdarch}/**"
+        - "library/{std,std_detect,test}/**"
+        - "library/*tests/**"
+        - "library/alloc/src/collections/btree/{borrow,map,node,set}/tests.rs"
+        - "library/alloc/src/collections/{linked_list,vec_deque}/tests.rs"
+        - "library/alloc/src/{raw_vec,wtf8}/tests.rs"
+    pattern: '(?m)^\s*#\[(test|bench)\]'
     level: error
-    message: "Tests in core/alloc/std live in the *tests sibling crates."
+    message: "Inline tests in the checked stdlib sources belong in the exempt test modules or sibling test crates."
 
   # ==========================================================================
   # tidy::bins — no binaries checked into the source tree.
@@ -310,12 +316,19 @@ rules:
   # than ordered_block's line comparator; simple one-item-per-line regions
   # match perfectly, multi-line items may need ignore-tidy-alphabetical.)
   # ==========================================================================
-  - id: rust-tidy-alphabetical
+  - id: rust-tidy-alphabetical-toml
+    kind: ordered_block
+    paths: ["Cargo.toml", "typos.toml"]
+    start: '# tidy-alphabetical-start'
+    end: '# tidy-alphabetical-end'
+    level: warning
+    scope_filter:
+      changed_since: "{{env.ALINT_BASE_REF | default('origin/master')}}"
+
+  - id: rust-tidy-alphabetical-rust
     kind: ordered_block
     paths:
       include:
-        - "Cargo.toml"
-        - "typos.toml"
         - "compiler/**/*.rs"
         - "library/**/*.rs"
         - "src/**/*.rs"
@@ -323,8 +336,8 @@ rules:
         - "src/llvm-project/**"
         - "src/gcc/**"
         - "src/tools/{cargo,clippy,miri,rust-analyzer,rustfmt}/**"
-    start: 'tidy-alphabetical-start'
-    end: 'tidy-alphabetical-end'
+    start: '// tidy-alphabetical-start'
+    end: '// tidy-alphabetical-end'
     level: warning
     scope_filter:
       changed_since: "{{env.ALINT_BASE_REF | default('origin/master')}}"
@@ -338,10 +351,12 @@ rules:
   - id: rust-tidy-triagebot-paths-resolve
     kind: registry_paths_resolve
     source: "triagebot.toml"
-    extract: {toml: "$.mentions"}     # mention keys are repo-relative path filters
+    # Section names are the path filters. Ignore content-mention keys such as
+    # "miri" by requiring a slash or dot in the captured key.
+    extract:
+      regex: '(?m)^\[mentions\."([^"]*[/.][^"]*)"\]\s*$'
     base: "."
     entries_are_globs: true
-    expect: file
     level: warning
     message: "A path filter in triagebot.toml [mentions.*] does not exist on disk."
 

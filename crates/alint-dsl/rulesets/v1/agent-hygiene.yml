@@ -39,8 +39,8 @@ rules:
   # `*.swp`), this gives broad coverage of the
   # leftover-artefact filename surface.
   #
-  # Important non-coverage: we deliberately do NOT match
-  # `*_v[0-9]*` / `*-v[0-9]*`. Real codebases use those for
+  # Deliberately not matched: `*_v[0-9]*` and `*-v[0-9]*`.
+  # Real codebases use those for
   # legitimate versioning — API versions
   # (`gitlab_v1_callback.py`), schema migrations
   # (`076_add_v1_tables.py`), release notes
@@ -131,7 +131,7 @@ rules:
   # leftovers vs. legitimate logging in build tooling, browser
   # demos, and vendored content.
   #
-  # The leading `(?:^|[\s;{(])` ensures we don't match
+  # The leading `(?:^|[\s;{(])` keeps the rule from matching
   # `myconsole.log(...)` or other false positives where `console`
   # is part of a longer identifier.
   - id: agent-no-console-log
@@ -163,7 +163,7 @@ rules:
         - "**/demo/**"
         - "**/demos/**"
         - "**/examples/**"
-        # Vendored / third-party code we don't own.
+        # Vendored and third-party code the project doesn't own.
         - "**/vendor/**"
         - "**/vendored/**"
         - "**/third_party/**"

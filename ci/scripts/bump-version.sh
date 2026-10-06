@@ -82,6 +82,7 @@ cargo metadata --offline --format-version 1 > /dev/null
 #    handles all forms because the regex's `(v|:)` alternation
 #    plus a word boundary on the trailing side covers them.
 SNIPPET_FILES=(
+  action.yml
   README.md
   SECURITY.md
   docs/site/integrations/docker.md

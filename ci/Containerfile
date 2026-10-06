@@ -2,6 +2,7 @@ FROM debian:bookworm-slim
 
 ARG RUNNER_VERSION=2.336.0
 ARG RUST_VERSION=stable
+ARG HYPERFINE_VERSION=1.20.0
 
 # System packages
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,10 +13,27 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     libssl-dev \
     pkg-config \
-    hyperfine \
     libicu72 \
     zlib1g \
     && rm -rf /var/lib/apt/lists/*
+
+# Benchmark output records hyperfine in its reproducibility fingerprint. Keep
+# the runner image on the same explicit version as bench-record.yml instead of
+# inheriting Debian bookworm's older package.
+RUN DPKG_ARCH=$(dpkg --print-architecture) \
+    && case "$DPKG_ARCH" in \
+         amd64) HF_ARCH=x86_64; HF_SHA256=af844f82e92e6ef206e0115b36742c8c79ad0a8ff39e10601c25e71d76048e2f ;; \
+         arm64) HF_ARCH=aarch64; HF_SHA256=90875cb1db7a1d797c311174d061728361e58fc70e3b62262a00635ac3b1997c ;; \
+         *) echo "unsupported architecture: $DPKG_ARCH" >&2; exit 1 ;; \
+       esac \
+    && HF_DIR="hyperfine-v${HYPERFINE_VERSION}-${HF_ARCH}-unknown-linux-gnu" \
+    && curl -fsSL -o /tmp/hyperfine.tar.gz \
+       "https://github.com/sharkdp/hyperfine/releases/download/v${HYPERFINE_VERSION}/${HF_DIR}.tar.gz" \
+    && echo "${HF_SHA256}  /tmp/hyperfine.tar.gz" | sha256sum -c - \
+    && tar -xzf /tmp/hyperfine.tar.gz -C /tmp \
+    && install -m 0755 "/tmp/${HF_DIR}/hyperfine" /usr/local/bin/hyperfine \
+    && rm -rf /tmp/hyperfine.tar.gz "/tmp/${HF_DIR}" \
+    && hyperfine --version | grep -F "${HYPERFINE_VERSION}"
 
 # Node.js 22 — for `npx likec4 validate` of the architecture model
 # (ci/scripts/likec4.sh, called from ci/scripts/docs.sh). bookworm's apt nodejs

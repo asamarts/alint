@@ -157,13 +157,13 @@ pub fn untrack_path(root: &Path, rel_path: &Path, dry_run: bool) -> UntrackOutco
 /// - `Some("main")` — `git diff --name-only --relative main...HEAD`
 ///   (three-dot — diff against the merge-base of `main` and
 ///   `HEAD`). Right shape for PR-check use cases.
-/// - `None` — `git ls-files --modified --others --exclude-standard`
-///   from `root`. Right shape for pre-commit / local-dev use
-///   cases. Untracked-but-not-gitignored files are included so a
-///   freshly-added `.env` in the working tree shows up; deleted
-///   files are also returned (they're in the diff but not on
-///   disk, so the engine's intersect-with-walked-index step
-///   filters them out naturally).
+/// - `None` — the union of `git diff --cached --name-only --relative`
+///   and `git ls-files --modified --others --exclude-standard` from
+///   `root`. This includes staged, unstaged, and untracked changes,
+///   which is the right shape for pre-commit / local-dev use cases.
+///   Deleted files are also returned (they're in the diff but not on
+///   disk, so the engine's intersect-with-walked-index step filters
+///   them out naturally).
 ///
 /// Returns `None` on the same conditions as
 /// [`collect_tracked_paths`]: `git` not on PATH, `root` outside
@@ -176,27 +176,38 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
     // Two distinct invocations: ref-based diff vs. working-tree
     // status. Both emit NUL-separated output so paths with
     // newlines / non-UTF-8 bytes round-trip.
-    let output = match base {
-        Some(base) => {
-            // Defense-in-depth, matching `diff_name_only`: reject a `base`
-            // starting with `-` explicitly (treat as "no changed-set"), in
-            // addition to the `--end-of-options` guard below.
-            if base.starts_with('-') {
-                return None;
-            }
-            Command::new("git")
-                .arg("-C")
-                .arg(root)
-                .args(["diff", "--name-only", "--relative", "-z"])
-                // `--end-of-options` so a `base`/`since` starting with `-`
-                // can't be parsed as a git OPTION (e.g. `--output=…`, which
-                // would write/truncate an arbitrary file).
-                .arg("--end-of-options")
-                .arg(format!("{base}...HEAD"))
-                .output()
-                .ok()?
+    let outputs = if let Some(base) = base {
+        // Defense-in-depth, matching `diff_name_only`: reject a `base`
+        // starting with `-` explicitly (treat as "no changed-set"), in
+        // addition to the `--end-of-options` guard below.
+        if base.starts_with('-') {
+            return None;
         }
-        None => Command::new("git")
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["diff", "--name-only", "--relative", "-z"])
+            // `--end-of-options` so a `base`/`since` starting with `-`
+            // can't be parsed as a git OPTION (e.g. `--output=…`, which
+            // would write/truncate an arbitrary file).
+            .arg("--end-of-options")
+            .arg(format!("{base}...HEAD"))
+            .output()
+            .ok()?;
+        vec![output]
+    } else {
+        // `ls-files --modified` compares the worktree with the index, so a
+        // staged edit disappears from it. Union the index-vs-HEAD diff with
+        // the working-tree/untracked set; otherwise a pre-commit hook can
+        // silently check zero files after the framework stashes unstaged
+        // changes. `--cached` also works for an unborn HEAD.
+        let staged = Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(["diff", "--cached", "--name-only", "--relative", "-z"])
+            .output()
+            .ok()?;
+        let working = Command::new("git")
             .arg("-C")
             .arg(root)
             .args([
@@ -207,17 +218,20 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
                 "-z",
             ])
             .output()
-            .ok()?,
+            .ok()?;
+        vec![staged, working]
     };
-    if !output.status.success() {
+    if outputs.iter().any(|output| !output.status.success()) {
         return None;
     }
     let mut out = HashSet::new();
-    for chunk in output.stdout.split(|&b| b == 0) {
-        if chunk.is_empty() {
-            continue;
+    for output in outputs {
+        for chunk in output.stdout.split(|&b| b == 0) {
+            if chunk.is_empty() {
+                continue;
+            }
+            out.insert(path_from_git_chunk(chunk));
         }
-        out.insert(path_from_git_chunk(chunk));
     }
     Some(out)
 }
@@ -810,6 +824,44 @@ mod tests {
         // hard-error (CLI's `--changed`) and silent fallback.
         assert!(collect_changed_paths(tmp.path(), None).is_none());
         assert!(collect_changed_paths(tmp.path(), Some("main")).is_none());
+    }
+
+    #[test]
+    fn collect_changed_without_base_unions_staged_unstaged_and_untracked() {
+        let repo = make_repo_with_commits(&["init"]);
+        let root = repo.path();
+        std::fs::write(root.join("staged.txt"), "old\n").unwrap();
+        std::fs::write(root.join("unstaged.txt"), "old\n").unwrap();
+        let run = |args: &[&str]| {
+            let output = Command::new("git")
+                .arg("-C")
+                .arg(root)
+                .args(args)
+                .output()
+                .unwrap();
+            assert!(
+                output.status.success(),
+                "git {args:?} failed: {}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        };
+        run(&["add", "staged.txt", "unstaged.txt"]);
+        run(&["commit", "-m", "add fixtures"]);
+
+        std::fs::write(root.join("staged.txt"), "staged edit\n").unwrap();
+        run(&["add", "staged.txt"]);
+        std::fs::write(root.join("unstaged.txt"), "unstaged edit\n").unwrap();
+        std::fs::write(root.join("untracked.txt"), "new\n").unwrap();
+
+        let changed = collect_changed_paths(root, None).expect("changed paths");
+        assert_eq!(
+            changed,
+            HashSet::from([
+                PathBuf::from("staged.txt"),
+                PathBuf::from("unstaged.txt"),
+                PathBuf::from("untracked.txt"),
+            ])
+        );
     }
 
     #[test]

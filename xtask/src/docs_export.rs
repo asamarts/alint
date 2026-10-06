@@ -1081,19 +1081,33 @@ fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
     // arrows don't leak into the plain-text SERP snippet as literal `**regex**`
     // (`*_path_matches`) or `⇒` (`command_idempotent`) — the website rule index
     // keeps the markdown (it renders it), but a `<meta>` description must not.
-    let summary = meta_desc_clean(&strip_markup(&first_sentence(body)), 140);
+    let mut opening = strip_markup(&first_sentence(body));
+    // Multi-format structured-query sections share one prose opener. Name the
+    // concrete format so the generated pages are useful on their own and do
+    // not present search engines with near-identical snippets.
+    if kind.contains("_path_") {
+        let format = kind.split('_').next().unwrap_or_default().to_uppercase();
+        opening = opening.replacen("structured document", &format!("{format} document"), 1);
+    }
     let family = family_title.to_lowercase();
-    let composed = if summary.len() < 25 {
+    let suffix = format!("alint {kind} rule, {family} family.");
+    let opening = meta_desc_clean(&opening, usize::MAX)
+        .trim_end_matches([':', ';', ','])
+        .to_string();
+    if opening.chars().count() < 25 {
         // Doc-comment opener too thin to be a useful snippet —
         // fall back to a kind + family clause (still concrete:
         // names the rule the searcher typed and where it lives).
-        format!("{kind} rule in alint's {family} family.")
-    } else if summary.ends_with('.') {
-        format!("{summary} alint {kind} rule, {family} family.")
+        return format!("{kind} rule in alint's {family} family.");
+    }
+    let separator = if opening.ends_with('.') { " " } else { ". " };
+    let budget = 158usize.saturating_sub(suffix.chars().count() + separator.chars().count());
+    let summary = meta_desc_clean(&opening, budget);
+    if summary.ends_with('.') {
+        format!("{summary} {suffix}")
     } else {
-        format!("{summary}. alint {kind} rule, {family} family.")
-    };
-    meta_desc_clean(&composed, 158)
+        format!("{summary}. {suffix}")
+    }
 }
 
 /// Render one `rules/<family>/<kind>.md` page. Frontmatter
@@ -1543,10 +1557,19 @@ fn emit_concept_page(target_dir: &Path, slug: &str, title: &str, body: &str) -> 
     let mut page = String::new();
     let _ = writeln!(&mut page, "---");
     let _ = writeln!(&mut page, "title: '{}'", escape_yaml_string(title));
+    let description = match slug {
+        "fix-operations" => {
+            "Configure alint's automatic fix operations, applicability tiers, and execution safeguards."
+        }
+        "nested-configs" => {
+            "Layer .alint.yml files across a monorepo with deterministic inheritance, trust boundaries, and root-relative behavior."
+        }
+        _ => "Understand this alint configuration concept and its repository-wide behavior.",
+    };
     let _ = writeln!(
         &mut page,
-        "description: 'alint concept: {}.'",
-        title.to_lowercase()
+        "description: '{}'",
+        escape_yaml_string(description)
     );
     let _ = writeln!(&mut page, "---");
     let _ = writeln!(&mut page);
@@ -1554,12 +1577,36 @@ fn emit_concept_page(target_dir: &Path, slug: &str, title: &str, body: &str) -> 
         let _ = writeln!(&mut page, "<likec4-view view-id=\"{view}\"></likec4-view>");
         let _ = writeln!(&mut page);
     }
-    page.push_str(body.trim_start_matches('\n'));
+    page.push_str(&promote_concept_headings(body.trim_start_matches('\n')));
     if !page.ends_with('\n') {
         page.push('\n');
     }
     fs::write(dir.join(format!("{slug}.md")), page)?;
     Ok(())
+}
+
+/// A concept page is extracted from an H2 section in `docs/rules.md`; its H3
+/// children become the standalone page's top-level sections. Shift headings one
+/// level up while leaving fenced examples byte-for-byte unchanged.
+fn promote_concept_headings(body: &str) -> String {
+    let mut out = String::with_capacity(body.len());
+    let mut in_fence = false;
+    for line in body.lines() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("```") {
+            in_fence = !in_fence;
+        }
+        let promoted = if !in_fence && trimmed.starts_with("### ") {
+            line.replacen("### ", "## ", 1)
+        } else if !in_fence && trimmed.starts_with("#### ") {
+            line.replacen("#### ", "### ", 1)
+        } else {
+            line.to_string()
+        };
+        out.push_str(&promoted);
+        out.push('\n');
+    }
+    out
 }
 
 /// Sections of a markdown document split at H2 headers (`## …`).
@@ -1797,20 +1844,26 @@ fn render_ruleset_page(
     // back), keep the ruleset name (the search query) in the
     // string, cap ~155 chars, no em-dashes. Fall back to a name-
     // scoped clause when the YAML has no leading comment block.
-    let ruleset_summary = meta_desc_clean(&first_overview_sentence(overview_md), 130);
-    let ruleset_desc = if ruleset_summary.len() < 25 {
+    let suffix = format!("alint bundled ruleset {name}@v1.");
+    let opening = meta_desc_clean(&first_overview_sentence(overview_md), usize::MAX);
+    let ruleset_desc = if opening.chars().count() < 25 {
         format!(
             "{name}@v1: a bundled alint ruleset. Adopt with extends: [alint://bundled/{name}@v1]."
         )
-    } else if ruleset_summary.ends_with('.') {
-        format!("{ruleset_summary} alint bundled ruleset {name}@v1.")
     } else {
-        format!("{ruleset_summary}. alint bundled ruleset {name}@v1.")
+        let separator = if opening.ends_with('.') { " " } else { ". " };
+        let budget = 158usize.saturating_sub(suffix.chars().count() + separator.chars().count());
+        let summary = meta_desc_clean(&opening, budget);
+        if summary.ends_with('.') {
+            format!("{summary} {suffix}")
+        } else {
+            format!("{summary}. {suffix}")
+        }
     };
     let _ = writeln!(
         &mut out,
         "description: '{}'",
-        escape_yaml_string(&meta_desc_clean(&ruleset_desc, 158))
+        escape_yaml_string(&ruleset_desc)
     );
     let _ = writeln!(&mut out, "---");
     let _ = writeln!(&mut out);

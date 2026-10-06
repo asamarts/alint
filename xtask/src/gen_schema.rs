@@ -67,7 +67,62 @@ pub fn build_generated_schema() -> Result<Value> {
     }
 
     normalize_descriptions(&mut schema);
+    prune_unreferenced_defs(&mut schema)?;
     Ok(schema)
+}
+
+/// Remove stale definitions left behind by the incremental, self-hosted schema
+/// migration. The committed schema is also the next generation's base, so a
+/// migrated Rust type that is renamed or removed would otherwise leave its old
+/// `$defs` entry in every future schema even though no branch references it.
+fn prune_unreferenced_defs(schema: &mut Value) -> Result<()> {
+    fn collect_refs(value: &Value, out: &mut std::collections::BTreeSet<String>) {
+        match value {
+            Value::Object(map) => {
+                if let Some(name) = map
+                    .get("$ref")
+                    .and_then(Value::as_str)
+                    .and_then(|rf| rf.strip_prefix("#/$defs/"))
+                {
+                    out.insert(name.to_string());
+                }
+                for (key, child) in map {
+                    if key != "$defs" {
+                        collect_refs(child, out);
+                    }
+                }
+            }
+            Value::Array(items) => items.iter().for_each(|item| collect_refs(item, out)),
+            _ => {}
+        }
+    }
+
+    let all_defs = schema
+        .get("$defs")
+        .and_then(Value::as_object)
+        .context("schema has no `$defs` object")?
+        .clone();
+    let mut reachable = std::collections::BTreeSet::new();
+    collect_refs(schema, &mut reachable);
+    let mut pending: Vec<String> = reachable.iter().cloned().collect();
+    while let Some(name) = pending.pop() {
+        let def = all_defs
+            .get(&name)
+            .with_context(|| format!("schema references missing `$defs/{name}`"))?;
+        let mut nested = std::collections::BTreeSet::new();
+        collect_refs(def, &mut nested);
+        for dependency in nested {
+            if reachable.insert(dependency.clone()) {
+                pending.push(dependency);
+            }
+        }
+    }
+    schema
+        .get_mut("$defs")
+        .and_then(Value::as_object_mut)
+        .expect("checked above")
+        .retain(|name, _| reachable.contains(name));
+    Ok(())
 }
 
 /// Collapse internal whitespace (including the `\n` schemars inserts between
@@ -387,6 +442,24 @@ mod tests {
         assert!(v.is_valid(&serde_json::json!(
             {"version":1,"rules":[{"id":"x","kind":"pair_hash","level":"error","source":"a","target":"b","algorithm":"sha256"}]}
         )));
+    }
+
+    #[test]
+    fn unreferenced_defs_are_pruned_transitively() {
+        let mut schema = serde_json::json!({
+            "$ref": "#/$defs/rule",
+            "$defs": {
+                "rule": { "$ref": "#/$defs/used" },
+                "used": { "type": "string" },
+                "stale": { "$ref": "#/$defs/stale_child" },
+                "stale_child": { "type": "number" }
+            }
+        });
+        prune_unreferenced_defs(&mut schema).unwrap();
+        let defs = schema["$defs"].as_object().unwrap();
+        assert_eq!(defs.len(), 2);
+        assert!(defs.contains_key("rule"));
+        assert!(defs.contains_key("used"));
     }
 
     #[test]

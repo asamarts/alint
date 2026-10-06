@@ -55,6 +55,8 @@ pub enum ProposalKind {
     BundledRuleset {
         /// Canonical URI, e.g. `alint://bundled/agent-hygiene@v1`.
         uri: String,
+        /// Rule IDs to exclude when extending this ruleset.
+        except: Vec<String>,
     },
     /// "Add this rule entry under `rules:`."
     Rule {
@@ -100,9 +102,10 @@ impl Proposal {
         matches!(self.kind, ProposalKind::BundledRuleset { .. })
     }
 
+    #[cfg(test)]
     pub fn bundled_uri(&self) -> Option<&str> {
         match &self.kind {
-            ProposalKind::BundledRuleset { uri } => Some(uri.as_str()),
+            ProposalKind::BundledRuleset { uri, .. } => Some(uri.as_str()),
             ProposalKind::Rule { .. } => None,
         }
     }
@@ -132,6 +135,7 @@ mod tests {
             id: "alint://bundled/rust@v1".into(),
             kind: ProposalKind::BundledRuleset {
                 uri: "alint://bundled/rust@v1".into(),
+                except: Vec::new(),
             },
             confidence: Confidence::High,
             evidence: vec![],

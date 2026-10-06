@@ -14,7 +14,7 @@ The official Action wraps the `install.sh` flow plus alint invocation into one s
 ## Inline PR annotations (default)
 
 ```yaml
-- uses: asamarts/alint@v0.17.0
+- uses: asamarts/alint@aa2d643b4b852af0f24d86adcee57388121c350b # v0.17.0
 ```
 
 This runs `alint check --format github` against `.` and emits findings as `::error::` / `::warning::` workflow commands, which GitHub renders inline on the PR.
@@ -22,14 +22,12 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 ## Inputs (all optional)
 
 ```yaml
-- uses: asamarts/alint@v0.17.0
+- uses: asamarts/alint@aa2d643b4b852af0f24d86adcee57388121c350b # v0.17.0
   with:
-    version: v0.17.0        # release tag; omit to follow the pinned action ref
     path: .                # directory to lint (default: .)
     working-directory: .   # dir the action runs in (default: the runner workspace)
-    format: github         # human | json | sarif | github (default)
-    config: |              # extra config path(s), one per line
-      .alint.yml
+    format: github         # human | json | sarif | github | markdown | junit | gitlab | agent
+    config: .alint.yml     # one extra config; compose more with extends:
     fail-on-warning: false
     args: ""               # extra CLI args appended verbatim
 ```
@@ -39,12 +37,12 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 Use `format: sarif` and pipe to the standard upload action:
 
 ```yaml
-- uses: asamarts/alint@v0.17.0
+- uses: asamarts/alint@aa2d643b4b852af0f24d86adcee57388121c350b # v0.17.0
   id: alint
   with:
     format: sarif
   continue-on-error: true
-- uses: github/codeql-action/upload-sarif@v3
+- uses: github/codeql-action/upload-sarif@2892aa5e19bbd11bc0cff5427e3b750a04d9e3c2 # v4.38.2
   if: always()
   with:
     sarif_file: ${{ steps.alint.outputs.sarif-file }}
@@ -59,10 +57,13 @@ alint's SARIF carries a stable [`partialFingerprints`](/docs/reference/output-fo
 For supply-chain hygiene (and to satisfy alint's own [`ci/github-actions@v1`](/docs/bundled-rulesets/) bundled ruleset), pin the action to a commit SHA:
 
 ```yaml
-- uses: asamarts/alint@<40-char-sha>  # v0.17.0
+- uses: asamarts/alint@aa2d643b4b852af0f24d86adcee57388121c350b # v0.17.0
 ```
 
-Look up the SHA on the [tag page](https://github.com/asamarts/alint/tags).
+Look up the SHA on the [tag page](https://github.com/asamarts/alint/tags). The
+action commit carries its matching binary version as the `version` input's
+default, so this one SHA pins both. Set `with: { version: ... }` only when you
+intentionally want a different binary release than the action commit provides.
 
 ## Validate PR commits with `git_commit_message`
 
@@ -78,7 +79,7 @@ jobs:
   alint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # `since:` walks <base>..HEAD. fetch-depth: 0 makes the
           # base ref reachable; the default depth of 1 leaves it
@@ -88,7 +89,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@v0.17.0
+        uses: asamarts/alint@aa2d643b4b852af0f24d86adcee57388121c350b # v0.17.0
 ```
 
 The rule in `.alint.yml`:
