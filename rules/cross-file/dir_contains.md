@@ -2,7 +2,7 @@
 title: 'dir_contains'
 description: 'Every directory matching select: must contain files matching every glob in require. alint dir_contains rule, cross-file family.'
 sidebar:
-  order: 13
+  order: 14
 categories: ['cross-file', 'structure']
 ---
 

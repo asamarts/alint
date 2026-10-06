@@ -2,7 +2,7 @@
 title: 'cross_file'
 description: 'A source must hold a relation to one or more targets (or, for resolves, the filesystem). alint cross_file rule, cross-file family.'
 sidebar:
-  order: 4
+  order: 5
 categories: ['cross-file']
 ---
 

@@ -2,7 +2,7 @@
 title: 'unique_by'
 description: 'No two files matching select may share the value of key. alint unique_by rule, cross-file family.'
 sidebar:
-  order: 15
+  order: 16
 categories: ['cross-file']
 ---
 

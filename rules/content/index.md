@@ -27,3 +27,4 @@ Rule kinds in the **Content** family. Each rule below links to its own page with
 | [`executable_has_shebang`](/docs/rules/unix-metadata/executable_has_shebang/) | Every file with `+x` set must begin with `#!`. |
 | [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) | Every file starting with `#!` must have `+x` set. |
 | [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) | Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). |
+| [`markdown_links_resolve`](/docs/rules/cross-file/markdown_links_resolve/) | Validate live Markdown link, image, and reference-definition destinations against the repository tree. |

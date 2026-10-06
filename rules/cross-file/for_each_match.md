@@ -2,7 +2,7 @@
 title: 'for_each_match'
 description: 'For each line matching select (a regex), the line must satisfy the nested require: predicates. alint for_each_match rule, cross-file family.'
 sidebar:
-  order: 7
+  order: 8
 categories: ['cross-file']
 ---
 

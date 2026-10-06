@@ -6,12 +6,12 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 105 rule kinds across 13 families (94 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 106 rule kinds across 13 families (95 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
-- [Content](/docs/rules/content/) — 17 rules
+- [Content](/docs/rules/content/) — 18 rules
 - [Structured query](/docs/rules/structured-query/) — 25 rules
 - [Naming](/docs/rules/naming/) — 4 rules
 - [Text hygiene](/docs/rules/text-hygiene/) — 9 rules
@@ -21,7 +21,7 @@ alint ships 105 rule kinds across 13 families (94 distinct rule behaviors plus 1
 - [Portable metadata](/docs/rules/portable-metadata/) — 4 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 5 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 13 rules
-- [Cross-file](/docs/rules/cross-file/) — 19 rules
+- [Cross-file](/docs/rules/cross-file/) — 20 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
@@ -87,6 +87,7 @@ alint ships 105 rule kinds across 13 families (94 distinct rule behaviors plus 1
 - [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML / XML / dotenv / properties / INI / HCL file in `paths` against a JSON Schema document. _(Structured query)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
+- [`markdown_links_resolve`](/docs/rules/cross-file/markdown_links_resolve/) — Validate live Markdown link, image, and reference-definition destinations against the repository tree. _(Cross-file)_
 - [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_
 - [`max_consecutive_blank_lines`](/docs/rules/text-hygiene/max_consecutive_blank_lines/) — Cap runs of blank lines to `max`. _(Text hygiene)_
 - [`max_directory_depth`](/docs/rules/structure/max_directory_depth/) — Tree depth from repo root may not exceed `max_depth`. _(Structure)_

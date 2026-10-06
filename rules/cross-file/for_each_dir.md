@@ -2,7 +2,7 @@
 title: 'for_each_dir'
 description: 'For every matching directory / file, evaluate a nested require: block with the entry as context. alint for_each_dir rule, cross-file family.'
 sidebar:
-  order: 11
+  order: 12
 categories: ['cross-file']
 ---
 
