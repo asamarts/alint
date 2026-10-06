@@ -5,7 +5,7 @@ sidebar:
   order: 2
 ---
 
-A rule never judges the whole repository. It narrows from the walked index to a specific set of files through three gates applied in a fixed order: `when:` decides whether the rule runs at all, `paths:` selects files by glob, and `scope_filter:` refines that selection per file. Only what survives all three is evaluated.
+A file-scoped rule narrows the walked index through three gates applied in a fixed order: `when:` decides whether the rule runs at all, `paths:` selects files by glob, and `scope_filter:` refines that selection per file. Only what survives all three is evaluated. An optional `expect_matches: true` assertion then makes an empty final set a finding instead of a silent pass.
 
 <svg class="alint-scope" viewBox="0 0 460 352" role="img" aria-labelledby="scope-t scope-d" xmlns="http://www.w3.org/2000/svg">
 <title id="scope-t">A rule narrows the file index through gates in a fixed order</title>
@@ -48,6 +48,8 @@ A rule never judges the whole repository. It narrows from the walked index to a 
 `paths:` is the primary selector: a glob, a list of globs, or an `{include, exclude}` pair matched against the walked index. It answers "which files is this rule about."
 
 `scope_filter:` refines that per file, for the cases a glob cannot express. Its predicates **AND-compose**: when more than one is set, a file must satisfy all of them. At least one predicate must be present. Cross-file rules (`pair`, `for_each_dir`, and their siblings) reject `scope_filter:` at build time, with a pointer to the `for_each_dir` + `when_iter:` pattern instead; the rule-major per-file kinds (`filename_case`, `file_max_size`, and their siblings) honor it as of v0.15.
+
+`expect_matches: true` asserts that the final effective scope is non-empty. It runs after a true `when:` gate and checks the full repository even when the command uses `--changed`; normal rule evaluation remains diff-limited. Use it for a literal or glob that must keep selecting real files as the repository evolves. It is rejected for existence and selector rules, where an empty set already has different semantics.
 
 ## scope_filter predicates
 
