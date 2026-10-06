@@ -75,8 +75,11 @@ sed -i "s|^version = \"$CUR\"$|version = \"$NEW\"|" Cargo.toml
 echo "==> refreshing Cargo.lock (cargo metadata --offline)"
 cargo metadata --offline --format-version 1 > /dev/null
 
-# 2. Install snippets across user-facing files. The version
-#    appears as `vX.Y.Z` (GHA ref, pre-commit rev, docker tag with
+# 2. Install snippets across user-facing files, plus action.yml's private
+#    ALINT_BAKED_VERSION. Keeping the baked value on the release commit lets a
+#    commit-SHA Action pin select the matching binary without a network lookup;
+#    check-release-version.sh fails a tag whose value was not updated here.
+#    The version appears as `vX.Y.Z` (GHA ref, pre-commit rev, docker tag with
 #    'v'), `:X.Y.Z` (docker tag, bare semver), and once in the
 #    SECURITY.md sentence "as of the vX.Y.Z release". One sed
 #    handles all forms because the regex's `(v|:)` alternation

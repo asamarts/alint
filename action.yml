@@ -9,11 +9,12 @@ inputs:
   version:
     description: |
       alint version to install: a release tag like `v0.17.0`, or
-      `latest`. Leave unset to install the release baked into this
-      action commit. A commit-SHA pin therefore pins both action code
-      and binary; set this input only to choose a different release.
+      `latest`. An explicit value overrides the action ref. When unset,
+      an exact release tag installs that tag, a commit SHA installs the
+      release baked into that action commit, and a branch follows the
+      latest release.
     required: false
-    default: "v0.17.0"
+    default: ""
   path:
     description: Directory to lint. Defaults to the repository root.
     required: false
@@ -59,6 +60,15 @@ runs:
       shell: bash
       env:
         ALINT_VERSION: ${{ inputs.version }}
+        # Keep this separate from the public input default. GitHub resolves an
+        # omitted input to its default before a composite step runs, so a
+        # non-empty public default is indistinguishable from an explicit
+        # `with: version:` value. A separate baked value lets the resolver
+        # preserve all three contracts: explicit input wins, an exact tag wins
+        # when the input is omitted, and only a full commit SHA selects the
+        # release baked into that commit. bump-version.sh updates this before
+        # the release commit is tagged; the release preflight verifies it.
+        ALINT_BAKED_VERSION: v0.17.0
         INSTALL_DIR: ${{ runner.temp }}/alint-bin
         # Pin install.sh to whichever ref the consumer pinned the
         # action to (e.g. `asamarts/alint@v0.17.0`). Without this,
@@ -79,6 +89,7 @@ runs:
         # empty action_ref, we fail loudly rather than silently
         # fetch `main` from the canonical repo.
         ACTION_REF: ${{ github.action_ref }}
+        ACTION_PATH: ${{ github.action_path }}
         SOURCE_REPO: ${{ github.repository }}
       run: |
         set -euo pipefail
@@ -91,18 +102,17 @@ runs:
         else
           ref="$ACTION_REF"
         fi
-        # Binary version: an explicit `version:` input wins; otherwise the
-        # action.yml default baked into this commit pins the matching release.
-        # Keep the fallback for local action tests that deliberately pass an
-        # empty value and for old commits whose input default was empty.
-        ver="${ALINT_VERSION:-}"
-        if [[ -z "$ver" ]]; then
-          if [[ "${ACTION_REF:-}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-            ver="$ACTION_REF"
-          else
-            ver="latest"
-          fi
-        fi
+        # The resolver lives beside action.yml so its precedence contract is
+        # unit-tested rather than duplicated as untestable inline shell. GitHub
+        # documents github.action_path specifically for files bundled with a
+        # composite action.
+        # ACTION_PATH is GitHub's action directory.
+        # shellcheck disable=SC1090
+        source "$ACTION_PATH/action/resolve-version.sh"
+        ver="$(resolve_alint_action_version \
+          "${ALINT_VERSION:-}" \
+          "${ACTION_REF:-}" \
+          "$ALINT_BAKED_VERSION")"
         export ALINT_VERSION="$ver"
         echo "alint action: installing '${ver}' (action_ref='${ACTION_REF:-<local>}', install.sh ref='${ref}')"
         # Fetch install.sh with retries: raw.githubusercontent.com can return a

@@ -35,10 +35,30 @@
 #
 # Usage:
 #   bash ci/scripts/check-version-pins.sh
+#   bash ci/scripts/check-version-pins.sh --verify-action-tag
+#
+# The default mode is checkout-local and works in shallow consumer clones (the
+# script is also run by alint's own command rule). The opt-in tag check proves
+# the published documentation SHA and baked binary version against Git history;
+# callers using it must fetch tags first.
 #
 # Fix path: bash ci/scripts/bump-version.sh <new-version>
 
 set -euo pipefail
+
+VERIFY_ACTION_TAG=false
+case "${1:-}" in
+  "") ;;
+  --verify-action-tag) VERIFY_ACTION_TAG=true ;;
+  *)
+    echo "usage: $0 [--verify-action-tag]" >&2
+    exit 2
+    ;;
+esac
+if [[ "$#" -gt 1 ]]; then
+  echo "usage: $0 [--verify-action-tag]" >&2
+  exit 2
+fi
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
@@ -98,16 +118,18 @@ for f in "${SCOPE[@]}"; do
   fi
 done
 
-# GitHub Action documentation has a separate post-release pin. Validate both
-# halves: the SHA must be the immutable commit behind the declared tag, and
-# every copy-paste snippet must use exactly that pair. A made-up 40-character
-# value otherwise looks supply-chain-safe while GitHub cannot resolve it.
+# GitHub Action documentation has a separate post-release pin. Every checkout,
+# including shallow consumer clones, validates its snippets against the
+# canonical metadata. The Docs job additionally passes --verify-action-tag with
+# full history to prove that the SHA is the declared tag's immutable commit and
+# that the tag contains the expected baked binary version.
 ACTION_PIN_FILE=ci/action-doc-pin.env
 if [[ ! -f "$ACTION_PIN_FILE" ]]; then
   echo "[version-pin] $ACTION_PIN_FILE: NOT FOUND" >&2
   failed=1
 else
-  # shellcheck disable=SC1090 -- repository-owned, fixed-shape data file.
+  # This is a repository-owned, fixed-shape data file.
+  # shellcheck disable=SC1090
   source "$ACTION_PIN_FILE"
   if [[ ! "${ACTION_DOC_VERSION:-}" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] ||
      [[ ! "${ACTION_DOC_SHA:-}" =~ ^[0-9a-f]{40}$ ]] ||
@@ -115,33 +137,34 @@ else
     echo "[version-pin] $ACTION_PIN_FILE: malformed action pin metadata" >&2
     failed=1
   else
-    tag="v${ACTION_DOC_VERSION}"
-    tag_sha=$(git rev-parse --verify "${tag}^{commit}" 2>/dev/null || true)
-    if [[ -z "$tag_sha" ]]; then
-      echo "[version-pin] $ACTION_PIN_FILE: tag $tag is unavailable; fetch tags before running this check" >&2
-      failed=1
-    elif [[ "$ACTION_DOC_SHA" != "$tag_sha" ]]; then
-      echo "[version-pin] $ACTION_PIN_FILE: SHA $ACTION_DOC_SHA != $tag commit $tag_sha" >&2
-      failed=1
-    fi
-    tagged_default=$(git show "${tag}:action.yml" 2>/dev/null |
-      awk '
-        /^  version:$/ { in_version=1; next }
-        in_version && /^    default:/ {
+    if [[ "$VERIFY_ACTION_TAG" == true ]]; then
+      tag="v${ACTION_DOC_VERSION}"
+      tag_sha=$(git rev-parse --verify "${tag}^{commit}" 2>/dev/null || true)
+      if [[ -z "$tag_sha" ]]; then
+        echo "[version-pin] $ACTION_PIN_FILE: tag $tag is unavailable; fetch tags before running --verify-action-tag" >&2
+        failed=1
+      elif [[ "$ACTION_DOC_SHA" != "$tag_sha" ]]; then
+        echo "[version-pin] $ACTION_PIN_FILE: SHA $ACTION_DOC_SHA != $tag commit $tag_sha" >&2
+        failed=1
+      fi
+      tagged_baked=$(git show "${tag}:action.yml" 2>/dev/null |
+        awk '
+          /^[[:space:]]*ALINT_BAKED_VERSION:/ {
           value=$0
-          sub(/^[[:space:]]*default:[[:space:]]*/, "", value)
+          sub(/^[[:space:]]*ALINT_BAKED_VERSION:[[:space:]]*/, "", value)
           gsub(/"/, "", value)
           print value
           exit
         }
-      ' || true)
-    expected_explicit=true
-    if [[ "$tagged_default" == "v${ACTION_DOC_VERSION}" ]]; then
-      expected_explicit=false
-    fi
-    if [[ "$ACTION_DOC_REQUIRES_EXPLICIT_VERSION" != "$expected_explicit" ]]; then
-      echo "[version-pin] $ACTION_PIN_FILE: requires-explicit-version=$ACTION_DOC_REQUIRES_EXPLICIT_VERSION, but $tag action.yml defaults to ${tagged_default:-<empty>}" >&2
-      failed=1
+        ' || true)
+      expected_explicit=true
+      if [[ "$tagged_baked" == "v${ACTION_DOC_VERSION}" ]]; then
+        expected_explicit=false
+      fi
+      if [[ "$ACTION_DOC_REQUIRES_EXPLICIT_VERSION" != "$expected_explicit" ]]; then
+        echo "[version-pin] $ACTION_PIN_FILE: requires-explicit-version=$ACTION_DOC_REQUIRES_EXPLICIT_VERSION, but $tag action.yml bakes ${tagged_baked:-<nothing>}" >&2
+        failed=1
+      fi
     fi
 
     action_doc_files=(docs/site/integrations/github-actions.md docs/rules.md)
@@ -211,4 +234,9 @@ if [[ "$failed" -ne 0 ]]; then
   exit 1
 fi
 
-echo "[version-pin] OK — ${#SCOPE[@]} workspace-version files, the published Action SHA, npm/package.json, and Zed manifests are consistent"
+if [[ "$VERIFY_ACTION_TAG" == true ]]; then
+  action_check="the published Action tag/SHA"
+else
+  action_check="the documented Action pins"
+fi
+echo "[version-pin] OK — ${#SCOPE[@]} workspace-version files, $action_check, npm/package.json, and Zed manifests are consistent"

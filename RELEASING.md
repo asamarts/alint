@@ -12,11 +12,19 @@ points are explicit.
    bash ci/scripts/bump-version.sh <new-version>   # e.g. 0.9.21
    ```
 
-   The script edits `Cargo.toml [workspace.package].version` + every
-   user-facing install snippet (README, SECURITY, docs/site/**) +
-   inserts a CHANGELOG stub + refreshes `Cargo.lock` via
+   The script edits `Cargo.toml [workspace.package].version`, the private
+   `ALINT_BAKED_VERSION` in `action.yml`, every user-facing install snippet
+   (README, SECURITY, docs/site/**), the npm and Zed manifests, and the npm
+   README. It also inserts a CHANGELOG stub and refreshes `Cargo.lock` via
    `cargo metadata --offline` (so the workspace internal-crate
    version entries in the lockfile track the bump).
+
+   The baked Action value is deliberately separate from the public `version`
+   input's empty default. This lets an explicit `with: version:` override every
+   ref, preserves exact-tag and moving-branch behavior, and makes a full commit
+   SHA select the release carried by that commit. The release preflight runs
+   `ci/scripts/check-release-version.sh` and blocks publishing unless the tag,
+   workspace version, and baked Action version all agree.
 
    Deliberately **not** touched:
    - `Cargo.toml [workspace.dependencies].alint-* version`,
@@ -51,7 +59,7 @@ points are explicit.
    `release.yml` `preflight` job runs the same gates remotely; this
    is the pre-push sanity gate.
 
-   Two recurrence guards bundled into `test` / `dep-floors`:
+   Three recurrence guards bundled into `test` / `dep-floors`:
    - README-count claims (rule kinds, families, bundled rulesets,
      fix ops, output formats, subcommands) are asserted against
      the workspace truth by
@@ -59,6 +67,10 @@ points are explicit.
    - `[workspace.dependencies]` API-compat floors are asserted
      `<= workspace.package.version` by
      `ci/scripts/check-workspace-dep-floors.sh`.
+   - GitHub Action resolution is asserted for explicit inputs, exact tags,
+     branches, local actions, and commit SHAs by
+     `ci/scripts/test-action-version.sh`; release tag/workspace/baked-version
+     agreement is covered by `ci/scripts/test-release-version.sh`.
 
    The pre-push git hook at `ci/githooks/pre-push` runs the same
    script automatically once opted in via
@@ -67,7 +79,10 @@ points are explicit.
 4. **Commit and tag.**
 
    ```sh
-   git add Cargo.toml Cargo.lock npm/package.json CHANGELOG.md
+   git add Cargo.toml Cargo.lock action.yml README.md SECURITY.md CHANGELOG.md \
+     npm/package.json npm/README.md editors/zed/Cargo.toml \
+     editors/zed/extension.toml docs/site/getting-started/installation.md \
+     docs/site/integrations/docker.md docs/site/integrations/pre-commit.md
    git commit -m "chore(release): bump workspace to <x.y.z>"
    git tag v<x.y.z>
    git push origin main

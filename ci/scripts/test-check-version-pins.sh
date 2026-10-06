@@ -9,6 +9,11 @@ TMP_ROOT=$(mktemp -d)
 trap 'rm -rf "$TMP_ROOT"' EXIT
 
 git clone -q --no-local "$REPO_ROOT" "$TMP_ROOT/repo"
+# Exercise working-tree changes before they are committed, not only the clone's
+# HEAD copies. The documentation fixtures are already part of this PR; these
+# two files are the implementation under test in the same change.
+cp "$REPO_ROOT/ci/scripts/check-version-pins.sh" "$TMP_ROOT/repo/ci/scripts/check-version-pins.sh"
+cp "$REPO_ROOT/action.yml" "$TMP_ROOT/repo/action.yml"
 cd "$TMP_ROOT/repo"
 
 pass=0
@@ -16,7 +21,8 @@ fail=0
 
 expect_ok() {
   local name=$1
-  if bash ci/scripts/check-version-pins.sh >/dev/null 2>&1; then
+  shift
+  if bash ci/scripts/check-version-pins.sh "$@" >/dev/null 2>&1; then
     echo "  ok: $name"
     pass=$((pass + 1))
   else
@@ -27,7 +33,8 @@ expect_ok() {
 
 expect_rejected() {
   local name=$1
-  if bash ci/scripts/check-version-pins.sh >/dev/null 2>&1; then
+  shift
+  if bash ci/scripts/check-version-pins.sh "$@" >/dev/null 2>&1; then
     echo "  FAIL: $name (expected rejection)" >&2
     fail=$((fail + 1))
   else
@@ -42,14 +49,35 @@ restore() {
 
 expect_ok "canonical pins"
 
+# Build a hermetic stand-in for the first release that contains the baked
+# version. This tests the success path without relying on tags being present in
+# the caller's checkout (CI's shell-test job intentionally uses a shallow one).
+git add action.yml
+git -c user.name='alint tests' -c user.email='tests@alint.invalid' \
+  commit -q -m 'fixture: bake action version'
+fixture_sha=$(git rev-parse HEAD)
+git tag -f v0.17.0 HEAD >/dev/null
+sed -i "s/^ACTION_DOC_SHA=.*/ACTION_DOC_SHA=$fixture_sha/" ci/action-doc-pin.env
+sed -i 's/^ACTION_DOC_REQUIRES_EXPLICIT_VERSION=.*/ACTION_DOC_REQUIRES_EXPLICIT_VERSION=false/' \
+  ci/action-doc-pin.env
+for f in docs/rules.md docs/site/integrations/github-actions.md; do
+  sed -i "s/d93c0283b19dd78afcd8a4b303f1556a7759ba81/$fixture_sha/g" "$f"
+  sed -i -E '/^[[:space:]]*version:[[:space:]]*v0\.17\.0([[:space:]]+#.*)?[[:space:]]*$/d' "$f"
+done
+expect_ok "verified release SHA and baked version" --verify-action-tag
+restore
+git tag -d v0.17.0 >/dev/null
+expect_rejected "verified mode requires the release tag" --verify-action-tag
+expect_ok "checkout-local mode does not require release tags"
+
 sed -i '0,/asamarts\/alint@[0-9a-f]\{40\}/s//asamarts\/alint@0000000000000000000000000000000000000000/' \
   docs/site/integrations/github-actions.md
-expect_rejected "unresolvable documented SHA"
+expect_rejected "documented SHA differs from metadata"
 restore
 
 sed -i 's/^ACTION_DOC_SHA=.*/ACTION_DOC_SHA=0000000000000000000000000000000000000000/' \
   ci/action-doc-pin.env
-expect_rejected "metadata SHA differs from release tag"
+expect_rejected "metadata SHA differs from snippets"
 restore
 
 sed -i '0,/^[[:space:]]*version: v0\.17\.0$/s//    path: ./' docs/site/integrations/github-actions.md
@@ -58,8 +86,10 @@ restore
 
 sed -i 's/^ACTION_DOC_REQUIRES_EXPLICIT_VERSION=.*/ACTION_DOC_REQUIRES_EXPLICIT_VERSION=false/' \
   ci/action-doc-pin.env
-expect_rejected "metadata disagrees with tagged action default"
+expect_rejected "metadata disagrees with snippet shape"
 restore
+
+expect_rejected "unknown option is rejected" --unknown
 
 echo "[test-check-version-pins] $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

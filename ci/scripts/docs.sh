@@ -50,10 +50,10 @@ cargo run -q -p xtask -- gen-categories --check
 echo "==> Running xtask gen-roadmap --check"
 cargo run -q -p xtask -- gen-roadmap --check
 
-# The Action examples are SHA-pinned, but a syntactically valid 40-character
-# value can still name no GitHub commit. Validate every snippet against the
-# canonical published tag recorded in ci/action-doc-pin.env. The Docs workflow
-# checks out full history and tags specifically for this gate.
+# Validate every Action snippet against the canonical published pin recorded in
+# ci/action-doc-pin.env. This checkout-local mode deliberately needs no tags so
+# docs.sh and dogfood remain usable in shallow clones. CI's Docs job and the
+# release preflight run the full-history --verify-action-tag mode separately.
 echo "==> Running ci/scripts/check-version-pins.sh"
 bash ci/scripts/check-version-pins.sh
 

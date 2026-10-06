@@ -274,6 +274,11 @@ jobs:
       # Load-bearing for schema/parser/contract correctness; must catch drift
       # on a PR, not only post-merge.
       - run: ci/scripts/docs.sh
+      - name: verify published Action documentation pin
+        # docs.sh performs the shallow-safe snippet checks. This integration
+        # check additionally proves the recorded SHA and baked binary version
+        # against the release tag fetched above.
+        run: bash ci/scripts/check-version-pins.sh --verify-action-tag
 
   dogfood:
     name: Dogfood

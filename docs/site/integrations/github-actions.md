@@ -67,7 +67,7 @@ For supply-chain hygiene (and to satisfy alint's own [`ci/github-actions@v1`](/d
 ```
 
 Look up the SHA on the [tag page](https://github.com/asamarts/alint/tags). The
-v0.17.0 Action predates the baked-version default, so its SHA needs the explicit
+v0.17.0 Action predates the baked binary version, so its SHA needs the explicit
 `version: v0.17.0` shown above to pin the binary as well as the Action code. The
 next release carries its matching binary version in `action.yml`; from that
 release onward, the SHA alone pins both, and `version:` is only needed to choose

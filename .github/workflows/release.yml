@@ -56,21 +56,18 @@ jobs:
       RUSTFLAGS: "-D warnings"
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - name: verify tag matches workspace version
+        with:
+          # The documentation pin gate below verifies the previous published
+          # Action SHA against its tag; a release-tag checkout alone does not
+          # necessarily contain that older tag.
+          fetch-depth: 0
+      - name: verify release version contract
         # release.yml triggers only on `push: tags: ["v*"]`, so
         # GITHUB_REF_NAME is the tag. Fail fast if the tag doesn't match the
         # Cargo.toml version publish-crates.sh reads, otherwise a forgotten
         # bump-version.sh ships a split-brain release (crates.io no-ops on the
         # already-published version while npm/Docker/GH-Release ship the tag).
-        run: |
-          set -euo pipefail
-          TAG_VER="${GITHUB_REF_NAME#v}"
-          CARGO_VER="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -1)"
-          if [ "$TAG_VER" != "$CARGO_VER" ]; then
-            echo "::error::release tag ${GITHUB_REF_NAME} (=> ${TAG_VER}) != Cargo.toml version ${CARGO_VER}. Run ci/scripts/bump-version.sh and re-tag the bumped commit." >&2
-            exit 1
-          fi
-          echo "tag ${GITHUB_REF_NAME} matches Cargo.toml version ${CARGO_VER}."
+        run: bash ci/scripts/check-release-version.sh "$GITHUB_REF_NAME"
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
           toolchain: stable
@@ -88,6 +85,8 @@ jobs:
         run: ci/scripts/build.sh
       - name: docs (cargo doc with -D warnings)
         run: ci/scripts/docs.sh
+      - name: verify published Action documentation pin
+        run: bash ci/scripts/check-version-pins.sh --verify-action-tag
       - name: dogfood (alint check on its own repo)
         run: ci/scripts/dogfood.sh
       - name: examples-validate (every examples/*/.alint.yml)
