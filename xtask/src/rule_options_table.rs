@@ -147,12 +147,12 @@ pub(crate) fn options_section(
     if has_paths {
         let _ = writeln!(
             &mut out,
-            "Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative."
+            "Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative."
         );
     } else {
         let _ = writeln!(
             &mut out,
-            "Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative."
+            "Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative."
         );
     }
     out
@@ -575,7 +575,9 @@ mod tests {
         assert!(out.contains("| `threshold` | number |  | `0.5` | Density floor. |"));
         assert!(out.find("`name`") < out.find("`threshold`"));
         // Has-`paths` branch advertises the `paths` common field.
-        assert!(out.contains("Plus the common `paths`, `level`, `id`, and `when` fields."));
+        assert!(out.contains(
+            "Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields."
+        ));
     }
 
     #[test]
@@ -624,8 +626,11 @@ mod tests {
         let out = options_section(&branch, &schema, None);
         assert!(out.contains("_This rule takes no kind-specific options._"));
         assert!(
-            out.contains("this rule analyses the whole repository, so it takes no `paths`")
-                || out.contains("This rule analyses the whole repository, so it takes no `paths`.")
+            out.contains(
+                "this rule analyses the whole repository, so it takes no `paths` or `expect_matches`"
+            ) || out.contains(
+                "This rule analyses the whole repository, so it takes no `paths` or `expect_matches`."
+            )
         );
     }
 

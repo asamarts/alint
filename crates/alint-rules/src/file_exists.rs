@@ -122,6 +122,10 @@ impl Rule for FileExistsRule {
         Some(&self.scope)
     }
 
+    fn supports_expect_matches(&self) -> bool {
+        false
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let found = if let Some(literals) = self.literal_paths.as_ref() {
             // Fast path: each pattern is a literal relative

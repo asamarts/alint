@@ -269,6 +269,7 @@ mod tests {
             message: msg.map(str::to_string),
             policy_url: None,
             when: None,
+            expect_matches: false,
             fix: None,
             scope_filter: None,
             extra: serde_yaml_ng::Mapping::new(),

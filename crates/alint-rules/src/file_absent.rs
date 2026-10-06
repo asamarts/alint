@@ -83,6 +83,10 @@ impl Rule for FileAbsentRule {
         Some(&self.scope)
     }
 
+    fn supports_expect_matches(&self) -> bool {
+        false
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let mut violations = Vec::new();
         // v0.9.11: when `git_tracked_only` is set the engine

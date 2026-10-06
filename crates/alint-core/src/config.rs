@@ -343,6 +343,13 @@ pub struct RuleSpec {
     pub policy_url: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
+    /// Require the rule's effective file scope (`paths:` plus any
+    /// `scope_filter:` predicates) to contain at least one file. Evaluated only
+    /// after `when:` is true and against the full repository index, including
+    /// during `--changed` runs. Unsupported for existence and selector rules,
+    /// whose empty sets already have kind-specific meaning.
+    #[serde(default)]
+    pub expect_matches: bool,
     /// Optional mechanical-fix strategy. Rules whose builders understand
     /// the chosen op attach a [`Fixer`](crate::Fixer) to the built rule;
     /// rules whose kind is incompatible with the op return a config error
@@ -1157,6 +1164,10 @@ pub struct NestedRuleSpec {
     pub policy_url: Option<String>,
     #[serde(default)]
     pub when: Option<String>,
+    /// Nested-rule equivalent of [`RuleSpec::expect_matches`]. Checked per
+    /// selected iteration after the nested `when:` gate is true.
+    #[serde(default)]
+    pub expect_matches: bool,
     /// Per-file scope filter — see [`RuleSpec::scope_filter`]
     /// for semantics. Inherited unchanged when
     /// [`NestedRuleSpec::instantiate`] synthesises a full
@@ -1247,6 +1258,7 @@ impl NestedRuleSpec {
                 .map(|m| crate::template::render_path(m, tokens)),
             policy_url: self.policy_url.clone(),
             when: self.when.clone(),
+            expect_matches: self.expect_matches,
             fix: None,
             // `git_tracked_only` and `respect_gitignore` are both kind-specific
             // options now (ADR-0008), stripped from the nested `extra` via

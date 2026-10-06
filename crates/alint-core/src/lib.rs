@@ -54,7 +54,7 @@ pub use report::{
 pub use rule::{
     Applicability, CollectedEdit, Context, EditVerifier, ExpectedValue, FixContext, FixEdit,
     FixOutcome, Fixer, GitTrackedMode, GroupId, PerFileRule, ReadForFix, Rule, RuleResult,
-    Violation, check_fix_size, eval_per_file, read_for_fix, write_atomic,
+    Violation, check_fix_size, eval_per_file, expect_matches_violation, read_for_fix, write_atomic,
 };
 pub use scope::Scope;
 pub use scope_filter::{

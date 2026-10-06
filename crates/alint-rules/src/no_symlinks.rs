@@ -29,6 +29,15 @@ impl Rule for NoSymlinksRule {
         Some(&self.scope)
     }
 
+    fn scope_matches_any(&self, index: &alint_core::FileIndex) -> bool {
+        index
+            .entries
+            .iter()
+            .map(|entry| entry.path.as_ref())
+            .chain(index.escaping_symlinks().iter().map(AsRef::as_ref))
+            .any(|path| self.scope.matches(path, index))
+    }
+
     alint_core::rule_common_impl!();
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {

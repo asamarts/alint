@@ -651,12 +651,19 @@ fn build_session(root: &Path) -> Result<Option<Session>, String> {
         let mut rule = registry
             .build(spec)
             .map_err(|e| format!("building rule {:?}: {e}", spec.id))?;
+        // Match the CLI's load contract: nested `require:` specs must fail at
+        // session construction, not only if a later full run happens to select
+        // a parent entry and builds them lazily.
+        rule.validate_nested(&registry)
+            .map_err(|e| format!("building rule {:?}: {e}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (top-level
         // config only; never via `extends:`). No-op for kinds that
         // don't honor the flag.
         let allow_out_of_root = config.allow_out_of_root.allows(&spec.id, &spec.kind);
         rule.set_allow_out_of_root(allow_out_of_root);
-        let mut entry = RuleEntry::new(rule).with_allow_out_of_root(allow_out_of_root);
+        let mut entry = RuleEntry::new(rule)
+            .with_spec(std::sync::Arc::new(spec.clone()))
+            .with_allow_out_of_root(allow_out_of_root);
         if let Some(when_src) = &spec.when {
             let expr = alint_core::when::parse(when_src)
                 .map_err(|e| format!("rule {:?}: parsing `when`: {e}", spec.id))?;

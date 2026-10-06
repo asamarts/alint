@@ -122,8 +122,8 @@ struct GitTrackedIndexes {
 
 /// Return of [`Engine::collect_live_per_file_entries`]: the per-file
 /// entries that should evaluate this run (paired with their position in
-/// `self.entries`), plus any `when`-evaluation-error results to emit
-/// verbatim.
+/// `self.entries`), plus any gate results (`when` errors or empty-scope
+/// assertions) to emit verbatim.
 type LivePerFileEntries<'a> = (Vec<(usize, &'a RuleEntry)>, Vec<(usize, RuleResult)>);
 
 /// A rule bundled with an optional `when` expression. Rules with a `when`
@@ -185,6 +185,12 @@ impl RuleEntry {
     pub fn with_spec(mut self, spec: Arc<crate::config::RuleSpec>) -> Self {
         self.spec = Some(spec);
         self
+    }
+
+    /// Whether this entry opts into the empty-scope assertion.
+    #[must_use]
+    pub fn expect_matches(&self) -> bool {
+        self.spec.as_ref().is_some_and(|spec| spec.expect_matches)
     }
 
     /// The rule's kind (e.g. `file_exists`), or `""` when built without a spec.
@@ -379,7 +385,9 @@ impl Engine {
         // Empty changed-set fast path: nothing to lint, return
         // an empty report rather than walk the entries list at
         // all. Saves the fact-evaluation pass too.
-        if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
+        if self.changed_paths.as_ref().is_some_and(HashSet::is_empty)
+            && !self.entries.iter().any(RuleEntry::expect_matches)
+        {
             return Ok(Report {
                 results: Vec::new(),
             });
@@ -514,9 +522,8 @@ impl Engine {
                     if entry.rule.as_per_file().is_some() {
                         return None;
                     }
-                    if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, None) {
-                        return None;
-                    }
+                    let skipped_for_changed =
+                        self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, None);
                     let ctx = pick_ctx(
                         entry.rule.as_ref(),
                         &full_ctx,
@@ -525,7 +532,14 @@ impl Engine {
                         git_dir_aware_ctx.as_ref(),
                     );
                     let t_rule = Instant::now();
-                    let result = run_entry(entry, ctx, &when_env, &fact_values);
+                    let result = run_entry(
+                        entry,
+                        ctx,
+                        full_ctx.index,
+                        &when_env,
+                        &fact_values,
+                        skipped_for_changed,
+                    );
                     // u128 → u64 saturating: same rationale as the
                     // `phase!` macro — elapsed_ns overflows u64 only
                     // after ~584 years per rule, and we want lossy
@@ -634,9 +648,9 @@ impl Engine {
         filtered_ctx: Option<&'a Context<'a>>,
         when_env: &'a WhenEnv<'a>,
     ) -> Vec<(usize, RuleResult)> {
-        let (live, when_errors) = self.collect_live_per_file_entries(full_ctx.index, when_env);
+        let (live, gate_results) = self.collect_live_per_file_entries(full_ctx.index, when_env);
         if live.is_empty() {
-            return when_errors;
+            return gate_results;
         }
 
         let per_file_ctx = filtered_ctx.unwrap_or(full_ctx);
@@ -742,7 +756,7 @@ impl Engine {
         for (idx, v) in by_file {
             bucket.entry(idx).or_default().push(v);
         }
-        let mut results = when_errors;
+        let mut results = gate_results;
         for (idx, entry) in live {
             // A live per-file rule that produced no violations is a
             // passing rule — emit an empty-violations `RuleResult` so
@@ -771,11 +785,11 @@ impl Engine {
     /// resolved. `when` evaluates against constant facts + vars (no
     /// `iter` namespace at the engine level), so its verdict is
     /// independent of the file being scanned — resolve it once per rule
-    /// here rather than per file. A `when` error short-circuits to a
-    /// per-rule result carrying the error message, matching the
-    /// rule-major path's `run_entry` for parity.
+    /// here rather than per file. A `when` error or a failed
+    /// `expect_matches` assertion short-circuits to a per-rule result, matching
+    /// the rule-major path's `run_entry` for parity.
     ///
-    /// Returns `(live entries, when-error results)`. Shared by
+    /// Returns `(live entries, gate results)`. Shared by
     /// [`Engine::run`]'s file-major loop and [`Engine::run_for_file`].
     fn collect_live_per_file_entries<'a>(
         &'a self,
@@ -783,12 +797,13 @@ impl Engine {
         when_env: &WhenEnv<'_>,
     ) -> LivePerFileEntries<'a> {
         let mut live: Vec<(usize, &RuleEntry)> = Vec::new();
-        let mut when_errors: Vec<(usize, RuleResult)> = Vec::new();
+        let mut gate_results: Vec<(usize, RuleResult)> = Vec::new();
         for (idx, entry) in self.entries.iter().enumerate() {
             if entry.rule.as_per_file().is_none() {
                 continue;
             }
-            if self.skip_for_changed(entry.rule.as_ref(), index, None) {
+            let skipped_for_changed = self.skip_for_changed(entry.rule.as_ref(), index, None);
+            if skipped_for_changed && !entry.expect_matches() {
                 continue;
             }
             if let Some(expr) = &entry.when {
@@ -796,7 +811,7 @@ impl Engine {
                     Ok(true) => {}
                     Ok(false) => continue,
                     Err(e) => {
-                        when_errors.push((
+                        gate_results.push((
                             idx,
                             RuleResult {
                                 rule_id: Arc::from(entry.rule.id()),
@@ -813,9 +828,32 @@ impl Engine {
                     }
                 }
             }
+            if let Some(violation) = entry
+                .spec
+                .as_deref()
+                .and_then(|spec| crate::expect_matches_violation(entry.rule.as_ref(), spec, index))
+            {
+                // This is a configuration-integrity finding, not a finding the
+                // host rule's fixer can repair (there is no target file).
+                let (violations, is_fixable) = mark_fixability(vec![violation], None);
+                gate_results.push((
+                    idx,
+                    RuleResult::new(
+                        Arc::from(entry.rule.id()),
+                        entry.rule.level(),
+                        entry.rule.policy_url().map(Arc::from),
+                        violations,
+                        is_fixable,
+                    ),
+                ));
+                continue;
+            }
+            if skipped_for_changed {
+                continue;
+            }
             live.push((idx, entry));
         }
-        (live, when_errors)
+        (live, gate_results)
     }
 
     /// Re-evaluate only the per-file rules that apply to a single file,
@@ -880,7 +918,7 @@ impl Engine {
             env: None,
         };
 
-        let (live, when_errors) = self.collect_live_per_file_entries(index, &when_env);
+        let (live, gate_results) = self.collect_live_per_file_entries(index, &when_env);
 
         // Dispatch each in-scope rule against the supplied bytes. The
         // raw violations (notes included) are bucketed by entry index;
@@ -909,7 +947,7 @@ impl Engine {
             }
         }
 
-        let mut by_idx: HashMap<usize, RuleResult> = when_errors.into_iter().collect();
+        let mut by_idx: HashMap<usize, RuleResult> = gate_results.into_iter().collect();
         for (idx, entry) in &live {
             if let Some(violations) = bucket.remove(idx) {
                 let (violations, is_fixable) = mark_fixability(violations, entry.rule.fixer());
@@ -1376,7 +1414,9 @@ impl Engine {
         stage_ops: Option<&RefCell<Vec<FixEdit>>>,
     ) -> Result<(FixReport, BTreeMap<PathBuf, Vec<u8>>)> {
         self.ensure_manifest_scope_resolvable()?;
-        if self.changed_paths.as_ref().is_some_and(HashSet::is_empty) {
+        if self.changed_paths.as_ref().is_some_and(HashSet::is_empty)
+            && !self.entries.iter().any(RuleEntry::expect_matches)
+        {
             return Ok((
                 FixReport {
                     results: Vec::new(),
@@ -1513,16 +1553,11 @@ impl Engine {
             // dropped (the old silent behavior, which made `fix` exit 0 while
             // `check` reported them and exited 1). `Some(created)` keeps a rule
             // alive for a file a fix in scope created (its cascade must finish).
-            if self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, Some(created)) {
+            let skipped_for_changed =
+                self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, Some(created));
+            if skipped_for_changed && !entry.expect_matches() {
                 continue;
             }
-            let ctx = pick_ctx(
-                entry.rule.as_ref(),
-                &full_ctx,
-                filtered_ctx.as_ref(),
-                git_file_only_ctx.as_ref(),
-                git_dir_aware_ctx.as_ref(),
-            );
             if let Some(expr) = &entry.when {
                 match expr.evaluate(&when_env) {
                     Ok(true) => {}
@@ -1540,9 +1575,31 @@ impl Engine {
                     }
                 }
             }
-            let violations = match entry.rule.evaluate(ctx) {
-                Ok(v) => v,
-                Err(e) => vec![Violation::new(format!("rule error: {e}"))],
+            let scope_violation = entry.spec.as_deref().and_then(|spec| {
+                crate::expect_matches_violation(entry.rule.as_ref(), spec, full_ctx.index)
+            });
+            if scope_violation.is_none() && skipped_for_changed {
+                continue;
+            }
+            // An empty-scope assertion is a configuration-integrity finding,
+            // not something the host rule's fixer can repair. Still feed it
+            // through baseline classification below so `check --baseline` and
+            // `fix --baseline` agree; only the fixer selection is suppressed.
+            let scope_assertion_failed = scope_violation.is_some();
+            let violations = if let Some(violation) = scope_violation {
+                vec![violation]
+            } else {
+                let ctx = pick_ctx(
+                    entry.rule.as_ref(),
+                    &full_ctx,
+                    filtered_ctx.as_ref(),
+                    git_file_only_ctx.as_ref(),
+                    git_dir_aware_ctx.as_ref(),
+                );
+                match entry.rule.evaluate(ctx) {
+                    Ok(v) => v,
+                    Err(e) => vec![Violation::new(format!("rule error: {e}"))],
+                }
             };
             // W4 (`fix --baseline`): SKIP -- surface, never apply -- any violation
             // the baseline grandfathers, so `fix` resolves only NEW findings. Reuse
@@ -1621,7 +1678,11 @@ impl Engine {
             // run -- applies normally. The located regime (per-file only today) is
             // confined by the filtered index, so out-of-scope violations never reach
             // it; the demote lives in the whole-file loop that full-index fixers use.
-            let fixer = entry.rule.fixer();
+            let fixer = if scope_assertion_failed {
+                None
+            } else {
+                entry.rule.fixer()
+            };
             fix_ctx.allow_out_of_root = entry.allow_out_of_root;
             // Located-edit fixers (Phase 1+) route through the batched
             // located_fix path instead of `apply`: collect their byte-range
@@ -2577,9 +2638,14 @@ fn pick_ctx<'a>(
 fn run_entry(
     entry: &RuleEntry,
     ctx: &Context<'_>,
+    full_index: &FileIndex,
     when_env: &WhenEnv<'_>,
     _facts: &FactValues,
+    skipped_for_changed: bool,
 ) -> Option<RuleResult> {
+    if skipped_for_changed && !entry.expect_matches() {
+        return None;
+    }
     if let Some(expr) = &entry.when {
         match expr.evaluate(when_env) {
             Ok(true) => {} // proceed
@@ -2596,7 +2662,38 @@ fn run_entry(
             }
         }
     }
-    Some(run_one(entry.rule.as_ref(), ctx))
+    if let Some(violation) = entry
+        .spec
+        .as_deref()
+        .and_then(|spec| crate::expect_matches_violation(entry.rule.as_ref(), spec, full_index))
+    {
+        // This is a configuration-integrity finding, not a finding the host
+        // rule's fixer can repair (there is no target file).
+        let (violations, is_fixable) = mark_fixability(vec![violation], None);
+        return Some(RuleResult::new(
+            Arc::from(entry.rule.id()),
+            entry.rule.level(),
+            entry.rule.policy_url().map(Arc::from),
+            violations,
+            is_fixable,
+        ));
+    }
+    if skipped_for_changed {
+        return None;
+    }
+    let violations = match entry.rule.evaluate(ctx) {
+        Ok(v) => v,
+        Err(e) => vec![Violation::new(format!("rule error: {e}"))],
+    };
+    // `new` partitions any note-flagged violations into `notes`.
+    let (violations, is_fixable) = mark_fixability(violations, entry.rule.fixer());
+    Some(RuleResult::new(
+        Arc::from(entry.rule.id()),
+        entry.rule.level(),
+        entry.rule.policy_url().map(Arc::from),
+        violations,
+        is_fixable,
+    ))
 }
 
 /// Stamp each violation's per-violation fixability ([`Violation::is_fixable`])
@@ -2629,22 +2726,6 @@ fn mark_fixability(
         }
         None => (violations, false),
     }
-}
-
-fn run_one(rule: &dyn Rule, ctx: &Context<'_>) -> RuleResult {
-    let violations = match rule.evaluate(ctx) {
-        Ok(v) => v,
-        Err(e) => vec![Violation::new(format!("rule error: {e}"))],
-    };
-    // `new` partitions any note-flagged violations into `notes`.
-    let (violations, is_fixable) = mark_fixability(violations, rule.fixer());
-    RuleResult::new(
-        Arc::from(rule.id()),
-        rule.level(),
-        rule.policy_url().map(Arc::from),
-        violations,
-        is_fixable,
-    )
 }
 
 #[cfg(test)]

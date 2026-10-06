@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- New per-rule `expect_matches: true` scope assertion: after a rule's `when:`
+  gate is true, alint reports a violation when `paths:` plus `scope_filter:`
+  select no files. The assertion checks the full repository even in
+  `--changed` mode, works in nested `require:` rules, and is rejected for
+  existence and selector rules whose empty sets already have kind-specific
+  meaning.
+
 ## [0.17.0] - 2026-10-01
 
 This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.

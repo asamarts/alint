@@ -360,6 +360,18 @@ pub(crate) fn evaluate_for_each(
                     continue;
                 }
             };
+            if let Some(mut violation) =
+                alint_core::expect_matches_violation(nested_rule.as_ref(), &nested_spec, ctx.index)
+            {
+                // Attribute a pathless scope-assertion failure to the selected
+                // parent entry, like other nested pathless findings.
+                violation.path = Some(entry.path.clone());
+                if let Some(message) = parent_message {
+                    violation.message = message.to_string().into();
+                }
+                violations.push(violation);
+                continue;
+            }
             // v0.9.8: when the nested rule's `paths:` template
             // resolved to a single literal path AND the rule is
             // a per-file rule, bypass `rule.evaluate(ctx)` —

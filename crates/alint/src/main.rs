@@ -1354,6 +1354,7 @@ fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
                 "level": entry.rule.level().as_str(),
                 "policy_url": entry.rule.policy_url(),
                 "conditional": entry.when.is_some(),
+                "expect_matches": entry.expect_matches(),
                 "fixable": entry.rule.fixer().is_some(),
             })
         })
@@ -1611,6 +1612,9 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     if let Some(paths) = entry.paths() {
         writeln!(out, "{dim}paths:     {dim:#} {}", paths.render_scope())?;
     }
+    if entry.expect_matches() {
+        writeln!(out, "{dim}expect_matches:{dim:#} true")?;
+    }
     write_scope_filter_explain(&mut out, entry)?;
     // Kind-specific options (pattern, max_lines, ...): the first inline after
     // the `options:` label, the rest indented under the value column. A
@@ -1738,6 +1742,7 @@ fn explain_json(entry: &alint_core::RuleEntry) -> Result<ExitCode> {
         "message": entry.message().filter(|m| !m.trim().is_empty()),
         "policy_url": entry.rule.policy_url(),
         "when": entry.when_src(),
+        "expect_matches": entry.expect_matches(),
         // Both `when` and `conditional` project from the retained `when:` source
         // (`spec.when`), so within this document they can never disagree - deriving
         // both from one field keeps it self-consistent for any future caller.

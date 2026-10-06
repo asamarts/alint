@@ -403,6 +403,26 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         None
     }
 
+    /// Whether this rule has a file-like scope for which
+    /// [`RuleSpec::expect_matches`](crate::RuleSpec::expect_matches) is
+    /// meaningful. The default covers ordinary `paths:`-scoped rules.
+    /// Existence rules override this to `false`: an empty match set is the
+    /// condition they are specifically designed to test.
+    fn supports_expect_matches(&self) -> bool {
+        self.path_scope().is_some() || self.as_per_file().is_some()
+    }
+
+    /// Return whether at least one indexed target belongs to this rule's
+    /// effective scope. Called only when [`Self::supports_expect_matches`] is
+    /// true. The default target domain is files; rules over a wider path domain
+    /// (currently `no_symlinks`) override it.
+    fn scope_matches_any(&self, index: &crate::FileIndex) -> bool {
+        let scope = self
+            .path_scope()
+            .or_else(|| self.as_per_file().map(PerFileRule::path_scope));
+        scope.is_some_and(|scope| index.files().any(|entry| scope.matches(&entry.path, index)))
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>>;
 
     /// Optional automatic-fix strategy. Rules whose violations can be
@@ -429,6 +449,36 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     fn as_per_file(&self) -> Option<&dyn PerFileRule> {
         None
     }
+}
+
+/// Build the configuration-integrity violation for an opted-in rule whose
+/// effective scope contains no files. The caller is responsible for applying
+/// the rule's `when:` gate first. Keeping this check shared gives top-level and
+/// nested rules identical semantics and output.
+#[must_use]
+pub fn expect_matches_violation(
+    rule: &dyn Rule,
+    spec: &crate::RuleSpec,
+    index: &crate::FileIndex,
+) -> Option<Violation> {
+    if !spec.expect_matches || rule.scope_matches_any(index) {
+        return None;
+    }
+    let rendered_scope = spec
+        .paths
+        .as_ref()
+        .map_or_else(|| "<all files>".to_string(), crate::PathsSpec::render_scope);
+    let qualifier = if spec.scope_filter.is_some() {
+        " after applying `scope_filter`"
+    } else {
+        ""
+    };
+    Some(
+        Violation::new(format!(
+            "expected rule scope to match at least one file, but `{rendered_scope}` matched none{qualifier}"
+        ))
+        .with_baseline_key("expect_matches"),
+    )
 }
 
 /// File-major dispatch entry-point for a per-file rule.

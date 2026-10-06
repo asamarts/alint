@@ -109,7 +109,17 @@ impl RuleRegistry {
             .builders
             .get(&spec.kind)
             .ok_or_else(|| Error::UnknownRuleKind(spec.kind.clone()))?;
-        builder(spec).map_err(|e| enrich_error(e, &spec.kind))
+        let rule = builder(spec).map_err(|e| enrich_error(e, &spec.kind))?;
+        if spec.expect_matches && !rule.supports_expect_matches() {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "`expect_matches` is not supported by `{}`; use it only on rules with an enumerable file `paths:` scope (existence and selector rules have their own empty-set semantics)",
+                    spec.kind
+                ),
+            ));
+        }
+        Ok(rule)
     }
 
     pub fn known_kinds(&self) -> impl Iterator<Item = &str> {
@@ -146,6 +156,7 @@ mod tests {
             message: None,
             policy_url: None,
             when: None,
+            expect_matches: false,
             fix: None,
             scope_filter: None,
             extra: serde_yaml_ng::Mapping::new(),

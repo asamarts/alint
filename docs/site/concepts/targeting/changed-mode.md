@@ -75,7 +75,7 @@ The filter narrows the file set for **per-file rules** only. Two families opt ou
 
 ## Edge cases
 
-- **Empty diff** (nothing staged, modified, or untracked): the run short-circuits to an empty report in milliseconds, so a no-op pre-commit is nearly free.
+- **Empty diff** (nothing staged, modified, or untracked): the run short-circuits to an empty report in milliseconds unless an active rule has `expect_matches: true`. Those scope assertions still inspect the full index so configuration drift cannot hide behind an incremental run; the underlying rules remain skipped.
 - **Outside a git repo** (or `git` missing from `PATH`): `--changed` hard-errors rather than silently falling back to a full check, because a silent full run would betray the intent the flag expressed.
 - **Deleted files** appear in the diff. A `LICENSE` you deleted is in the changed set, the walker no longer sees it on disk, and an existence rule for `LICENSE` evaluates the whole tree (which now lacks it) and fires.
 - **Partly staged files** are checked from the working tree, because that is what alint reads. The pre-commit framework temporarily stashes unstaged hunks, so its working tree matches the index while the hook runs; a hand-written hook should do the same if it needs index-exact content.

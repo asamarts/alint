@@ -161,10 +161,29 @@ Common per-rule fields:
 - **`level`** *(required)*: `error`, `warning`, `info`, or `off`. `off` disables the rule entirely.
 - **`paths`**: glob, list of globs, or `{include, exclude}` pair. Required for most kinds.
 - **`when`**: bounded expression gating the rule on facts / vars. See [Scoping](/docs/concepts/targeting/scoping/) for the gate order.
+- **`expect_matches`** *(default `false`)*: when `true`, report a violation if the active rule's effective file scope matches nothing (see below).
 - **`scope_filter`**: extra per-file scoping by ancestor manifest presence, git diff, or membership in a manifest-declared path set (see below). Cross-file rules reject this field at build time.
 - **`fix`**: fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
 - **`message`**: override the rule's display message.
 - **`policy_url`**: link surfaced when the rule fires.
+
+#### `expect_matches` *(file-scoped rules, v0.18+)*
+
+Set `expect_matches: true` when an empty scope means the configuration has drifted rather than that the repository is compliant. Alint checks the effective scope — `paths:` after every `scope_filter:` predicate — only after `when:` evaluates true. If no file remains, the rule emits a normal violation at its configured level, so human, JSON, SARIF, CI annotations, baselines, and exit codes all handle it like any other finding.
+
+```yaml
+rules:
+  - id: llms-copy-has-no-stale-url
+    kind: file_content_forbidden
+    paths: src/data/llms.txt
+    expect_matches: true
+    pattern: 'https://old\.example'
+    level: error
+```
+
+This assertion always measures the full repository, even when the command uses `--changed`; the underlying per-file rule still evaluates only changed files. That separation prevents both failure modes: a renamed or deleted target is still caught in an incremental CI run, while a valid target outside the diff does not cause a false empty-scope finding. A false `when:` gate disables both the rule and its assertion.
+
+`expect_matches` is supported on rules with an enumerable file `paths:` scope, including nested `require:` rules (where it is checked once per active parent iteration). It is deliberately rejected at config load for `file_exists`, `file_absent`, directory-existence rules, and selector/cross-file rules: those kinds already assign their own meaning to an empty set or select through fields other than `paths:`. Use the existence rule itself for presence, and use the selector kind's own completeness behavior where available.
 
 #### `scope_filter` *(per-file rules, v0.9.6+)*
 
@@ -232,7 +251,7 @@ rules:
     level: warning
 ```
 
-Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use; non-literal entries are dropped), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a path that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when the set is empty, since an empty include set would otherwise silently no-op the whole rule. This guards the *declared* set: a member that resolves but matches no file on disk (a glob with no matching directory, or a literal pointing at an absent path) still scopes nothing silently, so use `alint explain` to confirm a rule's resolved scope.
+Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use; non-literal entries are dropped), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a path that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when the set is empty, since an empty include set would otherwise silently no-op the whole rule. This guards the *declared* set; `expect_matches: true` separately asserts that the final effective scope contains a file on disk.
 
 Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). A **glob** member is expanded: a `members = ["crates/*"]` entry (the form a real `Cargo.toml` / `package.json` declares) scopes every file under each matching `crates/<x>` directory. The set is extracted once per run and cached, like `changed_since:`. A manifest that is absent or unreadable contributes nothing: the rule runs full-scope for `exclude`, matches nothing for `include`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure-parse (no spawn, safe inside an `extends:`'d ruleset), and `alint explain <rule>` prints the resolved set.
 
