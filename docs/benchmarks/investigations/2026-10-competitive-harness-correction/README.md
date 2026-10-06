@@ -73,8 +73,8 @@ slower than the rest. It is retained in the raw result rather than discarded;
 the cell's 8.5% coefficient of variation remains inside the macro gate's 10%
 quality ceiling for 100k rows.
 
-Raw per-sample statistics, commands, and the complete machine/tool fingerprint
-are in [`results/index.md`](results/index.md) and
+Raw sample timings, aggregate statistics, row identities, and the complete
+machine/tool fingerprint are in [`results/index.md`](results/index.md) and
 [`results/results.json`](results/results.json).
 
 ## Reproduction

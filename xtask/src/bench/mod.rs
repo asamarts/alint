@@ -525,6 +525,10 @@ pub struct Row {
     pub min_ms: f64,
     pub max_ms: f64,
     pub samples: usize,
+    /// Individual measured samples in milliseconds. Older reports predate
+    /// this additive field, so keep deserialization backward-compatible.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub times_ms: Vec<f64>,
     pub command: String,
 }
 

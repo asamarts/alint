@@ -251,6 +251,7 @@ mod tests {
             min_ms: min,
             max_ms: mean + sd,
             samples: 10,
+            times_ms: Vec::new(),
             command: format!("alint ({size}/{scen}/{mode})"),
         }
     }

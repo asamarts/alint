@@ -178,6 +178,25 @@ impl Tool {
         Ok(())
     }
 
+    /// Remove the config staged by [`Self::setup_config`]. Generated trees are
+    /// shared across tools and scenarios for a given size; cleanup prevents a
+    /// previous competitor's config from changing later tools' walk inputs.
+    pub fn teardown_config(self, root: &Path) -> Result<()> {
+        let config = match self {
+            Self::Alint => Some(".alint.yml"),
+            Self::LsLint => Some(".ls-lint.yml"),
+            Self::GrepPipeline => None,
+            Self::Repolinter => Some("repolinter.json"),
+        };
+        if let Some(config) = config {
+            let path = root.join(config);
+            if path.exists() {
+                fs::remove_file(path)?;
+            }
+        }
+        Ok(())
+    }
+
     /// Full shell command line handed to hyperfine for one
     /// row. Hyperfine spawns this via `sh -c`, so pipes /
     /// semicolons / globs work exactly as a user would type
@@ -548,5 +567,22 @@ mod tests {
         assert_eq!(Tool::LsLint.hyperfine_ignored_exit_codes(), &[] as &[i32]);
         assert_eq!(Tool::GrepPipeline.hyperfine_ignored_exit_codes(), &[1]);
         assert_eq!(Tool::Repolinter.hyperfine_ignored_exit_codes(), &[1]);
+    }
+
+    #[test]
+    fn staged_configs_do_not_leak_between_tools() {
+        let root = tempfile::tempdir().unwrap();
+        let cases = [
+            (Tool::Alint, Scenario::S1, ".alint.yml"),
+            (Tool::LsLint, Scenario::S1, ".ls-lint.yml"),
+            (Tool::Repolinter, Scenario::S2, "repolinter.json"),
+        ];
+        for (tool, scenario, config) in cases {
+            tool.setup_config(root.path(), scenario).unwrap();
+            assert!(root.path().join(config).is_file());
+            tool.teardown_config(root.path()).unwrap();
+            assert!(!root.path().join(config).exists());
+        }
+        Tool::GrepPipeline.teardown_config(root.path()).unwrap();
     }
 }

@@ -35,6 +35,16 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
         args.runs = 3;
     }
 
+    // A requested tool may be installed but have no meaningful row in the
+    // selected scenario/mode matrix (for example ls-lint with S2 only). Drop
+    // those tools before fingerprinting or staging configs, and fail clearly
+    // if the entire requested matrix is empty.
+    args.tools
+        .retain(|&tool| tool_supports_any_cell(tool, &args.scenarios, &args.modes));
+    if args.tools.is_empty() {
+        bail!("the selected tools, scenarios, and modes have no supported benchmark rows");
+    }
+
     ensure_hyperfine()?;
     // A supplied `--alint-binary` (past-version backfill) is measured as-is; the
     // normal path builds the current checkout.
@@ -188,9 +198,12 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
             // running on the same shared tree.
             scenario.setup_overlay(&tree_root)?;
             for &tool in &args.tools {
-                // Tool decides whether to write a config; ls-lint's
-                // `.ls-lint.yml` and alint's `.alint.yml` coexist
-                // since they're keyed on different filenames.
+                if !args.modes.iter().any(|&mode| tool.supports(scenario, mode)) {
+                    continue;
+                }
+                // Stage only this competitor's config. It is removed after
+                // all of the tool's supported modes so later rows see the
+                // same generated tree rather than accumulated config files.
                 tool.setup_config(&tree_root, scenario)?;
                 for &mode in &args.modes {
                     if !tool.supports(scenario, mode) {
@@ -206,6 +219,7 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
                     let row = run_one(&alint_bin, &tree_root, tool, size, scenario, mode, &args)?;
                     rows.push(row);
                 }
+                tool.teardown_config(&tree_root)?;
             }
             scenario.teardown_overlay(&tree_root)?;
         }
@@ -240,6 +254,12 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
 
 fn join_labels<T: Copy, F: Fn(T) -> &'static str>(items: &[T], f: F) -> String {
     items.iter().map(|&t| f(t)).collect::<Vec<_>>().join(",")
+}
+
+fn tool_supports_any_cell(tool: Tool, scenarios: &[Scenario], modes: &[Mode]) -> bool {
+    scenarios
+        .iter()
+        .any(|&scenario| modes.iter().any(|&mode| tool.supports(scenario, mode)))
 }
 
 /// Flag a full-tree command whose 100k mean is less than twice its 1k mean.
@@ -407,6 +427,7 @@ fn run_one(
         .into_iter()
         .next()
         .context("hyperfine produced no results")?;
+    let times_ms = r.times.iter().map(|seconds| seconds * 1000.0).collect();
 
     Ok(Row {
         tool: tool.name().into(),
@@ -420,6 +441,7 @@ fn run_one(
         min_ms: r.min * 1000.0,
         max_ms: r.max * 1000.0,
         samples: r.times.len(),
+        times_ms,
         command: r.command,
     })
 }
@@ -651,6 +673,7 @@ mod tests {
             min_ms: mean_ms,
             max_ms: mean_ms,
             samples: 1,
+            times_ms: vec![mean_ms],
             command: String::new(),
         }
     }
@@ -695,5 +718,29 @@ mod tests {
             assert_eq!(probe.needle, needle);
         }
         assert!(readiness_probe(Tool::Alint, Scenario::S1, Mode::Changed).is_none());
+    }
+
+    #[test]
+    fn unsupported_tools_are_excluded_from_the_selected_matrix() {
+        assert!(tool_supports_any_cell(
+            Tool::LsLint,
+            &[Scenario::S1],
+            &[Mode::Full]
+        ));
+        assert!(!tool_supports_any_cell(
+            Tool::LsLint,
+            &[Scenario::S2],
+            &[Mode::Full, Mode::Changed]
+        ));
+        assert!(!tool_supports_any_cell(
+            Tool::Repolinter,
+            &[Scenario::S1],
+            &[Mode::Full]
+        ));
+        assert!(tool_supports_any_cell(
+            Tool::Alint,
+            &[Scenario::Sfix],
+            &[Mode::Fix]
+        ));
     }
 }

@@ -63,8 +63,9 @@ the published `results.json`. The harness:
    by default) so every machine materialises a byte-identical
    tree. S4 uses the nested polyglot generator and a real Git
    repository so its workspace and git-aware paths fire.
-4. **Stages** the scenario overlay and each selected tool's
-   configuration at the tree root.
+4. **Stages** the scenario overlay and the current tool's configuration at the
+   tree root, removing that tool-specific config before the next competitor so
+   shared trees do not accumulate extra benchmark inputs.
 5. **Validates** every row before timing it. Competitive S1/S2
    full-mode rows receive a temporary, scenario-specific violation;
    the command must return the exact expected status and report the
@@ -82,7 +83,8 @@ the published `results.json`. The harness:
    full-tree rows. A 100k/1k mean below 2× produces a warning,
    since that shape usually means the tool never walked the tree.
 8. **Writes** per-size `results.md` plus an aggregated
-   `index.md` and the machine-readable `results.json`.
+   `index.md` and the machine-readable `results.json`, including every
+   measured sample in milliseconds as well as the aggregate statistics.
 
 Macro-specific design choices worth flagging:
 
