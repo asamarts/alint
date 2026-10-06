@@ -459,9 +459,9 @@ cross-file shapes (4):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (940 lines, 40
-node-specific rules + 5 bundled rulesets, **86 rules total** loaded
-— confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (**61 effective rules** —
+21 rules declared here plus 1 local fact and 5 extended rulesets, after ID
+overrides/deduplication), confirmed by `alint validate-config`.
 
 **Synopsis of the load-bearing repo-specific rules** (full config in
 `.alint.yml`):
@@ -539,19 +539,12 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **40 node-specific rules** in `.alint.yml` (the `node-*` prefix
-  identifies them in `alint list` output): test-filename-grammar,
-  changelog-filename, src/node_version.h macros (×4), governance +
-  build files, eslint-config root + tier partials, custom-rule
-  presence, primordials presence, lint configs, ruff section,
-  workflow assertions, and 9 `command:` shellouts.
-- **46 bundled rules** from the 5 extended rulesets: 15 from
-  oss-baseline + 9 from node + 3 from ci/github-actions + 11 from
-  hygiene/no-tracked-artifacts + 3 from tooling/editorconfig (some
-  rule IDs may overlap; total reported is 86 after dedup).
+- **21 rules** declared in `.alint.yml`, plus 1 local fact.
+- **61 effective rules** after loading the 5 extended rulesets and
+  applying ID overrides/deduplication.
 
 **Validation:** `alint validate-config` reports
-`✓ Config valid: 86 rule(s) loaded`. Pitfall checks: the magic
+`✓ Config valid: 61 rule(s) loaded`. Pitfall checks: the magic
 comment is present (line 1); `command:` rules use `command:` (not
 `argv:`) and integer `timeout:` (not duration strings); JSONPath
 bracket notation used for dashed keys (`$.dependencies['remark-preset-lint-node']`);
@@ -641,8 +634,8 @@ across the live tree — **mostly real findings.** Findings break down to:
 (need broader exclude list), 1 bidi-control finding in WPT test fixture
 (intentional), 43 real `node_modules/` test-fixture commits, 3 real
 `.env` test fixtures, ~16 cosmetic newline / trailing-whitespace /
-heuristic findings, and ~62 GHA hardening warnings (Scorecard catches
-the same on its nightly run).
+heuristic findings, and ~62 GHA findings under the historical 0.9.17
+ruleset.
 
 **Status as of v0.9.20.** The 3 `hygiene-no-js-build-outputs`
 directory-name FPs documented in §6.1 are **resolved in v0.9.18 via
@@ -652,7 +645,9 @@ bundled-rule refinement A1** — the rule now requires a sibling
 `test/fixtures/**/.env`, and `test/fixtures/wpt/**` per-rule scope
 refinements documented in §6.2 are still pending (config-side, not
 engine-side); these are the recommended `.alint.yml` updates a real
-adopter would make.
+adopter would make. With alint 0.16.1 on the 2026-05-07 snapshot, the
+GitHub Actions rules flag only `create-release-proposal.yml`, which grants
+`contents: write` at workflow scope; the other 35 workflows limit the token.
 
 ### 6.1 Real findings
 
@@ -663,8 +658,7 @@ adopter would make.
 | 3 `.env` files committed | `test/fixtures/dotenv/.env`, `test/fixtures/run-script/.env`, `test/fixtures/test-runner/flag-propagation/.env` | error | `hygiene-no-env-files` | **Real but intentional.** These are test fixtures for `node --env-file` testing. **Recommended fix:** add `test/fixtures/**/.env` to the rule's exclude list. |
 | 1 bidi-control character finding | `test/fixtures/wpt/url/resources/urltestdata.json` | error | `oss-no-bidi-controls` | **Real but expected.** Web Platform Tests data — explicitly tests URL encoding of bidi controls. **Recommended fix:** add `test/fixtures/wpt/**` to the rule's exclude list. |
 | 1 file > 10 MiB | (single occurrence) | warning | `hygiene-no-huge-files` | Reviewable. |
-| 9 workflows lack the `contents: read` minimum permission | (across `.github/workflows/`) | warning | `gha-workflow-contents-read` | **Real bugs** — Scorecard catches the same on its nightly run. |
-| 2 workflows lack `permissions:` block | (across `.github/workflows/`) | warning | `gha-pin-actions-to-sha` | Same class. |
+| 1 workflow grants workflow-wide `contents: write` | `.github/workflows/create-release-proposal.yml` | warning | `gha-workflow-contents-read` | **Real.** Current result from alint 0.16.1 on the 2026-05-07 snapshot. |
 | 3 forbidden directory-name matches | (paths in non-JS subtrees with no sibling `package.json`) | warning | `hygiene-no-js-build-outputs` | **Was a false-positive class against v0.9.17; FIXED in v0.9.18 via bundled-rule refinement A1** — `hygiene-no-js-build-outputs` now requires a sibling `package.json`, eliminating directory-name matches in non-JS subtrees. Same fix benefits k8s, vscode, and nixpkgs simultaneously. |
 | 10 markdown / 3 source files lack final newline | (across the tree) | info | `oss-final-newline` + `oss-no-trailing-whitespace` | Real but unweighted by the existing tooling. |
 | 1 `node-package-json-exists` failure | (related to root config layering) | error | `node-package-json-exists` | **False positive in spirit** — node has multiple `package.json` files (root, tools/lint-md/, tools/eslint/, etc.); the rule fires when scope doesn't unambiguously identify the canonical one. **Recommended fix:** scope the rule to `root_only: true` for the `node@v1` ruleset's package.json check. |
@@ -681,8 +675,8 @@ adopter would make.
   refinement; would catch real typos in net-new test additions),
   changelog-filename grammar (silently passing on the 25 existing
   files; would catch a `CHANGELOG_v27.md` lowercase typo at PR time)
-- **62 GHA hardening warnings** (Scorecard surfaces the same; alint
-  surfaces them at PR time)
+- **1 current GHA permissions warning** (the 62-count above is retained only
+  as a historical 0.9.17 measurement)
 - **49 false positives needing per-rule scope refinement** (test-fixture
   node_modules + test-fixture .env + bidi WPT + 22 test-helper
   filename matches + 3 hygiene directory-name matches)
@@ -775,10 +769,10 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   v0.9.19/v0.9.20 added width-aware human output and the bundled-rule
   message audit. The node `.alint.yml` itself was not modified in batch
   B1 (it never carried pitfall #22 — no `pattern: |` block scalars).
-- **Rule count:** **86** (40 custom + 5 bundled rulesets — `oss-baseline`
-  15, `node` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts`
-  11, `tooling/editorconfig` 3; rule IDs may overlap)
-- **`alint validate-config`:** ✓ Config valid: 86 rule(s) loaded
+- **Current rule count:** **61 effective rules** (21 rules declared here,
+  1 local fact, and 5 extended rulesets, after ID
+  overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 61 rule(s) loaded
 - **Live-tree recheck status:** Counts in §6 reflect the 2026-05-07
   v0.9.17 walk; the 3 `hygiene-no-js-build-outputs` directory-name FPs
   are RESOLVED in v0.9.18 (bundled-rule refinement A1). The 6 P1/P2

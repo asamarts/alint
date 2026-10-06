@@ -418,7 +418,7 @@ exact reproduction command.
 
 | Check | Existing tool | Existing wall-clock | alint wall-clock | Ratio |
 |---|---|---|---|---|
-| `verify-staging-meta-files.sh` (34 staging dirs × 4 file-exists) | bash file-exists loop | **277 ms** ± 2 ms | **89 ms** ± 2 ms | **3.1× alint faster** |
+| `verify-staging-meta-files.sh` (33 staging dirs; the historical timed rule checked 4 files, the corrected rule checks all 6) | bash file-exists loop | **277 ms** ± 2 ms | **89 ms** ± 2 ms | **3.1× alint faster** on the historical 4-file comparison |
 | `verify-pkg-names.sh` (git grep over in-tree Go) | `git grep -E` | **439 ms** ± 12 ms | included in 320ms full pass | n/a — full alint pass already runs the rule |
 | `verify-boilerplate.sh` (license headers, full tree) | python `boilerplate.py` | **1.60 s** ± 0.004 s | included in 320 ms full pass | **5× alint faster** (full alint pass replaces this script + ~7 others simultaneously) |
 | `verify-file-sizes.sh` (git ls-files + size loop) | bash + `git ls-files --eol` | **4.05 s** ± 0.003 s | included in 320 ms full pass | **12.7× alint faster** |

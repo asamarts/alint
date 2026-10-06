@@ -44,64 +44,20 @@ extends:
   - alint://bundled/ci/github-actions@v1       # 16 workflows: name/permissions/SHA-pinned actions
   - alint://bundled/hygiene/no-tracked-artifacts@v1
 
-  # compliance/apache-2@v1 — VERDICT: PARTIALLY FITS, OVER-FIRES on TF.
-  #   The bundled apache-2-source-has-license-header rule's default include
-  #   set (.py/.cc/.h/.go/.java/.js/.ts/.swift/.sh/...) is correct for TF's
-  #   *hand-written* sources — TF carries the canonical
-  #   "Licensed under the Apache License, Version 2.0" block verbatim on
-  #   every one (confirmed: configure.py line 3).
-  #   BUT TF generates THOUSANDS of files that legitimately lack the header:
-  #   the 1185 api/golden/*.pbtxt textprotos, generated _pb2.py / *_generated.h,
-  #   and the entire third_party/ + bundled-dep tree. The bundled ruleset has
-  #   no TF-aware excludes, so it would false-positive at scale (the v0.9.18
-  #   audit already saw ~700 FPs on the Bazel arm of this).
-  #   DECISION: extend it, but neutralise the over-fire with a same-id
-  #   override below that narrows `paths.exclude`. (If your alint build does
-  #   not support overriding an extended rule's paths, drop this line and use
-  #   the standalone `tensorflow-apache-header` rule instead — also below.)
-  - alint://bundled/compliance/apache-2@v1
+  # compliance/apache-2@v1 is intentionally not extended. TensorFlow's source
+  # set includes generated files and empty package markers that do not carry
+  # headers, and a path-only exclusion cannot model that convention without
+  # either false findings or broad blind spots.
 
 rules:
   # ──────────────────────────────────────────────────────────────────────
-  # Apache header — narrow the bundled rule away from generated/vendored
-  # files. Same id as the bundled rule = override of its paths.
+  # TensorFlow's package manifest is nested rather than at the repository root.
   # ──────────────────────────────────────────────────────────────────────
-  - id: apache-2-source-has-license-header
-    kind: file_header
-    paths:
-      include:
-        - "**/*.py"
-        - "**/*.cc"
-        - "**/*.cpp"
-        - "**/*.h"
-        - "**/*.hpp"
-        - "**/*.go"
-        - "**/*.java"
-        - "**/*.swift"
-        - "**/*.m"
-        - "**/*.mm"
-        - "**/*.sh"
-      exclude:
-        - "third_party/**"
-        - "tensorflow/tools/api/golden/**"      # 1185 generated textprotos
-        - "**/*_pb2.py"                          # protoc output
-        - "**/*_pb2.pyi"
-        - "**/*_generated.h"                     # flatbuffer/proto codegen
-        - "tensorflow/lite/micro/**"             # vendored MCU tree
-    lines: 25
-    pattern: 'Licensed under the Apache License,?\s*Version 2'
+  - id: python-manifest-exists
+    when: facts.has_python
+    kind: file_exists
+    paths: "tensorflow/tools/pip_package/setup.py"
     level: warning
-
-  # Bazel BUILD/.bzl licensing — TF uses per-package `licenses(["notice"])`,
-  # NOT per-file headers (premise repair from v0.9.18; carried forward).
-  - id: tensorflow-bazel-files-declare-license
-    kind: file_header
-    paths:
-      include: ["**/BUILD", "**/BUILD.bazel"]
-      exclude: ["third_party/**"]
-    lines: 25
-    pattern: '(licenses\(.*notice|default_applicable_licenses.*license)'
-    level: info
 
   # ──────────────────────────────────────────────────────────────────────
   # SANITY-CHECK SUITE → command_idempotent  (BIGGEST WIN, the +9 core)
@@ -242,7 +198,7 @@ rules:
   # package legitimately absent on one interpreter.
   # ──────────────────────────────────────────────────────────────────────
   - id: tensorflow-requirements-lock-numpy-parity
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "requirements_lock_3_10.txt"
       extract:
@@ -310,7 +266,7 @@ rules:
   - id: tensorflow-tf-version-bzl-semver
     kind: file_content_matches
     paths: "tensorflow/tf_version.bzl"
-    pattern: 'TF_VERSION_(MAJOR|MINOR|PATCH)\s*=\s*"\d+"'
+    pattern: '(?m)^TF_VERSION\s*=\s*"\d+\.\d+\.\d+(?:-[^"]+)?"\s*$'
     level: warning
 
   # ──────────────────────────────────────────────────────────────────────

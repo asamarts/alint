@@ -501,7 +501,7 @@ false-positive class exceeded 100 violations (vscode's config dodges
 pitfalls #22 + #14 cleanly via single-quoted scalars + `\s+` bridging).
 Findings break down to: 2 real copyright-header omissions in test
 fixtures, 1 real .gitattributes-violation `.bat` file, ~107 GitHub
-Actions hardening gaps (Scorecard catches the same on its nightly run;
+Actions hardening gaps (measured directly by alint on the captured workflows;
 alint surfaces them at PR time), ~180 cosmetic findings (final-newline,
 trailing-whitespace, hygiene heuristic false positives on directory
 names), and a sprinkling of governance-info findings.
@@ -521,9 +521,9 @@ this case.
 |---|---|---|---|---|
 | 2 `.tsx` test fixtures lack the canonical Microsoft/MIT copyright header | `src/vs/editor/test/node/diffing/fixtures/ws-alignment/{1,2}.tsx` | warning | `vscode-copyright-header-src` | **Real findings.** These are test fixtures used to feed the diffing-algorithm test suite; copying from external sources is the typical reason headers are missing. **Recommended fix:** add `src/vs/editor/test/**/fixtures/**` to the rule's `paths.exclude` list (test fixtures are recognised carve-outs in `build/filters.ts` too). |
 | 1 `.bat` file uses LF line endings instead of CRLF | `build/azure-pipelines/win32/listprocesses.bat:1` | warning | `vscode-windows-bat-crlf` | **Real bug** — Windows shells refuse to execute `.bat` files with LF endings under some configurations. The `.gitattributes` rule (`*.bat eol=crlf`) is a hint to git-on-checkout; if the file was created under WSL or via gh-cli, the LF endings persist. **Recommended fix:** `git rm` and re-add via PowerShell, OR `dos2unix --eol crlf` and `git add`. |
-| 1 workflow lacks a top-level `permissions:` block | `.github/workflows/copilot-setup-steps.yml` | warning | `vscode-workflow-has-permissions` | **Real bug** — least-privilege workflow defaults are best practice. Scorecard catches this on its nightly run. |
-| 9 workflows lack the `contents: read` minimum permission | (across `.github/workflows/`) | warning | `gha-workflow-contents-read` | **Real bugs** of the same class — Scorecard surfaces them too. |
-| 107 third-party action references not pinned to a 40-char SHA | (across `.github/workflows/`) | warning | `gha-pin-actions-to-sha` | **Same as the kubernetes pilot's finding** — vscode uses floating-tag refs (`actions/checkout@v4`); Scorecard surfaces these on nightly cadence. alint surfaces them at PR time, which is the additive value here. |
+| 1 workflow lacks a top-level `permissions:` block | `.github/workflows/copilot-setup-steps.yml` | warning | `vscode-workflow-has-permissions` | **Real bug** — least-privilege workflow defaults are best practice. |
+| 9 workflows lack the `contents: read` minimum permission | (across `.github/workflows/`) | warning | `gha-workflow-contents-read` | **Real bugs** of the same class. |
+| 107 third-party action references not pinned to a 40-char SHA | (across `.github/workflows/`) | warning | `gha-pin-actions-to-sha` | **Real.** VS Code uses floating-tag refs such as `actions/checkout@v4`; alint measures them directly at check time. |
 | 4 workflows lack a `name:` field | (across `.github/workflows/`) | info | `gha-workflow-has-name` | Cosmetic; not gated upstream. |
 | 1 root-level `.env` file committed | `extensions/copilot/test/simulation/fixtures/multiFileEdit/issue-9647/.env` | error | `hygiene-no-env-files` | **False positive in spirit** — this is a test fixture for the "edit existing files" simulation harness. Not a real .env (no secrets). **Recommended fix:** add `extensions/copilot/test/simulation/fixtures/**` to the rule's exclude list. |
 | 19 forbidden `**/build` / `**/dist` directory matches | `build/`, `extensions/copilot/build/`, `extensions/copilot/script/build/`, `extensions/cpp/build/`, `extensions/git/build/`, … | warning | `hygiene-no-js-build-outputs` | **Was a false-positive class against v0.9.17; FIXED in v0.9.18 via bundled-rule refinement A1** — `hygiene-no-js-build-outputs` now requires a sibling `package.json` to fire, eliminating vscode's `build/` and `extensions/*/build/` script-directory FPs. Same fix benefits k8s, nixpkgs, and node. |

@@ -1,0 +1,52 @@
+name: alint://bundled/oss-baseline accepts lowercase readme and license filenames
+tags: [check, extends, bundled, oss-baseline, regression]
+
+given:
+  tree:
+    readme.md: |
+      # demo
+
+      A repository whose established document names are lowercase.
+    license.md: |
+      The MIT License (MIT)
+
+      Copyright (c) Example Authors
+
+      Permission is hereby granted, free of charge, to any person obtaining a
+      copy of this software and associated documentation files (the "Software"),
+      to deal in the Software without restriction, including without limitation
+      the rights to use, copy, modify, merge, publish, distribute, sublicense,
+      and/or sell copies of the Software.
+    SECURITY.md: |
+      # Security Policy
+
+      ## Reporting
+
+      Report vulnerabilities privately to security@example.com.
+      We aim to acknowledge reports within 72 hours.
+
+      ## Supported versions
+
+      Security fixes are provided for the latest stable release. Please include
+      reproduction steps, affected versions, and any suggested mitigations in a
+      private report.
+    CODE_OF_CONDUCT.md: "# Code of Conduct\n\nBe kind.\n"
+    .gitignore: "target/\n"
+    .github:
+      dependabot.yml: |
+        version: 2
+        updates:
+          - package-ecosystem: cargo
+            directory: "/"
+            schedule:
+              interval: weekly
+      CODEOWNERS: "* @demo/maintainers\n"
+  config: |
+    version: 1
+    extends:
+      - alint://bundled/oss-baseline@v1
+
+when: [check]
+
+expect:
+  - violations: []

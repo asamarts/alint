@@ -111,11 +111,11 @@ exact-version-lockstep).
 | 10 | rust-toolchain.toml has `rustfmt`, `clippy`, `rust-analyzer` components | Not pnpm's concern | Cargo: known but not enforced via lint |
 | 11 | Lerna `publish.allowBranch: [canary]` integrity | pnpm sees lerna.json | Not Cargo's concern |
 | 12 | Turbo task graph (`turbo.json` `tasks.build.outputs[*]` includes `dist/**`) | pnpm sees turbo.json by file presence only | Not Cargo's concern |
-| 13 | Errors registry (`errors/manifest.json` ↔ `errors/**/*.md`) coverage | pnpm has no concept | Cargo has no concept |
+| 13 | Error-code consolidation (`packages/next/errors.json`) | pnpm has no concept | Cargo has no concept |
 | 14 | externals registry (`server-external-packages.jsonc` ↔ `improper-server-external.mdx`) consistency | pnpm has no concept | Cargo has no concept |
 | 15 | The 30+ workflow SHA-pinning + permissions-block discipline | pnpm has no concept | Cargo has no concept |
 
-**15 cross-language conventions both ecosystem-specific linters
+**14 current cross-language conventions both ecosystem-specific linters
 miss** — exactly the gap alint's polyglot bundle composition
 (`monorepo/cargo-workspace@v1` + `monorepo/pnpm-workspace@v1`
 layered together, plus oss-baseline + ci/github-actions +
@@ -153,7 +153,7 @@ Verified via `ls /tmp/next.js/scripts/check-* /tmp/next.js/scripts/validate-*`:
 | Script | What it checks | Backing tool |
 |---|---|---|
 | `check-examples.sh` | Re-canonicalises every `examples/*/package.json`; copies template `next-env.d.ts` and `.gitignore`; **fails if `git status` shows drift** (mutation-with-verification) | bash + jq + git |
-| `check-manifests.js` | Walks `errors/manifest.json`'s route tree, asserts every `errors/**/*.md` (except `template.md`) is reachable from the route graph | Node.js |
+| `check-manifests.js` | Legacy script whose `errors/manifest.json` input was deleted in 2023; it is not run by current CI | Node.js |
 | `check-pre-compiled.sh` + `check-pre-compiled.bat` | Re-runs `pnpm ncc-compiled` (re-bundles webpack runtime); fails if `git status` shows drift | bash + git |
 | `check-is-release.js` | Parses the most recent commit message for a `^v\d+\.\d+\.\d+(-\w+\.\d+)?$` tag | Node.js + git log |
 | `check-unused-turbo-tasks.mjs` | Scans every `*.rs` file under `crates/` + `turbopack/crates/` for `#[turbo_tasks::function]` annotations; cross-references against usage sites; reports unused | Node.js + Rust source scan |
@@ -213,7 +213,7 @@ TSESTree visitor — out of alint's scope. Shelled out via
 | Script | Coverage | Notes |
 |---|---|---|
 | `check-examples.sh` | ❌ out-of-scope (mutation) | alint reads files; doesn't regenerate-and-diff. Wrap in `command:` rule that runs the script in CI; failures still flag. |
-| `check-manifests.js` | 🔄 alint-future | `registry_paths_resolve` (v0.10 ship-target, 8 sources). The deeper "every md reachable from routes" is exactly this primitive's shape. |
+| `check-manifests.js` | obsolete | Its manifest input was deleted in 2023, so neither the script nor an alint wrapper belongs in the current gate inventory. |
 | `check-pre-compiled.{sh,bat}` | ❌ out-of-scope (codegen) | Mutation followed by git-diff. Same pattern as airflow's `update-spelling-wordlist-to-be-sorted`. |
 | `check-is-release.js` | ❌ out-of-scope (git history) | Parses commit messages. The `git_commit_message` rule kind exists but checks staged/HEAD message; this script needs subprocess git access. |
 | `check-unused-turbo-tasks.mjs` | ❌ out-of-scope (Rust AST) | Wrap in `command:` rule. |
@@ -227,7 +227,7 @@ TSESTree visitor — out of alint's scope. Shelled out via
 | eslint configs | ❌ out-of-scope (TS/JS AST) | Shell out via `command:`. |
 | prettier configs | ✅ alint-today (presence) + ❌ out-of-scope (formatting) | `file_exists` for `.prettierrc.json` + `.prettierignore`. Formatting itself is prettier's job. |
 | ast-grep config | ❌ out-of-scope (Rust AST) | Shell out. |
-| typos config | ❌ out-of-scope (NLP) | Shell out. |
+| typos config | file presence only | Next.js does not run typos in CI or lint-staged, so the config is inventoried but no command rule is claimed. |
 | alex configs | ❌ out-of-scope (NLP) | Shell out. |
 | socket.yaml | ❌ out-of-scope (supply-chain scanner) | File-presence only. |
 | lint-staged config | ✅ alint-today (presence) | `file_exists`. |
@@ -250,7 +250,7 @@ because the supply-chain blast radius is large).
 | Cross-toolchain channel pinning (rust-toolchain + .node-version) | ✅ alint-today | 2× `toml_path_matches` + `file_exists`. |
 | gitattributes EOL pin | ✅ alint-today | `file_content_matches`. |
 | Husky hook integrity | ✅ alint-today | `file_exists` + `file_content_matches`. |
-| errors/manifest.json shape | ✅ alint-today (partial) | `json_path_matches` for shape. The deeper "registry resolves" needs `registry_paths_resolve`. |
+| errors/manifest.json shape | obsolete | The file was deleted in 2023; the three rules that depended on it were removed. |
 | externals doc cross-reference | 🔄 alint-future | `cross_file_value_equals` (v0.10 ship-target). |
 | Tracked-artefact hygiene across BOTH `.next/` AND `target/debug/` | ✅ alint-today | `hygiene/no-tracked-artifacts@v1` + extended for nested locations. |
 
@@ -282,10 +282,10 @@ artefact families** = **74 distinct surfaces**.
 Granular breakdown:
 
 ```
-scripts/check-* gates (8):
-  ✅ alint-today:     0 / 8  = 0%
-  🔄 alint-future:    2 / 8  = 25%   (check-manifests + validate-externals-doc)
-  ❌ out-of-scope:    6 / 8  = 75%   (check-examples, check-pre-compiled, check-is-release, check-unused-turbo-tasks, check-backport-canary-release)
+current scripts/check-* gates (excluding the obsolete check-manifests script):
+  ✅ alint-today: command wrappers for the repository's active check scripts
+  🔄 alint-future: validate-externals-doc could become declarative with a Markdown-table extractor
+  ❌ out-of-scope: mutating generators, git-history operations, and Rust AST analysis
 
 7 root lint tool configs:
   ✅ alint-today (presence):    3 / 7  = 43%
@@ -294,30 +294,28 @@ scripts/check-* gates (8):
 36 GHA workflows:
   ✅ alint-today (ci/github-actions@v1):  36 / 36 = 100%
 
-15 cross-language conventions BOTH per-ecosystem linters miss:
-  ✅ alint-today:    13 / 15 = 87%
-  🔄 alint-future:    2 / 15 = 13%   (dir_name_matches_field-unscoping + cross_file_value_equals)
+14 current cross-language conventions BOTH per-ecosystem linters miss:
+  ✅ alint-today:    12 / 14 = 86%
+  🔄 alint-future:    2 / 14 = 14%   (dir_name_matches_field-unscoping + Markdown-table extraction)
 ```
 
 **Commentary.** Three observations:
 
 1. **next.js is the canonical "polyglot at the workspace tier"
    demonstration.** The hybrid pnpm + Cargo dual-workspace shape
-   means **15 of 15 cross-language conventions are invisible to
+   means **14 of 14 current cross-language conventions are invisible to
    either ecosystem-specific linter** — pnpm only sees the 19
    packages, Cargo only sees the 68 crates, and neither sees the
    shared workspace-uniformity discipline. That's the headline
    pitch. alint's polyglot bundle composition
    (`monorepo/cargo-workspace@v1` + `monorepo/pnpm-workspace@v1`
-   layered together) covers 13 / 15 today; the remaining 2 are
-   v0.10 ship-targets.
+   layered together) covers 12 / 14 today; the remaining 2 need richer
+   extraction/normalization.
 
-2. **75 % of the `scripts/check-*` gates (6 of 8) are deliberately
-   out of alint's scope.** They're mutation-with-verification (4),
-   git-history operations (2), and Rust AST (1). The remaining
-   25 % (`check-manifests` + `validate-externals-doc`) are exactly
-   the v0.10 ship-target shapes (`registry_paths_resolve` +
-   `cross_file_value_equals`).
+2. **Several `scripts/check-*` gates are deliberately out of alint's
+   declarative scope.** They are mutation-with-verification, git-history
+   operations, or Rust AST analysis. Active scripts can still run through
+   command rules; `check-manifests.js` is excluded because its input is gone.
 
 3. **`dir_name_matches_field` with an unscoping transform** is the
    one v0.10+ extension surfaced uniquely by next.js's intentionally
@@ -330,9 +328,9 @@ scripts/check-* gates (8):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (801 lines, 59
-repo-specific rules, 11 bundled rulesets folded in via `extends:`,
-**130 rules total** loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (53
+repo-specific rules, 8 bundled rulesets folded in via `extends:`,
+**110 rules total** loaded — confirmed by `alint validate-config`).
 
 **Synopsis of the load-bearing rules** (full config in `.alint.yml`):
 
@@ -383,33 +381,26 @@ rules:
     kind: file_content_matches
     paths: .gitattributes
     pattern: '(?m)^\*\s+text=auto\s+eol=lf'
-  - id: nextjs-errors-manifest-declares-routes        # JSONPath shape on errors/manifest.json
-    kind: json_path_matches
-    paths: errors/manifest.json
-    path: "$.routes[*].path"
-    matches: '^/errors/.+\.md$'
 ```
 
 **Repo-specific vs bundled split:**
 
-- **59 next.js-specific rules** (`nextjs-*` prefix): 3 pnpm-workspace
+- **53 next.js-specific rules** (`nextjs-*` prefix): 3 pnpm-workspace
   shape + 4 per-npm-package + 2 per-Cargo-crate + 5 root SSoT + 3
   lerna + 8 tool-config presence + 3 husky-hook integrity + 4
-  repo-metadata + 2 errors/manifest + 3 turbo.json + 6
+  repo-metadata + error-code consolidation + 3 turbo.json + 6
   workspace-root config + 3 tracked-artefact + 1 GHA SHA-pinning
-  restate + 11 `command:` shellouts (prettier, eslint, tsc,
-  ast-grep, alex, cargo fmt, cargo clippy, typos, check-examples,
-  check-unused-turbo-tasks, validate-externals-doc).
-- **76 bundled rules** from the 11 extended rulesets (15 + 9 + 11 +
-  4 + 4 + 4 + 3 + 11 + 7 + 3 + 5 = 76 with overlap dedup).
+  restate + 9 `command:` shellouts (prettier, eslint, tsc,
+  ast-grep, alex, cargo fmt, cargo clippy, check-examples,
+  check-unused-turbo-tasks, and validate-externals-doc, with overlap in the list).
+- **57 effective bundled rules** from the 8 extended rulesets after ID
+  de-duplication.
 
 **Validation:** `alint validate-config` reports `✓ Config valid:
-130 rule(s) loaded`. Pitfall checks: the magic comment is present
+110 rule(s) loaded`. Pitfall checks: the magic comment is present
 (line 1); pitfall #16 is explicitly worked around in
 `nextjs-package-json-declares-private` (line 294, with comment
-block on lines 287-293) and `nextjs-tsconfig-strict-mode` (line
-613, with comment block on lines 611-616) using
-`file_content_matches` against the JSON text rather than
+block on lines 287-293) using `file_content_matches` against the JSON text rather than
 `json_path_matches` against bool; all patterns use single-quoted
 scalars (no YAML literal block scalars — pitfall #22-clean); the
 GHA `nextjs-workflow-actions-pinned-by-sha` rule uses a JSONPath
@@ -428,15 +419,15 @@ Methodology: `hyperfine --warmup 1 --runs 3 -i` against the live
 
 | Check | Existing tool | Existing wall-clock | alint wall-clock | Ratio |
 |---|---|---|---|---|
-| **alint full pass (130 rules)** | n/a | n/a | **10.264 s** ± 2.541 s | — |
+| **historical alint full pass (130-rule config)** | n/a | n/a | **10.264 s** ± 2.541 s | — |
 
 The 10 s wall-clock against the ~163 MiB sparse-checkout (68
 `Cargo.toml` + 306 `package.json` + 6,000+ TS source files + 36
 workflows) is dominated by:
 
-- **The 11 `command:` shellouts** firing once per matching anchor
+- **The former 11-command config** firing once per matching anchor
   file — `cargo fmt --check`, `cargo clippy --workspace`, prettier,
-  eslint, tsc, ast-grep, alex, typos, plus the 3 npm-script
+  eslint, tsc, ast-grep, alex, the now-removed typos command, plus 3 npm-script
   shellouts (`pnpm check-examples`, `pnpm check-unused-turbo-tasks`,
   `pnpm validate-externals-doc`). None of these tools are on PATH
   on the bench machine, so each shellout fires as "command not
@@ -491,12 +482,12 @@ package.json). Other rows are unaffected. The breakdown:
 
 | # | Count | Rule | Triage |
 |---|---|---|---|
-| 1 | 113 | `gha-pin-actions-to-sha` (bundled `ci/github-actions@v1`) | Real findings — third-party action steps pin by floating tag rather than 40-char commit SHA across the 36 workflows. Worth filing for supply-chain hardening (the next.js README §1.4 explicitly notes the supply-chain blast radius). |
+| 1 | 95 | `gha-pin-actions-to-sha` (bundled `ci/github-actions@v1`) | Real findings — action steps pin by tag rather than commit across the 36 workflows, measured with alint 0.16.1 on the 2026-05-07 snapshot. |
 | 2 | 106 | `oss-final-newline` | Real findings — markdown / yaml drift across `errors/`, `crates/`, `bench/`. Below tidy's threshold; informational. |
 | 3 | 62 | `oss-no-trailing-whitespace` | Same — trailing-ws long tail. Informational. |
 | 4 | 56 | `node-no-tracked-node-modules` (bundled) | **Test fixtures** — the next.js repo intentionally tracks `node_modules` under `test/integration/**` for reproducible test environments. **Recommended:** add `paths.exclude: ["test/integration/**", "examples/**"]` to override the bundled rule. |
 | 5 | 56 | `hygiene-no-node-modules` (bundled `hygiene/no-tracked-artifacts@v1`) | Same fixtures, two rule names — same exclude. |
-| 6 | 33 | `gha-workflow-contents-read` (bundled) | Real findings — workflows lacking `permissions: contents: read` block. Worth filing for hardening across the 36 workflows. |
+| 6 | 21 | `gha-workflow-contents-read` (bundled) | Real findings — workflows lacking a permissions declaration, measured with alint 0.16.1 on the 2026-05-07 snapshot. |
 | 7 | 22 | `nextjs-workflow-actions-pinned-by-sha` (the per-rule restate at warning level) | Same finding set as #1, narrower JSONPath filter. |
 | 8 | 12 | `monorepo-packages-have-readme` (bundled) | Real — packages without READMEs (likely test packages or private internal packages). Needs allowlist. |
 | 9 | 8 | `hygiene-no-js-build-outputs` | **RESOLVED in v0.9.18 (A1 fix).** v0.9.17-era count: 8 FPs on `build/` directories inside Rust crate source trees. v0.9.18's A1 refinement gates `hygiene-no-js-build-outputs` on a sibling `package.json` (correctly distinguishing JS build output from arbitrarily-named Rust source dirs); effective v0.9.20 count: ~0. |
@@ -515,9 +506,8 @@ package.json). Other rows are unaffected. The breakdown:
   both halves. (The original validation pass also surfaced 3 of 19
   npm packages missing license fields; the current run shows them
   as already-fixed or scope-excluded — verify the current state.)
-- **113 + 22 GHA action references not pinned to commit SHA**
-  across the 36 workflows.
-- **33 workflows lacking `permissions: contents: read`** declaration.
+- **95 action references not pinned to a commit SHA** across 36 workflows.
+- **21 workflows lacking a permissions declaration.**
 
 **False-positive class (mostly tracked-artefact hygiene):** the
 test-fixture `node_modules/`, `dist/`, nested-`pnpm-lock.yaml`,
@@ -558,9 +548,7 @@ rule exists — license enforcement is per-half via
 
 The next.js case study **also explicitly worked around pitfall #16**
 (JSONPath bool/number regex coercion) in two places:
-`nextjs-package-json-declares-private` (line 294, comment block
-287-293) and `nextjs-tsconfig-strict-mode` (line 613, comment block
-611-616), both using `file_content_matches` against the JSON text
+`nextjs-package-json-declares-private`, using `file_content_matches` against the JSON text
 rather than `json_path_matches` against bool. Pitfall #16 is now
 in the canonical-22 catalogue at position #16; distinct from #22.
 
@@ -572,7 +560,6 @@ Sorted by demand strength:
 
 - **`cross_file_value_equals`** — covers `validate-externals-doc.js`
   here. **v0.10 ship-target (10 sources).**
-- **`registry_paths_resolve`** — covers `check-manifests.js` here.
   **v0.10 ship-target (8 sources).**
 - **`dir_name_matches_field` extension with unscoping** — covers
   the `@next/x` ↔ `packages/x` mapping; same as vercel/turbo's base
@@ -594,12 +581,10 @@ Three candidate refinements for the next revalidation pass:
    separates "which subtree am I in" from "what am I checking",
    exactly the cleanup the dual-language shape needs. Estimated
    reduction: ~40 lines + clearer rule intent.
-2. **The 8 `scripts/check-*.{js,mjs,sh}` files revisited via v0.10
-   rule kinds.** `check-manifests.js` and `validate-externals-doc.js`
-   shell out today — the v0.10 ship-targets (`registry_paths_resolve`
-   + `cross_file_value_equals`) will let both move to declarative
-   rules. `check-examples.sh` / `check-pre-compiled.sh` stay
-   shellouts (mutation + git-state).
+2. **The active `scripts/check-*.{js,mjs,sh}` files revisited with richer
+   extractors.** `validate-externals-doc.js` needs a Markdown-table extractor;
+   `check-examples.sh` / `check-pre-compiled.sh` stay shellouts (mutation +
+   git state). The obsolete manifest script is not part of this roadmap.
 3. **Bundled-ruleset additions surfaced by `alint suggest`.** The
    config will skip the newer `compliance/reuse@v1` and
    `agent-hygiene@v1`. Running `alint suggest` against
@@ -616,10 +601,10 @@ Three candidate refinements for the next revalidation pass:
 
 - **alint version pin:** 0.9.20 (current, 2026-05-10). Original
   capture under v0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
-- **`.alint.yml` in this directory:** **shipped — 801 lines, 59
-  repo-specific rules, 11 bundled rulesets folded in via `extends:`,
-  130 effective rules loaded.**
-  `alint validate-config` confirms `✓ Config valid: 130 rule(s)
+- **`.alint.yml` in this directory:** **shipped — 53
+  repo-specific rules, 8 bundled rulesets folded in via `extends:`,
+  110 effective rules loaded.**
+  `alint validate-config` confirms `✓ Config valid: 110 rule(s)
   loaded`. **Live-tree recheck:** performed in this batch under
   v0.9.17 — see §6 for the 525-violation breakdown. Under v0.9.20
   the v0.9.18 A1 fix (`hygiene-no-js-build-outputs` requires sibling
@@ -661,11 +646,10 @@ Three candidate refinements for the next revalidation pass:
   - Pitfall #22 instances in this directory's config: **ZERO**
     (`grep -nE 'pattern:\s*[|>][-+]?$' .alint.yml` returns no
     matches; all 9 multi-line patterns use single-quoted scalars).
-  - **Pitfall #16 worked around in 2 places** (this case study's
+  - **Pitfall #16 worked around in 1 place** (this case study's
     contribution to the canonical-22 catalogue): JSONPath
     bool/regex coercion in `nextjs-package-json-declares-private`
-    and `nextjs-tsconfig-strict-mode`, with in-line
-    CONFIG-AUTHORING.md references. #16 is an authoring gotcha,
+    with an in-line CONFIG-AUTHORING.md reference. #16 is an authoring gotcha,
     not engine-fixed.
   - Pitfalls #1-#17, #20, #21 — authoring gotchas, not
     engine-fixed; #20/#21 await v0.10's
@@ -690,10 +674,9 @@ Three candidate refinements for the next revalidation pass:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (115 rules, ~82% coverage). +4 surfaces: registry_paths_resolve
-expresses the errors/manifest.json registry (a documented v0.9.17 gap),
-command_idempotent x11 collapses every lint tool (prettier/eslint/tsc/
-ast-grep/cargo fmt+clippy/typos/...) under one runner with timeouts, and the
+accordingly (110 rules, 49/60 inventoried surfaces, ~82% coverage).
+`command_idempotent` wraps the actual lint tools and check scripts
+(prettier/eslint/tsc/ast-grep/cargo fmt+clippy/...) with timeouts, and the
 config covers both halves of the hybrid pnpm + Cargo monorepo (JS json_path
 / for_each_dir + Rust toml_path / rust-toolchain lockstep). Non-replaceable:
 the AST/type/NLP semantic tools, the Rust compile, mutating generators.

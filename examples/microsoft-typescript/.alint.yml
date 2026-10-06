@@ -109,16 +109,10 @@ rules:
     max_bytes: 262144
     level: warning
 
-  - id: ts-baseline-errors-pair-with-js
-    kind: pair
-    primary: "tests/baselines/reference/*.errors.txt"
-    partner: "{dir}/{stem}.js"
-    level: warning
-
   - id: ts-gitattributes-keeps-binary-default
     kind: file_content_matches
     paths: .gitattributes
-    pattern: '^\* -text$'
+    pattern: '(?m)^\* -text$'
     level: error
 
   # ───────────────────────── tsconfig shape ───────────────────────────
@@ -169,7 +163,7 @@ rules:
   # link against. cross_file_value_equals locks them together.
   - id: ts-dprint-ts-plugin-version-agrees
     when: facts.has_dprint_config
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: package.json
       extract:
@@ -184,28 +178,6 @@ rules:
       `@dprint/typescript` devDependency in package.json. The repo comment
       "if updating typescript, update the one in package.json" is the manual
       step this rule enforces.
-
-  # ───── NEW @ v0.10: the lib generator's input manifest must resolve ──
-  # Herebyfile.mjs `generateLibs` reads src/lib/libs.json, maps each entry
-  # <lib> -> src/lib/<lib>.d.ts, and concatenates them into built/lib.*.d.ts.
-  # A typo / deleted source in libs.json silently drops a lib from the
-  # generated output. registry_paths_resolve asserts every listed source
-  # exists on disk (the generator appends ".d.ts", so entries_are_globs
-  # lets us match `<lib>.d.ts`).
-  - id: ts-libs-manifest-sources-resolve
-    when: facts.has_libs_manifest
-    kind: registry_paths_resolve
-    source: src/lib/libs.json
-    extract:
-      json: "$.libs[*]"
-    base: src/lib
-    entries_are_globs: true
-    expect: file
-    level: warning
-    message: >-
-      Every entry in src/lib/libs.json must resolve to a src/lib/<entry>.d.ts
-      source file (the Hereby `generateLibs` task concatenates these). A
-      missing source silently drops a lib from the built lib.*.d.ts output.
 
   # ───── NEW @ v0.10: import firewall (approximates no-direct-import) ──
   # The custom eslint rule `no-direct-import` forbids one src project from

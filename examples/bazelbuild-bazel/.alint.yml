@@ -196,34 +196,6 @@ rules:
       The repo root needs a BUILD or BUILD.bazel file.
 
   # ===================================================================
-  # § ★ NEW v0.10 — cross_file_value_equals: version coherence
-  # ===================================================================
-
-  - id: bazel-version-matches-bazelci
-    # The .bazelversion pin (Bazelisk reads it) should agree with the
-    # `bazel:` version key the Buildkite presubmit selects, so CI builds
-    # with the same Bazel the contributor's Bazelisk fetched. If
-    # .bazelci/presubmit.yml does not carry a `bazel:` key, the target is
-    # absent and the rule no-ops (allow_missing_target).
-    kind: cross_file_value_equals
-    source:
-      file: .bazelversion
-      extract: { regex: '^\s*([0-9][^\s]*)\s*$' }
-    targets:
-      - file: .bazelci/presubmit.yml
-        extract: { regex: '(?m)^\s*bazel:\s*"?([0-9][^\s"]*)"?' }
-    normalize: trim
-    allow_missing_target: true
-    # The source .bazelversion is gitignored; the per-rule respect_gitignore
-    # override is file_exists-only (ADR-0008), so this comparison sees the
-    # source only where the walker does (allow_missing_target no-ops it otherwise).
-    level: warning
-    message: >-
-      `.bazelversion` and the `.bazelci/presubmit.yml` `bazel:` pin should
-      name the same Bazel version so CI builds match local Bazelisk. No
-      existing static check catches this drift.
-
-  # ===================================================================
   # § BUILD / *.bzl filename + suffix conventions
   # ===================================================================
 

@@ -114,7 +114,7 @@ rules:
     # global.json declares the SDK version TWICE — `sdk.version` (what the
     # Arcade bootstrap downloads) and `tools.dotnet` (what the dotnet-install
     # scripts under eng/common honour). They drift independently in PRs.
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: global.json
       extract: { json: "$.sdk.version" }

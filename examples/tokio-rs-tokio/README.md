@@ -16,8 +16,7 @@ catalogue of the rules that need new alint primitives.
 
 **alint version:** 0.9.20 (current, 2026-05-10). Inventory data and
 live-tree gap-discovery counts in §6 were captured under v0.9.17.
-Tokio surfaces the v0.10 `pair_hash` ship-target (3 sources:
-kubernetes + tokio + golang/go FIPS) for the
+Tokio surfaces a `line_count_header` candidate for the
 `spellcheck.dic`-first-line-equals-body-line-count check —
 preserved in §8 below. v0.9.18's bundled-rule fix wave didn't
 touch this config's rule set: tokio's tree has no LICENSE.TXT/.md
@@ -132,17 +131,17 @@ Every row from §1 tagged with one of:
 | 5 | `check-spelling` (cargo-spellcheck) | ✅ alint-today | `command:` per `spellcheck.toml`. |
 | 6 | `check-spelling` (trailing-ws) | ✅ alint-today | `no_trailing_whitespace` over `**/*.{rs,md,toml,yml,yaml,sh}` (cleaner than the recursive grep). |
 | 7 | `check-readme` (byte-equality) | 🔄 alint-future | `cross_file_value_equals` (v0.10 ship-target, 10 sources) — "contents of file A equal contents of file B". |
-| 8 | `check-readme` (version cross-ref) | 🔄 alint-future | `cross_file_value_equals` with selector — extract `$.package.version` from `tokio/Cargo.toml`, assert it appears in `README.md`. |
+| 8 | `check-readme` (version cross-ref) | ✅ alint-today | `cross_file_value_equals` extracts `$.package.version` from `tokio/Cargo.toml` and the version in `README.md`. |
 | 9 | `cargo deny` (nightly) | ✅ alint-today | `command:` per `deny.toml`. |
 | 10 | `cargo deny` (per-PR) | ✅ alint-today | Same tool as #9. |
-| 11 | `spellcheck.dic` shape | 🔄 alint-future | (a) `pair_hash` (v0.10+ candidate, 3 sources): "value at offset 0 of file A equals computed property of file A" (line count); (b) `ordered_block` (v0.10 ship-target, 7 sources): "lines after the header are sorted unique". |
+| 11 | `spellcheck.dic` shape | 🔄 alint-future | A `line_count_header` primitive could compare the numeric header with the body length. Sorting also stays in CI because the file has no literal end marker for `ordered_block`. |
 | 12 | uring kernel test | ❌ out-of-scope | Downloads + builds Linux kernel. alint never executes external builds. |
 
 **Tally for §2.1 (the 12 checks):**
 
 ```
-✅ alint-today:    8 / 12 = 67%   (fmt, clippy, docs, semver, spellcheck×2, deny×2)
-🔄 alint-future:   3 / 12 = 25%   (check-readme×2 + spellcheck.dic shape)
+✅ alint-today:    9 / 12 = 75%   (fmt, clippy, docs, semver, spellcheck×2, README version, deny×2)
+🔄 alint-future:   2 / 12 = 17%   (README byte equality + spellcheck.dic shape)
 ❌ out-of-scope:   1 / 12 = 8%    (uring kernel)
 ```
 
@@ -271,9 +270,9 @@ Granular breakdown:
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (496 lines, 28
-repo-specific rules, 6 bundled rulesets folded in via `extends:`,
-**74 rules total** loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (28 rules declared here,
+5 bundled rulesets folded in via `extends:`, **70 effective rules** —
+confirmed by `alint validate-config`).
 
 **Synopsis of the load-bearing rules** (full config in `.alint.yml`):
 
@@ -328,19 +327,17 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **28 tokio-specific rules** (`tokio-*` prefix): 6 `command:`
+- **28 rules** declared in this config: 6 `command:`
   shellouts (rustfmt / clippy / cargo-deny / cargo-doc /
   cargo-semver-checks / cargo-spellcheck) + the 15 defensive
   structural conventions enumerated in §2.2 + 7 helpers
   (workflow-presence, deny.toml shape, README-pair file-presence,
   spellcheck file presence, illumos buildomat config presence,
   no-trailing-whitespace).
-- **48 bundled rules** from the 6 extended rulesets (15 + 11 + 4 +
-  4 + 3 + 11 = 48 with overlap dedup that the engine computes; net
-  effective is 46 because of small overlaps with the per-rule
-  ones).
+- **70 effective rules** after loading the 5 extended rulesets and
+  applying ID overrides/deduplication.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 74
+**Validation:** `alint validate-config` reports `✓ Config valid: 70
 rule(s) loaded`. Pitfall checks: the magic comment is present (line
 1); `command:` rules use `command:` (not `argv:`); bool comparison
 uses `toml_path_equals`/`equals: false` (pitfall #16 workaround
@@ -471,15 +468,11 @@ pattern matching).
 
 Sorted by demand strength:
 
-- **`cross_file_value_equals`** — covers tokio's `diff README.md
-  tokio/README.md` (check-readme byte-equality) and the
-  version-grep cross-reference. **v0.10 ship-target (10 sources).**
-  tokio is one of the demand-drivers.
-- **`ordered_block`** — covers tokio's `spellcheck.dic` body
-  sortedness. **v0.10 ship-target (7 sources).**
-- **`pair_hash`** — covers `spellcheck.dic` first-line-equals-body-
-  line-count. **v0.10+ candidate (3 sources: k8s + tokio +
-  golang/go FIPS).**
+- **`file_byte_equals`** — would cover `diff README.md tokio/README.md`.
+  `pair_hash format: contains` cannot compare the two file digests.
+- **`line_count_header`** — would compare `spellcheck.dic`'s numeric first
+  line with its body length. Sorting needs a markerless whole-tail mode or
+  remains with the repository's `sort -uc` check.
 - **`toml_path_equals` typed-value comparison** — minor DX polish;
   today the workaround stringifies-and-regex-matches against bool.
   Same pitfall #16 / pitfall #17 family from CONFIG-AUTHORING.md.
@@ -520,10 +513,10 @@ Three candidate refinements for the next revalidation pass:
 
 - **alint version pin:** 0.9.20 (current, 2026-05-10). Original
   capture under v0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
-- **`.alint.yml` in this directory:** **shipped — 496 lines, 28
-  repo-specific rules, 6 bundled rulesets folded in via `extends:`,
-  74 effective rules loaded.**
-  `alint validate-config` confirms `✓ Config valid: 74 rule(s)
+- **`.alint.yml` in this directory:** **shipped — 28 rules declared
+  here, 5 bundled rulesets folded in via `extends:`, 70 effective rules
+  loaded.**
+  `alint validate-config` confirms `✓ Config valid: 70 rule(s)
   loaded`. **Live-tree recheck:** performed in this batch under
   v0.9.17 — see §6 for the 180-violation breakdown (172 GHA
   SHA-pinning + 7 small long-tail; no P0/P1 bugs). v0.9.20 numbers
@@ -582,11 +575,12 @@ Three candidate refinements for the next revalidation pass:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (73 rules, ~83% coverage, the corpus high). +5 surfaces, the
+accordingly (70 rules, 18/24 inventoried surfaces, 75% coverage). The
 headline being MSRV coherence: the 5 crates' `rust-version` + ci.yml's
 `rust_min` (hand-synced per ci.yml's own comment block) -> one
-cross_file_value_equals from a single source of truth. Also pair_hash for
-the README byte-mirror, ordered_block for spellcheck.dic, and rustfmt ->
+cross_file_value_equals from a single source of truth. The README byte mirror,
+spellcheck dictionary sort/count checks, and an ambiguous regex-based
+tokio-util version comparison remain with upstream CI; rustfmt uses
 command_idempotent. Non-replaceable: clippy semantics, the compile/run
 matrices, loom/miri dynamic gates.
 

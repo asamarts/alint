@@ -245,7 +245,7 @@ out-of-scope as well (test-runner-driven).
 | Invariant | Coverage | Rule |
 |---|---|---|
 | Baseline file size cap (256 KiB ceiling, with carve-outs for `projectOutput/` and `api/`) | alint-today | `ts-baseline-file-max-size` (`file_max_size`) |
-| Pairing — every `*.errors.txt` has a matching `*.js` sibling | alint-today (broken — see §6) | `ts-baseline-errors-pair-with-js` (`pair`) — fires false positives because `{stem}` doesn't strip multi-extensions like `.errors.txt` |
+| Pairing — every `*.errors.txt` has a matching `*.js` sibling | alint-future | `pair` cannot strip the compound `.errors.txt` suffix, so the former rule was removed after producing 9,055 false warnings |
 | `.gitattributes` `* -text` discipline | alint-today | `ts-gitattributes-keeps-binary-default` (above) |
 
 ---
@@ -323,9 +323,9 @@ baseline invariants (3):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (480 lines, 22
-repo-specific rules, 6 bundled rulesets folded in via `extends:`,
-**68 rules total** loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (25 rules declared here,
+2 local facts, and 6 bundled rulesets folded in via `extends:`,
+**69 effective rules** — confirmed by `alint validate-config`).
 
 **Synopsis of the load-bearing repo-specific rules** (full config in
 `.alint.yml`):
@@ -355,14 +355,10 @@ rules:
   - id: ts-baseline-file-max-size         # 256 KiB ceiling on tests/baselines/reference/**
     kind: file_max_size
     max_bytes: 262144
-  - id: ts-baseline-errors-pair-with-js   # every *.errors.txt has a matching *.js
-    kind: pair
-    primary: "tests/baselines/reference/*.errors.txt"
-    partner: "{dir}/{stem}.js"            # ← {stem} doesn't strip multi-extension; see §6
   - id: ts-gitattributes-keeps-binary-default
     kind: file_content_matches
     paths: .gitattributes
-    pattern: '^\* -text$'
+    pattern: '(?m)^\* -text$'
     level: error
   - id: ts-tsconfig-strict-mode           # JSONPath against tsconfig.* (JSONC tolerated for valid JSON)
     kind: json_path_equals
@@ -388,16 +384,12 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **22 repo-specific rules** in `.alint.yml` (the `ts-*` prefix
-  identifies them in `alint list` output).
-- **46 bundled rules** from the 6 extended rulesets (some IDs
-  overlap, which is why `alint list` reports 68 not 68+22): 15 from
-  oss-baseline + 9 from node + 3 from ci/github-actions + 11 from
-  hygiene/no-tracked-artifacts + 3 from tooling/editorconfig + 5
-  from agent-context = 46.
+- **25 rules** declared in `.alint.yml`, plus 2 local facts.
+- **69 effective rules** after loading the 6 extended rulesets and
+  applying ID overrides/deduplication.
 
 **Validation:** `alint validate-config` reports
-`✓ Config valid: 68 rule(s) loaded`. Pitfall checks: the magic
+`✓ Config valid: 69 rule(s) loaded`. Pitfall checks: the magic
 comment is present (line 1); the `command:` rules use `command:` (not
 `argv:`) and integer `timeout:` (not duration strings); the `pair`
 rule uses `partner:` (not `secondary:`). The 2 instances of pitfall
@@ -405,8 +397,8 @@ rule uses `partner:` (not `secondary:`). The 2 instances of pitfall
 that surfaced 748 aspirational-rule fires against v0.9.17 were fixed
 in v0.9.18 (batch B1) — both rules now use `|-` and were lowered to
 `level: info` per the original §6 recommendation. The `pair` `{stem}`
-semantic gap on `ts-baseline-errors-pair-with-js` is still pending the
-`{stem_all}` template-token v0.10+ candidate — see §6.
+semantic gap that affected `ts-baseline-errors-pair-with-js` still needs a
+`{stem_all}` template token before that removed rule can be restored.
 
 ---
 
@@ -493,8 +485,9 @@ template-token v0.10+ candidate. The bundled-rule refinements A1
 (hygiene-no-js-build-outputs requires sibling `package.json`) and
 A3 (python@v1 default test-fixture excludes) shipped in v0.9.18,
 eliminating the corresponding hygiene FPs. Net headline against the
-current `.alint.yml`: the 9,055 `pair`-rule FPs persist; everything
-else is resolved or addressed via per-rule scope refinements
+historical `.alint.yml`: the 9,055 `pair`-rule findings came from a
+rule that could not express compound suffixes. That rule is now removed;
+everything else is resolved or addressed via per-rule scope refinements
 documented in this section.
 
 ### 6.1 Real findings (after deducting the false-positive class)
@@ -504,7 +497,7 @@ documented in this section.
 | 135 baseline files exceed the 256 KiB ceiling | `tests/baselines/reference/binaryArithmeticControlFlowGraphNotTooLarge.{symbols,types}`, `tests/baselines/reference/canWatch/getDirectoryToWatchFailedLookupLocationAtTypesIndirDos.baseline.md`, … | warning | `ts-baseline-file-max-size` | **Real but mostly known.** The rule is documented as a sentry — these are the runaway-output regressions. Some are intentional (long generated outputs from project-output tests). The exclude list (`tests/baselines/reference/projectOutput/**`, `tests/baselines/reference/api/**`) catches the legitimate-large dirs; everything in this list is novel growth. **Worth filing 5-10 PRs to trim the runaway-test outputs.** |
 | 16 tsconfig files don't have `strict: true` | `src/compiler/tsconfig.json`, `src/deprecatedCompat/tsconfig.json`, `src/services/tsconfig.json`, `src/server/tsconfig.json`, … (16 total) | warning | `ts-tsconfig-strict-mode` | **Mixed.** Some of these are intentional (per-package compile config inherits strict from the root); some genuinely don't set strict. Review needed; likely the rule should `extends`-aware (only check the leaf-most config in a chain). |
 | 1 tsconfig fails to parse as JSON | `scripts/tsconfig.json:10:9` (`"declaration": true,` in a `// commented-out` line) | warning | `ts-tsconfig-strict-mode` | **Real config gap.** alint's `json_path_equals` doesn't fully tolerate JSONC. The `tsconfig.json` files in TS use jsonc-style line comments (`//`); the rule misclassifies a `//-commented` line as malformed JSON. **Fix path:** alint's structured-query rules need a `Format::Jsonc` variant for tsconfig.* files. Single-source for now (TypeScript), but anywhere tsconfig.json appears with comments will hit this. **Logged as an alint engine gap** — see §7. |
-| 18 workflows have third-party actions not pinned to a 40-char SHA | `.github/workflows/{accept-baselines-fix-lints.yaml, ci.yml, close-issues.yml, codeql.yml, …}` | warning | `ts-workflow-actions-pinned-by-sha` | **Real but documented as a "Scorecard catches this on the next nightly" trade-off.** The TS team uses floating-tag refs (`actions/checkout@v4`) for ergonomics. OpenSSF Scorecard surfaces the same 18 findings on its nightly run. alint surfaces them at PR time, which is the additive value here. |
+| 5 action references point at a branch rather than a commit | 5 of the 18 workflows, including `microsoft/TypeScript-Twoslash-Repro-Action@master` | warning | `ts-workflow-actions-pinned-by-sha` | **Real.** Measured with alint 0.16.1 on the 2026-05-07 snapshot. |
 | 17 `node_modules/` directories committed under `tests/baselines/reference/` and `tests/cases/projects/` | `tests/baselines/reference/project/nodeModulesMaxDepthExceeded/{amd,node}/maxDepthExceeded/built/node_modules`, `tests/cases/projects/NodeModulesSearch/importHigher/node_modules`, … | error | `node-no-tracked-node-modules` + `hygiene-no-node-modules` | **Real but intentional.** These are test fixtures — the tests literally check that the compiler can resolve `node_modules` lookups in baseline scenarios. The rule needs an exclude scoped to `tests/baselines/reference/**/node_modules` and `tests/cases/projects/**/node_modules`. **Recommended fix:** add the two scopes to the rule's exclude list. |
 | 5 hygiene `**/build` / `**/coverage` / `**/dist` directory matches | `scripts/build/`, `tests/baselines/reference/config/showConfig/Shows tsconfig for single option/out`, `tests/baselines/reference/project/declarationDir2/amd/out`, … | warning | `hygiene-no-js-build-outputs` + `hygiene-no-cargo-target` | **All false positives.** `scripts/build/` is a source directory (not a JS build artefact); the `tests/baselines/reference/` matches are fixture content. **Recommended fix:** add the test-fixture root to the rule's exclude list. |
 | 6 src/ files have trailing whitespace | `src/compiler/types.ts:6549`, `src/testRunner/unittests/tsbuild/moduleSpecifiers.ts:124`, `src/testRunner/unittests/tsc/declarationEmit.ts:317`, … | warning | `ts-src-no-trailing-whitespace` | **Real bugs.** dprint catches this on the next format pass; alint surfaces them at `alint check` time (pre-format). Worth filing a janitorial cleanup PR. |
@@ -527,12 +520,11 @@ and `oss-no-trailing-whitespace` to exclude `tests/baselines/reference/**`
 
 ### 6.2 Open and resolved `.alint.yml` bugs
 
-One rule in this directory's `.alint.yml` still produces systemically
-wrong verdicts (Bug 1, awaiting an engine-side fix); the second was
-resolved in v0.9.18 (Bug 2, preserved as bug-discovery context for
-pitfall #22).
+Both known config bugs are resolved: Bug 1 by removing a rule whose
+compound-suffix pairing was not expressible, and Bug 2 by correcting the
+YAML scalar and severity. The details remain as regression context.
 
-#### Bug 1 (still open): `ts-baseline-errors-pair-with-js` fires 9,055 false positives
+#### Bug 1 (resolved): `ts-baseline-errors-pair-with-js` fired 9,055 false positives
 
 **Cause.** The `pair` rule's `{stem}` token resolves via Rust's
 `std::path::Path::file_stem()`, which strips only the **last**
@@ -643,8 +635,8 @@ TypeScript via batch B1).
   airflow's `check-no-new-airflow-exceptions`. **2 sources;
   v0.10+ design candidate.**
 - **`{stem_all}` template token** (strip all recognised extensions
-  from a path basename) — would fix the `ts-baseline-errors-pair-with-js`
-  rule cleanly. **NEW alint-future candidate** surfaced by this
+  from a path basename) — would make it possible to restore the removed
+  `ts-baseline-errors-pair-with-js` rule cleanly. **alint-future candidate** surfaced by this
   case study; single-source for now (TypeScript) but applies anywhere
   multi-extension files are paired (`.test.ts.snap` ↔ `.test.ts` etc).
 - **`Format::Jsonc` variant for the `*_path_equals` / `*_path_matches`
@@ -699,16 +691,15 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   needs sibling package.json, python@v1 default test-fixture excludes,
   oss-license-exists recognises LICENSE.TXT). v0.9.19/v0.9.20 added
   width-aware human output and the bundled-rule message audit.
-- **Rule count:** **68** (22 custom + 6 bundled rulesets — `oss-baseline`
-  15, `node` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11,
-  `tooling/editorconfig` 3, `agent-context` 5; some rule IDs overlap
-  which is why the grand total is 68 rather than the arithmetic sum)
-- **`alint validate-config`:** ✓ Config valid: 68 rule(s) loaded
+- **Current rule count:** **69 effective rules** (25 rules declared
+  here, 2 local facts, and 6 extended rulesets, after ID
+  overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 69 rule(s) loaded
 - **Live-tree recheck status:** Counts in §6 reflect the 2026-05-07
-  v0.9.17 walk; the 748 pitfall-#22 aspirational fires (Bug 2) are
-  RESOLVED in v0.9.18 (current `.alint.yml` carries `|-` + `level: info`
-  on both copyright-header rules). The 9,055 `pair`-rule FPs (Bug 1)
-  are STILL OPEN, awaiting `{stem_all}` v0.10+ template token.
+  v0.9.17 walk. The 748 pitfall-#22 aspirational fires (Bug 2) were
+  resolved in v0.9.18. The rule behind the 9,055 `pair` false positives
+  (Bug 1) is retired until the relationship can be modeled precisely;
+  the historical finding count is not part of current coverage.
 - **Pitfall fixes:**
   - Pitfall **#18** (per-rule `respect_gitignore: false`) — engine-fixed
     in v0.9.17; not needed here.
@@ -722,23 +713,20 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   Bug 1 above), `Format::Jsonc` for structured-query rules (NEW v0.10+
   candidate, 1 source — but applies to vscode, deno, helm, anywhere
   tsconfig is consumed).
-- **Open suspected bugs in this directory's `.alint.yml`:** 1 rule
-  (`ts-baseline-errors-pair-with-js`, 9,055 FPs from the `{stem}`
-  semantic gap). Awaits the `{stem_all}` v0.10+ template-token engine
-  extension; no config-side workaround is clean enough to apply yet.
-  See §6.2 Bug 1.
+- **Open suspected bugs in this directory's `.alint.yml`:** none. The
+  compound-suffix pairing stays unconfigured until the engine can express it.
 
 ## v0.11 re-analysis update (2026-05-25)
 
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (71 rules, ~67% coverage). +3 surfaces: cross_file_value_equals
+accordingly (69 rules, 17/27 inventoried surfaces, ~63% coverage). +2 surfaces: cross_file_value_equals
 pins the dprint TypeScript plugin version (.dprint.jsonc wasm URL <->
-package.json @dprint/typescript), registry_paths_resolve resolves
-src/lib/libs.json $.libs[*] to the .d.ts sources, and import_gate (js) is a
+package.json @dprint/typescript), and import_gate (js) is a
 coarse stand-in for a no-direct-import rule. Non-replaceable: the 9 custom
-AST eslint rules, the baseline accept/diff loop, generated-lib freshness.
+AST eslint rules, the baseline accept/diff loop, generated-lib freshness,
+and mapping extensionless `libs.json` entries to `.d.ts` files.
 
 Full catalogue, coverage math, and cross-cutting findings:
 `docs/development/case-study-v011-reanalysis-log.md` (Batch 4).

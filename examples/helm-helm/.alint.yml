@@ -196,7 +196,7 @@ rules:
   # patch level (1.26.0) and .github/env at minor (1.26); we compare the
   # minor-level slice to avoid a false drift.
   - id: helm-go-version-sync
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: ".github/env"
       extract:

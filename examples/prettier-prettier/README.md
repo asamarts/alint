@@ -93,10 +93,10 @@ export:
 - `languages.evaluate.js` — linguist-languages lookup table consumed at
   build time
 
-The build's `scripts/build/build.js` loads each plugin via these
-conventional filenames; a plugin that drops `languages.evaluate.js`
-would silently be omitted from the production bundle. Yet **nothing
-on disk asserts this contract**:
+Each plugin's `index.js` imports `languages.evaluate.js` statically. A missing
+file therefore fails module resolution during the build rather than silently
+dropping the plugin. The alint presence rule gives an earlier, clearer error,
+but it is not a net-new integrity guarantee:
 
 ```
 $ rg -l "language-\*/index" .github scripts package.json eslint.config.js \
@@ -201,7 +201,7 @@ Each row tagged with one of:
 
 ### 2.4 The 8 `src/language-*` plugins
 
-8 / 8 mapped today via the **5 net-new gates** (per the brief's
+8 / 8 mapped today via **5 structural gates** (per the brief's
 prettier note — verified each below):
 
 | Net-new gate | Verified rule ID | Verified target |
@@ -212,11 +212,10 @@ prettier note — verified each below):
 | 4. Every `packages/plugin-*` is published under `@prettier/` scope | `prettier-plugin-package-prettier-scope` | `json_path_matches` on `packages/plugin-*/package.json#$.name` |
 | 5. The 20 changelog category roster + 2 templates exist | `prettier-changelog-categories-exist` | `file_exists` over the 22 explicit paths |
 
-These 5 are NET-NEW — none of prettier's 8 `lint:*` scripts, 16
-`lint.yml` steps, or 5 custom node scripts encodes them. They're
-maintained socially today (review + repo memory) and would silently
-ship a broken plugin or orphaned changelog category until production
-build-failure or release.
+These 5 make the layout explicit and produce focused diagnostics. They are
+not all net-new enforcement: each plugin's `index.js` statically imports
+`languages.evaluate.js`, so that missing file already breaks the build. The
+remaining package/changelog shape checks are primarily review-time guards.
 
 ### 2.5 The 20 changelog categories + 2 templates
 
@@ -245,14 +244,11 @@ checks).
    eslint, knip) — alint's no-AST non-goal applies cleanly. Drop
    them in `command:` rules so a single `alint check` is the gate.
 
-2. **The 5 net-new gates are the launch-pitch headline for prettier**
+2. **The structural gates provide fast, focused diagnostics for prettier**
    (per the brief's note). Per-language-plugin convention discipline
-   is maintained socially today — there is zero on-disk enforcement.
-   None of the 11 `lint:*` scripts, none of the 16 `lint.yml` steps,
-   and none of the 5 custom validation node scripts checks the per-
-   plugin layout. Alint's `for_each_dir` over `src/language-*` adds
-   5 net-new gates that prettier's existing ESLint + prettier-itself
-   + cspell + knip + tsc stack does not provide today.
+   benefits from a direct diagnostic, even where module resolution already
+   catches a missing import. Alint's `for_each_dir` over `src/language-*`
+   reports the structural cause without waiting for the production build.
 
 3. **`command_idempotent` mode is the second most-demanded primitive**
    across the inventory. prettier's `ensure-no-files-changed.js` is
@@ -293,7 +289,7 @@ custom node scripts (5):
   out-of-scope:     1 / 5  = 20%
 
 src/language-* + packages/plugin-* + changelog (30):
-  alint-today:     30 / 30 = 100%   (all via the 5 net-new gates + 22 file_exists)
+  alint-today:     30 / 30 = 100%   (via 5 structural gates + 22 file_exists)
 
 governance/config artefacts (10):
   alint-today:     10 / 10 = 100%
@@ -370,7 +366,7 @@ rules:
 
 - **22 prettier-specific rules** in `.alint.yml`: 1 deps-pinned + 6
   command shellouts (yarn lint, prettier, eslint, cspell,
-  format-test, actionlint analogue) + 5 changelog gates + 5 net-new
+  format-test, actionlint analogue) + 5 changelog gates + 5 structural
   layout gates + 5 root-config presence + 3 package.json shape
   rules.
 - **46 bundled rules** from the 6 extended rulesets (some IDs overlap,
@@ -411,10 +407,10 @@ do not change throughput characteristics).
 | **alint full pass** (68 rules; mostly declarative + 6 `command:` shellouts that no-op when tools are absent) | n/a | n/a | **102 ms** ± 11 ms | — |
 | `lint-changelog.js` invariants (one node script per cat) | node + custom JS | pending — needs node toolchain | included in 102 ms full pass | n/a |
 | `check-deps.js` root pinning regex | node + custom JS | pending | included in 102 ms full pass | n/a |
-| **5 net-new gates** (per-language-plugin + changelog roster) | n/a — no upstream check | n/a | included in 102 ms full pass | infinite (no upstream equivalent) |
+| **5 structural gates** (per-language-plugin + changelog roster) | focused file checks; one overlaps static module resolution | n/a | included in 102 ms full pass | n/a |
 
 The headline number: **a single 102 ms alint pass replaces
-lint-changelog.js (5 sub-checks) + check-deps.js + the 5 net-new
+lint-changelog.js (5 sub-checks) + check-deps.js + the 5 structural
 gates that have no upstream equivalent + the 22-path changelog
 roster.** Pure declarative check time vs the multi-script node
 sequential overhead: subsecond consolidation.
@@ -433,7 +429,7 @@ Each script does its own fs walk; cspell + prettier + eslint + tsc
 each pay startup cost per process. Typical wall-clock on a clean
 checkout: **~30-45 s** on a developer laptop, dominated by tsc + knip
 + cspell. alint's 102 ms pass replaces the structural floor + 5
-net-new gates without paying any of those startup costs.
+structural gates without paying any of those startup costs.
 
 The `command:` shellouts of course inherit the underlying tool's
 runtime — the speedup is from the native-rule subset *plus* the
@@ -450,7 +446,8 @@ Run: `alint check --config /home/kaminsod/projects/alint/examples/prettier-prett
 the live tree (23 errors + 13 warnings + 75 info; 31 passing; 17
 failing rules; 69 auto-fixable). Of those, the bulk was committed
 `node_modules/` test fixtures (intentional — see §6.1) + cosmetic
-trailing-whitespace + final-newline findings. **The 5 net-new gates
+trailing-whitespace + final-newline findings. Of the 69 trailing-whitespace
+findings, 62 are intentional `tests/format/` fixtures. **The structural gates
 pass** — every `src/language-*/` exports both `index.js` and
 `languages.evaluate.js`; every `packages/plugin-*` has the full
 shape; every changelog category has its `.gitkeep`. **No real bug
@@ -473,15 +470,15 @@ counts on this tree.
 | Finding | Path | Severity | Rule | Triage |
 |---|---|---|---|---|
 | 2 committed `node_modules/` | `tests/integration/.../node_modules`, `tests/integration/plugins/virtualDirectory/node_modules` | error | `node-no-tracked-node-modules`, `hygiene-no-node-modules` | **False positive (test fixtures).** prettier intentionally checks in tiny `node_modules/` trees as test fixtures for plugin-resolution + path-handling integration tests. **Recommended fix:** add `tests/integration/**/node_modules/**` to the rule's `paths.exclude:` list. Filed under the bundled-ruleset refinement queue. |
-| ~75 info-level trailing-whitespace + final-newline | `website/blog/2025-06-23-3.6.0.md`, various blog posts | info | `oss-no-trailing-whitespace`, `oss-final-newline` | Real but unweighted — prettier doesn't gate on blog-post trailing whitespace. Below the project's threshold of attention. **All 75 are auto-fixable** via `alint fix`. |
+| 69 trailing-whitespace findings, plus final-newline findings | 62 under `tests/format/`; the remainder in blog/docs files | info | `oss-no-trailing-whitespace`, `oss-final-newline` | The 62 format-test hits are intentional fixtures and must not be auto-fixed. The small remainder is cosmetic and outside Prettier's gate threshold. |
 | ~13 warnings | various | warning | (mixed bundled + custom rules) | Mostly cosmetic; not gated upstream. |
 
 **Total real findings (alint-surfaced, existing tooling missed):**
 The structural floor is healthy at HEAD. The 2
 "node_modules in tests/" findings are intentional test fixtures (false
-positive — recommended bundled-rule refinement). The 75 info-level
-findings are below prettier's gate threshold but real signal for
-auto-fix.
+positive — recommended bundled-rule refinement). Most whitespace findings
+are also test fixtures; only the small non-fixture remainder is appropriate
+for cleanup or auto-fix.
 
 ### 6.2 Pitfall #22 verification (per the brief's batch-5 special-attention check)
 
@@ -573,7 +570,7 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 - **Live-tree recheck:** **performed at v0.9.17** — see §6 for the
   111-violation breakdown (2 false-positive `node_modules/` test
   fixtures + ~13 warnings + 75 cosmetic info-level findings; **5
-  net-new gates all pass — structural floor healthy**). Not re-run
+  structural gates all pass — structural floor healthy**). Not re-run
   for v0.9.20.
 - **Pitfall fixes:** Pitfall #18 (per-rule `respect_gitignore: false`)
   and #19 (literal-path runtime guard for `root_only: true` +
@@ -612,7 +609,7 @@ the v0.10+ candidate roster:
 | `unique_by` cross-dir | prettier PR-number uniqueness across changelog categories | **1 source** (prettier) — single-source, defer |
 | Env-injection on `command:` rules | prettier "Lint docs code block" PRETTIER_DEBUG | **1 source** (prettier) — single-source, defer |
 
-The 5 net-new gates (per the brief's prettier note) are **all
+The 5 structural gates (per the brief's prettier note) are **all
 verified against /tmp/prettier**:
 
 1. `prettier-each-language-plugin-has-index` → 8 plugins under
@@ -634,7 +631,7 @@ verified against /tmp/prettier**:
 
 **All 22 explicit `file_exists` paths in
 `prettier-changelog-categories-exist` resolve at HEAD.** None of
-the 5 net-new gates surfaces a finding — the structural floor is
+the 5 structural gates surfaces a finding — the structural floor is
 healthy. They're scoped to fire when (e.g.) a new language plugin
 lands without its category dir, or a published `packages/plugin-*`
 ships without a README to npm.

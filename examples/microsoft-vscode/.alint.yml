@@ -256,7 +256,7 @@ rules:
   # tail with a regex so the two extracted strings are equal.
   - id: vscode-copilot-engines-version-matches-root
     when: facts.has_copilot_ext
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "package.json"
       extract:

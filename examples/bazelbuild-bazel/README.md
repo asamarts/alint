@@ -313,9 +313,9 @@ Buildifier (1 surface):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (~1,150 lines, 41
-repo-specific rules, 4 bundled rulesets folded in via `extends:`,
-**81 rules total** loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (43 repo-specific rules,
+5 bundled rulesets folded in via `extends:`, **85 effective rules** —
+confirmed by `alint validate-config`).
 
 **Synopsis of the 7 most load-bearing repo-specific rules** (full config
 in `.alint.yml`):
@@ -370,18 +370,11 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **41 repo-specific rules** in `.alint.yml`: 7 Bazel-structural-file
-  + 2 BUILD/.bzl naming + 1 .bzl Apache header + 2 GHA Bazel-team
-  hardening + 4 .gitattributes invariants + 3 .bazelci CI rules + 7
-  top-level metadata + 5 Java source-tree convention + 3 C++
-  source-tree convention + 3 Python tooling + 2 shell tooling + 1
-  buildifier orchestration + 1 hygiene override (no `output/` from
-  compile.sh) + 1 .bazelversion presence/shape pair.
-- **40 bundled rules** from the 4 extended rulesets minus 1 fact
-  (`has_java` is an `- id:` entry but not a loadable rule) = **81
-  total loaded**.
+- **43 rules** declared in `.alint.yml`.
+- **85 effective rules** after loading the 5 extended rulesets and
+  applying ID overrides/deduplication.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 81
+**Validation:** `alint validate-config` reports `✓ Config valid: 85
 rule(s) loaded`. Pitfall checks: the magic comment is present (line 1);
 no `pattern: |` block scalars (pitfall #22 — authoring-only — not
 applicable); the `bazel-version-file-exists` rule uses the
@@ -602,10 +595,9 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 - **alint version (current):** `0.9.20` (2026-05-10). Capture pass
   was against `0.9.17`; counts in §6 are v0.9.17-era and have not
   been re-run.
-- **Rule count:** **81** (41 custom + 4 bundled rulesets — `oss-baseline`
-  15, `java` 11, `ci/github-actions` 3, `hygiene/no-tracked-artifacts`
-  11; minus 1 fact `has_java` = 81 loadable rules)
-- **`alint validate-config`:** ✓ Config valid: 81 rule(s) loaded
+- **Current rule count:** **85 effective rules** (43 rules declared in
+  this config plus 5 extended rulesets, after ID overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 85 rule(s) loaded
 - **Live-tree recheck:** **v0.9.17-era** — see §6 for the 910-violation
   breakdown captured 2026-05-07. Per the v0.9.18 B4 cross-cutting
   revalidation pass, the 30 `hygiene-no-js-build-outputs` warnings
@@ -661,10 +653,10 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (86 rules, ~69% coverage). +5 surfaces: import_gate reclaims
+accordingly (85 rules, 37/55 inventoried surfaces, ~67% coverage). The
+nonexistent `.bazelci` version pin is no longer credited. import_gate reclaims
 two textual layering firewalls (C++ -> JNI headers, sun.misc.Unsafe
-routing), cross_file_value_equals syncs the .bazelversion pin against the
-presubmit config, and changed_since PR-scopes the now-5,729-file Java
+routing), and changed_since PR-scopes the now-5,729-file Java
 license-header sweep. The re-analysis also caught a 274-false-positive
 bug in the prior config (a BUILD-naming rule with prefix "#").
 

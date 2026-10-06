@@ -244,13 +244,9 @@ out-of-scope:    11 / 35 = 31%   (5 custom eslint TSESTree + extract-errors + li
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (878 lines including
-narrative comments, **87 rules** loaded — confirmed by
-`alint validate-config`: 33 react-specific + 54 from 8 bundled rulesets
-— `oss-baseline=15` + `node=9` + `monorepo=4` +
-`monorepo/yarn-workspace=4` + `ci/github-actions=3` +
-`hygiene/no-tracked-artifacts=11` + `tooling/editorconfig=3` +
-`agent-context=5` − overlap = 54 effective rule IDs after dedup).
+Working config: [`./.alint.yml`](.alint.yml) (**80 effective rules** —
+36 rules declared here plus 2 local facts and 6 extended rulesets, after ID
+overrides/deduplication), confirmed by `alint validate-config`.
 
 Synopsis of the load-bearing repo-specific rules (full config in
 `.alint.yml`):
@@ -295,10 +291,11 @@ rules:
 ```
 
 **Repo-specific vs bundled split:**
-- **33 repo-specific rules** in `.alint.yml` (the `react-*` prefix)
-- **54 bundled rules** from the 8 extended rulesets
+- **36 rules** declared in `.alint.yml`, plus 2 local facts.
+- **80 effective rules** after loading the 6 extended rulesets and
+  applying ID overrides/deduplication.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 87
+**Validation:** `alint validate-config` reports `✓ Config valid: 80
 rule(s) loaded`. The `pattern: |-` (strip-final-newline block scalar)
 on `react-copyright-header-{src,scripts}` is a **pitfall #22 hardening
 fix landed in the v0.9.17-era batch** (the engine still doesn't
@@ -426,8 +423,8 @@ The v0.9.17-era audit flagged TWO `pattern: |` instances in the config
 (`react-copyright-header-scripts`). Both were hardened to `pattern: |-`
 (strip-final-newline block scalar) for canonical-correct semantics per
 pitfall #22 guidance. **Verified:** the live `.alint.yml` ships
-`pattern: |-` on both rules; `alint validate-config` still reports `✓
-Config valid: 87 rule(s) loaded`. **Pitfall #22 remains
+`pattern: |-` on both rules; `alint validate-config` reports `✓ Config
+valid: 80 rule(s) loaded`. **Pitfall #22 remains
 authoring-only** in v0.9.20 (engine does not auto-strip the trailing
 newline; configs must use `|-`).
 
@@ -487,12 +484,10 @@ Three concrete unanalyzed angles for a future revalidation pass:
 ## 9. Validation status (2026-05-10)
 
 - **alint version:** `0.9.20` (2026-05-10)
-- **Rule count:** **87** (33 react-specific + 54 from 8 bundled
-  rulesets — `oss-baseline=15`, `node=9`, `monorepo=4`,
-  `monorepo/yarn-workspace=4`, `ci/github-actions=3`,
-  `hygiene/no-tracked-artifacts=11`, `tooling/editorconfig=3`,
-  `agent-context=5`; rule IDs overlap, total dedups to 54)
-- **`alint validate-config`:** ✓ Config valid: 87 rule(s) loaded
+- **Current rule count:** **80 effective rules** (36 rules declared here,
+  2 local facts, and 6 extended rulesets, after ID
+  overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 80 rule(s) loaded
 - **Live-tree recheck:** v0.9.17-era counts in §6 carried forward; not
   re-walked under v0.9.20. The v0.9.18 pre-launch fix wave (A1-A6:
   hygiene-no-js-build-outputs sibling-package.json gate, ASF preamble
@@ -524,12 +519,14 @@ Three concrete unanalyzed angles for a future revalidation pass:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (82 rules, ~77% coverage). +4 surfaces: cross_file_value_equals
+accordingly (80 rules, 22/31 inventoried surfaces, ~71% coverage). The two
+clean-checkout misfires (build-output-only package files and the unsupported
+error extractor command) are no longer credited. cross_file_value_equals
 natively replaces version-check.js (the exact primitive the old example
 flagged as a non-replaceable node shell-out) plus a new
-ReactVersions.js <-> ReactVersion.js sync, registry_paths_resolve resolves
-the package.json `files` tarball allow-list, and generated_file_fresh
-covers extract-errors codes.json freshness. Residual: N-in-1 set membership
+ReactVersions.js <-> ReactVersion.js sync. The package allow-list describes
+build output, and extract-errors has no stdout mode and needs a built tree,
+so both remain with React's build/release tooling. Residual: N-in-1 set membership
 (every thrown Error literal in codes.json) and an append-only registry kind.
 
 Full catalogue, coverage math, and cross-cutting findings:

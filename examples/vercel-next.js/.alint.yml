@@ -12,7 +12,7 @@
 #     [package] block) — that's why we assert VALUE uniformity, not the
 #     `workspace = true` inheritance form.
 #   - 37 GitHub Actions workflows
-#   - bespoke check scripts: check-manifests.js, check-error-codes.js,
+#   - bespoke check scripts: check-error-codes.js,
 #     validate-externals-doc.js, check-unused-turbo-tasks.mjs,
 #     check-examples.sh, check-pre-compiled.sh, check-is-release.js,
 #     check-backport-canary-release.js
@@ -26,18 +26,14 @@
 #             check-unused-turbo-tasks
 #
 # NEW SINCE v0.9.17 (the headline of this re-analysis):
-#   1. errors/<id>.mdx registry — every errors/**/*.md(x) page reachable
-#      from errors/manifest.json (check-manifests.js) is now expressible
-#      as `registry_paths_resolve` (manifest paths -> files on disk).
-#   2. errors.json code registry — `pair_hash`/`generated_file_fresh`
+#   1. errors.json code registry — `pair_hash`/`generated_file_fresh`
 #      freshness of the consolidated code->message map (check-error-codes.js
 #      regenerates from .errors/ and fails if dirty).
-#   3. ALL `command:` wrappers upgraded to `command_idempotent` (the gates
-#      are read-only --check tools) with explicit `timeout:`.
-#   4. server-external-packages.jsonc <-> external-bundling.mdx now a real
-#      `cross_file_value_equals` (was a documented gap).
-#   5. wordlist/ordering gates -> `ordered_block` (was a documented gap).
-#   6. PR-scoping the 29k-file tree via per-rule `scope_filter.changed_since`.
+#   2. `command:` wrappers upgraded to `command_idempotent` where the command
+#      is an actual repository gate and has check/idempotence semantics.
+#   3. server-external-packages.jsonc <-> external-bundling.mdx remains with
+#      the repository's validator because the Markdown side is free-form.
+#   4. PR-scoping the 29k-file tree via per-rule `scope_filter.changed_since`.
 # ============================================================================
 
 version: 1
@@ -53,35 +49,6 @@ extends:
   - alint://bundled/tooling/editorconfig@v1
 
 rules:
-  # ════════════════════════════════════════════════════════════════════
-  # 1. ERRORS REGISTRY  — the biggest v0.10 win.
-  # ════════════════════════════════════════════════════════════════════
-
-  # check-manifests.js: every errors/**/*.md(x) (except template) must be
-  # reachable from errors/manifest.json's route tree. The manifest carries
-  # `routes[*].path` like "/errors/<slug>.md"; we resolve each declared
-  # path to a file on disk. (The script ALSO checks the reverse direction
-  # — orphan files; registry_paths_resolve covers the forward arm here.)
-  - id: nextjs-errors-manifest-paths-resolve
-    kind: registry_paths_resolve
-    source: errors/manifest.json
-    extract:
-      json: "$..routes[*].path"
-    base: "."
-    expect: file
-    level: error
-    message: >-
-      Every path in errors/manifest.json must resolve to a file on disk
-      (the route paths are "/errors/<slug>.md"). Mirrors check-manifests.js
-      forward arm: a manifest entry with no backing page 404s the docs site.
-
-  - id: nextjs-errors-manifest-present
-    kind: file_exists
-    paths: errors/manifest.json
-    level: error
-    message: >-
-      errors/manifest.json is the canonical error-page route graph.
-
   # errors.json code-registry freshness. check-error-codes.js consolidates
   # any staged-but-unmerged .errors/*.json into errors.json and EXITS 1 if
   # it had to add anything (i.e. the committed errors.json is stale). That
@@ -274,13 +241,6 @@ rules:
     pattern: '"private":\s*true'
     level: error
     message: 'Root package.json must declare "private": true so root never publishes.'
-
-  - id: nextjs-tsconfig-strict-mode
-    kind: file_content_matches
-    paths: tsconfig.json
-    pattern: '"strict":\s*true'
-    level: error
-    message: "Root tsconfig.json must keep strict: true (pnpm lint-typescript / tsc --noEmit is the gate)."
 
   - id: nextjs-lerna-uses-pnpm
     kind: json_path_matches
@@ -546,12 +506,6 @@ rules:
     timeout: 1800
     level: error
 
-  - id: nextjs-typos-check
-    kind: command_idempotent
-    command: ["typos"]
-    timeout: 120
-    level: warning
-
   - id: nextjs-check-examples
     kind: command_idempotent
     command: ["pnpm", "check-examples"]
@@ -572,15 +526,6 @@ rules:
     timeout: 60
     level: warning
 
-  # check-manifests.js reverse arm (orphan errors/*.md not in the manifest)
-  # — registry_paths_resolve covers the forward arm above; the orphan-detection
-  # direction stays a command wrapper until a `registry_membership` kind exists.
-  - id: nextjs-check-manifests
-    kind: command_idempotent
-    command: ["node", "scripts/check-manifests.js"]
-    timeout: 120
-    level: warning
-
 # ============================================================================
 # GENUINE NON-REPLACEABLES (kept as the authoritative tool / out of scope):
 #   - prettier --check        : AST-aware formatter
@@ -589,7 +534,6 @@ rules:
 #   - ast-grep scan           : Rust/TS AST pattern matching
 #   - alex                    : insensitive-language NLP
 #   - cargo fmt/clippy        : Rust language-level lints + the compile
-#   - typos                   : dictionary spell-check
 #   - check-unused-turbo-tasks.mjs : turbo-tasks AST scan over 50k+ Rust LOC
 #   - check-error-codes.js    : MUTATING generator (writes errors.json, rm's
 #                               .errors/) — wrapped via command_idempotent, not
@@ -606,14 +550,10 @@ rules:
 #   - the Rust compile itself : cargo build / turbo-tasks codegen.
 #
 # NEW-RULE-KIND CANDIDATES surfaced by this re-analysis:
-#   A. registry_membership (bidirectional) — registry_paths_resolve only does
-#      manifest->disk (forward). check-manifests.js ALSO flags disk files NOT in
-#      the manifest (orphans). A reverse/bidirectional kind would retire the
-#      check-manifests command wrapper entirely.
-#   B. mutating generated_file_fresh — a `mode: write-then-diff` so MUTATING
+#   A. mutating generated_file_fresh — a `mode: write-then-diff` so MUTATING
 #      generators (check-error-codes.js, check-pre-compiled.sh) become true
 #      freshness gates instead of command_idempotent wrappers.
-#   C. cross_file_value_equals with a markdown-table extractor — would close
+#   B. cross_file_value_equals with a markdown-table extractor — would close
 #      the validate-externals-doc.js gap (server-external-packages.jsonc vs the
 #      external-bundling docs table).
 # ============================================================================

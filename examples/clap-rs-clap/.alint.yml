@@ -107,7 +107,7 @@ rules:
   #    not the other is a silent late-CI failure — now a structural error.
   # ═══════════════════════════════════════════════════════════════════
   - id: clap-msrv-coherent-across-ci
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: Cargo.toml
       extract: { toml: "$.workspace.package['rust-version']" }
@@ -124,7 +124,7 @@ rules:
       together — a lone bump fails the `check (msrv)` job late.
 
   - id: clap-stable-toolchain-coherent
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       # Makefile is the canonical STABLE pin the Makefile targets consume.
       file: Makefile
@@ -218,7 +218,7 @@ rules:
   #    different (still-valid) category string.
   # ═══════════════════════════════════════════════════════════════════
   - id: clap-member-category-identity
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: Cargo.toml                       # the `clap` facade is canonical
       extract: { toml: "$.package.categories[0]" }
@@ -366,7 +366,7 @@ rules:
   # cargo-release keeps these in lockstep via pre-release-replacements;
   # alint now asserts the invariant instead of trusting the release script.
   - id: clap-citation-version-matches-crate
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: Cargo.toml
       extract: { toml: "$.package.version" }

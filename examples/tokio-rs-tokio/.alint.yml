@@ -111,25 +111,12 @@ rules:
     level: warning
 
   # ════════════════════════════════════════════════════════════════
-  # BIG WIN #1 — README mirror equality   [NEW v0.10: pair_hash]
+  # README mirror equality remains with CI.
   # check-readme job: `diff README.md tokio/README.md`.
-  # The v0.9.17 config could only assert BOTH files exist; pair_hash
-  # asserts byte-equality. We hash the root README and require its digest
-  # to be "contains"-found in the tokio crate copy. (Identical files →
-  # identical sha256; for true diff-on-mismatch a future
-  # cross_file_value_equals(lines) variant would be cleaner — see note.)
   # ════════════════════════════════════════════════════════════════
-  - id: tokio-readme-mirror
-    kind: pair_hash
-    source: "README.md"
-    target: "tokio/README.md"
-    algorithm: sha256
-    format: contains
-    level: error
-    message: |
-      README.md (repo root) and tokio/README.md must stay byte-identical
-      (CI enforces `diff README.md tokio/README.md`). pair_hash compares
-      sha256 digests so any drift fails the lint.
+  # Full-file byte equality is not a `pair_hash format: contains` operation.
+  # Keep the repository's existing `diff README.md tokio/README.md` CI check
+  # as the authority until alint has a byte-equality rule kind.
 
   # ════════════════════════════════════════════════════════════════
   # BIG WIN #2 — tokio version is current in README
@@ -141,7 +128,7 @@ rules:
   # `version = "X"` snippet in README.md.
   # ════════════════════════════════════════════════════════════════
   - id: tokio-readme-version-current
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "tokio/Cargo.toml"
       extract: { toml: "$.package.version" }
@@ -165,7 +152,7 @@ rules:
   # check at all.
   # ════════════════════════════════════════════════════════════════
   - id: tokio-msrv-coherence
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "tokio/Cargo.toml"
       extract: { toml: "$.package['rust-version']" }
@@ -189,49 +176,20 @@ rules:
       machine-extractable, left as docs.)
 
   # ════════════════════════════════════════════════════════════════
-  # BIG WIN #4 — inter-crate tokio dependency pin coherence
-  #              [NEW v0.10: cross_file_value_equals]
-  # tokio-util depends on tokio = "1.47.0"; a published-crate dep must
-  # never out-pin the actual tokio version. We assert the tokio-util dep
-  # major matches; for an exact-pin policy swap regex to capture full ver.
-  # (Demonstrative — tokio's actual policy allows >= within 1.x, so this
-  # is a warning, not an error.)
+  # Inter-crate dependency requirements remain with Cargo and review.
   # ════════════════════════════════════════════════════════════════
-  - id: tokio-util-dep-major-matches
-    kind: cross_file_value_equals
-    source:
-      file: "tokio/Cargo.toml"
-      extract: { regex: 'version = "([0-9]+)\.[0-9]+\.[0-9]+"' }   # tokio major "1"
-    targets:
-      - file: "tokio-util/Cargo.toml"
-        extract: { regex: 'tokio = \{ version = "([0-9]+)\.[0-9]+\.[0-9]+"' }
-    level: warning
-    message: |
-      tokio-util's `tokio = { version = "1.x.y" }` dependency must track
-      the same major as the tokio crate it ships beside.
+  # Cargo's TOML structure, rather than an unscoped regex that also matches
+  # dependency versions, must identify the package version. The published
+  # crates intentionally use compatible 1.x requirements, so this stays CI-
+  # and Cargo-owned instead of asserting a convention the repository lacks.
 
   # ════════════════════════════════════════════════════════════════
-  # BIG WIN #5 — spellcheck.dic sorted + unique   [NEW v0.10: ordered_block]
+  # spellcheck.dic sorting and count parity remain with CI.
   # check-spelling job runs `sed '1d' | LC_ALL=en_US.UTF8 sort -uc`.
-  # ordered_block asserts the lines between the start/end markers are
-  # sorted and unique. The v0.9.17 config flagged this as a gap. We bound
-  # the block: start AFTER the integer header line, end at EOF.
-  # NOTE: the count-header == actual-line-count assertion (first line is
-  # an int equal to wc -l of the rest) is STILL a gap — it needs a
-  # "line-count cross-check" primitive (a NEW-rule-kind candidate:
-  # `line_count_header`). Kept as the partial check below.
   # ════════════════════════════════════════════════════════════════
-  - id: tokio-spellcheck-dic-sorted
-    kind: ordered_block
-    paths: "spellcheck.dic"
-    start: '^\d+$'        # the integer header line; block begins after it
-    end: '\z'             # to end of file
-    comparator: lexical   # LC_ALL=C sort; tune if locale matters
-    unique: true
-    level: warning
-    message: |
-      spellcheck.dic words (everything after the integer header) must be
-      sorted and unique, matching the check-spelling job's `sort -uc`.
+  # spellcheck.dic has no literal end marker, so `ordered_block` cannot model
+  # the words after its numeric header. The repository's `sort -uc` check
+  # remains authoritative for sorting and uniqueness.
 
   - id: tokio-spellcheck-dic-header-is-int
     kind: file_content_matches
@@ -449,10 +407,8 @@ rules:
 #      to the count of the remaining lines (spellcheck.dic header). Today
 #      only the "is an int" half is expressible. Generic to any
 #      "N\n<N lines>" manifest format.
-#   2. cross_file_value_equals(extract: {lines:{}}) full-file-equality
-#      mode — would let tokio-readme-mirror report the DIFF on mismatch
-#      (pair_hash only says "digests differ"). A natural pairing with the
-#      existing diff-style output.
+#   2. file_byte_equals — compare two complete files and report a useful diff
+#      on mismatch, covering the README mirror without misusing pair_hash.
 #   3. toml_member_set_equals — assert [workspace] members ⊇/== the
 #      [patch.crates-io] keys (currently only the single tokio path key is
 #      checked). A "two TOML arrays/key-sets must agree" primitive.

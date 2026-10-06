@@ -314,9 +314,9 @@ governance/build artefacts (8):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (1011 lines, 40
-pytorch-specific rules + 6 bundled rulesets, **87 rules total**
-loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (**60 effective rules** —
+23 declared here plus 4 extended rulesets, after ID
+overrides/deduplication), confirmed by `alint validate-config`.
 
 **Synopsis of the 8 most load-bearing repo-specific rules** (full
 config in `.alint.yml`):
@@ -367,16 +367,11 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **40 pytorch-specific rules** in `.alint.yml`: 3 broad-tree hygiene
-  + 1 Trojan Source override + 9 single-pattern `file_content_forbidden`
-  (mirroring the load-bearing grep_linter adapters) + 10 `command:`
-  shellouts + 3 GHA custom + 1 placeholder for MERGE_CONFLICTLESS_CSV
-  + 1 version.txt shape + 1 CODEOWNERS floor + 1 `file_starts_with`
-  shebang + 6 `file_exists` blocks + 4 misc.
-- **47 bundled rules** from the 6 extended rulesets (15 + 9 + 3 + 11 +
-  6 + 3 = 47).
+- **23 rules** declared in `.alint.yml`.
+- **60 effective rules** after loading the 4 extended rulesets and
+  applying ID overrides/deduplication.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 87
+**Validation:** `alint validate-config` reports `✓ Config valid: 60
 rule(s) loaded`. Pitfall checks:
 
 - Magic comment present (line 1).
@@ -532,7 +527,9 @@ was applied; this section is now informational.)
 
 ### 6.4 Suspected `.alint.yml` bugs
 
-**None.** Config validates cleanly (87 rules loaded). All known
+**None currently known.** Config validates cleanly (60 effective rules
+loaded). The original build-variables path rule was retired because its
+entries do not share one resolvable base. All remaining known
 pitfalls verified clean:
 
 - `(?m)` flag present on every multi-line regex (#13)
@@ -611,15 +608,9 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 
 - **alint version:** `0.9.20` (current as of 2026-05-10). Originally
   validated against `0.9.17` (2026-05-07).
-- **Rule count:** **87** (40 custom + 6 bundled rulesets — `oss-baseline`
-  15, `python` 9, `ci/github-actions` 3, `hygiene/no-tracked-artifacts`
-  11, `agent-hygiene` 6, `tooling/editorconfig` 3 = 47 bundled, no
-  overlap). v0.9.18-v0.9.20 did not change this count (A1-A6 are
-  bundled-side refinements that do not add/remove rule IDs;
-  v0.9.19/v0.9.20 changed only output width handling + bundled-rule
-  message text).
-- **`alint validate-config`:** ✓ Config valid: 87 rule(s) loaded
-  (v0.9.17-era; not re-run for v0.9.20).
+- **Current rule count:** **60 effective rules** (23 declared here plus
+  4 extended rulesets, after ID overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 60 rule(s) loaded.
 - **Live-tree recheck:** **performed at v0.9.17** against
   `/tmp/pytorch` — 23,113 violations, 32 rules pass silently; see §6
   for the breakdown. 6.2 s wall-clock (vs lintrunner's ~30-60 s for
@@ -659,12 +650,15 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (61 rules, ~78% coverage). +6 surfaces: the .lintrunner.toml
+accordingly (60 rules, 48/63 inventoried surfaces, ~76% coverage). The
+.lintrunner.toml
 formatter codes -> command_idempotent x9 (asserting "the formatter is a
-no-op", the real CI invariant), torchgen freshness -> generated_file_fresh,
-build_variables.bzl -> registry_paths_resolve. Correction: cmake/Codegen.cmake
+no-op", the real CI invariant), and torchgen freshness -> generated_file_fresh.
+Correction: cmake/Codegen.cmake
 exec()s the .bzl as Python, so there is no bzl<->CMake duplication to sync
-(the old README's "sync gap" was partly a mis-diagnosis). Non-replaceable:
+(the old README's "sync gap" was partly a mis-diagnosis). Its paths use
+different roots, so one `registry_paths_resolve` base produced about 1,300
+false findings and was removed. Non-replaceable:
 clang-tidy/mypy, the custom AST adapters, WORKFLOWSYNC (N-to-N equality).
 
 Full catalogue, coverage math, and cross-cutting findings:

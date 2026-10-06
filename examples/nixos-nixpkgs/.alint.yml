@@ -172,26 +172,10 @@ rules:
   # this was only enforced by shelling out to keep-sorted under
   # treefmt. The block delimiters are keep-sorted's literal markers.
   # ─────────────────────────────────────────────────────────────────
-  - id: nixpkgs-maintainers-keep-sorted
-    kind: ordered_block
-    paths: maintainers/maintainer-list.nix
-    start: '#\s*keep-sorted start'
-    end: '#\s*keep-sorted end'
-    level: warning
-    message: >-
-      The keep-sorted block in maintainer-list.nix must stay
-      alphabetically ordered (treefmt programs.keep-sorted enforces
-      this in CI; alint asserts it declaratively pre-flight).
-
-  - id: nixpkgs-team-list-keep-sorted
-    kind: ordered_block
-    paths: maintainers/team-list.nix
-    start: '#\s*keep-sorted start'
-    end: '#\s*keep-sorted end'
-    level: warning
-    message: >-
-      The keep-sorted block in team-list.nix must stay alphabetically
-      ordered (treefmt programs.keep-sorted; declarative twin).
+  # keep-sorted's `block=yes` mode groups multi-line Nix attributes before
+  # comparing them. `ordered_block` compares individual lines, so the two
+  # maintainer lists remain owned by treefmt instead of being approximated
+  # here with a rule that either no-ops or reports false findings.
 
   # ─────────────────────────────────────────────────────────────────
   # pkgs/by-name structural invariant — every package directory has a

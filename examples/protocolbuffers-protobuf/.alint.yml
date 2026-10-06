@@ -89,7 +89,7 @@ rules:
   #                                                              (see NEW-RULE-KIND CANDIDATES).
   # ════════════════════════════════════════════════════════════════════
   - id: protobuf-java-version-coherent
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: protobuf_version.bzl
       extract:
@@ -105,7 +105,7 @@ rules:
       published JAR ship different versions.
 
   - id: protobuf-ruby-version-coherent
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: protobuf_version.bzl
       extract:
@@ -176,18 +176,9 @@ rules:
   # sort over the whole file. (Some lists carry "# comment" markers and a
   # blank trailer; start/end bracket the comparable region.)
   # ════════════════════════════════════════════════════════════════════
-  - id: protobuf-failure-lists-sorted
-    kind: ordered_block
-    paths: "conformance/failure_list_*.txt"
-    start: '^[^#\s]'
-    end: '\z'
-    unique: true
-    level: warning
-    message: >-
-      conformance/failure_list_<lang>.txt entries should stay C-locale
-      sorted + unique so cross-binding diffs are reviewable and merge
-      conflicts minimal. (Was a documented-but-unenforced candidate in
-      the v0.9.17 config.)
+  # The conformance failure lists have no literal boundary markers and are
+  # not sorted upstream. Their semantics stay with the conformance runner;
+  # `ordered_block` cannot model them without inventing a false convention.
 
   # ════════════════════════════════════════════════════════════════════
   # 5. version.json LANGUAGES -> BINDING DIRS  (NEW — registry_paths_resolve)

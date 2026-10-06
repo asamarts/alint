@@ -295,7 +295,7 @@ CONTRIBUTORS.txt, LICENSE via bundled).
 
 ```
 ✅ alint-today:     34 / 45 = 76%
-🔄 alint-future:     7 / 45 = 16%   (v0.11+ cross_language_implementation_complete + ordered_block for failure_lists)
+🔄 alint-future:     7 / 45 = 16%   (cross-language parity plus a logical-list sorting primitive)
 ❌ out-of-scope:     4 / 45 =  9%   (conformance test execution + Apple privacy validation + Kokoro internal CI + cross-language wire-format binary-protos compare)
                     ─────────────────
                     total = 45 = 100%
@@ -312,14 +312,13 @@ CONTRIBUTORS.txt, LICENSE via bundled).
    apache/arrow + tensorflow/tensorflow + protobuf + angular +
    flutter. **v0.11 design phase ship-ready.**
 
-2. **`ordered_block` for failure_list files is a v0.10 ship-target
-   re-confirmed by 27 file targets in this repo** (19
+2. **The failure lists need a logical-list sorting primitive, not
+   `ordered_block`.** There are 27 file targets in this repo (19
    `failure_list_*.txt` + 8 `text_format_failure_list_*.txt`). All
    currently un-sorted (verified via `LC_ALL=C sort -c
-   conformance/failure_list_cpp.txt` → exits non-zero). Same v0.10
-   shape as rust + airflow + tokio + cpython + arrow + golang/go +
-   protobuf — **7 sources**, tied with `registry_paths_resolve` at
-   the top of the v0.10 backlog.
+   conformance/failure_list_cpp.txt` → exits non-zero), and they have no
+   literal boundary markers. The former regex-marker `ordered_block` rule
+   silently checked nothing and has been removed.
 
 3. **The conformance discipline is the launch-pitch headline.** Every
    binding has parity (own runner + own failure_list + own version
@@ -374,9 +373,9 @@ command shellouts (6):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (1067 lines, 79
-protobuf-specific rules + 3 bundled rulesets, **108 rules total**
-loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (**44 effective rules** —
+15 declared here plus 3 extended rulesets, after ID
+overrides/deduplication), confirmed by `alint validate-config`.
 
 **Synopsis of the 7 most load-bearing repo-specific rules** (full
 config in `.alint.yml`):
@@ -424,16 +423,11 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **79 protobuf-specific rules** in `.alint.yml`: 1 cross-language
-  README iteration + 12 version-manifest rules (5 version.json + 7
-  protobuf_version.bzl) + 9 conformance presence (proto + runner + 7
-  per-binding runners) + 8 per-binding failure_list family + 1 text-
-  format multi-path + 12 per-binding test workflow + 9 per-binding
-  manifest + 4 governance + 2 editions + 1 OpenSSF Scorecard + 6
-  command shellouts + others.
-- **29 bundled rules** from the 3 extended rulesets (15 + 3 + 11 = 29).
+- **15 rules** declared in `.alint.yml`.
+- **44 effective rules** after loading the 3 extended rulesets and
+  applying ID overrides/deduplication.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 108
+**Validation:** `alint validate-config` reports `✓ Config valid: 44
 rule(s) loaded`. Pitfall checks:
 
 - Magic comment present (line 1).
@@ -515,7 +509,7 @@ case study). **Counts not re-run for v0.9.20.**
 | Finding | Path | Severity | Rule | Triage |
 |---|---|---|---|---|
 | `=======` markdown-section underline misread as merge-conflict marker | `csharp/README.md` | error | `oss-no-merge-conflict-markers` | **False positive (pre-existing bundled-rule issue, fixed in v0.12 / `0d66ee95`).** The `=======` regex was too eager — it matched the ASCII underline used for markdown h2 sections (one of two valid Setext-style heading delimiters). Verified at v0.9.17; the v0.9.18 cross-cutting revalidation (B4) did NOT pull this rule into its A1-A6 refinement scope, so the FP persisted through v0.9.20. **Fixed in alint v0.12 (commit `0d66ee95`):** the rule now treats `=======` as a conflict separator only when the file also carries an unambiguous anchor line (`<<<<<<< `, `>>>>>>> `, or `||||||| ` — each 7 chars + space + ref), so pure 7-`=` Setext underlines no longer fire. |
-| ~50 GHA SHA-pin warnings | `.github/workflows/{scorecard,test_runner,…}.yml` | warning | `gha-pin-actions-to-sha` (bundled) | **Real but expected upstream issue.** protobuf has 22 workflows; many third-party actions still use floating tags. The bundled rule surfaces them at PR time; OpenSSF Scorecard surfaces the same nightly. Aligns with protobuf's existing Scorecard hygiene posture. |
+| 106 action references use a tag instead of a commit | 24 workflows, mostly protobuf's own `protocolbuffers/protobuf-ci` actions | warning | `gha-pin-actions-to-sha` (bundled) | **Real.** Measured with alint 0.16.1 on the 2026-05-07 snapshot; `release_bazel_module.yaml` also grants workflow-wide `contents: write`. |
 | ~21 info-level final-newline + trailing-whitespace | various | info | `oss-final-newline`, `oss-no-trailing-whitespace` | Real but unweighted — protobuf doesn't gate on these cosmetic items. **All auto-fixable** via `alint fix`. |
 | 6 "tool not on PATH" warnings | `MODULE.bazel`, `python/BUILD.bazel`, `ruby/google-protobuf.gemspec`, `go/BUILD.bazel`, `src/google/protobuf/BUILD.bazel` | warning | `protobuf-{buildifier,bazel-build-target,cpp-clang-format,python-flake8,ruby-rubocop,go-fmt}-check` | Expected — the tools are not installed in this test env. In production CI these would resolve cleanly. |
 
@@ -555,8 +549,10 @@ The config uses:
 
 ### 6.4 Suspected `.alint.yml` bugs
 
-**None.** Config validates cleanly (108 rules loaded). Live-tree
-recheck reproduces the README finding exactly.
+**None currently known.** Config validates cleanly (44 effective rules
+loaded). The original audit's non-working failure-list rule was retired;
+live-tree validation should still be repeated when the pinned snapshot is
+updated.
 
 ---
 
@@ -608,10 +604,9 @@ Three candidate refinements worth evaluating in subsequent sweeps:
    into one file; splitting per-binding via `nested_configs` would
    let each binding evolve independently and read like a per-language
    structural contract.
-2. **`ordered_block` for failure_list_<lang>.txt + text_format_
-   failure_list_<lang>.txt files.** With `ordered_block` at v0.10
-   ship-target, protobuf is the **canonical demand-driver** — 27 file
-   targets in one repo, all currently un-sorted.
+2. **Logical-list sorting for failure_list_<lang>.txt + text_format_
+   failure_list_<lang>.txt files.** `ordered_block` requires literal markers
+   and therefore cannot express these 27 unmarked, currently unsorted files.
 3. **`compliance/apache-2@v1` doesn't apply** (protobuf uses
    BSD-3-Clause not Apache-2). **`agent-context@v1`** could apply if
    protobuf adds an AGENTS.md / CLAUDE.md.
@@ -622,13 +617,9 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 
 - **alint version:** `0.9.20` (current as of 2026-05-10). Originally
   validated against `0.9.17` (2026-05-07).
-- **Rule count:** **108** (79 custom + 3 bundled rulesets — 15 + 3 + 11
-  = 29 bundled, no overlap). v0.9.18-v0.9.20 did not change this count
-  (A1-A6 are bundled-side refinements that do not add/remove rule IDs;
-  v0.9.19/v0.9.20 changed only output width handling + bundled-rule
-  message text).
-- **`alint validate-config`:** ✓ Config valid: 108 rule(s) loaded
-  (v0.9.17-era; not re-run for v0.9.20).
+- **Current rule count:** **44 effective rules** (15 declared here plus
+  3 extended rulesets, after ID overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 44 rule(s) loaded.
 - **Live-tree recheck:** **performed at v0.9.17** against
   `/tmp/protobuf` — 150 violations across 14 failing files (72 rules
   pass silently); see §6 for the breakdown. Engine behaviour stable
@@ -666,8 +657,8 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (45 rules, ~81% coverage). +19 surfaces (the largest gain in
-the corpus): the famous src/file_lists.cmake <-> Bazel-glob staleness ->
+accordingly (44 rules, 46/58 inventoried surfaces, ~79% coverage). The gains
+include the famous src/file_lists.cmake <-> Bazel-glob staleness ->
 one command_idempotent rule, the BSD header sweep across ~10 language
 bindings -> file_header (the repo had zero header rules before), and
 per-language version coherence (version.json + protobuf_version.bzl) ->

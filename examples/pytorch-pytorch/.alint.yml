@@ -246,23 +246,9 @@ rules:
   # differ. Shown for the libtorch core list (path_prefix="torch/csrc/").
   # ══════════════════════════════════════════════════════════════════
 
-  - id: pytorch-build-variables-paths-resolve # build_variables.bzl integrity
-    kind: registry_paths_resolve
-    source: "build_variables.bzl"
-    extract:
-      # Quoted "*.cpp"/"*.h" path tokens (one capture group). The .bzl is
-      # valid-Python-and-Starlark; this catches the literal source members.
-      regex: '"([A-Za-z0-9_./]+\.(?:cpp|h|cu|cuh))"'
-    base: "torch/csrc"
-    entries_are_globs: false
-    expect: file
-    level: warning
-    message: |
-      A source file listed in build_variables.bzl does not resolve under
-      torch/csrc/. CMake exec()s this .bzl directly (cmake/Codegen.cmake);
-      a dangling entry silently drops a translation unit from the build.
-      (Some lists use a different path_prefix — add a sibling rule with
-      the matching base: if you see false positives.)
+  # build_variables.bzl mixes paths rooted at the repository with paths
+  # rooted under torch/csrc. One registry_paths_resolve base cannot model
+  # both groups, so CMake's direct execution of the file remains authoritative.
 
   # ══════════════════════════════════════════════════════════════════
   # SECTION E — version.txt coherence via cross_file_value_equals  (NEW)
@@ -278,7 +264,7 @@ rules:
   # ══════════════════════════════════════════════════════════════════
 
   - id: pytorch-version-coherence
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "version.txt"
       extract: { regex: '^([0-9]+\.[0-9]+)' }   # MAJOR.MINOR

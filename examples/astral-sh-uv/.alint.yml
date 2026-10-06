@@ -97,7 +97,7 @@ rules:
   # filter support is too narrow for `?(@.name=='windows')`, this is the one
   # rule that may still need the Python script — noted in the gap section.
   - id: uv-trampoline-windows-version-consistent
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: Cargo.lock
       extract: { toml: "$.package[?(@.name=='windows')].version" }

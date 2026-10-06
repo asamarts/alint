@@ -306,7 +306,7 @@ rules:
   # against istio-discovery as the source of truth and compare peers.)
   # ════════════════════════════════════════════════════════════════
   - id: istio-chart-hub-consistent
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "manifests/charts/istio-control/istio-discovery/values.yaml"
       extract: { yaml: "$._internal_defaults_do_not_set.global.hub" }

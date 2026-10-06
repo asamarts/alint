@@ -109,7 +109,7 @@ rules:
   # Corepack reads packageManager; the human-facing pin is devEngines. They
   # drift independently and a mismatch produces a cryptic peer-version error.
   - id: pnpm-package-manager-matches-dev-engines
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "package.json"
       extract:

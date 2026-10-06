@@ -277,7 +277,7 @@ rules:
     # ★ check-version-consistency: the canonical airflow version in the
     # core pyproject.toml must match the value restated elsewhere. Tune the
     # source/target paths to your fork's exact version-carrying files.
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: airflow-core/pyproject.toml
       extract: { toml: "$.project.version" }
@@ -294,7 +294,7 @@ rules:
     # required-version pin in the root pyproject must match the value
     # restated in the devel pyproject. The marker-rewrite half stays on
     # the codegen hook; this catches drift.
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: pyproject.toml
       extract: { toml: "$.tool.uv.required-version" }

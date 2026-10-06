@@ -186,3 +186,117 @@ fn every_example_carries_the_yaml_language_server_directive() {
         missing.join("\n  - "),
     );
 }
+
+/// `ordered_block` markers are exact trimmed lines. Regex-looking markers
+/// silently match nothing, which made several published case-study rules
+/// appear to pass without checking a block at all.
+#[test]
+fn example_ordered_block_markers_are_literal_lines() {
+    let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples");
+    let mut invalid = Vec::new();
+
+    for entry in fs::read_dir(examples_dir).unwrap() {
+        let config_path = entry.unwrap().path().join(".alint.yml");
+        if !config_path.is_file() {
+            continue;
+        }
+        let config = alint_dsl::load(&config_path).unwrap();
+        for rule in config
+            .rules
+            .iter()
+            .filter(|rule| rule.kind == "ordered_block")
+        {
+            for key in ["start", "end"] {
+                let Some(marker) = rule
+                    .extra
+                    .get(serde_yaml_ng::Value::String(key.to_owned()))
+                    .and_then(serde_yaml_ng::Value::as_str)
+                else {
+                    continue;
+                };
+                if marker.starts_with('^')
+                    || marker.ends_with('$')
+                    || marker == r"\z"
+                    || marker.contains(r"\s")
+                {
+                    invalid.push(format!("{}: {key}: {marker:?}", rule.id));
+                }
+            }
+        }
+    }
+
+    assert!(
+        invalid.is_empty(),
+        "ordered_block start/end markers are literal trimmed lines, not regexes:\n  - {}",
+        invalid.join("\n  - "),
+    );
+}
+
+/// These rules were retired after validation against pinned upstream trees:
+/// they either targeted generated-only files, depended on deleted manifests,
+/// encoded a convention the project did not follow, or used a rule kind that
+/// cannot express the upstream check. Reintroducing one requires a new rule
+/// kind or a fixture that demonstrates the repaired semantics.
+#[test]
+fn known_misfiring_example_rules_stay_retired() {
+    let retired = [
+        "bazel-version-matches-bazelci",
+        "react-error-codes-fresh",
+        "react-pkg-files-resolve",
+        "flutter-engine-version-coherent",
+        "ts-baseline-errors-pair-with-js",
+        "ts-libs-manifest-sources-resolve",
+        "nixpkgs-maintainers-keep-sorted",
+        "nixpkgs-team-list-keep-sorted",
+        "protobuf-failure-lists-sorted",
+        "pytorch-build-variables-paths-resolve",
+        "rust-tidy-alphabetical-rust",
+        "rust-tidy-alphabetical-toml",
+        "rust-tidy-proc-macro-deps-fresh",
+        "tensorflow-bazel-files-declare-license",
+        "tokio-readme-mirror",
+        "tokio-spellcheck-dic-sorted",
+        "tokio-util-dep-major-matches",
+        "turbo-crate-denies-clippy-all",
+        "turbo-crate-inherits-edition",
+        "turbo-crate-inherits-workspace-lints",
+        "turbo-npm-versions-track-version-txt",
+        "turbo-package-declares-repository-directory",
+        "nextjs-check-manifests",
+        "nextjs-errors-manifest-paths-resolve",
+        "nextjs-errors-manifest-present",
+        "nextjs-tsconfig-strict-mode",
+        "nextjs-typos-check",
+    ];
+    let examples_dir = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .unwrap()
+        .parent()
+        .unwrap()
+        .join("examples");
+    let mut found = Vec::new();
+
+    for entry in fs::read_dir(examples_dir).unwrap() {
+        let config_path = entry.unwrap().path().join(".alint.yml");
+        if !config_path.is_file() {
+            continue;
+        }
+        let config = alint_dsl::load(&config_path).unwrap();
+        for rule in &config.rules {
+            if retired.contains(&rule.id.as_str()) {
+                found.push(rule.id.clone());
+            }
+        }
+    }
+
+    assert!(
+        found.is_empty(),
+        "known-misfiring example rules were reintroduced without repaired semantics: {}",
+        found.join(", "),
+    );
+}

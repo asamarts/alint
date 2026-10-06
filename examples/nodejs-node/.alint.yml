@@ -139,8 +139,10 @@ rules:
     when: facts.has_node_src
     kind: ordered_block
     paths: "README.md"
-    start: '^### Collaborators$'
-    end: '^#### Collaborator emeriti$'
+    start: "### Collaborators"
+    end: "#### Collaborator emeriti"
+    select: '^\* \['
+    comparator: lexical-ci
     level: warning
     message: |
       The Collaborators list in README.md must stay alphabetical by

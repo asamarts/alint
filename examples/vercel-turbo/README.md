@@ -113,10 +113,11 @@ permissions, SHA pinning, name).
 
 ## 2. Coverage classification
 
-### 2.1 The 22 structural gates that DON'T exist in turbo's tooling
+### 2.1 Structural gates that do not exist in turbo's tooling
 
-The brief asks: **list each of the 22 gates that don't exist in
-turbo's tooling explicitly + classify each per §2.** Verified
+The original brief listed 22 candidate gates. Validation against the
+upstream tree showed that three of those candidates were not project
+conventions; they are retained below as rejected mappings. Verified
 against the live `/tmp/turborepo/` tree. These are conventions
 turbo's CI silently assumes but doesn't enforce; alint adds each
 one as a declarative gate.
@@ -134,23 +135,23 @@ one as a declarative gate.
 | 9 | `turbo-cargo-crate-has-readme` | Every `crates/*` has `README.md` | `for_each_dir` + `file_exists` | ✅ alint-today |
 | 10 | `turbo-cargo-crate-has-cargo-toml` | Every `crates/*` has `Cargo.toml` | bundled `monorepo/cargo-workspace@v1` | ✅ alint-today |
 | 11 | `turbo-cargo-crate-publish-false` | Every internal crate declares `publish = false` | `for_each_dir` + `toml_path_matches` | ✅ alint-today |
-| 12 | `turbo-cargo-crate-edition-workspace` | Every `crates/*/Cargo.toml` inherits `edition = { workspace = true }` | `for_each_dir` + `file_content_matches` | ✅ alint-today |
-| 13 | `turbo-cargo-crate-lints-workspace` | Every `crates/*/Cargo.toml` inherits `[lints] workspace = true` | `for_each_dir` + `file_content_matches` | ✅ alint-today |
+| 12 | `turbo-cargo-crate-edition-workspace` | Candidate inheritance convention | — | rejected: 7 crates legitimately do not inherit it |
+| 13 | `turbo-cargo-crate-lints-workspace` | Candidate lint inheritance convention | — | rejected: 6 crates legitimately do not inherit it |
 | 14 | `turbo-pnpm-package-has-package-json` | Every `packages/*` has `package.json` | bundled `monorepo/pnpm-workspace@v1` | ✅ alint-today |
 | 15 | `turbo-pnpm-package-has-readme` | Every `packages/*` has `README.md` | `for_each_dir` + `file_exists` | ✅ alint-today |
 | 16 | `turbo-pnpm-package-has-license` | Every `packages/*` has its own `LICENSE` (the repo-root LICENSE doesn't auto-include in `npm pack`) | `for_each_dir` + `file_exists` | ✅ alint-today |
-| 17 | `turbo-pnpm-package-repository-directory` | Every `packages/*/package.json` declares `repository.directory` pointing to its own subdir | `for_each_dir` + `json_path_matches` | ✅ alint-today |
+| 17 | `turbo-pnpm-package-repository-directory` | Candidate per-package repository deep link | — | rejected: 5 packages intentionally omit it |
 | 18 | `turbo-example-has-meta-json` | Every `examples/*` has a `meta.json` so the runner can pick it up | `for_each_dir` + `file_exists` | ✅ alint-today |
 | 19 | `turbo-example-meta-json-shape` | `meta.json` declares `name`, `description`, `maintainedByCoreTeam` | 3× `json_path_matches` per example | ✅ alint-today |
 | 20 | `turbo-example-has-turbo-json` | Every `examples/*` has its own `turbo.json` | `for_each_dir` + `file_exists` | ✅ alint-today |
 | 21 | `turbo-example-has-gitignore` | Every `examples/*` has its own `.gitignore` | `for_each_dir` + `file_exists` | ✅ alint-today |
 | 22 | `turbo-shell-script-shellcheck` | All shell scripts under `scripts/**/*.sh` pass shellcheck | `command:` shellout per `scripts/**/*.sh` | ✅ alint-today (shellout) |
 
-**All 22 gates are alint-today.** None require the v0.10 backlog.
-20 are pure declarative; 2 are `command:` shellouts (1 to
-shellcheck, 1 implicit via the husky hook content checks). This
-is the headline pitch: **turbo's CI silently assumes 22 conventions
-that alint adds as explicit gates.**
+**Nineteen of the candidates are represented.** The three rejected
+conventions above are intentionally absent. The represented set is mostly
+declarative, with command wrappers for external tools.
+This is the useful distinction: alint makes real implicit conventions
+explicit without turning every observed difference into policy.
 
 ### 2.2 Additional gates needing v0.10+ primitives
 
@@ -262,9 +263,9 @@ Granular breakdown:
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (434 lines, 28
-repo-specific rules, 9 bundled rulesets folded in via `extends:`,
-**88 rules total** loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (29 rules declared here,
+8 bundled rulesets folded in via `extends:`, **86 effective rules** —
+confirmed by `alint validate-config`).
 
 **Synopsis of the load-bearing rules** (full config in `.alint.yml`):
 
@@ -281,15 +282,6 @@ extends:
   - alint://bundled/tooling/editorconfig@v1          # 3 rules
 
 rules:
-  - id: turbo-internal-crate-not-publishable    # 60 of 61 crates currently drift
-    kind: toml_path_matches
-    paths: "crates/*/Cargo.toml"
-    path: "$.package.publish"
-    matches: "false"
-  - id: turbo-crate-inherits-workspace-lints    # 6 of 61 crates currently drift
-    kind: file_content_matches
-    paths: "crates/*/Cargo.toml"
-    pattern: '(?ms)^\[lints\]\s*\nworkspace = true'
   - id: turbo-crate-has-readme                  # 9 of 52 crates lack README
     kind: for_each_dir
     select: "crates/*"
@@ -322,15 +314,15 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **28 turbo-specific rules** (`turbo-*` prefix): 13 per-crate /
+- **29 rules** declared in this config: the retained per-crate /
   per-package / per-example structural conventions (the §2.1 22-gate
   table), 8 husky-hook + tool-config-presence assertions, and 7
   `command:` shellouts (cargo fmt / cargo clippy / cargo deny /
   oxlint / oxfmt / taplo / shellcheck).
-- **64 bundled rules** from the 9 extended rulesets (15 + 11 + 9 +
-  4 + 4 + 4 + 3 + 11 + 3 = 64 with overlap dedup).
+- **86 effective rules** after loading the 8 extended rulesets and
+  applying ID overrides/deduplication.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 88
+**Validation:** `alint validate-config` reports `✓ Config valid: 86
 rule(s) loaded`. Pitfall checks: the magic comment is present (line
 1); pitfall #16 is explicitly worked around in
 `turbo-example-meta-declares-maintenance` (in-line comment lines
@@ -407,7 +399,7 @@ the cleanup).
 | # | Count | Rule | Triage |
 |---|---|---|---|
 | 1 | 61 | `turbo-internal-crate-not-publishable` | **All real findings.** Validates §6's "60 of 61 crates drift" headline (the bench tree has one extra crate above the original 60). Recommendation: add `publish = false` to each internal `crates/turborepo-*/Cargo.toml`. |
-| 2 | 61 | `turbo-crate-inherits-edition` | **All real findings.** Every `crates/*/Cargo.toml` should declare `edition = { workspace = true }`; every one currently inlines its own edition. Recommendation: refactor to workspace inheritance. |
+| 2 | 61 | `turbo-crate-inherits-edition` | **Retired rule.** The project does not require every crate to inherit the edition; treating all deviations as findings was unsupported. |
 | 3 | 47 | `gha-pin-actions-to-sha` (bundled `ci/github-actions@v1`) | Real findings — third-party action steps pin by tag rather than commit SHA. Worth filing for supply-chain hardening. |
 | 4 | 30 | `node-no-tracked-node-modules` (bundled) | Likely **test fixtures** under `crates/*/fixtures/**/node_modules/`. Need `paths.exclude` for fixture trees. |
 | 5 | 30 | `hygiene-no-node-modules` (bundled `hygiene/no-tracked-artifacts@v1`) | Same as #4 — same fixtures, two rule names. |
@@ -417,8 +409,8 @@ the cleanup).
 | 9 | 8 | `turbo-package-has-license` | Validates §6's "8 of 17 packages lack per-package LICENSE". |
 | 10 | 6 | `hygiene-no-js-build-outputs` | **RESOLVED in v0.9.18 (A1 fix).** v0.9.17-era count: 6 FPs on `crates/turborepo-paths/src/lib/build/` and similar Rust source dirs named `build/`. v0.9.18's A1 refinement gates `hygiene-no-js-build-outputs` on a sibling `package.json` (correctly distinguishing JS build output from arbitrarily-named Rust source dirs); effective v0.9.20 count: ~0. |
 | 11 | 6 | `hygiene-no-env-files` (bundled) | Likely `examples/*/.env.example` or `crates/*/test-fixtures/.env`. Need allowlist. |
-| 12 | 6 | `turbo-crate-inherits-workspace-lints` | **All real findings.** Validates the "6 of 61 crates currently drift" §4 figure. |
-| 13 | 5 | `turbo-package-declares-repository-directory` | Real — packages without `repository.directory` field. |
+| 12 | 6 | `turbo-crate-inherits-workspace-lints` | **Retired rule.** The six crates do not establish a universal project convention. |
+| 13 | 5 | `turbo-package-declares-repository-directory` | **Retired rule.** The five omissions are valid for this repository. |
 
 **Real findings (alint surfaced, existing tooling missed):**
 
@@ -429,12 +421,11 @@ the cleanup).
 - **8 of 17 packages lack a per-package LICENSE** (`npm pack`
   doesn't auto-include the repo-root LICENSE).
 - **47 GHA action steps not SHA-pinned.**
-- **6 of 61 crates drift on `[lints] workspace = true`
-  inheritance.**
 
 **Expected absence from this run:** the case-study spec mentions
-`with-microfrontends` lacks `meta.json` and `with-nextjs` lacks
-`turbo.json`, but the `turbo-example-has-meta-json` /
+`with-microfrontends` lacks `meta.json`; `with-nextjs` is only a README stub
+with no `package.json`, so the `when_iter` guard deliberately skips it rather
+than producing a turbo.json finding. The `turbo-example-has-meta-json` /
 `turbo-example-has-turbo-json` rules don't appear in the top-15.
 Either the sparse-clone elides `examples/`, or those examples
 were since fixed. Verify with `ls /tmp/turborepo/examples/with-microfrontends`.
@@ -527,10 +518,10 @@ Three candidate refinements for the next revalidation pass:
 
 - **alint version pin:** 0.9.20 (current, 2026-05-10). Original
   capture under v0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
-- **`.alint.yml` in this directory:** **shipped — 434 lines, 28
-  repo-specific rules, 9 bundled rulesets folded in via `extends:`,
-  88 effective rules loaded.**
-  `alint validate-config` confirms `✓ Config valid: 88 rule(s)
+- **`.alint.yml` in this directory:** **shipped — 29 rules declared
+  here, 8 bundled rulesets folded in via `extends:`, 86 effective rules
+  loaded.**
+  `alint validate-config` confirms `✓ Config valid: 86 rule(s)
   loaded`. **Live-tree recheck:** performed in this batch under
   v0.9.17 — see §6 for the 307-violation breakdown (61
   publish=false drift + 61 edition-inheritance drift + 9
@@ -593,13 +584,13 @@ Three candidate refinements for the next revalidation pass:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (91 rules, ~82% coverage). +6 surfaces: the n-way npm-version
-<-> version.txt coherence -> cross_file_value_equals (the real cross-half
-contract), registry_paths_resolve on [workspace].members, and import_gate
+accordingly (86 rules, 30/38 inventoried surfaces, ~79% coverage).
+`registry_paths_resolve` checks [workspace].members, and `import_gate`
 mirroring the clippy.toml type/method bans. Corrections from the re-analysis:
 turbo is MIT (not MPL-2.0) and Rust files carry no SPDX header (the config
-asserts the #![deny] attr instead); coherence is npm <-> version.txt since
-the Cargo `turbo` crate is pinned 0.1.0.
+does not invent a header rule). npm package versions do not continuously equal
+version.txt: stable releases advance that file to the next canary, and private
+packages may remain 0.0.0, so the false coherence rule was removed.
 
 Full catalogue, coverage math, and cross-cutting findings:
 `docs/development/case-study-v011-reanalysis-log.md` (Batch 6).

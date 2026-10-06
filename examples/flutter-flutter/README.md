@@ -347,12 +347,9 @@ governance files** = **89 distinct surfaces**.
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (847 lines including
-narrative comments, **68 rules** loaded — confirmed by `alint
-validate-config`: 39 flutter-specific + 29 from 3 bundled rulesets
-— `oss-baseline=15` + `ci/github-actions=3` +
-`hygiene/no-tracked-artifacts=11` − overlap = 29 effective rule IDs
-after dedup).
+Working config: [`./.alint.yml`](.alint.yml) (**57 effective rules** —
+24 declared here plus 4 extended rulesets, after ID
+overrides/deduplication), confirmed by `alint validate-config`.
 
 **Synopsis of the load-bearing repo-specific rules** (full config
 in `.alint.yml`):
@@ -390,10 +387,11 @@ rules:
 ```
 
 **Repo-specific vs bundled split:**
-- **39 repo-specific rules** in `.alint.yml` (the `flutter-*` prefix)
-- **29 bundled rules** from the 3 extended rulesets
+- **24 rules** declared in `.alint.yml`
+- **57 effective rules** after loading the 4 extended rulesets and
+  applying ID overrides/deduplication
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 68
+**Validation:** `alint validate-config` reports `✓ Config valid: 57
 rule(s) loaded`. No pitfall #22 (`pattern: |`) instances; both
 `file_header` rules use single-line bare patterns. Pitfalls
 #13/#14/#16/#17 were checked and not present in this config — every
@@ -617,10 +615,9 @@ Three concrete unanalyzed angles for a future revalidation pass:
 ## 9. Validation status (2026-05-10)
 
 - **alint version:** `0.9.20` (2026-05-10)
-- **Rule count:** **68** (39 flutter-specific + 29 from 3 bundled
-  rulesets — `oss-baseline=15`, `ci/github-actions=3`,
-  `hygiene/no-tracked-artifacts=11`)
-- **`alint validate-config`:** ✓ Config valid: 68 rule(s) loaded
+- **Current rule count:** **57 effective rules** (24 declared here plus
+  4 extended rulesets, after ID overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 57 rule(s) loaded
 - **Live-tree recheck:** v0.9.17-era counts in §6 carried forward; not
   re-walked under v0.9.20. The v0.9.18 pre-launch fix wave (A1
   hygiene-no-js-build-outputs sibling-package.json gate) closed the 4
@@ -653,12 +650,13 @@ Three concrete unanalyzed angles for a future revalidation pass:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (58 rules, ~59% coverage). +9 surfaces, lifting the
+accordingly (57 rules, 33/58 inventoried surfaces, ~57% coverage). The
+gitignored `bin/internal/engine.version` comparison is no longer credited.
+The remaining additions lift the
 dev/bots/analyze.dart custom checks: verifyNoMissingLicense -> file_header,
 verifyNoTrailingSpaces + verifySpacesAfterFlowControlStatements ->
 file_content_forbidden, the flutter_tools self-import + no-test-imports
-bans -> import_gate (generic + dart import_pattern), engine.version
-coherence -> cross_file_value_equals. changed_since grandfathers the ~8k
+bans -> import_gate (generic + dart import_pattern). changed_since grandfathers the ~8k
 legacy Dart/C++ tree on the text-sweep rules. Non-replaceable: dart/flutter
 analyze, clang-tidy, the 6 Dart-AST custom_rules, golden pixel-diff.
 

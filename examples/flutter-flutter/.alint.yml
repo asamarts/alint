@@ -173,29 +173,6 @@ rules:
 
 
   # ════════════════════════════════════════════════════════════════════
-  # ENGINE.VERSION PIN COHERENCE — NEW (v0.10 cross_file_value_equals).
-  # bin/internal/engine.version pins the in-tree engine commit. The
-  # content-aware-hash workflow + update_engine_version.sh derive from it.
-  # cross_file_value_equals locks the pin against any duplicate that drifts.
-  # (engine.version was empty at clone time in monorepo mode — rule no-ops
-  #  cleanly when absent.)
-  # ════════════════════════════════════════════════════════════════════
-  - id: flutter-engine-version-coherent
-    kind: cross_file_value_equals
-    source:
-      file: bin/internal/engine.version
-      extract: { lines: {} }
-    targets:
-      - file: bin/cache/engine.stamp
-        extract: { lines: {} }
-    allow_missing_target: true
-    level: error
-    message: >-
-      engine.version pin coherence (NEW): the engine commit in
-      bin/internal/engine.version must match any cached engine stamp. Mirrors
-      what update_engine_version.sh / content_aware_hash.sh assert at bootstrap.
-
-  # ════════════════════════════════════════════════════════════════════
   # .ci.yaml SHARD REGISTRY RESOLUTION + ORDERING — v0.10 kinds.
   # Each .ci.yaml target carries a `shard:` value that MUST resolve to a
   # switch-case in dev/bots/test.dart. registry_paths_resolve cannot reach

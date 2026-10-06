@@ -16,14 +16,13 @@
 #
 # IMPORTANT corrections vs the task brief / old example:
 #   * License is MIT (LICENSE: "Copyright (c) 2026 Vercel, Inc"; deny.toml allows
-#     MIT/Apache/MPL/BSD), NOT MPL-2.0. Rust files carry NO SPDX header — only
-#     crate-level inner attrs like `#![deny(clippy::all)]`. So no file_header
-#     SPDX rule applies; we instead assert the crate-level deny attr is present.
+#     MIT/Apache/MPL/BSD), NOT MPL-2.0. Rust files carry no SPDX header, so no
+#     file_header rule applies; the repository's Cargo and Clippy gates own its
+#     crate-level lint policy.
 #   * Cross-half version coherence is NOT Cargo<->npm. The Cargo crate `turbo`
-#     is pinned at 0.1.0 (decoupled). The real single-source-of-truth is
-#     version.txt line 1, mirrored into EVERY published npm package.json
-#     (turbo, create-turbo, turbo-codemod, turbo-gen ... all = 2.9.15-canary.8).
-#     That n-way npm<->version.txt coherence is the headline cross_file win.
+#     is pinned at 0.1.0 (decoupled). `version.txt` advances to the next canary
+#     after stable releases while package versions remain on the release, and
+#     private packages may stay at 0.0.0, so static equality would be false.
 
 version: 1
 
@@ -41,32 +40,6 @@ rules:
   # ════════════════════════════════════════════════════════════════════
   # NEW IN v0.10/v0.11 — the capabilities that weren't available at v0.9.17
   # ════════════════════════════════════════════════════════════════════
-
-  # ── [cross_file_value_equals] HEADLINE WIN. version.txt line 1 is the
-  # canonical release version; the release workflow rewrites it and every
-  # published npm package.json must match. This single rule replaces the
-  # entire scripts/version.js + RELEASE.md coherence assumption and the
-  # implicit "all packages bump together" contract. (At v0.9.17 there was
-  # NO cross-file primitive — this was un-expressible.)
-  - id: turbo-npm-versions-track-version-txt
-    kind: cross_file_value_equals
-    source:
-      file: version.txt
-      extract:
-        regex: '^([^\n]+)'
-    targets:
-      - { file: "packages/turbo/package.json",        extract: { json: "$.version" } }
-      - { file: "packages/create-turbo/package.json",  extract: { json: "$.version" } }
-      - { file: "packages/turbo-codemod/package.json",  extract: { json: "$.version" } }
-      - { file: "packages/turbo-gen/package.json",      extract: { json: "$.version" } }
-      - { file: "packages/turbo-utils/package.json",    extract: { json: "$.version" } }
-      - { file: "packages/turbo-workspaces/package.json", extract: { json: "$.version" } }
-    allow_missing_target: true
-    level: error
-    message: >-
-      Every published @turbo* package.json `version` must equal version.txt
-      line 1. The release pipeline (scripts/version.js) bumps them together;
-      a drift means a partial/aborted release left the tree inconsistent.
 
   # ── [registry_paths_resolve] The Cargo workspace `members` globs must
   # resolve to real crate dirs. Catches a deleted crate left dangling in
@@ -169,33 +142,6 @@ rules:
   # STRUCTURAL GATES (carried from the v0.9.17 example, still valid)
   # ════════════════════════════════════════════════════════════════════
 
-  # ── Every crate inherits workspace [lints].
-  - id: turbo-crate-inherits-workspace-lints
-    kind: file_content_matches
-    paths: "crates/*/Cargo.toml"
-    pattern: '(?ms)^\[lints\]\s*\nworkspace = true'
-    level: warning
-    message: >-
-      Every workspace crate should inherit `[lints] workspace = true` so the
-      workspace clippy/rustc policy (clippy.toml + root Cargo.toml) applies.
-
-  # ── Crate-level deny attr present (the de-facto "header" — there is no SPDX).
-  - id: turbo-crate-denies-clippy-all
-    kind: file_content_matches
-    paths: "crates/*/src/lib.rs"
-    pattern: '#!\[deny\(clippy::all\)\]'
-    level: warning
-    message: >-
-      Turborepo crates carry a crate-level `#![deny(clippy::all)]` inner attr
-      (there is no SPDX file header; license is MIT at repo root). Keep it.
-
-  # ── Crates inherit edition from the workspace.
-  - id: turbo-crate-inherits-edition
-    kind: file_content_matches
-    paths: "crates/*/Cargo.toml"
-    pattern: 'edition\s*=\s*\{\s*workspace\s*=\s*true\s*\}'
-    level: warning
-
   # ── Per-crate README.
   - id: turbo-crate-has-readme
     kind: for_each_dir
@@ -222,18 +168,6 @@ rules:
     require:
       - kind: file_exists
         paths: "{path}/README.md"
-    level: warning
-
-  # ── Per-package repository.directory deep-link.
-  - id: turbo-package-declares-repository-directory
-    kind: for_each_dir
-    select: "packages/*"
-    when_iter: 'iter.has_file("package.json")'
-    require:
-      - kind: json_path_matches
-        paths: "{path}/package.json"
-        path: "$.repository.directory"
-        matches: '^packages/[a-z0-9_.-]+$'
     level: warning
 
   # ── Examples hygiene: meta.json + its shape, turbo.json, .gitignore.

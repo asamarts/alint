@@ -254,7 +254,7 @@ rules:
   # token must be byte-equal across files.
   # ──────────────────────────────────────────────────────────────────────
   - id: cpython-version-minor-coherent
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "Include/patchlevel.h"
       extract: { regex: '#define PY_MINOR_VERSION\s+(\d+)' }
@@ -269,7 +269,7 @@ rules:
       of truth and must agree before any build/release.
 
   - id: cpython-version-major-coherent
-    kind: cross_file_value_equals
+    kind: cross_file
     source:
       file: "Include/patchlevel.h"
       extract: { regex: '#define PY_MAJOR_VERSION\s+(\d+)' }

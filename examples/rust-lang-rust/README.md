@@ -28,7 +28,8 @@ which collapsed the 1,091 `rust-sources-snake-case` FPs on
 ## 1. Inventory of existing tooling
 
 The Rust monorepo carries its own custom linter — `src/tools/tidy/` is a
-~5k-LoC Rust binary dispatched from `main.rs`'s parallel `check!()` macro
+~7,700-line Rust binary without its own tests (8,545 lines with them),
+dispatched from `main.rs`'s parallel `check!()` macro
 into a thread pool. Plus a small set of CI shell scripts and four
 GitHub Actions workflows.
 
@@ -155,7 +156,7 @@ Every row from §1 tagged with one of:
 | 16 | `rustdoc_gui_tests` | ✅ alint-today | `file_starts_with` over `tests/rustdoc-gui/**/*.goml` requiring `// description` prefix. |
 | 17 | `rustdoc_json` | ❌ out-of-scope | git-diff-aware: the check fires only when `src/rustdoc-json-types` is modified. alint's `--changed` flag informs *which* files to check, not *whether* to check. |
 | 18 | `rustdoc_templates` | 🔄 alint-future | `balanced_delimiters` (v0.10 design candidate, 2 sources: rust + cpython). Templating-language nesting check. |
-| 19 | `style` | ✅ alint-today | `line_max_width` × 3 (per scope_filter for `.goml=120` / error-code `.md=80` / default 100) + `file_max_lines: 3000` + `no_trailing_whitespace` + `line_endings: lf` + `file_content_forbidden` (TODO/XXX/FIXME). The most-cited tidy check; cleanest fit. |
+| 19 | `style` | ✅ partial | The `.goml=120` and error-code Markdown `=80` width checks map cleanly. The broad style sweep does not: tidy skips directories and honors per-line `ignore-tidy-*` directives that generic content rules cannot model, so those approximations were removed. |
 | 20 | `target_policy` | ❌ out-of-scope | Target-spec parsing + assembly-LLVM cross-reference. |
 | 21 | `target_specific_tests` | ❌ out-of-scope | Compiletest header semantics + LLVM-component graph. |
 | 22 | `tests_placement` | ✅ alint-today | `dir_absent` for `src/test/`. |
@@ -277,9 +278,9 @@ governance artefacts (8):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (283 lines, 20
+Working config: [`./.alint.yml`](.alint.yml) (17
 repo-specific rules, 5 bundled rulesets folded in via `extends:`,
-**62 rules total** loaded — confirmed by `alint validate-config`).
+**58 rules total** loaded — confirmed by `alint validate-config`).
 
 **Synopsis of the load-bearing rules** (full config in `.alint.yml`):
 
@@ -292,11 +293,12 @@ extends:
   - alint://bundled/hygiene/no-tracked-artifacts@v1  # 11 rules
 
 rules:
-  # tidy::style — three line-length scopes, file_max_lines, no-CR, no-TODO
-  - id: rust-tidy-line-100-cols
-    kind: line_max_width
-    paths: { include: ["compiler/**/*.{md,toml,yml,yaml,sh,py}", …], exclude: ["**/auto-generated/**", "src/llvm-project/**", "src/gcc/**"] }
-    max_width: 100
+  # Fixture-aware override of the bundled Rust final-newline rule.
+  - id: rust-sources-final-newline
+    kind: final_newline
+    paths:
+      include: ["**/*.rs"]
+      exclude: ["src/tools/{rust-analyzer,rustfmt}/**", "tests/ui/**"]
   - id: rust-tidy-line-120-goml
     kind: line_max_width
     paths: "tests/rustdoc-gui/**/*.goml"
@@ -305,10 +307,6 @@ rules:
     kind: line_max_width
     paths: "compiler/rustc_error_codes/src/error_codes/*.md"
     max_width: 80
-  - id: rust-tidy-no-todo-marker      # tidy::style — no `TODO`/`XXX`
-    kind: file_content_forbidden
-    paths: { include: ["compiler/**/*.rs", "library/**/*.rs", "src/**/*.rs"], exclude: ["**/tests/**", "src/llvm-project/**", "src/gcc/**"] }
-    pattern: '(?i)\b(TODO|XXX)\b'
   - id: rust-tidy-cargo-edition       # tidy::edition — every Cargo.toml is 2021/2024
     kind: toml_path_matches
     path: "$.package.edition"
@@ -326,20 +324,14 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **20 repo-specific rules** (the `rust-tidy-*` / `rust-triagebot-*`
-  prefix identifies them in `alint list` output): three
-  `line_max_width` scopes, `file_max_lines: 3000`,
-  `no_trailing_whitespace`, `line_endings: lf`, no-TODO,
-  `dir_absent: src/test`, Cargo edition, Cargo.lock source
-  allowlist, `tests/crashes/` `//@ known-bug:` directive,
-  rustdoc-gui description prefix, `no_illegal_windows_names`,
-  no-`#[test]`-in-stdlib, plus 6 `command:` shellouts (typos,
-  shellcheck, ruff format + lint, rustfmt, triagebot section
-  presence).
-- **42 bundled rules** from the 5 extended rulesets (15 + 11 + 4 + 3
-  + 11 = 44 with 2-rule overlap dedup).
+- **17 repo-specific rules**, including a fixture-aware override of the
+  bundled final-newline rule, two exact width checks, Cargo edition and
+  lock-source checks, crash/stdlib/triagebot structure, and five tool
+  wrappers (rustfmt, typos, Ruff format + lint, and ShellCheck).
+- **41 effective bundled rules** after ID de-duplication and the local
+  final-newline override.
 
-**Validation:** `alint validate-config` reports `✓ Config valid: 62
+**Validation:** `alint validate-config` reports `✓ Config valid: 58
 rule(s) loaded`. Pitfall checks: the magic comment is present (line
 1); all `command:` rules use `command:` and integer `timeout:`; all
 patterns use `'…'` single-quote scalars (no YAML literal block
@@ -416,14 +408,14 @@ SHA-pinning rows). The top per-rule counts are:
 | # | Count | Rule | Triage |
 |---|---|---|---|
 | 1 | 1,091 | `rust-sources-snake-case` (bundled rust@v1) | **RESOLVED in v0.9.18 (A6 fix).** This v0.9.17-era count fired on every `compiler/rustc_*` module + acronym-y crate names (`rustc_errors`, `RustcSession`, etc.); the Rust workspace has a deliberate exception for compiler-internal naming. v0.9.18's bundled-rule refinement A6 added an `allow_compiler_naming` knob to `rust@v1`'s `rust-sources-snake-case`, which scopes the rule away from compiler crates by default — eliminating the entire 1,091-violation class without per-repo override. |
-| 2 | 668 | `rust-tidy-line-100-cols` | Real findings — `compiler/rustc_error_codes/src/error_codes/*.md` (long URL refs), some `library/**/*.toml` long dep specs, a handful of `tests/**/*.{md,sh}` over-100-col wrapping. Most are tolerable; the rule is `warning`. Match upstream tidy's threshold-vs-allowlist policy. |
-| 3 | 237 | `rust-tidy-no-todo-marker` | **Mixed.** Real `// TODO` markers in compiler source (some valid — paired with tracking issues). Upstream tidy has the same complaint pattern; this is the long-tail TODO de-noise queue. |
-| 4 | 149 | `rust-sources-final-newline` (bundled rust@v1) | Real findings — vendored `**/auto-generated/**` files. **Recommended:** add `paths.exclude` for `**/auto-generated/**` and the LLVM-project / GCC mirror trees. |
+| 2 | 668 | `rust-tidy-line-100-cols` | **Retired config rule.** It did not reproduce tidy: most findings were in directories tidy skips or on lines carrying `ignore-tidy-*` directives. |
+| 3 | 237 | `rust-tidy-no-todo-marker` | **Retired config rule.** A raw token search cannot honor tidy's directory filters and ignore directives. |
+| 4 | 149 | `rust-sources-final-newline` (bundled rust@v1) | **Expected fixtures, now excluded.** 141 are rust-analyzer/rustfmt test inputs and 8 are UI tests marked `ignore-tidy-trailing-newlines`; the local override leaves both groups out. |
 | 5 | 106 | `rust-sources-no-trailing-whitespace` (bundled rust@v1) | Same — vendored fixtures + a few real source-tree drifts. |
 | 6 | 66 | `rust-tidy-line-80-error-codes` | All in `compiler/rustc_error_codes/src/error_codes/*.md`. Real — these are the canonical error-code docs and the 80-col rule mirrors the upstream tidy rule. |
 | 7 | 63 | `oss-no-trailing-whitespace` | Trailing-ws in `tests/`, `src/`, `compiler/` markdown / yaml. Below tidy's threshold; informational. |
-| 8 | 62 | `rust-tidy-lf-line-endings` | CRLF in some Windows-build-script fixtures (`.bat` excluded; `.ps1` is not — likely needs adding to the rule's `paths.exclude`). |
-| 9 | 57 | `rust-tidy-no-trailing-whitespace` | Same as #7, narrower scope. |
+| 8 | 62 | `rust-tidy-lf-line-endings` | **Retired config rule.** It did not reproduce tidy's file filtering. |
+| 9 | 57 | `rust-tidy-no-trailing-whitespace` | **Retired config rule.** It did not honor tidy's ignore directives. |
 | 10 | 40 | `oss-final-newline` | Markdown fixtures + governance docs. Below tidy's threshold. |
 | 11 | 34+34 | `rust-tidy-ruff-format` + `rust-tidy-ruff-lint` | Pending — `ruff` not on PATH, so the `command:` rule fires per-file as "command not found" rather than reporting actual lint findings. **Bug fix candidate:** the rule emits a clearer "ruff binary missing" diagnostic instead of degrading to per-file failures. |
 | 12 | 20 | `rust-tidy-shellcheck` | Real shellcheck warnings on `src/ci/scripts/*.sh`. The upstream tidy `extra_checks::shellcheck` enforces the same. |
@@ -432,9 +424,8 @@ SHA-pinning rows). The top per-rule counts are:
 
 **Real findings (alint surfaced, existing tidy missed):**
 
-- 6 vendored Rust files lack final newline + trailing whitespace
-  (alint scans the full tree; tidy excludes vendored dirs by
-  default).
+- No final-newline bug is claimed: all 149 historical findings were
+  intentional test inputs or explicitly ignored by tidy.
 - 12 GitHub Actions workflow steps pin third-party actions by
   floating tag rather than commit SHA (supply-chain hardening
   candidate; tidy doesn't check this).
@@ -542,10 +533,10 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 
 - **alint version pin:** 0.9.20 (current, 2026-05-10). Original
   capture under v0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
-- **`.alint.yml` in this directory:** **shipped — 283 lines, 20
+- **`.alint.yml` in this directory:** **shipped — 17
   repo-specific rules, 5 bundled rulesets folded in via `extends:`,
-  62 effective rules loaded.**
-  `alint validate-config` confirms `✓ Config valid: 62 rule(s)
+  58 effective rules loaded.**
+  `alint validate-config` confirms `✓ Config valid: 58 rule(s)
   loaded`. v0.9.18 also extended `dir_absent` with `scope_filter`
   support (relevant to this config's `rust-tidy-no-src-test-dir`
   rule if it later wants per-subtree scoping).
@@ -554,10 +545,10 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   effective surface drops by ~1,091 because v0.9.18's A6 fix
   (`allow_compiler_naming` knob on bundled
   `rust-sources-snake-case`) eliminates the entire compiler-naming
-  FP class. Remaining long tail: 668 line-length warnings on
-  `compiler/`+`tests/` markdown/yaml, 237 real `// TODO` marker
-  findings, 149 `rust-sources-final-newline` on auto-generated
-  files, and the GHA-SHA-pinning long tail.
+  FP class. The later upstream-tree validation showed that the broad
+  line-length/TODO/style approximations and all 149 final-newline findings
+  disagreed with tidy's skips or explicit ignore directives; those rules are
+  now removed or narrowed rather than reported as upstream bugs.
 - **Rule-kind candidate status:**
   - `ordered_block` — v0.10 ship-target (7 sources). Rust monorepo
     is the canonical demand-driver (6 invocations of `alphabetical`
@@ -596,11 +587,12 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (68 rules, ~59% coverage / ~27 behaviors). +6 surfaces:
-ordered_block maps tidy::alphabetical exactly, the whole tidy::style
-whitespace/length/forbidden-token sweep becomes ~10 declarative rules, the
-Cargo.lock `source =` allowlist (tidy::extdeps) becomes exact, rustfmt ->
-command_idempotent, and triagebot path-filters -> registry_paths_resolve.
+accordingly (58 rules, 18/34 inventoried surfaces, ~53% coverage). The
+Cargo.lock `source =` allowlist (tidy::extdeps) is exact, rustfmt uses
+`command_idempotent`, and triagebot path filters use
+`registry_paths_resolve`. tidy's alphabetical and broad style checks remain
+native because they compare logical multi-line items and honor skip/ignore
+directives that alint's generic rules cannot express.
 Note: the per-tier PERMITTED_DEPENDENCIES allowlist needs a cargo-metadata
 graph walk (not import_gate, which reads source not the resolved graph), so
 it stays a non-replaceable.

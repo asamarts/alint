@@ -366,9 +366,9 @@ hygiene (3):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (725 lines, 46
-nixpkgs-specific rules + 4 bundled rulesets, **79 rules total**
-loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (**56 effective rules** —
+24 declared here plus 4 extended rulesets, after ID
+overrides/deduplication), confirmed by `alint validate-config`.
 
 **Synopsis of the load-bearing repo-specific rules** (full config in
 `.alint.yml`):
@@ -437,15 +437,12 @@ rules:
 
 **Repo-specific vs bundled split:**
 
-- **46 nixpkgs-specific rules** in `.alint.yml` (the `nixpkgs-*` prefix
-  identifies them in `alint list` output).
-- **33 bundled rules** from the 4 extended rulesets: 15 from
-  oss-baseline + 3 from ci/github-actions + 11 from
-  hygiene/no-tracked-artifacts + 3 from tooling/editorconfig (some
-  IDs may overlap; total reported is 79 after dedup).
+- **24 rules** declared in `.alint.yml`.
+- **56 effective rules** after loading the 4 extended rulesets and
+  applying ID overrides/deduplication.
 
 **Validation:** `alint validate-config` reports
-`✓ Config valid: 79 rule(s) loaded`. Pitfall checks: the magic
+`✓ Config valid: 56 rule(s) loaded`. Pitfall checks: the magic
 comment is present (line 1); the `command:` rules use `command:` (not
 `argv:`) and integer `timeout:` (not duration strings). **0
 instances of pitfall #22** (no `pattern: |` block scalars in this
@@ -632,10 +629,11 @@ violations; the structural floor is sound.**
 **resolved in v0.9.18 via bundled-rule refinement A1** — the rule now
 requires a sibling `package.json` to fire, which excludes nixpkgs's
 all-Nix tree entirely. Net: the post-v0.9.18 surface drops to ~30
-violations against the same SHA, of which 24 are GHA hardening
-warnings (Scorecard-class, surfaced at PR time vs nightly), 2 are
+violations against the same SHA, of which 24 were GHA hardening
+warnings in that historical ruleset, 2 are
 real bundler-cache bugs, 1 is the known hackage-packages.nix size
-warning, and 3 are governance-info findings.
+warning, and 3 are governance-info findings. The current 0.16.1 result is
+the single workflow-permissions finding recorded below.
 
 ### 6.1 Findings (all reviewed)
 
@@ -644,14 +642,12 @@ warning, and 3 are governance-info findings.
 | 2 Ruby bundler-cache directories committed | `pkgs/by-name/pt/pt/.bundle`, `pkgs/by-name/re/redis-dump/.bundle` | warning | `hygiene-no-ruby-bundler-cache` | **Real bugs** — `.bundle/` is bundler's per-package cache that should never be committed. Worth filing a janitorial PR to add to `.gitignore` and `git rm -r` from the affected packages. |
 | 3 directories matching `**/build` / `**/coverage` heuristic | `pkgs/development/python-modules/{bootstrap/build,build,coverage}` | warning | `hygiene-no-js-build-outputs` | **Was a false-positive class against v0.9.17; FIXED in v0.9.18 via bundled-rule refinement A1** — `hygiene-no-js-build-outputs` now requires a sibling `package.json` to fire, which excludes nixpkgs's all-Nix tree entirely. Same fix benefits k8s, vscode, and node. |
 | 1 file > 10 MiB | `pkgs/development/haskell-modules/hackage-packages.nix` (~36 MiB) | warning | `hygiene-no-huge-files` | **Real but expected.** This is the Haskell ecosystem registry — a generated ~30 MiB Nix expression listing every Hackage package. The `linguist-generated` marker in `.gitattributes` flags it for git stats; alint flags it as a size sentry. **Recommended fix:** add `pkgs/development/haskell-modules/hackage-packages.nix` to the rule's exclude list (it's intentionally generated). |
-| 16 workflows lack `permissions.contents: read` | `.github/workflows/{bot,build,check,…}.yml` | warning | `gha-workflow-contents-read` | **Real bugs** — least-privilege workflow defaults are best practice. nixpkgs's bot workflows could benefit from declaring this explicitly. The OpenSSF Scorecard surfaces the same finding. |
-| 8 workflows have third-party actions not pinned to a 40-char SHA | (across `.github/workflows/`) | warning | `gha-pin-actions-to-sha` | **Same as kubernetes / vscode** — most third-party actions in nixpkgs use floating tags rather than SHA pins; OpenSSF Scorecard surfaces the same finding. alint surfaces it at PR time. |
+| 1 workflow declares no permissions | `.github/workflows/periodic-merge.yml` | warning | `gha-workflow-contents-read` | **Real.** Measured with alint 0.16.1 on the 2026-05-07 snapshot; the other 16 workflows pin every action to a commit and limit the token. |
 | 3 governance-info findings | `oss-security-policy-exists`, `oss-codeowners-exists`, `oss-code-of-conduct-exists` | info | bundled oss-baseline | nixpkgs uses different conventions (`SECURITY.md` not `SECURITY_CONTACTS`; `ci/OWNERS` not `CODEOWNERS`; no `code-of-conduct.md` at root). All expected; oss-baseline emits info-level findings to surface the convention difference. |
 
 **Total real findings (alint-surfaced, existing tooling missed):**
 - **2 real bugs** (bundler cache committed in 2 packages)
-- **24 real but documented-as-known-trade-off findings** (workflow
-  permissions + action pinning)
+- **1 workflow-permissions finding** on the current measured snapshot
 - **3 governance-info findings** (convention difference; expected)
 
 **Total false positives (config-side refinements needed):**
@@ -663,7 +659,7 @@ warning, and 3 are governance-info findings.
 ### 6.2 No suspected `.alint.yml` bugs
 
 The config is clean. No regex pitfalls, no `pair` rule semantic gaps,
-no JSONPath schema mismatches. The 73-rule pass over 52,354 files
+no JSONPath schema mismatches. The historical pass over 52,354 files
 produces a clean 33-violation result with no surprise classes —
 the cleanest of any case study in the catalogue.
 
@@ -741,10 +737,9 @@ Three candidate refinements worth evaluating in subsequent sweeps:
   message audit. The nixpkgs `.alint.yml` itself was not modified in
   batch B1 (it never carried pitfall #22 — no `pattern: |` block
   scalars).
-- **Rule count:** **79** (46 custom + 4 bundled rulesets — `oss-baseline`
-  15, `ci/github-actions` 3, `hygiene/no-tracked-artifacts` 11,
-  `tooling/editorconfig` 3; rule IDs may overlap)
-- **`alint validate-config`:** ✓ Config valid: 79 rule(s) loaded
+- **Current rule count:** **56 effective rules** (24 declared here plus
+  4 extended rulesets, after ID overrides/deduplication).
+- **`alint validate-config`:** ✓ Config valid: 56 rule(s) loaded
 - **Live-tree measurement:** **52,354 files** (current sparse-checkout;
   prior 39,101 was a smaller exclusion set), **332 ms wall-clock**
   (lite pass, no command rules) / **376 ms** (full pass with 7
@@ -776,11 +771,11 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (58 rules, ~67% coverage). +3 surfaces: ordered_block finally
-gets clean targets (maintainer-list.nix + team-list.nix wrap their lists in
-literal `# keep-sorted start/end` markers), command_idempotent collapses the
-treefmt suite (nixfmt/actionlint/zizmor), and for_each_dir enforces the
-pkgs/by-name shard file-shape. No nix ecosystem bundle exists yet (a gap).
+accordingly (56 rules, 13/21 inventoried surfaces, ~62% coverage).
+`command_idempotent` collapses the treefmt suite (nixfmt/actionlint/zizmor),
+and `for_each_dir` enforces the pkgs/by-name shard file-shape. The two
+keep-sorted lists use `block=yes` over multi-line Nix attributes, which
+`ordered_block` cannot model. No nix ecosystem bundle exists yet (a gap).
 Non-replaceable: nix eval, nixfmt semantics, the meta.maintainers/license
 cross-refs (need a nix-value extractor).
 

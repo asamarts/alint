@@ -79,7 +79,7 @@ inside `bazel test` invocations.
 | `@test` | What it actually does | Backing tool |
 |---|---|---|
 | Check buildifier formatting on BUILD files | `buildifier --mode=check` on the changed `BUILD`+`*.bzl` files | buildifier |
-| Check formatting for C++ files | `clang-format` on changed `.cc`/`.h` | clang-format |
+| Check formatting for C++ files | Declared but skipped in the changed-files suite | clang-format (skipped) |
 | Check pylint for Python files | `pylint` on changed `.py` (config: `tools/ci_build/pylintrc`, 344 lines) | pylint |
 | API compatibility test passes, ensuring no unexpected changes to the TF API | Same as full-suite test 8, scoped to changed files | `bazel test` |
 
@@ -184,16 +184,16 @@ Every row from §1 tagged with one of:
 | API compatibility test | 🔄 alint-future (partial) | The test itself is `bazel test` (out of scope for execution). The **goldens-vs-runtime parity** is the v0.11+ `cross_language_implementation_complete` primitive (1,185 textprotos = the canonical demand-driver). |
 | Bazel query over //... | ❌ out-of-scope | Bazel query. |
 | buildifier on BUILD | ✅ alint-today | `command:` rule shelling to `buildifier --mode=check`. |
-| clang-format on C++ | ✅ alint-today | `command:` rule shelling to `clang-format`. |
+| clang-format on C++ | not an active upstream gate | The bats test is skipped; the example's command is optional extra policy, not coverage of a running CI check. |
 | pylint on Python | ✅ alint-today | `command:` rule shelling to `pylint --rcfile=tensorflow/tools/ci_build/pylintrc`. |
 | API compat (changed-files variant) | 🔄 alint-future | Same as full-suite test 8. |
 
 **Tally for §2.1 (the 13 bats cases):**
 
 ```
-✅ alint-today:    4 / 13 = 31%   (no-dup-windows + buildifier + clang-format + pylint)
+✅ alint-today:    3 / 13 = 23%   (no-dup-windows + buildifier + pylint)
 🔄 alint-future:   3 / 13 = 23%   (links-resolve + API compat full + API compat changed)
-❌ out-of-scope:   6 / 13 = 46%   (the 6 bazel cquery/build/query cases)
+❌ out-of-scope:   7 / 13 = 54%   (the 7 Bazel cquery/build/test/query cases)
 ```
 
 ### 2.2 The 16 GHA workflows
@@ -239,7 +239,7 @@ All 16 covered by `ci/github-actions@v1` (3 rules). 100 % alint-today.
 | Artefact | Coverage |
 |---|---|
 | `LICENSE`, `README.md`, `SECURITY.md`, `CODE_OF_CONDUCT.md`, `CONTRIBUTING.md`, `CODEOWNERS`, `AUTHORS`, `CITATION.cff`, `ISSUES.md`, `RELEASE.md` | ✅ alint-today (oss-baseline + per-artefact `file_exists`) |
-| `LICENSE` is Apache-2 | ✅ alint-today | `compliance/apache-2@v1` (3 rules). |
+| `LICENSE` is Apache-2 | ✅ alint-today | `oss-license-exists`; the generic Apache source-header bundle is intentionally not extended because TensorFlow's generated and empty marker files do not follow one path-only convention. |
 | `.github/dependabot.yml` covers GH Actions | ✅ alint-today | Custom `tensorflow-dependabot-covers-actions`. |
 | `tensorflow/security/README.md` exists + `advisory/*.md` shape | ✅ presence + 🔄 future shape | `file_exists` for the index; per-CVE template-match needs `markdown_template_match` (v0.10+ design candidate, single-source TF only). |
 
@@ -264,9 +264,9 @@ Granular breakdown:
 
 ```
 bats @test cases (13):
-  ✅ alint-today:     4 / 13 = 31%
+  ✅ alint-today:     3 / 13 = 23%
   🔄 alint-future:    3 / 13 = 23%
-  ❌ out-of-scope:    6 / 13 = 46%
+  ❌ out-of-scope:    7 / 13 = 54%
 
 GHA workflows (16):
   ✅ alint-today:    16 / 16 = 100%   (all under ci/github-actions@v1)
@@ -295,7 +295,7 @@ per-Python-version lockfile (3):
    No other case study in the catalogue exercises both topologies
    so cleanly.
 
-2. **Almost half of the bats suite (6 of 13) is bazel cquery /
+2. **More than half of the bats suite (7 of 13) is bazel cquery /
    bazel build / bazel query — out of alint's deliberate
    non-goals.** alint never executes bazel; the existing tools are
    the right tools. The remaining 7 bats cases are either
@@ -314,20 +314,18 @@ per-Python-version lockfile (3):
 
 ## 4. The `.alint.yml` synopsis
 
-Working config: [`./.alint.yml`](.alint.yml) (1,009 lines, 40
-repo-specific rules, 6 bundled rulesets folded in via `extends:`,
-**83 rules total** loaded — confirmed by `alint validate-config`).
+Working config: [`./.alint.yml`](.alint.yml) (19
+repo-specific rules, 4 bundled rulesets folded in via `extends:`,
+**55 rules total** loaded — confirmed by `alint validate-config`).
 
 **Synopsis of the load-bearing rules** (full config in `.alint.yml`):
 
 ```yaml
 extends:
   - alint://bundled/oss-baseline@v1                  # 15 rules
-  - alint://bundled/compliance/apache-2@v1           # 3 rules
   - alint://bundled/python@v1                        # 9 rules
   - alint://bundled/ci/github-actions@v1             # 3 rules
   - alint://bundled/hygiene/no-tracked-artifacts@v1  # 11 rules
-  - alint://bundled/tooling/editorconfig@v1          # 3 rules
 
 rules:
   # ── The TFLite per-language file-shape parity layer ──────────────
@@ -352,16 +350,8 @@ rules:
     kind: file_content_matches
     paths: "tensorflow/tools/api/golden/v2/*.pbtxt"
     pattern: '(?m)^path:\s*"tensorflow\.'
-  # ── Bazel licensing declaration on every BUILD (v0.9.18 B3 fix) ──
-  # Premise repaired in v0.9.18: TF declares licensing per-Bazel-package
-  # via `licenses(["notice"])` + `default_applicable_licenses`, NOT
-  # inline Apache-2 headers. The 700-violation FP class triaged in §6
-  # below was the trigger for the rewrite.
-  - id: tensorflow-bazel-files-have-apache-header
-    kind: file_header
-    paths: { include: ["**/BUILD", "**/BUILD.bazel"], exclude: ["third_party/**"] }
-    lines: 25
-    pattern: '(licenses\(.*notice|default_applicable_licenses.*license)'
+  # BUILD-file licensing is not universal in TensorFlow. The former header
+  # approximation was removed after flagging 287 valid BUILD files.
   # ── The 13 bats @test cases — shellouts to existing tools ────────
   - id: tensorflow-buildifier
     kind: command
@@ -473,10 +463,9 @@ surfaced **21,436 violations** across 24 failing rules (43 passing)
 under v0.9.17. The vast majority was the 5 `command:` shellouts
 firing as "command not found" on each anchor file (below),
 masking the real findings (~150 actual structural violations once
-shellouts are filtered). Under v0.9.20 the v0.9.18 B3 fix collapses
-the 700-violation `tensorflow-bazel-files-have-apache-header` FP
-class (row 5) to ~0; the bench-machine shellout failure pattern
-remains identical until the external tools land on PATH.
+shellouts are filtered). The later validation found that the B3 rewrite
+still encoded a non-universal BUILD-file convention, so that rule and the
+generic Apache header bundle are now removed.
 
 | # | Count | Rule | Triage |
 |---|---|---|---|
@@ -484,9 +473,9 @@ remains identical until the external tools land on PATH.
 | 2 | 6,603 | `tensorflow-clang-format` | Same — `clang-format` not on PATH. |
 | 3 | 2,880 | `tensorflow-pylint` | Same — `pylint` not on PATH. |
 | 4 | 759 | `tensorflow-buildifier` | Same — `buildifier` not on PATH. Note 671 BUILD + 87 .bzl = 758 anchor files (1 over from a long-tail extension). |
-| 5 | 700 | `tensorflow-bazel-files-have-apache-header` | **RESOLVED in v0.9.18 (B3 fix).** Original v0.9.17-era count: 700 FPs. The rule's original regex (`'Licensed under the Apache License,?\s*Version 2'`) misread TF's policy — TF declares licensing per-Bazel-package via `licenses(["notice"])` + `default_applicable_licenses = ["//tensorflow:license"]`, NOT inline Apache-2 headers. v0.9.18's B3 refinement rewrote this case study's `.alint.yml` rule: kind switched to `file_header` (lines: 25), pattern switched to `'(licenses\(.*notice|default_applicable_licenses.*license)'`, scope tightened to BUILD/BUILD.bazel and exclude `third_party/**`. Effective count under v0.9.20: ~0. The principled fix — a Bazel-licensing-declaration-aware rule kind — is a v0.11+ ship-target (1 source: this repo). |
+| 5 | 700 | `tensorflow-bazel-files-have-apache-header` | **Resolved by removal.** The original header premise was wrong, and the later `licenses(...)` approximation still flagged 287 valid BUILD files because the convention is not universal. |
 | 6 | 36 | `oss-no-trailing-whitespace` | Real findings. |
-| 7 | 36 | `apache-2-source-has-license-header` | Bundled rule firing on the same files as #5, narrower scope. |
+| 7 | 36 | `apache-2-source-has-license-header` | **Resolved by not extending the bundle.** The remaining findings were mostly legitimate empty `__init__.py` files. |
 | 8 | 36 | `tensorflow-no-trailing-whitespace` | Same as #6, narrower scope. |
 | 9 | 25 | `oss-final-newline` | Real findings. |
 | 10 | 18 | `tensorflow-lite-python-source-has-test` | **All real findings.** ~18 Python TFLite modules without `_test.py` partner. Worth filing as test-coverage gaps. |
@@ -495,9 +484,9 @@ remains identical until the external tools land on PATH.
 | 13 | 4 | `tensorflow-lite-objc-api-has-test` | **All real findings.** Validates §6 spec: 4 ObjC `apis/` headers without `tests/` partners. |
 | 14 | 3 | `gha-workflow-contents-read` | Real findings — workflows lacking permissions block. |
 | 15 | 1 | `oss-no-merge-conflict-markers` | **False positive** (validates §6 spec): the `=======` separator in `tensorflow/tools/pip_package/THIRD_PARTY_NOTICES.txt` is a text divider (formatting), not a real conflict — the file carries no `<<<<<<<` / `>>>>>>>` anchor. **Fixed in alint v0.12 (commit `0d66ee95`):** the rule now requires an unambiguous anchor line (`<<<<<<< ` / `>>>>>>> ` / `||||||| `) before treating `=======` as a conflict separator, so the earlier `paths.exclude` workaround for that one file is no longer needed. |
-| 16 | 1 | `python-manifest-exists` | **Validates §6 spec:** TF doesn't ship `pyproject.toml` (still on `setup.py` + `requirements_lock_*.txt`, predating PEP 621). **Accurate finding** — flag as such in config's leading comment. |
+| 16 | 1 | `python-manifest-exists` | **Resolved with a local override:** TensorFlow's manifest is `tensorflow/tools/pip_package/setup.py`, not a root-level file. |
 | 17 | 1 | `python-has-lockfile` | Same — TF uses `requirements_lock_3_*.txt` matrix, not the PEP 621 lockfile shape the bundled rule expects. |
-| 18 | 1 | `tensorflow-tf-version-bzl-declares-semver` | Real finding — needs investigation. |
+| 18 | 1 | `tensorflow-tf-version-bzl-semver` | **Resolved:** the current file declares one `TF_VERSION = "x.y.z"` value; the rule now matches that shape rather than obsolete per-part constants. |
 
 **Real findings (alint surfaced, existing tooling missed):**
 
@@ -509,9 +498,9 @@ remains identical until the external tools land on PATH.
   Python-side equivalent of the Swift/ObjC findings.
 - **1 merge-conflict-marker false-positive** in
   `THIRD_PARTY_NOTICES.txt` (validates §6 spec).
-- **2 PEP 621 false-positives** (`python-manifest-exists`,
-  `python-has-lockfile`) — TF's pre-PEP-621 packaging is
-  intentional; the bundled rules need overrides documented.
+- **1 remaining Python lockfile convention mismatch:** TensorFlow uses a
+  `requirements_lock_3_*.txt` matrix. The manifest false positive is resolved
+  by the local nested-`setup.py` override.
 
 **Investigation closed — v0.9.18 B3 fix shipped:** the 700-violation
 `tensorflow-bazel-files-have-apache-header` count under v0.9.17 was
@@ -620,15 +609,15 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 
 - **alint version pin:** 0.9.20 (current, 2026-05-10). Original
   capture under v0.9.17 (`1dbd9b218a0e`, built 2026-05-07).
-- **`.alint.yml` in this directory:** **shipped — 1,009 lines, 40
-  repo-specific rules, 6 bundled rulesets folded in via `extends:`,
-  83 effective rules loaded.**
-  `alint validate-config` confirms `✓ Config valid: 83 rule(s)
-  loaded`. **Live-tree recheck:** performed in this batch under
+- **`.alint.yml` in this directory:** **shipped — 19
+  repo-specific rules, 4 bundled rulesets folded in via `extends:`,
+  55 effective rules loaded.**
+  `alint validate-config` confirms `✓ Config valid: 55 rule(s)
+  loaded`. **Historical live-tree recheck:** performed in this batch under
   v0.9.17 — see §6 for the 21,436-violation breakdown. Under v0.9.20
-  the v0.9.18 B3 fix collapses the 700-violation
-  `tensorflow-bazel-files-have-apache-header` FP class (row 5) to
-  ~0; the ~20k shellout-failure synthesised counts (buildifier /
+  the B3 rewrite reduced the original 700 findings but was later removed
+  because 287 valid BUILD files still failed it. The ~20k historical
+  shellout-failure synthesised counts (buildifier /
   pylint / clang-format / codespell aren't on PATH on the bench
   machine) and the ~150 real structural findings (9 + 18 TFLite
   test-coverage gaps, THIRD_PARTY_NOTICES merge-conflict-marker FP,
@@ -667,11 +656,9 @@ Three candidate refinements worth evaluating in subsequent sweeps:
     multi-doc YAML fix respectively.
 - **Bundled-ruleset rule counts (authoritative as of 2026-05-07):**
   oss-baseline=15, python=9, ci/github-actions=3,
-  hygiene/no-tracked-artifacts=11, compliance/apache-2=3,
+  hygiene/no-tracked-artifacts=11,
   tooling/editorconfig=3. v0.9.18 refinements that touched
   bundled rulesets impacting this config:
-  **A2** (`compliance/apache-2@v1` `apache-2-source-has-license-header`
-  bundles long-form ASF preamble),
   **A3** (`python@v1` default-excludes test-fixture paths),
   **A5** (`oss-baseline@v1` `oss-license-exists` recognises
   LICENSE.TXT and LICENSE.md). Plus this case study's own
@@ -682,13 +669,13 @@ Three candidate refinements worth evaluating in subsequent sweeps:
 Re-derived against the current upstream + everything alint shipped since
 this study was written (v0.10 rule kinds + v0.11 commit-validation /
 `changed_since` / `{{env.X}}`). The `.alint.yml` here was rewritten
-accordingly (58 rules, ~78% coverage). +9 surfaces: the bats sanity suite
+accordingly (55 rules, 32/41 inventoried surfaces, ~78% coverage). The bats sanity suite
 (pylint/buildifier/clang-format/codespell/api-compat) -> command_idempotent
 with per-file offender parsing, the tensorflow.org/code/<path> link
 integrity -> registry_paths_resolve, and requirements_lock cross-version pin
-parity -> cross_file_value_equals. Note: compliance/apache-2@v1 OVER-FIRES
-(1,185 generated .pbtxt goldens + _pb2.py + third_party), so it is extended
-with a same-id paths.exclude override rather than used as-is.
+parity -> cross_file_value_equals. `compliance/apache-2@v1` and the BUILD
+licensing approximation are omitted because both misrepresent valid files;
+the bundled Python-manifest rule is locally overridden to the nested setup.py.
 
 Full catalogue, coverage math, and cross-cutting findings:
 `docs/development/case-study-v011-reanalysis-log.md` (Batch 6).
