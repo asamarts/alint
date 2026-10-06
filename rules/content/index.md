@@ -20,7 +20,7 @@ Rule kinds in the **Content** family. Each rule below links to its own page with
 | [`file_min_size`](/docs/rules/content/file_min_size/) | File must be at least `min_bytes` in size. |
 | [`file_min_lines`](/docs/rules/content/file_min_lines/) | File must have at least `min_lines` lines (`\n`-terminated, with an unterminated trailing segment counting as one more, `wc -l` semantics). |
 | [`file_max_lines`](/docs/rules/content/file_max_lines/) | File must have at most `max_lines` lines, using the same accounting as `file_min_lines`. |
-| [`file_footer`](/docs/rules/content/file_footer/) | Last `lines` lines of each file in scope must match a regex. |
+| [`file_footer`](/docs/rules/content/file_footer/) | The configured number of final lines in each file in scope must match a regex. |
 | [`file_shebang`](/docs/rules/content/file_shebang/) | First line of each file in scope must match the `shebang` regex. |
 | [`file_is_text`](/docs/rules/content/file_is_text/) | Content is detected as text (magic bytes + UTF-8 validity check), fails on binary files matched by `paths`. |
 | [`file_is_ascii`](/docs/rules/content/file_is_ascii/) | Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. |

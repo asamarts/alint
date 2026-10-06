@@ -1,6 +1,6 @@
 ---
 title: 'git_commit_signed_off'
-description: 'Assert every commit in scope carries a DCO (Developer Certificate of Origin) Signed-off-by: trailer, required by every CNCF / Linux.'
+description: 'Assert every commit in scope carries a DCO (Developer Certificate of Origin) Signed-off-by: trailer. alint git_commit_signed_off rule, git hygiene family.'
 sidebar:
   order: 6
 categories: ['git-hygiene']

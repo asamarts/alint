@@ -17,12 +17,12 @@ Two modes, selected by the optional `since:` field:
 
 `since:` accepts anything `git rev-parse` resolves: a 40-char or abbreviated SHA, a branch (`origin/main`), a tag (`v1.2.3`), or a relative ref (`HEAD~5`). The rule walks `<since>..HEAD` oldest-first, validates each commit, and emits one violation per failing commit with the short SHA + a subject snippet so you know which to amend.
 
-POSIX-style env-var interpolation is supported:
+Use alint's standard template syntax for environment values:
 
-- `${VAR}` substitutes the value of `VAR`. Unset (or empty) is a hard error with a CI-friendly hint.
-- `${VAR:-default}` substitutes `VAR`, or `default` when `VAR` is unset or empty.
+- `{{env.VAR}}` requires `VAR` to be set and non-empty.
+- `{{env.VAR | default('value')}}` supplies a fallback, such as `since: "{{env.ALINT_BASE_SHA | default('origin/main')}}"` for local runs.
 
-The GitHub Actions double-brace template syntax `${{ ... }}` is **not** interpolated by alint; it has to be rendered by Actions before the YAML is read, which only works in workflow files, not in `.alint.yml`. Use the single-brace `${VAR}` form and export the var in a workflow step.
+GitHub Actions expressions are evaluated only in workflow files, not inside `.alint.yml`; export the expression to an environment variable in the workflow and read it through `{{env.VAR}}` in the alint config. The older POSIX-style `${VAR}` / `${VAR:-default}` syntax still works for this field but is deprecated and will be removed in v1.0.
 
 #### `include_merges:`
 
@@ -55,7 +55,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@v0.13.0
+        uses: asamarts/alint@aa2d643b4b852af0f24d86adcee57388121c350b # v0.17.0
 ```
 
 ## Options
@@ -65,7 +65,7 @@ jobs:
 | `include_merges` | boolean |  | `false` | When validating a range (`since:` set), include merge commits. Defaults to `false` because merge commits in PR contexts are typically the synthetic merge `actions/checkout` produces (with an auto-generated subject the rule would always flag) or maintainer-resolved merges from the base branch. Has no effect when `since:` is unset; combining `include_merges: true` with no `since:` is a load-time error. |
 | `pattern` | string |  | `null` | Rust-regex pattern the full message (subject + body, joined with newlines) must match. Use `(?s)` to make `.` match newlines. |
 | `requires_body` | boolean |  | `false` | When true, the message must have a non-empty body, that is, at least one line of content after the subject's blank-line separator. |
-| `since` | string |  | `null` | Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports POSIX `${VAR}` and `${VAR:-default}` env-var interpolation so CI can pass a SHA via an env var (e.g. `since: ${ALINT_BASE_SHA:-origin/main}` with `ALINT_BASE_SHA` exported in a workflow step from `github.event.pull_request.base.sha`). The GitHub Actions double-brace template syntax `${{ ... }}` is NOT interpolated by alint. |
+| `since` | string |  | `null` | Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports alint's template syntax, so CI can pass a SHA through an environment variable (for example, `since: "{{env.ALINT_BASE_SHA \| default('origin/main')}}"`). The older POSIX `${VAR}` / `${VAR:-default}` form is deprecated and will be removed in v1.0. |
 | `subject_max_length` | integer (>= 1) |  | `null` | Maximum number of characters allowed in the subject line. Common values: 50 (Tim Pope's recommendation), 72 (GitHub PR-title cutoff). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.

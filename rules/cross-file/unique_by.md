@@ -1,6 +1,6 @@
 ---
 title: 'unique_by'
-description: 'No two files matching select may share the value of key (a path template; tokens {path}/{dir}/{basename}/{stem}/{ext}/{parent_name}).'
+description: 'No two files matching select may share the value of key. alint unique_by rule, cross-file family.'
 sidebar:
   order: 15
 categories: ['cross-file']

@@ -1,6 +1,6 @@
 ---
 title: 'command_idempotent'
-description: 'Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 => the tree is formatter-clean (silent); non-zero.'
+description: 'Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 => the tree is. alint command_idempotent rule, cross-file family.'
 sidebar:
   order: 10
 categories: ['cross-file']

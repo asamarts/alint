@@ -1,6 +1,6 @@
 ---
 title: 'pair_hash'
-description: 'The algorithm digest (sha256 default / sha512) of every file matching source must appear in the single target file, either as an embedded.'
+description: 'The algorithm digest (sha256 default / sha512) of every file matching source must appear in the single target file. alint pair_hash rule, cross-file family.'
 sidebar:
   order: 2
 categories: ['cross-file', 'security-unicode-sanity']

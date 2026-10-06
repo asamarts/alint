@@ -1,6 +1,6 @@
 ---
 title: 'git_commit_subject_matches'
-description: 'Each commit''s subject line (the first line of its message) must match the matches: regex, the subject-grammar member of the commit family.'
+description: 'Each commit''s subject line (the first line of its message) must match the matches: regex, the. alint git_commit_subject_matches rule, git hygiene family.'
 sidebar:
   order: 8
 categories: ['git-hygiene']

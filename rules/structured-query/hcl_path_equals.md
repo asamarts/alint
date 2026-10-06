@@ -1,6 +1,6 @@
 ---
 title: 'hcl_path_equals'
-description: 'Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.'
+description: 'Query a HCL document with a JSONPath expression and assert every match deep-equals the supplied value. alint hcl_path_equals rule, structured query family.'
 sidebar:
   order: 8
 categories: ['structured-query']

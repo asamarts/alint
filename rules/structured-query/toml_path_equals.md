@@ -1,6 +1,6 @@
 ---
 title: 'toml_path_equals'
-description: 'Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value.'
+description: 'Query a TOML document with a JSONPath expression and assert every match deep-equals the supplied value. alint toml_path_equals rule, structured query family.'
 sidebar:
   order: 3
 categories: ['structured-query']

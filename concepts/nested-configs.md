@@ -1,6 +1,6 @@
 ---
 title: 'Nested .alint.yml (monorepo layering)'
-description: 'alint concept: nested .alint.yml (monorepo layering).'
+description: 'Layer .alint.yml files across a monorepo with deterministic inheritance, trust boundaries, and root-relative behavior.'
 ---
 
 <likec4-view view-id="monorepoNesting"></likec4-view>
@@ -42,7 +42,7 @@ rules:
 
 At load time, alint walks the tree (respecting `.gitignore` + `ignore:`), picks up every nested `.alint.yml` / `.alint.yaml`, and **prefixes each nested rule's path-like fields** (`paths`, `select`, `primary`) with the relative directory the config lives in. So the frontend rule above evaluates as if it were `paths: "packages/frontend/**/*.ts"` at the root — it fires only on frontend TypeScript files.
 
-### Restrictions (MVP)
+## Restrictions (MVP)
 
 - Only the root config sets `nested_configs: true`. Nested configs can't spawn further nesting.
 - Nested configs can only declare `version:` and `rules:` — `extends:`, `facts:`, `vars:`, `ignore:`, `respect_gitignore:`, `fix_size_limit:`, and `allow_out_of_root:` are root-only.

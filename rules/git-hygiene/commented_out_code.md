@@ -1,6 +1,6 @@
 ---
 title: 'commented_out_code'
-description: 'Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners).'
+description: 'Heuristic detector for blocks of commented-out source code. alint commented_out_code rule, git hygiene family.'
 sidebar:
   order: 2
 categories: ['git-hygiene', 'content']

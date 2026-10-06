@@ -1,6 +1,6 @@
 ---
 title: 'markdown_paths_resolve'
-description: 'Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo.'
+description: 'Validate that backticked workspace paths in markdown files resolve to real files or directories in the. alint markdown_paths_resolve rule, git hygiene family.'
 sidebar:
   order: 3
 categories: ['git-hygiene', 'cross-file']

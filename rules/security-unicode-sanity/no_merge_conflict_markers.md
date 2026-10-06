@@ -1,6 +1,6 @@
 ---
 title: 'no_merge_conflict_markers'
-description: 'Flag <<<<<<<, =======, >>>>>>>, ||||||| markers at the start of a line, almost always left over from an unresolved merge.'
+description: 'Flag <<<<<<<, =======, >>>>>>>, ||||||| markers at the start of a line, almost always. alint no_merge_conflict_markers rule, security / unicode sanity family.'
 sidebar:
   order: 1
 categories: ['security-unicode-sanity', 'text-hygiene']

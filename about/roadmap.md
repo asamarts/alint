@@ -482,7 +482,8 @@ Ranked by leverage.
   1M-file size opt-in via `--include-1m`.
 - ✅ **Competitive comparisons**, shipped in v0.5.7
   (2026-04-26). Same harness now drives ls-lint,
-  Repolinter, and `find` + `ripgrep` pipelines alongside
+  Repolinter, and shell pipelines (`find` + grep for S1; `test`, `find`, and
+  ripgrep for S2) alongside
   alint, gated to the scenarios each tool can sanely
   express. Reproducibility via the
   `ghcr.io/asamarts/alint-bench` Docker image (pinned
@@ -559,8 +560,8 @@ without changing the underlying tool.
   carries an `agent_instruction` field templated from the
   rule's `message` + `fix` block: a remediation phrasing
   optimised for an agent to act on, not for a human to read.
-  Closes the "agents already consume our JSON, but the SARIF
-  shape is awkward in their context" feedback gap.
+  Closes a feedback gap: agents already read the JSON output,
+  but the SARIF shape was awkward in their context.
 
 Out-of-scope for v0.6 (deliberately): new rule kinds, semantic
 analysis, secret-entropy scanning, AGENTS.md export. All of

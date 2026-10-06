@@ -1,6 +1,6 @@
 ---
 title: 'file_min_lines'
-description: 'File must have at least min_lines lines (\n-terminated, with an unterminated trailing segment counting as one more, wc -l semantics).'
+description: 'File must have at least min_lines lines. alint file_min_lines rule, content family.'
 sidebar:
   order: 9
 categories: ['content', 'structure']

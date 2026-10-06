@@ -46,7 +46,7 @@ alint ships 105 rule kinds across 13 families (94 distinct rule behaviors plus 1
 - [`file_content_matches`](/docs/rules/content/file_content_matches/) — File contents must contain at least one match for a regex. _(Content)_
 - [`file_ends_with`](/docs/rules/content/file_ends_with/) — Byte-level prefix / suffix check. _(Content)_
 - [`file_exists`](/docs/rules/existence/file_exists/) — Every glob match in `paths` must correspond to a real file. _(Existence)_
-- [`file_footer`](/docs/rules/content/file_footer/) — Last `lines` lines of each file in scope must match a regex. _(Content)_
+- [`file_footer`](/docs/rules/content/file_footer/) — The configured number of final lines in each file in scope must match a regex. _(Content)_
 - [`file_graph`](/docs/rules/cross-file/file_graph/) — Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. _(Cross-file)_
 - [`file_hash`](/docs/rules/content/file_hash/) — Content SHA-256 must equal the expected digest. _(Content)_
 - [`file_header`](/docs/rules/content/file_header/) — The first N lines must match a regex (line-oriented). _(Content)_
@@ -91,11 +91,11 @@ alint ships 105 rule kinds across 13 families (94 distinct rule behaviors plus 1
 - [`max_consecutive_blank_lines`](/docs/rules/text-hygiene/max_consecutive_blank_lines/) — Cap runs of blank lines to `max`. _(Text hygiene)_
 - [`max_directory_depth`](/docs/rules/structure/max_directory_depth/) — Tree depth from repo root may not exceed `max_depth`. _(Structure)_
 - [`max_files_per_directory`](/docs/rules/structure/max_files_per_directory/) — Per-directory fanout may not exceed `max_files`. _(Structure)_
-- [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) — Flag Trojan-Source bidi override characters (U+202A–202E, U+2066–2069). _(Security / Unicode sanity)_
+- [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) — Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). _(Security / Unicode sanity)_
 - [`no_bom`](/docs/rules/encoding/no_bom/) — Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. _(Encoding)_
 - [`no_case_conflicts`](/docs/rules/portable-metadata/no_case_conflicts/) — Flag paths that differ only by case (e.g. `README.md` + `readme.md`). _(Portable metadata)_
 - [`no_empty_files`](/docs/rules/structure/no_empty_files/) — Flag zero-byte files. _(Structure)_
-- [`no_illegal_windows_names`](/docs/rules/portable-metadata/no_illegal_windows_names/) — Reject path components Windows can't represent: _(Portable metadata)_
+- [`no_illegal_windows_names`](/docs/rules/portable-metadata/no_illegal_windows_names/) — Reject path components that Windows cannot represent. _(Portable metadata)_
 - [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/) — Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a line — almost always left over from an unresolved merge. _(Security / Unicode sanity)_
 - [`no_submodules`](/docs/rules/git-hygiene/no_submodules/) — Flag the presence of `.gitmodules` at the repo root — always, regardless of `paths`. _(Git hygiene)_
 - [`no_symlinks`](/docs/rules/unix-metadata/no_symlinks/) — Flag tracked paths that are symbolic links. _(Unix metadata)_
