@@ -70,6 +70,7 @@ pub static KIND_CATEGORIES: &[(&str, &[Category])] = &[
     ("json_schema_passes", &[Category::StructuredQuery]),
     ("line_endings", &[Category::TextHygiene, Category::PortableMetadata]),
     ("line_max_width", &[Category::TextHygiene]),
+    ("markdown_links_resolve", &[Category::CrossFile, Category::Content]),
     ("markdown_paths_resolve", &[Category::GitHygiene, Category::CrossFile]),
     ("max_consecutive_blank_lines", &[Category::TextHygiene]),
     ("max_directory_depth", &[Category::Structure]),

@@ -15,6 +15,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   existence and selector rules whose empty sets already have kind-specific
   meaning.
 
+- New `markdown_links_resolve` rule kind validates Markdown links, images,
+  reference definitions, and explicit reference labels against repository
+  files and directories. It ignores code examples, front matter, and HTML
+  comments; reports each bad link at its source location; supports a
+  `relative: forbid` mode for trailing-slash documentation sites; and can map
+  root-absolute URL prefixes back to source directories.
+
 ### Fixed
 
 - Cache-backed `scope_filter.changed_since` and manifest-derived predicates are

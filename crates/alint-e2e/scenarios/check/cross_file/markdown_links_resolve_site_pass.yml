@@ -1,0 +1,28 @@
+name: markdown_links_resolve validates root-absolute rendered-site routes
+tags: [check, markdown_links_resolve, cross_file, passing]
+
+given:
+  tree:
+    docs:
+      site:
+        index.md: |
+          # Site
+
+          See [the guide](/docs/guide/) and [this section](#site).
+        guide.md: "# Guide\n"
+  config: |
+    version: 1
+    rules:
+      - id: site-links
+        kind: markdown_links_resolve
+        paths: "docs/site/**/*.md"
+        relative: forbid
+        root:
+          url_prefix: /docs/
+          dir: docs/site
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

@@ -1,0 +1,34 @@
+name: markdown_links_resolve catches a moved repository target
+tags: [check, markdown_links_resolve, cross_file, failing]
+
+docs:
+  title: A repository link into a moved directory is reported
+  case: fail
+  kind: markdown_links_resolve
+
+given:
+  tree:
+    CHANGELOG.md: |
+      # Changelog
+
+      Benchmarks: [v0.9.4](docs/benchmarks/macro/results/linux-x86_64/v0.9.4/).
+    docs:
+      benchmarks:
+        macro:
+          results:
+            linux-x86_64-ryzen-3900x:
+              v0.9.4:
+                README.md: "# results\n"
+  config: |
+    version: 1
+    rules:
+      - id: repo-links
+        kind: markdown_links_resolve
+        paths: CHANGELOG.md
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: repo-links, level: error, path: CHANGELOG.md}

@@ -177,6 +177,7 @@ pub struct FileIndex {
     /// Relative paths, sorted + deduped. Empty for a fixture-built index.
     escaping_symlinks: Vec<Arc<Path>>,
     path_set: OnceLock<HashSet<Arc<Path>>>,
+    all_path_set: OnceLock<HashSet<Arc<Path>>>,
     parent_to_children: OnceLock<HashMap<Arc<Path>, Vec<usize>>>,
     /// Per-`since`-ref diff sets backing `scope_filter.changed_since:`.
     /// Populated once by the engine before per-file dispatch (a ref
@@ -220,6 +221,7 @@ impl FileIndex {
             entries,
             escaping_symlinks,
             path_set: OnceLock::new(),
+            all_path_set: OnceLock::new(),
             parent_to_children: OnceLock::new(),
             changed_paths: OnceLock::new(),
             manifest_paths: OnceLock::new(),
@@ -359,6 +361,26 @@ impl FileIndex {
     /// the hash lookup is several orders of magnitude faster.
     pub fn contains_file(&self, rel: &Path) -> bool {
         self.file_path_set().contains(rel)
+    }
+
+    /// O(1) "does this exact relative path exist as an indexed file or
+    /// directory?" query. This is the path-resolution counterpart to
+    /// [`Self::contains_file`]: documentation links and other repository
+    /// references may legitimately target either kind.
+    pub fn contains_path(&self, rel: &Path) -> bool {
+        self.all_path_set
+            .get_or_init(|| {
+                #[cfg(debug_assertions)]
+                let start = std::time::Instant::now();
+                let set = self
+                    .entries
+                    .iter()
+                    .map(|entry| Arc::clone(&entry.path))
+                    .collect();
+                trace_index_build!("all_path_set", start, self.entries.len());
+                set
+            })
+            .contains(rel)
     }
 
     /// Find a file entry by its exact relative path. Uses the
@@ -1015,6 +1037,25 @@ mod tests {
         // find_file filters dirs — querying a known directory
         // returns None.
         assert!(idx.find_file(Path::new("b")).is_none());
+    }
+
+    #[test]
+    fn fileindex_contains_path_includes_files_and_directories() {
+        let idx = FileIndex::from_entries(vec![
+            FileEntry {
+                path: Path::new("a/x.rs").into(),
+                is_dir: false,
+                size: 0,
+            },
+            FileEntry {
+                path: Path::new("a").into(),
+                is_dir: true,
+                size: 0,
+            },
+        ]);
+        assert!(idx.contains_path(Path::new("a/x.rs")));
+        assert!(idx.contains_path(Path::new("a")));
+        assert!(!idx.contains_path(Path::new("missing")));
     }
 
     #[test]

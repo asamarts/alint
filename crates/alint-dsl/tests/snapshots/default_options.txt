@@ -1641,6 +1641,22 @@ LineMaxWidthRule {
     max_width: 100,
 }
 
+=== kind: markdown_links_resolve | id: docs-links-resolve ===
+MarkdownLinksResolveRule {
+    id: "docs-links-resolve",
+    level: Error,
+    policy_url: None,
+    message: None,
+    scope: Scope { ... },
+    relative: Resolve,
+    root_map: Some(
+        RootMap {
+            url_prefix: "/docs/",
+            dir: "docs/site",
+        },
+    ),
+}
+
 === kind: markdown_paths_resolve | id: agents-md-paths-resolve ===
 MarkdownPathsResolveRule {
     id: "agents-md-paths-resolve",

@@ -387,6 +387,38 @@ rules:
       `[workspace.package].version`. Run `bash ci/scripts/bump-version.sh
       <new-version>` to sync, then re-run `alint check`.
 
+  # --- Documentation link integrity ---------------------------------------
+  # GitHub-rendered repository docs resolve relative destinations from the
+  # source file. Historical benchmark snapshots, versioned design records,
+  # and site content have separate URL/lifecycle semantics and are excluded.
+  - id: repository-markdown-links-resolve
+    kind: markdown_links_resolve
+    paths:
+      include:
+        - README.md
+        - CHANGELOG.md
+        - CONTRIBUTING.md
+        - SECURITY.md
+        - GOVERNANCE.md
+        - CODE_OF_CONDUCT.md
+        - RELEASING.md
+        - "docs/**/*.md"
+      exclude:
+        - "docs/site/**"
+        - "docs/benchmarks/**"
+        - "docs/**/archive/**"
+        - "docs/design/v*/**"
+    level: error
+
+  # docs/site pages are served at trailing-slash URLs. A source-relative link
+  # therefore resolves against the rendered URL (not the source directory) and
+  # is almost always dead; canonical site links begin at `/docs/` instead.
+  - id: site-markdown-links-are-root-absolute
+    kind: markdown_links_resolve
+    paths: "docs/site/**/*.md"
+    relative: forbid
+    level: error
+
   # --- AI-content markers in user-facing docs -----------------------------
   # Mirrors the alint.org rules. Scoped to the top-level user-facing
   # markdown docs (README + contributor/governance/security/release

@@ -242,6 +242,20 @@
         }
       ]
     },
+    "RelativeMode": {
+      "oneOf": [
+        {
+          "const": "resolve",
+          "description": "Resolve relative destinations against the Markdown source file.",
+          "type": "string"
+        },
+        {
+          "const": "forbid",
+          "description": "Reject relative destinations (useful for trailing-slash documentation sites, where filesystem-relative links resolve against a different URL).",
+          "type": "string"
+        }
+      ]
+    },
     "RequireList": {
       "anyOf": [
         {
@@ -257,6 +271,24 @@
           "type": "array"
         }
       ]
+    },
+    "RootMapSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "description": "Repository directory corresponding to `url_prefix` (for example `docs/site`). Extensionless routes also try `<route>.md` and `<route>/index.md`.",
+          "type": "string"
+        },
+        "url_prefix": {
+          "description": "Root-absolute URL prefix to validate, including leading and trailing slashes (for example `/docs/`). Other root-absolute URLs are ignored.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url_prefix",
+        "dir"
+      ],
+      "type": "object"
     },
     "SelectSpec": {
       "anyOf": [
@@ -3263,6 +3295,9 @@
           "$ref": "#/$defs/rule_commented_out_code"
         },
         {
+          "$ref": "#/$defs/rule_markdown_links_resolve"
+        },
+        {
           "$ref": "#/$defs/rule_markdown_paths_resolve"
         },
         {
@@ -3465,6 +3500,37 @@
       "required": [
         "paths",
         "max_width"
+      ],
+      "type": "object"
+    },
+    "rule_markdown_links_resolve": {
+      "description": "Validate live Markdown links, images, and reference destinations against repository files and directories.",
+      "properties": {
+        "kind": {
+          "const": "markdown_links_resolve"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        },
+        "relative": {
+          "$ref": "#/$defs/RelativeMode",
+          "default": "resolve",
+          "description": "How to handle relative Markdown destinations: `resolve` (default) or `forbid`."
+        },
+        "root": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/RootMapSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional mapping from root-absolute rendered URLs to repository source files. This validates only URLs beneath the declared prefix."
+        }
+      },
+      "required": [
+        "paths"
       ],
       "type": "object"
     },

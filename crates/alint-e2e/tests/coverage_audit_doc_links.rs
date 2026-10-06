@@ -1,28 +1,22 @@
 //! Repo-side documentation link integrity (external-evaluation §3.1).
 //!
-//! A reader browsing the docs on GitHub hit two classes of dead link:
-//!
-//!   1. **Broken relative links** — a markdown link to a repo file that
-//!      moved or was misspelt (e.g. `crates/alint-core/src/when.rs`
-//!      after the `when` module became a directory).
-//!   2. **Root-absolute site links** — `](/docs/concepts/…)`. On GitHub
+//! A reader browsing the docs on GitHub can hit **root-absolute site
+//! links** — `](/docs/concepts/…)`. On GitHub
 //!      a `/…` link resolves against `github.com`, not the repo or the
 //!      site, so it dead-ends. These belong to the rendered site at
 //!      alint.org, not to a repo reader.
 //!
-//! This gate enforces both on the actively-maintained docs:
-//!
-//!   * every relative file link resolves to a real path, and
-//!   * no doc introduces a root-absolute `/…` link, EXCEPT the few
+//! This gate enforces that no actively-maintained repo doc introduces a
+//! root-absolute `/…` link, EXCEPT the few
 //!     dual-purpose files that are sliced/copied into the alint.org
 //!     site (where `/docs/…` is the correct, resolvable form) and that
 //!     carry a "reading this on GitHub? the full reference is at
 //!     alint.org" banner for repo readers.
 //!
-//! The site-content tree `docs/site/**` has the opposite semantics and its
-//! own test below: its pages are served at trailing-slash URLs on
-//! alint.org, so they must use root-absolute `/docs/…` links and no
-//! relative ones.
+//! Relative-link resolution and the opposite `docs/site/**` policy are now
+//! dogfooded through `markdown_links_resolve` rules in `.alint.yml`. This
+//! Rust audit retains only the banner policy that is not a link-resolution
+//! concern.
 //!
 //! Out of scope (not browsed as repo docs): the benchmark
 //! result/▸archive snapshots and the versioned `docs/design/v*/`
@@ -169,12 +163,11 @@ fn strip_code_drops_example_links_but_keeps_real_ones() {
 }
 
 #[test]
-fn repo_doc_links_are_not_dead_on_github() {
+fn repo_docs_do_not_use_dead_root_absolute_links_on_github() {
     let root = repo_root();
     let docs = collect_docs(&root);
     assert!(!docs.is_empty(), "no governed docs found");
 
-    let mut broken_relative: Vec<String> = Vec::new();
     let mut root_absolute: Vec<String> = Vec::new();
     let mut missing_banner: Vec<String> = Vec::new();
 
@@ -206,83 +199,28 @@ fn repo_doc_links_are_not_dead_on_github() {
             if regexish_scheme(&url) {
                 continue;
             }
-            if url.starts_with('/') {
-                if !allow_site_links {
-                    root_absolute.push(format!(
-                        "{rel}: ]({url}) — dead on GitHub; use https://alint.org{url}"
-                    ));
-                }
-                continue;
+            if url.starts_with('/') && !allow_site_links {
+                root_absolute.push(format!(
+                    "{rel}: ]({url}) — dead on GitHub; use https://alint.org{url}"
+                ));
             }
-            // Relative link: resolve the path part (drop anchor/query).
-            let target = url.split(['#', '?']).next().unwrap_or("");
-            if target.is_empty() || target.contains(' ') {
-                continue; // prose / placeholder, not a real path
-            }
-            let resolved = path.parent().unwrap().join(target);
-            if !resolved.exists() {
-                broken_relative.push(format!("{rel}: ]({url}) — target not found"));
-            }
+            // Relative links need no work here: the dogfood
+            // `repository-markdown-links-resolve` rule in `.alint.yml`
+            // validates them.
         }
     }
 
     let mut problems = String::new();
-    for v in [&broken_relative, &root_absolute, &missing_banner] {
+    for v in [&root_absolute, &missing_banner] {
         for line in v {
             writeln!(problems, "  - {line}").unwrap();
         }
     }
     assert!(
-        broken_relative.is_empty() && root_absolute.is_empty() && missing_banner.is_empty(),
-        "documentation link problems ({} broken relative, {} dead root-absolute, \
-         {} missing banner):\n{problems}",
-        broken_relative.len(),
+        root_absolute.is_empty() && missing_banner.is_empty(),
+        "documentation link problems ({} dead root-absolute, {} missing banner):\n{problems}",
         root_absolute.len(),
         missing_banner.len(),
-    );
-}
-
-/// alint.org serves each `docs/site/**` page at a trailing-slash URL
-/// (`docs/site/about/monorepos.md` is `/docs/about/monorepos/`), so a
-/// relative link resolves against the page's own URL, not against its
-/// file: `../integrations/docker/` from that page lands on
-/// `/docs/about/integrations/docker/`, a 404, and a `./page.md` link
-/// never resolves. Site pages therefore link with root-absolute `/docs/…`
-/// URLs, which alint.org's build-time link check resolves against the
-/// rendered pages.
-#[test]
-fn site_docs_link_root_absolute() {
-    let root = repo_root();
-    let mut pages: Vec<String> = Vec::new();
-    walk_md(&root, &root.join("docs/site"), |_| true, &mut pages);
-    assert!(!pages.is_empty(), "no docs/site pages found");
-
-    let mut relative: Vec<String> = Vec::new();
-    for rel in &pages {
-        let text = std::fs::read_to_string(root.join(rel)).unwrap();
-        for url in links(&strip_code(&text)) {
-            // A link title (`](url "title")`) follows the url.
-            let url = url.split_whitespace().next().unwrap_or("");
-            let absolute = url.is_empty()
-                || url.starts_with('#')
-                || url.starts_with('/')
-                || url.starts_with("mailto:")
-                || url.starts_with("http://")
-                || url.starts_with("https://")
-                || regexish_scheme(url);
-            if !absolute {
-                relative.push(format!(
-                    "  - {rel}: ]({url}), use a root-absolute /docs/… link"
-                ));
-            }
-        }
-    }
-    assert!(
-        relative.is_empty(),
-        "{} relative link(s) in docs/site, which break on alint.org's \
-         trailing-slash URLs:\n{}",
-        relative.len(),
-        relative.join("\n"),
     );
 }
 

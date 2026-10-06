@@ -584,6 +584,14 @@ rules:
     level: error
 
   # ─── Markdown / commented-code / blame-age ─────────────────────
+  - id: docs-links-resolve
+    kind: markdown_links_resolve
+    paths: "docs/**/*.md"
+    relative: resolve
+    root:
+      url_prefix: /docs/
+      dir: docs/site
+    level: error
   - id: agents-md-paths-resolve
     kind: markdown_paths_resolve
     paths: "AGENTS.md"

@@ -1,0 +1,31 @@
+name: markdown_links_resolve rejects relative links on trailing-slash site pages
+tags: [check, markdown_links_resolve, cross_file, failing]
+
+given:
+  tree:
+    docs:
+      site:
+        about:
+          monorepos.md: |
+            # Monorepos
+
+            Continue with [GitHub Actions](../integrations/github-actions/).
+        integrations:
+          github-actions.md: "# GitHub Actions\n"
+  config: |
+    version: 1
+    rules:
+      - id: site-links
+        kind: markdown_links_resolve
+        paths: "docs/site/**/*.md"
+        relative: forbid
+        root:
+          url_prefix: /docs/
+          dir: docs/site
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: site-links, level: error, path: docs/site/about/monorepos.md}

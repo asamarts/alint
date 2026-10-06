@@ -172,7 +172,7 @@ schema whereas alint's relations are discovered per run.
 
 | Missing class | Gaps | Kind of work |
 |---|---|---|
-| Recognition upgrade (build a structure the parser drops or never builds) | B1 duplicate keys, B2 well-formed, E1/E3/E6 markdown grammar, G1 tabular, H2 Dockerfile, F2 SPDX-expression | a parser or scanner |
+| Recognition upgrade (build a structure the parser drops or never builds) | B1 duplicate keys, B2 well-formed, E3/E6 markdown grammar, G1 tabular, H2 Dockerfile, F2 SPDX-expression | a parser or scanner |
 | Dependency over a *dynamically-extracted* relation | C3 version consistency, D1 key parity, D2 placeholder parity, F3 REUSE completeness | new constraint logic (the `constraint` kind of 2.4); the dependency shape is partly present already (`registry_paths_resolve` and `cross_file set_equals` are dynamic INDs), so the genuinely new pieces are key-*set* enumeration (D1, which JSONPath cannot express) and the extract-and-assert packaging |
 | General FO+COUNT (equality-of-counts / threshold over an extracted relation) | C3 count-distinct, key-count parity, B4 mutually-exclusive (= 1), dead-pattern (= 0) | a `count` operator on the `constraint` kind |
 | A small offline decision procedure | C4 semver-range algebra | a self-contained solver |
@@ -205,6 +205,10 @@ a reader does not re-propose them):
   files** via `cross_file_value_equals` with `normalize:` bands (the dogfood
   `install-snippets-match-workspace-version` rule proves it); **naming parity** via
   `filename_case` / `filename_regex`.
+- **Markdown link integrity** via `markdown_links_resolve`: repository-relative links,
+  images and reference definitions resolve against the file tree; explicit reference labels
+  exist; and trailing-slash documentation sites can forbid relative URLs or map rendered
+  root-absolute routes back to source files.
 
 Already on alint's own radar (the `examples/README` emerging-gaps list and ROADMAP
 single-source candidates): `json_key_sort_order`, `column_alignment`, `not_executable`,
@@ -317,14 +321,15 @@ this is a clean new kind (reference file plus a glob of peers).
 
 ### Family E: docs, accessibility, and i18n structural
 
-A markdown and docs-hygiene family. `markdown_paths_resolve` today handles only backticked
-paths with a required prefix list; it does not parse markdown link / image / anchor grammar,
-alt text, or heading structure. All of these are a light line-scanner (a fenced-code toggle
-plus front-matter skip), never a real AST.
+A markdown and docs-hygiene family. `markdown_links_resolve` now covers live link / image /
+reference destinations, undefined explicit reference labels, code/comment/front-matter
+exclusion, source-relative resolution, and rendered-site URL policy. `markdown_paths_resolve`
+remains the separate checker for backticked path claims. Alt text and heading/front-matter
+structure remain gaps; they can extend the same light scanner rather than introducing a full
+Markdown AST.
 
 | Gap | Detects | Scope | Expr | Fix |
 |---|---|---|---|---|
-| `markdown_links_resolve` | relative `[text](./path)` and `![alt](./img)` targets that miss on disk; `#anchor` links matching no heading slug; undefined reference labels | IN (relative/anchor); external URLs OUT | K | Suggestion |
 | `markdown_images_have_alt` | an image with no alt text (WCAG / MD045) | IN | P+K | Suggestion |
 | `markdown_required_headings` | a document's heading sequence matches a required ordered template with wildcards (MD043) | IN | K | Suggestion |
 | `markdown_reference_integrity` | reference labels defined and used; no duplicate/unused definitions (MD052/MD053) | IN | K | Suggestion |
@@ -472,16 +477,15 @@ gap all ride the same path-to-span bridge.
 5. toolchain-pins ruleset (C2): under-served, because Dependabot ignores pin files. (P for exact
    pins; range pins are C4 `semver_range`)
 6. `semver_range` awareness (C4): the one class alint structurally cannot do. (K)
-7. `markdown_links_resolve` (E1): `markdown_paths_resolve` does only backticks. (K)
-8. `dependency_version_consistency` (C3): the syncpack/manypkg headline. (K)
-9. `license_detectable` (F1): the deferred `detect:` fact; Scorecard/Repolinter/GitHub gate on
+7. `dependency_version_consistency` (C3): the syncpack/manypkg headline. (K)
+8. `license_detectable` (F1): the deferred `detect:` fact; Scorecard/Repolinter/GitHub gate on
    it. (K)
-10. `gitattributes_valid` (A2): an un-owned niche; alint hit the bug itself. (P+K)
-11. `delimited_columns` (G1): data repos; no general linter covers tabular integrity. (K)
-12. `markdown_required_headings` (E3): the most alint-native doc rule. (K)
-13. `pinned_references` (H1): Dockerfile digest and pre-commit `rev` are clean gaps. (P+K)
-14. `markdown_images_have_alt` (E2): a fresh accessibility angle. (P+K)
-15. `dependabot_ecosystem_drift` (C5) and `codeowners_valid` (J1): governance validity beyond
+9. `gitattributes_valid` (A2): an un-owned niche; alint hit the bug itself. (P+K)
+10. `delimited_columns` (G1): data repos; no general linter covers tabular integrity. (K)
+11. `markdown_required_headings` (E3): the most alint-native doc rule. (K)
+12. `pinned_references` (H1): Dockerfile digest and pre-commit `rev` are clean gaps. (P+K)
+13. `markdown_images_have_alt` (E2): a fresh accessibility angle. (P+K)
+14. `dependabot_ecosystem_drift` (C5) and `codeowners_valid` (J1): governance validity beyond
     existence. (P+K)
 
 Second tier: `well_formed`, `frontmatter_schema`, `spdx_identifier_valid`,
@@ -512,8 +516,8 @@ Four reusable substrates unlock disproportionate coverage, so they should be seq
   (an IN cross-file check).
 - **A duplicate-aware / spanned structured parser** (shared with the auto-fix bridge) unlocks
   `no_duplicate_keys` (B1).
-- **A markdown link / heading / front-matter scanner** (one light line-scanner with a
-  fenced-code toggle) unlocks all of Family E.
+- **The shipped Markdown link scanner**, extended with heading / front-matter recognition,
+  unlocks the remaining Family E checks without a second parser.
 - **A single `constraint` kind** (extract relations from a glob, then assert a dependency;
   section 2.4) generalizes `cross_file` and `registry_paths_resolve` (not `unique_by`, whose
   path-template keying needs a new extractor; 2.4) and unlocks the
@@ -523,8 +527,8 @@ Four reusable substrates unlock disproportionate coverage, so they should be seq
 
 Sequencing suggestion: ship `editorconfig_conforms` and `no_duplicate_keys` first (highest
 leverage, each a self-contained kind on an existing evaluator), package the version-SSOT and
-toolchain-pins bundled rulesets (mostly (P), immediate value), then build the markdown scanner
-(Family E) and the SPDX table (Family F) as shared substrates, with `semver_range` and the
+toolchain-pins bundled rulesets (mostly (P), immediate value), then extend the Markdown scanner
+(Family E) and build the SPDX table (Family F) as shared substrates, with `semver_range` and the
 cross-file consistency kinds following as engine capabilities.
 
 ## 10. References

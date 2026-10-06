@@ -116,6 +116,7 @@ pub mod io;
 pub mod json_schema_passes;
 pub mod line_endings;
 pub mod line_max_width;
+pub mod markdown_links_resolve;
 pub mod markdown_paths_resolve;
 pub mod max_consecutive_blank_lines;
 pub mod max_directory_depth;
@@ -207,6 +208,10 @@ pub fn migrated_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
             max_consecutive_blank_lines::options_schema(),
         ),
         ("rule_unique_by", unique_by::options_schema()),
+        (
+            "rule_markdown_links_resolve",
+            markdown_links_resolve::options_schema(),
+        ),
         (
             "rule_markdown_paths_resolve",
             markdown_paths_resolve::options_schema(),
@@ -475,6 +480,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
     registry.register("ini_path_absent", structured_path::ini_path_absent_build);
     registry.register("hcl_path_absent", structured_path::hcl_path_absent_build);
     registry.register("json_schema_passes", json_schema_passes::build);
+    registry.register("markdown_links_resolve", markdown_links_resolve::build);
     registry.register("markdown_paths_resolve", markdown_paths_resolve::build);
     registry.register("commented_out_code", commented_out_code::build);
     registry.register("git_no_denied_paths", git_no_denied_paths::build);

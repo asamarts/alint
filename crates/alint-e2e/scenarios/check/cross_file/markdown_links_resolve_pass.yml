@@ -1,0 +1,38 @@
+name: markdown_links_resolve accepts valid repository links
+tags: [check, markdown_links_resolve, cross_file, passing]
+
+docs:
+  title: Live repository links resolve while examples and external URLs are ignored
+  case: pass
+  kind: markdown_links_resolve
+
+given:
+  tree:
+    README.md: |
+      # Project
+
+      See [the guide](docs/guide.md "Guide") and ![logo](docs/logo.svg).
+      [reference]: docs/guide.md?view=full#start
+      Continue with [the reference][reference].
+      External links such as [alint](https://alint.org) stay offline.
+
+      `[example](missing.md)`
+      <!-- [commented example](missing.md) -->
+      ```markdown
+      [fenced example](missing.md)
+      ```
+    docs:
+      guide.md: "# Guide\n"
+      logo.svg: "<svg/>\n"
+  config: |
+    version: 1
+    rules:
+      - id: repo-links
+        kind: markdown_links_resolve
+        paths: README.md
+        level: error
+
+when: [check]
+
+expect:
+  - violations: []

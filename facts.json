@@ -2,7 +2,7 @@
   "format_version": 2,
   "alint_version": "0.17.0",
   "counts": {
-    "rule_kinds": 105,
+    "rule_kinds": 106,
     "families": 13,
     "bundled_rulesets": 22,
     "auto_fix_ops": 26,
@@ -77,6 +77,7 @@
     "json_schema_passes",
     "line_endings",
     "line_max_width",
+    "markdown_links_resolve",
     "markdown_paths_resolve",
     "max_consecutive_blank_lines",
     "max_directory_depth",
@@ -403,6 +404,10 @@
     "line_max_width": [
       "text-hygiene"
     ],
+    "markdown_links_resolve": [
+      "cross-file",
+      "content"
+    ],
     "markdown_paths_resolve": [
       "git-hygiene",
       "cross-file"
@@ -597,6 +602,7 @@
     "json_schema_passes": "json_schema_passes",
     "line_endings": "line_endings",
     "line_max_width": "line_max_width",
+    "markdown_links_resolve": "markdown_links_resolve",
     "markdown_paths_resolve": "markdown_paths_resolve",
     "max_consecutive_blank_lines": "max_consecutive_blank_lines",
     "max_directory_depth": "max_directory_depth",

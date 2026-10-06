@@ -609,6 +609,18 @@ For every file matching `primary`, a file matching the `partner` template must e
 
 The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). The sums-line parser accepts **either order** — coreutils / go-`.sum` `<hex> <path>` *and* the Go FIPS snapshot's path-first `<path> <hex>` — by identifying the digest token by its shape (the algorithm fixes its hex length). One violation per source whose digest is absent or mismatched; a missing `target` is one violation anchored on `target`. Raw bytes are hashed (a CRLF/newline change *is* a digest change — it is an integrity pin). Detection-only: alint never regenerates the manifest (same posture as `file_hash`). The sibling of `file_hash` (one file vs a *literal* hash in the config) and `generated_file_fresh` (a *generator's* stdout); `pair_hash` is the cross-file "B carries A's current digest" relation. golang/go FIPS `fips140.sum` is the canonical, highest-stakes use.
 
+### `markdown_links_resolve`
+
+**Categories:** Cross-file, Content
+
+Validate live Markdown link, image, and reference-definition destinations against the repository tree. Relative destinations resolve from the source file's directory after URL percent-decoding; query strings and fragments do not affect the filesystem lookup. Both files and directories are valid targets. External URLs and other URI schemes, protocol-relative URLs, and same-page `#fragment` links are intentionally offline/out of scope. Explicit reference uses such as `[guide][install]` and `[guide][]` also report undefined labels.
+
+The scanner skips YAML front matter, fenced and indented code blocks, inline code spans, and HTML comments, so documentation examples are not mistaken for live links. A real link whose visible text contains inline code, such as ``[`Rule`](../rule.md)``, is still checked. Each bad link is a separate violation at the destination's line and column.
+
+`relative: forbid` is the site mode: relative links fail even if their source-tree path exists, preventing trailing-slash rendered pages from resolving them against the wrong URL. Add a `root` map to validate root-absolute rendered routes against their source tree; extensionless routes try the exact path, `<route>.md`, and `<route>/index.md`.
+
+This is a whole-index cross-file rule: in `--changed` mode a non-empty change checks the complete Markdown link graph, so deleting a target is caught even when the linking page did not change. Check-only; guessing a moved destination is not a safe mechanical edit.
+
 ### `registry_paths_resolve`
 
 **Categories:** Cross-file
