@@ -82,6 +82,16 @@ if echo "$CHANGED" | grep -qE '^(crates/|xtask/|schemas/|\.alint\.yml$|\.gitattr
   RUST=true
 fi
 
+# The composite Action's version resolver is covered by the shell-test job,
+# while action.yml's baked release and documentation pins are covered by the
+# Docs job. These files are neither Rust nor ordinary docs, so route them to
+# both pipelines explicitly; otherwise an action-only PR would exercise only
+# the local `uses: ./` self-test, which cannot cover commit-SHA resolution.
+if echo "$CHANGED" | grep -qE '^(action\.yml|action/)'; then
+  RUST=true
+  DOCS=true
+fi
+
 # `demo/**` is the README demo: a fixture repo plus the VHS tape that records
 # `alint check`/`fix` against it. `ci/scripts/demo-drift.sh` replays that exact
 # sequence and asserts what alint really does, and it runs inside the Dogfood

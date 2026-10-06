@@ -139,7 +139,7 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
 |---|---|---|---|
 | **GitHub Releases** | tarball + per-file `.sha256` + concatenated `SHA256SUMS`; also force-moves the `v0` major tag (`release.yml:215-226`) so `@v0` tracks latest (see `MP-N2`) | all 5 triples | `GITHUB_TOKEN` |
 | **install.sh** (`curl \| bash` via alint.org) | platform-detect → SHA-256 verified download → `$HOME/.local/bin` (prints a PATH hint if that dir is not on `PATH`, `install.sh:104-108`) | 4 (no Windows) | none |
-| **GitHub Action** `asamarts/alint@v0` | composite; fetches install.sh at the consumer's pinned ref with 3x retry; binary version derives from the action ref | 4 (no Windows) | none |
+| **GitHub Action** `asamarts/alint@<sha>` | composite; fetches install.sh at the consumer's pinned ref with 3x retry; explicit version wins, exact tags select themselves, full SHAs select the version baked into that commit, and moving refs follow latest | 4 (no Windows) | none |
 | **crates.io** `cargo install alint` | source build; publishes 6 crates in dep order; **keyless OIDC** publishing | any Rust target | OIDC |
 | **npm** `@asamarts/alint` | **postinstall-download** wrapper (no native bytes in the tarball; `install.js` downloads + SHA-256-verifies at install time); keyless OIDC publishing | 5 (declares win-arm64 it can't serve) | OIDC |
 | **Docker** `ghcr.io/asamarts/alint` | distroless-static, nonroot (UID 65532), re-extracts the *release* binaries so the image is byte-identical to the tarballs; OCI labels set in CI (`release.yml:313-317`); tags `:vX.Y.Z`/`:X.Y.Z`/`:X.Y`/`:latest` | linux amd64+arm64 | `GITHUB_TOKEN` |

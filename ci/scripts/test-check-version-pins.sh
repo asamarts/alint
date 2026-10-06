@@ -45,6 +45,7 @@ expect_rejected() {
 
 restore() {
   git checkout -q -- ci/action-doc-pin.env docs/rules.md docs/site/integrations/github-actions.md
+  rm -f docs/site/new-action-example.md
 }
 
 expect_ok "canonical pins"
@@ -78,6 +79,18 @@ restore
 sed -i 's/^ACTION_DOC_SHA=.*/ACTION_DOC_SHA=0000000000000000000000000000000000000000/' \
   ci/action-doc-pin.env
 expect_rejected "metadata SHA differs from snippets"
+restore
+
+cat > docs/site/new-action-example.md <<'EOF'
+# New Action example
+
+```yaml
+- uses: asamarts/alint@0000000000000000000000000000000000000000 # v0.17.0
+  with:
+    version: v0.17.0
+```
+EOF
+expect_rejected "new user-facing Action snippets are discovered"
 restore
 
 sed -i '0,/^[[:space:]]*version: v0\.17\.0$/s//    path: ./' docs/site/integrations/github-actions.md

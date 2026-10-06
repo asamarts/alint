@@ -26,6 +26,17 @@ baked_version=$(awk '
     exit
   }
 ' action.yml)
+public_default=$(awk '
+  /^  version:[[:space:]]*$/ { in_version=1; next }
+  in_version && /^  [^[:space:]][^:]*:/ { exit }
+  in_version && /^[[:space:]]+default:/ {
+    value=$0
+    sub(/^[[:space:]]*default:[[:space:]]*/, "", value)
+    gsub(/"/, "", value)
+    print "found:" value
+    exit
+  }
+' action.yml)
 
 failed=0
 if [[ "v${workspace_version:-}" != "$release_tag" ]]; then
@@ -34,6 +45,11 @@ if [[ "v${workspace_version:-}" != "$release_tag" ]]; then
 fi
 if [[ "$baked_version" != "$release_tag" ]]; then
   echo "[release-version] $release_tag != action.yml baked version ${baked_version:-<missing>}" >&2
+  failed=1
+fi
+if [[ "$public_default" != "found:" ]]; then
+  echo "[release-version] action.yml inputs.version.default must be present and empty" >&2
+  echo "[release-version] a non-empty public default makes an omitted input indistinguishable from an explicit override" >&2
   failed=1
 fi
 if [[ "$failed" -ne 0 ]]; then

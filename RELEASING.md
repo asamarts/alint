@@ -13,9 +13,10 @@ points are explicit.
    ```
 
    The script edits `Cargo.toml [workspace.package].version`, the private
-   `ALINT_BAKED_VERSION` in `action.yml`, every user-facing install snippet
-   (README, SECURITY, docs/site/**), the npm and Zed manifests, and the npm
-   README. It also inserts a CHANGELOG stub and refreshes `Cargo.lock` via
+   `ALINT_BAKED_VERSION` in `action.yml`, every workspace-version-coupled
+   install snippet (README, SECURITY, and the installation, Docker, and
+   pre-commit guides), the npm and Zed manifests, and the npm README. It also
+   inserts a CHANGELOG stub and refreshes `Cargo.lock` via
    `cargo metadata --offline` (so the workspace internal-crate
    version entries in the lockfile track the bump).
 
@@ -138,10 +139,23 @@ checklist so the release-gated pieces land and nothing drifts:
    cookbook, getting-started) are safe to pre-write; the output-formats note is
    under the main-overlaid `docs/site/reference/**`, so wrap any unreleased part
    in `<!-- alint:since=X -->`.
-4. **Reconcile the trackers.** Bump `alint.org`'s pins (four install sites plus
+4. **Refresh the published Action pin after the release exists.** A release
+   commit cannot contain its own SHA, so this is deliberately a follow-up
+   commit on `main`: update `ci/action-doc-pin.env` and every
+   `asamarts/alint@<sha> # vX.Y.Z` example to the new tag's commit. From v0.18.0
+   onward the tagged `action.yml` contains its baked binary version, so set
+   `ACTION_DOC_REQUIRES_EXPLICIT_VERSION=false` and remove the now-redundant
+   `with: version:` line from each example. Verify both the user-facing copies
+   and the tag relationship with:
+
+   ```sh
+   bash ci/scripts/check-version-pins.sh --verify-action-tag
+   ```
+
+5. **Reconcile the trackers.** Bump `alint.org`'s pins (four install sites plus
    prose claims), and reconcile `alint.org` `marketing/STATE.md` to the new
    version and counts so it never drifts weeks behind again (P5.2).
-5. **Confirm the gates are green.** `gen-schema` / `gen-facts` / `docs-export`
+6. **Confirm the gates are green.** `gen-schema` / `gen-facts` / `docs-export`
    `--check` and the `docs/adr@v1` dogfood here; the `check-counts.mjs` count
    gate and `check-version-pins.sh` pin gate on the alint.org side.
 

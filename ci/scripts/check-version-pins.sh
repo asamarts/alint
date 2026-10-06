@@ -113,7 +113,7 @@ for f in "${SCOPE[@]}"; do
   drift=$(printf '%s\n' "$pins" | grep -vE "(v|:)${WS_ESCAPED}([^0-9.]|$)" || true)
   if [[ -n "$drift" ]]; then
     echo "[version-pin] $f: stale pin (workspace is $WORKSPACE_VER)" >&2
-    echo "$drift" | sed 's/^/    /' >&2
+    printf '    %s\n' "${drift//$'\n'/$'\n    '}" >&2
     failed=1
   fi
 done
@@ -167,7 +167,19 @@ else
       fi
     fi
 
+    # Keep the two canonical locations required even if their examples are
+    # accidentally removed, then discover every additional copy-paste snippet
+    # in the user-facing README/docs tree. Historical design/development notes
+    # live outside this surface and intentionally retain their original refs.
     action_doc_files=(docs/site/integrations/github-actions.md docs/rules.md)
+    while IFS= read -r -d '' f; do
+      case "$f" in
+        docs/site/integrations/github-actions.md|docs/rules.md) continue ;;
+      esac
+      if grep -qE 'uses:[[:space:]]*asamarts/alint@' "$f"; then
+        action_doc_files+=("$f")
+      fi
+    done < <(find README.md docs/site -type f \( -name '*.md' -o -name '*.mdx' \) -print0)
     uses_count=0
     explicit_count=0
     for f in "${action_doc_files[@]}"; do
@@ -182,7 +194,7 @@ else
         grep -vF "asamarts/alint@${ACTION_DOC_SHA} # v${ACTION_DOC_VERSION}" || true)
       if [[ -n "$mismatched" ]]; then
         echo "[version-pin] $f: Action pin differs from $ACTION_PIN_FILE" >&2
-        echo "$mismatched" | sed 's/^/    /' >&2
+        printf '    %s\n' "${mismatched//$'\n'/$'\n    '}" >&2
         failed=1
       fi
       file_explicit=$(grep -cE "^[[:space:]]+version:[[:space:]]+v${ACTION_DOC_VERSION//./\\.}([[:space:]#]|$)" "$f" || true)

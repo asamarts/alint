@@ -52,6 +52,14 @@ sed -i '/ALINT_BAKED_VERSION:/d' action.yml
 expect_rejected "missing Action baked version" v0.17.0
 cp "$REPO_ROOT/action.yml" action.yml
 
+sed -i '0,/^[[:space:]]*default: ""$/s//    default: "v0.17.0"/' action.yml
+expect_rejected "non-empty public Action version default" v0.17.0
+cp "$REPO_ROOT/action.yml" action.yml
+
+sed -i '0,/^[[:space:]]*default: ""$/d' action.yml
+expect_rejected "missing public Action version default" v0.17.0
+cp "$REPO_ROOT/action.yml" action.yml
+
 # Prove the normal release-preparation command updates both sides of the
 # contract. Stub only cargo metadata: dependency availability is unrelated to
 # this shell test, while the real bump script still performs every file edit.
