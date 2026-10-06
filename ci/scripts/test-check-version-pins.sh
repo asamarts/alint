@@ -54,7 +54,7 @@ expect_ok "canonical pins"
 # the caller's checkout (CI's shell-test job intentionally uses a shallow one).
 git add action.yml
 git -c user.name='alint tests' -c user.email='tests@alint.invalid' \
-  commit -q -m 'fixture: bake action version'
+  commit --allow-empty -q -m 'fixture: bake action version'
 fixture_sha=$(git rev-parse HEAD)
 git tag -f v0.17.0 HEAD >/dev/null
 sed -i "s/^ACTION_DOC_SHA=.*/ACTION_DOC_SHA=$fixture_sha/" ci/action-doc-pin.env
