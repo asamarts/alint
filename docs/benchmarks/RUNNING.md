@@ -31,7 +31,7 @@ End-to-end CLI wall-time over deterministic synthetic monorepos. Slow at
 the larger sizes; opt-in to 1M.
 
 ```sh
-# Default — alint-only over 1k/10k/100k × S1/S2/S3 × full/changed
+# Default — alint-only over 1k/10k/100k × all supported scenarios/modes
 xtask bench-scale
 
 # Include the 1M size (multi-GB working set, slow — ~10 minutes per run)
@@ -41,11 +41,12 @@ xtask bench-scale --include-1m
 xtask bench-scale --include-1m --sizes 1m --scenarios S3 --modes full \
     --warmup 1 --runs 2
 
-# All scenarios (S1-S14) at every size, both modes
-xtask bench-scale --include-1m --scenarios S1,S2,S3,S4,S5,S6,S7,S8,S9,S10,S11,S12,S13,S14
+# All check and fix scenarios at every size and supported mode
+xtask bench-scale --include-1m --scenarios S1,S2,S3,S4,SFIX \
+    --modes full,changed,fix
 
-# Compare against ls-lint and grep on the scenarios they support
-xtask bench-scale --tools all
+# Reproducible competitive run (alint, ls-lint, shell, Repolinter)
+xtask bench-scale --docker --tools all --scenarios S1,S2 --modes full
 ```
 
 Defaults to `--out docs/benchmarks/macro/results/<arch>/<workspace-version>/`
@@ -112,7 +113,8 @@ For macro benches, `bench-scale --out` already writes to the right
 per-version dir; just run the publication-grade matrix:
 
 ```sh
-xtask bench-scale --include-1m --scenarios S1,S2,S3 --modes full,changed \
+xtask bench-scale --include-1m --scenarios S1,S2,S3,S4,SFIX \
+    --modes full,changed,fix \
     --warmup 3 --runs 10
 ```
 
@@ -135,6 +137,6 @@ in the registry but absent from any bench scenario:
 cargo test -p alint-e2e --test coverage_audit_bench_listing -- --nocapture
 ```
 
-Use the listing as a triage list when extending S6 / S7 / S8 — kinds
+Use the listing as a triage list when extending S2 / S3 / S4 — kinds
 without a bench scenario have no perf gate against the next regression
 of their dispatch shape.

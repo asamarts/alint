@@ -211,6 +211,10 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
         }
     }
 
+    for warning in flat_scaling_warnings(&rows) {
+        eprintln!("[xtask] WARN: {warning}");
+    }
+
     let report = Report {
         schema_version: 1,
         fingerprint,
@@ -236,6 +240,39 @@ pub fn bench_scale(mut args: ScaleArgs) -> Result<()> {
 
 fn join_labels<T: Copy, F: Fn(T) -> &'static str>(items: &[T], f: F) -> String {
     items.iter().map(|&t| f(t)).collect::<Vec<_>>().join(",")
+}
+
+/// Flag a full-tree command whose 100k mean is less than twice its 1k mean.
+/// Startup cost can flatten small cells, but a 100x larger walk should still
+/// show material growth. This is advisory because host noise and a genuinely
+/// sublinear tool are possible; the original broken ls-lint rows had a ratio
+/// below 1 and would have triggered this warning.
+fn flat_scaling_warnings(rows: &[Row]) -> Vec<String> {
+    let mut warnings = Vec::new();
+    for small in rows
+        .iter()
+        .filter(|row| row.size_files == 1_000 && row.mode == "full")
+    {
+        let Some(large) = rows.iter().find(|row| {
+            row.size_files == 100_000
+                && row.tool == small.tool
+                && row.scenario == small.scenario
+                && row.mode == small.mode
+        }) else {
+            continue;
+        };
+        if !small.mean_ms.is_finite() || !large.mean_ms.is_finite() || small.mean_ms <= 0.0 {
+            continue;
+        }
+        let ratio = large.mean_ms / small.mean_ms;
+        if ratio < 2.0 {
+            warnings.push(format!(
+                "suspiciously flat full-tree scaling for {}/{}: 100k/1k is {:.2}x ({:.1} ms / {:.1} ms); verify the tool read its config and walked the tree",
+                small.tool, small.scenario, ratio, large.mean_ms, small.mean_ms,
+            ));
+        }
+    }
+    warnings
 }
 
 /// Flush dirty pages and drop the page cache before a size phase's benchmark
@@ -331,19 +368,24 @@ fn run_one(
         (args.warmup, args.runs)
     };
 
-    validate_benchmark_command(tool, tree_root, scenario, &cmd_str, &label)?;
+    let readiness_cmd = tool.readiness_invocation(alint, tree_root, scenario, mode);
+    validate_benchmark_command(tool, tree_root, scenario, mode, &readiness_cmd, &label)?;
 
     let mut hyperfine = Command::new("hyperfine");
     hyperfine
         .args(["--warmup", &warmup.to_string()])
         .args(["--min-runs", &runs.to_string()])
         .args(["--max-runs", &runs.to_string()]);
-    // Exit 1 means "lint findings" for alint and Repolinter, and "no
-    // unmatched names" for the shell baseline. ls-lint uses `-warn`, so it
-    // exits zero for findings and needs no exemption. Never ignore setup or
-    // internal failures wholesale: those are not benchmark samples.
-    if tool != Tool::LsLint {
-        hyperfine.arg("--ignore-failure=1");
+    // Ignore only the per-tool statuses whose meaning is pinned by the
+    // readiness check above. Never ignore setup/internal failures wholesale.
+    let ignored_codes = tool.hyperfine_ignored_exit_codes();
+    if !ignored_codes.is_empty() {
+        let codes = ignored_codes
+            .iter()
+            .map(i32::to_string)
+            .collect::<Vec<_>>()
+            .join(",");
+        hyperfine.arg(format!("--ignore-failure={codes}"));
     }
     let status = hyperfine
         .arg("--command-name")
@@ -390,15 +432,12 @@ fn validate_benchmark_command(
     tool: Tool,
     tree_root: &Path,
     scenario: Scenario,
+    mode: Mode,
     command: &str,
     label: &str,
 ) -> Result<()> {
-    let probe = match (tool, scenario) {
-        (Tool::LsLint, Scenario::S1) => Some(("alint_bench_BadName.rs", "alint_bench_BadName.rs")),
-        (Tool::Repolinter, Scenario::S2) => Some(("alint_bench_probe.rs", "alint_bench_probe.rs")),
-        _ => None,
-    };
-    let probe_path = probe.map(|(path, _)| tree_root.join(path));
+    let probe = readiness_probe(tool, scenario, mode);
+    let probe_path = probe.map(|probe| tree_root.join(probe.path));
     if let Some(path) = &probe_path {
         if path.exists() {
             bail!(
@@ -406,7 +445,7 @@ fn validate_benchmark_command(
                 path.display()
             );
         }
-        fs::write(path, "// TODO: benchmark readiness probe\n")?;
+        fs::write(path, probe.expect("probe path requires a probe").contents)?;
     }
     let output = Command::new("sh")
         .args(["-c", command])
@@ -418,9 +457,12 @@ fn validate_benchmark_command(
     }
     let output = output?;
     let code = output.status.code();
-    let allowed = match tool {
-        Tool::LsLint => code == Some(0),
-        Tool::Alint | Tool::GrepPipeline | Tool::Repolinter => matches!(code, Some(0 | 1)),
+    let allowed = match probe {
+        Some(probe) => code == Some(probe.expected_exit),
+        None => match tool {
+            Tool::LsLint => code == Some(0),
+            Tool::Alint | Tool::GrepPipeline | Tool::Repolinter => matches!(code, Some(0 | 1)),
+        },
     };
     if !allowed {
         bail!(
@@ -428,19 +470,76 @@ fn validate_benchmark_command(
             String::from_utf8_lossy(&output.stderr).trim()
         );
     }
-    if let Some((_, needle)) = probe {
+    if let Some(probe) = probe {
         let combined = format!(
             "{}{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr)
         );
-        if !combined.contains(needle) {
+        if !combined.contains(probe.needle) {
             bail!(
-                "benchmark readiness probe for {label} did not report planted finding {needle:?}; the tool may not have loaded its config"
+                "benchmark readiness probe for {label} did not report planted finding {:?}; the tool may not have loaded its config",
+                probe.needle,
             );
         }
     }
     Ok(())
+}
+
+#[derive(Clone, Copy)]
+struct ReadinessProbe {
+    path: &'static str,
+    contents: &'static str,
+    needle: &'static str,
+    expected_exit: i32,
+}
+
+/// Competitive full-mode rows get a scenario-specific planted finding. The
+/// exact exit status plus diagnostic needle distinguish a real lint result
+/// from startup/config errors (notably Repolinter, which returns 1 for both).
+fn readiness_probe(tool: Tool, scenario: Scenario, mode: Mode) -> Option<ReadinessProbe> {
+    if mode != Mode::Full {
+        return None;
+    }
+    match (tool, scenario) {
+        (Tool::Alint, Scenario::S1) => Some(ReadinessProbe {
+            path: "alint_bench_probe.bak",
+            contents: "benchmark readiness probe\n",
+            needle: "no-bak",
+            expected_exit: 1,
+        }),
+        (Tool::LsLint, Scenario::S1) => Some(ReadinessProbe {
+            path: "alint_bench_BadName.rs",
+            contents: "// benchmark readiness probe\n",
+            needle: "alint_bench_BadName.rs",
+            expected_exit: 0,
+        }),
+        (Tool::GrepPipeline, Scenario::S1) => Some(ReadinessProbe {
+            path: "alint_bench_BadName.rs",
+            contents: "// benchmark readiness probe\n",
+            needle: "alint_bench_BadName.rs",
+            expected_exit: 1,
+        }),
+        (Tool::Alint, Scenario::S2) => Some(ReadinessProbe {
+            path: "alint_bench_probe.ts",
+            contents: "debugger;\n",
+            needle: "ts-no-debugger",
+            expected_exit: 1,
+        }),
+        (Tool::GrepPipeline, Scenario::S2) => Some(ReadinessProbe {
+            path: "alint_bench_probe.rs",
+            contents: "// TODO: benchmark readiness probe\n",
+            needle: "alint_bench_probe.rs",
+            expected_exit: 0,
+        }),
+        (Tool::Repolinter, Scenario::S2) => Some(ReadinessProbe {
+            path: "alint_bench_probe.rs",
+            contents: "// TODO: benchmark readiness probe\n",
+            needle: "no-todo-rust",
+            expected_exit: 1,
+        }),
+        _ => None,
+    }
 }
 
 // ─── --changed-mode setup ────────────────────────────────────────────
@@ -533,4 +632,68 @@ fn touch_subset(root: &Path, subset: &[&PathBuf]) -> Result<()> {
         fs::write(&abs, content)?;
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn row(tool: &str, size_files: usize, mean_ms: f64) -> Row {
+        Row {
+            tool: tool.into(),
+            size_files,
+            size_label: if size_files == 1_000 { "1k" } else { "100k" }.into(),
+            scenario: "S1".into(),
+            mode: "full".into(),
+            mean_ms,
+            stddev_ms: 0.0,
+            median_ms: mean_ms,
+            min_ms: mean_ms,
+            max_ms: mean_ms,
+            samples: 1,
+            command: String::new(),
+        }
+    }
+
+    #[test]
+    fn flat_scaling_warns_below_two_x() {
+        let warnings =
+            flat_scaling_warnings(&[row("ls-lint", 1_000, 28.0), row("ls-lint", 100_000, 27.0)]);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("ls-lint/S1"));
+        assert!(warnings[0].contains("0.96x"));
+    }
+
+    #[test]
+    fn flat_scaling_accepts_material_growth_and_incomplete_pairs() {
+        let warnings = flat_scaling_warnings(&[
+            row("alint", 1_000, 10.0),
+            row("alint", 100_000, 390.0),
+            row("shell", 1_000, 58.0),
+        ]);
+        assert_eq!(warnings, Vec::<String>::new());
+    }
+
+    #[test]
+    fn readiness_probes_pin_each_competitive_contract() {
+        let cases = [
+            (Tool::Alint, Scenario::S1, 1, "no-bak"),
+            (Tool::LsLint, Scenario::S1, 0, "alint_bench_BadName.rs"),
+            (
+                Tool::GrepPipeline,
+                Scenario::S1,
+                1,
+                "alint_bench_BadName.rs",
+            ),
+            (Tool::Alint, Scenario::S2, 1, "ts-no-debugger"),
+            (Tool::GrepPipeline, Scenario::S2, 0, "alint_bench_probe.rs"),
+            (Tool::Repolinter, Scenario::S2, 1, "no-todo-rust"),
+        ];
+        for (tool, scenario, expected_exit, needle) in cases {
+            let probe = readiness_probe(tool, scenario, Mode::Full).unwrap();
+            assert_eq!(probe.expected_exit, expected_exit);
+            assert_eq!(probe.needle, needle);
+        }
+        assert!(readiness_probe(Tool::Alint, Scenario::S1, Mode::Changed).is_none());
+    }
 }

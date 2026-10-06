@@ -184,21 +184,21 @@ fn render_per_size(report: &Report, size: Size) -> String {
 }
 
 fn write_fingerprint_block(out: &mut String, fp: &fingerprint::Fingerprint, args: &ReportArgs) {
-    let _ = writeln!(out, "**Platform:** `{}/{}`  ", fp.os, fp.arch);
+    let _ = writeln!(out, "**Platform:** `{}/{}`<br>", fp.os, fp.arch);
     let _ = writeln!(
         out,
-        "**CPU:** `{}` ({} cores)  ",
+        "**CPU:** `{}` ({} cores)<br>",
         fp.cpu_model, fp.cpu_cores
     );
-    let _ = writeln!(out, "**RAM:** {} GB  ", fp.ram_gb);
-    let _ = writeln!(out, "**FS:** `{}`  ", fp.fs_type);
-    let _ = writeln!(out, "**rustc:** `{}`  ", fp.rustc);
+    let _ = writeln!(out, "**RAM:** {} GB<br>", fp.ram_gb);
+    let _ = writeln!(out, "**FS:** `{}`<br>", fp.fs_type);
+    let _ = writeln!(out, "**rustc:** `{}`<br>", fp.rustc);
     let _ = writeln!(
         out,
-        "**alint:** `{}` ({})  ",
+        "**alint:** `{}` ({})<br>",
         fp.alint_version, fp.alint_git_sha
     );
-    let _ = writeln!(out, "**hyperfine:** `{}`  ", fp.hyperfine_version);
+    let _ = writeln!(out, "**hyperfine:** `{}`<br>", fp.hyperfine_version);
     if !fp.tool_versions.is_empty() {
         let listing: String = fp
             .tool_versions
@@ -206,11 +206,11 @@ fn write_fingerprint_block(out: &mut String, fp: &fingerprint::Fingerprint, args
             .map(|(name, ver)| format!("{name}=`{ver}`"))
             .collect::<Vec<_>>()
             .join(", ");
-        let _ = writeln!(out, "**Tools:** {listing}  ");
+        let _ = writeln!(out, "**Tools:** {listing}<br>");
     }
-    let _ = writeln!(out, "**Seed:** `{}`  ", args.seed);
-    let _ = writeln!(out, "**Warmup/runs:** {} / {}  ", args.warmup, args.runs);
-    let _ = writeln!(out, "**Generated:** `{}`  ", fp.timestamp);
+    let _ = writeln!(out, "**Seed:** `{}`<br>", args.seed);
+    let _ = writeln!(out, "**Warmup/runs:** {} / {}<br>", args.warmup, args.runs);
+    let _ = writeln!(out, "**Generated:** `{}`<br>", fp.timestamp);
     let _ = writeln!(out);
     let _ = writeln!(
         out,

@@ -48,12 +48,6 @@ pub struct ForwardedArgs {
 pub fn run_in_docker(args: &ForwardedArgs) -> Result<()> {
     ensure_docker()?;
 
-    // Resolve tools host-side so missing-on-PATH detection
-    // produces a clean error message before we spend time
-    // pulling the image. The container's xtask will redo
-    // detection inside, against the image's installed set.
-    super::tools::resolve(&args.tools)?;
-
     let workspace = crate::workspace_root()?;
     let image = std::env::var("ALINT_BENCH_IMAGE")
         .unwrap_or_else(|_| format!("ghcr.io/asamarts/alint-bench:{}", env!("CARGO_PKG_VERSION")));
@@ -80,7 +74,11 @@ pub fn run_in_docker(args: &ForwardedArgs) -> Result<()> {
     // `target/` (often gigabytes of incremental artefacts) isn't
     // shadowed and the container's release rebuild persists
     // across runs.
-    cmd.arg("-v").arg("alint-bench-cargo-target:/cargo-target");
+    // v2 starts from the image's world-writable /cargo-target directory. The
+    // original volume was created root-only, which made every `--docker` run
+    // fail as soon as the host-UID process tried to compile the checkout.
+    cmd.arg("-v")
+        .arg("alint-bench-cargo-target-v2:/cargo-target");
     cmd.arg(&image);
 
     // Forwarded args. The image's ENTRYPOINT is
@@ -114,7 +112,9 @@ fn forward(args: &ForwardedArgs, workspace: &Path) -> Vec<String> {
     out.push("--runs".into());
     out.push(args.runs.to_string());
     out.push("--seed".into());
-    out.push(format!("{:#x}", args.seed));
+    // Clap's default u64 parser accepts decimal input. Keep the outer and inner
+    // CLI contract identical instead of forwarding Rust-style hexadecimal.
+    out.push(args.seed.to_string());
     out.push("--diff-pct".into());
     out.push(args.diff_pct.to_string());
     if args.quick {
@@ -180,4 +180,31 @@ fn run_trim(program: &str, args: &[&str]) -> Option<String> {
         return None;
     }
     Some(String::from_utf8_lossy(&out.stdout).trim().to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forward_uses_inner_cli_compatible_decimal_seed() {
+        let args = ForwardedArgs {
+            sizes: vec!["1k".into()],
+            include_1m: false,
+            scenarios: vec!["S1".into()],
+            modes: vec!["full".into()],
+            tools: vec!["all".into()],
+            warmup: 1,
+            runs: 3,
+            seed: 0x00a1_1e47,
+            diff_pct: 10.0,
+            out: None,
+            quick: false,
+            json_only: false,
+        };
+
+        let forwarded = forward(&args, Path::new("/worktree"));
+        let seed_index = forwarded.iter().position(|arg| arg == "--seed").unwrap();
+        assert_eq!(forwarded[seed_index + 1], "10559047");
+    }
 }

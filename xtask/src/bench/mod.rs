@@ -142,7 +142,7 @@ impl Size {
 pub enum Scenario {
     /// Axis A — layout & path (walk-bound). Filename class, existence /
     /// absence, path-metadata, and a `scope_filter` shape. The cheapest
-    /// path (walker + `GlobSet`, little content read); the ls-lint / grep
+    /// path (walker + `GlobSet`, little content read); the ls-lint / shell
     /// competitive anchor. Absorbs the old S1 / S10 + the layout half of
     /// the old S2/S4.
     S1,

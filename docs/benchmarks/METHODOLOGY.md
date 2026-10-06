@@ -40,7 +40,8 @@ So we split:
   [`micro/README.md`](micro/README.md).
 - **hyperfine macro-benches** measure the actual CLI as
   users will invoke it, across controlled synthetic trees,
-  and publish per-platform numbers. 14 scenarios (S1-S14)
+  and publish per-platform numbers. Five scenarios (S1-S4
+  plus SFIX)
   under `xtask/src/bench/scenarios/`; catalogue in
   [`macro/README.md`](macro/README.md).
 
@@ -52,24 +53,35 @@ the published `results.json`. The harness:
 
 1. **Builds** `alint` in release mode via `cargo build
    --release -p alint`.
-2. **Generates** a deterministic synthetic monorepo via
+2. **Captures** a hardware fingerprint (OS, arch, rustc
+   version, CPU model, RAM size, filesystem type, hyperfine
+   version, and tool versions); the report separately records
+   the seed and warmup/run counts.
+3. **Generates** a deterministic synthetic monorepo via
    `alint_bench::tree::generate_monorepo(packages,
    files_per_package, seed)`. The seed is fixed (`0xA11E47`
    by default) so every machine materialises a byte-identical
-   tree. S8 uses `generate_git_monorepo`, which additionally
-   runs `git init && git add -A && git commit` so the
-   engine's git-aware paths actually fire.
-3. **Stages** the scenario's config YAML at the tree root.
-4. **Captures** a hardware fingerprint (OS, arch, rustc
-   version, CPU model, RAM size, filesystem type, hyperfine
-   version, tool versions, seed, warmup/runs counts) and
-   writes it to the `index.md` header.
-5. **Shells out** to hyperfine with `--warmup 3 --runs 10`
+   tree. S4 uses the nested polyglot generator and a real Git
+   repository so its workspace and git-aware paths fire.
+4. **Stages** the scenario overlay and each selected tool's
+   configuration at the tree root.
+5. **Validates** every row before timing it. Competitive S1/S2
+   full-mode rows receive a temporary, scenario-specific violation;
+   the command must return the exact expected status and report the
+   planted filename or rule ID. This distinguishes a real finding
+   from a startup/configuration failure, including Repolinter's
+   ambiguous exit code 1.
+6. **Shells out** to hyperfine with `--warmup 3 --runs 10`
    by default — `3` warmup runs to fill the page cache and
    amortise JIT/CPU-frequency-scaling settling, `10`
    measured runs for a stddev that's small enough to detect
-   10% deltas with high confidence.
-6. **Writes** per-size `results.md` plus an aggregated
+   10% deltas with high confidence. It ignores only the exit
+   codes explicitly associated with findings for that tool; setup
+   and internal failures remain fatal.
+7. **Checks scaling** when a run contains both 1k and 100k
+   full-tree rows. A 100k/1k mean below 2× produces a warning,
+   since that shape usually means the tool never walked the tree.
+8. **Writes** per-size `results.md` plus an aggregated
    `index.md` and the machine-readable `results.json`.
 
 Macro-specific design choices worth flagging:
@@ -173,6 +185,11 @@ numbers. The full rationale + tool-version pin list lives
 in [`macro/README.md`](macro/README.md)'s "Reproducible
 competitive runs" section.
 
+The image also pins its benchmark-only Rust compiler independently of
+alint's user-facing MSRV. The mounted checkout's moving `stable` override
+cannot silently change that compiler, and the exact rustc remains in every
+result fingerprint.
+
 ## Reproducibility caveats (be honest)
 
 - **Absolute numbers are not comparable across machines.**
@@ -250,8 +267,8 @@ not wired into any workflow. Wall-clock regression is gated
 **per-release** (manual, before tag) by `xtask bench-gate`
 (cross-version `min_ms`; the publish criterion in `RELEASING.md`),
 trustworthy only on a verified-quiet box — `bench-record.yml`'s
-`xtask bench-scale` matrix (S1-S14 × {1k,10k,100k,1m} × {full,changed})
-is otherwise characterization. A gate failure — or any > 20 % drift even
+`xtask bench-scale` matrix (S1-S4 full/changed plus SFIX fix, each at
+1k/10k/100k/1m) is otherwise characterization. A gate failure — or any > 20 % drift even
 when the gate passes — gets an investigation under
 [`investigations/`](investigations/) (v0.14.0's S2 read regression failed
 the gate at +15 % and got one, below).

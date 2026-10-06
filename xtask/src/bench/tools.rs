@@ -6,10 +6,10 @@
 //! hyperfine command string. The orchestrator iterates the
 //! cartesian product of (tool × size × scenario × mode) and
 //! skips combos where `tool.supports(scenario, mode) == false`
-//! — that's how ls-lint is gated to S1 only, Repolinter (later)
-//! to S2 only, etc.
+//! — that's how ls-lint is gated to S1 only, Repolinter to S2
+//! only, etc.
 //!
-//! Phases 1-3 ship `Alint`, `LsLint`, `GrepPipeline`, and
+//! The harness ships `Alint`, `LsLint`, `GrepPipeline`, and
 //! `Repolinter`.
 
 use std::fs;
@@ -74,11 +74,23 @@ impl Tool {
         }
     }
 
+    /// Non-zero statuses that mean a successful lint run with findings (or,
+    /// for the shell S1 baseline, no unmatched filenames in its final grep).
+    /// Hyperfine may ignore only these explicit codes. Repolinter also returns
+    /// 1 for malformed configuration, so its planted-finding readiness probe
+    /// must pass before that code is accepted for timed samples.
+    pub fn hyperfine_ignored_exit_codes(self) -> &'static [i32] {
+        match self {
+            Self::Alint | Self::GrepPipeline | Self::Repolinter => &[1],
+            Self::LsLint => &[],
+        }
+    }
+
     /// True iff this tool can meaningfully run the given
     /// `(scenario, mode)`. Out-of-scope combos are skipped at
     /// the orchestrator level rather than producing zero or
     /// nonsense rows. ls-lint is filename-only and has no
-    /// `--changed`-equivalent; Repolinter (when added) covers
+    /// `--changed`-equivalent; Repolinter covers
     /// content + existence with no filename support; the grep
     /// pipeline doesn't model the workspace bundle's
     /// cross-file rules so S3 is out of scope.
@@ -131,7 +143,11 @@ impl Tool {
                 let rg = detect_via_version_flag("rg", "--version")?;
                 Some(format!("{find}; {grep}; {rg}"))
             }
-            Self::Repolinter => detect_via_version_flag("repolinter", "--version"),
+            Self::Repolinter => {
+                let repolinter = detect_via_version_flag("repolinter", "--version")?;
+                let node = detect_via_version_flag("node", "--version")?;
+                Some(format!("{repolinter}; node {node}"))
+            }
         }
     }
 
@@ -165,8 +181,9 @@ impl Tool {
     /// Full shell command line handed to hyperfine for one
     /// row. Hyperfine spawns this via `sh -c`, so pipes /
     /// semicolons / globs work exactly as a user would type
-    /// them — important for `GrepPipeline`, which strings
-    /// together multiple `find` + `rg` invocations.
+    /// them — important for `GrepPipeline`, which uses `find`
+    /// + GNU grep for S1 and `test` + `find` + ripgrep for S2.
+    ///
     /// `alint_bin` is the path to the locally-built alint
     /// binary; ignored by non-alint tools (which find their
     /// binary on `PATH`).
@@ -195,8 +212,8 @@ impl Tool {
                 format!("ls-lint -warn -workdir {root} -config {root}/.ls-lint.yml")
             }
             Self::GrepPipeline => match scenario {
-                Scenario::S1 => grep_pipeline_s1(&root),
-                Scenario::S2 => grep_pipeline_s2(&root),
+                Scenario::S1 => grep_pipeline_s1(&root, false),
+                Scenario::S2 => grep_pipeline_s2(&root, false),
                 Scenario::S3 | Scenario::S4 | Scenario::Sfix => {
                     unreachable!("supports() filters S3/S4/SFIX out for GrepPipeline")
                 }
@@ -206,6 +223,31 @@ impl Tool {
             // path positionally rather than via `-r` so a
             // run mirrors how a user would invoke it locally.
             Self::Repolinter => format!("repolinter lint {root}"),
+        }
+    }
+
+    /// Command used by the untimed readiness check. The shell baseline's
+    /// timed form suppresses findings, so its probe form keeps output visible
+    /// and lets the harness prove that a planted violation was actually read.
+    /// Other tools already report findings in their normal invocation.
+    pub fn readiness_invocation(
+        self,
+        alint_bin: &Path,
+        tree_root: &Path,
+        scenario: Scenario,
+        mode: Mode,
+    ) -> String {
+        if self != Self::GrepPipeline {
+            return self.invocation(alint_bin, tree_root, scenario, mode);
+        }
+
+        let root = quote_for_shell(&tree_root.to_string_lossy());
+        match scenario {
+            Scenario::S1 => grep_pipeline_s1(&root, true),
+            Scenario::S2 => grep_pipeline_s2(&root, true),
+            Scenario::S3 | Scenario::S4 | Scenario::Sfix => {
+                unreachable!("supports() filters S3/S4/SFIX out for GrepPipeline")
+            }
         }
     }
 }
@@ -244,24 +286,25 @@ fn quote_for_shell(s: &str) -> String {
 /// matches across all three tools. Documented in
 /// methodology.md so readers don't read more into the numbers
 /// than is there.
-fn grep_pipeline_s1(root: &str) -> String {
+fn grep_pipeline_s1(root: &str, emit_findings: bool) -> String {
+    let sink = if emit_findings { "" } else { " >/dev/null" };
     [
         // *.rs → snake_case
-        format!("find {root} -name '*.rs' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9_]*\\.rs$' >/dev/null"),
+        format!("find {root} -name '*.rs' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9_]*\\.rs$'{sink}"),
         // *.tsx → PascalCase
-        format!("find {root} -name '*.tsx' -type f -printf '%f\\n' | grep -vE '^[A-Z][a-zA-Z0-9]*\\.tsx$' >/dev/null"),
+        format!("find {root} -name '*.tsx' -type f -printf '%f\\n' | grep -vE '^[A-Z][a-zA-Z0-9]*\\.tsx$'{sink}"),
         // *.ts → kebab-case
-        format!("find {root} -name '*.ts' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.ts$' >/dev/null"),
+        format!("find {root} -name '*.ts' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.ts$'{sink}"),
         // *.yaml → kebab-case
-        format!("find {root} -name '*.yaml' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.yaml$' >/dev/null"),
+        format!("find {root} -name '*.yaml' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.yaml$'{sink}"),
         // *.yml → kebab-case
-        format!("find {root} -name '*.yml' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.yml$' >/dev/null"),
+        format!("find {root} -name '*.yml' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9-]*\\.yml$'{sink}"),
         // *.md → broad alphanumeric
-        format!("find {root} -name '*.md' -type f -printf '%f\\n' | grep -vE '^[a-zA-Z0-9_.-]+$' >/dev/null"),
+        format!("find {root} -name '*.md' -type f -printf '%f\\n' | grep -vE '^[a-zA-Z0-9_.-]+$'{sink}"),
         // *.json → broad alphanumeric
-        format!("find {root} -name '*.json' -type f -printf '%f\\n' | grep -vE '^[a-zA-Z0-9_.-]+$' >/dev/null"),
+        format!("find {root} -name '*.json' -type f -printf '%f\\n' | grep -vE '^[a-zA-Z0-9_.-]+$'{sink}"),
         // *.py → snake_case
-        format!("find {root} -name '*.py' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9_]*\\.py$' >/dev/null"),
+        format!("find {root} -name '*.py' -type f -printf '%f\\n' | grep -vE '^[a-z][a-z0-9_]*\\.py$'{sink}"),
     ]
     .join("; ")
 }
@@ -273,7 +316,8 @@ fn grep_pipeline_s1(root: &str) -> String {
 /// Tracks the rule-shape ratio of alint's S2: 4 layout
 /// checks, 3 content checks (Rust / TS / Python forbidden
 /// patterns), 1 size check.
-fn grep_pipeline_s2(root: &str) -> String {
+fn grep_pipeline_s2(root: &str, emit_findings: bool) -> String {
+    let sink = if emit_findings { "" } else { " >/dev/null" };
     [
         // Layout — README + LICENSE existence at root.
         format!("test -f {root}/README.md || test -f {root}/README"),
@@ -281,16 +325,16 @@ fn grep_pipeline_s2(root: &str) -> String {
             "test -f {root}/LICENSE || test -f {root}/LICENSE.md || test -f {root}/LICENSE.txt"
         ),
         // Layout — forbidden file extensions anywhere.
-        format!("find {root} -name '*.bak' -type f >/dev/null"),
-        format!("find {root} -name '*.orig' -type f >/dev/null"),
+        format!("find {root} -name '*.bak' -type f{sink}"),
+        format!("find {root} -name '*.orig' -type f{sink}"),
         // Content — TODO / XXX / FIXME in Rust.
-        format!("rg --type rust --no-messages '\\b(TODO|XXX|FIXME)\\b' {root} >/dev/null || true"),
+        format!("rg --type rust --no-messages '\\b(TODO|XXX|FIXME)\\b' {root}{sink} || true"),
         // Content — `debugger;` in TS / TSX.
-        format!("rg --type ts --no-messages '\\bdebugger\\s*;' {root} >/dev/null || true"),
+        format!("rg --type ts --no-messages '\\bdebugger\\s*;' {root}{sink} || true"),
         // Content — top-level print() in Python.
-        format!("rg --type py --no-messages '^\\s*print\\s*\\(' {root} >/dev/null || true"),
+        format!("rg --type py --no-messages '^\\s*print\\s*\\(' {root}{sink} || true"),
         // Size — files larger than 10 MiB.
-        format!("find {root} -type f -size +10M >/dev/null"),
+        format!("find {root} -type f -size +10M{sink}"),
     ]
     .join("; ")
 }
@@ -460,3 +504,49 @@ ignore:
   - target
   - .git
 ";
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ls_lint_invocation_uses_explicit_tree_config_and_warn_mode() {
+        let command = Tool::LsLint.invocation(
+            Path::new("/tmp/alint"),
+            Path::new("/tmp/tree with space"),
+            Scenario::S1,
+            Mode::Full,
+        );
+        assert_eq!(
+            command,
+            "ls-lint -warn -workdir '/tmp/tree with space' -config '/tmp/tree with space'/.ls-lint.yml"
+        );
+    }
+
+    #[test]
+    fn shell_readiness_invocation_keeps_findings_visible() {
+        let timed = Tool::GrepPipeline.invocation(
+            Path::new("/tmp/alint"),
+            Path::new("/tmp/tree"),
+            Scenario::S1,
+            Mode::Full,
+        );
+        let readiness = Tool::GrepPipeline.readiness_invocation(
+            Path::new("/tmp/alint"),
+            Path::new("/tmp/tree"),
+            Scenario::S1,
+            Mode::Full,
+        );
+        assert!(timed.contains(">/dev/null"));
+        assert!(!readiness.contains(">/dev/null"));
+        assert!(readiness.contains("grep -vE"));
+    }
+
+    #[test]
+    fn ignored_exit_codes_are_tool_specific() {
+        assert_eq!(Tool::Alint.hyperfine_ignored_exit_codes(), &[1]);
+        assert_eq!(Tool::LsLint.hyperfine_ignored_exit_codes(), &[] as &[i32]);
+        assert_eq!(Tool::GrepPipeline.hyperfine_ignored_exit_codes(), &[1]);
+        assert_eq!(Tool::Repolinter.hyperfine_ignored_exit_codes(), &[1]);
+    }
+}

@@ -36,7 +36,7 @@ docs/benchmarks/
 │   ├── README.md        — what each of the 12 micro-benches measures
 │   └── results/<arch>/<version>/criterion/   — published snapshots
 │
-├── macro/               — hyperfine bench-scale (S1-S14, full e2e wall-time)
+├── macro/               — hyperfine bench-scale (S1-S4 + SFIX, full e2e wall-time)
 │   ├── README.md        — what each scenario tests + tool matrix
 │   └── results/<arch>/<version>/             — published snapshots
 │

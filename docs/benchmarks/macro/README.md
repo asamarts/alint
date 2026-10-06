@@ -74,19 +74,29 @@ The `--docker` flag fixes this. `xtask bench-scale --docker --tools
 all …` runs the entire matrix inside `ghcr.io/asamarts/alint-bench:<tag>`,
 a published image that pins:
 
-- `alint` — built from the same workspace at image-build time.
+- `alint` — built from the bind-mounted checkout at run time with the image's
+  pinned compiler; its version and Git SHA are recorded in the fingerprint.
 - `ls-lint` — pinned `v2.2.3`.
 - GNU find and grep from the pinned Debian base image; their exact runtime
   versions are recorded in every result fingerprint.
 - `ripgrep` (used by the S2 shell baseline) — pinned `15.1.0`.
 - `repolinter` — pinned `0.11.2`.
+- Node.js (the Repolinter runtime) — pinned `20.20.2`.
 - `hyperfine` — pinned `1.20.0`.
-- `rustc` — pinned via `rust-toolchain.toml` at image-build time.
+- `rustc` — bench-only `1.88.0`, pinned by the image independently of
+  alint's user-facing MSRV and recorded in the result fingerprint.
 
 A given image tag (e.g. `0.17.0`) is therefore the canonical
 *"competitive bench environment for v0.17.0."* Bumping any tool's
 version requires re-publishing the image and re-running the
 competitive numbers — the image tag IS the methodology version.
+
+Before hyperfine times a competitive S1/S2 row, the harness plants a
+scenario-specific violation and requires the tool to report its filename or
+rule ID with the expected exit status. Only tool-specific finding statuses are
+ignored during timing. Runs that include both 1k and 100k also warn when the
+100k/1k ratio is below 2×. These checks prevent a missing or malformed config
+from becoming a deceptively fast benchmark result.
 
 ### Where the image lives
 

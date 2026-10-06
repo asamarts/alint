@@ -37,6 +37,14 @@ Each investigation directory ships:
 
 ## Existing investigations
 
+### [`2026-10-competitive-harness-correction/`](2026-10-competitive-harness-correction/)
+
+The v0.5.7 ls-lint comparison measured an immediate missing-config error instead
+of linting the generated tree. The correction pins explicit config resolution,
+tool-specific exit statuses, planted-finding readiness checks, accurate shell
+tool fingerprints, and a flat-scaling warning. It also contains the replacement
+S1/S2 competitive matrix from the Ryzen 9 3900X benchmark machine.
+
 ### [`2026-05-bench-runner-instability/`](2026-05-bench-runner-instability/)
 
 The v0.9.23 CV-gate failures that turned out to be **gate miscalibration, not a

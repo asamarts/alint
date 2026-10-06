@@ -1,7 +1,7 @@
 # Scenario s1_layout — Layout & path (walk-bound). [Consolidated set, axis A]
 #
 # The cheapest path: walker + GlobSet + path/metadata rules, little or no content
-# read. The ls-lint / grep competitive anchor. Absorbs the old S1 (filename), S10
+# read. The ls-lint / shell competitive anchor. Absorbs the old S1 (filename), S10
 # (scope_filter shape), and the existence/size half of S2/S4. A subset carries a
 # `scope_filter: { has_ancestor }` so the v0.9.8 scope_filter-on-non-per-file-rules
 # dispatch shape stays covered.
