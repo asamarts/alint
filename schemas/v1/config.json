@@ -1404,7 +1404,7 @@
           "$ref": "#/$defs/level"
         },
         "message": {
-          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution.",
+          "description": "Override the default failure message. `{{vars.*}}` is substituted in template bodies; documented kind-specific `{{ctx.*}}` placeholders are rendered by those kinds. Other placeholders remain literal.",
           "type": "string"
         },
         "paths": {
@@ -2902,7 +2902,7 @@
       "type": "object"
     },
     "rule_id": {
-      "description": "Unique kebab-case identifier for the rule.",
+      "description": "Stable identifier beginning with a lowercase ASCII letter, followed by lowercase ASCII letters, digits, underscores, or hyphens. Shared by rules, facts, and templates; effective rule ids must be unique after composition.",
       "pattern": "^[a-z][a-z0-9_-]*$",
       "type": "string"
     },
@@ -4100,7 +4100,7 @@
           "$ref": "#/$defs/level"
         },
         "message": {
-          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution.",
+          "description": "Override the default failure message. `{{vars.*}}` is substituted in template bodies; documented kind-specific `{{ctx.*}}` placeholders are rendered by those kinds. Other placeholders remain literal.",
           "type": "string"
         },
         "policy_url": {

@@ -1,7 +1,8 @@
 # alint Architecture
 
 > Status: Living design document. Describes alint's internals for contributors
-> and embedders. For the current scope by version, see [ROADMAP.md](./ROADMAP.md).
+> and embedders. For the current scope by version, see
+> [ROADMAP.md](https://github.com/asamarts/alint/blob/main/docs/design/ROADMAP.md).
 
 > **Diagrams:** this document embeds interactive architecture diagrams that
 > render on [alint.org](https://alint.org/docs/about/architecture/); GitHub
@@ -11,7 +12,18 @@
 
 ## Overview
 
-alint is a language-agnostic linter for **repository structure, file existence, filename conventions, and file content rules**. It is a single static Rust binary that reads a declarative YAML config and enforces rules over a repository tree.
+alint is a language-agnostic, general linter for **finite, inspectable project state**.
+The current implementation inspects a repository's working-tree files and directories,
+structured documents, filesystem metadata, and selected local Git state and history. It is a
+single static Rust binary that reads a declarative YAML config and emits findings or bounded
+remediations.
+
+For the precise scope of the "general linter" claim, the limits of the current model, and
+the proposed selector/extractor/relation/constraint direction, see
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md).
+The companion
+[`rule-coverage-gaps.md`](https://github.com/asamarts/alint/blob/main/docs/design/rule-coverage-gaps.md)
+inventories missing detection classes.
 
 <likec4-view view-id="index"></likec4-view>
 
@@ -23,23 +35,28 @@ Examples of rules in scope:
 - Does every `.java` file start with a required license-header comment?
 - Is anything binary present under `src/`?
 - Does `package.json`'s `license` field equal `"Apache-2.0"`?
+- Do dependency declarations agree across manifests?
+- Do commits in a range satisfy subject, sign-off, author, and signature policy?
 
 Out of scope (explicitly; use the named tool instead):
 
 - Code semantics / AST linting → ESLint, Clippy, ruff
 - Static application security testing → Semgrep, CodeQL
 - Infrastructure-as-code scanning → Checkov, Conftest, tfsec
-- Commit-message linting → commitlint
 - Secret scanning → gitleaks, trufflehog
+
+alint does include bounded commit and history policy. It does not try to replace a complete
+semantic code analyzer, security scanner, build system, or package resolver. The exact boundary
+and the proposal for generalizing it are documented in `general-linter.md`.
 
 The clarity of these non-goals is itself a feature.
 
 ## Design principles
 
-1. **The repository tree is the input.** Every rule sees a unified file/directory index. `check` walks once per invocation; `fix` walks once per fixpoint pass (it re-walks after applying edits and re-fixes to convergence, see the [v0.17 fixpoint design](v0.17/fixpoint.md)).
+1. **A repository snapshot is the primary input.** Every filesystem rule sees a unified file/directory index; Git-aware rules may also request explicit local Git inputs. The engine builds its main index once for `check` and once per `fix` fixpoint pass (effectful delegated rules may perform their own explicitly documented probes; see the [v0.17 fixpoint design](https://github.com/asamarts/alint/blob/main/docs/design/v0.17/fixpoint.md)).
 2. **A small set of composable rule families.** Existence, content, naming, and cross-file were the original shapes; the model has since grown to thirteen families, all built on the same rule record. The [rule reference](https://alint.org/docs/rules/) lists every kind by family.
-3. **Declarative by default, programmable at the edges.** YAML covers typical rules. A bounded expression language gates rules on facts. A plugin surface (command, later WASM) covers user-defined logic.
-4. **Walk once, evaluate in parallel.** Single-pass walker; shared file index; `rayon` for rule-level parallelism. (`fix` reuses this same walk+evaluate primitive once per fixpoint pass.)
+3. **Declarative by default, programmable at the edges.** YAML covers typical rules. A bounded expression language gates rules on facts. The `command` rule is the current escape hatch for user-defined logic; a capability-limited WASM host remains a possible future extension.
+4. **Walk once per pass; share and parallelize safe work.** The walker and check evaluator use `rayon`; the shared index and file-major dispatch coalesce hot-path reads. Fix application remains serial and ordered.
 5. **Respect ecosystem defaults.** `.gitignore` is honored by default. YAML is the config format. Case aliases (`PascalCase` / `pascalcase` / `pascal-case`) all parse.
 6. **Every rule carries its own story.** Severity, message, `policy_url`, and optional `fix` are first-class fields.
 7. **Modern output formats from day one.** Eight formats: human, json, sarif, github, gitlab, junit, markdown, and agent.
@@ -51,12 +68,15 @@ The clarity of these non-goals is itself a feature.
 
 Every rule is a record:
 
-- `id`: unique kebab-case identifier
+- `id`: stable identifier, unique after composition (the schema currently accepts a lowercase
+  ASCII letter followed by lowercase letters, digits, `_`, or `-`)
 - `kind`: the primitive rule type, namespaced (`file_exists`, `filename_case`, `pair`, ...)
 - `level`: `error` | `warning` | `info` | `off`
 - `paths`: the scope glob(s); accepts a string, an array (with `!negation`), or `{include, exclude}`
 - `when`: optional expression gating rule application on facts
-- `message`: human message; supports `{{vars.*}}` and `{{ctx.*}}` substitution
+- `message`: optional human-message override. `{{vars.*}}` substitution occurs while expanding a
+  template instance; supported `{{ctx.*}}` fields are kind-specific and are rendered only by the
+  kinds that document them. Other messages are literal.
 - `policy_url`: optional URL to a human-readable policy justification
 - `fix`: optional fixer block
 - kind-specific fields
@@ -71,6 +91,9 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
     fn level(&self) -> Level;
     fn policy_url(&self) -> Option<&str> { None }
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>>;
+    fn fixer(&self) -> Option<&dyn Fixer> { None }
+    fn as_per_file(&self) -> Option<&dyn PerFileRule> { None }
+    // Additional hooks describe full-index, Git, scope, nesting, and trust needs.
 }
 ```
 
@@ -78,15 +101,14 @@ Rules produce `Violation`s; the engine aggregates them into a `Report`.
 
 ### Dispatch flip + `PerFileRule` (v0.9.3)
 
-Since v0.9.3 the engine partitions rules into two dispatch shapes for
-hot-path performance. The `Rule` trait above describes the rule-major
-shape, where each rule scans the file index and reads the files it needs.
-That fits **cross-file rules** (`pair`, `for_each_dir`, `unique_by`,
-`dir_contains`, `dir_only_contains`, `every_matching_has`,
-`file_exists`, `file_absent`, ...) whose verdict spans the whole tree.
+Since v0.9.3 the engine partitions rules into two execution loops, covering three semantic
+classes. The rule-major loop contains both **full-index rules** (cross-file, existence, and other
+whole-repository predicates) and **ordinary rule-major rules** that have not or cannot opt into
+file-major dispatch. `requires_full_index()` independently controls which index a rule sees under
+`--changed`; it does not choose the dispatch loop.
 
-**Per-file rules**, those that read each matched file's content
-individually, opt into a sibling `PerFileRule` trait, and the engine
+**Per-file rules**, those that can evaluate each matched file independently
+(usually from its content), opt into a sibling `PerFileRule` trait, and the engine
 drives a *file-major* outer loop on their behalf: each matched file is
 read at most once, then dispatched to every applicable per-file rule.
 The trait hands a pre-loaded byte slice to `evaluate_file` rather than
@@ -94,23 +116,18 @@ having the rule re-read inside `evaluate`:
 
 ```rust
 pub trait PerFileRule: Send + Sync + std::fmt::Debug {
-    fn id(&self) -> &str;
-    fn level(&self) -> Level;
     fn path_scope(&self) -> &Scope;
-    fn max_bytes_needed(&self) -> Option<usize> { None }
-    fn evaluate_file(&self, file: &FileEntry, content: &[u8])
+    fn evaluate_file(&self, ctx: &Context<'_>, path: &Path, bytes: &[u8])
         -> Result<Vec<Violation>>;
+    fn max_bytes_needed(&self) -> Option<usize> { None }
 }
 ```
 
-Engine discrimination happens once at registry time: rules that
-override `requires_full_index() = true` stay rule-major; the rest opt
-into per-file dispatch. Roughly two dozen rules across the content,
-text-hygiene, security-unicode, and encoding families take the per-file
-path. Two metadata-driven Unix rules
-(`executable_has_shebang`, `shebang_has_executable`) stay rule-major
-so they can short-circuit on `metadata().permissions()` before any
-read. Full design, and the rules that did or did not migrate, is in
+The engine discriminates at evaluation time through `Rule::as_per_file()`: `Some` joins the
+file-major loop and `None` stays rule-major. The two traits are views of the same rule object;
+identity, severity, fixes, and other common behavior stay on `Rule`. The opted-in set spans
+content, text-hygiene, security/Unicode, and encoding rules. Metadata rules and full-index rules
+remain rule-major. Full design, and the rules that did or did not migrate, is in
 [the v0.9 dispatch-flip pass](https://github.com/asamarts/alint/blob/main/docs/design/v0.9/dispatch_flip.md).
 
 ### Memory layout on the hot path (v0.9.2)
@@ -139,7 +156,7 @@ test: byte-identical output before/after the type pass. Full design:
 
 <likec4-view view-id="configModel"></likec4-view>
 
-YAML, with a JSON Schema (draft 2020-12) maintained at [`schemas/v1/config.json`](https://github.com/asamarts/alint/blob/main/schemas/v1/config.json) in the repository and embedded into `alint-dsl` at build time via `include_str!` (exposed as `alint_dsl::CONFIG_SCHEMA_V1`). Integration tests round-trip representative configs through a compliant validator so the schema and the engine's actual DSL stay in sync.
+YAML, with a JSON Schema (draft 2020-12) maintained at [`schemas/v1/config.json`](https://github.com/asamarts/alint/blob/main/schemas/v1/config.json) in the repository and embedded into `alint-dsl` at build time via `include_str!` (exposed as `alint_dsl::CONFIG_SCHEMA_V1`). The schema drives editor completion and documentation; the runtime performs typed Serde decoding plus explicit builder validation rather than invoking a JSON Schema validator. Integration tests validate representative configs against both paths and gate the root and embedded schema copies byte-for-byte.
 
 For editor autocomplete, reference the schema via the YAML language server pragma, either by a relative path (recommended inside this repo) or by the GitHub raw URL (for downstream users):
 
@@ -207,15 +224,19 @@ Rules are grouped into thirteen families. Every kind shares the record shape abo
 - **Naming** (`filename_case`, `filename_regex`): a basename matches a case convention or a regex.
 - **Text hygiene** (`no_trailing_whitespace`, `final_newline`, `line_endings`, `line_max_width`, `indent_style`, `max_consecutive_blank_lines`): whitespace and line-shape checks, most with a fixer.
 - **Security / Unicode** (`no_merge_conflict_markers`, `no_bidi_controls`, `no_zero_width_chars`): flag conflict markers and Trojan-Source bidi / zero-width characters.
-- **Encoding** (`no_bom`): byte-order-mark and encoding checks.
+- **Encoding** (`no_bom`): byte-order-mark checks. General text/binary and ASCII checks live in
+  the content family.
 - **Structure** (`max_directory_depth`, `max_files_per_directory`, `no_empty_files`): shape of the tree itself.
 - **Portable metadata** (`no_case_conflicts`, `no_illegal_windows_names`): reject tree shapes that look fine on one OS but break checkouts on a case-insensitive or Windows filesystem.
-- **Unix metadata** (`no_symlinks`, `executable_bit`, `executable_has_shebang`, `shebang_has_executable`): permission-bit and symlink checks, `#[cfg(unix)]`-gated so configs stay portable.
+- **Unix metadata** (`no_symlinks`, `executable_bit`, `executable_has_shebang`, `shebang_has_executable`): permission-bit and symlink checks. Platform-specific operations are isolated so the binary and configs remain portable.
 - **Git hygiene** (`no_submodules`, `git_no_denied_paths`, `git_commit_message`, `git_commit_signed_off`, `git_commit_subject_matches`, `git_blame_age`, ...): properties of the git tree and the commit range.
 - **Cross-file** (`pair`, `for_each_dir`, `for_each_file`, `every_matching_has`, `unique_by`, `dir_contains`, `file_graph`, ...): a verdict that spans more than one file.
 - **Plugin** (`command`): shell out to an external checker per matched file (see [Plugin model](#plugin-model)).
 
-`git_tracked_only:` and `scope_filter:` are per-rule fields, not kinds; see [Closest-ancestor scoping](#closest-ancestor-scoping-scope_filter-v096) and [Git-tracked filtered index](#git-tracked-filtered-index-v0911) below.
+`scope_filter:` is a common field accepted by compatible file-scoped kinds. `git_tracked_only:`
+is instead a kind-specific option of `file_exists`, `file_absent`, `dir_exists`, and
+`dir_absent`. See [Rule scoping](#rule-scoping-scope_filter-v096) and
+[Git-tracked filtered index](#git-tracked-filtered-index-v0911) below.
 
 ### Fix operations
 
@@ -225,47 +246,64 @@ Rules that declare a `fix:` block opt in to automatic remediation. The op is a d
 
 | Op | Shape | Rule kinds |
 |---|---|---|
-| `file_create` | `{content, path?, create_parents?}` | `file_exists` |
-| `file_remove` | `{}` | `file_absent`, `no_empty_files`, `no_symlinks`, `no_submodules` |
-| `file_rename` | `{}` (target derived from rule config) | `filename_case` |
-| `dir_create` | `{}` | `dir_exists` |
-| `relocate` | `{}` (moves the file to the repo root) | `file_absent` |
-| `chmod` | `{}` (direction from the rule) | `executable_bit`, `shebang_has_executable` |
-| `git_untrack` | `{}` (`git rm --cached`; *spawning*) | `file_absent` |
-| `command` | `{run, timeout?}` (runs a user command; *spawning*) | `command` |
+| `file_create` | `{content \| content_from, path?, create_parents?, applicability?}` | `file_exists` |
+| `file_remove` | `{applicability?}` | `file_absent`, `no_empty_files`, `no_symlinks`, `no_submodules` |
+| `file_rename` | `{applicability?}` (target derived from rule config) | `filename_case` |
+| `dir_create` | `{applicability?}` | `dir_exists` |
+| `relocate` | `{applicability?}` (moves the file to the repo root) | `file_absent` |
+| `chmod` | `{applicability?}` (direction from the rule) | `executable_bit`, `shebang_has_executable` |
+| `git_untrack` | `{applicability?}` (`git rm --cached`; *spawning*) | `file_absent` |
+| `command` | `{run, timeout?, applicability?}` (runs argv; *spawning*) | `command` |
 
 **Content-editing ops** (skipped on files over `fix_size_limit`; default 1 MiB, `null` disables):
 
 | Op | Shape | Rule kinds |
 |---|---|---|
-| `file_prepend` | `{content}` | `file_header` |
-| `file_append` | `{content}` | `file_content_matches`, `file_footer` |
-| `file_trim_trailing_whitespace` | `{}` | `no_trailing_whitespace` |
-| `file_append_final_newline` | `{}` | `final_newline` |
-| `file_normalize_line_endings` | `{}` (target read from parent rule) | `line_endings` |
+| `file_prepend` | `{content \| content_from, applicability?}` | `file_header` |
+| `file_append` | `{content \| content_from, applicability?}` | `file_content_matches`, `file_footer` |
+| `file_trim_trailing_whitespace` | `{applicability?}` | `no_trailing_whitespace` |
+| `file_append_final_newline` | `{applicability?}` | `final_newline` |
+| `file_normalize_line_endings` | `{applicability?}` (target read from parent rule) | `line_endings` |
 | `file_strip_bidi` | `{}` | `no_bidi_controls` |
 | `file_strip_zero_width` | `{}` | `no_zero_width_chars` |
-| `file_strip_bom` | `{}` | `no_bom` |
-| `file_collapse_blank_lines` | `{}` (max read from parent rule) | `max_consecutive_blank_lines` |
-| `replace` | `{replacement}` (pattern from parent rule; optional `applicability`) | `file_content_forbidden`, `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_matches` |
-| `set_value` | `{}` (value from the rule's `equals:`) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_equals` |
-| `remove_value` | `{}` (target from parent rule) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_absent` |
-| `sync_from` | `{}` (source + relation from parent rule) | `cross_file` (`relation: identical` / `equals`) |
-| `create_and_register` | `{content?, content_from?}` | `cross_file` (`relation: registered`) |
-| `sort` | `{}` (markers / comparator / `unique` / `select` from parent rule) | `ordered_block` |
-| `indent_style` | `{}` (style / width from parent rule) | `indent_style` (`style: spaces` + `width`) |
-| `insert_line` | `{}` (require lines / comparator from parent rule) | `ordered_block` (markerless, with `require:`) |
-| `insert_header` | `{content?, content_from?}` (inserts AFTER a leading BOM / shebang / `<?xml?>`) | `file_header` |
+| `file_strip_bom` | `{applicability?}` | `no_bom` |
+| `file_collapse_blank_lines` | `{applicability?}` (max read from parent rule) | `max_consecutive_blank_lines` |
+| `replace` | `{replacement, pattern?, applicability?}` (structured matches require their own search `pattern`) | `file_content_forbidden`, `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_matches` |
+| `set_value` | `{applicability?}` (value from the rule's `equals:`) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_equals` |
+| `remove_value` | `{applicability?}` (target from parent rule) | `{json,yaml,toml,xml,dotenv,properties,ini,hcl}_path_absent` |
+| `sync_from` | `{applicability?}` (source + relation from parent rule) | `cross_file` (`relation: identical` / `equals`) |
+| `create_and_register` | `{content?, content_from?, applicability?}` | `cross_file` (`relation: registered`) |
+| `sort` | `{applicability?}` (markers / comparator / `unique` / `select` from parent rule) | `ordered_block` |
+| `indent_style` | `{applicability?}` (style / width from parent rule) | `indent_style` (`style: spaces` + `width`) |
+| `insert_line` | `{applicability?}` (require lines / comparator from parent rule) | `ordered_block` (markerless, with `require:`) |
+| `insert_header` | `{content \| content_from, applicability?}` (inserts after a leading BOM / shebang / `<?xml?>`) | `file_header` |
 
-Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads are streaming where possible; otherwise the file is loaded in full. (`set_value` / `remove_value` are *located* ops -- one byte-range splice through the same regime as `replace`; `sort` is a whole-file rewrite that permutes the entry lines in place, and `create_and_register`'s register half is a list-append into the target manifest.)
+Over-limit content-editing ops report `Skipped` with a stderr warning instead of applying. Reads
+are streaming where possible; otherwise the file is loaded in full. `set_value` and
+`remove_value` are located ops over selected structured nodes; `sort` is a whole-file rewrite,
+and `create_and_register` combines file creation, when needed, with a structured list append.
 
-`replace` is the first *located* op: rather than rewriting the whole file, it emits one byte-range edit per regex match, which the located regime batches, orders, overlap-skips, and splices in a single pass. It is `Unsafe` by default (a regex rewrite is not behavior-preserving), so a bare `alint fix` surfaces it as a suggestion and `--unsafe-fixes` applies it.
+`replace`, `set_value`, and `remove_value` are *located* ops: they emit byte-range edits that the
+located regime batches, orders, overlap-skips, verifies, and splices in a single pass. `replace`
+and `remove_value` are `Unsafe` by default; scalar `set_value` is `Safe` by default, while
+ambiguous or unsupported shapes are withheld or demoted.
 
-Every op carries an applicability tier (`Safe` / `Unsafe` / `Suggestion` / `Never`); most content and path-normalizing ops are `Safe` (applied by a bare `alint fix`), while the ones that delete content or are not behavior-preserving default to `Unsafe` — `file_remove` (irreversible deletion), `remove_value`, `replace` (a regex rewrite), `sort` with `unique` (drops lines), `indent_style` (a mis-aimed reindent hard-breaks an indent-significant file), and `insert_line` (a computed-position insert) — so a bare `alint fix` surfaces those as suggestions and `--unsafe-fixes` applies them. Per-op tiers are listed in [Rules](https://alint.org/docs/rules/). A user may promote `file_remove` back to `Safe` on a specific rule (`fix: { file_remove: { applicability: safe } }`) in their own top-level config; an inherited (`extends:`'d) ruleset may not promote it (the DSL refuses the promotion). Fixers run serially after the parallel evaluation, from a single thread. A content-editing op does not write as it runs: it routes its result into an in-memory compose buffer keyed by the resolved file target, and the engine flushes one atomic write per touched file, so several fixers editing the same file compose in config order rather than racing or clobbering. Path-only ops apply to the filesystem directly. `--dry-run` runs the whole pass but writes nothing; `--diff` stages the same composed result and prints it as a unified diff.
+Every built fixer resolves to an applicability tier (`Safe`, `Unsafe`, `Suggestion`, or
+`Never`), although fixed-behavior marker ops do not all expose a YAML override. Most
+normalizations default to `Safe`. Destructive, arbitrary, or direction-sensitive operations
+default to `Unsafe`, including `file_remove`, `git_untrack`, `command`, `relocate`, `sync_from`,
+`create_and_register`, `remove_value`, `replace`, `indent_style`, `insert_line`, and `sort` when
+`unique: true`. A bare `alint fix` reports unsafe work as suggested; `--unsafe-fixes` applies it.
+Per-op details are generated in [Rules](https://alint.org/docs/rules/). An inherited ruleset may
+demote but not promote a fix, and spawning fixes are top-level-only. Fixers run serially. Content
+edits compose in config order in memory and flush atomically once per touched file; path-only ops
+apply directly (or are staged for `--diff`). `--dry-run` writes nothing, and `--diff` renders the
+staged result.
 
 ### Path template tokens
 
-Used in `partner`, nested `require`, messages, and rename fixers:
+Used in path-shaped fields such as `partner`, nested `require` paths, `command` argv,
+cross-file mapping templates, and `unique_by.key`:
 
 - `{dir}`: parent directory of the matched file
 - `{path}`: full relative path
@@ -273,7 +311,9 @@ Used in `partner`, nested `require`, messages, and rename fixers:
 - `{stem}`: filename without the final extension
 - `{ext}`: final extension without the dot
 - `{parent_name}`: immediate parent directory name
-- `{stem_kebab}`, `{stem_snake}`, `{stem_pascal}`, ...: transformed stems
+
+Unknown tokens are preserved literally. Case conversion is a behavior of the
+`filename_case`/`file_rename` pair, not an additional family of path-template tokens.
 
 ### Scope and globbing
 
@@ -298,7 +338,9 @@ paths: {include: ["src/**"], exclude: ["**/*.test.*"]}     # explicit pair
 
 ### Facts and conditional rules
 
-Facts are declarative properties of the repository, evaluated once per run and cached. `when` clauses gate rules on facts.
+Facts are declarative scalar properties of the repository. A normal check evaluates them once
+per engine run; the LSP's repeated single-file path caches them on the lifetime of its
+`FileIndex`. `when` clauses gate rules on facts.
 
 Fact kinds are `any_file_exists`, `all_files_exist`, `count_files`, `file_content_matches`, `git_branch`, and `custom: {argv: [...]}` (shell out, stdout → value). Language/license detectors (`detect: linguist`, `detect: askalono`) are deferred — see the planned `alint-facts` crate below.
 
@@ -308,7 +350,9 @@ The `when` expression language is deliberately bounded:
 - Identifiers: `facts.<name>`, `vars.<name>`, `iter.<name>`, `env.<name>` (`ctx.<name>` is available in messages, not in `when:`)
 - Literals: strings, numbers, booleans, null, lists
 
-No user-defined functions, no recursion, no I/O. Examples:
+There are no user-defined functions or recursion. The grammar includes the bounded built-in
+`iter.has_file(...)`; I/O happens only while named fact providers are evaluated, never from the
+expression itself. Examples:
 
 ```yaml
 when: facts.has_rust
@@ -317,9 +361,18 @@ when: facts.has_rust and not facts.is_workspace_member
 when: facts.java_file_count > 0
 ```
 
-### Closest-ancestor scoping (`scope_filter:`, v0.9.6+)
+### Rule scoping (`scope_filter:`, v0.9.6+)
 
-A second per-file gate orthogonal to `when:` and `paths:`. Per-file rules can declare `scope_filter: { has_ancestor: <list> }` to narrow themselves to files that have a specified manifest somewhere in their ancestor directory chain. The engine walks `Path::parent()` upward (the file's own directory counts as an ancestor) and consults the v0.9.5 path-index at each step; first-match-wins gates the rule per-file.
+`scope_filter:` is a second file-scope gate orthogonal to `when:` and `paths:`. Its predicates
+AND-compose:
+
+- `has_ancestor` admits a file when a named manifest occurs in its ancestor chain;
+- `changed_since` admits paths in a `<ref>...HEAD` Git diff;
+- `include_manifest_paths` and `exclude_manifest_paths` use path sets extracted from a
+  manifest, with optional target derivation.
+
+The closest-ancestor lookup walks from the file's directory toward the root and stops at the
+nearest directory containing any configured manifest name.
 
 ```yaml
 - id: rust-sources-no-bidi
@@ -331,7 +384,9 @@ A second per-file gate orthogonal to `when:` and `paths:`. Per-file rules can de
   level: error
 ```
 
-The composition order is: 1. Tree-level `when:` (skip rule entirely if false), 2. Per-file `paths:` glob, 3. Per-file `scope_filter:` ancestor walk, 4. Per-file `git_tracked_only:` consult, 5. Rule-specific evaluate body.
+Conceptually the gates are: tree-level `when:`, the kind's target selector/`paths:`, compatible
+`scope_filter:` predicates, any kind-specific Git-tracked view, then the rule body. The exact
+iteration order is an optimization; all declared gates must admit the target.
 
 Cross-file rules (`pair`, `for_each_dir`, `file_exists`, ...) reject `scope_filter:` at build time and direct authors to `for_each_dir + when_iter:`. Per-file rules, both `PerFileRule` and the remaining rule-major ones, honour the filter through the shared `Scope::matches` call (see the v0.9.10 structural fix below).
 
@@ -341,15 +396,28 @@ Used by the seven bundled ecosystem rulesets (`rust@v1`, `node@v1`, `python@v1`,
 
 ### Git-tracked filtered index (v0.9.11)
 
-`git_tracked_only: true` on a rule narrows it to paths in `git ls-files` output, skipping locally-built but untracked artefacts (`target/`, `node_modules/`, ...). Through v0.9.10 each rule consulted `ctx.is_git_tracked(path)` inline, the same silent-drop bug class that hit `scope_filter:`.
+`git_tracked_only: true` on one of the four existence kinds narrows its view to paths in
+`git ls-files` output, skipping locally built but untracked artefacts (`target/`,
+`node_modules/`, ...). `git_no_denied_paths` is separately and inherently tracked-path based.
+Through v0.9.10 each opted-in existence rule consulted `ctx.is_git_tracked(path)` inline, the
+same silent-drop bug class that hit `scope_filter:`.
 
 v0.9.11 builds two filtered `FileIndex` views once per run when any rule opts in: a file-tracked subset (entries where `git_tracked.contains(path)`) and a dir-aware subset (dirs that recursively contain at least one tracked file). The engine substitutes the pre-filtered index via `pick_ctx`; the rule's `evaluate` body never sees an untracked path, and the runtime `is_git_tracked()` check disappears from per-rule code. Full design: [the v0.9 git-tracked filtered-index pass](https://github.com/asamarts/alint/blob/main/docs/design/v0.9/git-tracked-filtered-index.md).
 
 ### Composition
 
-`extends` accepts local paths and URLs (with optional SHA-256 subresource integrity). Child configs deep-merge over parents on a per-rule-id basis. Setting `level: off` on an inherited rule disables it.
+`extends` accepts local paths, HTTPS URLs (with optional SHA-256 subresource integrity), and
+bundled URIs. Entries may filter inherited rule IDs with `only`/`except`. Sources resolve
+left-to-right with cycle detection and caching; rule mappings merge one field level deep by ID,
+and the child wins. Setting `level: off` disables an inherited rule.
 
 Bundled rulesets are referenced via `alint://bundled/<name>@v<major>`.
+
+Top-level templates provide string substitution before typed rule decoding. Optional nested
+configs scope rules to subtrees. Baselines suppress known finding identities after evaluation.
+Trust is monotone: an inherited source cannot grant itself process execution, outside-root
+reads, top-level exception/baseline authority, or a more permissive fix tier. These are distinct
+composition mechanisms and intentionally do not form a general macro language.
 
 ## Execution model
 
@@ -357,24 +425,52 @@ The pipeline from `alint check` to output:
 
 <likec4-view view-id="checkFlow"></likec4-view>
 
-1. **Config load.** Read `.alint.yml`; follow `extends` with caching and cycle detection; validate against JSON Schema.
-2. **Facts.** Evaluate facts sequentially, once per run. Cache keyed on input hashes (reused on the LSP per-file path).
-3. **Rule filter.** Evaluate `when` clauses; drop disabled rules.
-4. **Walk.** One *parallel* pass over the filesystem via the `ignore` crate's `WalkBuilder::build_parallel` (v0.9.1). Each worker thread accumulates `FileEntry`s in a thread-local `Vec`; the engine merges them and runs a deterministic `sort_unstable_by` post-sort so downstream output is byte-identical to the pre-v0.9.1 sequential walker. The resulting `FileIndex` exposes lazy `OnceLock` indexes (`contains_file`, `children_of`, `descendants_of`, `file_basenames_of`) that turn common cross-file queries from linear scans into O(1) hash lookups (v0.9.5 + v0.9.8).
-5. **Dispatch partition.** Rules with `requires_full_index() = true` (cross-file) stay rule-major; the rest implement `PerFileRule` and join the file-major dispatch (v0.9.3, see [Rule model](#dispatch-flip--perfilerule-v093)).
-6. **Match.** Per rule, resolve matching files/dirs through `Scope::matches(&Path, &FileIndex)` (v0.9.10), so globs *and* `scope_filter:` ancestor predicates evaluate in one call. For `git_tracked_only:` rules the engine substitutes a pre-filtered `FileIndex` so out-of-scope paths never reach `evaluate` (v0.9.11).
-7. **Evaluate.** Per-file rules receive a pre-loaded `&[u8]` slice via `evaluate_file` (read once per file regardless of how many per-file rules match it); cross-file rules read what they need from the index. Both fan out via `rayon`.
-8. **Aggregate.** Collect `RuleResult`s into a `Report`.
-9. **Fix (optional).** Rules with a `fix:` block remediate what they flagged, gated by an applicability tier: the default threshold applies only `Safe` ops, `--unsafe-fixes` raises it to include `Unsafe` ones, and `Suggestion`-tier edits are reported but never written. Content-editing ops don't write as they go: each routes its result into a per-run in-memory buffer that composes every edit to a file in config order, so the engine emits a *single atomic write per file* however many fixers touched it. Path-only ops (create / remove / rename) act on the filesystem directly. A located-edit regime (collect, tier-filter, total-order, overlap-skip, verify, splice) handles byte-ranged edits; the `replace` op is its first user (a file also touched by a whole-file fixer this pass defers its located edits to a rerun, so offsets never splice into changed bytes). Each result is reported `Applied`, `Skipped`, `Suggested`, or `Unfixable`; `--dry-run` computes all of it without writing, and `--diff` renders the composed result as a unified diff.
-10. **Emit.** Format via selected output.
+1. **Config load and build.** Read `.alint.yml`; resolve composition with caching, cycle and
+   trust checks; decode the merged YAML into typed specs; build every enabled top-level rule and
+   structurally validate its nested rules; reject invalid kinds/options and cross-field
+   combinations. JSON Schema is the editor/test contract, not a runtime validation pass.
+2. **Walk.** Build one full `FileIndex` with the `ignore` crate's parallel walker. Workers collect
+   entries locally; a deterministic post-sort removes filesystem/thread scheduling from output.
+   Lazy `OnceLock` indexes accelerate membership, child, descendant, and basename queries.
+3. **Inputs and derived views.** Evaluate facts sequentially against the full index. Collect Git
+   tracked/blame data only if requested, resolve changed/manifest-derived scope maps once, and
+   build changed or Git-tracked index views as needed. The LSP's single-file evaluator caches
+   facts on its long-lived index; a normal CLI run does not use a persistent content-hash cache.
+4. **Gates.** Skip `off` entries during loading/building; evaluate `when:` once per live rule;
+   apply changed-mode, `expect_matches`, scope, and kind-specific target gates. Gate errors become
+   visible findings rather than silent passes.
+5. **Dispatch.** `Rule::as_per_file() == Some(...)` joins the file-major loop. All other rules
+   use the rule-major loop. Independently, `requires_full_index()` selects the full rather than
+   changed-only index for rules whose verdict needs whole-repository context.
+6. **Evaluate.** During `check`, both loops fan out through `rayon`. The file-major loop reads one
+   matched file once and shares its byte slice among applicable `PerFileRule`s (respecting each
+   rule's prefix-read cap). Rule-major evaluators own any reads they require and may therefore
+   reread a file used by another rule.
+7. **Aggregate and post-process.** Reassemble results in config order, partition notes from
+   violations, attach fixability/proposed edits where the selected formatter needs them, and
+   apply an optional baseline before deciding the exit status.
+8. **Fix (optional).** Fix evaluation and application are serial to preserve configuration order.
+   Applicability gates writes; whole-file edits compose in memory, located edits are ordered and
+   overlap-checked, and path operations apply directly or stage for `--diff`. A real fix re-walks
+   after a pass that changed bytes and repeats to a bounded fixpoint; dry-run is a non-mutating
+   single-pass preview. Outcomes are `Applied`, `Skipped`, `Suggested`, or `Unfixable`/error.
+9. **Emit.** Render one of the selected output formats and derive the command exit code.
 
-Invariants (per pass): the walk runs exactly once; any given file's bytes are read at most once; rule evaluation is parallelized (facts are evaluated once, sequentially); fixers run serially, and a file's content edits compose in memory and flush as a single atomic write per file. `check` runs one such pass; `fix` runs this pass repeatedly, re-walking after each until no new edit applies (bounded by a non-convergence cap), so across a `fix` the walk and per-file read recur once per pass. See the [v0.17 fixpoint design](v0.17/fixpoint.md).
+The engine builds its main `FileIndex` with one repository walk per pass. An explicitly effectful
+kind such as `generated_file_fresh` may run a tool and perform its own before/after inspection;
+that work is outside the shared-walk guarantee. The stronger read-once guarantee applies to the
+file-major partition only, not to every rule or fact provider. Check evaluation is parallel; fix
+evaluation/application is ordered and serial. Content writes are atomic per flushed file, but the
+whole multi-file fix pass is not a transaction. See the
+[v0.17 fixpoint design](https://github.com/asamarts/alint/blob/main/docs/design/v0.17/fixpoint.md).
 
-Step 2 in detail: facts are evaluated once (sequentially, cached), then gate which rules run via their `when:` conditions.
+Step 3 in detail: facts are evaluated once per normal engine run, then gate rules through their
+`when:` conditions. The LSP reuses a cached result while its index is valid.
 
 <likec4-view view-id="factsFlow"></likec4-view>
 
-Steps 5 to 7 in detail: dispatch partitions rules into cross-file (rule-major) and per-file, so each matched file's bytes are read exactly once (ADR-0003).
+Steps 5 and 6 in detail: dispatch partitions rules into rule-major and opted-in file-major work;
+only the latter coalesces reads across matching rules (ADR-0003).
 
 <likec4-view view-id="dispatchFlow"></likec4-view>
 
@@ -422,7 +518,7 @@ alint/
 ├── crates/
 │   ├── alint/              binary entrypoint; `cargo install alint`
 │   ├── alint-core/         engine, walker, rule trait, config AST, errors
-│   ├── alint-dsl/          YAML config loader + schema validation + bundled rulesets
+│   ├── alint-dsl/          YAML composition/typed loading + embedded editor schema + bundled rulesets
 │   ├── alint-rules/        built-in rule implementations
 │   ├── alint-output/       formatters (human, json, sarif, github, gitlab, junit, markdown, agent)
 │   ├── alint-lsp/          language server behind the `lsp` subcommand (tower-lsp)
@@ -432,7 +528,7 @@ alint/
 ├── xtask/                  cargo-xtask helpers (bench-release driver, docs-export, publish-benches)
 ├── ci/                     self-hosted runner + per-job shell scripts
 ├── editors/                editor integrations (VS Code, Zed, JetBrains, Neovim, Helix, Emacs, Sublime, Eclipse)
-├── schemas/v1/             JSON Schema for .alint.yml + report shapes (mirrored under crates/alint-dsl/schemas/)
+├── schemas/v1/             JSON Schemas for .alint.yml and report shapes (only config.json is mirrored in alint-dsl)
 ├── docs/
 │   ├── design/             architecture, roadmap, per-cut design passes (v0.7, v0.9, ...)
 │   ├── development/        contributor docs (rule-authoring.md)
@@ -445,9 +541,11 @@ alint/
 └── Cargo.toml              workspace manifest
 ```
 
-**Planned additions (see [ROADMAP.md](./ROADMAP.md)):**
+**Possible future extraction/extension points (see
+[ROADMAP.md](https://github.com/asamarts/alint/blob/main/docs/design/ROADMAP.md)):**
 
-- `crates/alint-plugin/`: WASM plugin host (roadmap v0.14; the tier-1 `command` plugin already lives in `alint-rules`).
+- `crates/alint-plugin/`: a WASM plugin host remains unscheduled backlog; the tier-1 `command`
+  plugin already lives in `alint-rules`.
 - `crates/alint-facts/`: currently subsumed by `alint-core::facts`; promotion to its own crate is deferred until the language and license detectors (`detect: linguist`, `detect: askalono`) land.
 
 ### Publishing intent (crates.io)
@@ -458,9 +556,12 @@ The public crate surface is kept narrow so the semver-stable API is small and ma
 |---|---|---|
 | `alint` (binary) | public | Enables `cargo install alint`. Package name matches `[[bin]] name`. |
 | `alint-core` | public | Embeddable engine for custom drivers: scripts, custom CI gates, third-party hosts. Semver-stable from 1.0. |
-| `alint-dsl`, `alint-rules`, `alint-output`, and later-phase crates | `publish = false` | Internal plumbing. Promotion to public requires a concrete external consumer and a commitment to maintain the API. |
+| `alint-dsl`, `alint-rules`, `alint-output`, `alint-lsp` | published, but documented as internal | Cargo requires the binary's workspace dependencies to be resolvable from crates.io. Publication does not make these semver-stable public APIs. |
+| `alint-bench`, `alint-testkit`, `alint-e2e`, `xtask` | `publish = false` | Repository-only benchmarking, testing, and maintenance tooling. |
 
-Unpublished crates still ship inside the binary and can be promoted later. The reverse, publishing a crate then realizing you don't want to maintain it as a stable API, is much harder.
+`publish` is a packaging property, not an API-stability promise. Only `alint-core` is presented
+as an embeddable library; implementation crates carry an `Internal` package description even
+though the release pipeline publishes them as dependencies of `alint`.
 
 ## Plugin model
 
@@ -468,8 +569,14 @@ Unpublished crates still ship inside the binary and can be promoted later. The r
 
 Two tiers, introduced across the roadmap:
 
-- **`command` rule kind** (shipped). The rule shells out per matched file. Exit code is the verdict; stdout/stderr is the message. Environment variables expose path, rule id, level, vars, and facts. Simple, scriptable, language-agnostic.
-- **`wasm` plugin kind** (roadmap v0.14). Plugins will implement a stable WIT interface, receive file bytes + metadata, and return a structured result. Distributed as `.wasm` blobs referenced by URL with SRI. Sandboxed, deterministic, no network by default (opt-in capability).
+- **`command` rule kind** (shipped). The rule spawns a configured argv per matched file; it does
+  not implicitly invoke a shell. Exit code is the verdict; bounded stdout/stderr form the default
+  failure message. Environment variables expose path, root, rule id, level, vars, and facts.
+  Simple, scriptable, language-agnostic.
+- **Future `wasm` plugin kind** (unscheduled backlog). The current direction is a stable WIT
+  interface, a filesystem sandbox, and a signed registry. Exact inputs, distribution, authority,
+  determinism, and capability grants remain design decisions; `general-linter.md` proposes the
+  stricter typed adapter/analyzer boundary.
 
 Native Rust plugins are deliberately out of scope. Dynamic library loading has ABI stability problems and would lock the plugin ecosystem to Rust. WASM is the long-term answer.
 
@@ -486,7 +593,9 @@ Selected via `--format`:
 - `gitlab`: GitLab Code Quality JSON.
 - `junit`: JUnit XML for generic CI reporting.
 - `markdown`: report with TOC, suitable for posting as a GitHub issue body.
-- `agent`: LLM-shaped JSON sibling of `json`, with a per-violation `agent_instruction` templated from each rule's message and fix block (v0.6).
+- `agent`: agent-oriented JSON sibling of `json`, with a per-violation instruction composed from
+  severity, message, location, actual Safe-fix availability, and policy URL, plus a machine-usable
+  fix command/edit when available (v0.6).
 
 ## Full example
 
@@ -522,11 +631,11 @@ rules:
     level: off
 
   # New rules.
-  - id: cargo-members-are-kebab
+  - id: cargo-member-paths-are-canonical
     kind: toml_path_matches
     paths: "Cargo.toml"
     path: "$.workspace.members[*]"
-    matches: "^[a-z][a-z0-9-]+$"
+    matches: "^crates/[a-z][a-z0-9-]*$"
     level: error
 
   - id: crates-have-readme
@@ -534,13 +643,13 @@ rules:
     select: "crates/*"
     require:
       - kind: file_exists
-        paths: "{dir}/README.md"
+        paths: "{path}/README.md"
     level: error
 
-  - id: integration-test-pair
+  - id: handlers-have-integration-tests
     kind: pair
-    primary: "crates/*/src/*.rs"
-    partner: "crates/*/tests/{stem}_test.rs"
+    primary: "src/handlers/*.rs"
+    partner: "tests/{stem}_test.rs"
     level: warning
 
   - id: bench-gated
@@ -552,11 +661,21 @@ rules:
 
 ## Contributing new rule kinds
 
-A new rule kind typically needs:
+A new kind follows the repository's spec-driven workflow, not only a trait implementation:
 
-1. A `Rule` impl in `crates/alint-rules/src/<kind>.rs`.
-2. Registration in `register_builtin` in `crates/alint-rules/src/lib.rs`.
-3. Unit tests alongside the impl (snapshot harness in `alint-testkit`).
-4. A docs entry so the kind appears in the [rule reference](https://alint.org/docs/rules/).
-5. An entry in the Full Example section if the kind is commonly used.
-6. If the primitive shifts from "planned" to "shipped," an update in [ROADMAP.md](./ROADMAP.md).
+1. Establish demand and semantics in the appropriate design document: target domain, empty-set
+   behavior, changed-mode/full-index needs, errors, finding identity, trust, and fixes.
+2. Define a `deny_unknown_fields` options type and generated schema fragment, then implement the
+   `Rule` (and `PerFileRule` only when it truly accepts one preloaded file at a time).
+3. Register the builder, option schema, canonical kind, aliases, and family/category metadata in
+   their single sources of truth.
+4. Add unit/property tests plus at least one firing and one silent end-to-end scenario. Cover
+   changed mode, scoping, limits, trust, output identity, and fix convergence when applicable.
+5. Add examples and generated rule documentation; run all catalogue/schema/docs/coverage gates.
+6. Update roadmap/design status only when the implementation and evidence ship together.
+
+The authoritative checklist is
+[`docs/development/rule-authoring.md`](https://github.com/asamarts/alint/blob/main/docs/development/rule-authoring.md),
+with non-negotiable invariants in
+[`constitution.md`](https://github.com/asamarts/alint/blob/main/docs/design/constitution.md) and
+the [spec-driven development guide](https://github.com/asamarts/alint/blob/main/docs/design/spec-driven-development.md).
