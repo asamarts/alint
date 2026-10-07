@@ -85,8 +85,7 @@ impl PerFileRule for MarkdownPathsResolveRule {
             if self.ignore_template_vars && has_template_vars(&cand.token) {
                 continue;
             }
-            let lookup = strip_path_decoration(&cand.token);
-            if path_resolves(ctx, lookup) {
+            if candidate_resolves(ctx, &cand.token) {
                 continue;
             }
             let msg = self.message.clone().unwrap_or_else(|| {
@@ -304,6 +303,29 @@ fn strip_path_decoration(s: &str) -> &str {
     s.trim_end_matches('/')
 }
 
+/// Resolve either the complete inline-code span or, when the span is shaped
+/// like a command invocation, its command path. Trying the complete span first
+/// preserves real paths containing whitespace. The command fallback is
+/// deliberately conservative: the remainder must begin with an option marker
+/// or contain no path separator, and the first word itself must resolve.
+fn candidate_resolves(ctx: &Context<'_>, token: &str) -> bool {
+    if path_resolves(ctx, strip_path_decoration(token)) {
+        return true;
+    }
+
+    let Some((split, _)) = token.char_indices().find(|(_, ch)| ch.is_whitespace()) else {
+        return false;
+    };
+    let command = strip_path_decoration(&token[..split]);
+    let arguments = token[split..].trim_start();
+    looks_like_command_arguments(arguments) && path_resolves(ctx, command)
+}
+
+fn looks_like_command_arguments(arguments: &str) -> bool {
+    !arguments.is_empty()
+        && (arguments.starts_with('-') || (!arguments.contains('/') && !arguments.contains('\\')))
+}
+
 /// Does `lookup` resolve to a real file or directory in the
 /// scanned tree? Glob characters in the lookup are matched
 /// against the file index (any-of); plain paths use exact
@@ -406,6 +428,18 @@ mod tests {
         assert_eq!(strip_path_decoration("src/foo.ts#L42"), "src/foo.ts");
         assert_eq!(strip_path_decoration("src/foo.ts:42#L1"), "src/foo.ts");
         assert_eq!(strip_path_decoration("src/foo/"), "src/foo");
+    }
+
+    #[test]
+    fn command_argument_shape_is_conservative() {
+        assert!(looks_like_command_arguments("--check"));
+        assert!(looks_like_command_arguments("-q docs/guide.md"));
+        assert!(looks_like_command_arguments("verify"));
+        assert!(looks_like_command_arguments("verify tree"));
+        assert!(!looks_like_command_arguments("docs/guide.md"));
+        assert!(!looks_like_command_arguments("verify docs/guide.md"));
+        assert!(!looks_like_command_arguments(r"docs\guide.md"));
+        assert!(!looks_like_command_arguments(""));
     }
 
     #[test]

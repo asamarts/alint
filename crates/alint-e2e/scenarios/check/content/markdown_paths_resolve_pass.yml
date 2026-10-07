@@ -13,11 +13,17 @@ given:
       utils.ts: "export const u = 1;\n"
     docs:
       guide.md: "# guide\n"
+      "User Guide.md": "# user guide\n"
+    tools:
+      run.ts: "export function run() {}\n"
     AGENTS.md: |
       # Agents file
 
       Production code lives under `src/api.ts` and `src/utils.ts`.
       User-facing docs are at `docs/guide.md`.
+      Run `tools/run.ts --check` to verify the tree, or use
+      `tools/run.ts verify` for the positional-argument form.
+      A real path containing whitespace still resolves: `docs/User Guide.md`.
 
       ```yaml
       # In code blocks, references aren't validated:
@@ -29,7 +35,7 @@ given:
       - id: agents-paths-resolve
         kind: markdown_paths_resolve
         paths: ["AGENTS.md"]
-        prefixes: ["src/", "docs/"]
+        prefixes: ["src/", "docs/", "tools/"]
         level: warning
 
 when: [check]

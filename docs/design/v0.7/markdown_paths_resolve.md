@@ -79,10 +79,15 @@ For each markdown file in scope:
    indented by 4+ spaces is excluded. Code samples
    demonstrate paths; they're not claims about the
    current tree.
-2. **Strip inline code that looks like code samples**
-   following ``` ` ``` . Heuristic: if the backticked
-   token contains spaces or matches a non-path shape
-   (`function(args)`, `cmd --flag`), skip.
+2. **Recognize command-shaped inline code without hiding
+   paths containing spaces.** Resolve the complete token first.
+   If it does not resolve and contains whitespace, treat the
+   first word as a command path only when that word resolves and
+   the remainder either starts with `-` or contains no `/` or
+   `\\` path separator. Thus `` `tools/run.ts --check` `` checks
+   `tools/run.ts`, while `` `docs/User Guide.md` `` still checks
+   the complete path and `` `docs/a.md docs/b.md` `` is not
+   silently accepted as a command.
 3. **Find candidate paths.** Backticked tokens that
    start with one of the configured `prefixes`.
 4. **Apply `ignore_template_vars` filtering.**

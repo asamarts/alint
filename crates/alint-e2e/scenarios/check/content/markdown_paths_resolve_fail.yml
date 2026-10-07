@@ -17,6 +17,7 @@ given:
 
       See `src/exists.ts` for the implementation.
       Reference `src/missing.ts` and `docs/gone.md`.
+      A missing command path still fails: `tools/missing.ts --check`.
 
       ```yaml
       example: `src/in-codeblock.ts`
@@ -31,12 +32,13 @@ given:
       - id: agents-paths-resolve
         kind: markdown_paths_resolve
         paths: ["AGENTS.md"]
-        prefixes: ["src/", "docs/"]
+        prefixes: ["src/", "docs/", "tools/"]
         level: warning
 
 when: [check]
 
 expect:
   - violations:
+      - {rule: agents-paths-resolve, level: warning, path: AGENTS.md}
       - {rule: agents-paths-resolve, level: warning, path: AGENTS.md}
       - {rule: agents-paths-resolve, level: warning, path: AGENTS.md}

@@ -25,6 +25,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `markdown_paths_resolve` now recognizes backticked command invocations such
+  as `` `tools/run.ts --check` ``: when the complete span is not a path, the
+  rule accepts it if its command path resolves and the remainder is
+  argument-shaped. Complete spans are resolved first, so real paths containing
+  whitespace continue to work, while a missing command path still fails.
+
 - Docs-bundle publishing now keeps generated rule indexes pinned to the
   released rule-page set, rejects dangling rule-index links before publishing,
   serializes every trigger that writes the shared branch, and uses a
