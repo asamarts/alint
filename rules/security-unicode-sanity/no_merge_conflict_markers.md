@@ -1,6 +1,6 @@
 ---
 title: 'no_merge_conflict_markers'
-description: 'Flag <<<<<<<, =======, >>>>>>>, ||||||| markers at the start of a line, almost always. alint no_merge_conflict_markers rule, security / unicode sanity family.'
+description: 'alint no_merge_conflict_markers rule (security / unicode sanity): Flag <<<<<<<, =======, >>>>>>>, ||||||| markers at the start of a line, almost always...'
 sidebar:
   order: 1
 categories: ['security-unicode-sanity', 'text-hygiene']
@@ -76,7 +76,7 @@ pub fn a() {}
 ```
 
 ```markdown title="src/docs.md"
-Conflict discussion: we use <<<<<< for ... (inline, no col-1 marker)
+Conflict discussion: the example uses <<<<<< for ... (inline, no col-1 marker)
 ```
 
 With this `.alint.yml`:

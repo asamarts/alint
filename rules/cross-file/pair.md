@@ -1,6 +1,6 @@
 ---
 title: 'pair'
-description: 'For every file matching primary, a file matching the partner template must exist. alint pair rule, cross-file family.'
+description: 'alint pair rule (cross-file): For every file matching primary, a file matching the partner template must exist.'
 sidebar:
   order: 1
 categories: ['cross-file']

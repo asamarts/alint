@@ -1,6 +1,6 @@
 ---
 title: 'yaml_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint yaml_path_matches rule, structured query family.'
+description: 'alint yaml_path_matches rule (structured query): Query a YAML document with JSONPath and require every selected string to match a regular expression.'
 sidebar:
   order: 10
 categories: ['structured-query']

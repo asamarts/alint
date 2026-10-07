@@ -1,6 +1,6 @@
 ---
 title: 'xml_path_absent'
-description: 'Assert a JSONPath query over the document matches nothing; one file-level violation if present. alint xml_path_absent rule, structured query family.'
+description: 'alint xml_path_absent rule (structured query): Query an XML document with JSONPath and require it to match nothing.'
 sidebar:
   order: 20
 categories: ['structured-query']

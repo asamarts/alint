@@ -1,6 +1,6 @@
 ---
 title: 'file_is_ascii'
-description: 'Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in allow. alint file_is_ascii rule, content family.'
+description: 'alint file_is_ascii rule (content): Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in allow.'
 sidebar:
   order: 14
 categories: ['content', 'encoding', 'security-unicode-sanity']

@@ -1,6 +1,6 @@
 ---
 title: 'file_starts_with'
-description: 'Byte-level prefix / suffix check. alint file_starts_with rule, content family.'
+description: 'alint file_starts_with rule (content): Byte-level prefix / suffix check.'
 sidebar:
   order: 4
 categories: ['content']

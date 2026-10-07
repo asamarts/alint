@@ -1,6 +1,6 @@
 ---
 title: Rule templates
-description: Define a rule shape once via the top-level `templates:` block; instantiate it N times via `extends_template:` with `{{vars.X}}` substitution. Replaces N near-duplicate rules with one shape and N short instances.
+description: Define a reusable rule template, instantiate it with variables, and replace repeated rule shapes with short declarations.
 sidebar:
   order: 6
 ---

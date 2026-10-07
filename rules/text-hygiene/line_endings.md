@@ -1,6 +1,6 @@
 ---
 title: 'line_endings'
-description: 'Every line ending matches target: lf or crlf. alint line_endings rule, text hygiene family.'
+description: 'alint line_endings rule (text hygiene): Every line ending matches target: lf or crlf.'
 sidebar:
   order: 3
 categories: ['text-hygiene', 'portable-metadata']

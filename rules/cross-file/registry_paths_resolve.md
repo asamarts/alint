@@ -1,6 +1,6 @@
 ---
 title: 'registry_paths_resolve'
-description: 'A manifest file enumerates path entries; each must resolve to an on-disk artefact. alint registry_paths_resolve rule, cross-file family.'
+description: 'alint registry_paths_resolve rule (cross-file): A manifest file enumerates path entries; each must resolve to an on-disk artefact.'
 sidebar:
   order: 4
 categories: ['cross-file']

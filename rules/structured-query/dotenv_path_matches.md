@@ -1,6 +1,6 @@
 ---
 title: 'dotenv_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint dotenv_path_matches rule, structured query family.'
+description: 'alint dotenv_path_matches rule (structured query): Query a dotenv document with JSONPath and require every selected string to match a regular expression.'
 sidebar:
   order: 13
 categories: ['structured-query']

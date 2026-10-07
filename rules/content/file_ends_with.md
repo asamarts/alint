@@ -1,6 +1,6 @@
 ---
 title: 'file_ends_with'
-description: 'Byte-level prefix / suffix check. alint file_ends_with rule, content family.'
+description: 'alint file_ends_with rule (content): Byte-level prefix / suffix check.'
 sidebar:
   order: 5
 categories: ['content']

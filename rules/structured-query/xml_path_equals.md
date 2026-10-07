@@ -1,6 +1,6 @@
 ---
 title: 'xml_path_equals'
-description: 'Query a XML document with a JSONPath expression and assert every match deep-equals the supplied value. alint xml_path_equals rule, structured query family.'
+description: 'alint xml_path_equals rule (structured query): Query an XML document with JSONPath and require every selected value to equal the expected value.'
 sidebar:
   order: 4
 categories: ['structured-query']

@@ -1,6 +1,6 @@
 ---
 title: 'no_submodules'
-description: 'Flag the presence of .gitmodules at the repo root, always, regardless of paths. alint no_submodules rule, git hygiene family.'
+description: 'alint no_submodules rule (git hygiene): Flag the presence of .gitmodules at the repo root, always, regardless of paths.'
 sidebar:
   order: 1
 categories: ['git-hygiene']

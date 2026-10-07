@@ -1,6 +1,6 @@
 ---
 title: 'command'
-description: 'Shell out to an external CLI per matched file. alint command rule, plugin (tier 1) family.'
+description: 'alint command rule (plugin (tier 1)): Shell out to an external CLI per matched file.'
 sidebar:
   order: 1
 categories: ['plugin-tier-1']

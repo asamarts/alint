@@ -1,6 +1,6 @@
 ---
 title: 'pair_changed_together'
-description: 'If the <since>...HEAD diff changes any path matching if_changed:, at least one path matching. alint pair_changed_together rule, git hygiene family.'
+description: 'alint pair_changed_together rule (git hygiene): If the <since>...HEAD diff changes any path matching if_changed:, at least one path matching...'
 sidebar:
   order: 13
 categories: ['git-hygiene', 'cross-file']

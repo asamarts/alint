@@ -1,6 +1,6 @@
 ---
 title: 'file_graph'
-description: 'Assemble the repo''s file -> file reference graph and assert a global structural property the 1-level cross-file. alint file_graph rule, cross-file family.'
+description: 'alint file_graph rule (cross-file): Assemble the repo''s file -> file reference graph and assert a global structural property the 1-level cross-file kinds...'
 sidebar:
   order: 6
 categories: ['cross-file']

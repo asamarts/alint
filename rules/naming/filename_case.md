@@ -1,6 +1,6 @@
 ---
 title: 'filename_case'
-description: 'Basename (stem only or full) matches a case convention: snake, kebab, pascal, camel, screaming-snake, flat, lower. alint filename_case rule, naming family.'
+description: 'alint filename_case rule (naming): Basename (stem only or full) matches a case convention: snake, kebab, pascal, camel, screaming-snake, flat, lower, upper.'
 sidebar:
   order: 1
 categories: ['naming']

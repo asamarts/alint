@@ -1,6 +1,6 @@
 ---
 title: 'file_absent'
-description: 'No file matching paths may exist in the walked tree. alint file_absent rule, existence family.'
+description: 'alint file_absent rule (existence): No file matching paths may exist in the walked tree.'
 sidebar:
   order: 2
 categories: ['existence']

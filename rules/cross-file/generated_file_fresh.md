@@ -1,6 +1,6 @@
 ---
 title: 'generated_file_fresh'
-description: 'A committed artefact must equal what a declared command generator produces, in one of two modes. alint generated_file_fresh rule, cross-file family.'
+description: 'alint generated_file_fresh rule (cross-file): A committed artefact must equal what a declared command generator produces, in one of two modes...'
 sidebar:
   order: 9
 categories: ['cross-file', 'security-unicode-sanity']

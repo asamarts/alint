@@ -1,6 +1,6 @@
 ---
 title: 'json_path_equals'
-description: 'Query a JSON document with a JSONPath expression and assert every match deep-equals the supplied value. alint json_path_equals rule, structured query family.'
+description: 'alint json_path_equals rule (structured query): Query a JSON document with JSONPath and require every selected value to equal the expected value.'
 sidebar:
   order: 1
 categories: ['structured-query']

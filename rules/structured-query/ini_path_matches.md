@@ -1,6 +1,6 @@
 ---
 title: 'ini_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint ini_path_matches rule, structured query family.'
+description: 'alint ini_path_matches rule (structured query): Query an INI document with JSONPath and require every selected string to match a regular expression.'
 sidebar:
   order: 15
 categories: ['structured-query']

@@ -1,6 +1,6 @@
 ---
 title: 'file_min_size'
-description: 'File must be at least min_bytes in size. alint file_min_size rule, content family.'
+description: 'alint file_min_size rule (content): File must be at least min_bytes in size.'
 sidebar:
   order: 8
 categories: ['content', 'structure']

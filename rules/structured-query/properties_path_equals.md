@@ -1,6 +1,6 @@
 ---
 title: 'properties_path_equals'
-description: 'Query a PROPERTIES document with a JSONPath expression and assert every match deep-equals the. alint properties_path_equals rule, structured query family.'
+description: 'alint properties_path_equals rule (structured query): Query a Java properties document with JSONPath and require every selected value to equal...'
 sidebar:
   order: 6
 categories: ['structured-query']

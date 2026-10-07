@@ -1,6 +1,6 @@
 ---
 title: 'no_symlinks'
-description: 'Flag tracked paths that are symbolic links. alint no_symlinks rule, unix metadata family.'
+description: 'alint no_symlinks rule (unix metadata): Flag tracked paths that are symbolic links.'
 sidebar:
   order: 1
 categories: ['unix-metadata', 'portable-metadata', 'security-unicode-sanity']

@@ -1,6 +1,6 @@
 ---
 title: 'import_gate'
-description: 'Forbid imports whose extracted target matches a forbid regex, within the paths scope, an architectural import. alint import_gate rule, cross-file family.'
+description: 'alint import_gate rule (cross-file): Forbid imports whose extracted target matches a forbid regex, within the paths scope, an architectural import...'
 sidebar:
   order: 10
 categories: ['cross-file', 'security-unicode-sanity']

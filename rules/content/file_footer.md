@@ -1,6 +1,6 @@
 ---
 title: 'file_footer'
-description: 'The configured number of final lines in each file in scope must match a regex. alint file_footer rule, content family.'
+description: 'alint file_footer rule (content): The configured number of final lines in each file in scope must match a regex.'
 sidebar:
   order: 11
 categories: ['content']

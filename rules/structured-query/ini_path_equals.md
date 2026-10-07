@@ -1,6 +1,6 @@
 ---
 title: 'ini_path_equals'
-description: 'Query a INI document with a JSONPath expression and assert every match deep-equals the supplied value. alint ini_path_equals rule, structured query family.'
+description: 'alint ini_path_equals rule (structured query): Query an INI document with JSONPath and require every selected value to equal the expected value.'
 sidebar:
   order: 7
 categories: ['structured-query']

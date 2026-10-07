@@ -1,6 +1,6 @@
 ---
 title: 'commented_out_code'
-description: 'Heuristic detector for blocks of commented-out source code. alint commented_out_code rule, git hygiene family.'
+description: 'alint commented_out_code rule (git hygiene): Heuristic detector for blocks of commented-out source code...'
 sidebar:
   order: 2
 categories: ['git-hygiene', 'content']

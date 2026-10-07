@@ -1,6 +1,6 @@
 ---
 title: 'file_max_size'
-description: 'File must be at most max_bytes in size. alint file_max_size rule, content family.'
+description: 'alint file_max_size rule (content): File must be at most max_bytes in size.'
 sidebar:
   order: 7
 categories: ['content', 'structure']

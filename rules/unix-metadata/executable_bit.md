@@ -1,6 +1,6 @@
 ---
 title: 'executable_bit'
-description: 'Assert every file in scope either has the +x bit set (require: true) or does not (require: false). alint executable_bit rule, unix metadata family.'
+description: 'alint executable_bit rule (unix metadata): Assert every file in scope either has the +x bit set (require: true) or does not (require: false).'
 sidebar:
   order: 2
 categories: ['unix-metadata']

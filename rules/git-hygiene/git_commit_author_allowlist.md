@@ -1,6 +1,6 @@
 ---
 title: 'git_commit_author_allowlist'
-description: 'Assert every commit author in scope matches an allowed email and/or name pattern. alint git_commit_author_allowlist rule, git hygiene family.'
+description: 'alint git_commit_author_allowlist rule (git hygiene): Assert every commit author in scope matches an allowed email and/or name pattern.'
 sidebar:
   order: 9
 categories: ['git-hygiene', 'security-unicode-sanity']

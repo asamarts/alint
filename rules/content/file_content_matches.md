@@ -1,6 +1,6 @@
 ---
 title: 'file_content_matches'
-description: 'File contents must contain at least one match for a regex. alint file_content_matches rule, content family.'
+description: 'alint file_content_matches rule (content): File contents must contain at least one match for a regex.'
 sidebar:
   order: 1
 categories: ['content']

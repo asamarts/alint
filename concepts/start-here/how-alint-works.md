@@ -1,6 +1,6 @@
 ---
 title: How alint works
-description: "A deep look at alint's execution pipeline: assemble one config, evaluate facts once, filter rules, walk the repository in parallel, dispatch per-file and cross-file rules over a single read of each file, and emit one report."
+description: "Follow alint's pipeline from configuration and fact evaluation through its parallel repository walk, rule dispatch, and final report."
 sidebar:
   order: 1
 ---

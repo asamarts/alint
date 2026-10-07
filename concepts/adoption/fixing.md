@@ -1,6 +1,6 @@
 ---
 title: Fixing
-description: "How alint repairs violations: rules with a fix: block are auto-fixable, the 26 fix ops grouped by what they touch, the Safe and Unsafe tiers and --unsafe-fixes, content_from:, fix_size_limit, and why evaluation is parallel but fixes apply one rule at a time."
+description: Learn how 26 fix ops, safety tiers, size limits, and content sources let alint apply repairs deterministically.
 sidebar:
   order: 1
 ---

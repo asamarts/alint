@@ -1,6 +1,6 @@
 ---
 title: 'no_case_conflicts'
-description: 'Flag paths that differ only by case (e.g. README.md + readme.md). alint no_case_conflicts rule, portable metadata family.'
+description: 'alint no_case_conflicts rule (portable metadata): Flag paths that differ only by case (e.g. README.md + readme.md).'
 sidebar:
   order: 1
 categories: ['portable-metadata', 'naming']

@@ -1,6 +1,6 @@
 ---
 title: 'file_shebang'
-description: 'First line of each file in scope must match the shebang regex. alint file_shebang rule, content family.'
+description: 'alint file_shebang rule (content): First line of each file in scope must match the shebang regex.'
 sidebar:
   order: 12
 categories: ['content', 'unix-metadata']

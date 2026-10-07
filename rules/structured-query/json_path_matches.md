@@ -1,6 +1,6 @@
 ---
 title: 'json_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint json_path_matches rule, structured query family.'
+description: 'alint json_path_matches rule (structured query): Query a JSON document with JSONPath and require every selected string to match a regular expression.'
 sidebar:
   order: 9
 categories: ['structured-query']

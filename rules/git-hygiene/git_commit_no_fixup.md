@@ -1,6 +1,6 @@
 ---
 title: 'git_commit_no_fixup'
-description: 'Fail on residual fixup! / squash! / amend! commits left in scope, the ones git commit --fixup / --squash. alint git_commit_no_fixup rule, git hygiene family.'
+description: 'alint git_commit_no_fixup rule (git hygiene): Fail on residual fixup! / squash! / amend! commits left in scope, the ones git commit --fixup / --squash...'
 sidebar:
   order: 7
 categories: ['git-hygiene']

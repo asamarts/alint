@@ -1,6 +1,6 @@
 ---
 title: 'git_commit_signed_off'
-description: 'Assert every commit in scope carries a DCO (Developer Certificate of Origin) Signed-off-by: trailer. alint git_commit_signed_off rule, git hygiene family.'
+description: 'alint git_commit_signed_off rule (git hygiene): Assert every commit in scope carries a DCO (Developer Certificate of Origin) Signed-off-by: trailer...'
 sidebar:
   order: 6
 categories: ['git-hygiene']

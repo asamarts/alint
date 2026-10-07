@@ -1,6 +1,6 @@
 ---
 title: 'ordered_block'
-description: 'The lines between a start / end marker pair must stay sorted (and, with unique: true, free of duplicates) under. alint ordered_block rule, cross-file family.'
+description: 'alint ordered_block rule (cross-file): The lines between a start / end marker pair must stay sorted (and, with unique: true, free of duplicates) under...'
 sidebar:
   order: 7
 categories: ['cross-file', 'text-hygiene']

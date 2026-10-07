@@ -1,6 +1,6 @@
 ---
 title: Bundled rulesets
-description: "The 22 curated rulesets compiled into alint: one extends line adopts a set, each rule is fact-gated so it applies only where it belongs, and you override any of it field-by-field in your own config."
+description: Adopt curated, fact-gated rulesets with one extends entry, then override individual rules field by field.
 sidebar:
   order: 2
 ---

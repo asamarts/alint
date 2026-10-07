@@ -1,6 +1,6 @@
 ---
 title: 'properties_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string. alint properties_path_matches rule, structured query family.'
+description: 'alint properties_path_matches rule (structured query): Query a Java properties document with JSONPath and require every selected string to match...'
 sidebar:
   order: 14
 categories: ['structured-query']

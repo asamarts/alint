@@ -1,6 +1,6 @@
 ---
 title: 'max_directory_depth'
-description: 'Tree depth from repo root may not exceed max_depth. alint max_directory_depth rule, structure family.'
+description: 'alint max_directory_depth rule (structure): Tree depth from repo root may not exceed max_depth.'
 sidebar:
   order: 1
 categories: ['structure']

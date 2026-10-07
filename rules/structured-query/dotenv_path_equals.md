@@ -1,6 +1,6 @@
 ---
 title: 'dotenv_path_equals'
-description: 'Query a DOTENV document with a JSONPath expression and assert every match deep-equals the supplied. alint dotenv_path_equals rule, structured query family.'
+description: 'alint dotenv_path_equals rule (structured query): Query a dotenv document with JSONPath and require every selected value to equal the expected value.'
 sidebar:
   order: 5
 categories: ['structured-query']

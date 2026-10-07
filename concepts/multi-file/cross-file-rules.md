@@ -1,6 +1,6 @@
 ---
 title: Cross-file rules
-description: "Rules whose verdict for one file depends on other files: the relational rules, file_graph and its require: modes, cross_file value relations, and the shared extract: extractor."
+description: Relate files through graphs, required paths, extracted values, and other checks whose verdict depends on multiple files.
 sidebar:
   order: 1
 ---

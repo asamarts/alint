@@ -1,6 +1,6 @@
 ---
 title: 'filename_regex'
-description: 'Basename matches a regex. alint filename_regex rule, naming family.'
+description: 'alint filename_regex rule (naming): Basename matches a regex.'
 sidebar:
   order: 2
 categories: ['naming']

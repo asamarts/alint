@@ -1,6 +1,6 @@
 ---
 title: 'toml_path_absent'
-description: 'Assert a JSONPath query over the document matches nothing; one file-level violation if present. alint toml_path_absent rule, structured query family.'
+description: 'alint toml_path_absent rule (structured query): Query a TOML document with JSONPath and require it to match nothing.'
 sidebar:
   order: 19
 categories: ['structured-query']

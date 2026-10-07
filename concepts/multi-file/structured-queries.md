@@ -1,6 +1,6 @@
 ---
 title: Structured queries
-description: "One JSONPath query language reads a value out of any of eight config formats, because alint parses each into one common Value tree first, with equals, matches, and absent ops."
+description: Query eight structured-data formats through one JSONPath model, with equality, pattern, and absence checks.
 sidebar:
   order: 2
 ---

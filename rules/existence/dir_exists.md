@@ -1,6 +1,6 @@
 ---
 title: 'dir_exists'
-description: 'Directory counterpart of file_exists. alint dir_exists rule, existence family.'
+description: 'alint dir_exists rule (existence): Directory counterpart of file_exists.'
 sidebar:
   order: 3
 categories: ['existence']

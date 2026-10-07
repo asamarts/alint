@@ -1,6 +1,6 @@
 ---
 title: 'final_newline'
-description: 'File must end with a single \n. alint final_newline rule, text hygiene family.'
+description: 'alint final_newline rule (text hygiene): File must end with a single \n.'
 sidebar:
   order: 2
 categories: ['text-hygiene']

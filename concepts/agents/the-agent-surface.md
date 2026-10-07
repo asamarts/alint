@@ -1,6 +1,6 @@
 ---
 title: The agent surface
-description: "How alint feeds a coding agent: the agent output format with per-violation fix_command, export-agents-md writing an AGENTS.md section, and the two bundled agentic rulesets."
+description: Use agent output, per-violation fix commands, generated AGENTS.md guidance, and bundled agent rulesets in coding-agent workflows.
 sidebar:
   order: 1
 ---

@@ -1,6 +1,6 @@
 ---
 title: Config layering
-description: "How one effective config is assembled from drop-ins and nested configs, and how the three interpolation timings resolve values at load, at template expansion, and per violation."
+description: See how drop-ins and nested configs combine, and when values resolve during loading, template expansion, and violation reporting.
 sidebar:
   order: 3
 ---

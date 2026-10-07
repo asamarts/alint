@@ -1,6 +1,6 @@
 ---
 title: 'git_commit_gpg_signed'
-description: 'Assert every commit in scope has a verifying signature (git verify-commit exits 0). alint git_commit_gpg_signed rule, git hygiene family.'
+description: 'alint git_commit_gpg_signed rule (git hygiene): Assert every commit in scope has a verifying signature (git verify-commit exits 0).'
 sidebar:
   order: 10
 categories: ['git-hygiene', 'security-unicode-sanity']

@@ -1,6 +1,6 @@
 ---
 title: 'git_commit_message'
-description: 'Validate commit-message shape via regex, max-subject-length, or required-body. alint git_commit_message rule, git hygiene family.'
+description: 'alint git_commit_message rule (git hygiene): Validate commit-message shape via regex, max-subject-length, or required-body.'
 sidebar:
   order: 5
 categories: ['git-hygiene']

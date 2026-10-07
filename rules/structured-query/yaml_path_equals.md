@@ -1,6 +1,6 @@
 ---
 title: 'yaml_path_equals'
-description: 'Query a YAML document with a JSONPath expression and assert every match deep-equals the supplied value. alint yaml_path_equals rule, structured query family.'
+description: 'alint yaml_path_equals rule (structured query): Query a YAML document with JSONPath and require every selected value to equal the expected value.'
 sidebar:
   order: 2
 categories: ['structured-query']

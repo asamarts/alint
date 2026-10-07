@@ -1,6 +1,6 @@
 ---
 title: 'dir_contains'
-description: 'Every directory matching select: must contain files matching every glob in require. alint dir_contains rule, cross-file family.'
+description: 'alint dir_contains rule (cross-file): Every directory matching select: must contain files matching every glob in require.'
 sidebar:
   order: 14
 categories: ['cross-file', 'structure']

@@ -1,6 +1,6 @@
 ---
 title: 'file_hash'
-description: 'Content SHA-256 must equal the expected digest. alint file_hash rule, content family.'
+description: 'alint file_hash rule (content): Content SHA-256 must equal the expected digest.'
 sidebar:
   order: 6
 categories: ['content', 'security-unicode-sanity']

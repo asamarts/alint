@@ -1,6 +1,6 @@
 ---
 title: Composition and trust
-description: "How extends: merges other configs into yours field-by-field by id, and the trust boundary that lets a fetched or bundled ruleset tighten your checks but never run your machine's code."
+description: Compose configurations by rule ID while keeping fetched and bundled rulesets inside a boundary that prevents code execution.
 sidebar:
   order: 1
 ---

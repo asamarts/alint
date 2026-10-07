@@ -1,6 +1,6 @@
 ---
 title: 'git_blame_age'
-description: 'Fire on lines matching a regex whose git blame author-time is older than max_age_days. alint git_blame_age rule, git hygiene family.'
+description: 'alint git_blame_age rule (git hygiene): Fire on lines matching a regex whose git blame author-time is older than max_age_days.'
 sidebar:
   order: 11
 categories: ['git-hygiene']

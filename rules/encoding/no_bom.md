@@ -1,6 +1,6 @@
 ---
 title: 'no_bom'
-description: 'Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. alint no_bom rule, encoding family.'
+description: 'alint no_bom rule (encoding): Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark.'
 sidebar:
   order: 1
 categories: ['encoding', 'text-hygiene']

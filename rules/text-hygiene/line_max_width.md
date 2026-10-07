@@ -1,6 +1,6 @@
 ---
 title: 'line_max_width'
-description: 'Cap line length in characters (not bytes, code points). alint line_max_width rule, text hygiene family.'
+description: 'alint line_max_width rule (text hygiene): Cap line length in characters (not bytes, code points).'
 sidebar:
   order: 4
 categories: ['text-hygiene']

@@ -1,6 +1,6 @@
 ---
 title: 'no_illegal_windows_names'
-description: 'Reject path components that Windows cannot represent. alint no_illegal_windows_names rule, portable metadata family.'
+description: 'alint no_illegal_windows_names rule (portable metadata): Reject path components that Windows cannot represent.'
 sidebar:
   order: 2
 categories: ['portable-metadata', 'naming']

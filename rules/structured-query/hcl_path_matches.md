@@ -1,6 +1,6 @@
 ---
 title: 'hcl_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint hcl_path_matches rule, structured query family.'
+description: 'alint hcl_path_matches rule (structured query): Query an HCL document with JSONPath and require every selected string to match a regular expression.'
 sidebar:
   order: 16
 categories: ['structured-query']

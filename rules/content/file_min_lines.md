@@ -1,6 +1,6 @@
 ---
 title: 'file_min_lines'
-description: 'File must have at least min_lines lines. alint file_min_lines rule, content family.'
+description: 'alint file_min_lines rule (content): File must have at least min_lines lines...'
 sidebar:
   order: 9
 categories: ['content', 'structure']

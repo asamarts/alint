@@ -1,6 +1,6 @@
 ---
 title: 'json_schema_passes'
-description: 'Validate every JSON / YAML / TOML / XML / dotenv / properties / INI / HCL file in paths against a. alint json_schema_passes rule, structured query family.'
+description: 'alint json_schema_passes rule (structured query): Validate every JSON / YAML / TOML / XML / dotenv / properties / INI / HCL file in paths against a JSON...'
 sidebar:
   order: 25
 categories: ['structured-query']

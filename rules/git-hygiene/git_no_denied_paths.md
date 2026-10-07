@@ -1,6 +1,6 @@
 ---
 title: 'git_no_denied_paths'
-description: 'Fire when any tracked file matches a configured glob denylist. alint git_no_denied_paths rule, git hygiene family.'
+description: 'alint git_no_denied_paths rule (git hygiene): Fire when any tracked file matches a configured glob denylist.'
 sidebar:
   order: 4
 categories: ['git-hygiene', 'security-unicode-sanity']

@@ -1,6 +1,6 @@
 ---
 title: 'for_each_match'
-description: 'For each line matching select (a regex), the line must satisfy the nested require: predicates. alint for_each_match rule, cross-file family.'
+description: 'alint for_each_match rule (cross-file): For each line matching select (a regex), the line must satisfy the nested require: predicates.'
 sidebar:
   order: 8
 categories: ['cross-file']

@@ -1,6 +1,6 @@
 ---
 title: 'for_each_dir'
-description: 'For every matching directory / file, evaluate a nested require: block with the entry as context. alint for_each_dir rule, cross-file family.'
+description: 'alint for_each_dir rule (cross-file): For every matching directory / file, evaluate a nested require: block with the entry as context.'
 sidebar:
   order: 12
 categories: ['cross-file']
@@ -82,6 +82,72 @@ rules:
 [2m--- src/beta -------------------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mevery-module-has-mod[0m
               expected a file matching [src/beta/mod.rs]
+
+[2mSummary (1 violation):[0m
+  [1m[31mx 1 error[0m
+  0 passing [2m*[0m 1 failing
+```
+
+### Filter Cargo workspace members with `when_iter`
+
+The rule fires on this repository:
+
+```text
+Cargo.toml
+crates/
+crates/alint-core/
+crates/alint-core/Cargo.toml
+crates/alint-core/README.md
+crates/alint-rules/
+crates/alint-rules/Cargo.toml
+crates/notes/
+crates/notes/scratch.md
+```
+
+```toml title="Cargo.toml"
+[workspace]
+members = ["crates/*"]
+```
+
+```toml title="crates/alint-core/Cargo.toml"
+[package]
+name = "alint-core"
+```
+
+```markdown title="crates/alint-core/README.md"
+# alint-core
+```
+
+```toml title="crates/alint-rules/Cargo.toml"
+[package]
+name = "alint-rules"
+```
+
+```markdown title="crates/notes/scratch.md"
+WIP notes.
+```
+
+With this `.alint.yml`:
+
+```yaml
+version: 1
+rules:
+  - id: cargo-pkg-needs-readme
+    kind: for_each_dir
+    select: "crates/*"
+    when_iter: 'iter.has_file("Cargo.toml")'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+```
+
+`alint check` reports:
+
+```ansi
+[2m--- crates/alint-rules ---------------------------------------------------------[0m
+  [1m[31mx  error  [0m  [2mcargo-pkg-needs-readme[0m
+              expected a file matching [crates/alint-rules/README.md]
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m

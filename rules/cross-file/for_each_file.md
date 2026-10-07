@@ -1,6 +1,6 @@
 ---
 title: 'for_each_file'
-description: 'For every matching directory / file, evaluate a nested require: block with the entry as context. alint for_each_file rule, cross-file family.'
+description: 'alint for_each_file rule (cross-file): For every matching directory / file, evaluate a nested require: block with the entry as context.'
 sidebar:
   order: 13
 categories: ['cross-file']

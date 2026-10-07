@@ -1,6 +1,6 @@
 ---
 title: 'json_path_absent'
-description: 'Assert a JSONPath query over the document matches nothing; one file-level violation if present. alint json_path_absent rule, structured query family.'
+description: 'alint json_path_absent rule (structured query): Query a JSON document with JSONPath and require it to match nothing.'
 sidebar:
   order: 17
 categories: ['structured-query']

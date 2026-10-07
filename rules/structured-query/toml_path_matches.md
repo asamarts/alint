@@ -1,6 +1,6 @@
 ---
 title: 'toml_path_matches'
-description: 'Same shape as the *_equals variants, but the asserted value is a regex matched against string values. alint toml_path_matches rule, structured query family.'
+description: 'alint toml_path_matches rule (structured query): Query a TOML document with JSONPath and require every selected string to match a regular expression.'
 sidebar:
   order: 11
 categories: ['structured-query']

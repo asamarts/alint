@@ -1,6 +1,6 @@
 ---
 title: 'file_header'
-description: 'The first N lines must match a regex (line-oriented). alint file_header rule, content family.'
+description: 'alint file_header rule (content): The first N lines must match a regex (line-oriented).'
 sidebar:
   order: 3
 categories: ['content']

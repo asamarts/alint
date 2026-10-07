@@ -1,6 +1,6 @@
 ---
 title: 'unique_by'
-description: 'No two files matching select may share the value of key. alint unique_by rule, cross-file family.'
+description: 'alint unique_by rule (cross-file): No two files matching select may share the value of key...'
 sidebar:
   order: 16
 categories: ['cross-file']

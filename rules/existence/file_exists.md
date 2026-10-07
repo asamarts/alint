@@ -1,6 +1,6 @@
 ---
 title: 'file_exists'
-description: 'Every glob match in paths must correspond to a real file. alint file_exists rule, existence family.'
+description: 'alint file_exists rule (existence): Every glob match in paths must correspond to a real file.'
 sidebar:
   order: 1
 categories: ['existence']
