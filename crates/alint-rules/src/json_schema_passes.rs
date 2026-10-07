@@ -420,6 +420,49 @@ mod tests {
     }
 
     #[test]
+    fn validator_honors_the_schema_declared_draft() {
+        // Draft 7 ignores siblings of `$ref`; Draft 2020-12 evaluates them.
+        // `validator_for` must therefore select the declared draft instead of
+        // silently applying its default draft to a user's schema.
+        let v = compile(&json!({
+            "$schema": "http://json-schema.org/draft-07/schema#",
+            "$ref": "#/definitions/text",
+            "type": "integer",
+            "definitions": { "text": { "type": "string" } }
+        }));
+        assert!(v.is_valid(&json!("alint")));
+        assert!(!v.is_valid(&json!(42)));
+    }
+
+    #[test]
+    fn ecma_regex_supports_unicode_space_and_literal_ampersands() {
+        // JSON Schema patterns use ECMA-style regex semantics. In particular,
+        // `\s` includes Unicode space separators/U+2028 and `&&` inside a
+        // character class is two literal ampersands, not Rust set intersection.
+        let whitespace = compile(&json!({ "type": "string", "pattern": r"^\s+$" }));
+        assert!(whitespace.is_valid(&json!("\u{2003}\u{2028}")));
+
+        let ampersands = compile(&json!({ "type": "string", "pattern": r"^[a&&b]+$" }));
+        assert!(ampersands.is_valid(&json!("&")));
+    }
+
+    #[test]
+    fn reference_errors_name_the_target_constraint() {
+        // The rule uses `(instance_path, schema_path)` as its baseline key.
+        // Keep `$ref` failures anchored to the actual target so unrelated
+        // constraints do not collapse onto an imprecise resource-root key.
+        let v = compile(&json!({
+            "$schema": "https://json-schema.org/draft/2020-12/schema",
+            "$defs": { "text": { "type": "string" } },
+            "properties": { "name": { "$ref": "#/$defs/text" } }
+        }));
+        let instance = json!({ "name": 42 });
+        let error = v.validate(&instance).unwrap_err();
+        assert_eq!(error.instance_path().to_string(), "/name");
+        assert_eq!(error.schema_path().to_string(), "/$defs/text/type");
+    }
+
+    #[test]
     fn yaml_value_round_trips_through_validator() {
         // Same schema as above; instance comes via YAML →
         // serde_json::Value, mirroring how the rule itself
