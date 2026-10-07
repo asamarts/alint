@@ -231,7 +231,7 @@ fn parse_content_prefix(hex: &str) -> std::result::Result<Vec<u8>, String> {
     if hex.is_empty() {
         return Err("content_prefix_hex entries must not be empty".to_string());
     }
-    if !hex.is_ascii() || hex.len() % 2 != 0 {
+    if !hex.is_ascii() || !hex.len().is_multiple_of(2) {
         return Err(format!(
             "content_prefix_hex entries must be even-length ASCII hex, got {hex:?}"
         ));

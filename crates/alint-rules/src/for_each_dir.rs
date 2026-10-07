@@ -300,24 +300,24 @@ pub(crate) fn evaluate_for_each(
             is_dir: entry.is_dir,
             index: ctx.index,
         };
-        if let Some(expr) = when_iter {
-            if let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars) {
-                let env = alint_core::WhenEnv {
-                    facts,
-                    vars,
-                    iter: Some(iter_env),
-                    env: None,
-                };
-                match expr.evaluate(&env) {
-                    Ok(true) => {}
-                    Ok(false) => continue,
-                    Err(e) => {
-                        violations.push(
-                            Violation::new(format!("{parent_id}: when_iter error: {e}"))
-                                .with_path(entry.path.clone()),
-                        );
-                        continue;
-                    }
+        if let Some(expr) = when_iter
+            && let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars)
+        {
+            let env = alint_core::WhenEnv {
+                facts,
+                vars,
+                iter: Some(iter_env),
+                env: None,
+            };
+            match expr.evaluate(&env) {
+                Ok(true) => {}
+                Ok(false) => continue,
+                Err(e) => {
+                    violations.push(
+                        Violation::new(format!("{parent_id}: when_iter error: {e}"))
+                            .with_path(entry.path.clone()),
+                    );
+                    continue;
                 }
             }
         }
@@ -333,26 +333,26 @@ pub(crate) fn evaluate_for_each(
             // does. We instantiate the per-iteration spec only
             // AFTER the gate so a falsy `when:` skips both the
             // template-render work AND the registry build.
-            if let Some(expr) = &nested.when {
-                if let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars) {
-                    let env = alint_core::WhenEnv {
-                        facts,
-                        vars,
-                        iter: Some(iter_env),
-                        env: None,
-                    };
-                    match expr.evaluate(&env) {
-                        Ok(true) => {}
-                        Ok(false) => continue,
-                        Err(e) => {
-                            violations.push(
-                                Violation::new(format!(
-                                    "{parent_id}: nested rule #{i} when error: {e}"
-                                ))
-                                .with_path(entry.path.clone()),
-                            );
-                            continue;
-                        }
+            if let Some(expr) = &nested.when
+                && let (Some(facts), Some(vars)) = (ctx.facts, ctx.vars)
+            {
+                let env = alint_core::WhenEnv {
+                    facts,
+                    vars,
+                    iter: Some(iter_env),
+                    env: None,
+                };
+                match expr.evaluate(&env) {
+                    Ok(true) => {}
+                    Ok(false) => continue,
+                    Err(e) => {
+                        violations.push(
+                            Violation::new(format!(
+                                "{parent_id}: nested rule #{i} when error: {e}"
+                            ))
+                            .with_path(entry.path.clone()),
+                        );
+                        continue;
                     }
                 }
             }

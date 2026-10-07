@@ -492,23 +492,23 @@ where
     if value.is_null() {
         return Ok(None);
     }
-    if let serde_yaml_ng::Value::Mapping(m) = &value {
-        if m.len() != 1 {
-            let mut keys: Vec<String> = m
-                .keys()
-                .map(|k| match k {
-                    serde_yaml_ng::Value::String(s) => s.clone(),
-                    other => format!("{other:?}"),
-                })
-                .collect();
-            keys.sort();
-            return Err(D::Error::custom(format!(
-                "a `fix:` block must have exactly one op key, found {}: {}. \
+    if let serde_yaml_ng::Value::Mapping(m) = &value
+        && m.len() != 1
+    {
+        let mut keys: Vec<String> = m
+            .keys()
+            .map(|k| match k {
+                serde_yaml_ng::Value::String(s) => s.clone(),
+                other => format!("{other:?}"),
+            })
+            .collect();
+        keys.sort();
+        return Err(D::Error::custom(format!(
+            "a `fix:` block must have exactly one op key, found {}: {}. \
                  Each rule declares a single fix op; split them into separate rules.",
-                m.len(),
-                keys.join(", ")
-            )));
-        }
+            m.len(),
+            keys.join(", ")
+        )));
     }
     // For a single-op block, name the op in any deserialize error. `FixSpec` is
     // `#[serde(untagged)]`, so a variant that fails on a missing/unknown field is

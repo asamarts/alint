@@ -668,17 +668,17 @@ fn process_family_h3s(
         // alias in the example (e.g. `kind: header` under `file_header`) reads
         // as a mismatch. extract_kinds() returns only canonical kinds, so a
         // top-level example `kind:` outside `group_kinds` is an alias (or wrong).
-        if let Some(ex_kind) = example_first_kind(&h3.body) {
-            if !group_kinds.contains(&ex_kind) {
-                wrong_kind_examples.push(format!(
-                    "{} → {}: example uses `kind: {}`, but this H3 documents `{}`; \
+        if let Some(ex_kind) = example_first_kind(&h3.body)
+            && !group_kinds.contains(&ex_kind)
+        {
+            wrong_kind_examples.push(format!(
+                "{} → {}: example uses `kind: {}`, but this H3 documents `{}`; \
                      use the canonical name (the alias still works in user configs)",
-                    h2.title,
-                    h3.title,
-                    ex_kind,
-                    group_kinds.join("` / `"),
-                ));
-            }
+                h2.title,
+                h3.title,
+                ex_kind,
+                group_kinds.join("` / `"),
+            ));
         }
         // Strip the `**Categories:**` association line (if any) from the body
         // BEFORE summarizing or rendering, so it never becomes the summary / SEO

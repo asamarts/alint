@@ -22,11 +22,11 @@ pub(crate) fn check_titles_no_backticks(target_dir: &Path) -> Result<()> {
             continue;
         }
         let text = fs::read_to_string(&path)?;
-        if let Some(title) = frontmatter_title(&text) {
-            if title.contains('`') {
-                let rel = path.strip_prefix(target_dir).unwrap_or(&path);
-                offenders.push(format!("{} ({title})", rel.display()));
-            }
+        if let Some(title) = frontmatter_title(&text)
+            && title.contains('`')
+        {
+            let rel = path.strip_prefix(target_dir).unwrap_or(&path);
+            offenders.push(format!("{} ({title})", rel.display()));
         }
     }
     if !offenders.is_empty() {

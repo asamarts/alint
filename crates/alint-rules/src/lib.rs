@@ -642,10 +642,9 @@ mod registry_tests {
                 if let Some(rest) = kind
                     .strip_prefix(fmt.as_str())
                     .and_then(|r| r.strip_prefix('_'))
+                    && rest.starts_with("path_")
                 {
-                    if rest.starts_with("path_") {
-                        ops.insert(rest);
-                    }
+                    ops.insert(rest);
                 }
             }
         }

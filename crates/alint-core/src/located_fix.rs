@@ -125,11 +125,11 @@ pub fn apply_file_edits(
             outcome[i] = LocatedOutcome::SkippedConflict;
             continue;
         }
-        if let Some(g) = ce.isolation_group {
-            if !used_groups.insert(g) {
-                outcome[i] = LocatedOutcome::SkippedConflict;
-                continue;
-            }
+        if let Some(g) = ce.isolation_group
+            && !used_groups.insert(g)
+        {
+            outcome[i] = LocatedOutcome::SkippedConflict;
+            continue;
         }
         reserved_end = Some(range.end);
         accepted.push(i);
@@ -177,11 +177,10 @@ pub fn apply_file_edits(
                 query,
                 expect,
             } = &batch[i].collected.verify
+                && !verify_structured(&result, *format, query, expect)
             {
-                if !verify_structured(&result, *format, query, expect) {
-                    outcome[i] = LocatedOutcome::Suggested;
-                    newly_demoted = true;
-                }
+                outcome[i] = LocatedOutcome::Suggested;
+                newly_demoted = true;
             }
         }
         if !newly_demoted {

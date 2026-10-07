@@ -634,10 +634,10 @@ impl OrderedBlockSortFixer {
         // conflict with a `final_newline` policy). Strip it back so a
         // no-final-newline file stays that way. (A pure reorder never trips this:
         // the last slot is preserved, so `out` keeps its `""` ending.)
-        if !text.ends_with('\n') {
-            if let Some(trimmed) = out.strip_suffix("\r\n").or_else(|| out.strip_suffix('\n')) {
-                out.truncate(trimmed.len());
-            }
+        if !text.ends_with('\n')
+            && let Some(trimmed) = out.strip_suffix("\r\n").or_else(|| out.strip_suffix('\n'))
+        {
+            out.truncate(trimmed.len());
         }
         Some(out)
     }

@@ -329,10 +329,10 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path, 
             .iter()
             .filter(|v| v.is_fixable && v.path.is_none())
         {
-            if let Some(edit) = fixer.fix_edit(v, &[], root) {
-                if let Some(pe) = whole_file_edit_to_proposed(&[], &edit) {
-                    creates.entry(ri).or_insert(pe);
-                }
+            if let Some(edit) = fixer.fix_edit(v, &[], root)
+                && let Some(pe) = whole_file_edit_to_proposed(&[], &edit)
+            {
+                creates.entry(ri).or_insert(pe);
             }
         }
     }
@@ -349,17 +349,17 @@ pub fn attach_proposed_edits(engine: &Engine, report: &mut Report, root: &Path, 
             }
             if let Some(p) = v.path.as_deref() {
                 let rel = p.to_path_buf();
-                if !done_files.contains(&rel) {
-                    if let Some(pe) = modify.get(&rel) {
-                        v.proposed_edits = vec![pe.clone()];
-                        done_files.insert(rel);
-                    }
-                }
-            } else if !done_creates.contains(&ri) {
-                if let Some(pe) = creates.get(&ri) {
+                if !done_files.contains(&rel)
+                    && let Some(pe) = modify.get(&rel)
+                {
                     v.proposed_edits = vec![pe.clone()];
-                    done_creates.insert(ri);
+                    done_files.insert(rel);
                 }
+            } else if !done_creates.contains(&ri)
+                && let Some(pe) = creates.get(&ri)
+            {
+                v.proposed_edits = vec![pe.clone()];
+                done_creates.insert(ri);
             }
         }
     }

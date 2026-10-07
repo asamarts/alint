@@ -167,12 +167,12 @@ fn tmp_fs_type_for(p: &Path) -> Option<String> {
         let out = run_capturing("mount", &[])?;
         for line in out.lines() {
             // Format: "/dev/disk1s5 on / (apfs, local, …)"
-            if line.contains(" on / ") || line.contains(" on /private/tmp ") {
-                if let Some(start) = line.find(" (") {
-                    let rest = &line[start + 2..];
-                    if let Some(end) = rest.find(',').or_else(|| rest.find(')')) {
-                        return Some(rest[..end].trim().to_string());
-                    }
+            if (line.contains(" on / ") || line.contains(" on /private/tmp "))
+                && let Some(start) = line.find(" (")
+            {
+                let rest = &line[start + 2..];
+                if let Some(end) = rest.find(',').or_else(|| rest.find(')')) {
+                    return Some(rest[..end].trim().to_string());
                 }
             }
         }

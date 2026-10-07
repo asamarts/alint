@@ -216,7 +216,7 @@ fn first_bad_line(
                 }
                 if let Some(w) = width
                     && w > 0
-                    && lead.len() % (w as usize) != 0
+                    && !lead.len().is_multiple_of(w as usize)
                 {
                     // Round up or down? Ambiguous -> not reindent-fixable.
                     return Some((line_no, BadReason::WidthMismatch, false));

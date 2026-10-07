@@ -338,38 +338,38 @@ fn find_comment_blocks(text: &str, lang: Language) -> Vec<CommentBlock> {
         let trimmed = line.trim_start();
 
         // Block-comment open (`/* … */`) — consume until close.
-        if let Some((open, close)) = block_delim {
-            if trimmed.starts_with(open) {
-                let is_doc = doc_block_delim.is_some_and(|(d_open, _)| trimmed.starts_with(d_open));
-                let start_line = i + 1;
-                let mut block_lines = Vec::new();
-                let mut block_content = String::new();
-                let mut closed = false;
-                let mut j = i;
-                while j < lines.len() {
-                    let l = lines[j];
-                    block_lines.push(l.to_string());
-                    let stripped = strip_block_comment_markers(l, open, close);
-                    block_content.push_str(&stripped);
-                    block_content.push('\n');
-                    if l.contains(close) && (j > i || trimmed.matches(close).count() > 0) {
-                        closed = true;
-                        j += 1;
-                        break;
-                    }
+        if let Some((open, close)) = block_delim
+            && trimmed.starts_with(open)
+        {
+            let is_doc = doc_block_delim.is_some_and(|(d_open, _)| trimmed.starts_with(d_open));
+            let start_line = i + 1;
+            let mut block_lines = Vec::new();
+            let mut block_content = String::new();
+            let mut closed = false;
+            let mut j = i;
+            while j < lines.len() {
+                let l = lines[j];
+                block_lines.push(l.to_string());
+                let stripped = strip_block_comment_markers(l, open, close);
+                block_content.push_str(&stripped);
+                block_content.push('\n');
+                if l.contains(close) && (j > i || trimmed.matches(close).count() > 0) {
+                    closed = true;
                     j += 1;
+                    break;
                 }
-                if closed {
-                    blocks.push(CommentBlock {
-                        start_line,
-                        lines: block_lines,
-                        content: block_content,
-                        is_doc_comment: is_doc,
-                    });
-                }
-                i = j;
-                continue;
+                j += 1;
             }
+            if closed {
+                blocks.push(CommentBlock {
+                    start_line,
+                    lines: block_lines,
+                    content: block_content,
+                    is_doc_comment: is_doc,
+                });
+            }
+            i = j;
+            continue;
         }
 
         // Line-comment run (consecutive `//` / `#` lines).

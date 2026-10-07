@@ -63,10 +63,10 @@ pub fn run_in_docker(args: &ForwardedArgs) -> Result<()> {
     // Desktop ignores `--user` for bind mounts but doesn't
     // error on it; Linux honours it as expected. Windows is
     // out of scope: the image is linux/amd64.
-    if cfg!(unix) {
-        if let Some((uid, gid)) = host_uid_gid() {
-            cmd.arg("--user").arg(format!("{uid}:{gid}"));
-        }
+    if cfg!(unix)
+        && let Some((uid, gid)) = host_uid_gid()
+    {
+        cmd.arg("--user").arg(format!("{uid}:{gid}"));
     }
 
     cmd.arg("-v").arg(format!("{}:/work", workspace.display()));

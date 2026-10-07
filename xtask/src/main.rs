@@ -618,14 +618,13 @@ pub(crate) fn workspace_version_from_manifest(workspace: &Path) -> Result<String
         .context("read workspace Cargo.toml")?;
     for line in manifest.lines() {
         let trimmed = line.trim_start();
-        if let Some(rest) = trimmed.strip_prefix("version") {
-            if let Some(eq) = rest.find('=')
-                && let Some(start) = rest[eq..].find('"')
-                && let Some(end) = rest[eq + start + 1..].find('"')
-            {
-                let value = &rest[eq + start + 1..eq + start + 1 + end];
-                return Ok(value.to_string());
-            }
+        if let Some(rest) = trimmed.strip_prefix("version")
+            && let Some(eq) = rest.find('=')
+            && let Some(start) = rest[eq..].find('"')
+            && let Some(end) = rest[eq + start + 1..].find('"')
+        {
+            let value = &rest[eq + start + 1..eq + start + 1 + end];
+            return Ok(value.to_string());
         }
     }
     bail!(

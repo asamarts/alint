@@ -668,14 +668,12 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
             // root) — can't be safely read anyway; prune it.
             _ => false,
         };
-        if !keep {
-            if let Ok(rel) = entry.path().strip_prefix(&root_for_rel) {
-                if !rel.as_os_str().is_empty() {
-                    if let Ok(mut v) = escaping_filter.lock() {
-                        v.push(Arc::from(rel));
-                    }
-                }
-            }
+        if !keep
+            && let Ok(rel) = entry.path().strip_prefix(&root_for_rel)
+            && !rel.as_os_str().is_empty()
+            && let Ok(mut v) = escaping_filter.lock()
+        {
+            v.push(Arc::from(rel));
         }
         keep
     });

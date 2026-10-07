@@ -178,12 +178,12 @@ fn parse_families(md: &str) -> Vec<Family> {
                 });
                 current = Some(families.len() - 1);
             }
-        } else if let Some(h3) = line.strip_prefix("### ") {
-            if let Some(idx) = current {
-                for k in kinds_in_heading(h3.trim()) {
-                    if !families[idx].kinds.contains(&k) {
-                        families[idx].kinds.push(k);
-                    }
+        } else if let Some(h3) = line.strip_prefix("### ")
+            && let Some(idx) = current
+        {
+            for k in kinds_in_heading(h3.trim()) {
+                if !families[idx].kinds.contains(&k) {
+                    families[idx].kinds.push(k);
                 }
             }
         }

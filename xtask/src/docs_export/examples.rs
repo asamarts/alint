@@ -672,15 +672,14 @@ mod tests {
         // documents, or a rule's own example page could ship the raw char - the
         // exact drift that let the bidi marks through. Tie it to the predicates.
         for cp in 0u32..=0x2100 {
-            if let Some(c) = char::from_u32(cp) {
-                if alint_rules::no_bidi_controls::is_bidi_control(c)
-                    || alint_rules::no_zero_width_chars::is_flagged_zero_width(c, false)
-                {
-                    assert!(
-                        is_dangerous_docs_char(c),
-                        "escaper drifted below the rules: U+{cp:04X} is rule-flagged but not escaped"
-                    );
-                }
+            if let Some(c) = char::from_u32(cp)
+                && (alint_rules::no_bidi_controls::is_bidi_control(c)
+                    || alint_rules::no_zero_width_chars::is_flagged_zero_width(c, false))
+            {
+                assert!(
+                    is_dangerous_docs_char(c),
+                    "escaper drifted below the rules: U+{cp:04X} is rule-flagged but not escaped"
+                );
             }
         }
 

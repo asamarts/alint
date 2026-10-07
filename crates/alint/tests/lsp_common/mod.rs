@@ -60,10 +60,10 @@ fn spawn_reader(stdout: std::process::ChildStdout) -> Receiver<Value> {
             if reader.read_exact(&mut buf).is_err() {
                 return;
             }
-            if let Ok(value) = serde_json::from_slice::<Value>(&buf) {
-                if tx.send(value).is_err() {
-                    return;
-                }
+            if let Ok(value) = serde_json::from_slice::<Value>(&buf)
+                && tx.send(value).is_err()
+            {
+                return;
             }
         }
     });

@@ -1033,10 +1033,10 @@ pub fn read_for_fix(
     // through a symlink sees a write made through the target and vice versa.
     // The bytes were already size-checked on their first (disk) read, so the
     // cap is not re-applied to in-memory bytes.
-    if let Some(buf) = ctx.compose {
-        if let Some(bytes) = buf.borrow().get(&resolve_write_target(abs)) {
-            return Ok(ReadForFix::Bytes(bytes.clone()));
-        }
+    if let Some(buf) = ctx.compose
+        && let Some(bytes) = buf.borrow().get(&resolve_write_target(abs))
+    {
+        return Ok(ReadForFix::Bytes(bytes.clone()));
     }
     // Refuse a non-regular file (FIFO / socket / device) BEFORE the read: a bare
     // `std::fs::read` opens a named pipe `O_RDONLY` and BLOCKS until a writer

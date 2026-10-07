@@ -174,10 +174,10 @@ fn compose_branch(base: &Value, options: &Value) -> Result<Value> {
             if let Some(obj) = prop.as_object_mut() {
                 let base_prop = base_props.and_then(|p| p.get(key));
                 for carried in ["description", "default"] {
-                    if !obj.contains_key(carried) {
-                        if let Some(v) = base_prop.and_then(|p| p.get(carried)) {
-                            obj.insert(carried.to_string(), v.clone());
-                        }
+                    if !obj.contains_key(carried)
+                        && let Some(v) = base_prop.and_then(|p| p.get(carried))
+                    {
+                        obj.insert(carried.to_string(), v.clone());
                     }
                 }
             }

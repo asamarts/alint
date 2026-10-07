@@ -319,11 +319,12 @@ mod hcl {
                     matches += 1;
                     found = resolve_in_attribute(attr, rest);
                 }
-            } else if let Some(block) = structure.as_block() {
-                if block.ident.as_str() == key && labels_match(block, rest) {
-                    matches += 1;
-                    found = resolve_block_body(block, &rest[block.labels.len()..]);
-                }
+            } else if let Some(block) = structure.as_block()
+                && block.ident.as_str() == key
+                && labels_match(block, rest)
+            {
+                matches += 1;
+                found = resolve_block_body(block, &rest[block.labels.len()..]);
             }
         }
         // Exactly one structure matched the key (and, for a block, its labels).
@@ -1048,14 +1049,14 @@ mod ini {
             }
             // Continuation (checked BEFORE the section header, as the parser does):
             // a deeper-indented line is value text, not a section or key.
-            if let Some((cur_indent, match_idx)) = cur {
-                if indent > cur_indent {
-                    if let Some(idx) = match_idx {
-                        matches[idx].value = None; // multi-line -> set_value declines
-                        matches[idx].full.end = line_end; // extend removal through here
-                    }
-                    continue; // `cur` unchanged: even deeper lines still continue
+            if let Some((cur_indent, match_idx)) = cur
+                && indent > cur_indent
+            {
+                if let Some(idx) = match_idx {
+                    matches[idx].value = None; // multi-line -> set_value declines
+                    matches[idx].full.end = line_end; // extend removal through here
                 }
+                continue; // `cur` unchanged: even deeper lines still continue
             }
             // Section header: `[` .. LAST `]`.
             if let Some(rest) = line.strip_prefix('[') {
@@ -1381,10 +1382,10 @@ mod toml_ {
         let mut out = rendered.to_string();
         // Trailing newline: toml_edit always appends one; drop it if the original
         // had none (strip exactly the one it added).
-        if !original.ends_with('\n') {
-            if let Some(stripped) = out.strip_suffix('\n') {
-                out = stripped.to_string();
-            }
+        if !original.ends_with('\n')
+            && let Some(stripped) = out.strip_suffix('\n')
+        {
+            out = stripped.to_string();
         }
         // Line endings: restore CRLF when the original was uniformly CRLF.
         // `toml_edit` normalizes STRUCTURAL newlines to LF but PRESERVES a raw

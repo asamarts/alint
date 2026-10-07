@@ -452,36 +452,36 @@ impl CrossFileValueFixer {
         // there.)
         if let Ok(parsed) = format.parse(&target_text) {
             let located = path_expr.query_located(&parsed);
-            if located.len() == 1 {
-                if let Some(node) = located.iter().next() {
-                    let n = node.node();
-                    if n.is_number() || n.is_boolean() {
-                        return Err(format!(
-                            "{} `{query}` is a {} node; `sync_from` on `equals` would change it \
+            if located.len() == 1
+                && let Some(node) = located.iter().next()
+            {
+                let n = node.node();
+                if n.is_number() || n.is_boolean() {
+                    return Err(format!(
+                        "{} `{query}` is a {} node; `sync_from` on `equals` would change it \
                              to a string (the propagated value is text). Pin a numeric/bool value \
                              with a same-file `set_value` (typed `equals:`) instead.",
-                            target_rel.display(),
-                            if n.is_number() { "numeric" } else { "boolean" }
+                        target_rel.display(),
+                        if n.is_number() { "numeric" } else { "boolean" }
+                    ));
+                }
+                // Correlate to the check (audit): NEVER clobber a non-literal
+                // `${...}` template node (the check skips it as a note), and skip
+                // a node the check deemed correct under `normalize`.
+                if let Some(s) = n.as_str() {
+                    if is_non_literal(s) {
+                        return Err(format!(
+                            "{} `{query}` is a non-literal template ({s:?}); `sync_from` \
+                                 leaves interpolated values alone",
+                            target_rel.display()
                         ));
                     }
-                    // Correlate to the check (audit): NEVER clobber a non-literal
-                    // `${...}` template node (the check skips it as a note), and skip
-                    // a node the check deemed correct under `normalize`.
-                    if let Some(s) = n.as_str() {
-                        if is_non_literal(s) {
-                            return Err(format!(
-                                "{} `{query}` is a non-literal template ({s:?}); `sync_from` \
-                                 leaves interpolated values alone",
-                                target_rel.display()
-                            ));
-                        }
-                        let source_norm = apply_normalize(&self.normalize, source_value);
-                        if apply_normalize(&self.normalize, s) == source_norm {
-                            return Err(format!(
-                                "{} `{query}` already equals {source_value:?} (under normalize)",
-                                target_rel.display()
-                            ));
-                        }
+                    let source_norm = apply_normalize(&self.normalize, source_value);
+                    if apply_normalize(&self.normalize, s) == source_norm {
+                        return Err(format!(
+                            "{} `{query}` already equals {source_value:?} (under normalize)",
+                            target_rel.display()
+                        ));
                     }
                 }
             }

@@ -1971,10 +1971,11 @@ impl Engine {
                 // `--dry-run` reports the outcomes but writes nothing: skip the
                 // stage entirely (commit_write in a dry run has no compose buffer
                 // and would write straight to disk, exactly what dry-run forbids).
-                if !dry_run && batch_changed {
-                    if let Err(source) = fix_ctx.commit_write(&abs, &new_bytes) {
-                        eprintln!("alint: could not stage {}: {source}", file.display());
-                    }
+                if !dry_run
+                    && batch_changed
+                    && let Err(source) = fix_ctx.commit_write(&abs, &new_bytes)
+                {
+                    eprintln!("alint: could not stage {}: {source}", file.display());
                 }
                 for (edit, outcome) in outcomes {
                     let status = located_status(
@@ -2055,39 +2056,37 @@ impl Engine {
         // path, where a failed `write_atomic` inside a fixer surfaces as
         // `Skipped("fix error: ...")` and the other fixers proceed (a single
         // read-only file must not abort the whole run or lose unrelated fixes).
-        if flush {
-            if let Some(buf) = &compose_buf {
-                let mut failed: Vec<PathBuf> = Vec::new();
-                for (target, bytes) in buf.borrow().iter() {
-                    if let Err(source) = write_atomic(target, bytes) {
-                        eprintln!("alint: could not write {}: {source}", target.display());
-                        failed.push(target.clone());
-                    }
+        if flush && let Some(buf) = &compose_buf {
+            let mut failed: Vec<PathBuf> = Vec::new();
+            for (target, bytes) in buf.borrow().iter() {
+                if let Err(source) = write_atomic(target, bytes) {
+                    eprintln!("alint: could not write {}: {source}", target.display());
+                    failed.push(target.clone());
                 }
-                if !failed.is_empty() {
-                    for rule in &mut results {
-                        for item in &mut rule.items {
-                            // Keying note: `failed` holds write-time canonical
-                            // targets; this re-derives `resolve_write_target` at
-                            // report time. If the file (or its parent) vanished
-                            // between the failed write and here, the report-time
-                            // canonicalize falls back to the non-canonical path
-                            // and won't match, so the item stays `Applied`. That
-                            // needs a write failure on a target that then
-                            // disappears -- exotic, and the common case (a
-                            // read-only file, permission denied) leaves the file
-                            // extant so the keys match. A whole-file op can no
-                            // longer vanish a composed file itself (it yields via
-                            // `has_pending_write`), which removes the in-engine
-                            // route to the mismatch.
-                            let hits_failed = item.violation.path.as_deref().is_some_and(|p| {
-                                failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
-                            });
-                            if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
-                                item.status = FixStatus::errored(format!(
-                                    "{FIX_ERROR_PREFIX} file could not be written"
-                                ));
-                            }
+            }
+            if !failed.is_empty() {
+                for rule in &mut results {
+                    for item in &mut rule.items {
+                        // Keying note: `failed` holds write-time canonical
+                        // targets; this re-derives `resolve_write_target` at
+                        // report time. If the file (or its parent) vanished
+                        // between the failed write and here, the report-time
+                        // canonicalize falls back to the non-canonical path
+                        // and won't match, so the item stays `Applied`. That
+                        // needs a write failure on a target that then
+                        // disappears -- exotic, and the common case (a
+                        // read-only file, permission denied) leaves the file
+                        // extant so the keys match. A whole-file op can no
+                        // longer vanish a composed file itself (it yields via
+                        // `has_pending_write`), which removes the in-engine
+                        // route to the mismatch.
+                        let hits_failed = item.violation.path.as_deref().is_some_and(|p| {
+                            failed.contains(&crate::rule::resolve_write_target(&root.join(p)))
+                        });
+                        if hits_failed && matches!(item.status, FixStatus::Applied(_)) {
+                            item.status = FixStatus::errored(format!(
+                                "{FIX_ERROR_PREFIX} file could not be written"
+                            ));
                         }
                     }
                 }

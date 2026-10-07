@@ -121,13 +121,12 @@ fn detect_workspace(root: &Path) -> Option<WorkspaceFlavor> {
     // Cargo: root Cargo.toml has a `[workspace]` table. Read +
     // grep — full TOML parsing is overkill for a string-shape
     // check.
-    if let Ok(content) = fs::read_to_string(root.join("Cargo.toml")) {
-        if content
+    if let Ok(content) = fs::read_to_string(root.join("Cargo.toml"))
+        && content
             .lines()
             .any(|l| l.trim_start().starts_with("[workspace]"))
-        {
-            return Some(WorkspaceFlavor::Cargo);
-        }
+    {
+        return Some(WorkspaceFlavor::Cargo);
     }
     // pnpm: root pnpm-workspace.yaml / .yml exists. The fact
     // gate inside the bundled ruleset re-checks this; here we
@@ -138,10 +137,10 @@ fn detect_workspace(root: &Path) -> Option<WorkspaceFlavor> {
     // Yarn / npm: root package.json contains a `"workspaces"`
     // field. Same string-shape check rather than full JSON
     // parsing.
-    if let Ok(content) = fs::read_to_string(root.join("package.json")) {
-        if content.contains("\"workspaces\"") {
-            return Some(WorkspaceFlavor::Yarn);
-        }
+    if let Ok(content) = fs::read_to_string(root.join("package.json"))
+        && content.contains("\"workspaces\"")
+    {
+        return Some(WorkspaceFlavor::Yarn);
     }
     None
 }

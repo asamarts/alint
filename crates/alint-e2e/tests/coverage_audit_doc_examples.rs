@@ -109,10 +109,10 @@ struct Block {
 /// dropped decorated fences from the gate.
 fn is_yaml_open_fence(trimmed: &str) -> bool {
     for tag in ["```yaml", "```yml"] {
-        if let Some(rest) = trimmed.strip_prefix(tag) {
-            if rest.is_empty() || rest.starts_with(char::is_whitespace) {
-                return true;
-            }
+        if let Some(rest) = trimmed.strip_prefix(tag)
+            && (rest.is_empty() || rest.starts_with(char::is_whitespace))
+        {
+            return true;
         }
     }
     false

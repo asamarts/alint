@@ -146,32 +146,31 @@ fn heading_to_phase(heading: &str, blurb: String) -> Result<Phase> {
     // rejected: the public roadmap is minor-version granular and the site
     // keys status on major.minor, so a patch would silently collide with its
     // minor.
-    if let Some(rest) = heading.strip_prefix('v') {
-        if rest.starts_with(|c: char| c.is_ascii_digit()) {
-            if let Some(colon) = rest.find(':') {
-                let ver = &rest[..colon];
-                let parts: Vec<&str> = ver.split('.').collect();
-                let is_major_minor = parts.len() == 2
-                    && parts
-                        .iter()
-                        .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
-                if !is_major_minor {
-                    bail!(
-                        "roadmap-public heading {heading:?} has version {ver:?}; public \
+    if let Some(rest) = heading.strip_prefix('v')
+        && rest.starts_with(|c: char| c.is_ascii_digit())
+        && let Some(colon) = rest.find(':')
+    {
+        let ver = &rest[..colon];
+        let parts: Vec<&str> = ver.split('.').collect();
+        let is_major_minor = parts.len() == 2
+            && parts
+                .iter()
+                .all(|p| !p.is_empty() && p.bytes().all(|b| b.is_ascii_digit()));
+        if !is_major_minor {
+            bail!(
+                "roadmap-public heading {heading:?} has version {ver:?}; public \
                          phases must be major.minor (e.g. `v0.12`). Do not put a \
                          roadmap-public marker on a patch or malformed version."
-                    );
-                }
-                let raw = rest[colon + 1..].trim();
-                let title = raw.strip_suffix("(shipped)").map_or(raw, str::trim_end);
-                return Ok(Phase {
-                    version: Some(ver.to_string()),
-                    title: title.to_string(),
-                    kind: "release".to_string(),
-                    blurb,
-                });
-            }
+            );
         }
+        let raw = rest[colon + 1..].trim();
+        let title = raw.strip_suffix("(shipped)").map_or(raw, str::trim_end);
+        return Ok(Phase {
+            version: Some(ver.to_string()),
+            title: title.to_string(),
+            kind: "release".to_string(),
+            blurb,
+        });
     }
     // Version-less named milestone (e.g. the engineering-foundations track).
     Ok(Phase {

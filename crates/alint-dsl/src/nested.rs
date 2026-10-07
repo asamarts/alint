@@ -99,19 +99,19 @@ pub(crate) fn discover_nested(
 
         let nested_rules = load_nested_config(&abs, &rel_dir)?;
         for rule in nested_rules {
-            if let Some(id) = rule.get("id").and_then(|v| v.as_str()) {
-                if !seen_ids.insert(id.to_string()) {
-                    return Err(Error::rule_config(
-                        id,
-                        format!(
-                            "nested config {} redefines rule id {id:?} - \
+            if let Some(id) = rule.get("id").and_then(|v| v.as_str())
+                && !seen_ids.insert(id.to_string())
+            {
+                return Err(Error::rule_config(
+                    id,
+                    format!(
+                        "nested config {} redefines rule id {id:?} - \
                              per-subtree overrides aren't supported yet; \
                              pick a unique id or disable the root's rule \
                              and define it per-subtree",
-                            abs.display()
-                        ),
-                    ));
-                }
+                        abs.display()
+                    ),
+                ));
             }
             discovered.push(rule);
         }

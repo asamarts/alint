@@ -116,15 +116,15 @@ fn every_examples_alint_yml_parses_and_builds() {
                 ));
             }
             // Step 2b: parse `when:` if present.
-            if let Some(when_src) = &spec.when {
-                if let Err(e) = alint_core::when::parse(when_src) {
-                    failures.push(format!(
-                        "{case_study}: rule {:?}: parsing `when:` \
+            if let Some(when_src) = &spec.when
+                && let Err(e) = alint_core::when::parse(when_src)
+            {
+                failures.push(format!(
+                    "{case_study}: rule {:?}: parsing `when:` \
                          failed — {e}\n  (use keywords `and`/`or`/`not`, \
                          not `&&`/`||`/`!`)",
-                        spec.id,
-                    ));
-                }
+                    spec.id,
+                ));
             }
         }
     }

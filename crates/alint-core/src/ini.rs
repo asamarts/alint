@@ -89,11 +89,11 @@ pub(crate) fn parse(text: &str) -> Result<Value, String> {
         // Continuation: a line indented deeper than the current key's line extends
         // that key's value (configparser style). The content is irrelevant here --
         // an indented `[x]` or `k=v` is value text, not a section or key.
-        if let Some(key) = cur_key.clone() {
-            if indent > cur_indent {
-                append_continuation(scope_mut(&mut root, section.as_deref()), &key, line);
-                continue;
-            }
+        if let Some(key) = cur_key.clone()
+            && indent > cur_indent
+        {
+            append_continuation(scope_mut(&mut root, section.as_deref()), &key, line);
+            continue;
         }
         // Section header: name = the text between the first `[` and the LAST `]`.
         if let Some(rest) = line.strip_prefix('[') {

@@ -106,12 +106,14 @@ fn links(text: &str) -> Vec<String> {
     let mut urls = Vec::new();
     let mut i = 0;
     while i < bytes.len() {
-        if bytes[i] == b']' && i + 1 < bytes.len() && bytes[i + 1] == b'(' {
-            if let Some(end) = text[i + 2..].find(')') {
-                urls.push(text[i + 2..i + 2 + end].trim().to_string());
-                i = i + 2 + end + 1;
-                continue;
-            }
+        if bytes[i] == b']'
+            && i + 1 < bytes.len()
+            && bytes[i + 1] == b'('
+            && let Some(end) = text[i + 2..].find(')')
+        {
+            urls.push(text[i + 2..i + 2 + end].trim().to_string());
+            i = i + 2 + end + 1;
+            continue;
         }
         i += 1;
     }

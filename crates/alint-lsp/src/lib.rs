@@ -579,10 +579,11 @@ impl LanguageServer for Backend {
         // A single SAFE fix is the obvious one to apply (some clients auto-apply
         // the preferred action); an Unsafe fix is never auto-preferred -- applying
         // it must stay a deliberate choice.
-        if actions.len() == 1 && !unsafe_flags[0] {
-            if let CodeActionOrCommand::CodeAction(action) = &mut actions[0] {
-                action.is_preferred = Some(true);
-            }
+        if actions.len() == 1
+            && !unsafe_flags[0]
+            && let CodeActionOrCommand::CodeAction(action) = &mut actions[0]
+        {
+            action.is_preferred = Some(true);
         }
         Ok(Some(actions))
     }
@@ -614,12 +615,11 @@ fn cache_and_collect(
 /// the first workspace folder and falling back to the (deprecated)
 /// `root_uri`.
 fn workspace_root(params: &InitializeParams) -> Option<PathBuf> {
-    if let Some(folders) = &params.workspace_folders {
-        if let Some(first) = folders.first() {
-            if let Ok(path) = first.uri.to_file_path() {
-                return Some(path);
-            }
-        }
+    if let Some(folders) = &params.workspace_folders
+        && let Some(first) = folders.first()
+        && let Ok(path) = first.uri.to_file_path()
+    {
+        return Some(path);
     }
     #[allow(deprecated)]
     params.root_uri.as_ref().and_then(|u| u.to_file_path().ok())

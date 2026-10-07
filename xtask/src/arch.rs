@@ -396,10 +396,10 @@ fn dsl_crate_components(dsl: &str) -> BTreeSet<String> {
         if !line.contains("component \"") {
             continue;
         }
-        if let Some(name) = first_quoted(line) {
-            if name == "alint" || name == "xtask" || name.starts_with("alint-") {
-                set.insert(name);
-            }
+        if let Some(name) = first_quoted(line)
+            && (name == "alint" || name == "xtask" || name.starts_with("alint-"))
+        {
+            set.insert(name);
         }
     }
     set
