@@ -351,6 +351,9 @@ pub const MAX_XML_DEPTH: usize = 128;
 /// only exercise the REJECTION path (they run on a >=2 MiB harness stack where even
 /// 300-deep survives), so a careless re-widening would pass every runtime test. This
 /// static bound is the real guard.
+// Rust 1.88's dead-code analysis does not count this use from an unnamed const;
+// keep the MSRV build warning-free without widening the internal API.
+#[allow(dead_code)]
 const SAFE_MAX_XML_DEPTH: usize = 160;
 const _: () = assert!(
     MAX_XML_DEPTH <= SAFE_MAX_XML_DEPTH,
@@ -610,6 +613,9 @@ pub const MAX_HCL_BYTES: usize = 64 * 1024;
 /// Widening `MAX_HCL_BYTES` past this re-opens the operator-chain stack-overflow
 /// `DoS` that the 256 KiB cap let through (PR #223) -- and the bomb regression test
 /// only fails by CRASHING, which is fragile, so pin the bound statically too.
+// Rust 1.88's dead-code analysis does not count this use from an unnamed const;
+// keep the MSRV build warning-free without widening the internal API.
+#[allow(dead_code)]
 const SAFE_MAX_HCL_BYTES: usize = 75 * 1024;
 const _: () = assert!(
     MAX_HCL_BYTES <= SAFE_MAX_HCL_BYTES,

@@ -60,6 +60,7 @@ row() {
   echo "| Check | Result |"
   echo "|-------|--------|"
   row "Format"       "$FMT_RESULT"         "$RUST_CHANGED"
+  row "MSRV"         "$MSRV_RESULT"        "$RUST_CHANGED"
   row "Clippy"       "$CLIPPY_RESULT"      "$RUST_CHANGED"
   row "Test"         "$TEST_RESULT"        "$RUST_CHANGED"
   row "Audit"        "$AUDIT_RESULT"       "$RUST_CHANGED"
@@ -96,7 +97,7 @@ row() {
 FAILED=false
 for result in \
   "$SECRETS_INVENTORY_RESULT" \
-  "$FMT_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
+  "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
   "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
   "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \
   "$SHELL_TESTS_RESULT" "$EDITORS_RESULT"; do

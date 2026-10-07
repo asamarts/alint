@@ -129,6 +129,27 @@ jobs:
           key: ci-fmt
       - run: ci/scripts/fmt.sh
 
+  # Cargo's MSRV-aware resolver can only protect this contract when every
+  # dependency declares an accurate rust-version. Compile the full workspace
+  # with the exact minimum so an undeclared dependency bump cannot make the
+  # documented `rust-version` silently untrue.
+  msrv:
+    name: MSRV
+    needs: [changes, fmt]
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        with:
+          toolchain: 1.88.0
+      - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
+        with:
+          key: ci-msrv
+      - run: cargo check --locked --workspace --all-targets
+
   clippy:
     name: Clippy
     needs: [changes, fmt]
@@ -444,6 +465,7 @@ jobs:
       - changes
       - secrets-inventory
       - fmt
+      - msrv
       - clippy
       - test
       - audit
@@ -471,6 +493,7 @@ jobs:
           SUPPLY_CHAIN_CHANGED: ${{ needs.changes.outputs.supply_chain }}
           SECRETS_INVENTORY_RESULT: ${{ needs.secrets-inventory.result }}
           FMT_RESULT: ${{ needs.fmt.result }}
+          MSRV_RESULT: ${{ needs.msrv.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}
           TEST_RESULT: ${{ needs.test.result }}
           AUDIT_RESULT: ${{ needs.audit.result }}

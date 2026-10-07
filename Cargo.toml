@@ -18,7 +18,7 @@ default-members = ["crates/alint"]
 [workspace.package]
 version = "0.17.0"
 edition = "2024"
-rust-version = "1.85"
+rust-version = "1.88"
 license = "Apache-2.0 OR MIT"
 repository = "https://github.com/asamarts/alint"
 authors = ["alint contributors"]

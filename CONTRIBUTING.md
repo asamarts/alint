@@ -52,7 +52,7 @@ cargo test --workspace            # ~5s
 cargo run -p alint -- check       # dogfood: alint lints itself
 ```
 
-Rust 1.85+ required (the workspace MSRV: `[workspace.package].rust-version` in `Cargo.toml`; `rust-toolchain.toml` pins the `stable` channel for development).
+Rust 1.88+ required (the workspace MSRV: `[workspace.package].rust-version` in `Cargo.toml`; `rust-toolchain.toml` pins the `stable` channel for development).
 
 ### Pre-push checklist
 

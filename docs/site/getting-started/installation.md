@@ -71,7 +71,7 @@ Supports Linux (x86_64/aarch64, glibc **and** musl), macOS (x86_64/arm64), and W
 cargo install alint
 ```
 
-Builds from source against the current stable Rust toolchain (requires rustc 1.85+ and `cargo` on `$PATH`). To install a **pre-built** binary instead of compiling, use [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
+Builds from source against the current stable Rust toolchain (requires rustc 1.88+ and `cargo` on `$PATH`). To install a **pre-built** binary instead of compiling, use [cargo-binstall](https://github.com/cargo-bins/cargo-binstall):
 
 ```bash
 cargo binstall alint
