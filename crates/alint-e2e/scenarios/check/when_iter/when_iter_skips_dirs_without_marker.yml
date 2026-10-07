@@ -1,6 +1,12 @@
 name: when_iter scopes for_each_dir to dirs containing a marker file
 tags: [check, for_each_dir, when_iter]
 
+docs:
+  title: Filter Cargo workspace members with `when_iter`
+  case: fail
+  kind: for_each_dir
+  order: 10
+
 # Canonical Cargo-workspace shape: only iterate `crates/*`
 # directories that actually look like a workspace member
 # (contain a Cargo.toml). The legacy `crates/notes/` dir

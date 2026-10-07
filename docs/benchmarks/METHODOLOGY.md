@@ -221,9 +221,9 @@ result fingerprint.
   the page cache once per size phase after tree-gen; warmup re-reads the
   tree so measured runs stay warm. A large-RAM host (e.g. the now-retired
   62 GB 3900X reference desktop, whose retained series lives under
-  [`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/)) never reclaims and
-  must leave the flag OFF — it needs passwordless sudo for `drop_caches`
-  and would only add overhead.
+  [`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/))
+  never reclaims and must leave the flag OFF — it needs passwordless sudo
+  for `drop_caches` and would only add overhead.
   Investigation: [`investigations/2026-07-1m-writeback-contention/`](investigations/2026-07-1m-writeback-contention/).
 
 ## Why not CodSpeed / iai-callgrind / Bencher

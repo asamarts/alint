@@ -190,3 +190,32 @@ fn every_published_version_appears_in_trajectory() {
         "trajectory.json is missing rows for these published versions: {missing:?}",
     );
 }
+
+#[test]
+fn committed_history_matches_renderer() {
+    if Command::new("python3").arg("--version").output().is_err() {
+        eprintln!("skipping: python3 not on PATH");
+        return;
+    }
+
+    let workspace = workspace_root();
+    let script = workspace.join("xtask/scripts/render-history.py");
+    let out = Command::new("python3")
+        .arg(&script)
+        .current_dir(&workspace)
+        .output()
+        .expect("run render-history.py");
+    assert!(
+        out.status.success(),
+        "render-history.py exited {:?}\nstderr:\n{}",
+        out.status.code(),
+        String::from_utf8_lossy(&out.stderr),
+    );
+
+    let committed = std::fs::read(workspace.join("docs/benchmarks/HISTORY.md"))
+        .expect("read committed benchmark history");
+    assert_eq!(
+        out.stdout, committed,
+        "docs/benchmarks/HISTORY.md drifted from render-history.py; regenerate it before committing"
+    );
+}

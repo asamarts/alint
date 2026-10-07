@@ -503,8 +503,8 @@ fn no_residual_categories_marker_after_strip() {
 /// regression is caught by `cargo test`, not only at bundle-build time. Guards
 /// the #97 failure modes: an opening sentence cut at an abbreviation ("differ
 /// only by case (e.g. ...)" → "...(e.g.", `no_case_conflicts`), a list lead-in
-/// ending in a colon composing to ":." (`no_illegal_windows_names`,
-/// `file_is_ascii`), and a cap that strands an unclosed "(" (`ordered_block`).
+/// ending in a colon (`no_illegal_windows_names`, `file_is_ascii`), and a cap
+/// that strands an unclosed "(" (`ordered_block`).
 #[test]
 fn rule_meta_descriptions_are_well_formed() {
     // Abbreviation forms `first_sentence` must not treat as a sentence end. If
@@ -535,6 +535,10 @@ fn rule_meta_descriptions_are_well_formed() {
                     "{kind} description omits its searchable kind name: {desc:?}"
                 );
                 assert!(
+                    desc.starts_with(&format!("alint {kind} rule (")),
+                    "{kind} description does not lead with its searchable name: {desc:?}"
+                );
+                assert!(
                     desc.chars().count() <= 158,
                     "{kind} description exceeds 158 characters: {desc:?}"
                 );
@@ -551,8 +555,8 @@ fn rule_meta_descriptions_are_well_formed() {
                     balanced(&desc),
                     "unbalanced parens in {kind} description: {desc:?}"
                 );
-                // Composing the " alint <kind> rule…" suffix onto a lead-in that
-                // still carries trailing punctuation leaves these artifacts.
+                // A lead-in that still carries trailing punctuation leaves
+                // these artifacts when composed with its final stop.
                 for bad in [":.", ";.", ",."] {
                     assert!(
                         !desc.contains(bad),
@@ -572,15 +576,102 @@ fn rule_meta_descriptions_are_well_formed() {
                         "unicode arrow {arrow:?} in {kind} description: {desc:?}"
                     );
                 }
-                // The opening sentence must not have been cut at an abbreviation,
-                // jamming the suffix onto the fragment.
+                // The opening sentence must not have been cut at an abbreviation
+                // and then presented as an intentional ellipsis.
                 for ab in ABBREV_DOT {
                     assert!(
-                        !desc.contains(&format!("{ab} alint ")),
+                        !desc.contains(&format!("{ab}...")),
                         "{kind} description split at abbreviation {ab:?}: {desc:?}"
                     );
                 }
+                for bad_article in ["a HCL document", "a INI document", "a XML document"] {
+                    assert!(
+                        !desc.contains(bad_article),
+                        "incorrect article in {kind} description: {desc:?}"
+                    );
+                }
             }
+        }
+    }
+}
+
+#[test]
+fn truncated_meta_summaries_are_explicit_and_well_formed() {
+    let input = "Validate a long generated description against a repository structure and \
+                 its declared constraints.";
+    let summary = truncate_meta_summary(input, 54);
+    assert!(summary.ends_with("..."), "{summary:?}");
+    assert!(summary.chars().count() <= 54, "{summary:?}");
+    assert!(!summary.ends_with(" the..."), "{summary:?}");
+
+    let parenthetical = truncate_meta_summary(
+        "Validate paths (including nested paths with special handling) against the repository.",
+        32,
+    );
+    assert_eq!(
+        parenthetical.matches('(').count(),
+        parenthetical.matches(')').count(),
+        "{parenthetical:?}"
+    );
+}
+
+/// Ruleset descriptions are generated from author prose, so validate the real
+/// catalogue rather than a toy fixture. This guards the #266 failure mode where
+/// the reserved suffix forced a word cap that was then disguised as a complete
+/// sentence (for example, "files named." or "authored or co-authored by.").
+#[test]
+fn ruleset_meta_descriptions_are_well_formed() {
+    let root = crate::workspace_root().expect("workspace root");
+    let rulesets_root = root.join(docs_paths::RULESETS_DIR);
+    let mut descriptions = std::collections::BTreeMap::new();
+
+    for entry in walkdir_plain(&rulesets_root).expect("walk bundled rulesets") {
+        if !entry.is_file()
+            || !matches!(
+                entry.extension().and_then(|ext| ext.to_str()),
+                Some("yml" | "yaml")
+            )
+        {
+            continue;
+        }
+        let rel = entry
+            .strip_prefix(&rulesets_root)
+            .expect("ruleset relative path");
+        let name = rel.with_extension("").to_string_lossy().replace('\\', "/");
+        let source = std::fs::read_to_string(&entry).expect("read bundled ruleset");
+        let overview = render_overview_from_comments(&source);
+        let desc = ruleset_meta_description(&name, &overview);
+
+        assert!(desc.contains(&format!("{name}@v1")), "{name}: {desc:?}");
+        assert!(desc.chars().count() <= 158, "{name}: {desc:?}");
+        assert!(
+            desc.ends_with('.') || desc.ends_with('!') || desc.ends_with('?'),
+            "{name}: unterminated description: {desc:?}"
+        );
+        assert!(
+            !desc.contains(['`', '—', '–']),
+            "{name}: non-plain-text description: {desc:?}"
+        );
+        assert_eq!(
+            desc.matches('(').count(),
+            desc.matches(')').count(),
+            "{name}: unbalanced description: {desc:?}"
+        );
+        if let Some(previous) = descriptions.insert(desc.clone(), name.clone()) {
+            panic!("duplicate ruleset descriptions for {previous} and {name}: {desc:?}");
+        }
+
+        let lead = format!("{name}@v1 bundled alint ruleset");
+        let opening = meta_desc_clean(
+            &strip_markup(&first_overview_sentence(&overview)),
+            usize::MAX,
+        );
+        let budget = 158usize.saturating_sub(lead.chars().count() + 3);
+        if opening.chars().count() >= 25 && opening.chars().count() > budget {
+            assert!(
+                desc.contains("..."),
+                "{name}: truncated prose is presented as complete: {desc:?}"
+            );
         }
     }
 }

@@ -2,8 +2,8 @@
 //! source of truth.
 //!
 //! README.md makes seven numeric claims about alint's surface area
-//! ("94 rule kinds across 13 families, plus 11 aliases", "22 bundled ecosystem
-//! rulesets", "12 auto-fix ops", "8 output formats", "9 subcommands").
+//! ("95 rule kinds across 13 families, plus 11 aliases", "22 bundled ecosystem
+//! rulesets", "26 auto-fix ops", "8 output formats", "12 subcommands").
 //! These claims drift trivially: a new rule kind ships, a new fixer
 //! lands, a new formatter lights up, but the README copy stays at
 //! the old number. The v0.9.22 audit caught a multi-month "60 rule

@@ -963,22 +963,36 @@ fn drop_trailing_stopwords(s: &str) -> String {
 /// `...` marker. Input is the `**Categories:**`-stripped H3 body.
 pub(crate) fn kind_summary(clean_body: &str, max_chars: usize) -> String {
     let sentence = strip_markup(&first_sentence(clean_body));
-    let cleaned = meta_desc_clean(&sentence, usize::MAX);
-    // A colon / comma / semicolon lead-in (a sentence that introduces a list) is
-    // not a self-contained one-liner; drop the trailing punctuation.
-    let cleaned = cleaned.trim_end_matches([':', ';', ',', ' ']);
+    truncate_meta_summary(&sentence, max_chars)
+}
+
+/// Plain-text summary capped at a word boundary. Unlike `meta_desc_clean`'s
+/// sentence-aware cap, this helper is used after the caller has already chosen
+/// one sentence, so it never mistakes an abbreviation (`e.g.`) for a safe
+/// stopping point. Any shortened summary ends in `...`; generated metadata
+/// must not turn a clipped clause into a falsely complete sentence.
+fn truncate_meta_summary(raw: &str, max_chars: usize) -> String {
+    let cleaned = meta_desc_clean(raw, usize::MAX)
+        .trim_end_matches([':', ';', ',', ' '])
+        .to_string();
     if cleaned.chars().count() <= max_chars {
-        return cleaned.to_string();
+        return cleaned;
     }
-    // Longer than one terminal line: word-cap it (leaving room for the marker),
-    // drop a dangling open quote the cap may have created plus any trailing
-    // punctuation, and end with an ASCII `...` so the truncation is honest.
-    let capped = meta_desc_clean(cleaned, max_chars.saturating_sub(3));
-    let capped: &str = match (capped.matches('"').count() % 2, capped.rfind('"')) {
-        (1, Some(q)) => &capped[..q],
-        _ => capped.as_str(),
+
+    let content_budget = max_chars.saturating_sub(3);
+    let hard_cap: String = cleaned.chars().take(content_budget).collect();
+    let word_cap = hard_cap
+        .rfind(' ')
+        .map_or(hard_cap.as_str(), |space| &hard_cap[..space]);
+    let quote_balanced = match (word_cap.matches('"').count() % 2, word_cap.rfind('"')) {
+        (1, Some(q)) => &word_cap[..q],
+        _ => word_cap,
     };
-    let trimmed = drop_trailing_stopwords(capped);
+    let balanced = tidy_truncated_tail(quote_balanced);
+    let trimmed = drop_trailing_stopwords(&balanced);
+    if trimmed.is_empty() {
+        return ".".repeat(max_chars.min(3));
+    }
     format!("{trimmed}...")
 }
 
@@ -1063,10 +1077,9 @@ fn tidy_truncated_tail(s: &str) -> String {
     .to_string()
 }
 
-/// Build the per-rule SERP description: lead with what the rule
-/// actually checks (its own first sentence — the unique value
-/// prop), keep the rule kind (the search query) and family
-/// (disambiguator) in the string, cap ~155 chars, no em-dashes.
+/// Build the per-rule SERP description: lead with the rule kind (the search
+/// query) and family (disambiguator), then explain what it checks from its own
+/// first sentence. Cap at 158 characters and use no em-dashes.
 /// Falls back to a family-scoped sentence when the rule body's
 /// opening line is too terse to stand alone.
 fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
@@ -1074,23 +1087,43 @@ fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
     // case (e.g. ...)" is not cut at the "g." (`no_case_conflicts`). A first
     // sentence that is a bare list lead-in ending in a colon
     // (`no_illegal_windows_names`: "Reject path components Windows can't
-    // represent:") composes to a "…:. alint …" artifact, which the final
-    // `meta_desc_clean` collapses (it drops a `[:;,]` left directly before a
-    // period — also the `allow:.` a backtick-wrapped `allow:` leaves behind).
+    // represent:") is trimmed before it is composed into the description.
     // `strip_markup` first, so `**bold**` / `*italic*` emphasis and unicode
     // arrows don't leak into the plain-text SERP snippet as literal `**regex**`
     // (`*_path_matches`) or `⇒` (`command_idempotent`) — the website rule index
     // keeps the markdown (it renders it), but a `<meta>` description must not.
     let mut opening = strip_markup(&first_sentence(body));
-    // Multi-format structured-query sections share one prose opener. Name the
-    // concrete format so the generated pages are useful on their own and do
-    // not present search engines with near-identical snippets.
-    if kind.contains("_path_") {
-        let format = kind.split('_').next().unwrap_or_default().to_uppercase();
-        opening = opening.replacen("structured document", &format!("{format} document"), 1);
+    // Multi-format structured-query sections share prose. Give every operation
+    // a concise, format-specific opener so each page is useful on its own (and
+    // use the correct article for initialisms such as INI, HCL, and XML).
+    if let Some((format, operation)) = kind.rsplit_once("_path_") {
+        let label = match format {
+            "dotenv" => "dotenv".to_string(),
+            "properties" => "Java properties".to_string(),
+            other => other.to_uppercase(),
+        };
+        let article = if matches!(format, "hcl" | "ini" | "xml") {
+            "an"
+        } else {
+            "a"
+        };
+        opening = match operation {
+            "equals" => format!(
+                "Query {article} {label} document with JSONPath and require every selected \
+                 value to equal the expected value."
+            ),
+            "matches" => format!(
+                "Query {article} {label} document with JSONPath and require every selected \
+                 string to match a regular expression."
+            ),
+            "absent" => format!(
+                "Query {article} {label} document with JSONPath and require it to match nothing."
+            ),
+            _ => opening,
+        };
     }
     let family = family_title.to_lowercase();
-    let suffix = format!("alint {kind} rule, {family} family.");
+    let lead = format!("alint {kind} rule ({family})");
     let opening = meta_desc_clean(&opening, usize::MAX)
         .trim_end_matches([':', ';', ','])
         .to_string();
@@ -1098,16 +1131,44 @@ fn rule_meta_description(kind: &str, family_title: &str, body: &str) -> String {
         // Doc-comment opener too thin to be a useful snippet —
         // fall back to a kind + family clause (still concrete:
         // names the rule the searcher typed and where it lives).
-        return format!("{kind} rule in alint's {family} family.");
+        return format!("{lead}.");
     }
-    let separator = if opening.ends_with('.') { " " } else { ". " };
-    let budget = 158usize.saturating_sub(suffix.chars().count() + separator.chars().count());
-    let summary = meta_desc_clean(&opening, budget);
-    if summary.ends_with('.') {
-        format!("{summary} {suffix}")
+    // Reserve `: ` plus a final period in case the source sentence has none.
+    let budget = 158usize.saturating_sub(lead.chars().count() + 3);
+    let summary = truncate_meta_summary(&opening, budget);
+    let punctuation = if summary.ends_with('.') || summary.ends_with('!') || summary.ends_with('?')
+    {
+        ""
     } else {
-        format!("{summary}. {suffix}")
+        "."
+    };
+    format!("{lead}: {summary}{punctuation}")
+}
+
+/// Build one searchable, honest ruleset description. The ruleset name leads,
+/// so it can never be removed by a cap; a long author-written overview is
+/// shortened with an explicit ellipsis rather than presented as a complete but
+/// grammatically broken sentence.
+fn ruleset_meta_description(name: &str, overview_md: &str) -> String {
+    const MAX_CHARS: usize = 158;
+
+    let lead = format!("{name}@v1 bundled alint ruleset");
+    let opening = strip_markup(&first_overview_sentence(overview_md));
+    let opening = meta_desc_clean(&opening, usize::MAX);
+    if opening.chars().count() < 25 {
+        return format!("{lead}.");
     }
+
+    // Reserve `: ` plus a final period in case the source sentence has none.
+    let budget = MAX_CHARS.saturating_sub(lead.chars().count() + 3);
+    let summary = truncate_meta_summary(&opening, budget);
+    let punctuation = if summary.ends_with('.') || summary.ends_with('!') || summary.ends_with('?')
+    {
+        ""
+    } else {
+        "."
+    };
+    format!("{lead}: {summary}{punctuation}")
 }
 
 /// Render one `rules/<family>/<kind>.md` page. Frontmatter
@@ -1838,28 +1899,7 @@ fn render_ruleset_page(
     let mut out = String::new();
     let _ = writeln!(&mut out, "---");
     let _ = writeln!(&mut out, "title: '{name}@v1'");
-    // SERP description: lead with what the ruleset actually does
-    // (its author-written overview, first sentence — the unique
-    // value prop a searcher scanning results wants reflected
-    // back), keep the ruleset name (the search query) in the
-    // string, cap ~155 chars, no em-dashes. Fall back to a name-
-    // scoped clause when the YAML has no leading comment block.
-    let suffix = format!("alint bundled ruleset {name}@v1.");
-    let opening = meta_desc_clean(&first_overview_sentence(overview_md), usize::MAX);
-    let ruleset_desc = if opening.chars().count() < 25 {
-        format!(
-            "{name}@v1: a bundled alint ruleset. Adopt with extends: [alint://bundled/{name}@v1]."
-        )
-    } else {
-        let separator = if opening.ends_with('.') { " " } else { ". " };
-        let budget = 158usize.saturating_sub(suffix.chars().count() + separator.chars().count());
-        let summary = meta_desc_clean(&opening, budget);
-        if summary.ends_with('.') {
-            format!("{summary} {suffix}")
-        } else {
-            format!("{summary}. {suffix}")
-        }
-    };
+    let ruleset_desc = ruleset_meta_description(name, overview_md);
     let _ = writeln!(
         &mut out,
         "description: '{}'",

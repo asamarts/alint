@@ -10,7 +10,7 @@ Pages because the consumer and producer disagreed on a hand-counted number.
 ## 1. Problem
 
 alint asserts its own surface area as prose in many places — the README sentence
-("94 rule kinds across 13 families, plus 11 aliases; 22 bundled ecosystem rulesets, 26 auto-fix
+("95 rule kinds across 13 families, plus 11 aliases; 22 bundled ecosystem rulesets, 26 auto-fix
 ops, 8 output formats", "12 subcommands"), `docs/site/about/index.md`, and the
 alint.org marketing site (a separate, private repo). Every one of these is a
 hand-maintained number that drifts the instant a rule kind, fixer, formatter, or
@@ -44,7 +44,7 @@ volatile fields, so it is committed and content-diff gated like the schema.
   "format_version": 3,
   "alint_version": "0.17.0",
   "counts": {
-    "rule_kinds": 94,
+    "rule_kinds": 95,
     "rule_aliases": 11,
     "families": 13,
     "bundled_rulesets": 22,

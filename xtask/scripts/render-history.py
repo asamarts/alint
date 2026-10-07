@@ -195,7 +195,7 @@ def modes_for(sid: str) -> List[str]:
 SCENARIOS = [
     (
         "S1", "Layout & path",
-        "Walker + `GlobSet` + path/metadata rules with little or no content read — the cheapest dispatch path and the `ls-lint` / `grep` competitive anchor. Consolidates the old filename-hygiene, `scope_filter`-shape, and existence/size scenarios; a subset carries `scope_filter: { has_ancestor }` so the non-per-file-rule scope_filter dispatch shape stays covered. Catches walker / glob / scope-match regressions.",
+        "Walker + `GlobSet` + path/metadata rules with little or no content read — the cheapest dispatch path and the `ls-lint` / shell (`find` + GNU grep) competitive anchor. Consolidates the old filename-hygiene, `scope_filter`-shape, and existence/size scenarios; a subset carries `scope_filter: { has_ancestor }` so the non-per-file-rule scope_filter dispatch shape stays covered. Catches walker / glob / scope-match regressions.",
     ),
     (
         "S2", "Per-file content",
@@ -339,7 +339,9 @@ def render(
         "> their `.ls-lint.yml`; they measured an immediate config error and must not be",
         "> used for comparison. The harness now passes an explicit config path, uses",
         "> `-warn`, and verifies a planted finding before timing. The rows remain in the",
-        "> raw historical report for provenance.",
+        "> raw historical report for provenance. The corrected current-checkout matrix",
+        "> and full diagnosis are in",
+        "> [`investigations/2026-10-competitive-harness-correction/`](investigations/2026-10-competitive-harness-correction/).",
         "",
         "## How to read this file",
         "",

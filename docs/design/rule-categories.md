@@ -280,9 +280,9 @@ alias is present to harvest.
 Many-to-many changes only per-category membership, not the underlying rule surface.
 A later count-contract correction makes the pre-existing alias distinction explicit:
 
-- `counts.rule_kinds` = 94 canonical kinds; `counts.rule_aliases` = 11. The
-  `rule_kinds` list retains all 105 accepted spellings for backward compatibility.
-- The catalog (`alint rules list` and the family Overview pages) lists the 94 CANONICAL
+- `counts.rule_kinds` = 95 canonical kinds; `counts.rule_aliases` = 11. The
+  `rule_kinds` list retains all 106 accepted spellings for backward compatibility.
+- The catalog (`alint rules list` and the family Overview pages) lists the 95 CANONICAL
   kinds, each annotating its aliases, so its row count is intentionally lower than the
   accepted-name list. The gap is exactly the 11 aliases, not missing rules.
 - `counts.families` = number of categories = 13, unchanged.
@@ -354,7 +354,7 @@ Site:
 Following the project's one-commit-per-phase convention with a forward pointer.
 
 - **Phase 0.** This design doc, ADR-0009, and the curated assignment table
-  (`docs/design/rule-categories-assignments.md`): 94 canonical kinds, 32 multi-category,
+  (`docs/design/rule-categories-assignments.md`): 95 canonical kinds, 33 multi-category,
   62 single, with the editorial calls settled.
 - **Phase 1.** `Category` enum (with the order-parity gate); add the shared rules.md
   parse helper and adopt it in the generators; add single-membership `**Categories:**`

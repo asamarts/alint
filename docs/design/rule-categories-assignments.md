@@ -183,13 +183,13 @@ Nothing carries more than three; the `gen-categories` gate can assert this bound
 
 | Category | Total kinds | (primary / gained as secondary) |
 |---|---|---|
-| Cross-file | 19 | 16 / +3 |
-| Content | 17 | 14 / +3 |
+| Structured query | 25 | 25 / +0 |
+| Cross-file | 20 | 17 / +3 |
+| Content | 18 | 14 / +4 |
 | Security / Unicode sanity | 13 | 3 / +10 |
 | Git hygiene | 13 | 13 / +0 |
 | Structure | 9 | 3 / +6 |
 | Text hygiene | 9 | 6 / +3 |
-| Structured query | 9 | 9 / +0 |
 | Encoding | 5 | 1 / +4 |
 | Unix metadata | 5 | 4 / +1 |
 | Existence | 4 | 4 / +0 |
@@ -198,7 +198,7 @@ Nothing carries more than three; the `gen-categories` gate can assert this bound
 | Plugin (tier 1) | 1 | 1 / +0 |
 
 The biggest discoverability gains are the Security lens (3 -> 13), Encoding (1 -> 5), and
-Structure (3 -> 9). 32 of the 94 canonical kinds are multi-category; 62 stay single, so
+Structure (3 -> 9). 33 of the 95 canonical kinds are multi-category; 62 stay single, so
 the taxonomy is enriched without becoming a everything-tagged-everything soup.
 
 ## Mis-filed-primary flags (future cleanup, not this feature)

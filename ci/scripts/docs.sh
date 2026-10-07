@@ -101,3 +101,9 @@ cargo run -q -p xtask -- gen-mermaid --check
 # Needs Node (set up by the Docs job).
 echo "==> Running node --test ci/scripts/strip-since.test.mjs"
 node --test ci/scripts/strip-since.test.mjs
+
+# The count-bearing concepts page is overlaid from main into a release-built
+# docs bundle. Pin every count on that page to the release's facts contract so a
+# post-release rule cannot leak into the published catalogue prose.
+echo "==> Running ci/scripts/test-pin-docs-counts.sh"
+bash ci/scripts/test-pin-docs-counts.sh
