@@ -212,10 +212,17 @@ fn committed_history_matches_renderer() {
         String::from_utf8_lossy(&out.stderr),
     );
 
-    let committed = std::fs::read(workspace.join("docs/benchmarks/HISTORY.md"))
-        .expect("read committed benchmark history");
+    // Git may check Markdown out as CRLF on Windows while Python's captured
+    // stdout uses LF (or vice versa). Newline encoding is not renderer drift;
+    // normalize it while retaining the terminal newline in the comparison.
+    let rendered = String::from_utf8(out.stdout)
+        .expect("render-history.py stdout is UTF-8")
+        .replace("\r\n", "\n");
+    let committed = std::fs::read_to_string(workspace.join("docs/benchmarks/HISTORY.md"))
+        .expect("read committed benchmark history")
+        .replace("\r\n", "\n");
     assert_eq!(
-        out.stdout, committed,
+        rendered, committed,
         "docs/benchmarks/HISTORY.md drifted from render-history.py; regenerate it before committing"
     );
 }
