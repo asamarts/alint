@@ -166,6 +166,40 @@ mod tests {
     }
 
     #[test]
+    fn get_does_not_follow_redirects() {
+        // Remote extends are content-pinned and must name their final URL. More
+        // importantly, following an HTTPS origin's redirect could reach an
+        // internal service, so this is an SSRF boundary rather than merely a
+        // request preference.
+        let (target_url, target_hits) = spawn_http_server(b"private".to_vec(), 1);
+
+        let redirect = TcpListener::bind("127.0.0.1:0").unwrap();
+        let redirect_port = redirect.local_addr().unwrap().port();
+        thread::spawn(move || {
+            if let Ok((mut stream, _)) = redirect.accept() {
+                let mut buf = [0u8; 2048];
+                let _ = stream.read(&mut buf);
+                let response = format!(
+                    "HTTP/1.1 302 Found\r\nLocation: {target_url}/private\r\nContent-Length: 0\r\n\r\n"
+                );
+                let _ = stream.write_all(response.as_bytes());
+            }
+        });
+
+        let url = format!("http://127.0.0.1:{redirect_port}/config.yml");
+        let err = Fetcher::default().get(&url).unwrap_err();
+        assert!(
+            matches!(err, FetchError::Status { status: 302, .. }),
+            "expected the redirect itself to surface, got {err:?}"
+        );
+        assert_eq!(
+            target_hits.load(Ordering::SeqCst),
+            0,
+            "redirect target must not receive a request"
+        );
+    }
+
+    #[test]
     fn get_errors_on_connection_refused() {
         // Bind + drop so the port is guaranteed free.
         let port = {
