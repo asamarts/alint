@@ -104,7 +104,7 @@ def parse_changelog(path: str) -> Dict[str, Tuple[str, str]]:
     out: Dict[str, Tuple[str, str]] = {}
     if not os.path.isfile(path):
         return out
-    with open(path) as f:
+    with open(path, encoding="utf-8") as f:
         lines = f.readlines()
 
     # Match either an em dash (—, U+2014) or a hyphen-minus.
@@ -252,7 +252,7 @@ def load_arch(base: str, arch: str) -> Dict[Cell, Stat]:
         if not os.path.isdir(vpath):
             continue
         for rj in glob.glob(os.path.join(vpath, "**", "results.json"), recursive=True):
-            with open(rj) as f:
+            with open(rj, encoding="utf-8") as f:
                 blob = json.load(f)
             for r in blob.get("rows", []):
                 key = (vdir, r["scenario"], r["size_label"], r["mode"])
