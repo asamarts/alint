@@ -237,7 +237,7 @@ jobs:
           # append the same-format hash of every other published asset so a later
           # `cosign sign-blob SHA256SUMS` covers the whole release -- installer
           # and attribution bundle included, not just the tarballs.
-          cat *.tar.gz.sha256 > SHA256SUMS
+          cat -- ./*.tar.gz.sha256 > SHA256SUMS
           sha256sum install.sh THIRD-PARTY-LICENSES.html alint.cdx.json >> SHA256SUMS
           echo "=== SHA256SUMS ==="
           cat SHA256SUMS

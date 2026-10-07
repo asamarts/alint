@@ -311,8 +311,13 @@ jobs:
           # files; the fix-only sfix_all.yml is excluded by the s[0-9]*_ glob
           # (supports() runs it under fix mode only, not the full/changed the check
           # scenarios take) and appended explicitly as SFIX.
-          scenarios=$(ls xtask/src/bench/scenarios/s[0-9]*_*.yml 2>/dev/null \
+          scenarios=$(find xtask/src/bench/scenarios -maxdepth 1 -type f \
+            -name 's[0-9]*_*.yml' -print \
             | sed -E 's#.*/s([0-9]+)_.*#\1#' | sort -n | sed 's/^/S/' | paste -sd,)
+          if [ -z "$scenarios" ]; then
+            echo "::error::no numbered benchmark scenarios found" >&2
+            exit 1
+          fi
           modes="full,changed"
           # Append the fix scenario + enable fix mode ONLY when this ref ships
           # sfix_all.yml, so an old-tag re-baseline whose xtask predates SFIX /
@@ -354,10 +359,18 @@ jobs:
           # criterion micro corpus). Derived rather than hardcoded so re-benching an
           # old tag (blame_cache / structured_query / etc. were added over time)
           # doesn't fail on a --bench its alint-bench crate doesn't define.
-          mbenches=$(ls crates/alint-bench/benches/*.rs 2>/dev/null | xargs -n1 basename \
-            | sed 's/\.rs$//' | grep -vE '^det_' | sed 's/^/--bench /' | paste -sd' ')
-          echo "micro benches for this ref: $mbenches"
-          cargo bench -p alint-bench --features fs-benches $mbenches
+          mapfile -t mbenches < <(find crates/alint-bench/benches -maxdepth 1 -type f \
+            -name '*.rs' -exec basename {} .rs \; | grep -vE '^det_' | sort)
+          if [ "${#mbenches[@]}" -eq 0 ]; then
+            echo "::error::no Criterion benchmark targets found" >&2
+            exit 1
+          fi
+          bench_args=()
+          for bench in "${mbenches[@]}"; do
+            bench_args+=(--bench "$bench")
+          done
+          echo "micro benches for this ref: ${mbenches[*]}"
+          cargo bench -p alint-bench --features fs-benches "${bench_args[@]}"
 
       - name: publish micro snapshot
         env:
@@ -366,7 +379,9 @@ jobs:
           set -euo pipefail
           out_dir="docs/benchmarks/micro/results/linux-x86_64/${OUT_LABEL}/criterion"
           ./target/release/xtask publish-benches --to "$out_dir" --trim
-          ls -la "$out_dir" | head -20
+          # This is a human-readable diagnostic listing, not filename parsing.
+          # shellcheck disable=SC2012
+          ls -la "$out_dir" | sed -n '1,20p'
 
       # ── HISTORY.md update is intentionally manual ────────────────
       # Auto-rewriting markdown tables is fragile (positional cells,
