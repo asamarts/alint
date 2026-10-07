@@ -15,7 +15,6 @@ Rule kinds in the **Cross-file** family. Each rule below links to its own page w
 | [`pair_changed_together`](/docs/rules/git-hygiene/pair_changed_together/) | If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range, the **co-change** gate. |
 | [`pair`](/docs/rules/cross-file/pair/) | For every file matching `primary`, a file matching the `partner` template must exist. |
 | [`pair_hash`](/docs/rules/cross-file/pair_hash/) | The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file, either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). |
-| [`markdown_links_resolve`](/docs/rules/cross-file/markdown_links_resolve/) | Validate live Markdown link, image, and reference-definition destinations against the repository tree. |
 | [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) | A manifest file enumerates path entries; each must resolve to an on-disk artefact. |
 | [`cross_file`](/docs/rules/cross-file/cross_file/) | A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem). |
 | [`file_graph`](/docs/rules/cross-file/file_graph/) | Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. |
