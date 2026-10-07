@@ -10,7 +10,7 @@ Validate that backticked workspace paths in markdown files resolve to real files
 
 The `prefixes` list is **required** — a backticked token must start with one of these to be considered a path candidate. No defaults: every project's layout differs, and a missing prefix is silent while a wrong default trips false positives.
 
-The scanner skips fenced code blocks (```` ``` ```` / `~~~`) and 4-space-indented blocks; those contain code samples, not factual claims about the tree. Trailing `:line` / `#L<n>` location suffixes are stripped before lookup, as are trailing punctuation and trailing slashes. Glob characters (`*`, `?`, `[`) trigger globset matching against the file index — pass if at least one file matches.
+The scanner skips fenced code blocks (```` ``` ```` / `~~~`) and 4-space-indented blocks; those contain code samples, not factual claims about the tree. Trailing `:line` / `#L<n>` location suffixes are stripped before lookup, as are trailing punctuation and trailing slashes. Glob characters (`*`, `?`, `[`) trigger globset matching against the file index — pass if at least one file matches. A command-shaped span such as `` `tools/run.ts --check` `` passes when its first word resolves and the remainder begins with an option or contains no path separator. The complete span is always tried first, so a real path containing whitespace is not mistaken for a command.
 
 By default the rule skips backticked tokens containing template-variable markers (`{{ }}`, `${ }`, `<…>`). Set `ignore_template_vars: false` to validate them as literal paths.
 
@@ -44,6 +44,7 @@ src/exists.ts
 
 See `src/exists.ts` for the implementation.
 Reference `src/missing.ts` and `docs/gone.md`.
+A missing command path still fails: `tools/missing.ts --check`.
 
 ```yaml
 example: `src/in-codeblock.ts`
@@ -70,7 +71,7 @@ rules:
   - id: agents-paths-resolve
     kind: markdown_paths_resolve
     paths: ["AGENTS.md"]
-    prefixes: ["src/", "docs/"]
+    prefixes: ["src/", "docs/", "tools/"]
     level: warning
 ```
 
@@ -84,9 +85,12 @@ rules:
   [1m[33m!  warning[0m  [2magents-paths-resolve[0m
               [2m4:32[0m  backticked path `docs/gone.md` doesn't resolve to a file or
               directory
+  [1m[33m!  warning[0m  [2magents-paths-resolve[0m
+              [2m5:37[0m  backticked path `tools/missing.ts --check` doesn't resolve to a
+              file or directory
 
-[2mSummary (2 violations):[0m
-  [1m[33m! 2 warnings[0m
+[2mSummary (3 violations):[0m
+  [1m[33m! 3 warnings[0m
   0 passing [2m*[0m 1 failing
 ```
 
@@ -97,10 +101,13 @@ This repository is compliant:
 ```text
 AGENTS.md
 docs/
+docs/User Guide.md
 docs/guide.md
 src/
 src/api.ts
 src/utils.ts
+tools/
+tools/run.ts
 ```
 
 ````markdown title="AGENTS.md"
@@ -108,12 +115,19 @@ src/utils.ts
 
 Production code lives under `src/api.ts` and `src/utils.ts`.
 User-facing docs are at `docs/guide.md`.
+Run `tools/run.ts --check` to verify the tree, or use
+`tools/run.ts verify` for the positional-argument form.
+A real path containing whitespace still resolves: `docs/User Guide.md`.
 
 ```yaml
 # In code blocks, references aren't validated:
 example: `src/anything-goes.ts`
 ```
 ````
+
+```markdown title="docs/User Guide.md"
+# user guide
+```
 
 ```markdown title="docs/guide.md"
 # guide
@@ -127,6 +141,10 @@ export function api() {}
 export const u = 1;
 ```
 
+```ts title="tools/run.ts"
+export function run() {}
+```
+
 With this `.alint.yml`:
 
 ```yaml
@@ -135,7 +153,7 @@ rules:
   - id: agents-paths-resolve
     kind: markdown_paths_resolve
     paths: ["AGENTS.md"]
-    prefixes: ["src/", "docs/"]
+    prefixes: ["src/", "docs/", "tools/"]
     level: warning
 ```
 
