@@ -100,6 +100,8 @@ jobs:
         run: ci/scripts/examples-validate.sh
       - name: shell-tests (test-*.sh harnesses incl. homebrew golden)
         run: ci/scripts/shell-tests.sh
+      - name: packaging (install.sh / npm shim / Dockerfile / pre-commit hooks)
+        run: ci/scripts/packaging-check.sh
       - name: deny (licenses + bans + sources; advisories advisory)
         run: ci/scripts/deny.sh
       - name: workspace dependency floors (<= workspace.package.version)

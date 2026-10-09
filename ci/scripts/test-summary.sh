@@ -45,6 +45,7 @@ expect "changes failed, all skipped" fail CHANGES_RESULT=failure
 expect "changes cancelled"           fail CHANGES_RESULT=cancelled
 expect "changes result missing"      fail
 expect "a job failed"                fail CHANGES_RESULT=success DENY_RESULT=failure
+expect "packaging failed"            fail CHANGES_RESULT=success PACKAGING_RESULT=failure
 
 python3 - <<'PY'
 import re

@@ -3,7 +3,8 @@ set -euo pipefail
 
 # Detect which components changed to enable conditional CI pipelines.
 # Outputs: rust=true/false, docs=true/false, bench=true/false,
-#          examples=true/false, editors=true/false
+#          examples=true/false, editors=true/false, supply_chain=true/false,
+#          packaging=true/false
 #
 # Environment variables (set by the workflow):
 #   GH_EVENT         - github.event_name (push | pull_request)
@@ -47,6 +48,7 @@ BENCH=false
 EXAMPLES=false
 EDITORS=false
 SUPPLY_CHAIN=false
+PACKAGING=false
 
 # CI infrastructure or workspace manifest changes trigger all pipelines.
 if echo "$CHANGED" | grep -qE '^(\.github/workflows/|ci/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$)'; then
@@ -57,6 +59,7 @@ if echo "$CHANGED" | grep -qE '^(\.github/workflows/|ci/|Cargo\.toml$|Cargo\.loc
   EXAMPLES=true
   EDITORS=true
   SUPPLY_CHAIN=true
+  PACKAGING=true
 fi
 
 # Supply-chain artifacts (SBOM + third-party license bundle) depend on the
@@ -66,6 +69,14 @@ fi
 # out-of-policy license is caught pre-merge instead of only at release time.
 if echo "$CHANGED" | grep -qE '(^|/)Cargo\.(toml|lock)$|^(about\.(toml|hbs)|deny\.toml|ci/scripts/supply-chain-artifacts\.sh)$'; then
   SUPPLY_CHAIN=true
+fi
+
+# Distribution packaging that no Rust/docs gate covers: the curl-able
+# installer, the npm shim, the release Docker image and the pre-commit hook
+# manifest. Routed to the `packaging` job (ci/scripts/packaging-check.sh), so a
+# PR touching only these still gets shellcheck / node --check / a docker build.
+if echo "$CHANGED" | grep -qE '^(install\.sh|Dockerfile|\.dockerignore|\.pre-commit-hooks\.yaml|npm/)'; then
+  PACKAGING=true
 fi
 
 # Editor extensions/integrations (VS Code TS + Zed wasm get built in CI).
@@ -125,7 +136,7 @@ if echo "$CHANGED" | grep -qE '^(examples/|schemas/|crates/alint-rules/|crates/a
 fi
 
 echo ""
-echo "==> rust=${RUST}  docs=${DOCS}  bench=${BENCH}  examples=${EXAMPLES}  editors=${EDITORS}  supply_chain=${SUPPLY_CHAIN}"
+echo "==> rust=${RUST}  docs=${DOCS}  bench=${BENCH}  examples=${EXAMPLES}  editors=${EDITORS}  supply_chain=${SUPPLY_CHAIN}  packaging=${PACKAGING}"
 
 # ── Write GitHub Actions outputs ─────────────────────────────────────
 
@@ -137,5 +148,6 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "examples=${EXAMPLES}"
     echo "editors=${EDITORS}"
     echo "supply_chain=${SUPPLY_CHAIN}"
+    echo "packaging=${PACKAGING}"
   } >> "$GITHUB_OUTPUT"
 fi

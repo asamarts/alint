@@ -56,6 +56,7 @@ row() {
   echo "| Examples              | ${EXAMPLES_CHANGED} |"
   echo "| Editors               | ${EDITORS_CHANGED} |"
   echo "| Supply chain          | ${SUPPLY_CHAIN_CHANGED} |"
+  echo "| Packaging             | ${PACKAGING_CHANGED:-false} |"
   echo ""
 
   echo "### Rust Pipeline"
@@ -66,7 +67,7 @@ row() {
   row "Clippy"       "$CLIPPY_RESULT"      "$RUST_CHANGED"
   row "Test"         "$TEST_RESULT"        "$RUST_CHANGED"
   row "Audit"        "$AUDIT_RESULT"       "$RUST_CHANGED"
-  row "Deny"         "$DENY_RESULT"        "$RUST_CHANGED"
+  row "Deny"         "$DENY_RESULT"        "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Supply chain" "$SUPPLY_CHAIN_RESULT" "$SUPPLY_CHAIN_CHANGED"
   row "Build"        "$BUILD_RESULT"       "$RUST_CHANGED"
   row "Docs"         "$DOCS_JOB_RESULT"    "$RUST_CHANGED"
@@ -92,6 +93,12 @@ row() {
   echo "|-------|--------|"
   row "Editors (VS Code + Zed)" "$EDITORS_RESULT" "$EDITORS_CHANGED"
   echo ""
+
+  echo "### Packaging Pipeline"
+  echo "| Check | Result |"
+  echo "|-------|--------|"
+  row "install.sh / npm / Docker / pre-commit" "${PACKAGING_RESULT:-skipped}" "${PACKAGING_CHANGED:-false}"
+  echo ""
 } | tee "${GITHUB_STEP_SUMMARY:-/dev/null}"
 
 # ── Fail if any critical job failed ──────────────────────────────────
@@ -109,7 +116,7 @@ for result in \
   "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
   "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
   "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \
-  "$SHELL_TESTS_RESULT" "$EDITORS_RESULT"; do
+  "$SHELL_TESTS_RESULT" "$EDITORS_RESULT" "${PACKAGING_RESULT:-skipped}"; do
   if [[ "$result" == "failure" ]]; then
     FAILED=true
   fi

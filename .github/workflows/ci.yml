@@ -50,6 +50,7 @@ jobs:
       examples: ${{ steps.detect.outputs.examples }}
       editors: ${{ steps.detect.outputs.editors }}
       supply_chain: ${{ steps.detect.outputs.supply_chain }}
+      packaging: ${{ steps.detect.outputs.packaging }}
       runner: ${{ steps.route.outputs.runner }}
       hosted: ${{ steps.route.outputs.hosted }}
     steps:
@@ -209,12 +210,14 @@ jobs:
           key: ci-audit
       - run: ci/scripts/audit.sh
 
+  # Also on `supply_chain`: deny.toml (the license / bans / sources policy)
+  # flips only supply_chain, so a PR loosening the policy must still run it.
   deny:
     name: Deny
     needs: [changes, fmt]
     if: >-
       !cancelled() && !failure()
-      && needs.changes.outputs.rust == 'true'
+      && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.supply_chain == 'true')
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -425,6 +428,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: ci/scripts/shell-tests.sh
 
+  # ── Distribution packaging ───────────────────────────────────────
+  # install.sh, npm/**, Dockerfile (+ .dockerignore) and .pre-commit-hooks.yaml
+  # trigger no Rust/docs pipeline, so they get their own cheap hosted job:
+  # shellcheck + syntax, node --check, hook-manifest schema, and a docker build
+  # against a placeholder-staged context. release.yml's preflight runs the same
+  # script unconditionally.
+  packaging:
+    name: Packaging
+    needs: changes
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.packaging == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: ci/scripts/packaging-check.sh
+
   # ── Editor extensions ─────────────────────────────────────────────
   # Build the packaged extensions that otherwise only build at release
   # time: typecheck + bundle the VS Code TS extension, wasm-build the Zed
@@ -485,6 +505,7 @@ jobs:
       - bench-smoke
       - examples
       - shell-tests
+      - packaging
       - editors
     # Keep this bookkeeping job hosted even after local capacity returns. An
     # always-run summary must not remain queued on an unavailable local runner
@@ -500,6 +521,7 @@ jobs:
           EXAMPLES_CHANGED: ${{ needs.changes.outputs.examples }}
           EDITORS_CHANGED: ${{ needs.changes.outputs.editors }}
           SUPPLY_CHAIN_CHANGED: ${{ needs.changes.outputs.supply_chain }}
+          PACKAGING_CHANGED: ${{ needs.changes.outputs.packaging }}
           SECRETS_INVENTORY_RESULT: ${{ needs.secrets-inventory.result }}
           FMT_RESULT: ${{ needs.fmt.result }}
           MSRV_RESULT: ${{ needs.msrv.result }}
@@ -515,4 +537,5 @@ jobs:
           EXAMPLES_RESULT: ${{ needs.examples.result }}
           SHELL_TESTS_RESULT: ${{ needs.shell-tests.result }}
           EDITORS_RESULT: ${{ needs.editors.result }}
+          PACKAGING_RESULT: ${{ needs.packaging.result }}
         run: ci/scripts/summary.sh
