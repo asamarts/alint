@@ -603,6 +603,13 @@ jobs:
             fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           echo "==> package.json version set to $ver"
+          # Re-run safe: `npm publish` of an already-published version fails
+          # (E403), so a `gh run rerun --failed` after a later failure would red
+          # here. Skip when the registry already serves this exact version.
+          if [[ "$(npm view "@asamarts/alint@${ver}" version 2>/dev/null || true)" == "$ver" ]]; then
+            echo "::notice::@asamarts/alint@${ver} is already on npm; skipping publish (re-run)."
+            exit 0
+          fi
           # --provenance rides the OIDC id-token; with Trusted Publishing npm also
           # generates provenance automatically, so this is explicit-and-belt.
           npm publish --access public --provenance
@@ -666,6 +673,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           attestations: true
+          # Re-run safe: wheels already on PyPI for this version are skipped
+          # instead of failing the job (PyPI files are immutable anyway).
+          skip-existing: true
 
   homebrew:
     name: bump Homebrew tap (asamarts/homebrew-alint)
@@ -749,7 +759,9 @@ jobs:
           #   OVSX_PAT — Open VSX access token (open-vsx.org → settings).
           # Expiring PATs (unlike the keyless crates.io / npm OIDC
           # publishes): if either 401s, rotate it and `gh run rerun <id>
-          # --failed` — no new tag needed (the .vsix is idempotent per version).
+          # --failed` — no new tag needed. Both publishes pass
+          # --skip-duplicate, so a registry that already has this version
+          # (the other one 401'd, or a later job failed) is a no-op, not a red.
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
           TAG: ${{ github.ref_name }}
@@ -772,8 +784,8 @@ jobs:
           npm run check-types
           npm run build
           # vsce/ovsx read VSCE_PAT/OVSX_PAT from the environment.
-          npx --no-install vsce publish --no-dependencies
-          npx --no-install ovsx publish --no-dependencies
+          npx --no-install vsce publish --no-dependencies --skip-duplicate
+          npx --no-install ovsx publish --no-dependencies --skip-duplicate
 
   publish-jetbrains:
     name: publish JetBrains plugin (Marketplace)
@@ -815,6 +827,15 @@ jobs:
           ver="${TAG#v}"
           # Pass the version to Gradle without editing the build file.
           echo "==> plugin version set to $ver"
+          # Re-run safe: the Marketplace rejects a duplicate version upload, so
+          # skip when its public plugin feed already lists this version. A feed
+          # lookup failure falls through to the publish (fail-open to the
+          # pre-guard behaviour, never to a silent skip).
+          feed="$(curl -fsS --retry 3 'https://plugins.jetbrains.com/plugins/list?pluginId=org.alint.lsp' || true)"
+          if grep -qF "<version>${ver}</version>" <<<"$feed"; then
+            echo "::notice::org.alint.lsp ${ver} is already on the JetBrains Marketplace; skipping publish (re-run)."
+            exit 0
+          fi
           # Use the pinned wrapper (./gradlew) so release matches what CI
           # validates, not the setup-action's provisioned Gradle.
           ./gradlew -PpluginVersion="$ver" publishPlugin

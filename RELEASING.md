@@ -270,8 +270,12 @@ paths:
 These stamp the version from the tag (`v0.x.y` → `0.x.y`), so the
 committed `package.json` / `pluginVersion` can lag. A token 401 mid-run
 is recoverable the same way as npm: rotate + `gh run rerun <id>
---failed`, no new tag (the `.vsix` / plugin `.zip` are idempotent per
-version).
+--failed`, no new tag. Every publisher is re-run safe: `vsce` / `ovsx`
+publish with `--skip-duplicate`, the JetBrains job skips a version the
+Marketplace plugin feed already lists, npm skips a version `npm view`
+already serves, PyPI uses `skip-existing`, `publish-crates.sh` skips
+crates already on crates.io, and the Homebrew job no-ops on an unchanged
+formula (pinned by `ci/scripts/test-release-idempotency.sh`).
 
 **JetBrains Marketplace internal-API rejections** are a *separate* class
 of mid-release failure: the Marketplace's validator rejects references

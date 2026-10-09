@@ -76,6 +76,23 @@ if create_idx != -1 and (view_idx == -1 or view_idx > create_idx):
 need('release', r'if ! gh workflow run docs-bundle\.yml',
      'the docs-bundle dispatch must be non-fatal (if ! ... ::warning::)')
 
+# 2. Every downstream publisher tolerates an already-published version.
+need('publish-vscode', r'vsce publish\b[^\n]*--skip-duplicate',
+     '`vsce publish` must pass --skip-duplicate')
+need('publish-vscode', r'ovsx publish\b[^\n]*--skip-duplicate',
+     '`ovsx publish` must pass --skip-duplicate')
+need('publish-npm', r'npm view "@asamarts/alint@\$\{ver\}" version',
+     '`npm publish` must be guarded by an `npm view pkg@ver` existence check')
+need('publish-pypi', r'^\s+skip-existing:\s*true\s*$',
+     'the PyPI publish must set skip-existing: true')
+need('publish-jetbrains', r'plugins\.jetbrains\.com/plugins/list\?pluginId=org\.alint\.lsp',
+     '`publishPlugin` must be guarded by a Marketplace version lookup')
+need('homebrew', r'git diff --cached --quiet',
+     'the tap bump must no-op when the formula is unchanged')
+publish_crates = Path('ci/scripts/publish-crates.sh').read_text(encoding='utf-8')
+if 'already published; skipping' not in publish_crates:
+    fail('publish-crates.sh: must skip crates already on crates.io')
+
 if failures:
     for message in failures:
         print(f'[release-idempotency] {message}', file=sys.stderr)
