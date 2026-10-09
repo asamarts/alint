@@ -18,13 +18,14 @@ if ! command -v node >/dev/null 2>&1; then
   exit 0
 fi
 
-targets=$(python3 - <<'PY'
-import yaml
-wf = yaml.safe_load(open('.github/workflows/release.yml', encoding='utf-8'))
-for row in wf['jobs']['build']['strategy']['matrix']['include']:
-    print(row['target'])
-PY
-)
+# The build matrix rows are the only `- target:` entries in release.yml
+# (plain-text read; no PyYAML dependency on the runner).
+targets=$(sed -nE 's/^[[:space:]]+- target:[[:space:]]*([A-Za-z0-9_-]+)[[:space:]]*$/\1/p' \
+  .github/workflows/release.yml)
+if [[ -z "$targets" ]]; then
+  echo "[test-npm-shim] could not read release.yml build-matrix targets" >&2
+  exit 1
+fi
 
 RELEASE_TARGETS="$targets" node - <<'JS'
 'use strict';

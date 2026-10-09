@@ -92,13 +92,23 @@ fi
 # fetch one from the network; a remote ref must fetch install.sh at that ref.
 sandbox=$(mktemp -d)
 trap 'rm -rf "$sandbox"' EXIT
+# Plain-text extraction (no PyYAML dependency on the runner): the `run: |`
+# block scalar of the `- name: Install alint` step, dedented.
 python3 - "$sandbox/install-step.sh" <<'PY'
+import re
 import sys
-import yaml
 
-action = yaml.safe_load(open('action.yml', encoding='utf-8'))
-step = next(s for s in action['runs']['steps'] if s.get('name') == 'Install alint')
-open(sys.argv[1], 'w', encoding='utf-8').write(step['run'])
+lines = open('action.yml', encoding='utf-8').read().splitlines()
+start = next(i for i, l in enumerate(lines) if re.match(r'^\s*- name: Install alint\s*$', l))
+run = next(i for i in range(start + 1, len(lines)) if re.match(r'^\s*run: \|\s*$', lines[i]))
+key_indent = len(lines[run]) - len(lines[run].lstrip())
+body = []
+for line in lines[run + 1:]:
+    if line.strip() and len(line) - len(line.lstrip()) <= key_indent:
+        break
+    body.append(line)
+indent = min(len(l) - len(l.lstrip()) for l in body if l.strip())
+open(sys.argv[1], 'w', encoding='utf-8').write('\n'.join(l[indent:] for l in body) + '\n')
 PY
 mkdir -p "$sandbox/action-path/action" "$sandbox/bin" "$sandbox/tmp"
 cp action/resolve-version.sh "$sandbox/action-path/action/"

@@ -41,16 +41,27 @@ fi
 # ── .pre-commit-hooks.yaml ────────────────────────────────────────────
 if have python3; then
   python3 - <<'PY' || bad ".pre-commit-hooks.yaml: schema check"
+import re
 import sys
-import yaml
 
-hooks = yaml.safe_load(open('.pre-commit-hooks.yaml', encoding='utf-8'))
-if not isinstance(hooks, list) or not hooks:
+# Plain-text parse (no PyYAML dependency on the runner): a top-level list of
+# flat hook mappings, each starting at `- id:`.
+text = open('.pre-commit-hooks.yaml', encoding='utf-8').read()
+blocks = re.split(r'^- ', text, flags=re.MULTILINE)
+if blocks[0].strip() and not all(l.lstrip().startswith('#') for l in blocks[0].splitlines() if l.strip()):
+    sys.exit('.pre-commit-hooks.yaml must be a top-level list of hooks')
+hooks = []
+for block in blocks[1:]:
+    hook = {}
+    for m in re.finditer(r'^\s*([a-z_]+):[ \t]*(\S[^\n]*)?$', block, re.MULTILINE):
+        hook.setdefault(m.group(1), (m.group(2) or '').strip())
+    hooks.append(hook)
+if not hooks:
     sys.exit('.pre-commit-hooks.yaml must be a non-empty list of hooks')
 ids = set()
 for hook in hooks:
     for key in ('id', 'name', 'entry', 'language'):
-        if not isinstance(hook.get(key), str) or not hook[key]:
+        if not hook.get(key):
             sys.exit(f'hook {hook.get("id")!r}: missing/empty {key!r}')
     if hook['id'] in ids:
         sys.exit(f'duplicate hook id {hook["id"]!r}')

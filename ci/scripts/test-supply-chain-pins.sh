@@ -15,12 +15,21 @@ from pathlib import Path
 import re
 import sys
 
-import yaml
-
 failures = []
 
-dependabot = yaml.safe_load(Path('.github/dependabot.yml').read_text(encoding='utf-8'))
-covered = {(u['package-ecosystem'], u['directory'].rstrip('/') or '/') for u in dependabot['updates']}
+# Plain-text parse (no PyYAML dependency on the runner): each update entry
+# starts at `- package-ecosystem:` and runs to the next one.
+text = Path('.github/dependabot.yml').read_text(encoding='utf-8')
+entries = re.split(r'^\s*- package-ecosystem:', text, flags=re.MULTILINE)[1:]
+updates = []
+for entry in entries:
+    eco = entry.split('\n', 1)[0].strip().strip('"\'')
+    d = re.search(r'^\s+directory:\s*["\']?([^"\'\s]+)', entry, re.MULTILINE)
+    p = re.search(r'^\s+prefix:\s*["\']?([^"\'\n]+)', entry, re.MULTILINE)
+    updates.append({'package-ecosystem': eco,
+                    'directory': d.group(1) if d else '',
+                    'commit-message': {'prefix': p.group(1).strip() if p else ''}})
+covered = {(u['package-ecosystem'], u['directory'].rstrip('/') or '/') for u in updates}
 REQUIRED = {
     ('cargo', '/'),
     ('github-actions', '/'),
@@ -32,7 +41,7 @@ REQUIRED = {
 }
 for eco, directory in sorted(REQUIRED - covered):
     failures.append(f'.github/dependabot.yml: no {eco} update entry for {directory}')
-for update in dependabot['updates']:
+for update in updates:
     if not update.get('commit-message', {}).get('prefix', '').startswith('chore('):
         failures.append(f'dependabot {update["package-ecosystem"]} {update["directory"]}: '
                         'commit-message prefix must be a chore(...) conventional type')
