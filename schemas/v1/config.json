@@ -1358,7 +1358,7 @@
           "properties": {
             "sort": {
               "additionalProperties": false,
-              "description": "The `sort` op (Phase 4): rewrite each of the host `ordered_block` rule's marked blocks with its entries sorted under the rule's `comparator` (and deduped when the rule sets `unique`), preserving non-entry lines (markers, blanks, `select`-excluded comments) in place. Behavior comes entirely from the host rule (`start`/`end`/`comparator`/`unique`/`select`); this spec adds only the optional tier override. **`Safe` by default** — a keep-sorted block's meaning is order-independent (and a `unique` block declared its duplicates redundant), so sorting is behavior-preserving.",
+              "description": "The `sort` op (Phase 4): rewrite each of the host `ordered_block` rule's marked blocks with its entries sorted under the rule's `comparator` (and deduped when the rule sets `unique`), preserving non-entry lines (markers, blanks, `select`-excluded comments) in place. Behavior comes entirely from the host rule (`start`/`end`/`comparator`/`unique`/`select`); this spec adds only the optional tier override. **`Safe` by default**: a keep-sorted block's meaning is order-independent (and a `unique` block declared its duplicates redundant), so sorting is behavior-preserving.",
               "properties": {
                 "applicability": {
                   "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
