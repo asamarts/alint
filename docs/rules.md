@@ -402,6 +402,10 @@ The rejected forms are:
 - Trailing dots (`foo.`) or trailing spaces (`foo `) — Windows silently strips these on checkout.
 - Reserved chars: `<`, `>`, `:`, `"`, `|`, `?`, `*`.
 
+<!-- alint:since=0.17.1 -->
+Per Microsoft's naming rules the check also rejects `COM0` / `LPT0` and the superscript-digit ports (`COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`); a reserved name followed by spaces before its extension (`CON .txt`); control characters U+0000 to U+001F (tab included); and a `\` inside a path component (a separator on Windows).
+<!-- /alint:since -->
+
 ---
 
 ## Unix metadata
