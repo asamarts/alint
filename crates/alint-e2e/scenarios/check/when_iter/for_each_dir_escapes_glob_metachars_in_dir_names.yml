@@ -1,0 +1,43 @@
+name: for_each_dir treats glob metacharacters in an iterated dir name literally
+tags: [check, for_each_dir, when_iter]
+
+# Regression (audit 2026-10, finding 2): `{path}` was pasted unescaped into
+# the nested rule's `paths:` glob and into `iter.has_file`. A Next.js dynamic
+# route dir `app/[slug]` became the character class `[slug]`, so its own
+# `page.tsx` never matched (false positive); `app/[id]` (no page) matched the
+# sibling `app/d/page.tsx` (false negative); and `pkgs/nobrace{` was an
+# invalid-glob error. Token values are now glob-escaped; the template keeps
+# its glob meaning.
+
+given:
+  tree:
+    app:
+      "[slug]":
+        page.tsx: "export default 1\n"
+        layout.tsx: "export default 1\n"
+      "[id]":
+        layout.tsx: "export default 1\n"
+      d:
+        page.tsx: "export default 1\n"
+        layout.tsx: "export default 1\n"
+    pkgs:
+      "nobrace{":
+        page.tsx: "export default 1\n"
+        layout.tsx: "export default 1\n"
+  config: |
+    version: 1
+    rules:
+      - id: route-has-page
+        kind: for_each_dir
+        select: "{app,pkgs}/*"
+        when_iter: 'iter.has_file("*.tsx")'
+        require:
+          - kind: file_exists
+            paths: "{path}/page.tsx"
+        level: error
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: route-has-page, level: error, path: "app/[id]"}
