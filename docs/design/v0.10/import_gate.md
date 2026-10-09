@@ -19,7 +19,7 @@ airflow, golang/go, pytorch) and the per-repo tracker in
 [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`import_gate` row: airflow, golang-go, helm, kubernetes,
 pytorch). Canonical scope:
-[`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+[`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#5; "k8s prometheus-imports + airflow + go + helm + pytorch").
 
 ## Problem

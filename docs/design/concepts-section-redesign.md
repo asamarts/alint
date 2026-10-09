@@ -1,6 +1,8 @@
 # Design doc: Concepts section redesign (content + animated diagrams)
 
-Status: Draft.
+Status: shipped. Phases 1 and 7 in the errata hot-fix (#228), Phase 2 in #230,
+Phases 3-6 in the following concepts PRs; all are in v0.17.0 (the docs-bundle
+concepts overlay deployed them to alint.org ahead of the release).
 Decisions: none required (a docs content + technique change; references ADR-0005
 architecture-diagrams and ADR-0007 release-aware docs). See Open questions for
 whether the animated-diagram convention warrants its own ADR.

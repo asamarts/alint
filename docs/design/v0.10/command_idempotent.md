@@ -22,7 +22,7 @@ via the 2026-05-06 deep-analysis aggregation) and the per-repo
 tracker in
 [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`command_idempotent` row: ruff, helm, prettier). Canonical
-scope: [`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+scope: [`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#6; "ruff-format / prettier --check / dprint check / deno fmt
 --check / eslint --no-fix shape").
 

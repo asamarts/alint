@@ -60,14 +60,20 @@ points are explicit.
    `release.yml` `preflight` job runs the same gates remotely; this
    is the pre-push sanity gate.
 
-   Three recurrence guards bundled into `test` / `dep-floors`:
+   Recurrence guards bundled into `test` / `dep-floors` (plus the MSRV leg):
    - README-count claims (rule kinds, families, bundled rulesets,
      fix ops, output formats, subcommands) are asserted against
      the workspace truth by
      `crates/alint-e2e/tests/coverage_audit_readme_claims.rs`.
    - `[workspace.dependencies]` API-compat floors are asserted
      `<= workspace.package.version` by
-     `ci/scripts/check-workspace-dep-floors.sh`.
+     `ci/scripts/check-workspace-dep-floors.sh` (also run by ci.yml's
+     `MSRV` job and the `release.yml` preflight).
+   - The workspace compiles on the exact MSRV
+     (`[workspace.package].rust-version`) via `ci/scripts/msrv.sh`, run
+     by ci.yml's `MSRV` job and the `release.yml` preflight (so no crate
+     publishes advertising an MSRV it was not built on). Not part of
+     `preflight.sh`; run it locally when touching dependencies.
    - GitHub Action resolution is asserted for explicit inputs, exact tags,
      branches, local actions, and commit SHAs by
      `ci/scripts/test-action-version.sh`; release tag/workspace/baked-version
@@ -223,14 +229,25 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   (fail-closed, not a partial release). Fix the generator and
   `gh run rerun <id> --failed`; ci.yml runs the same script pre-merge (the
   `supply-chain` job), so a release-time failure should be rare.
-- **A signing / attestation failure** (`MP-H1`). The `release` job's cosign + attest
-  steps run *before* `create GitHub Release` and depend on public-good Sigstore
-  (Fulcio + Rekor) plus the GitHub attestations API. A transient Sigstore outage, or
-  a cosign / attest-action error, fails the release job before the Release exists,
-  while `docker` and `publish-crates` (both `needs: build`) may already have
-  published to ghcr / crates.io. Re-run the release job: the cosign + attest steps are
-  idempotent and precede Release creation, so a clean re-run re-signs and then creates
-  the Release. Never re-tag.
+- **A signing / attestation failure** (`MP-H1`). The `release` job's steps run in
+  this order: aggregate `SHA256SUMS`, cosign keyless sign of `SHA256SUMS`, create
+  the GitHub Release, then the two attestations (build provenance + SBOM), then the
+  docs-bundle dispatch and the major-tag move. Only the cosign signature precedes
+  Release creation: it depends on public-good Sigstore (Fulcio + Rekor), so a
+  transient Sigstore outage or a cosign error fails the job before the Release
+  exists, while `docker` and `publish-crates` (both `needs: build`) may already have
+  published to ghcr / crates.io. The attestations run *after* the Release and are
+  best-effort (`continue-on-error`): a failure there only raises a `::warning::`
+  and never blocks the Release or the downstream publishers. In every case, re-run
+  with `gh run rerun <id> --failed`. Never re-tag.
+- **A failure after the Release exists.** The `release` job is idempotent: if a
+  later step failed (for example the major-tag move), the re-run finds the
+  existing Release and re-uploads the same asset set with
+  `gh release upload --clobber` (then asserts the published asset set matches)
+  instead of dying on `gh release create`, so the `needs: release` publishers
+  (npm, PyPI, Homebrew, VS Code, JetBrains) still run. The docs-bundle dispatch is
+  non-fatal: if it fails the job emits a `::warning::` and you run
+  `gh workflow run docs-bundle.yml --ref main` by hand.
 - **Expiring credentials** (`MP-M2`). Three channels carry secrets that can expire: VS
   Code + Open VSX (`VSCE_PAT` / `OVSX_PAT`), JetBrains (the marketplace token + signing
   cert/key), and the Homebrew tap SSH deploy key. On a 401/403 from any, rotate the
@@ -259,8 +276,12 @@ paths:
 These stamp the version from the tag (`v0.x.y` → `0.x.y`), so the
 committed `package.json` / `pluginVersion` can lag. A token 401 mid-run
 is recoverable the same way as npm: rotate + `gh run rerun <id>
---failed`, no new tag (the `.vsix` / plugin `.zip` are idempotent per
-version).
+--failed`, no new tag. Every publisher is re-run safe: `vsce` / `ovsx`
+publish with `--skip-duplicate`, the JetBrains job skips a version the
+Marketplace plugin feed already lists, npm skips a version `npm view`
+already serves, PyPI uses `skip-existing`, `publish-crates.sh` skips
+crates already on crates.io, and the Homebrew job no-ops on an unchanged
+formula (pinned by `ci/scripts/test-release-idempotency.sh`).
 
 **JetBrains Marketplace internal-API rejections** are a *separate* class
 of mid-release failure: the Marketplace's validator rejects references

@@ -46,6 +46,12 @@ jobs:
           else
             tag="${latest}"
           fi
+          # Fail closed on anything but a three-part release tag: the value is
+          # handed to install scripts / registries downstream.
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::invalid release tag '${tag}' (expected vX.Y.Z)" >&2
+            exit 1
+          fi
           # is_latest gates the floating-pointer + homebrew checks: those only make
           # sense when the smoked tag is what `latest` / `:latest` / the tap serve.
           if [ "${tag}" = "${latest}" ]; then is_latest=1; else is_latest=0; fi
@@ -98,10 +104,12 @@ jobs:
         uses: cargo-bins/cargo-binstall@c06f6a0003f7c6165a00c89d1697731c9e8a5c72 # v1.25.2
 
       - name: install cosign (so the install.sh leg exercises its verify path)
-        # With cosign v3 present, install.sh's opt-in verification actually runs
-        # against the release's real signed assets -- so a SAN-regexp drift, a
-        # renamed .cosign.bundle, or a broken verify surfaces here, not in a user's
-        # install. (On an unsigned release it just skips, as install.sh is designed.)
+        # With cosign v3 present, install.sh's verification actually runs against
+        # the release's real signed assets -- so a SAN-regexp drift, a renamed
+        # .cosign.bundle, or a broken verify surfaces here, not in a user's
+        # install. smoke-channel.sh runs install.sh with ALINT_REQUIRE_VERIFY=1
+        # and asserts its "Signature OK" line, so a silently SKIPPED verification
+        # (cosign missing/too old, bundle absent) reds the leg too.
         if: matrix.channel == 'install.sh'
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
         with:
@@ -112,4 +120,6 @@ jobs:
           # 1 when the smoked tag is the latest release: enables the floating
           # (`latest` / `:latest` / homebrew) pointer checks in the script.
           SMOKE_FLOATING: ${{ needs.resolve.outputs.is_latest }}
-        run: ci/scripts/smoke-channel.sh "${{ matrix.channel }}" "${{ needs.resolve.outputs.tag }}"
+          SMOKE_CHANNEL: ${{ matrix.channel }}
+          SMOKE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: ci/scripts/smoke-channel.sh "$SMOKE_CHANNEL" "$SMOKE_TAG"

@@ -19,7 +19,9 @@
 # mounted volume must be world-readable; if `alint fix` needs to
 # write, pass `-u $(id -u):$(id -g)` to keep host ownership.
 
-FROM gcr.io/distroless/static-debian12:nonroot
+# Digest-pinned (multi-arch index for :nonroot) so a tag move cannot change
+# the base under a release; Dependabot's docker lane moves the digest.
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:afa5c872c891853ca7fcf1f12c3edb23f7eeef36189728842dd51042ff57f7ab
 
 ARG TARGETARCH
 

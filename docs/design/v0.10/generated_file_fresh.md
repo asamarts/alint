@@ -18,7 +18,7 @@ opt-in primitive" note) and the per-repo tracker in
 [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`generated_file_fresh` row: airflow, spark, kubernetes,
 nixpkgs, protobuf, cpython, pytorch, tensorflow). Canonical
-scope: [`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+scope: [`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#4).
 
 ## The non-goal tension (read this first)

@@ -19,7 +19,7 @@ The recommended path on macOS and Linux. The [asamarts/homebrew-alint](https://g
 ## install.sh (Linux + macOS)
 
 ```bash
-curl -sSL https://alint.org/install.sh | bash
+curl -fsSL https://alint.org/install.sh | bash
 ```
 
 Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarball from GitHub Releases, verifies its SHA-256, and installs to `$INSTALL_DIR` (default `~/.local/bin`). This path is shell-based, so it does not cover Windows; Windows users have [npm](#npm), [cargo](#cargo), or the manual tarball (see [Windows](#windows)).
@@ -27,7 +27,7 @@ Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarba
 Pin a specific version (and skip the "latest release" GitHub API lookup, which can rate-limit on shared CI egress IPs):
 
 ```bash
-ALINT_VERSION=v0.17.0 curl -sSL https://alint.org/install.sh | bash
+ALINT_VERSION=v0.17.0 curl -fsSL https://alint.org/install.sh | bash
 ```
 
 Supply-chain note: the installer verifies the SHA-256 of the release tarball it downloads, but the script itself is fetched from the `main` branch (`alint.org/install.sh` redirects there). To pin the installer too, point `curl` at a release tag instead of `main` (for example `https://raw.githubusercontent.com/asamarts/alint/v0.17.0/install.sh`), or download it from the [Releases page](https://github.com/asamarts/alint/releases) and review it before running.

@@ -38,7 +38,7 @@ this directory (`lsp_server.md`, `vscode_extension.md`,
 
 Order by demand × adopter surface. Per-repo citations + per-
 primitive evidence in [`../../development/launch-evidence.md`](../../development/launch-evidence.md);
-canonical scope reference in [`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push).
+canonical scope reference in [`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push).
 
 ## How to use this directory
 

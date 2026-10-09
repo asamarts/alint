@@ -27,8 +27,11 @@ jobs:
   # change-gates jobs (needs.changes.outputs.*) to keep PRs fast,
   # but a release must verify the whole tree regardless of the diff.
   #
-  # Parity with ci.yml correctness jobs: fmt, clippy, test, build,
-  # docs, dogfood, examples, shell-tests, deny. deny.sh bootstraps
+  # Parity with ci.yml correctness jobs: fmt, msrv (+ dep-floors), clippy,
+  # test, build, docs, dogfood (+ demo-drift), examples, shell-tests, deny.
+  # The MSRV leg matters most here: every published crate advertises
+  # `rust-version` from [workspace.package], so it must actually compile on
+  # that toolchain before publish-crates runs. deny.sh bootstraps
   # cargo-deny on demand so the license / supply-chain gate works on
   # ubuntu-latest too. Deliberately NOT here:
   #   audit       — audit.sh is advisory-only by design (never fails
@@ -44,7 +47,7 @@ jobs:
   # homebrew, publish-crates) `needs:` this job; if it fails, no
   # artefacts are published.
   preflight:
-    name: preflight (fmt/clippy/test/build/docs/dogfood/examples/shell/deny)
+    name: preflight (fmt/msrv/clippy/test/build/docs/dogfood/examples/shell/deny)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -89,12 +92,25 @@ jobs:
         run: bash ci/scripts/check-version-pins.sh --verify-action-tag
       - name: dogfood (alint check on its own repo)
         run: ci/scripts/dogfood.sh
+      - name: demo-drift (README demo GIF still tells the truth)
+        # dogfood.sh has just built target/release/alint; same pairing as
+        # ci.yml's Dogfood job.
+        run: ci/scripts/demo-drift.sh
       - name: examples-validate (every examples/*/.alint.yml)
         run: ci/scripts/examples-validate.sh
       - name: shell-tests (test-*.sh harnesses incl. homebrew golden)
         run: ci/scripts/shell-tests.sh
+      - name: packaging (install.sh / npm shim / Dockerfile / pre-commit hooks)
+        run: ci/scripts/packaging-check.sh
       - name: deny (licenses + bans + sources; advisories advisory)
         run: ci/scripts/deny.sh
+      - name: workspace dependency floors (<= workspace.package.version)
+        run: bash ci/scripts/check-workspace-dep-floors.sh
+      - name: msrv (cargo check on [workspace.package].rust-version)
+        # Last on purpose: msrv.sh installs the MSRV toolchain and checks with
+        # `cargo +<msrv>`, leaving the stable default untouched for the steps
+        # above. Gates build -> publish-crates via `needs: preflight`.
+        run: ci/scripts/msrv.sh
 
   build:
     name: build (${{ matrix.target }})
@@ -271,7 +287,16 @@ jobs:
       # lesson of v0.15.1, where a rejected SBOM attestation -- ordered BEFORE this
       # step -- skipped the Release even though crates.io + Docker had already
       # published, stranding a half-released version.
-      - name: create GitHub Release
+      #
+      # IDEMPOTENT for `gh run rerun <id> --failed`: if a LATER step of this job
+      # failed (docs-bundle dispatch, major-tag move) the Release already exists,
+      # and an unconditional `gh release create` would die here on the re-run,
+      # so the `needs: release` publishers (npm / PyPI / Homebrew / VS Code /
+      # JetBrains) would never run. When the Release exists, re-upload the same
+      # asset set with --clobber instead (the tarballs are the same build
+      # artifacts; SHA256SUMS + its fresh cosign bundle are regenerated above),
+      # then assert the published asset set is exactly the expected one.
+      - name: create (or, on re-run, refresh) the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -284,13 +309,27 @@ jobs:
           # alint.cdx.json) were staged / downloaded above and are already
           # recorded in SHA256SUMS by the aggregate step. SHA256SUMS.cosign.bundle
           # is the keyless signature over SHA256SUMS produced just above.
-          gh release create "$TAG" \
-            --repo "$REPO" \
-            --title "alint $TAG" \
-            --generate-notes \
-            install.sh SHA256SUMS SHA256SUMS.cosign.bundle \
-            THIRD-PARTY-LICENSES.html alint.cdx.json \
-            alint-*.tar.gz alint-*.tar.gz.sha256
+          assets=(install.sh SHA256SUMS SHA256SUMS.cosign.bundle
+                  THIRD-PARTY-LICENSES.html alint.cdx.json
+                  alint-*.tar.gz alint-*.tar.gz.sha256)
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::notice::Release ${TAG} already exists (job re-run); refreshing its assets with --clobber"
+            gh release upload "$TAG" --repo "$REPO" --clobber "${assets[@]}"
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "alint $TAG" \
+              --generate-notes \
+              "${assets[@]}"
+          fi
+          expected="$(printf '%s\n' "${assets[@]}" | sort)"
+          actual="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | sort)"
+          if [[ "$expected" != "$actual" ]]; then
+            echo "::error::Release ${TAG} asset set drifted from the expected set"
+            diff <(echo "$expected") <(echo "$actual") || true
+            exit 1
+          fi
+          echo "Release ${TAG} carries exactly the $(echo "$expected" | wc -l) expected assets."
 
       - name: attest build provenance for every asset in SHA256SUMS
         id: attest_provenance
@@ -336,7 +375,14 @@ jobs:
           # corrective build explicitly: docs-bundle always checks out the latest
           # *published* Release (now this one), rebuilds the bundle at the new
           # version, and pings the deploy hook -- so the guard clears on its own.
-          gh workflow run docs-bundle.yml --ref main
+          #
+          # NON-FATAL: the Release already exists at this point, and a failed
+          # dispatch must not fail this job (which would skip every `needs:
+          # release` publisher). The manual fallback is one command:
+          #   gh workflow run docs-bundle.yml --ref main
+          if ! gh workflow run docs-bundle.yml --ref main; then
+            echo "::warning::docs-bundle.yml dispatch failed; run 'gh workflow run docs-bundle.yml --ref main' manually or alint.org's STALE DOCS BUNDLE guard will block deploys."
+          fi
 
       - name: move the major tag (e.g. v0) to this release
         env:
@@ -573,6 +619,13 @@ jobs:
             fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
           "
           echo "==> package.json version set to $ver"
+          # Re-run safe: `npm publish` of an already-published version fails
+          # (E403), so a `gh run rerun --failed` after a later failure would red
+          # here. Skip when the registry already serves this exact version.
+          if [[ "$(npm view "@asamarts/alint@${ver}" version 2>/dev/null || true)" == "$ver" ]]; then
+            echo "::notice::@asamarts/alint@${ver} is already on npm; skipping publish (re-run)."
+            exit 0
+          fi
           # --provenance rides the OIDC id-token; with Trusted Publishing npm also
           # generates provenance automatically, so this is explicit-and-belt.
           npm publish --access public --provenance
@@ -636,6 +689,9 @@ jobs:
         uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
         with:
           attestations: true
+          # Re-run safe: wheels already on PyPI for this version are skipped
+          # instead of failing the job (PyPI files are immutable anyway).
+          skip-existing: true
 
   homebrew:
     name: bump Homebrew tap (asamarts/homebrew-alint)
@@ -665,11 +721,19 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.HOMEBREW_TAP_DEPLOY_KEY }}
 
-      - name: trust github.com host key
+      - name: trust github.com host key (pinned, not keyscanned)
+        # GitHub's PUBLISHED SSH host keys (docs.github.com "GitHub's SSH key
+        # fingerprints"; also `gh api meta --jq .ssh_keys`). Pinned rather than
+        # `ssh-keyscan`, which trusts whatever answers on first contact. If
+        # GitHub rotates a key, update these lines from that page.
         run: |
           set -euo pipefail
           mkdir -p ~/.ssh
-          ssh-keyscan github.com >> ~/.ssh/known_hosts
+          cat >> ~/.ssh/known_hosts <<'KNOWN_HOSTS'
+          github.com ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIOMqqnkVzrm0SdG6UOoqKLsabgH5C9okWi0dh2l9GKJl
+          github.com ecdsa-sha2-nistp256 AAAAE2VjZHNhLXNoYTItbmlzdHAyNTYAAAAIbmlzdHAyNTYAAABBBEmKSENjQEezOmxkZMy7opKgwFB9nkt5YRrYMjNuG5N87uRgg6CLrbo5wAdT/y6v0mKV0U2w0WZ2YB/++Tpockg=
+          github.com ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABgQCj7ndNxQowgcQnjshcLrqPEiiphnt+VTTvDP6mHBL9j1aNUkY4Ue1gvwnGLVlOhGeYrnZaMgRK6+PKCUXaDbC7qtbW8gIkhL7aGCsOr/C56SJMy/BCZfxd1nWzAOxSDPgVsmerOBYfNqltV9/hWCqBywINIR+5dIg6JTJ72pcEpEjcYgXkE2YEFXV1JHnsKgbLWNlhScqb2UmyRkQyytRLtL+38TGxkxCflmO+5Z8CSSNY7GidjMIZ7Q4zMjA2n1nGrlTDkzwDCsw+wqFPGQA179cnfGWOWRVruj16z6XyvxvjJwbz0wQZ75XK5tKSb7FNyeIEs4TT4jk+S4dhPeAUC5y+bDYirYgM4GC7uEnztnZyaVWQ7B381AK4Qdrwt51ZqExKbQpTUNn+EjqoTwvqNj4kqx5QUCI0ThS/YkOxJCXmPUWZbhjpCg56i+2aB6CmK2JGhn57K5mj0MNdBXA4/WnwH6XoPWJzK5Nyu2zB3nAZp+S5hpQs+p1vN1/wsjk=
+          KNOWN_HOSTS
 
       - name: clone tap
         run: git clone git@github.com:asamarts/homebrew-alint.git tap
@@ -719,7 +783,9 @@ jobs:
           #   OVSX_PAT — Open VSX access token (open-vsx.org → settings).
           # Expiring PATs (unlike the keyless crates.io / npm OIDC
           # publishes): if either 401s, rotate it and `gh run rerun <id>
-          # --failed` — no new tag needed (the .vsix is idempotent per version).
+          # --failed` — no new tag needed. Both publishes pass
+          # --skip-duplicate, so a registry that already has this version
+          # (the other one 401'd, or a later job failed) is a no-op, not a red.
           VSCE_PAT: ${{ secrets.VSCE_PAT }}
           OVSX_PAT: ${{ secrets.OVSX_PAT }}
           TAG: ${{ github.ref_name }}
@@ -742,8 +808,8 @@ jobs:
           npm run check-types
           npm run build
           # vsce/ovsx read VSCE_PAT/OVSX_PAT from the environment.
-          npx --no-install vsce publish --no-dependencies
-          npx --no-install ovsx publish --no-dependencies
+          npx --no-install vsce publish --no-dependencies --skip-duplicate
+          npx --no-install ovsx publish --no-dependencies --skip-duplicate
 
   publish-jetbrains:
     name: publish JetBrains plugin (Marketplace)
@@ -785,6 +851,15 @@ jobs:
           ver="${TAG#v}"
           # Pass the version to Gradle without editing the build file.
           echo "==> plugin version set to $ver"
+          # Re-run safe: the Marketplace rejects a duplicate version upload, so
+          # skip when its public plugin feed already lists this version. A feed
+          # lookup failure falls through to the publish (fail-open to the
+          # pre-guard behaviour, never to a silent skip).
+          feed="$(curl -fsS --retry 3 'https://plugins.jetbrains.com/plugins/list?pluginId=org.alint.lsp' || true)"
+          if grep -qF "<version>${ver}</version>" <<<"$feed"; then
+            echo "::notice::org.alint.lsp ${ver} is already on the JetBrains Marketplace; skipping publish (re-run)."
+            exit 0
+          fi
           # Use the pinned wrapper (./gradlew) so release matches what CI
           # validates, not the setup-action's provisioned Gradle.
           ./gradlew -PpluginVersion="$ver" publishPlugin

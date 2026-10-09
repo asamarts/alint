@@ -31,7 +31,7 @@ The npm package version tracks alint releases exactly: `npm install
 |---------|----------------------|
 | Linux   | x64, arm64 (musl)    |
 | macOS   | x64, arm64           |
-| Windows | x64                  |
+| Windows | x64 (arm64 runs the x64 binary under Windows 11 emulation) |
 
 For unsupported platforms, install via `cargo install alint`,
 [Homebrew](https://github.com/asamarts/alint#homebrew-macos--linuxbrew), or by

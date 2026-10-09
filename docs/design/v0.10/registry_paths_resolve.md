@@ -17,7 +17,7 @@ in [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`registry_paths_resolve` row: arrow, spark, dotnet, flutter,
 kubernetes, nixpkgs, node, protobuf, cpython, pytorch,
 rust-lang/rust, tensorflow, next.js). Canonical scope:
-[`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push).
+[`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push).
 
 ## Problem
 

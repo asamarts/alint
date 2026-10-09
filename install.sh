@@ -6,7 +6,7 @@
 # $HOME/.local/bin).
 #
 # Usage:
-#   curl -sSL https://alint.org/install.sh | bash
+#   curl -fsSL https://alint.org/install.sh | bash
 #
 # The one-liner fetches this script from the `main` branch (a moving ref). To pin
 # and/or read the installer itself before running, use a tag-pinned raw URL:
@@ -28,76 +28,15 @@
 
 set -euo pipefail
 
-REPO="${ALINT_REPO:-asamarts/alint}"
-VERSION="${ALINT_VERSION:-latest}"
-INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
-BINARY="alint"
-
-# ── Platform detection ───────────────────────────────────────────────
-
-OS="$(uname -s)"
-ARCH="$(uname -m)"
-case "${OS}-${ARCH}" in
-  Linux-x86_64)        TARGET="x86_64-unknown-linux-musl" ;;
-  Linux-aarch64|Linux-arm64) TARGET="aarch64-unknown-linux-musl" ;;
-  Darwin-x86_64)       TARGET="x86_64-apple-darwin" ;;
-  Darwin-arm64)        TARGET="aarch64-apple-darwin" ;;
-  *)
-    echo "error: unsupported platform ${OS}/${ARCH}"
-    echo "       on Windows, download the release tarball manually from:"
-    echo "       https://github.com/${REPO}/releases"
-    exit 1
-    ;;
-esac
-
-echo "==> Detected platform: ${OS}/${ARCH} → ${TARGET}"
-
-# ── Resolve version ──────────────────────────────────────────────────
-
-if [[ "${VERSION}" == "latest" ]]; then
-  echo "==> Resolving latest release tag"
-  # Fetch first so `set -o pipefail` does not trip on curl's SIGPIPE when
-  # awk exits early after the first match.
-  RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
-  VERSION=$(printf '%s\n' "${RELEASE_JSON}" \
-    | awk -F'"' '/"tag_name":/ {print $4; exit}')
-  if [[ -z "${VERSION}" ]]; then
-    echo "error: could not resolve latest release tag from github api"
-    echo "       try specifying ALINT_VERSION=v0.1.0 explicitly."
-    exit 1
-  fi
-  echo "==> Latest version: ${VERSION}"
-fi
-
-ARCHIVE="alint-${VERSION}-${TARGET}.tar.gz"
-BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
-ARCHIVE_URL="${BASE_URL}/${ARCHIVE}"
-SHA_URL="${ARCHIVE_URL}.sha256"
-
-# ── Download + verify ────────────────────────────────────────────────
-
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "${TMPDIR}"' EXIT
-
-echo "==> Downloading ${ARCHIVE_URL}"
-curl -fsSL -o "${TMPDIR}/${ARCHIVE}" "${ARCHIVE_URL}"
-curl -fsSL -o "${TMPDIR}/${ARCHIVE}.sha256" "${SHA_URL}"
-
-echo "==> Verifying SHA-256"
-cd "${TMPDIR}"
-if command -v sha256sum >/dev/null 2>&1; then
-  sha256sum -c "${ARCHIVE}.sha256"
-elif command -v shasum >/dev/null 2>&1; then
-  shasum -a 256 -c "${ARCHIVE}.sha256"
-else
-  echo "error: neither sha256sum nor shasum is available — cannot verify download"
-  exit 1
-fi
+# The whole script is function definitions until the single `main "$@"` call on
+# the LAST line: when piped (`curl ... | bash`), bash executes as it reads, so a
+# download truncated mid-stream ends inside a definition and runs nothing,
+# instead of running a partial install.
 
 # ── Optional signature verification (best-effort, cosign) ────────────
 # If cosign v3+ is present, verify the release's cosign-signed SHA256SUMS and
 # confirm this archive's digest is listed in it: authenticity, not just the
-# integrity the per-file .sha256 above already checked. Best-effort by default,
+# integrity main()'s per-file .sha256 check already gave. Best-effort by default,
 # NEVER a hard dependency: skipped (with a note) when cosign is absent or older
 # than v3 (the signature uses the new-format Sigstore bundle, which older cosign
 # cannot parse), when the release has no .cosign.bundle asset, or when
@@ -163,31 +102,103 @@ verify_signature() {
   fi
   echo "==> Signature OK (SHA256SUMS signed by ${REPO}'s release workflow)"
 }
-verify_signature
 
-# ── Extract + install ────────────────────────────────────────────────
+main() {
 
-echo "==> Extracting"
-tar -xzf "${ARCHIVE}"
+  REPO="${ALINT_REPO:-asamarts/alint}"
+  VERSION="${ALINT_VERSION:-latest}"
+  INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
+  BINARY="alint"
 
-STAGED_DIR="alint-${VERSION}-${TARGET}"
-if [[ ! -f "${STAGED_DIR}/${BINARY}" ]]; then
-  echo "error: binary not found at ${TMPDIR}/${STAGED_DIR}/${BINARY}"
-  exit 1
-fi
+  # ── Platform detection ───────────────────────────────────────────────
 
-mkdir -p "${INSTALL_DIR}"
-cp "${STAGED_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
-chmod +x "${INSTALL_DIR}/${BINARY}"
+  OS="$(uname -s)"
+  ARCH="$(uname -m)"
+  case "${OS}-${ARCH}" in
+    Linux-x86_64)        TARGET="x86_64-unknown-linux-musl" ;;
+    Linux-aarch64|Linux-arm64) TARGET="aarch64-unknown-linux-musl" ;;
+    Darwin-x86_64)       TARGET="x86_64-apple-darwin" ;;
+    Darwin-arm64)        TARGET="aarch64-apple-darwin" ;;
+    *)
+      echo "error: unsupported platform ${OS}/${ARCH}"
+      echo "       on Windows, download the release tarball manually from:"
+      echo "       https://github.com/${REPO}/releases"
+      exit 1
+      ;;
+  esac
 
-echo "==> Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
+  echo "==> Detected platform: ${OS}/${ARCH} → ${TARGET}"
 
-# Post-install sanity
-"${INSTALL_DIR}/${BINARY}" --version 2>/dev/null || true
+  # ── Resolve version ──────────────────────────────────────────────────
 
-# Helpful PATH hint
-if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
-  echo ""
-  echo "note: ${INSTALL_DIR} is not in your PATH. Add it to your shell rc, e.g.:"
-  echo "      echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.bashrc"
-fi
+  if [[ "${VERSION}" == "latest" ]]; then
+    echo "==> Resolving latest release tag"
+    # Fetch first so `set -o pipefail` does not trip on curl's SIGPIPE when
+    # awk exits early after the first match.
+    RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
+    VERSION=$(printf '%s\n' "${RELEASE_JSON}" \
+      | awk -F'"' '/"tag_name":/ {print $4; exit}')
+    if [[ -z "${VERSION}" ]]; then
+      echo "error: could not resolve latest release tag from github api"
+      echo "       try specifying ALINT_VERSION=v0.1.0 explicitly."
+      exit 1
+    fi
+    echo "==> Latest version: ${VERSION}"
+  fi
+
+  ARCHIVE="alint-${VERSION}-${TARGET}.tar.gz"
+  BASE_URL="https://github.com/${REPO}/releases/download/${VERSION}"
+  ARCHIVE_URL="${BASE_URL}/${ARCHIVE}"
+  SHA_URL="${ARCHIVE_URL}.sha256"
+
+  # ── Download + verify ────────────────────────────────────────────────
+
+  TMPDIR=$(mktemp -d)
+  trap 'rm -rf "${TMPDIR}"' EXIT
+
+  echo "==> Downloading ${ARCHIVE_URL}"
+  curl -fsSL -o "${TMPDIR}/${ARCHIVE}" "${ARCHIVE_URL}"
+  curl -fsSL -o "${TMPDIR}/${ARCHIVE}.sha256" "${SHA_URL}"
+
+  echo "==> Verifying SHA-256"
+  cd "${TMPDIR}"
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum -c "${ARCHIVE}.sha256"
+  elif command -v shasum >/dev/null 2>&1; then
+    shasum -a 256 -c "${ARCHIVE}.sha256"
+  else
+    echo "error: neither sha256sum nor shasum is available — cannot verify download"
+    exit 1
+  fi
+
+  verify_signature
+
+  # ── Extract + install ────────────────────────────────────────────────
+
+  echo "==> Extracting"
+  tar -xzf "${ARCHIVE}"
+
+  STAGED_DIR="alint-${VERSION}-${TARGET}"
+  if [[ ! -f "${STAGED_DIR}/${BINARY}" ]]; then
+    echo "error: binary not found at ${TMPDIR}/${STAGED_DIR}/${BINARY}"
+    exit 1
+  fi
+
+  mkdir -p "${INSTALL_DIR}"
+  cp "${STAGED_DIR}/${BINARY}" "${INSTALL_DIR}/${BINARY}"
+  chmod +x "${INSTALL_DIR}/${BINARY}"
+
+  echo "==> Installed ${BINARY} to ${INSTALL_DIR}/${BINARY}"
+
+  # Post-install sanity
+  "${INSTALL_DIR}/${BINARY}" --version 2>/dev/null || true
+
+  # Helpful PATH hint
+  if ! echo ":${PATH}:" | grep -q ":${INSTALL_DIR}:"; then
+    echo ""
+    echo "note: ${INSTALL_DIR} is not in your PATH. Add it to your shell rc, e.g.:"
+    echo "      echo 'export PATH=\"${INSTALL_DIR}:\$PATH\"' >> ~/.bashrc"
+  fi
+}
+
+main "$@"

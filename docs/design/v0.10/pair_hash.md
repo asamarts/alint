@@ -20,7 +20,7 @@ FIPS is the highest-stakes use case (CMVP submission references
 the file format)") and the per-repo tracker in
 [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`pair_hash` row: golang-go, kubernetes, tokio). Canonical
-scope: [`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+scope: [`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#8; "Hash of file A appears … in file B").
 
 ## Problem

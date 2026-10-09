@@ -1,5 +1,5 @@
 ---
-status: proposed
+status: accepted
 date: 2026-07-07
 decision-makers: asamarts
 ---
@@ -8,10 +8,11 @@ decision-makers: asamarts
 
 ## Status
 
-Proposed. (One of: Proposed | Accepted | Rejected | Deprecated | Superseded by ADR-NNNN.)
+Accepted. (One of: Proposed | Accepted | Rejected | Deprecated | Superseded by ADR-NNNN.)
 
-Proposed pending the companion many-to-many rule-category design doc and its
-implementation phases.
+Implemented: the `alint rules` catalog namespace (`list`, `categories`, later
+`show`) shipped in v0.14.0 alongside the many-to-many rule categories, with
+`alint rules show` and `--search` refinements in v0.15.0 (see CHANGELOG.md).
 
 ## Context
 
@@ -31,7 +32,8 @@ Two forces complicate the answer.
    does alint offer?" A category browser is inherently catalog-scoped and
    config-independent, so it fits neither command.
 
-2. **The command grammar is flat verbs.** All eleven subcommands (`check`, `list`,
+2. **The command grammar is flat verbs.** All eleven subcommands at the time of
+   this decision (`alint rules` made it twelve) (`check`, `list`,
    `explain`, `fix`, `baseline`, `facts`, `init`, `export-agents-md`, `suggest`,
    `validate-config`, `lsp`) are single-level verbs. There is no noun-namespace with
    sub-subcommands. Introducing discovery risks two failure modes: overloading

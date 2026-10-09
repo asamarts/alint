@@ -50,6 +50,7 @@ jobs:
       examples: ${{ steps.detect.outputs.examples }}
       editors: ${{ steps.detect.outputs.editors }}
       supply_chain: ${{ steps.detect.outputs.supply_chain }}
+      packaging: ${{ steps.detect.outputs.packaging }}
       runner: ${{ steps.route.outputs.runner }}
       hosted: ${{ steps.route.outputs.hosted }}
     steps:
@@ -132,7 +133,11 @@ jobs:
   # Cargo's MSRV-aware resolver can only protect this contract when every
   # dependency declares an accurate rust-version. Compile the full workspace
   # with the exact minimum so an undeclared dependency bump cannot make the
-  # documented `rust-version` silently untrue.
+  # documented `rust-version` silently untrue. The toolchain is DERIVED from
+  # Cargo.toml's [workspace.package].rust-version by msrv.sh (never
+  # hand-copied here; test-ci-pr-routing.sh rejects a literal pin). The same
+  # script runs in release.yml's preflight. This job also owns the other
+  # workspace-manifest contract, the [workspace.dependencies] API floors.
   msrv:
     name: MSRV
     needs: [changes, fmt]
@@ -142,13 +147,17 @@ jobs:
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: msrv
+        run: echo "toolchain=$(ci/scripts/msrv.sh --print)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: 1.88.0
+          toolchain: ${{ steps.msrv.outputs.toolchain }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: ci-msrv
-      - run: cargo check --locked --workspace --all-targets
+      - run: ci/scripts/msrv.sh
+      - name: workspace dependency floors (<= workspace.package.version)
+        run: bash ci/scripts/check-workspace-dep-floors.sh
 
   clippy:
     name: Clippy
@@ -201,12 +210,14 @@ jobs:
           key: ci-audit
       - run: ci/scripts/audit.sh
 
+  # Also on `supply_chain`: deny.toml (the license / bans / sources policy)
+  # flips only supply_chain, so a PR loosening the policy must still run it.
   deny:
     name: Deny
     needs: [changes, fmt]
     if: >-
       !cancelled() && !failure()
-      && needs.changes.outputs.rust == 'true'
+      && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.supply_chain == 'true')
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -417,6 +428,23 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: ci/scripts/shell-tests.sh
 
+  # ── Distribution packaging ───────────────────────────────────────
+  # install.sh, npm/**, Dockerfile (+ .dockerignore) and .pre-commit-hooks.yaml
+  # trigger no Rust/docs pipeline, so they get their own cheap hosted job:
+  # shellcheck + syntax, node --check, hook-manifest schema, and a docker build
+  # against a placeholder-staged context. release.yml's preflight runs the same
+  # script unconditionally.
+  packaging:
+    name: Packaging
+    needs: changes
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.packaging == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: ci/scripts/packaging-check.sh
+
   # ── Editor extensions ─────────────────────────────────────────────
   # Build the packaged extensions that otherwise only build at release
   # time: typecheck + bundle the VS Code TS extension, wasm-build the Zed
@@ -477,6 +505,7 @@ jobs:
       - bench-smoke
       - examples
       - shell-tests
+      - packaging
       - editors
     # Keep this bookkeeping job hosted even after local capacity returns. An
     # always-run summary must not remain queued on an unavailable local runner
@@ -485,12 +514,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
           RUST_CHANGED: ${{ needs.changes.outputs.rust }}
           DOCS_CHANGED: ${{ needs.changes.outputs.docs }}
           BENCH_CHANGED: ${{ needs.changes.outputs.bench }}
           EXAMPLES_CHANGED: ${{ needs.changes.outputs.examples }}
           EDITORS_CHANGED: ${{ needs.changes.outputs.editors }}
           SUPPLY_CHAIN_CHANGED: ${{ needs.changes.outputs.supply_chain }}
+          PACKAGING_CHANGED: ${{ needs.changes.outputs.packaging }}
           SECRETS_INVENTORY_RESULT: ${{ needs.secrets-inventory.result }}
           FMT_RESULT: ${{ needs.fmt.result }}
           MSRV_RESULT: ${{ needs.msrv.result }}
@@ -506,4 +537,5 @@ jobs:
           EXAMPLES_RESULT: ${{ needs.examples.result }}
           SHELL_TESTS_RESULT: ${{ needs.shell-tests.result }}
           EDITORS_RESULT: ${{ needs.editors.result }}
+          PACKAGING_RESULT: ${{ needs.packaging.result }}
         run: ci/scripts/summary.sh
