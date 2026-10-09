@@ -17,6 +17,7 @@ mod export_agents_md;
 mod init;
 mod progress;
 mod rules;
+mod safe_write;
 mod suggest;
 
 use cli::{Cli, Command, RulesCommand};
@@ -386,7 +387,9 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
     // than we do.
     for name in [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"] {
         let candidate = path.join(name);
-        if candidate.is_file() {
+        // `symlink_metadata`, not `is_file`: a (dangling) symlink counts as
+        // existing, so `init` never writes through it to a file elsewhere.
+        if std::fs::symlink_metadata(&candidate).is_ok() {
             bail!(
                 "{} already exists; refusing to overwrite. Delete it first if you really \
                  want to regenerate, or edit it directly.",
@@ -398,7 +401,7 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
     let detection = init::detect(path, monorepo);
     let body = init::render(&detection);
     let target = path.join(".alint.yml");
-    std::fs::write(&target, &body).with_context(|| format!("writing {}", target.display()))?;
+    safe_write::create_new(&target, body.as_bytes(), "config")?;
 
     let summary = init::render_summary(&detection);
     if summary.is_empty() {
@@ -906,6 +909,15 @@ fn cmd_baseline(
         },
         Path::to_path_buf,
     );
+    // A baseline path that comes from the repo (the `baseline:` key or the
+    // default) is untrusted: it must stay inside the repository and not be a
+    // symlink, so a crafted config / committed link can't make `alint
+    // baseline` overwrite a file elsewhere. An explicit `--output` is the
+    // user's own choice and may point anywhere (still never through a link).
+    // A repo-derived baseline path (the `baseline:` key or the default) is
+    // confined to the repository; an explicit `--output` is not. Neither may
+    // be a symlink. Checked up front so a bad target fails before the run.
+    safe_write::check_output(&root, &out_path, output.is_some(), "baseline")?;
 
     let engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
@@ -977,8 +989,13 @@ fn cmd_baseline(
         }
     }
 
-    std::fs::write(&out_path, new_baseline.to_jsonl())
-        .with_context(|| format!("writing baseline {}", out_path.display()))?;
+    safe_write::write_output(
+        &root,
+        &out_path,
+        new_baseline.to_jsonl().as_bytes(),
+        output.is_some(),
+        "baseline",
+    )?;
     if !cli.quiet {
         let n = new_baseline.entries.len();
         let total = new_baseline.total();
