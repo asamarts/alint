@@ -18,6 +18,10 @@
 
 use serde_json::Value;
 
+#[cfg(test)]
+mod xml_scan_tests;
+mod yaml_value;
+
 /// Maximum INPUT size any structured format will parse into a value tree. The read
 /// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed tree
 /// costs far more RSS: measured up to ~30x the input for attribute-heavy XML
@@ -143,7 +147,7 @@ impl Format {
                         crate::yaml_depth::MAX_YAML_EXPANSION_NODES
                     ));
                 }
-                yaml_to_value(text)
+                yaml_value::yaml_to_value(text)
             }
             Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),
             Self::Xml => xml_to_value(text),
@@ -537,151 +541,6 @@ fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), St
         }
     }
     Ok(())
-}
-
-/// Parse YAML into the family's `serde_json::Value` tree, with two YAML-specific
-/// adaptations a plain `serde_yaml_ng -> serde_json::Value` deserialize lacks:
-///
-/// - **Merge keys** (YAML 1.1 `<<: *base` / `<<: [*a, *b]`) are APPLIED: the
-///   merged mapping's keys join the enclosing mapping, explicit keys win, and in
-///   a sequence of merges earlier mappings take precedence (yaml.org/type/merge).
-///   Left literal, `<<` hid every merged key from a query -- a `yaml_path_equals`
-///   false positive and a `yaml_path_absent` bypass. A `<<` whose value is not a
-///   mapping (or a sequence of them) stays an ordinary key.
-/// - **Custom tags** (AWS `CloudFormation` `!Ref` / `!GetAtt` / `!Sub`, GitLab CI
-///   `!reference`, ...) are DROPPED and the tagged value kept, so `!Ref Bucket`
-///   queries as `"Bucket"` and `!GetAtt [B, Arn]` as `["B", "Arn"]`. (`serde_json`
-///   has no tag representation; previously any tag made the whole file a parse
-///   error.) Core tags (`!!str`, `!!int`, ...) keep their usual meaning.
-///
-/// Everything else is exactly the plain deserialize -- scalars go through
-/// `serde_json::Value`'s own visitor, keys are read as strings the same way, and a
-/// duplicate key keeps its last value -- which a test pins on untagged documents.
-fn yaml_to_value(text: &str) -> std::result::Result<Value, String> {
-    use serde::de::DeserializeSeed as _;
-    YamlJson
-        .deserialize(serde_yaml_ng::Deserializer::from_str(text))
-        .map_err(|e| e.to_string())
-}
-
-/// The [`yaml_to_value`] seed / visitor: builds a `serde_json::Value`, applying
-/// merge keys and stripping custom tags (which `serde_yaml_ng` surfaces as an
-/// enum: variant = tag, newtype payload = the tagged node).
-#[derive(Clone, Copy)]
-struct YamlJson;
-
-impl<'de> serde::de::DeserializeSeed<'de> for YamlJson {
-    type Value = Value;
-    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
-        d.deserialize_any(self)
-    }
-}
-
-/// A mapping key, read exactly as `serde_json::Value` reads one (`deserialize_str`).
-struct YamlKey;
-
-impl<'de> serde::de::DeserializeSeed<'de> for YamlKey {
-    type Value = String;
-    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<String, D::Error> {
-        d.deserialize_str(self)
-    }
-}
-
-impl serde::de::Visitor<'_> for YamlKey {
-    type Value = String;
-    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("a string key")
-    }
-    fn visit_str<E>(self, v: &str) -> Result<String, E> {
-        Ok(v.to_owned())
-    }
-    fn visit_string<E>(self, v: String) -> Result<String, E> {
-        Ok(v)
-    }
-}
-
-/// Scalars are delegated to `serde_json::Value`'s own visitor, so number / null /
-/// non-finite-float handling is identical to the plain deserialize.
-macro_rules! yaml_json_scalar {
-    ($($method:ident($ty:ty) => $de:ident;)*) => {$(
-        fn $method<E: serde::de::Error>(self, v: $ty) -> Result<Value, E> {
-            serde::Deserialize::deserialize(serde::de::value::$de::<E>::new(v))
-        }
-    )*};
-}
-
-impl<'de> serde::de::Visitor<'de> for YamlJson {
-    type Value = Value;
-    fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.write_str("any YAML value")
-    }
-    yaml_json_scalar! {
-        visit_bool(bool) => BoolDeserializer;
-        visit_i64(i64) => I64Deserializer;
-        visit_u64(u64) => U64Deserializer;
-        visit_i128(i128) => I128Deserializer;
-        visit_u128(u128) => U128Deserializer;
-        visit_f64(f64) => F64Deserializer;
-    }
-    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<Value, E> {
-        Ok(Value::String(v.to_owned()))
-    }
-    fn visit_string<E: serde::de::Error>(self, v: String) -> Result<Value, E> {
-        Ok(Value::String(v))
-    }
-    fn visit_none<E: serde::de::Error>(self) -> Result<Value, E> {
-        Ok(Value::Null)
-    }
-    fn visit_unit<E: serde::de::Error>(self) -> Result<Value, E> {
-        Ok(Value::Null)
-    }
-    fn visit_some<D: serde::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
-        d.deserialize_any(self)
-    }
-    fn visit_newtype_struct<D: serde::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
-        d.deserialize_any(self)
-    }
-    fn visit_seq<A: serde::de::SeqAccess<'de>>(self, mut seq: A) -> Result<Value, A::Error> {
-        let mut out = Vec::new();
-        while let Some(v) = seq.next_element_seed(self)? {
-            out.push(v);
-        }
-        Ok(Value::Array(out))
-    }
-    fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
-        let mut out = serde_json::Map::new();
-        while let Some(key) = map.next_key_seed(YamlKey)? {
-            let value = map.next_value_seed(self)?;
-            out.insert(key, value);
-        }
-        // Apply a merge key. The merged values were built by this same visitor,
-        // so their own merges are already resolved (nested merges compose).
-        let mergeable = match out.get("<<") {
-            Some(Value::Object(_)) => true,
-            Some(Value::Array(items)) => items.iter().all(Value::is_object),
-            _ => false,
-        };
-        if mergeable && let Some(merge) = out.remove("<<") {
-            let sources = match merge {
-                Value::Array(items) => items,
-                single => vec![single],
-            };
-            for source in sources {
-                if let Value::Object(entries) = source {
-                    for (k, v) in entries {
-                        out.entry(k).or_insert(v);
-                    }
-                }
-            }
-        }
-        Ok(Value::Object(out))
-    }
-    fn visit_enum<A: serde::de::EnumAccess<'de>>(self, data: A) -> Result<Value, A::Error> {
-        use serde::de::VariantAccess as _;
-        // A custom tag: drop it (the variant name) and keep the tagged node.
-        let (_tag, variant) = data.variant::<serde::de::IgnoredAny>()?;
-        variant.newtype_variant_seed(self)
-    }
 }
 
 /// Parse XML into the same `serde_json::Value` tree the rest of
@@ -1211,147 +1070,6 @@ mod tests {
         // and report the *strict* parser's message.
         let err = Format::Json.parse("{ \"x\": 1, \"y\" }").unwrap_err();
         assert!(err.contains("expected"), "strict error preserved: {err}");
-    }
-
-    #[test]
-    fn xml_depth_scan_does_not_count_comments_cdata_or_self_closing() {
-        // The pre-scan must not over-count: comment/CDATA contents and
-        // self-closing tags don't add nesting, so valid shallow docs pass.
-        assert!(
-            xml_within_parse_limits(
-                "<r><!-- <a><a><a> --><c/><![CDATA[ <b><b> ]]><d attr=\"x>y\"/></r>"
-            )
-            .is_ok()
-        );
-        // A genuinely deep run is rejected with a depth message.
-        let deep = format!("{}{}", "<a>".repeat(300), "</a>".repeat(300));
-        let err = xml_within_parse_limits(&deep).unwrap_err();
-        assert!(err.contains("depth"), "depth rejection: {err}");
-        // Real manifest depth is fine.
-        assert!(xml_within_parse_limits(
-            "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"
-        )
-        .is_ok());
-    }
-
-    /// Parse `doc` with the REAL roxmltree on a huge stack (so a deep but
-    /// legal document survives) and return its maximum element depth, or
-    /// `None` when roxmltree rejects it.
-    fn roxmltree_max_depth(doc: &str) -> Option<usize> {
-        let doc = doc.to_owned();
-        std::thread::Builder::new()
-            .stack_size(512 * 1024 * 1024)
-            .spawn(move || {
-                let parsed = roxmltree::Document::parse(&doc).ok()?;
-                parsed
-                    .descendants()
-                    .filter(roxmltree::Node::is_element)
-                    .map(|n| n.ancestors().filter(roxmltree::Node::is_element).count())
-                    .max()
-            })
-            .expect("spawn big-stack probe thread")
-            .join()
-            .expect("probe thread")
-    }
-
-    #[test]
-    fn xml_depth_scan_lexer_agrees_with_roxmltree_at_every_skip_boundary() {
-        // GATE for the depth pre-scan's lexer parity: each fixture hides a
-        // `</a>` inside a region roxmltree treats as opaque (a PI runs to `?>`,
-        // not the first `>`; a comment's `-->` search starts AFTER `<!--`, so
-        // `<!--->` does not close it). If the pre-scan's view of where that
-        // region ends disagrees with roxmltree's, the hidden `</a>` cancels
-        // each real `<a>` and a document far past `MAX_XML_DEPTH` slips through
-        // to a recursive parse that ABORTS the process at scale. Each fixture is
-        // probed against the real parser to prove it is legal and over-deep.
-        let n = MAX_XML_DEPTH + 72;
-        let fixtures = [
-            ("pi-with-gt", "<a><?p ></a>?>"),
-            ("pi-gt-only", "<a><?p >></a>?>"),
-            ("comment-dash-gt", "<a><!---></a>-->"),
-            ("cdata-gt", "<a><![CDATA[ ]> </a> ]]>"),
-            ("comment-gt", "<a><!-- > </a> -->"),
-        ];
-        for (name, unit) in fixtures {
-            let doc = format!("<r>{}{}</r>", unit.repeat(n), "</a>".repeat(n));
-            let real = roxmltree_max_depth(&doc)
-                .unwrap_or_else(|| panic!("{name}: fixture must be legal XML"));
-            assert!(
-                real > MAX_XML_DEPTH,
-                "{name}: fixture is over-deep ({real})"
-            );
-            assert!(
-                xml_within_parse_limits(&doc).is_err(),
-                "{name}: the pre-scan must reject a {real}-deep document"
-            );
-        }
-        // The XML declaration's attribute values may legally hold `?>`; the
-        // scan must not end the declaration there (and must still accept it).
-        let decl = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><r a=\"?>\"><b/></r>";
-        assert!(roxmltree_max_depth(decl).is_some());
-        assert!(xml_within_parse_limits(decl).is_ok());
-    }
-
-    #[test]
-    fn xml_pi_hidden_close_bomb_is_a_parse_error_not_an_abort() {
-        // The reported reproducer at full scale: 100 000 `<a>` levels whose
-        // closes are each hidden in a `<?p ></a>?>` PI. It must surface as one
-        // ordinary parse error, never a stack-overflow abort (exit 134).
-        let n = 100_000;
-        let doc = format!("<r>{}{}</r>", "<a><?p ></a>?>".repeat(n), "</a>".repeat(n));
-        let err = Format::Xml.parse(&doc).unwrap_err();
-        assert!(err.contains("depth"), "rejected by the depth guard: {err}");
-    }
-
-    #[test]
-    fn xml_depth_scan_never_hides_markup_behind_a_runaway_quote() {
-        // roxmltree rejects `<` anywhere inside a tag (even in a quoted value),
-        // so an unterminated quote must not let the pre-scan skip the elements
-        // that follow it: every `<a>` after it stays visible and counted.
-        let doc = format!("<r b=\"{}", "<a>".repeat(MAX_XML_DEPTH + 10));
-        assert!(xml_within_parse_limits(&doc).is_err());
-    }
-
-    proptest::proptest! {
-        /// Lexer parity as a property: for any document roxmltree ACCEPTS, the
-        /// pre-scan never sees it as shallower than the real tree -- probing the
-        /// scan with a ceiling one below the true depth must reject. Fragments
-        /// are biased toward every opaque-region boundary (PI, comment, CDATA,
-        /// quotes, the XML declaration) so a boundary mismatch that hides a
-        /// close tag surfaces as a shrunk counterexample.
-        #[test]
-        fn xml_depth_scan_never_undercounts_a_document_roxmltree_accepts(
-            frags in proptest::collection::vec(
-                proptest::sample::select(vec![
-                    "<a>", "</a>", "<a/>", "<a b=\"", "\">", "'", "\"", "<?p ", "?>",
-                    ">", "-", "<!--", "-->", "<![CDATA[", "]]>", "]", "?", "x", " ",
-                    "</a>", "<a>", "<a c='>'>", "<?xml version=\"1.0\"?>",
-                ]),
-                0..40,
-            )
-        ) {
-            let doc = format!("<r>{}</r>", frags.concat());
-            if let Ok(parsed) = roxmltree::Document::parse(&doc) {
-                // roxmltree's RECURSION depth (what overflows): every enclosing
-                // element, plus the element itself when it has content (a
-                // childless element may be `<a/>`, which does not recurse).
-                let real = parsed
-                    .descendants()
-                    .filter(roxmltree::Node::is_element)
-                    .map(|n| {
-                        let with_self = n.ancestors().filter(roxmltree::Node::is_element).count();
-                        if n.has_children() { with_self } else { with_self - 1 }
-                    })
-                    .max()
-                    .unwrap_or(0);
-                if real > 0 {
-                    proptest::prop_assert!(
-                        xml_within_limits(&doc, real - 1).is_err(),
-                        "scan under-counts {real}-deep doc: {doc}"
-                    );
-                }
-            }
-        }
     }
 
     #[test]
@@ -1992,76 +1710,6 @@ mod tests {
             ok,
             "an at-limit XML document must parse on a 2 MiB worker stack"
         );
-    }
-
-    #[test]
-    fn yaml_merge_keys_are_applied_not_kept_as_a_literal_key() {
-        // Regression: `<<: *base` stayed a literal "<<" key, so
-        // `yaml_path_equals $.derived.x` was a false positive and
-        // `yaml_path_absent $.derived.secret` a bypass (the merged key hid
-        // under "<<"). YAML 1.1 merge keys are applied; explicit keys win.
-        let doc = "base: &b {x: 1, y: 2, secret: s}\n\
-                   derived:\n  <<: *b\n  y: 3\n";
-        let v = Format::Yaml.parse(doc).unwrap();
-        assert_eq!(v["derived"]["x"], json!(1));
-        assert_eq!(v["derived"]["y"], json!(3), "an explicit key overrides");
-        assert_eq!(v["derived"]["secret"], json!("s"));
-        assert!(v["derived"].get("<<").is_none(), "no literal merge key");
-        // A sequence of merges: earlier mappings take precedence.
-        let doc = "a: &a {k: 1}\nb: &b {k: 2, j: 2}\nc:\n  <<: [*a, *b]\n";
-        let v = Format::Yaml.parse(doc).unwrap();
-        assert_eq!(v["c"], json!({"k": 1, "j": 2}));
-        // Nested merges resolve through every level.
-        let doc = "base: &b {x: 1}\nmid: &m {<<: *b, y: 2}\ntop: {<<: *m, z: 3}\n";
-        let v = Format::Yaml.parse(doc).unwrap();
-        assert_eq!(v["top"], json!({"x": 1, "y": 2, "z": 3}));
-        // A `<<` whose value is not a mapping is kept as an ordinary key.
-        let v = Format::Yaml.parse("a:\n  <<: plain\n").unwrap();
-        assert_eq!(v["a"]["<<"], json!("plain"));
-    }
-
-    #[test]
-    fn yaml_custom_tags_are_stripped_not_a_parse_error() {
-        // Regression: a custom tag (CloudFormation `!Ref`/`!GetAtt`, GitLab CI
-        // `!reference`) made the whole file a parse error. The tag is dropped
-        // and the tagged value kept.
-        let doc = "Resources:\n  B:\n    Properties:\n      Name: !Ref BucketName\n      \
-                   Arn: !GetAtt [B, Arn]\n      Sub: !Sub\n        - x-${A}\n        - {A: 1}\n\
-                   job:\n  script: !reference [.setup, script]\n";
-        let v = Format::Yaml.parse(doc).unwrap();
-        let p = &v["Resources"]["B"]["Properties"];
-        assert_eq!(p["Name"], json!("BucketName"));
-        assert_eq!(p["Arn"], json!(["B", "Arn"]));
-        assert_eq!(p["Sub"], json!(["x-${A}", {"A": 1}]));
-        assert_eq!(v["job"]["script"], json!([".setup", "script"]));
-        // Core tags keep their usual meaning.
-        let v = Format::Yaml
-            .parse("a: !!str 123\nb: !!int \"7\"\n")
-            .unwrap();
-        assert_eq!(v["a"], json!("123"));
-    }
-
-    #[test]
-    fn yaml_conversion_matches_the_plain_serde_path_on_untagged_documents() {
-        // The tag/merge-aware conversion must not change anything else: on
-        // documents without tags or merge keys it equals a plain
-        // `serde_yaml_ng -> serde_json::Value` deserialize, value for value.
-        let docs = [
-            "a: 1\nb: -2\nc: 1.5\nd: 18446744073709551615\ne: .inf\nf: .nan\ng: ~\nh: true\n",
-            "a: 'q'\nb: \"x\\ty\"\nc: yes\nd: 0x1F\ne: 2002-12-14\nf: 1e3\n",
-            "list: [1, two, {three: 3}]\nnested: {a: {b: [null, false]}}\n",
-            "1: int-key\ntrue: bool-key\n3.5: float-key\n",
-            "a: 1\na: 2\n",
-            "- x\n- y: [1, 2]\n",
-            "anchor: &a [1, 2]\nref: *a\n",
-            "plain\n",
-            "s: |\n  multi\n  line\nf: >-\n  folded\n  text\n",
-        ];
-        for doc in docs {
-            let plain =
-                serde_yaml_ng::from_str::<serde_json::Value>(doc).map_err(|e| e.to_string());
-            assert_eq!(Format::Yaml.parse(doc), plain, "diverged on {doc:?}");
-        }
     }
 
     #[test]
