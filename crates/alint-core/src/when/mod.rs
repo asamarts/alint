@@ -380,6 +380,30 @@ mod tests {
     }
 
     #[test]
+    fn double_negation_parses() {
+        assert!(check("not not facts.is_rust"));
+        assert!(!check("not not not facts.is_rust"));
+    }
+
+    #[test]
+    fn negative_integer_literals() {
+        assert!(check("facts.n_files > -1"));
+        assert!(check("-5 < facts.n_files"));
+        assert!(!check("facts.n_files == -42"));
+        assert!(check("-3 in [-1, -2, -3]"));
+    }
+
+    #[test]
+    fn long_flat_chain_reports_complexity_not_nesting() {
+        let src = vec!["facts.is_rust"; 80].join(" or ");
+        let err = parse(&src).unwrap_err().to_string();
+        assert!(err.contains("too complex"), "{err}");
+        // A long `not` run is bounded the same way (it nests the AST).
+        let src = format!("{}facts.is_rust", "not ".repeat(100_000));
+        assert!(parse(&src).is_err());
+    }
+
+    #[test]
     fn integer_comparison() {
         assert!(check("facts.n_files > 0"));
         assert!(check("facts.n_files == 42"));

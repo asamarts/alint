@@ -74,10 +74,24 @@ impl Parser {
     /// never re-enter `parse_expr`, where the paren/bracket re-entry guard
     /// lives (H5 flat-chain gap).
     fn bump_depth(&mut self) -> Result<(), WhenError> {
+        self.bump_depth_for("expression nests too deeply (max depth 64)")
+    }
+
+    /// [`bump_depth`](Self::bump_depth) for an operator chain, whose limit is
+    /// hit by a long FLAT `a or b or …` list rather than visible nesting; say
+    /// so, or the "nests too deeply" message points at the wrong cause.
+    fn bump_chain_depth(&mut self) -> Result<(), WhenError> {
+        self.bump_depth_for(
+            "expression is too complex: more than 64 combined levels of nesting and \
+             chained `and` / `or` / `not` terms; split it with a fact",
+        )
+    }
+
+    fn bump_depth_for(&mut self, message: &str) -> Result<(), WhenError> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
             self.depth -= 1;
-            return Err(self.err("expression nests too deeply (max depth 64)"));
+            return Err(self.err(message));
         }
         Ok(())
     }
@@ -106,7 +120,7 @@ impl Parser {
             // its own single nesting bump, so chain depth correctly accumulates
             // along the spine (H5 flat-chain gap). Restoring it here would let a
             // ~MAX_DEPTH² tree parse and abort on Drop — DO NOT.
-            self.bump_depth()?;
+            self.bump_chain_depth()?;
             let right = self.parse_and()?;
             left = WhenExpr::Or(Box::new(left), Box::new(right));
         }
@@ -119,7 +133,7 @@ impl Parser {
             self.advance();
             // See `parse_or`: bump per `and` node and never restore, so `depth`
             // bounds the AST's cumulative structural depth (Drop/eval-safe).
-            self.bump_depth()?;
+            self.bump_chain_depth()?;
             let right = self.parse_not()?;
             left = WhenExpr::And(Box::new(left), Box::new(right));
         }
@@ -129,7 +143,11 @@ impl Parser {
     fn parse_not(&mut self) -> Result<WhenExpr, WhenError> {
         if matches!(self.peek(), Some(Tok::KwNot)) {
             self.advance();
-            let inner = self.parse_cmp()?;
+            // Recurse so `not not x` parses. Each `not` nests the AST (and this
+            // call stack) by one, so it counts against the depth bound like a
+            // chain operator: never restored.
+            self.bump_chain_depth()?;
+            let inner = self.parse_not()?;
             return Ok(WhenExpr::Not(Box::new(inner)));
         }
         self.parse_cmp()

@@ -156,8 +156,12 @@ pub(super) fn lex(src: &str) -> Result<Vec<(Tok, usize)>, WhenError> {
                 i += 1;
                 out.push((Tok::Str(s), start));
             }
-            c if c.is_ascii_digit() => {
-                let mut j = i;
+            // A `-` directly before a digit is a negative literal: the language
+            // has no binary minus, so `facts.n > -1` is unambiguous.
+            c if c.is_ascii_digit()
+                || (c == b'-' && bytes.get(i + 1).is_some_and(u8::is_ascii_digit)) =>
+            {
+                let mut j = i + 1;
                 while j < bytes.len() && bytes[j].is_ascii_digit() {
                     j += 1;
                 }
