@@ -271,7 +271,16 @@ jobs:
       # lesson of v0.15.1, where a rejected SBOM attestation -- ordered BEFORE this
       # step -- skipped the Release even though crates.io + Docker had already
       # published, stranding a half-released version.
-      - name: create GitHub Release
+      #
+      # IDEMPOTENT for `gh run rerun <id> --failed`: if a LATER step of this job
+      # failed (docs-bundle dispatch, major-tag move) the Release already exists,
+      # and an unconditional `gh release create` would die here on the re-run,
+      # so the `needs: release` publishers (npm / PyPI / Homebrew / VS Code /
+      # JetBrains) would never run. When the Release exists, re-upload the same
+      # asset set with --clobber instead (the tarballs are the same build
+      # artifacts; SHA256SUMS + its fresh cosign bundle are regenerated above),
+      # then assert the published asset set is exactly the expected one.
+      - name: create (or, on re-run, refresh) the GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
@@ -284,13 +293,27 @@ jobs:
           # alint.cdx.json) were staged / downloaded above and are already
           # recorded in SHA256SUMS by the aggregate step. SHA256SUMS.cosign.bundle
           # is the keyless signature over SHA256SUMS produced just above.
-          gh release create "$TAG" \
-            --repo "$REPO" \
-            --title "alint $TAG" \
-            --generate-notes \
-            install.sh SHA256SUMS SHA256SUMS.cosign.bundle \
-            THIRD-PARTY-LICENSES.html alint.cdx.json \
-            alint-*.tar.gz alint-*.tar.gz.sha256
+          assets=(install.sh SHA256SUMS SHA256SUMS.cosign.bundle
+                  THIRD-PARTY-LICENSES.html alint.cdx.json
+                  alint-*.tar.gz alint-*.tar.gz.sha256)
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "::notice::Release ${TAG} already exists (job re-run); refreshing its assets with --clobber"
+            gh release upload "$TAG" --repo "$REPO" --clobber "${assets[@]}"
+          else
+            gh release create "$TAG" \
+              --repo "$REPO" \
+              --title "alint $TAG" \
+              --generate-notes \
+              "${assets[@]}"
+          fi
+          expected="$(printf '%s\n' "${assets[@]}" | sort)"
+          actual="$(gh release view "$TAG" --repo "$REPO" --json assets --jq '.assets[].name' | sort)"
+          if [[ "$expected" != "$actual" ]]; then
+            echo "::error::Release ${TAG} asset set drifted from the expected set"
+            diff <(echo "$expected") <(echo "$actual") || true
+            exit 1
+          fi
+          echo "Release ${TAG} carries exactly the $(echo "$expected" | wc -l) expected assets."
 
       - name: attest build provenance for every asset in SHA256SUMS
         id: attest_provenance
@@ -336,7 +359,14 @@ jobs:
           # corrective build explicitly: docs-bundle always checks out the latest
           # *published* Release (now this one), rebuilds the bundle at the new
           # version, and pings the deploy hook -- so the guard clears on its own.
-          gh workflow run docs-bundle.yml --ref main
+          #
+          # NON-FATAL: the Release already exists at this point, and a failed
+          # dispatch must not fail this job (which would skip every `needs:
+          # release` publisher). The manual fallback is one command:
+          #   gh workflow run docs-bundle.yml --ref main
+          if ! gh workflow run docs-bundle.yml --ref main; then
+            echo "::warning::docs-bundle.yml dispatch failed; run 'gh workflow run docs-bundle.yml --ref main' manually or alint.org's STALE DOCS BUNDLE guard will block deploys."
+          fi
 
       - name: move the major tag (e.g. v0) to this release
         env:
