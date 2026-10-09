@@ -4,7 +4,7 @@
 //! Repository content is untrusted: a `baseline: ../elsewhere` key or a
 //! committed symlink at the default baseline path must not let
 //! `alint baseline` overwrite a file outside the repository. Writes go
-//! through [`write_in_root`], which
+//! through [`write_output`], which (for a repo-derived path)
 //!
 //! 1. rejects a target that lexically escapes `root` (`..`, absolute),
 //! 2. rejects a target whose (existing) parent directory canonically
