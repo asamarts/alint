@@ -18,6 +18,7 @@ pub mod jsonpath_diagnostics;
 mod level;
 pub mod located_fix;
 mod pathsafe;
+pub mod process;
 pub mod proposed_fix;
 mod registry;
 mod report;
