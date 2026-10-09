@@ -103,7 +103,7 @@ Fix: `file_append` — append declared content.
 
 File contents must NOT match a regex.
 
-<!-- alint:since=0.17.1 -->
+<!-- alint:since=0.18.0 -->
 The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact.
 <!-- /alint:since -->
 
@@ -113,7 +113,7 @@ The pattern is matched against the raw bytes, so a file that is not valid UTF-8 
 
 The first N lines must match a regex (line-oriented). For a byte-level prefix check, prefer `file_starts_with`.
 
-<!-- alint:since=0.17.1 -->
+<!-- alint:since=0.18.0 -->
 A leading UTF-8 BOM is not part of the header: the lines are read after it, which is where both fixes insert the header, so a `^`-anchored pattern matches a BOM file and the fix converges.
 <!-- /alint:since -->
 
@@ -191,7 +191,7 @@ Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in 
 
 ## Structured query
 
-JSONPath queries over structured documents per [RFC 9535](https://datatracker.ietf.org/doc/html/rfc9535). JSON / YAML / TOML / XML / dotenv / properties / INI / HCL targets coerce into the same `serde_json::Value` tree, so a single rule works across all eight formats — Kubernetes manifests, GitHub Actions workflows, `package.json`, `Cargo.toml`, `pyproject.toml`, Maven `pom.xml`, .NET `.csproj` / `.props` / `.targets`, `.env` / `.properties` / `.ini` / `.cfg`, and Terraform / Nomad `.tf` / `.tfvars` / `.hcl` / `.nomad` files. JSON/YAML/TOML coerce through serde; XML maps via the [XML-mapping convention](#xml-mapping) documented below; a `.env` file maps to a flat `{ KEY: "value" }` object of literal strings (no `${VAR}` expansion), auto-detected by filename (`.env` / `.env.*`; pass `format: dotenv` for other names). In `cross_file` value relations a `${VAR}` value is skipped by the non-literal filter, so use `dotenv_path_*` for a literal comparison. A Java `.properties` file likewise maps to a flat object of literal strings; dotted keys stay ONE key, so query with bracket notation (`$['db.host']`). An INI / `.cfg` file maps to a 2-level `{ section: { key: "value" } }` object of literal strings (pre-section keys hoist to the top level, and a key repeated within one scope becomes a file-order array), so a `[server]` section's `port` is `$['server']['port']`. HCL (Terraform / Nomad / Packer) maps via `hcl-rs`, which is JSON-native: a block nests by its type then labels (`resource "aws_instance" "web" { … }` is `$.resource.aws_instance.web`), values keep their HCL type (a number stays a number, so a numeric `equals:` needs no quotes; `hcl-rs` normalizes a `1.0` in the file to `1`, which `equals:` treats as the same number), and an unevaluated expression (`var.x`, `${…}`, a function call) arrives as an opaque string. A block label containing a dash needs bracket notation (`$.resource.aws_instance['my-web']`). A block type appearing once is an object but repeated is an array (the same cardinality footgun as [XML](#xml-mapping)). Because `hcl-rs` is a recursive-descent parser with no depth limit of its own, a document that nests too deeply (in structure OR in expressions/parentheses/interpolation) or that exceeds a size bound is rejected as one parse-error violation rather than being allowed to overflow the stack. JSON parsing is **JSONC-tolerant**: a `.json` file that carries `//` or `/* … */` comments or trailing commas (`tsconfig.json`, `.vscode/*.json`, and other JS/TS-ecosystem files) still parses — strict JSON is tried first (and is byte-identical), the tolerant retry only kicks in on failure, and a genuinely-malformed document still reports the strict parser's error. The same tolerance applies to the `json:` extract used by `cross_file` / `registry_paths_resolve`.
+JSONPath queries over structured documents per [RFC 9535](https://datatracker.ietf.org/doc/html/rfc9535). JSON / YAML / TOML / XML / dotenv / properties / INI / HCL targets coerce into the same `serde_json::Value` tree, so a single rule works across all eight formats — Kubernetes manifests, GitHub Actions workflows, `package.json`, `Cargo.toml`, `pyproject.toml`, Maven `pom.xml`, .NET `.csproj` / `.props` / `.targets`, `.env` / `.properties` / `.ini` / `.cfg`, and Terraform / Nomad `.tf` / `.tfvars` / `.hcl` / `.nomad` files. JSON/YAML/TOML coerce through serde; XML maps via the [XML-mapping convention](#xml-mapping) documented below; a `.env` file maps to a flat `{ KEY: "value" }` object of literal strings (no `${VAR}` expansion), auto-detected by filename (`.env` / `.env.*`; pass `format: dotenv` for other names). In `cross_file` value relations a `${VAR}` value is skipped by the non-literal filter, so use `dotenv_path_*` for a literal comparison. A Java `.properties` file likewise maps to a flat object of literal strings; dotted keys stay ONE key, so query with bracket notation (`$['db.host']`). An INI / `.cfg` file maps to a 2-level `{ section: { key: "value" } }` object of literal strings (pre-section keys hoist to the top level, and a key repeated within one scope becomes a file-order array), so a `[server]` section's `port` is `$['server']['port']`. HCL (Terraform / Nomad / Packer) maps via `hcl-rs`, which is JSON-native: a block nests by its type then labels (`resource "aws_instance" "web" { … }` is `$.resource.aws_instance.web`), values keep their HCL type (a number stays a number, so a numeric `equals:` needs no quotes — but write whole numbers as integers: `hcl-rs` normalizes a `1.0` in the file to `1`, and a JSON integer does not equal a float, so `equals: 1.0` would not match), and an unevaluated expression (`var.x`, `${…}`, a function call) arrives as an opaque string. A block label containing a dash needs bracket notation (`$.resource.aws_instance['my-web']`). A block type appearing once is an object but repeated is an array (the same cardinality footgun as [XML](#xml-mapping)). Because `hcl-rs` is a recursive-descent parser with no depth limit of its own, a document that nests too deeply (in structure OR in expressions/parentheses/interpolation) or that exceeds a size bound is rejected as one parse-error violation rather than being allowed to overflow the stack. JSON parsing is **JSONC-tolerant**: a `.json` file that carries `//` or `/* … */` comments or trailing commas (`tsconfig.json`, `.vscode/*.json`, and other JS/TS-ecosystem files) still parses — strict JSON is tried first (and is byte-identical), the tolerant retry only kicks in on failure, and a genuinely-malformed document still reports the strict parser's error. The same tolerance applies to the `json:` extract used by `cross_file` / `registry_paths_resolve`.
 
 **Value-mapping caveats (all formats).** The eight formats coerce into one `serde_json::Value` tree, but their data models differ, so a rule that works on one format can behave differently on another. Eight sharp edges:
 
@@ -203,7 +203,7 @@ JSONPath queries over structured documents per [RFC 9535](https://datatracker.ie
 - **Large / based numbers diverge.** An integer beyond `i64` becomes a lossy float in JSON but a parse error in YAML / TOML / HCL. TOML parses `0x1F` / `0o17` / `0b101` / `1_000` (underscores included) as numbers; YAML parses the base prefixes (`0x1F` -> 31, `0o17`, `0b101`) but keeps an underscored `1_000` as the string `"1_000"`; HCL **rejects** non-decimal literals like `0x1F` / `1_000` as parse errors; the stringly formats keep every such literal as a string.
 - **`*_path_matches` does not stringify native values.** A JSON / YAML / TOML / HCL number or boolean selected by a `*_path_matches` rule produces a "value is not a string" violation instead of being converted to its source spelling. Use `*_path_equals` with a typed `equals:` value when the semantic value matters. When the exact textual spelling matters (for example, a version encoded as a number), use `file_content_matches` against the source text instead.
 - **YAML input must contain one document.** Structured YAML rules currently parse one document per file. A `---`-separated multi-document manifest produces one parse-error violation; exclude that file from structured rules or use a text rule when the convention spans a multi-document stream.
-<!-- alint:since=0.17.1 -->
+<!-- alint:since=0.18.0 -->
 - **YAML merge keys are applied; custom tags are dropped.** A YAML 1.1 merge key (`<<: *base`, or `<<: [*a, *b]`) is resolved before querying: the merged keys appear in the enclosing mapping (explicit keys win; in a merge list, earlier mappings win), so `$.derived.x` sees a merged `x` and no literal `<<` key exists. A `<<` whose value is not a mapping stays an ordinary key. A custom tag (CloudFormation `!Ref` / `!GetAtt`, GitLab CI `!reference`, ...) is dropped and the tagged value kept, so `!Ref Bucket` queries as `"Bucket"` and `!GetAtt [B, Arn]` as `["B", "Arn"]`, instead of the file failing to parse.
 <!-- /alint:since -->
 
@@ -217,8 +217,8 @@ Query a structured document with a JSONPath expression and assert every match de
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
 - Unparseable files — one violation per file (not silently skipped).
-<!-- alint:since=0.17.1 -->
-- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. There is no other coercion: a string `"1"` never equals the number `1`.
+<!-- alint:since=0.18.0 -->
+- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
 <!-- /alint:since -->
 
 <a id="xml-mapping"></a>
@@ -332,7 +332,7 @@ Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a lin
 
 Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
 
-<!-- alint:since=0.17.1 -->
+<!-- alint:since=0.18.0 -->
 Every in-scope file is scanned, including invalid-UTF-8 and binary-looking (NUL-bearing) ones, so neither a junk byte nor a NUL byte can hide a control. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
 <!-- /alint:since -->
 
@@ -344,7 +344,7 @@ Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leadin
 
 As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
 
-<!-- alint:since=0.17.1 -->
+<!-- alint:since=0.18.0 -->
 Like `no_bidi_controls`, binary-looking (NUL-bearing) files are scanned too; such a finding is reported but not auto-fixed.
 <!-- /alint:since -->
 
@@ -356,7 +356,11 @@ Like `no_bidi_controls`, binary-looking (NUL-bearing) files are scanned too; suc
 
 **Categories:** Encoding, Text hygiene
 
-Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer strips a leading UTF-8 BOM (a stacked run of them in one pass); a UTF-16 / UTF-32 BOM is reported but not auto-fixed, since removing it without transcoding the file would corrupt it (the byte-level text fixers likewise leave UTF-16 / UTF-32 files alone).
+Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer strips whichever BOM is detected.
+
+<!-- alint:since=0.18.0 -->
+As of v0.18, the fixer strips only a leading UTF-8 BOM (a stacked run of them in one pass); a UTF-16 / UTF-32 BOM is reported but not auto-fixed, since removing it without transcoding the file would corrupt it (the byte-level text fixers likewise leave UTF-16 / UTF-32 files alone).
+<!-- /alint:since -->
 
 ---
 
@@ -392,7 +396,7 @@ Checks that reject tree shapes which work on one OS but break checkouts elsewher
 
 Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.
 
-<!-- alint:since=0.17.1 -->
+<!-- alint:since=0.18.0 -->
 Directories count too: a file `Lib` beside a directory `lib/`, or directories `Docs/` + `docs/`, collide. A collision is reported once, at the shallowest colliding level, not again for every path beneath it.
 <!-- /alint:since -->
 
@@ -408,7 +412,7 @@ The rejected forms are:
 - Trailing dots (`foo.`) or trailing spaces (`foo `) — Windows silently strips these on checkout.
 - Reserved chars: `<`, `>`, `:`, `"`, `|`, `?`, `*`.
 
-<!-- alint:since=0.17.1 -->
+<!-- alint:since=0.18.0 -->
 Per Microsoft's naming rules the check also rejects `COM0` / `LPT0` and the superscript-digit ports (`COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`); a reserved name followed by spaces before its extension (`CON .txt`); control characters U+0000 to U+001F (tab included); and a `\` inside a path component (a separator on Windows).
 <!-- /alint:since -->
 
@@ -678,7 +682,11 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
 
 **Categories:** Cross-file
 
-Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. `nodes` (a glob) selects the graph's files. The `edges` block takes one of two extractors: `from_content` (extract one reference per match — `extract` is the same one-of as `registry_paths_resolve`: `toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` JSONPath, `lines`, `regex` capture group 1 — then `resolve` it to a path, `relative_to_file` default or `relative_to_repo_root`) for the reference-graph modes, or `derive_target` (`{ from: <regex on the node path>, to: <template, e.g. $1.pb.go> }`) for the `fresh` codegen-freshness mode **or** the `no_dangling` derived-sibling-existence mode. Bare module names, absolute paths, URLs, and computed/interpolated references are **dropped, not mis-resolved** (resolving module *names* is the package-graph non-goal — nodes stay path-based). `require` is a closed set — three bare-string modes and three configured map modes: `acyclic` (no dependency cycle among the nodes; each set of mutually-dependent files -- a strongly connected component -- is reported once, naming every file on any of its cycles, and a component that is one simple cycle is rendered as its path); `no_dangling` (every path-shaped edge must resolve to a path that exists on disk — the doc-cross-link / generic `markdown_paths_resolve` integrity check; with `edges.derive_target` it instead asserts each node's *derived* sibling exists, e.g. every `licenses/X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` (no node is unreferenced by another node, except those matching a `roots:` glob — the registry / staging orphan detector); `{ forbidden_edges: [{ from, to }] }` (one violation per edge whose source matches `from` and resolved target matches `to` — the whole-repo layering firewall, where `import_gate` is the cheap per-file version); `{ no_orphans: { roots: [...] } }` (the `no_orphans` form with declared entry points); and `{ fresh: { hash, marker } }` (needs `edges.derive_target`: the generated file must embed the source's current `hash` digest, captured by `marker` group 1 — content-hash, never mtime; the alint-native form of generate-then-`git diff`, with no generator run). Pure-parse and extraction-based: it never shells out. Cross-file (whole-index).
+Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. `nodes` (a glob) selects the graph's files. The `edges` block takes one of two extractors: `from_content` (extract one reference per match — `extract` is the same one-of as `registry_paths_resolve`: `toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` JSONPath, `lines`, `regex` capture group 1 — then `resolve` it to a path, `relative_to_file` default or `relative_to_repo_root`) for the reference-graph modes, or `derive_target` (`{ from: <regex on the node path>, to: <template, e.g. $1.pb.go> }`) for the `fresh` codegen-freshness mode **or** the `no_dangling` derived-sibling-existence mode. Bare module names, absolute paths, URLs, and computed/interpolated references are **dropped, not mis-resolved** (resolving module *names* is the package-graph non-goal — nodes stay path-based). `require` is a closed set — three bare-string modes and three configured map modes: `acyclic` (no dependency cycle among the nodes, each reported once as a rotation-canonical path list); `no_dangling` (every path-shaped edge must resolve to a path that exists on disk — the doc-cross-link / generic `markdown_paths_resolve` integrity check; with `edges.derive_target` it instead asserts each node's *derived* sibling exists, e.g. every `licenses/X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` (no node is unreferenced by another node, except those matching a `roots:` glob — the registry / staging orphan detector); `{ forbidden_edges: [{ from, to }] }` (one violation per edge whose source matches `from` and resolved target matches `to` — the whole-repo layering firewall, where `import_gate` is the cheap per-file version); `{ no_orphans: { roots: [...] } }` (the `no_orphans` form with declared entry points); and `{ fresh: { hash, marker } }` (needs `edges.derive_target`: the generated file must embed the source's current `hash` digest, captured by `marker` group 1 — content-hash, never mtime; the alint-native form of generate-then-`git diff`, with no generator run). Pure-parse and extraction-based: it never shells out. Cross-file (whole-index).
+
+<!-- alint:since=0.18.0 -->
+As of v0.18, `acyclic` reports each set of mutually dependent files (a strongly connected component) once, naming every file on any of its cycles; a component that is one simple cycle is still rendered as its path, so existing baselines keep matching.
+<!-- /alint:since -->
 
 ### `ordered_block`
 
