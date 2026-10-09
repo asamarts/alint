@@ -1219,11 +1219,11 @@ fn cmd_fix(
                 .collect(),
         };
         format
-            .write_fix_with_options(&applied_only, &mut out, opts)
+            .write_fix_report(&applied_only, &mut out, opts, dry_run)
             .context("writing output")?;
     } else {
         format
-            .write_fix_with_options(&report, &mut out, opts)
+            .write_fix_report(&report, &mut out, opts, dry_run)
             .context("writing output")?;
     }
     out.flush().ok();

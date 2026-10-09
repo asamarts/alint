@@ -23,7 +23,7 @@ pub use diff::write_fix_diff;
 pub use github::write_github;
 pub use gitlab::write_gitlab;
 pub use human::{wrap_message, write_fix_human, write_human};
-pub use json::{write_fix_json, write_json, write_json_with_baseline};
+pub use json::{write_fix_json, write_fix_json_with_mode, write_json, write_json_with_baseline};
 pub use junit::write_junit;
 pub use markdown::{write_fix_markdown, write_markdown};
 pub use sanitize::sanitize_terminal;
@@ -140,6 +140,20 @@ impl Format {
         w: &mut dyn Write,
         opts: HumanOptions,
     ) -> std::io::Result<()> {
+        self.write_fix_report(report, w, opts, false)
+    }
+
+    /// Like [`Format::write_fix_with_options`], for a run that may be a dry
+    /// run: the JSON report carries `dry_run` so a preview is
+    /// distinguishable from a real run. (The human and markdown renderers
+    /// already word dry-run outcomes as "would ...".)
+    pub fn write_fix_report(
+        self,
+        report: &FixReport,
+        w: &mut dyn Write,
+        opts: HumanOptions,
+        dry_run: bool,
+    ) -> std::io::Result<()> {
         match self {
             Self::Human
             | Self::Sarif
@@ -152,7 +166,7 @@ impl Format {
             // falls back to the human formatter so logs from
             // `alint fix --format=agent` still read sensibly.
             | Self::Agent => write_fix_human(report, w, opts),
-            Self::Json => write_fix_json(report, w),
+            Self::Json => write_fix_json_with_mode(report, dry_run, w),
             Self::Markdown => write_fix_markdown(report, w),
         }
     }

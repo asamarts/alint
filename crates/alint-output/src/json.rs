@@ -188,6 +188,10 @@ pub fn write_json_with_baseline(
 #[derive(Serialize)]
 struct JsonFixReport<'a> {
     schema_version: u32,
+    /// `true` for `alint fix --dry-run`: nothing was written, and every
+    /// `applied` item is what WOULD be applied. Distinguishes a preview from
+    /// a real run without parsing the human-oriented `detail` text.
+    dry_run: bool,
     summary: FixSummary,
     results: Vec<JsonFixRuleResult<'a>>,
 }
@@ -232,6 +236,17 @@ struct JsonFixItem<'a> {
 }
 
 pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<()> {
+    write_fix_json_with_mode(report, false, w)
+}
+
+/// [`write_fix_json`] for a run that may be a dry run: `dry_run` is emitted
+/// as the top-level `dry_run` field (statuses stay `applied` etc. for
+/// compatibility; `dry_run: true` says none of them were written).
+pub fn write_fix_json_with_mode(
+    report: &FixReport,
+    dry_run: bool,
+    w: &mut dyn Write,
+) -> std::io::Result<()> {
     let results: Vec<JsonFixRuleResult<'_>> = report
         .results
         .iter()
@@ -264,6 +279,7 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
         .collect();
     let out = JsonFixReport {
         schema_version: 1,
+        dry_run,
         summary: FixSummary {
             applied: report.applied(),
             skipped: report.skipped(),
