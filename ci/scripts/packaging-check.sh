@@ -35,6 +35,7 @@ if have node; then
   done
   node -e 'JSON.parse(require("fs").readFileSync("npm/package.json","utf8"))' \
     || bad "npm/package.json: invalid JSON"
+  bash ci/scripts/test-npm-shim.sh || bad "npm shim: os/cpu -> release target table"
 fi
 
 # ── .pre-commit-hooks.yaml ────────────────────────────────────────────
