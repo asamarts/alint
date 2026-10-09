@@ -1216,12 +1216,33 @@ impl Engine {
         // state), so its key leaves `final_keys` and it is dropped -> exit 0,
         // agreeing with `check`. Keeping it here would strand a phantom I/O error
         // on a clean tree.
+        //
+        // An `Applied` whose violation the converged pass STILL saw is not a
+        // resolution: the fix wrote something, but the rule's re-evaluation on
+        // the fresh tree reports the same violation (e.g. `file_create` made a
+        // gitignored `.env` the walker never indexes, or a `file_create.path`
+        // that differs from the rule's `paths:`). The lock above hid the converged
+        // pass's own item for that key, so without this demotion `fix` would print
+        // "applied" and exit 0 while `check` still fails. Demote it to a declined
+        // skip (the violation stands -> nonzero exit at `level: error`), keeping
+        // what was done in the reason so the user can see why it did not stick.
         if converged {
             for rr in &mut results {
                 rr.items.retain(|it| {
                     matches!(it.status, FixStatus::Applied(_))
                         || final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
                 });
+                for it in &mut rr.items {
+                    if let FixStatus::Applied(summary) = &it.status
+                        && final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
+                    {
+                        it.status = FixStatus::declined(format!(
+                            "fix ran ({summary}) but the violation still stands on re-check \
+                             (is the written path ignored, outside the rule's scope, or \
+                             different from the path the rule checks?)"
+                        ));
+                    }
+                }
             }
         }
         // A rule whose every item was superseded (and not re-emitted) drops out,
@@ -3084,12 +3105,42 @@ mod tests {
         // so an Applied for one node cannot lock-mask a standing Skipped for another.
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
-        let rule: Box<dyn Rule> = Box::new(MixedBatchRule {
-            id: "mixed".into(),
-            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
-            fixer: MixedBatchFixture,
-        });
-        let report = Engine::new(vec![rule], RuleRegistry::new())
+        let mixed = || -> Box<dyn Rule> {
+            Box::new(MixedBatchRule {
+                id: "mixed".into(),
+                scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+                fixer: MixedBatchFixture,
+            })
+        };
+        let count = |r: &FixReport, applied: bool| {
+            r.results
+                .iter()
+                .flat_map(|r| &r.items)
+                .filter(|i| matches!(i.status, FixStatus::Applied(_)) == applied)
+                .count()
+        };
+        // Within ONE pass (a dry run is single-pass): the real edit reports
+        // Applied, the identity edit a per-edit no-op Skipped.
+        let preview = Engine::new(vec![mixed()], RuleRegistry::new())
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                true,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert_eq!(
+            count(&preview, true),
+            1,
+            "only the real edit is Applied; the identity edit is a per-edit no-op"
+        );
+        assert_eq!(
+            count(&preview, false),
+            1,
+            "the identity edit is downgraded to Skipped"
+        );
+        let report = Engine::new(vec![mixed()], RuleRegistry::new())
             .fix(
                 tmp.path(),
                 &idx(&["a.txt"]),
@@ -3103,20 +3154,17 @@ mod tests {
             std::fs::read(tmp.path().join("a.txt")).unwrap(),
             b"X1234567"
         );
-        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
-        let applied = items
-            .iter()
-            .filter(|i| matches!(i.status, FixStatus::Applied(_)))
-            .count();
-        let skipped = items
-            .iter()
-            .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
-            .count();
+        // The fixture rule flags every `.txt` file unconditionally, so the
+        // converged pass still sees the 0..1 edit's key: the violation STANDS, so
+        // the earlier Applied must not survive as a success (audit 2026-10
+        // finding 1: never "applied" while the violation stands).
         assert_eq!(
-            applied, 1,
-            "only the real edit is Applied; the identity edit is a per-edit no-op"
+            count(&report, true),
+            0,
+            "an Applied whose violation the converged pass still sees is demoted"
         );
-        assert_eq!(skipped, 1, "the identity edit is downgraded to Skipped");
+        assert!(report.has_unfixable_errors());
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
         // Pre-req 1: two edits on one file get DISTINCT keys (range-keyed), not a
         // single `(rule, path)` that could lock-mask one behind the other.
         let keys: std::collections::HashSet<String> = items
@@ -3140,35 +3188,40 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
         let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
-        let report = engine
-            .fix(
-                tmp.path(),
-                &idx(&["a.txt"]),
-                &crate::WalkOptions::default(),
-                false,
-                Applicability::Safe,
-            )
-            .unwrap();
+        let run = |dry_run: bool| {
+            engine
+                .fix(
+                    tmp.path(),
+                    &idx(&["a.txt"]),
+                    &crate::WalkOptions::default(),
+                    dry_run,
+                    Applicability::Safe,
+                )
+                .unwrap()
+        };
+        let count = |r: &FixReport, applied: bool| {
+            r.results
+                .iter()
+                .flat_map(|r| &r.items)
+                .filter(|i| matches!(i.status, FixStatus::Applied(_)) == applied)
+                .count()
+        };
+        // Within ONE pass (dry run): the first edit of the group applies, the
+        // second (same isolation group) is a conflict skip.
+        let preview = run(true);
+        assert_eq!(count(&preview, true), 1);
+        assert_eq!(count(&preview, false), 1);
+        let report = run(false);
         // First edit (0..1 -> X) applied; the second (same group) is a conflict.
         assert_eq!(
             std::fs::read(tmp.path().join("a.txt")).unwrap(),
             b"X1234567"
         );
-        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
-        assert_eq!(
-            items
-                .iter()
-                .filter(|i| matches!(i.status, FixStatus::Applied(_)))
-                .count(),
-            1
-        );
-        assert_eq!(
-            items
-                .iter()
-                .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
-                .count(),
-            1
-        );
+        // The fixture rule flags the file unconditionally, so the converged pass
+        // still sees both edits' keys: nothing may be reported Applied while the
+        // violation stands (audit 2026-10 finding 1), and both items remain.
+        assert_eq!(count(&report, true), 0);
+        assert_eq!(count(&report, false), 2);
         // The batch applies on pass 1 and the identity re-collect on pass 2 nets
         // no change (the no-op downgrade), so the loop CONVERGES -- it must not
         // churn to the cap.
