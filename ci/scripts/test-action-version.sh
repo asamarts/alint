@@ -85,5 +85,68 @@ else
   fail=$((fail + 1))
 fi
 
+# Behavioural check of the Install step's install.sh source. Extract the step's
+# `run:` script from action.yml and execute it in a sandbox whose `curl` and
+# installer are stubs: a local `uses: ./` (empty action_ref) must run the
+# install.sh bundled beside action.yml (the commit under test) and never
+# fetch one from the network; a remote ref must fetch install.sh at that ref.
+sandbox=$(mktemp -d)
+trap 'rm -rf "$sandbox"' EXIT
+python3 - "$sandbox/install-step.sh" <<'PY'
+import sys
+import yaml
+
+action = yaml.safe_load(open('action.yml', encoding='utf-8'))
+step = next(s for s in action['runs']['steps'] if s.get('name') == 'Install alint')
+open(sys.argv[1], 'w', encoding='utf-8').write(step['run'])
+PY
+mkdir -p "$sandbox/action-path/action" "$sandbox/bin" "$sandbox/tmp"
+cp action/resolve-version.sh "$sandbox/action-path/action/"
+printf '#!/usr/bin/env bash\necho BUNDLED-INSTALLER\n' > "$sandbox/action-path/install.sh"
+cat > "$sandbox/bin/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "curl $*" >> "$CURL_LOG"
+out=""
+while [[ $# -gt 0 ]]; do
+  if [[ "$1" == "-o" ]]; then out="$2"; shift; fi
+  shift
+done
+printf '#!/usr/bin/env bash\necho FETCHED-INSTALLER\n' > "$out"
+STUB
+chmod +x "$sandbox/bin/curl"
+
+run_install_step() {
+  local action_ref=$1
+  : > "$sandbox/curl.log"
+  env PATH="$sandbox/bin:$PATH" CURL_LOG="$sandbox/curl.log" \
+    ALINT_VERSION="" ALINT_BAKED_VERSION="$baked_version" \
+    INSTALL_DIR="$sandbox/install" ACTION_REF="$action_ref" \
+    ACTION_PATH="$sandbox/action-path" SOURCE_REPO=asamarts/alint \
+    RUNNER_TEMP="$sandbox/tmp" GITHUB_PATH="$sandbox/github-path" \
+    bash "$sandbox/install-step.sh" 2>&1
+}
+
+local_out=$(run_install_step "")
+if grep -q BUNDLED-INSTALLER <<< "$local_out" && [[ ! -s "$sandbox/curl.log" ]]; then
+  echo "  ok: local action runs the bundled install.sh (no network fetch)"
+  pass=$((pass + 1))
+else
+  echo "  FAIL: local action did not run the bundled install.sh" >&2
+  echo "$local_out" >&2
+  cat "$sandbox/curl.log" >&2
+  fail=$((fail + 1))
+fi
+
+remote_out=$(run_install_step v9.8.7)
+if grep -q FETCHED-INSTALLER <<< "$remote_out" &&
+   grep -q 'raw.githubusercontent.com/asamarts/alint/v9.8.7/install.sh' "$sandbox/curl.log"; then
+  echo "  ok: remote action fetches install.sh at its pinned ref"
+  pass=$((pass + 1))
+else
+  echo "  FAIL: remote action did not fetch install.sh at its pinned ref" >&2
+  echo "$remote_out" >&2
+  fail=$((fail + 1))
+fi
+
 echo "[test-action-version] $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]
