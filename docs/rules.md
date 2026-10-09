@@ -350,7 +350,7 @@ Like `no_bidi_controls`, binary-looking (NUL-bearing) files are scanned too; suc
 
 **Categories:** Encoding, Text hygiene
 
-Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer strips whichever BOM is detected.
+Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer strips a leading UTF-8 BOM (a stacked run of them in one pass); a UTF-16 / UTF-32 BOM is reported but not auto-fixed, since removing it without transcoding the file would corrupt it (the byte-level text fixers likewise leave UTF-16 / UTF-32 files alone).
 
 ---
 

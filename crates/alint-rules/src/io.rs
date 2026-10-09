@@ -98,8 +98,17 @@ pub fn classify_bytes(bytes: &[u8]) -> Classification {
 /// (reorder / reindent / splice). The explicit full scan closes that (audit R2).
 /// `content_inspector` still supplies the broader statistical heuristics (encoding,
 /// control-char density) over its leading window.
+///
+/// A file that opens with a UTF-16 / UTF-32 byte-order mark counts too, NUL or
+/// not: its code units are 2 / 4 bytes wide, so every byte-level edit these
+/// fixers make (append a `\n`, drop a `0x20` byte, strip the 2-byte mark without
+/// transcoding) desynchronizes or corrupts it -- and UTF-16 text in non-Latin
+/// scripts (`中文` is `2D 4E 87 65`) carries no NUL for the check above to see.
 pub fn looks_binary(bytes: &[u8]) -> bool {
     if bytes.contains(&0) {
+        return true;
+    }
+    if crate::no_bom::detect_bom(bytes).is_some_and(|k| k != crate::no_bom::BomKind::Utf8) {
         return true;
     }
     let window = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
