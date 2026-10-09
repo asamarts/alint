@@ -261,9 +261,14 @@ impl Rule for StructuredPathRule {
                 }
                 let full = ctx.root.join(literal);
                 // Cap the read so a multi-GB file matched here can't OOM the
-                // run; over-cap or unreadable → skip (M3).
-                let Ok(bytes) = crate::io::read_capped(&full) else {
-                    continue;
+                // run; over-cap → skip (M3). A genuine read error fails CLOSED,
+                // matching `check`'s file-major dispatch (audit 2026-10 finding 7).
+                let bytes = match crate::io::read_capped(&full) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        violations.extend(crate::io::read_cap_error_violation(literal, &e));
+                        continue;
+                    }
                 };
                 violations.extend(self.evaluate_file(ctx, literal, &bytes)?);
             }
@@ -273,10 +278,15 @@ impl Rule for StructuredPathRule {
                     continue;
                 }
                 let full = ctx.root.join(&entry.path);
-                // Cap the read (multi-GB OOM guard, M3); permission / race /
-                // over-cap → silent skip, like other content rules.
-                let Ok(bytes) = crate::io::read_capped(&full) else {
-                    continue;
+                // Cap the read (multi-GB OOM guard, M3); race / over-cap → skip.
+                // A genuine read error fails CLOSED, matching `check`'s
+                // file-major dispatch (audit 2026-10 finding 7).
+                let bytes = match crate::io::read_capped(&full) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        violations.extend(crate::io::read_cap_error_violation(&entry.path, &e));
+                        continue;
+                    }
                 };
                 violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
             }

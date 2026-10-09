@@ -508,10 +508,13 @@ fn evaluate_one_per_file_rule(
                 .with_path(literal),
             ];
         }
-        Err(crate::io::ReadCapError::Io(_)) => {
-            // Mirror the rule-major behaviour: silent skip on read
-            // failure (permission flake, race with mid-walk delete).
-            return Vec::new();
+        Err(crate::io::ReadCapError::Io(e)) => {
+            // Mirror the rule-major behaviour: a mid-walk delete
+            // (`NotFound`) skips; a genuine read error fails CLOSED with
+            // a "could not read file" finding (audit 2026-10 finding 7).
+            return crate::io::io_error_violation(literal, &e)
+                .into_iter()
+                .collect();
         }
     };
     match pf.evaluate_file(ctx, literal, &bytes) {

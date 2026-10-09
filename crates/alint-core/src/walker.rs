@@ -38,7 +38,42 @@ pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
 /// alive and observable (M3). A genuine read error (permission, I/O) is logged
 /// at `warn` so it's observable with `-v` / `RUST_LOG` rather than silent (L7);
 /// a `NotFound` is a silent skip (the benign deleted-between-walk-and-read race).
+///
+/// A genuine read error is folded into `None` here; the per-file content
+/// dispatch (engine + [`crate::eval_per_file`]) uses [`read_for_analysis`]
+/// instead so it can fail CLOSED on it.
 pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
+    match read_for_analysis(path, size) {
+        AnalysisRead::Bytes(b) => Some(b),
+        AnalysisRead::Skip => None,
+        AnalysisRead::Unreadable(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
+            None
+        }
+    }
+}
+
+/// Outcome of [`read_for_analysis`]. A genuine read error is only logged at
+/// `debug` there: the per-file dispatch surfaces it as a finding instead.
+#[derive(Debug)]
+pub enum AnalysisRead {
+    /// The file's bytes (within [`MAX_ANALYZE_BYTES`]).
+    Bytes(Vec<u8>),
+    /// A deliberate, benign skip: the file vanished between the walk and the
+    /// read (`NotFound`), or it exceeds the analysis cap (logged at `warn`).
+    Skip,
+    /// A genuine read error (permission denied, I/O). The caller must surface
+    /// it: a content rule that silently passes a file it could not read is a
+    /// fail-open false negative (audit 2026-10 finding 7) -- a mode-000 file
+    /// with trailing whitespace read "All rules passed". See
+    /// [`crate::unreadable_file_violation`].
+    Unreadable(std::io::Error),
+}
+
+/// [`read_capped_or_skip`], but distinguishing a genuine read error
+/// ([`AnalysisRead::Unreadable`]) from a benign skip, so per-file content
+/// dispatch can report the former instead of passing the file.
+pub fn read_for_analysis(path: &Path, size: u64) -> AnalysisRead {
     if size > MAX_ANALYZE_BYTES {
         tracing::warn!(
             path = %path.display(),
@@ -46,7 +81,7 @@ pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
             cap = MAX_ANALYZE_BYTES,
             "skipping file larger than the analysis cap"
         );
-        return None;
+        return AnalysisRead::Skip;
     }
     // M3-F2 (TOCTOU): the walk-time `size` above is a fast reject only — it can
     // be stale, so a file that GREW past the cap between the walk and here would
@@ -55,7 +90,7 @@ pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
     // `size` is ALSO forwarded as the read buffer's preallocation hint — alint
     // already stat-ed it during the walk, so it costs nothing and lets the read
     // finish in one syscall (see `read_bounded`).
-    read_bounded(path, MAX_ANALYZE_BYTES, size)
+    read_bounded_classified(path, MAX_ANALYZE_BYTES, size)
 }
 
 /// Read a whole file bounded to `cap` bytes — TOCTOU-safe: the read itself
@@ -76,14 +111,24 @@ pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
 /// wall clock. Sizing the buffer up front restores the single-read behaviour
 /// `std::fs::read` had before the OOM cap. See
 /// docs/benchmarks/investigations/2026-07-v0.14-s2-harness-artifact/.
+#[cfg(test)]
 pub(crate) fn read_bounded(path: &Path, cap: u64, size_hint: u64) -> Option<Vec<u8>> {
+    match read_bounded_classified(path, cap, size_hint) {
+        AnalysisRead::Bytes(b) => Some(b),
+        AnalysisRead::Skip | AnalysisRead::Unreadable(_) => None,
+    }
+}
+
+/// The classifying core of `read_bounded` (see its docs for the TOCTOU bound
+/// and the preallocation hint).
+fn read_bounded_classified(path: &Path, cap: u64, size_hint: u64) -> AnalysisRead {
     use std::io::Read as _;
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AnalysisRead::Skip,
         Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
-            return None;
+            tracing::debug!(path = %path.display(), error = %e, "unreadable file");
+            return AnalysisRead::Unreadable(e);
         }
     };
     let prealloc = usize::try_from(size_hint.min(cap.saturating_add(1))).unwrap_or(0);
@@ -95,12 +140,12 @@ pub(crate) fn read_bounded(path: &Path, cap: u64, size_hint: u64) -> Option<Vec<
                 cap,
                 "skipping file larger than the analysis cap (grew past its walk-time size)"
             );
-            None
+            AnalysisRead::Skip
         }
-        Ok(_) => Some(buf),
+        Ok(_) => AnalysisRead::Bytes(buf),
         Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
-            None
+            tracing::debug!(path = %path.display(), error = %e, "unreadable file");
+            AnalysisRead::Unreadable(e)
         }
     }
 }

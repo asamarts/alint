@@ -717,14 +717,32 @@ impl Engine {
                     // analysis cap (from the index size, no extra
                     // stat) so a multi-GB blob can't OOM the run (M3).
                     // A genuinely-absent file (deleted mid-walk) skips
-                    // silently; a real read error (permission, I/O) or
-                    // an over-cap file is logged at `warn` so it isn't
-                    // silently mistaken for "file absent" (L7). Either
-                    // way the run stays resilient.
+                    // silently. A real read error (permission, I/O)
+                    // fails CLOSED: every applicable rule reports
+                    // "could not read file" on it at its own level, so
+                    // an unreadable in-scope file can never read as
+                    // "passed" (audit 2026-10 finding 7). `eval_per_file`
+                    // and the rules' own `evaluate` loops (the `fix`
+                    // read path) report the same, so `check` and `fix`
+                    // agree.
                     let abs = root.join(&file_entry.path);
-                    let Some(bytes) = crate::walker::read_capped_or_skip(&abs, file_entry.size)
-                    else {
-                        return Vec::new();
+                    let bytes = match crate::walker::read_for_analysis(&abs, file_entry.size) {
+                        crate::walker::AnalysisRead::Bytes(b) => b,
+                        crate::walker::AnalysisRead::Skip => return Vec::new(),
+                        crate::walker::AnalysisRead::Unreadable(e) => {
+                            return applicable
+                                .iter()
+                                .map(|(entry_idx, _)| {
+                                    (
+                                        *entry_idx,
+                                        crate::rule::unreadable_file_violation(
+                                            &file_entry.path,
+                                            &e,
+                                        ),
+                                    )
+                                })
+                                .collect();
+                        }
                     };
                     // 3. Dispatch. Every applicable rule sees the
                     // same byte slice; the file is read exactly once
@@ -2804,7 +2822,11 @@ fn mark_fixability(
             // does not apply here, so those violations are not "auto-fixable".
             let applies_by_default = f.applicability().applies_at(Applicability::Safe);
             for v in &mut violations {
-                v.is_fixable = applies_by_default && f.can_fix(v);
+                // An unreadable-file finding is never auto-fixable: the fixer would
+                // hit the same read error, so `check` must not promise a fix.
+                v.is_fixable = applies_by_default
+                    && f.can_fix(v)
+                    && v.baseline_key.as_deref() != Some(crate::rule::UNREADABLE_FILE_KEY);
             }
             (violations, true)
         }

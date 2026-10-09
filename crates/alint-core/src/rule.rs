@@ -557,9 +557,10 @@ pub trait PerFileRule: Send + Sync + std::fmt::Debug {
 /// of them to a one-liner. The helper takes `&R: PerFileRule` so
 /// it inlines for static dispatch.
 ///
-/// Read failures (file deleted mid-walk, permission flake) skip the
-/// file silently to match the engine's file-major behaviour at
-/// `crate::engine` line ~506.
+/// A file deleted mid-walk (`NotFound`) or over the analysis cap is skipped;
+/// a genuine read error (permission, I/O) yields an
+/// [`unreadable_file_violation`] -- the same fail-closed outcome as the
+/// engine's file-major dispatch, so `check` and `fix` agree.
 pub fn eval_per_file<R: PerFileRule + ?Sized>(
     rule: &R,
     ctx: &Context<'_>,
@@ -571,14 +572,41 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
         }
         let full = ctx.root.join(&entry.path);
         // Skip a file larger than the analysis cap (index size, no extra
-        // stat) so a multi-GB blob can't OOM the run (M3).
-        let Some(bytes) = crate::walker::read_capped_or_skip(&full, entry.size) else {
-            continue;
-        };
-        violations.extend(rule.evaluate_file(ctx, &entry.path, &bytes)?);
+        // stat) so a multi-GB blob can't OOM the run (M3); a genuine read error
+        // fails CLOSED with a finding, matching the engine's per-file dispatch.
+        match crate::walker::read_for_analysis(&full, entry.size) {
+            crate::walker::AnalysisRead::Bytes(bytes) => {
+                violations.extend(rule.evaluate_file(ctx, &entry.path, &bytes)?);
+            }
+            crate::walker::AnalysisRead::Skip => {}
+            crate::walker::AnalysisRead::Unreadable(e) => {
+                violations.push(unreadable_file_violation(&entry.path, &e));
+            }
+        }
     }
     Ok(violations)
 }
+
+/// The finding a per-file content rule reports for an in-scope file it could
+/// not read (permission denied, I/O error): `could not read file: <err>`,
+/// anchored on the file, at the rule's level. Content rules fail CLOSED on a
+/// read error -- silently passing a file the rule never inspected is a false
+/// negative (audit 2026-10 finding 7: a mode-000 file with trailing whitespace
+/// read "All rules passed", exit 0). A `NotFound` (deleted between the walk and
+/// the read) and an over-cap file stay benign skips. The violation carries a
+/// fixed `baseline_key` so its fingerprint is stable (the file's content, which
+/// the default fingerprint would hash, is exactly what cannot be read).
+#[must_use]
+pub fn unreadable_file_violation(rel: &Path, err: &std::io::Error) -> Violation {
+    Violation::new(format!("could not read file: {err}"))
+        .with_path(Arc::<Path>::from(rel))
+        .with_baseline_key(UNREADABLE_FILE_KEY)
+}
+
+/// The `baseline_key` [`unreadable_file_violation`] stamps. The engine also
+/// keys on it to never tag such a finding `fixable` (the fixer would hit the
+/// same read error).
+pub(crate) const UNREADABLE_FILE_KEY: &str = "alint:unreadable-file";
 
 /// Runtime context for applying a fix.
 #[derive(Debug)]
