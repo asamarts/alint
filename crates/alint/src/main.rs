@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use alint_core::{Engine, FixReport, FixRuleResult, FixStatus, RuleRegistry, WalkOptions, walk};
-use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions};
+use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions, sanitize_terminal as term};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
@@ -44,7 +44,7 @@ fn main() -> ExitCode {
     match run(cli) {
         Ok(code) => code,
         Err(e) => {
-            eprintln!("alint: {e:#}");
+            eprintln!("alint: {}", term(&format!("{e:#}")));
             // Exit 3 for an internal alint error (a bug), 2 for a config /
             // CLI-usage error the user can fix (M11).
             if error_is_internal(&e) {
@@ -847,11 +847,15 @@ fn report_baseline_summary(
             match &s.violation.path {
                 Some(p) => eprintln!(
                     "  baselined: {}: [{}] {}",
-                    p.display(),
-                    s.rule_id,
-                    s.violation.message
+                    term(&p.display().to_string()),
+                    term(&s.rule_id),
+                    term(&s.violation.message)
                 ),
-                None => eprintln!("  baselined: [{}] {}", s.rule_id, s.violation.message),
+                None => eprintln!(
+                    "  baselined: [{}] {}",
+                    term(&s.rule_id),
+                    term(&s.violation.message)
+                ),
             }
         }
     }
@@ -1023,8 +1027,12 @@ fn report_notes_to_stderr(report: &alint_core::Report, show_notes: bool) {
         for result in &report.results {
             for note in &result.notes {
                 match &note.path {
-                    Some(p) => eprintln!("  note: {}: {}", p.display(), note.message),
-                    None => eprintln!("  note: {}", note.message),
+                    Some(p) => eprintln!(
+                        "  note: {}: {}",
+                        term(&p.display().to_string()),
+                        term(&note.message)
+                    ),
+                    None => eprintln!("  note: {}", term(&note.message)),
                 }
             }
         }
@@ -1332,13 +1340,13 @@ fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         write!(
             out,
             "{level_style}{label}{level_style:#}{pad} {}",
-            rule.id()
+            term(rule.id())
         )?;
         // Surface the rule's kind (and a fixable marker) in the human list,
         // matching what `list --format json` already carries — otherwise the
         // human inventory can't answer "what kind is this rule?".
         if !entry.kind().is_empty() {
-            write!(out, "  {dim}{}{dim:#}", entry.kind())?;
+            write!(out, "  {dim}{}{dim:#}", term(entry.kind()))?;
         }
         if entry.when.is_some() {
             write!(out, " {dim}[when]{dim:#}")?;
@@ -1349,6 +1357,7 @@ fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         if opts.show_docs
             && let Some(url) = rule.policy_url()
         {
+            let url = term(url);
             write!(out, "  {dim}({dim:#}{docs}{url}{docs:#}{dim}){dim:#}")?;
         }
         writeln!(out)?;
@@ -1468,7 +1477,7 @@ fn render_facts_human(
         writeln!(
             out,
             "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{value_str}{value_style:#}",
-            spec.id,
+            term(&spec.id),
         )?;
     }
     Ok(())
@@ -1602,9 +1611,9 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         Level::Info => style::INFO,
         Level::Off => style::DIM,
     };
-    writeln!(out, "{dim}id:        {dim:#} {}", rule.id())?;
+    writeln!(out, "{dim}id:        {dim:#} {}", term(rule.id()))?;
     if !entry.kind().is_empty() {
-        writeln!(out, "{dim}kind:      {dim:#} {}", entry.kind())?;
+        writeln!(out, "{dim}kind:      {dim:#} {}", term(entry.kind()))?;
         let cats = rules::categories_for_kind(entry.kind());
         if !cats.is_empty() {
             writeln!(out, "{dim}categories:{dim:#} {}", cats.join(", "))?;
@@ -1621,7 +1630,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
             writeln!(
                 out,
                 "{dim}docs:      {dim:#} {docs}https://alint.org/docs/rules/{family}/{}/{docs:#}",
-                rules::canonical_kind(entry.kind()),
+                term(rules::canonical_kind(entry.kind())),
             )?;
         }
     }
@@ -1631,7 +1640,11 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         rule.level().as_str(),
     )?;
     if let Some(paths) = entry.paths() {
-        writeln!(out, "{dim}paths:     {dim:#} {}", paths.render_scope())?;
+        writeln!(
+            out,
+            "{dim}paths:     {dim:#} {}",
+            term(&paths.render_scope())
+        )?;
     }
     if entry.expect_matches() {
         writeln!(out, "{dim}expect_matches:{dim:#} true")?;
@@ -1641,7 +1654,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     // the `options:` label, the rest indented under the value column. A
     // spec-less entry has no options, so the flattened iterator is empty.
     for (i, (k, v)) in entry.extra().into_iter().flatten().enumerate() {
-        let key = k.as_str().unwrap_or_default();
+        let key = term(k.as_str().unwrap_or_default());
         let val = match serde_json::to_value(v) {
             // A single-line string renders bare; a multi-line string (and every
             // non-string) renders as compact JSON, so an embedded newline cannot
@@ -1650,6 +1663,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
             Ok(jv) => jv.to_string(),
             Err(_) => String::new(),
         };
+        let val = term(&val);
         if i == 0 {
             writeln!(out, "{dim}options:   {dim:#} {dim}{key}:{dim:#} {val}")?;
         } else {
@@ -1663,7 +1677,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     if let Some(msg) = entry.message() {
         let msg = msg.trim_end_matches('\n');
         if !msg.trim().is_empty() {
-            let msg = msg.replace('\n', &format!("\n{}", " ".repeat(12)));
+            let msg = term(msg).replace('\n', &format!("\n{}", " ".repeat(12)));
             writeln!(out, "{dim}message:   {dim:#} {msg}")?;
         }
     }
@@ -1672,16 +1686,17 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     if opts.show_docs
         && let Some(url) = rule.policy_url()
     {
+        let url = term(url);
         writeln!(out, "{dim}policy_url:{dim:#} {docs}{url}{docs:#}")?;
     }
     if let Some(when) = entry.when_src() {
-        writeln!(out, "{dim}when:      {dim:#} {when}")?;
+        writeln!(out, "{dim}when:      {dim:#} {}", term(when))?;
     }
     if let Some(fixer) = rule.fixer() {
         writeln!(
             out,
             "{dim}fix:       {dim:#} {}",
-            alint_core::Fixer::describe(fixer)
+            term(&alint_core::Fixer::describe(fixer))
         )?;
     }
     out.flush().ok();
