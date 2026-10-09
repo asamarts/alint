@@ -20,6 +20,7 @@ alint-core.workspace = true
 alint-dsl.workspace = true
 alint-rules.workspace = true
 tower-lsp.workspace = true
+tower-service.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 # parking_lot::Mutex: a panic in any async handler must not poison the

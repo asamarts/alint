@@ -111,6 +111,9 @@ similar = "3"
 # the design docs were relocated to `docs/design/v0.11/` (the
 # move itself shipped in v0.9.22).
 tower-lsp = "0.20"
+# The `Service` trait, to wrap the tower-lsp service so `exit` stops the
+# server promptly (already in the tree via tower-lsp).
+tower-service = "0.3"
 # Async runtime for the LSP server (tower-lsp is async). Only
 # `crates/alint-lsp` pulls it in; the CLI enters the runtime via the
 # `lsp` subcommand.
