@@ -318,7 +318,7 @@ Cap runs of blank lines to `max`. A blank line is empty or whitespace-only.
 
 ## Security / Unicode sanity
 
-Checks for content that reads one way to a reviewer and another way to a compiler, a terminal or git: invisible or direction-changing Unicode characters, leftover merge-conflict markers, and files that must stay byte-identical. These problems survive code review because a diff view renders them harmlessly, so a mechanical check is the reliable defence. Most of these rules are cheap enough to run on every file in the repository.
+Checks for problems that slip past code review: content that reads one way to a reviewer and another way to a compiler, a terminal or git (invisible or direction-changing Unicode, non-ASCII bytes, leftover merge-conflict markers); content, imports, tracked paths or symlinks a project forbids; files that must match a pinned digest or the output of their generator; and commits that must be signed or come from an allowed author. A diff view tends to render the first group harmlessly, which is why a mechanical check is the reliable defence.
 
 ### `no_merge_conflict_markers`
 
@@ -400,7 +400,7 @@ The rejected forms are:
 
 ## Unix metadata
 
-All rules in this family are no-ops on Windows — the +x bit and symlinks don't have a portable cross-platform story, so configs stay identical either way.
+The rules that read the `+x` bit (`executable_bit`, `executable_has_shebang`, `shebang_has_executable`) are no-ops on Windows, which has no executable bit, so the same config runs unchanged on every platform. `no_symlinks` and `file_shebang` check every platform.
 
 ### `no_symlinks`
 

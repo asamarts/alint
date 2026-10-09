@@ -1974,7 +1974,7 @@ pub(crate) fn render_overview_from_comments(yaml_text: &str) -> String {
             out.push_str("\n\n");
         }
         match b {
-            Block::Para(lines) => out.push_str(&lines.join("\n")),
+            Block::Para(lines) => out.push_str(&rulesets::overview_paragraph(lines)),
             Block::Code(lines) => {
                 out.push_str("```yaml\n");
                 for l in lines {

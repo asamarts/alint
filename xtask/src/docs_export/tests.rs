@@ -1088,8 +1088,8 @@ fn top_level_only_lists_the_globals_no_subcommand_takes() {
 
 /// Rule notes come from the comments above a rule and at its key indent; a
 /// divider or blank line cuts the comments above off, a comment nested in a
-/// value belongs to neither, and a paragraph opening with a release tag is
-/// dropped.
+/// value stays in the definition, and a paragraph opening with a release tag
+/// reads "Changed in".
 #[test]
 fn rule_sources_split_notes_from_definitions() {
     let yaml = "\
@@ -1120,19 +1120,73 @@ rules:
     assert_eq!(sources[0].id, "first-rule");
     assert_eq!(
         sources[0].notes_md,
-        "Why the first rule exists.\nIt spans two lines."
+        "Why the first rule exists. It spans two lines."
     );
     assert_eq!(
         sources[0].definition,
-        "- id: first-rule\n  kind: file_exists\n  paths:\n    - README.md\n  level: warning"
+        "- id: first-rule\n  kind: file_exists\n  paths:\n    # which files count\n    - README.md\n  level: warning"
     );
     assert_eq!(sources[1].id, "second-rule");
-    assert_eq!(sources[1].notes_md, "Why the second rule exists.");
+    assert_eq!(
+        sources[1].notes_md,
+        "Changed in v0.9.18: broadened to more names.\n\nWhy the second rule exists."
+    );
     assert!(
         !sources[1].definition.contains('#'),
         "{:?}",
         sources[1].definition
     );
+}
+
+/// Hard-wrapped comment prose is rejoined and escaped, so a wrapped line
+/// can't turn into a list item and a bare glob can't turn into emphasis;
+/// a list stays a list and a column-aligned block stays preformatted.
+#[test]
+fn rule_notes_render_as_safe_markdown() {
+    let yaml = "\
+rules:
+  # Excludes cover `src/doc/**` and **/*.miri.rs, unique to rust-lang/rust
+  # + similar projects. Copyright <year> holders.
+  #
+  # Two categories:
+  #
+  #   src/doc/**    — doc examples
+  #   tests/ui/**   — UI fixtures
+  #
+  # - first item,
+  #   continued
+  # - second item
+  - id: r
+    kind: file_exists
+    paths: x
+";
+    let notes = &rule_sources(yaml)[0].notes_md;
+    assert_eq!(
+        notes,
+        "Excludes cover `src/doc/**` and \\*\\*/\\*.miri.rs, unique to rust-lang/rust + \
+         similar projects. Copyright `<year>` holders.\n\n\
+         Two categories:\n\n\
+         ```text\nsrc/doc/**    — doc examples\ntests/ui/**   — UI fixtures\n```\n\n\
+         - first item, continued\n- second item"
+    );
+}
+
+#[test]
+fn escape_inline_keeps_code_spans_and_urls() {
+    use super::rulesets::escape_inline;
+    assert_eq!(
+        escape_inline("set <Nullable>enable</Nullable>, or `<Project Sdk=\"x\">`"),
+        "set `<Nullable>enable</Nullable>`, or `<Project Sdk=\"x\">`"
+    );
+    assert_eq!(
+        escape_inline("pin @<sha> (\"Copyright <year>\") if a < b"),
+        "pin @`<sha>` (\"Copyright `<year>`\") if a &lt; b"
+    );
+    assert_eq!(
+        escape_inline("see https://example.com/a_b_c for snake_case"),
+        "see https://example.com/a_b_c for snake\\_case"
+    );
+    assert_eq!(escape_inline("an `unclosed span"), "an \\`unclosed span");
 }
 
 /// Every rule serde sees in a bundled ruleset is found by the comment-aware
@@ -1178,4 +1232,28 @@ fn rule_sources_cover_every_bundled_rule() {
             );
         }
     }
+}
+
+/// A hard-wrapped overview line that happens to start with a list marker
+/// stays prose; a list after a colon, or opening its paragraph, stays a list.
+#[test]
+fn overview_wrapped_marker_lines_stay_prose() {
+    let yaml = "\
+# alint://bundled/x@v1
+#
+# Layouts like `ext/*` + `runtime/`
+# + `cli/` will no-op, and so will
+# 1. this line.
+#
+# Conventions:
+# - `packages/*` for npm,
+#   one per package
+# - `crates/*` for Rust
+version: 1
+";
+    assert_eq!(
+        render_overview_from_comments(yaml),
+        "Layouts like `ext/*` + `runtime/`\n\\+ `cli/` will no-op, and so will\n1\\. this line.\n\n\
+         Conventions:\n- `packages/*` for npm,\n  one per package\n- `crates/*` for Rust"
+    );
 }

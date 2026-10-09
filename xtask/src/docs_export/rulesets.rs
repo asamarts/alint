@@ -5,9 +5,7 @@ use std::fmt::Write as _;
 
 use alint_rules::kind_docs::KIND_SUMMARIES;
 
-use super::{
-    escape_yaml_string, first_sentence, render_overview_from_comments, ruleset_meta_description,
-};
+use super::{escape_yaml_string, first_sentence, ruleset_meta_description};
 
 /// GitHub repo-relative base for source-of-truth links rendered
 /// into the bundled-ruleset pages. Pinned to `main` so readers
@@ -28,21 +26,12 @@ pub(super) struct RuleSource {
 /// what serde drops: the comments. A rule's notes are the comment lines
 /// directly above its `- id:` line (a blank line or a `# ---` divider
 /// cuts them off) plus the comment lines at the rule's own key indent.
-/// Comments nested deeper, inside a list value, stay out of the notes,
-/// and so do paragraphs that open with a release tag (`v0.9.18: `).
+/// Comments nested deeper, inside a list value, explain that value, so
+/// they stay in the definition.
 ///
 /// Rulesets are written with rules at a two-space indent (`  - id: x`);
 /// the catalogue test checks that every rule serde sees is found here.
 pub(super) fn rule_sources(yaml_text: &str) -> Vec<RuleSource> {
-    fn notes(comment_lines: &[String]) -> String {
-        let mut as_yaml = String::new();
-        for line in comment_lines {
-            let _ = writeln!(&mut as_yaml, "{line}");
-        }
-        let md = render_overview_from_comments(&as_yaml);
-        strip_release_tag(&md)
-    }
-
     let mut out: Vec<RuleSource> = Vec::new();
     let mut in_rules = false;
     let mut pending: Vec<String> = Vec::new();
@@ -55,7 +44,7 @@ pub(super) fn rule_sources(yaml_text: &str) -> Vec<RuleSource> {
             }
             out.push(RuleSource {
                 id,
-                notes_md: notes(&comments),
+                notes_md: notes_markdown(&comments),
                 definition: def.join("\n"),
             });
         }
@@ -67,10 +56,6 @@ pub(super) fn rule_sources(yaml_text: &str) -> Vec<RuleSource> {
             in_rules = line == "rules:";
             continue;
         }
-        if !line.is_empty() && !line.starts_with(' ') {
-            // The next top-level key ends the rules block.
-            break;
-        }
         if let Some(rest) = line.strip_prefix("  - id:") {
             finish(&mut current, &mut out);
             let id = rest.trim().trim_matches(['"', '\'']).to_string();
@@ -78,15 +63,20 @@ pub(super) fn rule_sources(yaml_text: &str) -> Vec<RuleSource> {
             current = Some((id, comments, vec![line[2..].to_string()]));
             continue;
         }
-        if let Some(comment) = line.strip_prefix("  #") {
-            // A comment at the list indent belongs to the rule below it.
+        // A comment at the list indent (or at the margin) belongs to the
+        // rule below it.
+        if let Some(comment) = line.strip_prefix("  #").or_else(|| line.strip_prefix('#')) {
             finish(&mut current, &mut out);
             if comment.trim_start().starts_with("---") {
                 pending.clear();
             } else {
-                pending.push(format!("#{comment}"));
+                pending.push(comment_body(comment));
             }
             continue;
+        }
+        if !line.is_empty() && !line.starts_with(' ') {
+            // The next top-level key ends the rules block.
+            break;
         }
         if line.is_empty() {
             pending.clear();
@@ -97,9 +87,7 @@ pub(super) fn rule_sources(yaml_text: &str) -> Vec<RuleSource> {
         }
         if let Some((_, comments, def)) = current.as_mut() {
             if let Some(comment) = line.strip_prefix("    #") {
-                comments.push(format!("#{comment}"));
-            } else if line.trim_start().starts_with('#') {
-                // A comment inside a value: part of neither.
+                comments.push(comment_body(comment));
             } else {
                 def.push(line.strip_prefix("  ").unwrap_or(line).to_string());
             }
@@ -109,28 +97,194 @@ pub(super) fn rule_sources(yaml_text: &str) -> Vec<RuleSource> {
     out
 }
 
-/// Drop the paragraphs of rule notes that open with a release tag
-/// (`v0.9.18: ...`, `v0.10 — ...`). Those record how a rule changed,
-/// which belongs in the changelog rather than on the reference page.
-fn strip_release_tag(md: &str) -> String {
-    let is_tagged = |para: &str| {
-        let Some(rest) = para.strip_prefix('v') else {
-            return false;
-        };
-        let ver_len = rest
-            .find(|c: char| !(c.is_ascii_digit() || c == '.'))
-            .unwrap_or(rest.len());
-        let (ver, tail) = rest.split_at(ver_len);
-        ver.contains('.')
-            && ver.starts_with(|c: char| c.is_ascii_digit())
-            && [":", " —", " -", " ("]
+/// The text of a comment line after its `#`, less the one space that
+/// conventionally follows it (further indentation is kept: it marks an
+/// aligned block).
+fn comment_body(after_hash: &str) -> String {
+    after_hash
+        .strip_prefix(' ')
+        .unwrap_or(after_hash)
+        .to_string()
+}
+
+/// Render a rule's comment lines as markdown. Comments are hard-wrapped
+/// plain text, so each paragraph is rejoined into one line and escaped
+/// (a wrapped line starting `+ ` or a bare `**/*.rs` glob would otherwise
+/// turn into a list or emphasis). A paragraph whose lines start `- ` or
+/// `* ` is a list; an indented or column-aligned paragraph is kept as a
+/// text block. A paragraph that opens with a release tag (`v0.9.18: `)
+/// reads "Changed in v0.9.18: ".
+fn notes_markdown(bodies: &[String]) -> String {
+    let mut blocks: Vec<String> = Vec::new();
+    for para in bodies.split(|b| b.trim().is_empty()) {
+        if para.is_empty() {
+            continue;
+        }
+        let indent = |l: &String| l.len() - l.trim_start().len();
+        let aligned = para.iter().any(|l| l.trim().contains("   "));
+        if indent(&para[0]) >= 2 || aligned {
+            let cut = para.iter().map(indent).min().unwrap_or(0);
+            let mut block = String::from("```text\n");
+            for line in para {
+                let _ = writeln!(&mut block, "{}", &line[cut..]);
+            }
+            block.push_str("```");
+            blocks.push(block);
+        } else if para[0].starts_with("- ") || para[0].starts_with("* ") {
+            let mut items: Vec<String> = Vec::new();
+            for line in para {
+                let line = line.trim();
+                match line.strip_prefix("- ").or_else(|| line.strip_prefix("* ")) {
+                    Some(item) => items.push(item.to_string()),
+                    None => {
+                        if let Some(last) = items.last_mut() {
+                            last.push(' ');
+                            last.push_str(line);
+                        }
+                    }
+                }
+            }
+            let list: Vec<String> = items
                 .iter()
-                .any(|sep| tail.starts_with(sep))
+                .map(|i| format!("- {}", escape_inline(i)))
+                .collect();
+            blocks.push(list.join("\n"));
+        } else {
+            let text = para.iter().map(|l| l.trim()).collect::<Vec<_>>().join(" ");
+            let text = match release_tag_len(&text) {
+                Some(_) => format!("Changed in {text}"),
+                None => text,
+            };
+            blocks.push(escape_block_start(&escape_inline(&text)));
+        }
+    }
+    blocks.join("\n\n")
+}
+
+/// The length of a leading release tag (`v0.9.18` in `v0.9.18: ...`,
+/// `v0.10 — ...`), if the text opens with one.
+fn release_tag_len(text: &str) -> Option<usize> {
+    let rest = text.strip_prefix('v')?;
+    let ver_len = rest
+        .find(|c: char| !(c.is_ascii_digit() || c == '.'))
+        .unwrap_or(rest.len());
+    let (ver, tail) = rest.split_at(ver_len);
+    let tagged = ver.contains('.')
+        && ver.starts_with(|c: char| c.is_ascii_digit())
+        && [":", " —", " -", " ("]
+            .iter()
+            .any(|sep| tail.starts_with(sep));
+    tagged.then_some(1 + ver_len)
+}
+
+/// Escape plain text for inline markdown: characters that would start
+/// emphasis, a link, strikethrough or an escape are escaped, except inside
+/// code spans and bare URLs, which render literally anyway, and a word
+/// holding a tag (`<year>`) is set as code rather than parsed as HTML.
+pub(super) fn escape_inline(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(c) = rest.chars().next() {
+        if c == '`' {
+            let ticks = rest.len() - rest.trim_start_matches('`').len();
+            let fence = &rest[..ticks];
+            if let Some(close) = rest[ticks..].find(fence) {
+                let span = ticks + close + ticks;
+                out.push_str(&rest[..span]);
+                rest = &rest[span..];
+                continue;
+            }
+            for _ in 0..ticks {
+                out.push_str("\\`");
+            }
+            rest = &rest[ticks..];
+            continue;
+        }
+        let at_word_start = out.is_empty() || out.ends_with([' ', '(', '<', '"']);
+        if at_word_start && (rest.starts_with("https://") || rest.starts_with("http://")) {
+            let url_len = rest.find(char::is_whitespace).unwrap_or(rest.len());
+            out.push_str(&rest[..url_len]);
+            rest = &rest[url_len..];
+            continue;
+        }
+        match c {
+            '\\' | '*' | '_' | '[' | ']' | '~' => {
+                out.push('\\');
+                out.push(c);
+            }
+            '<' => {
+                // A tag or placeholder (`<year>`, `<Nullable>enable</Nullable>`)
+                // becomes code, through to the end of its word: escaped, it
+                // would be one long unbreakable run of text.
+                let word_len = rest.find(char::is_whitespace).unwrap_or(rest.len());
+                let word = rest[..word_len].trim_end_matches(['.', ',', ';', ':', ')', '"', '\'']);
+                if word.contains('>') && !word.contains('`') {
+                    let _ = write!(out, "`{word}`");
+                    rest = &rest[word.len()..];
+                    continue;
+                }
+                out.push_str("&lt;");
+            }
+            _ => out.push(c),
+        }
+        rest = &rest[c.len_utf8()..];
+    }
+    out
+}
+
+/// Escape what would make a one-line paragraph a heading, quote, list
+/// item or thematic break.
+fn escape_block_start(line: &str) -> String {
+    let ordered = line
+        .find(|c: char| !c.is_ascii_digit())
+        .is_some_and(|i| i > 0 && line[i..].starts_with(['.', ')']));
+    if line.starts_with(['#', '>', '+', '-', '=']) || ordered {
+        let at = if ordered {
+            line.find(|c: char| !c.is_ascii_digit()).unwrap_or(0)
+        } else {
+            0
+        };
+        format!("{}\\{}", &line[..at], &line[at..])
+    } else {
+        line.to_string()
+    }
+}
+
+/// The lines of one overview paragraph as markdown. Comments are
+/// hard-wrapped, so a wrapped line can happen to start with `+ `, `- `,
+/// `1. `, `#` or `>` and would then open a list, heading or quote
+/// mid-sentence. A list is real when it opens the paragraph, follows a
+/// line ending in `:`, or continues a list; any other such line start is
+/// escaped.
+pub(super) fn overview_paragraph(lines: &[String]) -> String {
+    let marker_len = |line: &str| -> Option<usize> {
+        if line.starts_with(['+', '-', '*']) && line[1..].starts_with(' ') {
+            return Some(1);
+        }
+        let digits = line.len() - line.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+        (digits > 0
+            && line[digits..].starts_with(['.', ')'])
+            && line[digits + 1..].starts_with(' '))
+        .then_some(digits + 1)
     };
-    md.split("\n\n")
-        .filter(|para| !is_tagged(para))
-        .collect::<Vec<_>>()
-        .join("\n\n")
+    let mut out: Vec<String> = Vec::with_capacity(lines.len());
+    let mut in_list = false;
+    for (i, line) in lines.iter().enumerate() {
+        let prev_opens_list = i == 0 || out[i - 1].trim_end().ends_with(':');
+        match marker_len(line) {
+            Some(_) if in_list || prev_opens_list => {
+                in_list = true;
+                out.push(line.clone());
+            }
+            Some(len) => {
+                let at = len - 1;
+                out.push(format!("{}\\{}", &line[..at], &line[at..]));
+            }
+            None if i > 0 && line.starts_with(['#', '>']) => out.push(format!("\\{line}")),
+            None => out.push(line.clone()),
+        }
+    }
+    out.join("\n")
 }
 
 /// The ruleset's top-level `facts:` block, verbatim, if it has one.
@@ -228,7 +382,7 @@ pub(super) fn render_ruleset_page(
         .and_then(|r| r.as_sequence())
         .filter(|r| !r.is_empty());
     let Some(rules) = rules else {
-        let _ = writeln!(&mut out, "_(no rules — this ruleset is a placeholder.)_");
+        let _ = writeln!(&mut out, "_(No rules: this ruleset is a placeholder.)_");
         let _ = writeln!(&mut out);
         write_ruleset_source(&mut out, rel_repo_path);
         return out;
@@ -294,7 +448,7 @@ fn write_ruleset_summary(out: &mut String, rules: &[serde_yaml_ng::Value]) {
         let id = str_field(rule, "id").unwrap_or_else(|| "(no-id)".into());
         let level = str_field(rule, "level").unwrap_or_default();
         let reports = str_field(rule, "message")
-            .map(|msg| first_sentence(&msg))
+            .map(|msg| escape_inline(&first_sentence(&msg)))
             .or_else(|| {
                 let kind = str_field(rule, "kind")?;
                 KIND_SUMMARIES
@@ -319,16 +473,19 @@ fn write_ruleset_summary(out: &mut String, rules: &[serde_yaml_ng::Value]) {
     }
     let _ = writeln!(out);
     for (when, n) in &gates {
-        let subject = match (*n == rules.len(), *n) {
-            (true, 1) => "The rule runs".to_string(),
-            (true, n) => format!("All {n} rules run"),
-            (false, 1) => "One rule runs".to_string(),
-            (false, n) => format!("{n} rules run"),
+        let sentence = match (*n == rules.len(), *n) {
+            (true, 1) => format!(
+                "The rule runs only when `{when}` holds, so the ruleset stays quiet in \
+                 repositories it doesn't apply to."
+            ),
+            (true, n) => format!(
+                "All {n} rules run only when `{when}` holds, so the ruleset stays quiet in \
+                 repositories it doesn't apply to."
+            ),
+            (false, 1) => format!("One rule runs only when `{when}` holds."),
+            (false, n) => format!("{n} rules run only when `{when}` holds."),
         };
-        let _ = writeln!(
-            out,
-            "{subject} only when `{when}` holds, so the ruleset stays quiet in repositories it doesn't apply to."
-        );
+        let _ = writeln!(out, "{sentence}");
         let _ = writeln!(out);
     }
 }
@@ -342,6 +499,8 @@ fn write_rule_section(
     source: Option<&RuleSource>,
     kind_to_family: &std::collections::HashMap<String, String>,
 ) {
+    // alint.org links each bundled rule to this heading by matching
+    // `### `<id>`` (src/lib/examples.ts), so the shape is a contract.
     let _ = writeln!(out, "### `{id}`");
     let _ = writeln!(out);
     if let Some(notes) = source.map(|s| s.notes_md.trim()).filter(|n| !n.is_empty()) {
@@ -383,7 +542,7 @@ fn write_rule_section(
         let _ = writeln!(
             out,
             "> {}",
-            msg.split_whitespace().collect::<Vec<_>>().join(" ")
+            escape_inline(&msg.split_whitespace().collect::<Vec<_>>().join(" "))
         );
     }
     if let Some(def) = source
