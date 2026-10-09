@@ -394,40 +394,106 @@ const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
 /// wall-clock `DoS`. A cheap linear pre-scan rejects an over-deep OR over-wide
 /// document here (as one ordinary per-file parse-error violation) so a crafted or
 /// accidental `<a><a>…` / `<r a0.. a1..>` file can never abort or hang the run.
-/// Comment / CDATA / PI / declaration regions are skipped so their contents don't
-/// count toward depth or attributes. `Ok(())` when within both limits.
+/// Comment / CDATA / PI regions are skipped so their contents don't count toward
+/// depth or attributes. `Ok(())` when within both limits.
+///
+/// **Lexer parity with roxmltree (0.20) is the security invariant.** Any region
+/// the scan treats as opaque must end exactly where roxmltree's tokenizer ends it;
+/// if the scan ends it EARLIER, a `</a>` roxmltree sees as PI / comment text is
+/// counted as a close, cancels a real `<a>`, and an arbitrarily deep document
+/// reaches the recursive parse (`<a><?p ></a>?>` x 100 000 aborted the process).
+/// So each boundary mirrors the tokenizer: a PI ends at `?>` (searched after the
+/// `<?`), a comment at `-->` searched AFTER `<!--` (so `<!--->` does not close
+/// it), CDATA at `]]>`, and only the leading `<?xml …?>` declaration honors quotes
+/// (its pseudo-attribute values may hold `?>`). Everywhere else the scan fails
+/// closed: a `<!` that is neither comment nor CDATA (a DOCTYPE, rejected because
+/// DTDs are disabled, or an unknown token) is stepped over by two bytes only, so
+/// nothing after it is hidden; and a tag scan stops at any `<` even inside a
+/// quoted value (roxmltree rejects `<` there), so a runaway quote can't swallow
+/// the markup that follows. Hidden-close fixtures are probed against the real
+/// parser in the tests.
 fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
+    xml_within_limits(text, MAX_XML_DEPTH)
+}
+
+/// [`xml_within_parse_limits`] with an explicit depth ceiling, so the parity
+/// property test can probe the scan at the REAL parser's depth.
+fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), String> {
+    /// Byte offset just past the first `needle` at or after `from`, or EOF.
+    fn skip_past(text: &str, from: usize, needle: &str) -> usize {
+        text.get(from..)
+            .and_then(|tail| tail.find(needle))
+            .map_or(text.len(), |p| from + p + needle.len())
+    }
     let bytes = text.as_bytes();
     let mut pos = 0usize;
+    if bytes.starts_with(b"\xEF\xBB\xBF") {
+        pos = 3;
+    }
+    // The XML declaration (`<?xml version=".." ?>`), recognized exactly where
+    // roxmltree does (the very start, after an optional BOM): skip to `?>`
+    // OUTSIDE quotes, since its pseudo-attribute values are quoted strings.
+    if bytes[pos..].starts_with(b"<?xml ") {
+        let mut i = pos + 6;
+        let mut quote: Option<u8> = None;
+        while i < bytes.len() {
+            let ch = bytes[i];
+            if ch == b'<' {
+                // Never legal inside the declaration: stop and re-examine it.
+                break;
+            }
+            match quote {
+                Some(q) if ch == q => quote = None,
+                None if ch == b'"' || ch == b'\'' => quote = Some(ch),
+                None if bytes[i..].starts_with(b"?>") => {
+                    i += 2;
+                    break;
+                }
+                Some(_) | None => {}
+            }
+            i += 1;
+        }
+        pos = i;
+    }
     let mut depth = 0usize;
     while pos < bytes.len() {
         if bytes[pos] != b'<' {
             pos += 1;
             continue;
         }
-        let rest = &text[pos..];
-        if rest.starts_with("</") {
+        let rest = &bytes[pos..];
+        if rest.starts_with(b"</") {
             depth = depth.saturating_sub(1);
             pos += 2;
-        } else if rest.starts_with("<!--") {
-            pos += rest.find("-->").map_or(rest.len(), |p| p + 3);
-        } else if rest.starts_with("<![CDATA[") {
-            pos += rest.find("]]>").map_or(rest.len(), |p| p + 3);
-        } else if rest.starts_with("<!") || rest.starts_with("<?") {
-            // DOCTYPE / PI / other declaration: skip to its terminating `>`.
-            pos += rest.find('>').map_or(rest.len(), |p| p + 1);
+        } else if rest.starts_with(b"<!--") {
+            pos = skip_past(text, pos + 4, "-->");
+        } else if rest.starts_with(b"<![CDATA[") {
+            pos = skip_past(text, pos + 9, "]]>");
+        } else if rest.starts_with(b"<?") {
+            pos = skip_past(text, pos + 2, "?>");
+        } else if rest.starts_with(b"<!") {
+            // DOCTYPE (DTDs are disabled) or an unknown `<!` token: roxmltree
+            // rejects the document right here. Step over `<!` only, so nothing
+            // after it is hidden from the scan.
+            pos += 2;
         } else {
             // `<tag …>` or `<tag/>`: find the closing `>` respecting quoted
             // attribute values (a `>` inside `"…"`/`'…'` isn't the tag end).
             // Count attributes by the `=` signs OUTSIDE quotes: XML requires
             // quoted values, so each attribute contributes exactly one unquoted
-            // `=`, and a `=` inside a value is skipped with the quote run.
-            let tag = rest.as_bytes();
+            // `=`, and a `=` inside a value is skipped with the quote run. A `<`
+            // ends the scan even inside quotes (roxmltree rejects it there), so
+            // a runaway quote cannot hide the elements after it.
+            let tag = rest;
             let mut end = 1usize;
             let mut quote: Option<u8> = None;
             let mut attrs = 0usize;
+            let mut closed = false;
             while end < tag.len() {
                 let ch = tag[end];
+                if ch == b'<' {
+                    break;
+                }
                 if let Some(q) = quote {
                     if ch == q {
                         quote = None;
@@ -444,6 +510,7 @@ fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
                         break;
                     }
                 } else if ch == b'>' {
+                    closed = true;
                     break;
                 }
                 end += 1;
@@ -454,17 +521,19 @@ fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
                      attributes ({MAX_XML_ATTRS_PER_ELEMENT})"
                 ));
             }
-            // Self-closing `<tag/>` opens and closes, so it adds no depth.
-            let self_closing = end >= 2 && tag[end - 1] == b'/';
+            // Self-closing `<tag/>` opens and closes, so it adds no depth. An
+            // unterminated tag conservatively counts as an open.
+            let self_closing = closed && end >= 2 && tag[end - 1] == b'/';
             if !self_closing {
                 depth += 1;
-                if depth > MAX_XML_DEPTH {
+                if depth > max_depth {
                     return Err(format!(
-                        "XML nesting exceeds the maximum supported depth ({MAX_XML_DEPTH})"
+                        "XML nesting exceeds the maximum supported depth ({max_depth})"
                     ));
                 }
             }
-            pos += end + 1;
+            // Past the `>`; or, when the scan stopped AT a `<`, re-examine it.
+            pos += if closed { end + 1 } else { end };
         }
     }
     Ok(())
@@ -1018,6 +1087,126 @@ mod tests {
             "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"
         )
         .is_ok());
+    }
+
+    /// Parse `doc` with the REAL roxmltree on a huge stack (so a deep but
+    /// legal document survives) and return its maximum element depth, or
+    /// `None` when roxmltree rejects it.
+    fn roxmltree_max_depth(doc: &str) -> Option<usize> {
+        let doc = doc.to_owned();
+        std::thread::Builder::new()
+            .stack_size(512 * 1024 * 1024)
+            .spawn(move || {
+                let parsed = roxmltree::Document::parse(&doc).ok()?;
+                parsed
+                    .descendants()
+                    .filter(roxmltree::Node::is_element)
+                    .map(|n| n.ancestors().filter(roxmltree::Node::is_element).count())
+                    .max()
+            })
+            .expect("spawn big-stack probe thread")
+            .join()
+            .expect("probe thread")
+    }
+
+    #[test]
+    fn xml_depth_scan_lexer_agrees_with_roxmltree_at_every_skip_boundary() {
+        // GATE for the depth pre-scan's lexer parity: each fixture hides a
+        // `</a>` inside a region roxmltree treats as opaque (a PI runs to `?>`,
+        // not the first `>`; a comment's `-->` search starts AFTER `<!--`, so
+        // `<!--->` does not close it). If the pre-scan's view of where that
+        // region ends disagrees with roxmltree's, the hidden `</a>` cancels
+        // each real `<a>` and a document far past `MAX_XML_DEPTH` slips through
+        // to a recursive parse that ABORTS the process at scale. Each fixture is
+        // probed against the real parser to prove it is legal and over-deep.
+        let n = MAX_XML_DEPTH + 72;
+        let fixtures = [
+            ("pi-with-gt", "<a><?p ></a>?>"),
+            ("pi-gt-only", "<a><?p >></a>?>"),
+            ("comment-dash-gt", "<a><!---></a>-->"),
+            ("cdata-gt", "<a><![CDATA[ ]> </a> ]]>"),
+            ("comment-gt", "<a><!-- > </a> -->"),
+        ];
+        for (name, unit) in fixtures {
+            let doc = format!("<r>{}{}</r>", unit.repeat(n), "</a>".repeat(n));
+            let real = roxmltree_max_depth(&doc)
+                .unwrap_or_else(|| panic!("{name}: fixture must be legal XML"));
+            assert!(
+                real > MAX_XML_DEPTH,
+                "{name}: fixture is over-deep ({real})"
+            );
+            assert!(
+                xml_within_parse_limits(&doc).is_err(),
+                "{name}: the pre-scan must reject a {real}-deep document"
+            );
+        }
+        // The XML declaration's attribute values may legally hold `?>`; the
+        // scan must not end the declaration there (and must still accept it).
+        let decl = "<?xml version=\"1.0\" encoding=\"UTF-8\"?><r a=\"?>\"><b/></r>";
+        assert!(roxmltree_max_depth(decl).is_some());
+        assert!(xml_within_parse_limits(decl).is_ok());
+    }
+
+    #[test]
+    fn xml_pi_hidden_close_bomb_is_a_parse_error_not_an_abort() {
+        // The reported reproducer at full scale: 100 000 `<a>` levels whose
+        // closes are each hidden in a `<?p ></a>?>` PI. It must surface as one
+        // ordinary parse error, never a stack-overflow abort (exit 134).
+        let n = 100_000;
+        let doc = format!("<r>{}{}</r>", "<a><?p ></a>?>".repeat(n), "</a>".repeat(n));
+        let err = Format::Xml.parse(&doc).unwrap_err();
+        assert!(err.contains("depth"), "rejected by the depth guard: {err}");
+    }
+
+    #[test]
+    fn xml_depth_scan_never_hides_markup_behind_a_runaway_quote() {
+        // roxmltree rejects `<` anywhere inside a tag (even in a quoted value),
+        // so an unterminated quote must not let the pre-scan skip the elements
+        // that follow it: every `<a>` after it stays visible and counted.
+        let doc = format!("<r b=\"{}", "<a>".repeat(MAX_XML_DEPTH + 10));
+        assert!(xml_within_parse_limits(&doc).is_err());
+    }
+
+    proptest::proptest! {
+        /// Lexer parity as a property: for any document roxmltree ACCEPTS, the
+        /// pre-scan never sees it as shallower than the real tree -- probing the
+        /// scan with a ceiling one below the true depth must reject. Fragments
+        /// are biased toward every opaque-region boundary (PI, comment, CDATA,
+        /// quotes, the XML declaration) so a boundary mismatch that hides a
+        /// close tag surfaces as a shrunk counterexample.
+        #[test]
+        fn xml_depth_scan_never_undercounts_a_document_roxmltree_accepts(
+            frags in proptest::collection::vec(
+                proptest::sample::select(vec![
+                    "<a>", "</a>", "<a/>", "<a b=\"", "\">", "'", "\"", "<?p ", "?>",
+                    ">", "-", "<!--", "-->", "<![CDATA[", "]]>", "]", "?", "x", " ",
+                    "</a>", "<a>", "<a c='>'>", "<?xml version=\"1.0\"?>",
+                ]),
+                0..40,
+            )
+        ) {
+            let doc = format!("<r>{}</r>", frags.concat());
+            if let Ok(parsed) = roxmltree::Document::parse(&doc) {
+                // roxmltree's RECURSION depth (what overflows): every enclosing
+                // element, plus the element itself when it has content (a
+                // childless element may be `<a/>`, which does not recurse).
+                let real = parsed
+                    .descendants()
+                    .filter(roxmltree::Node::is_element)
+                    .map(|n| {
+                        let with_self = n.ancestors().filter(roxmltree::Node::is_element).count();
+                        if n.has_children() { with_self } else { with_self - 1 }
+                    })
+                    .max()
+                    .unwrap_or(0);
+                if real > 0 {
+                    proptest::prop_assert!(
+                        xml_within_limits(&doc, real - 1).is_err(),
+                        "scan under-counts {real}-deep doc: {doc}"
+                    );
+                }
+            }
+        }
     }
 
     #[test]
