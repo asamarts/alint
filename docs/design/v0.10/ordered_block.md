@@ -20,7 +20,7 @@ golang/go, protobuf `failure_lists`) and the per-repo tracker in
 [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`ordered_block` row: airflow, spark, flutter, golang-go,
 protobuf, cpython, rust-lang/rust, tokio). Canonical scope:
-[`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+[`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#3).
 
 ## Problem

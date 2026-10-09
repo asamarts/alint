@@ -1,6 +1,6 @@
 # Many-to-many rule categories
 
-Status: proposed (2026-07-07). CLI decision recorded in ADR-0009; this doc is the
+Status: shipped in v0.14.0 (proposed 2026-07-07). CLI decision recorded in ADR-0009 (accepted); this doc is the
 full feature design. Authoring/gating pattern follows `spec-driven-development.md`;
 the contract shape follows `facts-json.md`.
 

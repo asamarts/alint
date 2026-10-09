@@ -24,7 +24,7 @@ Demand evidence:
 9 of 12 governance artefacts") and the per-repo tracker in
 [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`apache/governance@v1` row: airflow, arrow, spark). Canonical
-scope: [`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+scope: [`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#9; "LICENSE + NOTICE + KEYS + RAT discipline … v0.9.18 A2 is a
 prerequisite"). `dotnet@v1` (#10) is the only remaining v0.10
 item after this.

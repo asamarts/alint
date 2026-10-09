@@ -1,6 +1,7 @@
 # Benchmark scenario consolidation (14 -> 5)
 
-Status: **APPROVED + audit-verified across 2 adversarial rounds (5 agents).** Design
+Status: **Shipped in v0.17.0** (merged in #263; the 5-scenario series is the MAIN
+bench-scale series, backfilled across past versions). Previously: **APPROVED + audit-verified across 2 adversarial rounds (5 agents).** Design
 sound (zero kinds dropped); all constraints + the live glob bug confirmed; round-2
 implementation-readiness gaps (Mode::Fix wiring, mode x scenario gating, the missing
 git+polyglot generator, the `sfix_all` fixture, the release-pipeline modes, the

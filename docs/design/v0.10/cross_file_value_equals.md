@@ -27,7 +27,7 @@ per-repo tracker in
 (`cross_file_value_equals` row: angular, airflow, helm, istio,
 vscode, node, pnpm, pytorch, tensorflow, tokio, next.js, turbo).
 Canonical scope:
-[`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+[`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#2, "past saturation").
 
 ## Problem
