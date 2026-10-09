@@ -49,7 +49,7 @@
 //!   require: acyclic
 //! ```
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::slice;
 
@@ -329,8 +329,8 @@ impl FileGraphRule {
             }
         }
 
-        for cycle in collect_cycles(&adj, nodes.len()) {
-            out.push(self.cycle_violation(nodes, &cycle));
+        for comp in cyclic_components(&adj, nodes.len()) {
+            out.push(self.cycle_violation(nodes, &comp));
         }
         out
     }
@@ -573,27 +573,42 @@ impl FileGraphRule {
             ))
     }
 
-    fn cycle_violation(&self, nodes: &[PathBuf], cycle: &[usize]) -> Violation {
-        let mut rendered: String = cycle
+    fn cycle_violation(&self, nodes: &[PathBuf], comp: &CyclicComponent) -> Violation {
+        let name = |i: usize| crate::slash(&nodes[i]);
+        let mut rendered: String = comp
+            .cycle
             .iter()
-            .map(|&i| crate::slash(&nodes[i]))
+            .map(|&i| name(i))
             .collect::<Vec<_>>()
             .join(" \u{2192} ");
         // Close the loop so the cycle reads unambiguously.
         rendered.push_str(" \u{2192} ");
-        rendered.push_str(&crate::slash(&nodes[cycle[0]]));
-        let msg = self
-            .message
-            .clone()
-            .unwrap_or_else(|| format!("dependency cycle ({} files): {rendered}", cycle.len()));
-        // A cycle is a SET of files; key on the sorted member set so a new
-        // file joining the cycle changes the fingerprint (anchoring on one
-        // member would mask the larger cycle).
-        let mut members: Vec<String> = cycle.iter().map(|&i| crate::slash(&nodes[i])).collect();
-        members.sort();
+        rendered.push_str(&name(comp.cycle[0]));
+        let members: Vec<String> = comp.members.iter().map(|&i| name(i)).collect();
+        let msg = self.message.clone().unwrap_or_else(|| {
+            if comp.cycle.len() == comp.members.len() {
+                // The component IS one simple cycle: render it as the path.
+                format!("dependency cycle ({} files): {rendered}", members.len())
+            } else {
+                // Interlocking cycles: name every participating file, plus one
+                // concrete cycle as an example.
+                format!(
+                    "dependency cycle among {} files: {} (e.g. {rendered})",
+                    members.len(),
+                    members.join(", ")
+                )
+            }
+        });
+        // A cycle is a SET of files; key on the sorted member set of the whole
+        // strongly connected component, so a new file joining it changes the
+        // fingerprint (anchoring on one member would mask the larger cycle). For
+        // a component that is one simple cycle this is the same key the
+        // per-cycle reporting produced.
+        let mut key_members = members;
+        key_members.sort();
         Violation::new(msg)
-            .with_path(nodes[cycle[0]].clone())
-            .with_baseline_key(format!("cycle\u{0}{}", members.join("\u{0}")))
+            .with_path(nodes[comp.members[0]].clone())
+            .with_baseline_key(format!("cycle\u{0}{}", key_members.join("\u{0}")))
     }
 
     fn dangling_violation(&self, src: &Path, target: &Path) -> Violation {
@@ -682,80 +697,129 @@ fn resolve_ref(reference: &str, from_file: &Path, mode: Resolve) -> Option<PathB
     crate::pathsafe::normalize_confined(&joined)
 }
 
-/// A representative set of directed cycles in `adj` (node indices
-/// `0..n`), each canonicalised (rotated to start at its smallest
-/// index, so the same cycle always reports identically) and the
-/// whole set sorted. Iterative DFS - no recursion-depth limit on
-/// deep graphs.
-///
-/// This is *not* an enumeration of every distinct simple cycle
-/// (that is exponential and needs Johnson's algorithm); it records
-/// one cycle per DFS back-edge - enough to surface every file that
-/// participates in a cycle. A node already fully explored (BLACK)
-/// is not revisited, so a cycle reachable only through it from a
-/// later DFS root may go unlisted even though its members are
-/// flagged via another cycle.
-fn collect_cycles(adj: &BTreeMap<usize, Vec<usize>>, n: usize) -> Vec<Vec<usize>> {
-    const WHITE: u8 = 0;
-    const GRAY: u8 = 1;
-    const BLACK: u8 = 2;
+/// One strongly connected set of mutually-dependent nodes (size >= 2): every
+/// member lies on at least one directed cycle with every other member.
+#[derive(Debug)]
+struct CyclicComponent {
+    /// Node indices, ascending.
+    members: Vec<usize>,
+    /// A shortest directed cycle through the smallest member, starting at it.
+    cycle: Vec<usize>,
+}
 
-    let mut state = vec![WHITE; n];
-    let mut cycles: BTreeSet<Vec<usize>> = BTreeSet::new();
+/// Every strongly connected component of `adj` (node indices `0..n`) that
+/// contains a cycle, each with a representative shortest cycle through its
+/// smallest member; sorted by smallest member, so the report is deterministic.
+/// Iterative Tarjan - no recursion-depth limit on deep graphs - so it is linear
+/// in nodes + edges, and every node on ANY cycle is in exactly one component.
+///
+/// (Reporting one cycle per DFS back-edge -- the earlier approach -- missed
+/// nodes: with `a->b, a->d, b->c, c->a, d->b`, `b` is fully explored before `d`
+/// is visited, so `d`, which lies on `d->b->c->a->d`, was never reported.)
+/// Self-loops are dropped by the caller, so a component is never a lone node.
+fn cyclic_components(adj: &BTreeMap<usize, Vec<usize>>, n: usize) -> Vec<CyclicComponent> {
+    const UNSEEN: usize = usize::MAX;
     let empty: Vec<usize> = Vec::new();
+    let neighbors = |v: usize| adj.get(&v).unwrap_or(&empty);
+    let mut index = vec![UNSEEN; n];
+    let mut low = vec![0usize; n];
+    let mut on_stack = vec![false; n];
+    let mut stack: Vec<usize> = Vec::new();
+    let mut next = 0usize;
+    let mut comps: Vec<Vec<usize>> = Vec::new();
 
     for start in 0..n {
-        if state[start] != WHITE {
+        if index[start] != UNSEEN {
             continue;
         }
-        let mut path: Vec<usize> = vec![start];
-        let mut next_child: Vec<usize> = vec![0];
-        state[start] = GRAY;
-
-        while let Some(&node) = path.last() {
-            let neighbors = adj.get(&node).unwrap_or(&empty);
-            let child = next_child[path.len() - 1];
-            if child < neighbors.len() {
-                next_child[path.len() - 1] += 1;
-                let next = neighbors[child];
-                match state[next] {
-                    WHITE => {
-                        state[next] = GRAY;
-                        path.push(next);
-                        next_child.push(0);
-                    }
-                    GRAY => {
-                        // Back-edge: the cycle is the path suffix
-                        // from `next` to the current node.
-                        if let Some(pos) = path.iter().position(|&x| x == next) {
-                            cycles.insert(canonical_cycle(&path[pos..]));
-                        }
-                    }
-                    _ => {} // BLACK: fully explored, no new cycle.
+        // (node, next neighbour position) frames of the simulated recursion.
+        let mut call: Vec<(usize, usize)> = vec![(start, 0)];
+        index[start] = next;
+        low[start] = next;
+        next += 1;
+        stack.push(start);
+        on_stack[start] = true;
+        while let Some(&(v, child)) = call.last() {
+            let nb = neighbors(v);
+            if child < nb.len() {
+                if let Some(frame) = call.last_mut() {
+                    frame.1 += 1;
+                }
+                let w = nb[child];
+                if index[w] == UNSEEN {
+                    index[w] = next;
+                    low[w] = next;
+                    next += 1;
+                    stack.push(w);
+                    on_stack[w] = true;
+                    call.push((w, 0));
+                } else if on_stack[w] {
+                    low[v] = low[v].min(index[w]);
                 }
             } else {
-                state[node] = BLACK;
-                path.pop();
-                next_child.pop();
+                call.pop();
+                if let Some(&(u, _)) = call.last() {
+                    low[u] = low[u].min(low[v]);
+                }
+                if low[v] == index[v] {
+                    let mut comp = Vec::new();
+                    while let Some(w) = stack.pop() {
+                        on_stack[w] = false;
+                        comp.push(w);
+                        if w == v {
+                            break;
+                        }
+                    }
+                    if comp.len() >= 2 {
+                        comp.sort_unstable();
+                        comps.push(comp);
+                    }
+                }
             }
         }
     }
-    cycles.into_iter().collect()
+    comps.sort_unstable_by_key(|c| c[0]);
+    comps
+        .into_iter()
+        .map(|members| {
+            let cycle = shortest_cycle_through(adj, &members);
+            CyclicComponent { members, cycle }
+        })
+        .collect()
 }
 
-/// Rotate a cycle so its smallest node index leads (direction
-/// preserved), giving every rotation of the same cycle one
-/// canonical form.
-fn canonical_cycle(cycle: &[usize]) -> Vec<usize> {
-    let min_pos = cycle
-        .iter()
-        .enumerate()
-        .min_by_key(|&(_, &v)| v)
-        .map_or(0, |(i, _)| i);
-    let mut out = Vec::with_capacity(cycle.len());
-    out.extend_from_slice(&cycle[min_pos..]);
-    out.extend_from_slice(&cycle[..min_pos]);
-    out
+/// A shortest directed cycle through `members[0]` (the smallest member) using
+/// only edges inside the component, starting at that member. Breadth-first over
+/// the ascending adjacency lists, so the choice is deterministic. Every member of
+/// a strongly connected component reaches every other, so a cycle always exists;
+/// the fallback (the bare member list) is unreachable in practice.
+fn shortest_cycle_through(adj: &BTreeMap<usize, Vec<usize>>, members: &[usize]) -> Vec<usize> {
+    let start = members[0];
+    let in_comp: HashSet<usize> = members.iter().copied().collect();
+    let mut parent: HashMap<usize, usize> = HashMap::new();
+    let mut queue = std::collections::VecDeque::from([start]);
+    while let Some(u) = queue.pop_front() {
+        for &w in adj.get(&u).into_iter().flatten() {
+            if !in_comp.contains(&w) {
+                continue;
+            }
+            if w == start {
+                let mut path = vec![u];
+                let mut cur = u;
+                while cur != start {
+                    cur = parent[&cur];
+                    path.push(cur);
+                }
+                path.reverse();
+                return path;
+            }
+            if w != start && !parent.contains_key(&w) {
+                parent.insert(w, u);
+                queue.push_back(w);
+            }
+        }
+    }
+    members.to_vec()
 }
 
 /// Resolve the map form of `require:` - exactly one of
@@ -1156,6 +1220,55 @@ mod tests {
         assert!(
             v[0].message
                 .contains("proto/a.proto \u{2192} proto/b.proto")
+        );
+    }
+
+    #[test]
+    fn acyclic_reports_every_file_on_a_cycle_once_per_strongly_connected_set() {
+        // Regression: edges a->b, a->d, b->c, c->a, d->b. One DFS back-edge
+        // per GRAY hit reported only a->b->c->a; d (on d->b->c->a->d) was never
+        // reported because b was already BLACK when d was explored. Reporting
+        // per strongly connected component names every participating file.
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("p")).unwrap();
+        let w = |name: &str, deps: &[&str]| {
+            let mut body = String::new();
+            for d in deps {
+                body.push_str("import \"p/");
+                body.push_str(d);
+                body.push_str("\";\n");
+            }
+            std::fs::write(root.join("p").join(name), body).unwrap();
+        };
+        w("a", &["b", "d"]);
+        w("b", &["c"]);
+        w("c", &["a"]);
+        w("d", &["b"]);
+        // An unrelated 2-cycle: a separate component, a separate finding.
+        w("x", &["y"]);
+        w("y", &["x"]);
+        let idx = index(&["p/a", "p/b", "p/c", "p/d", "p/x", "p/y"]);
+        let r = acyclic("p/*", r#"import\s+"([^"]+)""#, Resolve::RelativeToRepoRoot);
+        let v = eval(&r, root, &idx);
+        assert_eq!(v.len(), 2, "one finding per cyclic component: {v:?}");
+        assert!(v[0].message.contains("p/d"), "d is on a cycle: {v:?}");
+        assert_eq!(
+            v[0].baseline_key.as_deref(),
+            Some("cycle\u{0}p/a\u{0}p/b\u{0}p/c\u{0}p/d")
+        );
+        // A component that IS a simple cycle keeps the exact path rendering
+        // (and the member-set key) the per-cycle reporting produced.
+        assert!(
+            v[1].message.contains("p/x \u{2192} p/y \u{2192} p/x"),
+            "{v:?}"
+        );
+        assert_eq!(v[1].baseline_key.as_deref(), Some("cycle\u{0}p/x\u{0}p/y"));
+        // Deterministic across runs.
+        let again = eval(&r, root, &idx);
+        assert_eq!(
+            v.iter().map(|x| &x.message).collect::<Vec<_>>(),
+            again.iter().map(|x| &x.message).collect::<Vec<_>>()
         );
     }
 
