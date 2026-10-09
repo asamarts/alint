@@ -43,6 +43,9 @@ fn main() -> ExitCode {
     init_tracing(&cli.color);
     match run(cli) {
         Ok(code) => code,
+        // The reader closed stdout early (`alint list | head -1`): not an
+        // alint error. Exit quietly, as if the output had been consumed.
+        Err(e) if is_broken_pipe(&e) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("alint: {}", term(&format!("{e:#}")));
             // Exit 3 for an internal alint error (a bug), 2 for a config /
@@ -65,6 +68,25 @@ fn error_is_internal(err: &anyhow::Error) -> bool {
             .downcast_ref::<alint_core::Error>()
             .is_some_and(alint_core::Error::is_internal)
     })
+}
+
+/// Whether the error chain carries an EPIPE: stdout's reader went away.
+fn is_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
+    })
+}
+
+/// Treat a closed stdout (EPIPE, e.g. `alint check -f json | head -1`) as a
+/// completed report write, so the command still returns the exit code its
+/// findings call for instead of a spurious "Broken pipe" error.
+fn tolerate_broken_pipe(res: io::Result<()>) -> io::Result<()> {
+    match res {
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
+    }
 }
 
 /// Install a custom panic hook that prints a pre-filled GitHub-issue
@@ -684,7 +706,7 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     // SARIF and JSON render baselined findings (marked / counted) so Code
     // Scanning dismisses rather than re-opens them; every other format ignores
     // the baseline and emits only the live (new) findings.
-    match (format, baseline_marks.as_ref()) {
+    let written = match (format, baseline_marks.as_ref()) {
         (Format::Sarif, Some(marks)) => {
             alint_output::write_sarif_for_config(&report, Some(marks), None, &config_rel, &mut out)
         }
@@ -711,8 +733,8 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
             alint_output::write_gitlab(&report, Some(&fps), &mut out)
         }
         _ => format.write_with_options(&report, &mut out, opts),
-    }
-    .context("writing output")?;
+    };
+    tolerate_broken_pipe(written).context("writing output")?;
     out.flush().ok();
 
     // Informational notes (non-violation findings) — surfaced on
@@ -1183,7 +1205,8 @@ fn cmd_fix(
             .stage_fixes(&root, &index, threshold)
             .context("staging fixes")?;
         let (mut out, _opts) = render_env(cli)?;
-        alint_output::write_fix_diff(&staged, &mut out).context("writing diff")?;
+        tolerate_broken_pipe(alint_output::write_fix_diff(&staged, &mut out))
+            .context("writing diff")?;
         out.flush().ok();
         return Ok(fix_exit_code(&report, fix_only, cli));
     }
@@ -1234,12 +1257,10 @@ fn cmd_fix(
                 })
                 .collect(),
         };
-        format
-            .write_fix_report(&applied_only, &mut out, opts, dry_run)
+        tolerate_broken_pipe(format.write_fix_report(&applied_only, &mut out, opts, dry_run))
             .context("writing output")?;
     } else {
-        format
-            .write_fix_report(&report, &mut out, opts, dry_run)
+        tolerate_broken_pipe(format.write_fix_report(&report, &mut out, opts, dry_run))
             .context("writing output")?;
     }
     out.flush().ok();

@@ -355,3 +355,13 @@ fn tracing_ansi_follows_color_choice_no_color_and_tty() {
     assert!(tracing_ansi("always", true, false));
     assert!(!tracing_ansi("never", false, true));
 }
+
+#[test]
+fn broken_pipe_is_detected_through_context_and_tolerated() {
+    let epipe = || std::io::Error::from(std::io::ErrorKind::BrokenPipe);
+    let wrapped = anyhow::Error::new(epipe()).context("writing output");
+    assert!(is_broken_pipe(&wrapped));
+    assert!(!is_broken_pipe(&anyhow::anyhow!("no config")));
+    assert!(tolerate_broken_pipe(Err(epipe())).is_ok());
+    assert!(tolerate_broken_pipe(Err(std::io::Error::other("disk full"))).is_err());
+}
