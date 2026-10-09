@@ -51,8 +51,14 @@ impl Rule for FileEndsWithRule {
             // bytes matter. Solo runs (`alint fix --only`,
             // tests) read just those bytes from the end.
             let full = ctx.root.join(&entry.path);
-            let Ok(tail) = read_suffix_n(&full, self.suffix.len()) else {
-                continue;
+            // A genuine read error fails CLOSED, matching `check`'s file-major
+            // dispatch (audit 2026-10 finding 7); `NotFound` stays a skip.
+            let tail = match read_suffix_n(&full, self.suffix.len()) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.extend(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &tail)?);
         }

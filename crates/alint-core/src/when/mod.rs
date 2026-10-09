@@ -795,6 +795,41 @@ mod tests {
     }
 
     #[test]
+    fn iter_has_file_escapes_glob_metacharacters_in_the_iterated_path() {
+        // Audit 2026-10 finding 2: the iterated dir is a real name, not a
+        // pattern. `app/[slug]` (Next.js) was compiled as a character class and
+        // missed its own file (FP); `pkgs/*` matched a sibling's file (FN);
+        // `pkgs/nobrace{` was an invalid-glob error.
+        let index = idx(&[
+            ("app/[slug]", true),
+            ("app/[slug]/page.tsx", false),
+            ("pkgs/*", true),
+            ("pkgs/other", true),
+            ("pkgs/other/a.rs", false),
+            ("pkgs/nobrace{", true),
+            ("pkgs/nobrace{/b.rs", false),
+        ]);
+        assert!(check_iter(
+            "iter.has_file(\"*.tsx\")",
+            Path::new("app/[slug]"),
+            true,
+            &index,
+        ));
+        assert!(!check_iter(
+            "iter.has_file(\"*.rs\")",
+            Path::new("pkgs/*"),
+            true,
+            &index,
+        ));
+        assert!(check_iter(
+            "iter.has_file(\"*.rs\")",
+            Path::new("pkgs/nobrace{"),
+            true,
+            &index,
+        ));
+    }
+
+    #[test]
     fn iter_has_file_returns_false_for_file_iteration() {
         let index = idx(&[("a.rs", false)]);
         assert!(!check_iter(

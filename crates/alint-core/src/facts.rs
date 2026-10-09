@@ -20,8 +20,7 @@
 use std::collections::HashMap;
 use std::path::Path;
 
-use std::io::Read as _;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use regex::Regex;
 use serde::Deserialize;
@@ -342,55 +341,21 @@ fn run_custom_with_timeout(spec: &CustomFact, root: &Path, timeout: Duration) ->
     let Some((program, args)) = spec.argv.split_first() else {
         return String::new();
     };
-    let Ok(mut child) = std::process::Command::new(program)
-        .args(args)
+    let mut cmd = std::process::Command::new(program);
+    cmd.args(args)
         .current_dir(root)
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-    else {
-        return String::new();
-    };
-
-    let mut out_pipe = child.stdout.take();
-    let reader = std::thread::spawn(move || {
-        let mut buf = Vec::new();
-        if let Some(p) = out_pipe.as_mut() {
-            // Custom facts are tiny by nature (a branch, a count); cap defensively.
-            let _ = p.take(1024 * 1024).read_to_end(&mut buf);
+        .stdin(std::process::Stdio::null());
+    // Shared bounded runner: concurrent drain, the timeout kills the whole
+    // process group (a grandchild holding stdout can't outlive it), and a
+    // backgrounded descendant can't stall the run after the child exits.
+    // Custom facts are tiny by nature (a branch, a count); cap defensively.
+    match crate::process::run_bounded(cmd, timeout, 1024 * 1024, false) {
+        crate::process::RunOutcome::Exited { status, stdout, .. } if status.success() => {
+            std::str::from_utf8(&stdout)
+                .map(|t| t.trim_end().to_string())
+                .unwrap_or_default()
         }
-        buf
-    });
-
-    let deadline = Instant::now() + timeout;
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let buf = reader.join().unwrap_or_default();
-                if !status.success() {
-                    return String::new();
-                }
-                return std::str::from_utf8(&buf)
-                    .map(|t| t.trim_end().to_string())
-                    .unwrap_or_default();
-            }
-            Ok(None) => {
-                if Instant::now() >= deadline {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    let _ = reader.join();
-                    return String::new();
-                }
-                std::thread::sleep(Duration::from_millis(10));
-            }
-            Err(_) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                let _ = reader.join();
-                return String::new();
-            }
-        }
+        _ => String::new(),
     }
 }
 
@@ -440,6 +405,8 @@ fn read_git_branch(root: &Path) -> String {
 mod tests {
     use super::*;
     use crate::walker::FileEntry;
+    #[cfg(unix)]
+    use std::time::Instant;
 
     fn idx(paths: &[&str]) -> FileIndex {
         FileIndex::from_entries(
@@ -725,6 +692,42 @@ mod tests {
         assert!(
             start.elapsed() < Duration::from_secs(5),
             "must return promptly at the deadline, not run the full sleep"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_fact_timeout_is_enforced_against_a_grandchild_holding_stdout() {
+        // Audit 2026-10 finding 5: killing only `sh` left `sleep` holding the
+        // pipe, so the reader join ran the full 15s past a 300ms deadline.
+        let spec = CustomFact {
+            argv: vec!["sh".into(), "-c".into(), "sleep 15; echo x".into()],
+        };
+        let start = Instant::now();
+        let got = run_custom_with_timeout(&spec, Path::new("."), Duration::from_millis(300));
+        assert_eq!(got, "");
+        assert!(
+            start.elapsed() < Duration::from_secs(6),
+            "{:?}",
+            start.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn custom_fact_does_not_wait_for_a_backgrounded_descendant() {
+        // `sleep 9 &` inherits stdout; the fact must resolve once `sh` exits
+        // (plus the bounded reader grace), not when the sleep ends.
+        let spec = CustomFact {
+            argv: vec!["sh".into(), "-c".into(), "sleep 9 & echo hi".into()],
+        };
+        let start = Instant::now();
+        let got = run_custom_with_timeout(&spec, Path::new("."), Duration::from_secs(30));
+        assert_eq!(got, "hi");
+        assert!(
+            start.elapsed() < Duration::from_secs(6),
+            "{:?}",
+            start.elapsed()
         );
     }
 

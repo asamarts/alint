@@ -557,9 +557,10 @@ pub trait PerFileRule: Send + Sync + std::fmt::Debug {
 /// of them to a one-liner. The helper takes `&R: PerFileRule` so
 /// it inlines for static dispatch.
 ///
-/// Read failures (file deleted mid-walk, permission flake) skip the
-/// file silently to match the engine's file-major behaviour at
-/// `crate::engine` line ~506.
+/// A file deleted mid-walk (`NotFound`) or over the analysis cap is skipped;
+/// a genuine read error (permission, I/O) yields an
+/// [`unreadable_file_violation`] -- the same fail-closed outcome as the
+/// engine's file-major dispatch, so `check` and `fix` agree.
 pub fn eval_per_file<R: PerFileRule + ?Sized>(
     rule: &R,
     ctx: &Context<'_>,
@@ -571,14 +572,41 @@ pub fn eval_per_file<R: PerFileRule + ?Sized>(
         }
         let full = ctx.root.join(&entry.path);
         // Skip a file larger than the analysis cap (index size, no extra
-        // stat) so a multi-GB blob can't OOM the run (M3).
-        let Some(bytes) = crate::walker::read_capped_or_skip(&full, entry.size) else {
-            continue;
-        };
-        violations.extend(rule.evaluate_file(ctx, &entry.path, &bytes)?);
+        // stat) so a multi-GB blob can't OOM the run (M3); a genuine read error
+        // fails CLOSED with a finding, matching the engine's per-file dispatch.
+        match crate::walker::read_for_analysis(&full, entry.size) {
+            crate::walker::AnalysisRead::Bytes(bytes) => {
+                violations.extend(rule.evaluate_file(ctx, &entry.path, &bytes)?);
+            }
+            crate::walker::AnalysisRead::Skip => {}
+            crate::walker::AnalysisRead::Unreadable(e) => {
+                violations.push(unreadable_file_violation(&entry.path, &e));
+            }
+        }
     }
     Ok(violations)
 }
+
+/// The finding a per-file content rule reports for an in-scope file it could
+/// not read (permission denied, I/O error): `could not read file: <err>`,
+/// anchored on the file, at the rule's level. Content rules fail CLOSED on a
+/// read error -- silently passing a file the rule never inspected is a false
+/// negative (audit 2026-10 finding 7: a mode-000 file with trailing whitespace
+/// read "All rules passed", exit 0). A `NotFound` (deleted between the walk and
+/// the read) and an over-cap file stay benign skips. The violation carries a
+/// fixed `baseline_key` so its fingerprint is stable (the file's content, which
+/// the default fingerprint would hash, is exactly what cannot be read).
+#[must_use]
+pub fn unreadable_file_violation(rel: &Path, err: &std::io::Error) -> Violation {
+    Violation::new(format!("could not read file: {err}"))
+        .with_path(Arc::<Path>::from(rel))
+        .with_baseline_key(UNREADABLE_FILE_KEY)
+}
+
+/// The `baseline_key` [`unreadable_file_violation`] stamps. The engine also
+/// keys on it to never tag such a finding `fixable` (the fixer would hit the
+/// same read error).
+pub(crate) const UNREADABLE_FILE_KEY: &str = "alint:unreadable-file";
 
 /// Runtime context for applying a fix.
 #[derive(Debug)]
@@ -1087,7 +1115,9 @@ pub(crate) fn resolve_write_target(path: &Path) -> PathBuf {
 /// leaves the original intact rather than truncated. The temp is a sibling so
 /// the rename is atomic on the same filesystem, and it is cleaned up on
 /// failure. Writes THROUGH a symlink to its canonical target, preserving the
-/// link. (Manual temp, no `tempfile` runtime dependency.)
+/// link. (Manual temp, no `tempfile` runtime dependency.) An existing
+/// read-only target is refused with `PermissionDenied` rather than replaced
+/// (the rename would otherwise succeed on directory permissions alone).
 ///
 /// Lives in `alint-core` so both the fixers (`alint-rules`) and the engine's
 /// compose flush share one implementation; `alint-rules::io` re-exports it.
@@ -1116,9 +1146,26 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+    // Refuse to replace a read-only file. A temp+rename only needs write access
+    // to the DIRECTORY, so without this check a `chmod 444` file (or a Perforce
+    // checkout not yet opened for edit) would be silently rewritten -- unlike a
+    // plain in-place write, which fails with EACCES. The caller reports the
+    // error (the engine downgrades the item to a fix error), so the violation
+    // stands visibly instead.
+    if let Ok(meta) = std::fs::metadata(path)
+        && meta.permissions().readonly()
+    {
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            format!("refusing to overwrite read-only file {}", path.display()),
+        ));
+    }
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let stem = path.file_name().and_then(|f| f.to_str()).unwrap_or("tmp");
-    let tmp = dir.join(format!(".{stem}.alint-fix.{}.{n}", std::process::id()));
+    // A short, fixed-shape name: the target's own name is NOT embedded, so a
+    // long basename (> ~230 bytes) cannot push the temp past NAME_MAX (255 on
+    // most filesystems; the old `.{name}.alint-fix.{pid}.{n}` failed with
+    // ENAMETOOLONG / os error 36). pid + counter keep it unique.
+    let tmp = dir.join(format!(".alint-fix.{}.{n}.tmp", std::process::id()));
     let write = || -> std::io::Result<()> {
         let mut f = std::fs::File::create(&tmp)?;
         f.write_all(bytes)?;
@@ -1147,6 +1194,46 @@ mod tests {
 
     fn empty_index() -> FileIndex {
         FileIndex::default()
+    }
+
+    // Unix-only: NAME_MAX is the unix limit this pins; on Windows the long
+    // absolute tempdir path would trip MAX_PATH instead, an unrelated limit.
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_handles_a_name_near_name_max() {
+        // Audit 2026-10 finding 9: the temp name embedded the target's name
+        // (`.{name}.alint-fix.{pid}.{n}`), so a 240-byte basename pushed it past
+        // NAME_MAX (255) and the write failed with ENAMETOOLONG (os error 36).
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join(format!("{}.txt", "a".repeat(240)));
+        std::fs::write(&p, b"old").unwrap();
+        write_atomic(&p, b"new").unwrap();
+        assert_eq!(std::fs::read(&p).unwrap(), b"new");
+        let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
+        assert_eq!(leftovers, 1, "no temp file left behind");
+    }
+
+    #[test]
+    fn write_atomic_refuses_a_read_only_file() {
+        // Audit 2026-10 finding 11: temp+rename only needs DIRECTORY write
+        // access, so a read-only file was silently replaced. It must be refused
+        // (left byte-identical, mode intact) so the fix reports an error.
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("locked.txt");
+        std::fs::write(&p, b"old").unwrap();
+        let mut perms = std::fs::metadata(&p).unwrap().permissions();
+        perms.set_readonly(true);
+        std::fs::set_permissions(&p, perms).unwrap();
+        let err = write_atomic(&p, b"new").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert_eq!(std::fs::read(&p).unwrap(), b"old");
+        assert!(std::fs::metadata(&p).unwrap().permissions().readonly());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+        // Restore so the tempdir cleans up on every platform.
+        let mut perms = std::fs::metadata(&p).unwrap().permissions();
+        #[allow(clippy::permissions_set_readonly_false)]
+        perms.set_readonly(false);
+        std::fs::set_permissions(&p, perms).unwrap();
     }
 
     #[test]

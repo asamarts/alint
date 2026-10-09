@@ -31,6 +31,33 @@ fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::open(path)
 }
 
+/// The fail-closed outcome of a per-file content rule's OWN read (its
+/// rule-major `evaluate` loop -- the read path `alint fix` uses) failing with
+/// an I/O error: `Some(could-not-read violation)` for a genuine error
+/// (permission, I/O), `None` for a `NotFound` (deleted mid-walk, a benign
+/// race). Mirrors the engine's file-major dispatch, which reports the same
+/// [`alint_core::unreadable_file_violation`], so `check` and `fix` agree
+/// (audit 2026-10 finding 7; this reverses the earlier fail-open choice).
+pub(crate) fn io_error_violation(
+    rel: &Path,
+    err: &std::io::Error,
+) -> Option<alint_core::Violation> {
+    (err.kind() != std::io::ErrorKind::NotFound)
+        .then(|| alint_core::unreadable_file_violation(rel, err))
+}
+
+/// [`io_error_violation`] for a [`read_capped`] failure. An over-cap file
+/// stays a skip (matching the engine's `MAX_ANALYZE_BYTES` behaviour).
+pub(crate) fn read_cap_error_violation(
+    rel: &Path,
+    err: &ReadCapError,
+) -> Option<alint_core::Violation> {
+    match err {
+        ReadCapError::TooLarge(_) => None,
+        ReadCapError::Io(e) => io_error_violation(rel, e),
+    }
+}
+
 /// Read up to `TEXT_INSPECT_LEN` bytes from the start of a file. Returned
 /// `Ok(None)` means the file was empty; `Err` is propagated I/O error.
 pub fn read_prefix(path: &Path) -> std::io::Result<Vec<u8>> {

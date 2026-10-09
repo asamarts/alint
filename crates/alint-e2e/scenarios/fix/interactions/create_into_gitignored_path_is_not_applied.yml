@@ -1,0 +1,35 @@
+name: a file_create whose target the walker never indexes is reported unresolved, not applied
+tags: [fix, interactions, file_exists, file_create]
+
+# Regression (audit 2026-10, finding 1): the fixpoint locked an `Applied`
+# outcome, so a fix that wrote a file the rule's re-check still could not see
+# (a gitignored `.env`) printed "applied" and exited 0 while `check` failed.
+# The converged pass still sees the violation, so the item must be demoted to
+# a skip (violation stands -> nonzero exit at `level: error`).
+given:
+  tree:
+    .gitignore: ".env\n"
+  config: |
+    version: 1
+    rules:
+      - id: has-env
+        kind: file_exists
+        paths: [".env"]
+        level: error
+        fix:
+          file_create:
+            content: "X=1\n"
+
+when: [fix, check]
+
+expect:
+  - applied: []
+    skipped: [has-env]
+    suggested: []
+    unfixable: []
+  - violations:
+      - {rule: has-env, level: error}
+
+expect_tree:
+  .gitignore: ".env\n"
+  .env: "X=1\n"

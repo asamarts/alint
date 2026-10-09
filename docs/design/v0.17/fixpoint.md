@@ -233,7 +233,8 @@ an aggregation key here, NOT a termination device):
   and exits 1 on a tree `check` calls clean. After convergence the loop drops any
   non-Applied item whose violation the final pass no longer saw. ONE carve-out
   keeps a *real* outcome: an `Applied` item is always kept (the audit trail of what
-  changed). A write error is NOT separately carved out (a follow-up audit removed
+  changed) -- though one whose violation the final pass still saw is demoted (next
+  bullet). A write error is NOT separately carved out (a follow-up audit removed
   that carve-out): a `Skipped` carrying `FIX_ERROR_PREFIX` is kept exactly when its
   violation is still in `final_keys`. A PERSISTENT write error (a read-only target,
   ENOSPC) re-fires on the converged pass, so its key IS in `final_keys` -> kept ->
@@ -249,6 +250,16 @@ an aggregation key here, NOT a termination device):
   sole located fixer `replace`, and the compose-coalesce alias skip it protected
   was itself a false-positive exit-1 on a clean tree, now correctly dropped so a
   coalesced symlink+target run exits 0.)
+- **An `Applied` whose violation still stands is demoted (audit 2026-10).** The
+  lock hides the converged pass's own item for a locked key, so a fix that wrote
+  something the rule's re-check still cannot see (a `file_create` of a gitignored
+  `.env` the walker never indexes; a `file_create.path: LICENSE` under `paths:
+  [LICENSE.md]`; a non-self-satisfying `file_append`) used to print "applied" and
+  exit 0 while `check` failed. After convergence, an `Applied` item whose key is
+  still in `final_keys` is rewritten to a declined `Skipped` ("fix ran (...) but
+  the violation still stands on re-check") -> exit 1 at `level: error`, agreeing
+  with `check`. Gated by `create_into_gitignored_path_is_not_applied` and
+  `create_at_a_different_path_is_not_applied`.
 - **Transient defers are not reported.** The located byte-consistency / removal
   defer (a batch yielding to a concurrent write, increment 1) emits no provisional
   "rerun to apply" skip: the re-walk IS the rerun, so the retry pass reports the

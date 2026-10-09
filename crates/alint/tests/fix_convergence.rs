@@ -12,13 +12,12 @@
 //!     attacker also dropped one invalid byte.
 //!   * NUL-bearing binary: the fixers refuse it (editing binary corrupts it), so
 //!     the detectors now skip it too -- `check` and `fix` agree.
-//!   * unreadable file (mode 000 / permission denied): `check` reads via the
-//!     engine's `read_capped_or_skip`, which SKIPS an unreadable file before
-//!     dispatch, so `check` exits 0. But `fix` finds violations through each
-//!     rule's whole-index `evaluate`, whose read arm flagged an "could not read
-//!     file" violation -- unfixable -> `fix` exited 1 on the very tree `check`
-//!     called clean. The per-file content rules now fail open on a read error
-//!     (skip, matching `check`), closing that exit-code divergence.
+//!   * unreadable file (mode 000 / permission denied): `check` and `fix` read
+//!     through different paths (the engine's file-major dispatch vs each rule's
+//!     whole-index `evaluate`) and once disagreed on it. Round 4 made both fail
+//!     OPEN; audit 2026-10 (finding 7) made both fail CLOSED -- a content rule
+//!     that silently passes a file it could not read is a false negative -- so
+//!     both report "could not read file" and exit 1, still in agreement.
 //!
 //! These live as an integration test rather than a scenario/property because a
 //! raw `0xFF` byte cannot be represented in a UTF-8 YAML scenario tree, and an
@@ -497,23 +496,21 @@ fn no_phantom_skip_for_a_file_another_rule_removed() {
     assert!(!root.join("big.txt").exists(), "big.txt was removed");
 }
 
-/// Audit regression (R3, fix-vs-check exit-code divergence on an unreadable file):
-/// `check` skips a mode-000 file via the engine's `read_capped_or_skip` and exits
-/// 0, but every per-file content rule's whole-index `evaluate` (the read path
-/// `fix` uses) flagged it "could not read file" -> unfixable -> `fix` exited 1 on
-/// the same tree. The rules now fail open on a read error (skip, matching
-/// `check`), so `fix` and `check` agree. Exercises both distinct read paths:
-/// `file_content_forbidden` reads via `read_capped`, `file_is_text` via
-/// `read_prefix`. `#[cfg(unix)]` -- mode 000 is the portable "unreadable" proxy.
+/// Audit regression (R3, fix-vs-check exit-code divergence on an unreadable
+/// file), now FAIL-CLOSED (audit 2026-10 finding 7): an in-scope file a content
+/// rule cannot read must never read as "passed". Both `check` (the engine's
+/// file-major dispatch) and `fix` (each rule's whole-index `evaluate`) report
+/// "could not read file" and exit 1, so they still agree. Exercises the distinct
+/// read paths: `file_content_forbidden` (`read_capped`), `file_is_text`
+/// (`read_prefix`), and `no_trailing_whitespace` (`eval_per_file`).
+/// `#[cfg(unix)]` -- mode 000 is the portable "unreadable" proxy.
 #[cfg(unix)]
 #[test]
-fn unreadable_file_is_skipped_by_both_check_and_fix() {
+fn unreadable_file_fails_closed_in_both_check_and_fix() {
     use std::os::unix::fs::PermissionsExt as _;
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path();
-    // Content that WOULD be flagged if readable: it contains FORBIDDEN and is
-    // valid text -- so the skip below is meaningful, not a trivial no-match.
-    write(root, "secret.txt", b"FORBIDDEN\n");
+    write(root, "secret.txt", b"FORBIDDEN  \n");
     let p = root.join("secret.txt");
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
     // Running as root (common in CI containers) bypasses mode bits, so the file
@@ -527,33 +524,76 @@ fn unreadable_file_is_skipped_by_both_check_and_fix() {
         root,
         "version: 1\nrules:\n\
          \x20 - id: no-forbidden\n    kind: file_content_forbidden\n    paths: \"*.txt\"\n    pattern: \"FORBIDDEN\"\n    level: error\n    fix: { replace: { replacement: \"OK\" } }\n\
-         \x20 - id: must-be-text\n    kind: file_is_text\n    paths: \"*.txt\"\n    level: error\n",
+         \x20 - id: must-be-text\n    kind: file_is_text\n    paths: \"*.txt\"\n    level: error\n\
+         \x20 - id: ntw\n    kind: no_trailing_whitespace\n    paths: \"*.txt\"\n    level: error\n",
     );
-    // check already skips the unreadable file (its read path is
-    // `read_capped_or_skip`), so the tree reads "clean" -> exit 0.
-    assert!(
-        check_is_clean(root),
-        "check must skip an unreadable file, not flag it"
-    );
-    // fix must AGREE: skip the unreadable file and exit 0. Before R3, `evaluate`
-    // flagged "could not read file" (both rules) -> unfixable -> exit 1.
-    let out = fix(root);
+    let out = Command::new(alint())
+        .args(["check", "."])
+        .current_dir(root)
+        .output()
+        .expect("run alint check");
+    let check_out = String::from_utf8_lossy(&out.stdout).into_owned();
     assert_eq!(
         out.status.code(),
-        Some(0),
-        "fix must skip an unreadable file and exit 0, agreeing with check; stdout={} stderr={}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr),
+        Some(1),
+        "check must fail closed on an unreadable in-scope file; stdout={check_out}"
     );
+    for rule in ["no-forbidden", "must-be-text", "ntw"] {
+        assert!(
+            check_out.contains(rule),
+            "{rule} must report it: {check_out}"
+        );
+    }
+    assert!(check_out.contains("could not read file"), "{check_out}");
+    // fix must AGREE: the violations stand -> exit 1, surfaced as unreadable.
+    let out = fix(root);
     let combined = format!(
         "{}{}",
         String::from_utf8_lossy(&out.stdout),
         String::from_utf8_lossy(&out.stderr)
     );
-    assert!(
-        !combined.contains("could not read file"),
-        "fix must not surface a 'could not read file' violation; got: {combined}"
+    assert_eq!(
+        out.status.code(),
+        Some(1),
+        "fix must agree with check (exit 1); got: {combined}"
     );
+    assert!(combined.contains("could not read file"), "{combined}");
     // Restore perms so tempdir cleanup is unencumbered on exotic platforms.
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
+}
+
+/// Audit 2026-10 finding 11: `write_atomic`'s temp+rename needs only DIRECTORY
+/// write access, so `fix` silently rewrote a read-only file (the engine's
+/// flush-failure handling assumed such a write fails). A read-only file is now
+/// refused: left byte-identical and read-only, the item reported as a fix
+/// error, exit 1 (the violation stands). Portable: `set_readonly` is the
+/// read-only bit on Windows and clears every write bit on unix.
+#[test]
+fn read_only_file_is_not_rewritten_by_fix() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, "locked.txt", b"a  \n");
+    let p = root.join("locked.txt");
+    let mut perms = std::fs::metadata(&p).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&p, perms).unwrap();
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: ntw\n    kind: no_trailing_whitespace\n    paths: \"*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n",
+    );
+    let out = fix(root);
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(1), "{combined}");
+    assert!(combined.contains("read-only"), "{combined}");
+    assert_eq!(std::fs::read(&p).unwrap(), b"a  \n", "untouched");
+    assert!(std::fs::metadata(&p).unwrap().permissions().readonly());
+    let mut perms = std::fs::metadata(&p).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&p, perms).unwrap();
 }

@@ -73,7 +73,63 @@ impl PathTokens {
 /// so a repo file literally named `a{ext}.c` (stem `a{ext}`) had its embedded
 /// `{ext}` wrongly expanded by the later `{ext}` pass, yielding a bogus path
 /// for the forbidding rules (L8). Unknown `{tokens}` are preserved verbatim.
+///
+/// An EMPTY token value that sits in its own leading path segment collapses
+/// together with the `/` after it: a root-level file has `{dir}` = `""`, so the
+/// documented `"{dir}/{stem}.h"` renders `"top.h"`, not the absolute-looking
+/// `"/top.h"` (which never matches a repo-relative path).
+///
+/// The output is a LITERAL path: substituted values are not escaped. For a
+/// template that is compiled as a glob, use [`render_path_glob`].
 pub fn render_path(template: &str, t: &PathTokens) -> String {
+    render_path_with(template, t, |v, out| out.push_str(v))
+}
+
+/// [`render_path`] for a template that is compiled as a **glob** (a nested
+/// rule's `paths:`, an `iter.has_file` pattern). Each substituted token value
+/// is glob-escaped (see [`glob_escape`]) so a real path containing glob
+/// metacharacters -- a Next.js `app/[slug]` dir, a literal `pkgs/*`, an
+/// unbalanced `{` -- matches only itself instead of being reinterpreted as a
+/// pattern (a false positive / false negative / invalid-glob error). The
+/// user-written template text around the tokens keeps its glob meaning.
+pub fn render_path_glob(template: &str, t: &PathTokens) -> String {
+    render_path_with(template, t, |v, out| {
+        // A value landing at the very start of the pattern that begins with `!`
+        // would be read as an EXCLUDE by `Scope::from_patterns`; wrap the `!` in
+        // a single-arm alternation so it is a literal.
+        let v = if out.is_empty()
+            && let Some(rest) = v.strip_prefix('!')
+        {
+            out.push_str("{!}");
+            rest
+        } else {
+            v
+        };
+        out.push_str(&glob_escape(v));
+    })
+}
+
+/// Escape `s` so it matches only itself when compiled as an alint glob
+/// (`globset`, the dialect `Scope` uses): the metacharacters `* ? [ ] { }` are
+/// wrapped in a one-character class (`[` -> `[[]`), and on non-Windows a `\`
+/// (a legal filename byte there, and globset's escape character) is
+/// backslash-escaped. On Windows `\` is the path separator, never part of a
+/// name, so it is left as-is.
+#[must_use]
+pub fn glob_escape(s: &str) -> String {
+    let escaped = globset::escape(s);
+    if cfg!(windows) {
+        escaped
+    } else {
+        escaped.replace('\\', "\\\\")
+    }
+}
+
+fn render_path_with(
+    template: &str,
+    t: &PathTokens,
+    mut push: impl FnMut(&str, &mut String),
+) -> String {
     // Longest-first only matters if one token is a prefix of another; none is,
     // but the order is kept stable for clarity / future additions.
     let tokens: [(&str, &str); 6] = [
@@ -90,8 +146,17 @@ pub fn render_path(template: &str, t: &PathTokens) -> String {
         out.push_str(&rest[..open]);
         let at_brace = &rest[open..];
         if let Some((tok, val)) = tokens.iter().find(|(tok, _)| at_brace.starts_with(tok)) {
-            out.push_str(val);
             rest = &at_brace[tok.len()..];
+            // An empty value that forms a whole leading segment (start of the
+            // output or right after a `/`) collapses with its trailing `/`, so
+            // `{dir}/x` for a root-level file is `x`, not `/x`.
+            if val.is_empty() && (out.is_empty() || out.ends_with('/')) {
+                if let Some(after) = rest.strip_prefix('/') {
+                    rest = after;
+                }
+            } else {
+                push(val, &mut out);
+            }
         } else {
             // A `{` that doesn't begin a known token: emit it literally and
             // resume after it (preserves `{unknown}` verbatim).
@@ -155,13 +220,27 @@ pub fn render_value(v: serde_yaml_ng::Value, tokens: &PathTokens) -> serde_yaml_
 }
 
 /// Apply path-template substitution to every pattern in a `PathsSpec`.
+/// `paths:` entries are globs, so token values are glob-escaped
+/// ([`render_path_glob`]). A flat-list `!exclude` entry keeps its leading
+/// `!` (it is template text, not a substituted value): the `!` is peeled off,
+/// the remainder rendered, and the `!` restored.
 pub fn render_paths_spec(spec: &PathsSpec, tokens: &PathTokens) -> PathsSpec {
+    let flat = |s: &String| match s.strip_prefix('!') {
+        Some(rest) => format!("!{}", render_path_glob(rest, tokens)),
+        None => render_path_glob(s, tokens),
+    };
     match spec {
-        PathsSpec::Single(s) => PathsSpec::Single(render_path(s, tokens)),
-        PathsSpec::Many(v) => PathsSpec::Many(v.iter().map(|s| render_path(s, tokens)).collect()),
+        PathsSpec::Single(s) => PathsSpec::Single(flat(s)),
+        PathsSpec::Many(v) => PathsSpec::Many(v.iter().map(flat).collect()),
         PathsSpec::IncludeExclude { include, exclude } => PathsSpec::IncludeExclude {
-            include: include.iter().map(|s| render_path(s, tokens)).collect(),
-            exclude: exclude.iter().map(|s| render_path(s, tokens)).collect(),
+            include: include
+                .iter()
+                .map(|s| render_path_glob(s, tokens))
+                .collect(),
+            exclude: exclude
+                .iter()
+                .map(|s| render_path_glob(s, tokens))
+                .collect(),
         },
     }
 }
@@ -228,6 +307,80 @@ mod tests {
     fn render_path_c_to_h() {
         let t = PathTokens::from_path(Path::new("src/mod/foo.c"));
         assert_eq!(render_path("{dir}/{stem}.h", &t), "src/mod/foo.h");
+    }
+
+    #[test]
+    fn render_path_root_level_dir_collapses_its_separator() {
+        // Audit 2026-10 finding 3: a root-level file has `{dir}` = "", so the
+        // documented `{dir}/{stem}.h` used to render `/top.h` (never a
+        // repo-relative path).
+        let t = PathTokens::from_path(Path::new("top.c"));
+        assert_eq!(render_path("{dir}/{stem}.h", &t), "top.h");
+        assert_eq!(render_path("{dir}/include/{stem}.h", &t), "include/top.h");
+        assert_eq!(render_path_glob("{dir}/*.h", &t), "*.h");
+        // A non-empty dir and a mid-template empty token are unchanged.
+        let nested = PathTokens::from_path(Path::new("src/foo.c"));
+        assert_eq!(render_path("{dir}/{stem}.h", &nested), "src/foo.h");
+        let no_ext = PathTokens::from_path(Path::new("src/Makefile"));
+        assert_eq!(render_path("{dir}/{stem}.{ext}", &no_ext), "src/Makefile.");
+    }
+
+    #[test]
+    fn render_path_glob_escapes_token_values_not_the_template() {
+        // Audit 2026-10 finding 2: substituted values are real path text and must
+        // not be reinterpreted as glob syntax; the user's template keeps its.
+        let t = PathTokens::from_path(Path::new("app/[slug]"));
+        assert_eq!(render_path_glob("{path}/*.tsx", &t), "app/[[]slug[]]/*.tsx");
+        // The literal renderer leaves values untouched.
+        assert_eq!(render_path("{path}/page.tsx", &t), "app/[slug]/page.tsx");
+        let star = PathTokens::from_path(Path::new("pkgs/*"));
+        assert_eq!(render_path_glob("{path}/**", &star), "pkgs/[*]/**");
+        let brace = PathTokens::from_path(Path::new("pkgs/nobrace{"));
+        assert_eq!(render_path_glob("{path}/x", &brace), "pkgs/nobrace[{]/x");
+        // A value beginning with `!` at the start of a pattern stays literal
+        // (a bare leading `!` would turn the pattern into an exclude).
+        let bang = PathTokens::from_path(Path::new("!keep"));
+        assert_eq!(render_path_glob("{path}/x", &bang), "{!}keep/x");
+    }
+
+    #[test]
+    fn render_paths_spec_escaped_patterns_match_only_the_real_path() {
+        use crate::scope::Scope;
+        use crate::walker::FileIndex;
+        let idx = FileIndex::from_entries(Vec::new());
+        let matches = |dir: &str, pat: &str, candidate: &str| {
+            let t = PathTokens::from_path(Path::new(dir));
+            let spec = render_paths_spec(&PathsSpec::Single(pat.to_string()), &t);
+            Scope::from_paths_spec(&spec)
+                .unwrap()
+                .matches(Path::new(candidate), &idx)
+        };
+        assert!(matches(
+            "app/[slug]",
+            "{path}/page.tsx",
+            "app/[slug]/page.tsx"
+        ));
+        assert!(!matches("app/[slug]", "{path}/page.tsx", "app/s/page.tsx"));
+        assert!(matches("pkgs/*", "{path}/*.rs", "pkgs/*/a.rs"));
+        assert!(!matches("pkgs/*", "{path}/*.rs", "pkgs/other/a.rs"));
+        assert!(matches(
+            "pkgs/nobrace{",
+            "{path}/*.rs",
+            "pkgs/nobrace{/b.rs"
+        ));
+        assert!(matches("!keep", "{path}/x", "!keep/x"));
+        // A template-level `!` exclude survives rendering.
+        let t = PathTokens::from_path(Path::new("pkgs/a"));
+        let spec = render_paths_spec(
+            &PathsSpec::Many(vec!["{path}/**".into(), "!{path}/gen/**".into()]),
+            &t,
+        );
+        let scope = Scope::from_paths_spec(&spec).unwrap();
+        assert!(scope.matches(Path::new("pkgs/a/src/x.rs"), &idx));
+        assert!(!scope.matches(Path::new("pkgs/a/gen/x.rs"), &idx));
+        // Backslash is a legal filename byte off Windows; it must stay literal.
+        #[cfg(not(windows))]
+        assert!(matches("pkgs/a\\b", "{path}/x", "pkgs/a\\b/x"));
     }
 
     #[test]

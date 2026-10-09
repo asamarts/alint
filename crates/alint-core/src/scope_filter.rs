@@ -297,14 +297,27 @@ impl ManifestPredicate {
     /// — the engine does the file read and caches the result on the
     /// [`FileIndex`]. An unparseable manifest / bad extract yields the empty set
     /// (the engine warns); the predicate then contributes nothing.
-    pub(crate) fn resolve_set(&self, text: &str) -> HashSet<PathBuf> {
+    ///
+    /// The result is in DECLARED order (first occurrence kept): a workspace
+    /// entry prefixed `!` (`!packages/internal` in a pnpm / npm `workspaces`
+    /// list) is an EXCLUDE, resolved like any other entry and returned with a
+    /// leading `!` (e.g. `!packages/internal`). [`ManifestSet::from_paths`]
+    /// evaluates the entries in order, last match wins. Before, the `!` entry
+    /// was resolved as a literal path that matched nothing, so the excluded
+    /// package silently stayed in scope (audit 2026-10 finding 8).
+    pub(crate) fn resolve_set(&self, text: &str) -> Vec<PathBuf> {
         let base = self.source.parent().unwrap_or_else(|| Path::new(""));
         let Ok(raw) = extract_values(&self.extract, text) else {
-            return HashSet::new();
+            return Vec::new();
         };
+        let mut seen: HashSet<PathBuf> = HashSet::new();
         raw.into_iter()
             .filter(|e| !is_non_literal(e))
             .filter_map(|entry| {
+                let (negated, entry) = match entry.strip_prefix('!') {
+                    Some(rest) => (true, rest.to_string()),
+                    None => (false, entry),
+                };
                 // A non-matching derive_target entry is not a mapped output —
                 // dropped, matching file_graph's derive_target.
                 let mapped = if let Some((from, to)) = &self.derive_target {
@@ -324,8 +337,15 @@ impl ManifestPredicate {
                 if resolved.as_path() == base {
                     return None;
                 }
-                Some(resolved)
+                Some(if negated {
+                    let mut s = std::ffi::OsString::from("!");
+                    s.push(resolved.as_os_str());
+                    PathBuf::from(s)
+                } else {
+                    resolved
+                })
             })
+            .filter(|p| seen.insert(p.clone()))
             .collect()
     }
 }
@@ -341,11 +361,53 @@ impl ManifestPredicate {
 ///   `package.json` workspace declares) matches a file when some component-prefix
 ///   of the file matches the glob — the glob analog of the literal rule, so
 ///   `members = ["crates/*"]` scopes every file under each matching `crates/<x>`.
+///
+/// A member prefixed `!` (from a negated workspace entry, see
+/// [`ManifestPathSpec::resolve_set`]) EXCLUDES what it matches. When any member
+/// is negated the members are evaluated in declared order and the LAST one that
+/// matches the file decides (gitignore-style), so `["packages/*",
+/// "!packages/internal"]` scopes every package except `packages/internal`.
 #[derive(Debug, Clone, Default)]
 pub struct ManifestSet {
     literals: HashSet<PathBuf>,
     globs: GlobSet,
     glob_patterns: Vec<String>,
+    /// Set when any member is negated: every member in declared order,
+    /// `(negated, member)`. `None` keeps the unordered fast path.
+    ordered: Option<Vec<(bool, ManifestMember)>>,
+}
+
+/// One compiled manifest member for the ordered (negation-aware) evaluation.
+#[derive(Debug, Clone)]
+enum ManifestMember {
+    Literal(PathBuf),
+    Glob(globset::GlobMatcher),
+}
+
+impl ManifestMember {
+    /// Directory-aware match: a literal matches itself and everything under it;
+    /// a glob matches when some component-prefix of `file` matches it.
+    fn matches(&self, file: &Path) -> bool {
+        match self {
+            Self::Literal(d) => file.starts_with(d),
+            Self::Glob(g) => {
+                let mut prefix = PathBuf::new();
+                file.components().any(|comp| {
+                    prefix.push(comp);
+                    g.is_match(&prefix)
+                })
+            }
+        }
+    }
+}
+
+/// An entry with a glob metacharacter (`*`, `?`, `[`, `{`) is a glob member.
+fn is_glob_member(s: &str) -> bool {
+    s.contains(['*', '?', '[', '{'])
+}
+
+fn compile_member(s: &str) -> Option<globset::Glob> {
+    GlobBuilder::new(s).literal_separator(true).build().ok()
 }
 
 impl ManifestSet {
@@ -356,16 +418,22 @@ impl ManifestSet {
     /// is brace-alternation, which `globset` expands but a literal never would.
     /// `literal_separator(true)` keeps `*` within one component, like the rule
     /// `paths:` globs and Cargo's own member semantics. A malformed glob is
-    /// dropped (the same fail-soft as an unparseable extract).
+    /// dropped (the same fail-soft as an unparseable extract). A `!`-prefixed
+    /// entry is a negated member (see the type docs); `paths` must then be in
+    /// declared order.
     #[must_use]
-    pub(crate) fn from_paths(paths: HashSet<PathBuf>) -> Self {
+    pub(crate) fn from_paths(paths: impl IntoIterator<Item = PathBuf>) -> Self {
+        let paths: Vec<PathBuf> = paths.into_iter().collect();
+        if paths.iter().any(|p| p.to_string_lossy().starts_with('!')) {
+            return Self::ordered(paths);
+        }
         let mut literals = HashSet::new();
         let mut builder = GlobSetBuilder::new();
         let mut glob_patterns = Vec::new();
         for p in paths {
             let s = p.to_string_lossy();
-            if s.contains(['*', '?', '[', '{']) {
-                if let Ok(glob) = GlobBuilder::new(&s).literal_separator(true).build() {
+            if is_glob_member(&s) {
+                if let Some(glob) = compile_member(&s) {
                     builder.add(glob);
                     glob_patterns.push(s.into_owned());
                 }
@@ -378,21 +446,70 @@ impl ManifestSet {
             literals,
             globs,
             glob_patterns,
+            ordered: None,
+        }
+    }
+
+    /// The negation-aware form: members kept in declared order.
+    fn ordered(paths: Vec<PathBuf>) -> Self {
+        let mut members = Vec::with_capacity(paths.len());
+        let mut glob_patterns = Vec::new();
+        let mut literals = HashSet::new();
+        for p in paths {
+            let s = p.to_string_lossy().into_owned();
+            let (negated, body) = match s.strip_prefix('!') {
+                Some(rest) => (true, rest.to_string()),
+                None => (false, s),
+            };
+            let member = if is_glob_member(&body) {
+                let Some(glob) = compile_member(&body) else {
+                    continue;
+                };
+                if !negated {
+                    glob_patterns.push(body);
+                }
+                ManifestMember::Glob(glob.compile_matcher())
+            } else {
+                if !negated {
+                    literals.insert(PathBuf::from(&body));
+                }
+                ManifestMember::Literal(PathBuf::from(body))
+            };
+            members.push((negated, member));
+        }
+        // `literals` / `glob_patterns` keep only the POSITIVE members, so
+        // `is_empty` stays "declares nothing to include"; matching uses `ordered`.
+        Self {
+            literals,
+            globs: GlobSet::empty(),
+            glob_patterns,
+            ordered: Some(members),
         }
     }
 
     /// Empty when it holds neither a literal path nor a glob member — the state
     /// the `expect_nonempty` warning guards. A glob member counts as non-empty
-    /// even before it matches any file (it is a real, resolvable scope).
+    /// even before it matches any file (it is a real, resolvable scope). Negated
+    /// members alone include nothing, so they do not count.
     #[must_use]
     pub(crate) fn is_empty(&self) -> bool {
         self.literals.is_empty() && self.glob_patterns.is_empty()
     }
 
     /// True if `file` is in the declared set: under some literal declared path, or
-    /// with a component-prefix matching some glob member (directory-aware).
+    /// with a component-prefix matching some glob member (directory-aware). With
+    /// negated members, the last matching member in declared order decides.
     #[must_use]
     pub(crate) fn contains_file(&self, file: &Path) -> bool {
+        if let Some(ordered) = &self.ordered {
+            let mut inside = false;
+            for (negated, member) in ordered {
+                if member.matches(file) {
+                    inside = !negated;
+                }
+            }
+            return inside;
+        }
         if self.literals.iter().any(|d| file.starts_with(d)) {
             return true;
         }
@@ -418,7 +535,8 @@ pub struct ResolvedManifestScope {
     pub include: bool,
     /// The manifest source (repo-root-relative).
     pub source: PathBuf,
-    /// The resolved, confined declared paths, sorted.
+    /// The resolved, confined declared paths: sorted, or in declared order when a
+    /// negated (`!`-prefixed) member is present (order is then the semantics).
     pub paths: Vec<PathBuf>,
 }
 
@@ -598,8 +716,13 @@ impl ScopeFilter {
             .iter()
             .map(|p| {
                 let text = read_manifest_confined(root, &p.source);
-                let mut paths: Vec<PathBuf> = p.resolve_set(&text).into_iter().collect();
-                paths.sort();
+                let mut paths: Vec<PathBuf> = p.resolve_set(&text);
+                // Sorted for a stable display, unless a negated (`!`) member is
+                // present: then declared order IS the semantics (last match
+                // wins), so it is shown as declared.
+                if !paths.iter().any(|p| p.to_string_lossy().starts_with('!')) {
+                    paths.sort();
+                }
                 ResolvedManifestScope {
                     include: p.sense == ManifestSense::Include,
                     source: p.source.clone(),
@@ -1063,7 +1186,7 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         map.insert(
             key.to_string(),
-            ManifestSet::from_paths(set.iter().map(PathBuf::from).collect()),
+            ManifestSet::from_paths(set.iter().map(PathBuf::from).collect::<Vec<_>>()),
         );
         i.set_manifest_paths(map);
         i
@@ -1257,7 +1380,7 @@ mod tests {
         let mut map = std::collections::HashMap::new();
         map.insert(
             key,
-            ManifestSet::from_paths([PathBuf::from("crates/x/b.rs")].into_iter().collect()),
+            ManifestSet::from_paths([PathBuf::from("crates/x/b.rs")]),
         );
         i.set_manifest_paths(map);
         assert!(
@@ -1283,11 +1406,11 @@ mod tests {
         let text = r#"{ "bin": { "cli": "dist/cli.js", "helper": "dist/sub/helper.js" } }"#;
         let set = pred.resolve_set(text);
         assert!(
-            set.contains(Path::new("src/cli.ts")),
+            set.contains(&PathBuf::from("src/cli.ts")),
             "mapped bin → src: {set:?}"
         );
         assert!(
-            set.contains(Path::new("src/sub/helper.ts")),
+            set.contains(&PathBuf::from("src/sub/helper.ts")),
             "nested mapped: {set:?}"
         );
     }
@@ -1312,7 +1435,7 @@ mod tests {
         let text = r#"{ "files": ["src/index.ts"] }"#;
         let set = f.manifest_predicates()[0].resolve_set(text);
         assert!(
-            set.contains(Path::new("packages/foo/src/index.ts")),
+            set.contains(&PathBuf::from("packages/foo/src/index.ts")),
             "declared path resolves under the manifest's own dir: {set:?}"
         );
     }
@@ -1325,11 +1448,62 @@ mod tests {
         // `../../etc/x` escapes the repo root once resolved under packages/foo/.
         let text = r#"{ "files": ["../../etc/x", "src/ok.ts"] }"#;
         let set = f.manifest_predicates()[0].resolve_set(text);
-        assert!(set.contains(Path::new("packages/foo/src/ok.ts")));
+        assert!(set.contains(&PathBuf::from("packages/foo/src/ok.ts")));
         assert!(
             !set.iter().any(|p| p.starts_with("..")),
             "root-escaping declared path dropped: {set:?}"
         );
+    }
+
+    #[test]
+    fn resolve_set_keeps_negated_entries_in_declared_order() {
+        // Audit 2026-10 finding 8: `!packages/internal` was resolved as the
+        // literal path `packages/foo/!packages/internal`-style junk that matched
+        // nothing. It must resolve (relative to the manifest dir) and keep its
+        // `!` and its position.
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: web/package.json\n  extract: { json: \"$.workspaces[*]\" }",
+        );
+        let text = r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/*"] }"#;
+        let set = f.manifest_predicates()[0].resolve_set(text);
+        assert_eq!(
+            set,
+            vec![
+                PathBuf::from("web/packages/*"),
+                PathBuf::from("!web/packages/internal"),
+            ],
+            "declared order, `!` kept, duplicate dropped"
+        );
+    }
+
+    #[test]
+    fn manifest_set_negation_is_ordered_last_match_wins() {
+        let set = ManifestSet::from_paths(
+            ["packages/*", "!packages/internal", "packages/internal/keep"]
+                .into_iter()
+                .map(PathBuf::from),
+        );
+        assert!(!set.is_empty());
+        assert!(set.contains_file(Path::new("packages/app/src/a.ts")));
+        assert!(!set.contains_file(Path::new("packages/internal/src/a.ts")));
+        assert!(set.contains_file(Path::new("packages/internal/keep/a.ts")));
+        assert!(!set.contains_file(Path::new("vendor/a.ts")));
+        // A negated glob excludes across members.
+        let set =
+            ManifestSet::from_paths(["packages/*", "!**/test/**"].into_iter().map(PathBuf::from));
+        assert!(set.contains_file(Path::new("packages/a/src/x.ts")));
+        assert!(!set.contains_file(Path::new("packages/a/test/x.ts")));
+        // Order matters: a negation BEFORE the positive is overridden by it.
+        let set = ManifestSet::from_paths(
+            ["!packages/internal", "packages/*"]
+                .into_iter()
+                .map(PathBuf::from),
+        );
+        assert!(set.contains_file(Path::new("packages/internal/a.ts")));
+        // Only negations include nothing (and count as empty for the warning).
+        let set = ManifestSet::from_paths(["!packages/a"].into_iter().map(PathBuf::from));
+        assert!(set.is_empty());
+        assert!(!set.contains_file(Path::new("packages/b/x.ts")));
     }
 
     #[test]
@@ -1412,11 +1586,11 @@ mod tests {
         let set =
             f.manifest_predicates()[0].resolve_set(r#"{"include": [".", "", "a/..", "src"]}"#);
         assert!(
-            !set.contains(Path::new("pkg")),
+            !set.contains(&PathBuf::from("pkg")),
             "a vacuous entry must not scope the whole subtree: {set:?}"
         );
         assert!(
-            set.contains(Path::new("pkg/src")),
+            set.contains(&PathBuf::from("pkg/src")),
             "a real child resolves under the manifest dir: {set:?}"
         );
         assert_eq!(set.len(), 1, "only the real child survives: {set:?}");
@@ -1434,15 +1608,15 @@ mod tests {
         let set =
             f.manifest_predicates()[0].resolve_set(r#"{"include": ["src", "../shared/src", "."]}"#);
         assert!(
-            set.contains(Path::new("packages/web/src")),
+            set.contains(&PathBuf::from("packages/web/src")),
             "the child `src` is kept: {set:?}"
         );
         assert!(
-            set.contains(Path::new("packages/shared/src")),
+            set.contains(&PathBuf::from("packages/shared/src")),
             "the in-root sibling `../shared/src` is kept: {set:?}"
         );
         assert!(
-            !set.contains(Path::new("packages/web")),
+            !set.contains(&PathBuf::from("packages/web")),
             "the vacuous `.` is dropped (not the whole subtree): {set:?}"
         );
         assert_eq!(set.len(), 2, "src + shared/src, not `.`: {set:?}");

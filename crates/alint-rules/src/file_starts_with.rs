@@ -54,8 +54,14 @@ impl Rule for FileStartsWithRule {
             // path (`evaluate_file`) gets the full slice from
             // the engine and bounds-checks via `starts_with`.
             let full = ctx.root.join(&entry.path);
-            let Ok(bytes) = read_prefix_n(&full, self.prefix.len()) else {
-                continue;
+            // A genuine read error fails CLOSED, matching `check`'s file-major
+            // dispatch (audit 2026-10 finding 7); `NotFound` stays a skip.
+            let bytes = match read_prefix_n(&full, self.prefix.len()) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.extend(crate::io::io_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
