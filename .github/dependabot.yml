@@ -61,3 +61,100 @@ updates:
     commit-message:
       prefix: "chore(actions)"
       include: scope
+
+  # ── Distribution + editor packaging ecosystems ─────────────────────
+  # Same cadence, grouping and commit style as the two lanes above. Each
+  # of these ships to users (the VS Code / Open VSX extension, the npm
+  # shim's runtime `tar` dep, the Zed wasm extension, the JetBrains
+  # plugin's Gradle build, the release image's base), so letting them
+  # rot is a supply-chain risk, not just hygiene.
+  - package-ecosystem: npm
+    directory: /editors/vscode
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    groups:
+      vscode-patch-and-minor:
+        update-types:
+          - patch
+          - minor
+    ignore:
+      # @types/vscode must not exceed engines.vscode (^1.85.0) or vsce
+      # refuses to package; bump it together with the engine floor, by hand.
+      - dependency-name: "@types/vscode"
+      # @types/node tracks the Node runtime VS Code's extension host ships.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+
+  - package-ecosystem: npm
+    directory: /npm
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    groups:
+      npm-shim-patch-and-minor:
+        update-types:
+          - patch
+          - minor
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+
+  - package-ecosystem: cargo
+    directory: /editors/zed
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    groups:
+      zed-patch-and-minor:
+        update-types:
+          - patch
+          - minor
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+
+  - package-ecosystem: gradle
+    directory: /editors/jetbrains
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    groups:
+      jetbrains-patch-and-minor:
+        update-types:
+          - patch
+          - minor
+    commit-message:
+      prefix: "chore(deps)"
+      include: scope
+
+  # The release image (/Dockerfile). Its base is digest-pinned, so this is
+  # the lane that moves the digest forward. bench/Dockerfile is deliberately
+  # NOT covered: its toolchain + base are part of the bench fingerprint and
+  # move only with a re-baseline.
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "07:00"
+      timezone: America/New_York
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "chore(docker)"
+      include: scope
