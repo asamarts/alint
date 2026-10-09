@@ -484,8 +484,14 @@ impl FileGraphRule {
             let mut target = String::new();
             caps.expand(to, &mut target);
             // Confine before any read: an absolute or root-escaping
-            // `to:` template must never read a file outside the tree.
-            let Some(target) = crate::pathsafe::normalize_confined(Path::new(&target)) else {
+            // `to:` template must never read a file outside the tree --
+            // lexically OR through an in-repo symlink (`out -> /elsewhere`),
+            // which the symlink-blind `normalize_confined` alone misses.
+            // `file_graph` has no `allow_out_of_root` opt-in, so any escape
+            // is denied.
+            let crate::pathsafe::Confined::In(target) =
+                crate::pathsafe::confine_read(Path::new(&target), ctx.root, false)
+            else {
                 out.push(Self::node_violation(
                     source,
                     &format!(
@@ -1417,6 +1423,38 @@ mod tests {
         assert_eq!(v.len(), 1, "{v:?}");
         assert!(v[0].message.contains("proto/a.pb.go"));
         assert!(v[0].message.contains("missing or unreadable"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn fresh_never_reads_a_target_through_an_escaping_symlink() {
+        // Confinement regression: the derived target was only LEXICALLY confined
+        // (`normalize_confined` is symlink-blind), so an in-repo `out -> /outside`
+        // symlink let `require: fresh` read a file outside the tree. It must use
+        // the symlink-aware `confine_read` like pair_hash / registry_paths_resolve.
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        std::fs::create_dir_all(root.join("proto")).unwrap();
+        let src = "message A {}\n";
+        std::fs::write(root.join("proto/a.proto"), src).unwrap();
+        let hash = Algorithm::Sha256.hex(src.as_bytes());
+        std::fs::write(
+            outside.path().join("a.pb.go"),
+            format!("// @generated sha256:{hash}\n"),
+        )
+        .unwrap();
+        std::os::unix::fs::symlink(outside.path(), root.join("out")).unwrap();
+        let idx = index(&["proto/a.proto"]);
+        let r = fresh_rule(
+            "proto/**/*.proto",
+            r"proto/(.*)\.proto",
+            "out/$1.pb.go",
+            r"sha256:([0-9a-f]{64})",
+        );
+        let v = eval(&r, root, &idx);
+        assert_eq!(v.len(), 1, "an escaping target must be flagged: {v:?}");
+        assert!(v[0].message.contains("escapes the repo root"), "{v:?}");
     }
 
     #[test]
