@@ -617,9 +617,11 @@ impl Engine {
         // Final assembly preserves `self.entries` order so the
         // output Vec is deterministic + tests that index by
         // position keep working. Each entry slot fills from
-        // either the cross-file or per-file partition; rules
-        // filtered out (by `--changed` scope, `when: false`, or
-        // passing with no violations) leave their slot empty.
+        // either the cross-file or per-file partition. A PASSING
+        // rule still fills its slot (an empty-violations
+        // `RuleResult`, so it counts toward "N rule(s) passed");
+        // only a rule that did not run -- skipped by `--changed`
+        // scope or a false `when:` -- leaves its slot empty.
         let t_assembly = Instant::now();
         let mut cross_by_idx: HashMap<usize, RuleResult> = cross_results.into_iter().collect();
         let mut per_file_by_idx: HashMap<usize, RuleResult> =
@@ -640,10 +642,12 @@ impl Engine {
     /// Per-file dispatch loop. Walks `index.files()` in parallel
     /// and, for each file, calls every applicable per-file rule's
     /// `evaluate_file` against a single `std::fs::read`. Returns
-    /// `(entry-index, RuleResult)` tuples for every per-file
-    /// rule that emitted at least one violation; passing rules
-    /// (zero violations) are omitted, matching the rule-major
-    /// path's semantics.
+    /// `(entry-index, RuleResult)` tuples for every live per-file
+    /// rule -- a passing rule (zero violations) included, as an
+    /// empty-violations `RuleResult`, matching the cross-file path
+    /// (which always emits a result) so it counts as passed -- plus
+    /// the gate results `collect_live_per_file_entries` short-circuited
+    /// (a `when` error or a failed `expect_matches`).
     #[allow(clippy::too_many_lines)]
     fn run_per_file<'a>(
         &'a self,
