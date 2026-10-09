@@ -2095,6 +2095,9 @@ impl Engine {
         // path, where a failed `write_atomic` inside a fixer surfaces as
         // `Skipped("fix error: ...")` and the other fixers proceed (a single
         // read-only file must not abort the whole run or lose unrelated fixes).
+        // A read-only target genuinely fails here: `write_atomic` refuses it
+        // explicitly, since its temp+rename would otherwise succeed on directory
+        // permissions alone and silently replace the file.
         if flush && let Some(buf) = &compose_buf {
             let mut failed: Vec<PathBuf> = Vec::new();
             for (target, bytes) in buf.borrow().iter() {

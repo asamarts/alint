@@ -561,3 +561,39 @@ fn unreadable_file_fails_closed_in_both_check_and_fix() {
     // Restore perms so tempdir cleanup is unencumbered on exotic platforms.
     std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o644)).unwrap();
 }
+
+/// Audit 2026-10 finding 11: `write_atomic`'s temp+rename needs only DIRECTORY
+/// write access, so `fix` silently rewrote a read-only file (the engine's
+/// flush-failure handling assumed such a write fails). A read-only file is now
+/// refused: left byte-identical and read-only, the item reported as a fix
+/// error, exit 1 (the violation stands). Portable: `set_readonly` is the
+/// read-only bit on Windows and clears every write bit on unix.
+#[test]
+fn read_only_file_is_not_rewritten_by_fix() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(root, "locked.txt", b"a  \n");
+    let p = root.join("locked.txt");
+    let mut perms = std::fs::metadata(&p).unwrap().permissions();
+    perms.set_readonly(true);
+    std::fs::set_permissions(&p, perms).unwrap();
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: ntw\n    kind: no_trailing_whitespace\n    paths: \"*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n",
+    );
+    let out = fix(root);
+    let combined = format!(
+        "{}{}",
+        String::from_utf8_lossy(&out.stdout),
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert_eq!(out.status.code(), Some(1), "{combined}");
+    assert!(combined.contains("read-only"), "{combined}");
+    assert_eq!(std::fs::read(&p).unwrap(), b"a  \n", "untouched");
+    assert!(std::fs::metadata(&p).unwrap().permissions().readonly());
+    let mut perms = std::fs::metadata(&p).unwrap().permissions();
+    #[allow(clippy::permissions_set_readonly_false)]
+    perms.set_readonly(false);
+    std::fs::set_permissions(&p, perms).unwrap();
+}
