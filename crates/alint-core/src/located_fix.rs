@@ -75,7 +75,8 @@ fn edit_range(edit: &FixEdit) -> Option<Range<usize>> {
 /// apply at `threshold` becomes `Suggested` or `Dropped` and reserves no
 /// range); overlap-skip (an accepted edit reserves its half-open range, a
 /// later edit that starts before the last reserved end is a
-/// `SkippedConflict`); isolation-group exclusion (an edit sharing a group
+/// `SkippedConflict`, as is a zero-width insert identical to one already
+/// accepted at the same offset); isolation-group exclusion (an edit sharing a group
 /// with an already-accepted edit is a `SkippedConflict` even when
 /// byte-disjoint); splice; then verify — each accepted `Structured` edit
 /// is checked against the spliced bytes and demoted to `Suggested` on
@@ -122,6 +123,25 @@ pub fn apply_file_edits(
             continue;
         }
         if reserved_end.is_some_and(|end| range.start < end) {
+            outcome[i] = LocatedOutcome::SkippedConflict;
+            continue;
+        }
+        // Zero-width inserts never overlap the half-open reservation, so
+        // several may land at one offset (distinct content, in total order --
+        // intended). An insert IDENTICAL to one already accepted there (same
+        // range, same bytes: two rules / violations wanting the same line) would
+        // splice the text twice; it is a conflict instead, the first one wins.
+        if range.is_empty()
+            && accepted.iter().rev().any(|&a| {
+                matches!(
+                    (&batch[a].collected.edit, &ce.edit),
+                    (
+                        FixEdit::ReplaceRange { range: ra, content: ca, .. },
+                        FixEdit::ReplaceRange { content: cb, .. },
+                    ) if *ra == range && ca == cb
+                )
+            })
+        {
             outcome[i] = LocatedOutcome::SkippedConflict;
             continue;
         }
@@ -672,6 +692,52 @@ mod tests {
         let (out, o) = apply_file_edits(b"xy", vec![r1, r0], Applicability::Safe);
         assert_eq!(out, b"xyAB"); // rule 0's "A" precedes rule 1's "B"
         assert!(o.iter().all(|(_, s)| *s == LocatedOutcome::Applied));
+    }
+
+    #[test]
+    fn identical_same_offset_inserts_apply_once() {
+        // Audit 2026-10 finding 12: the overlap check (`start < reserved_end`)
+        // admits every zero-width insert at one offset, so two IDENTICAL inserts
+        // (two rules / violations both inserting the same line) spliced the text
+        // twice. The duplicate is now a conflict skip; the first applies.
+        // Distinct same-offset inserts still both land (test above).
+        let r0 = edit(
+            0,
+            0,
+            replace(2..2, "A\n"),
+            Applicability::Safe,
+            EditVerifier::None,
+            None,
+        );
+        let r1 = edit(
+            1,
+            0,
+            replace(2..2, "A\n"),
+            Applicability::Safe,
+            EditVerifier::None,
+            None,
+        );
+        let r2 = edit(
+            1,
+            1,
+            replace(2..2, "B\n"),
+            Applicability::Safe,
+            EditVerifier::None,
+            None,
+        );
+        let (out, o) = apply_file_edits(b"xy", vec![r1, r0, r2], Applicability::Safe);
+        assert_eq!(out, b"xyA\nB\n");
+        let applied = o
+            .iter()
+            .filter(|(_, s)| *s == LocatedOutcome::Applied)
+            .count();
+        assert_eq!(applied, 2, "{o:?}");
+        assert_eq!(
+            o.iter()
+                .filter(|(_, s)| *s == LocatedOutcome::SkippedConflict)
+                .count(),
+            1
+        );
     }
 
     #[test]
