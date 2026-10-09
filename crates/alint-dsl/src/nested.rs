@@ -55,7 +55,7 @@ pub(crate) fn discover_nested(
     root: &RawConfig,
 ) -> Result<Vec<Mapping>> {
     let walk_opts = alint_core::WalkOptions {
-        respect_gitignore: root.respect_gitignore,
+        respect_gitignore: root.respect_gitignore.unwrap_or(true),
         extra_ignores: root.ignore.clone(),
     };
     let index = alint_core::walk(root_dir, &walk_opts)?;
@@ -166,7 +166,7 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
              root-only concept; move them to the root config"
         )));
     }
-    if !config.ignore.is_empty() || config.nested_configs {
+    if !config.ignore.is_empty() || config.nested_configs == Some(true) {
         return Err(Error::Other(format!(
             "nested config {source} declares `ignore:` or `nested_configs:` - \
              both are root-only in this release"

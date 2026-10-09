@@ -39,6 +39,12 @@ struct MemoKey {
     trusted: Vec<String>,
 }
 
+impl LoadState {
+    fn cached(&self, key: Option<&MemoKey>) -> Option<RawConfig> {
+        key.and_then(|k| self.memo.get(k)).cloned()
+    }
+}
+
 impl MemoKey {
     fn new(path: &Path, confine: Option<&Path>, trusted: &[String]) -> Self {
         Self {
@@ -118,8 +124,8 @@ pub(crate) fn load_recursive(
     // Diamond chains reload a shared file once per DAG path (2^depth); a
     // non-top-level load is a pure function of its `MemoKey`, so reuse it.
     let memo_key = (!is_top).then(|| MemoKey::new(&canonical, confine, trusted));
-    if let Some(cached) = memo_key.as_ref().and_then(|k| state.memo.get(k)) {
-        return Ok(cached.clone());
+    if let Some(cached) = state.cached(memo_key.as_ref()) {
+        return Ok(cached);
     }
     let visiting = &mut state.visiting;
     if !visiting.insert(canonical.clone()) {
@@ -218,31 +224,8 @@ pub(crate) fn load_recursive(
             confine_extends_target(&target, url, confine)?;
             load_recursive(&target, state, opts, confine, false, trusted)?
         };
-        // Extended configs cannot introduce `custom:` facts or
-        // `kind: command` rules — both spawn arbitrary processes
-        // on behalf of a ruleset whose code the user didn't
-        // write. Same trust model on both sides.
-        alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
-        reject_command_rules_in(&parent.rules, url)?;
-        // A *spawning* fix op (`git_untrack`) is the RCE analogue of a spawning
-        // rule kind: refuse it from any extended source, at every `require:` depth
-        // (auto-fix.md 5.5). The kind gate above misses it because a spawning
-        // FIXER can hang off a non-spawning kind (`git_untrack` on `file_absent`).
-        crate::reject_spawning_fix_ops_in(&parent.rules, url)?;
-        crate::reject_fix_promotion_in(&parent.rules, url)?;
-        reject_spawning_templates_in(&parent.templates, url)?;
-        // ...and the template analogue: a spawning fix in a `templates:` block
-        // would splice into its referencing rule at finalize, past the gate above.
-        crate::reject_spawning_fix_op_templates_in(&parent.templates, url)?;
-        // ...and the same promotion refusal for a `templates:` block, which a
-        // template instance would otherwise smuggle a `fix.<op>.applicability:
-        // safe` past the rule-level gate above (it expands at finalize time).
-        crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
-        reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
-        reject_baseline_in(&parent.baseline, url)?;
-        // A ruleset may not allowlist ITSELF into auto-applying content fixers;
-        // only the user's top-level config grants that via `trusted_extends:`.
-        crate::reject_trusted_extends_in(&parent.trusted_extends, url)?;
+        gate_extended_source(&parent, url)?;
+        parent.drop_top_level_settings(url);
         parent.rules = apply_rule_filter(parent.rules, entry)?;
         // W2 content-fixer trust (auto-fix.md 5.5): a REMOTE `extends:` the user has
         // NOT listed in `trusted_extends:` may PROPOSE a content edit but never
@@ -345,6 +328,37 @@ fn load_remote(
     }
     visiting.remove(&token);
     Ok(config)
+}
+
+/// Every per-source trust refusal for one `extends:`'d config. Runs before the
+/// config merges, so `url` names the offending source in each error.
+fn gate_extended_source(parent: &RawConfig, url: &str) -> Result<()> {
+    // Extended configs cannot introduce `custom:` facts or
+    // `kind: command` rules — both spawn arbitrary processes
+    // on behalf of a ruleset whose code the user didn't
+    // write. Same trust model on both sides.
+    alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
+    reject_command_rules_in(&parent.rules, url)?;
+    // A *spawning* fix op (`git_untrack`) is the RCE analogue of a spawning
+    // rule kind: refuse it from any extended source, at every `require:` depth
+    // (auto-fix.md 5.5). The kind gate above misses it because a spawning
+    // FIXER can hang off a non-spawning kind (`git_untrack` on `file_absent`).
+    crate::reject_spawning_fix_ops_in(&parent.rules, url)?;
+    crate::reject_fix_promotion_in(&parent.rules, url)?;
+    reject_spawning_templates_in(&parent.templates, url)?;
+    // ...and the template analogue: a spawning fix in a `templates:` block
+    // would splice into its referencing rule at finalize, past the gate above.
+    crate::reject_spawning_fix_op_templates_in(&parent.templates, url)?;
+    // ...and the same promotion refusal for a `templates:` block, which a
+    // template instance would otherwise smuggle a `fix.<op>.applicability:
+    // safe` past the rule-level gate above (it expands at finalize time).
+    crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
+    reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
+    reject_baseline_in(&parent.baseline, url)?;
+    // A ruleset may not allowlist ITSELF into auto-applying content fixers;
+    // only the user's top-level config grants that via `trusted_extends:`.
+    crate::reject_trusted_extends_in(&parent.trusted_extends, url)?;
+    Ok(())
 }
 
 /// Load an `alint://bundled/<name>@<rev>` ruleset from the

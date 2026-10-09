@@ -151,7 +151,7 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     // directory, finds any sub-directory configs, scopes their
     // rules to their directory, and appends them to the root's
     // rule list.
-    if raw.nested_configs {
+    if raw.nested_configs == Some(true) {
         let root_dir = path
             .parent()
             .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
@@ -212,14 +212,18 @@ fn collect_drop_ins(dir: &Path) -> Result<Vec<PathBuf>> {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawConfig {
+    // The four top-level settings below are `Option` so `merge` can tell "set"
+    // from "unset": a `.alint.d/` drop-in that omits one must not reset the
+    // main config's explicit value to the serde default. `finalize` applies
+    // the defaults once, after every source has merged.
     #[serde(default)]
-    version: u32,
+    version: Option<u32>,
     #[serde(default)]
     extends: Vec<alint_core::ExtendsEntry>,
     #[serde(default)]
     ignore: Vec<String>,
-    #[serde(default = "default_respect_gitignore")]
-    respect_gitignore: bool,
+    #[serde(default)]
+    respect_gitignore: Option<bool>,
     #[serde(default)]
     vars: std::collections::HashMap<String, String>,
     #[serde(default)]
@@ -235,10 +239,13 @@ pub(crate) struct RawConfig {
     templates: Vec<Mapping>,
     #[serde(default)]
     rules: Vec<Mapping>,
-    #[serde(default = "default_fix_size_limit")]
-    fix_size_limit: Option<u64>,
+    /// Outer `None` = unset; `Some(None)` = an explicit `fix_size_limit: null`
+    /// (no cap), which must survive a later source that omits the key.
+    #[serde(default, deserialize_with = "deserialize_explicit")]
+    #[allow(clippy::option_option)] // unset vs explicit `null` vs a limit
+    fix_size_limit: Option<Option<u64>>,
     #[serde(default)]
-    nested_configs: bool,
+    nested_configs: Option<bool>,
     /// `allow_out_of_root:` — the top-level escape hatch for path
     /// confinement. Parsed here (the YAML-facing form); the loader
     /// rejects a non-default value from any `extends:`'d ruleset, and
@@ -263,13 +270,43 @@ pub(crate) struct RawConfig {
     trusted_extends: Vec<String>,
 }
 
-fn default_respect_gitignore() -> bool {
-    true
+const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
+
+/// Deserialize a present key (including an explicit `null`) as `Some(value)`,
+/// leaving a missing key to `#[serde(default)]`'s `None`.
+fn deserialize_explicit<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
-#[allow(clippy::unnecessary_wraps)]
-fn default_fix_size_limit() -> Option<u64> {
-    Some(1 << 20)
+impl RawConfig {
+    /// Drop the top-level settings an `extends:`'d config declared. They were
+    /// never honored from an extended source (the extending config's own
+    /// value -- or its default -- always replaced them), and an inherited
+    /// ruleset lifting `fix_size_limit` or `respect_gitignore` for the
+    /// consumer is not its call; warn instead of silently ignoring.
+    pub(crate) fn drop_top_level_settings(&mut self, source: &str) {
+        // `version:` describes the extended file itself, not the consumer.
+        self.version = None;
+        let declared: Vec<&str> = [
+            ("respect_gitignore", self.respect_gitignore.take().is_some()),
+            ("fix_size_limit", self.fix_size_limit.take().is_some()),
+            ("nested_configs", self.nested_configs.take().is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, was_set)| was_set.then_some(name))
+        .collect();
+        if !declared.is_empty() {
+            tracing::warn!(
+                "extended config {source} sets {}; top-level settings are only read from \
+                 your own config and its `.alint.d/` drop-ins, so the value is ignored",
+                declared.join(", ")
+            );
+        }
+    }
 }
 
 impl RawConfig {
@@ -379,15 +416,15 @@ impl RawConfig {
             rules.push(spec);
         }
         Ok(Config {
-            version: self.version,
+            version: self.version.unwrap_or(0),
             extends: Vec::new(),
             ignore: self.ignore,
-            respect_gitignore: self.respect_gitignore,
+            respect_gitignore: self.respect_gitignore.unwrap_or(true),
             vars: self.vars,
             facts: self.facts,
             rules,
-            fix_size_limit: self.fix_size_limit,
-            nested_configs: self.nested_configs,
+            fix_size_limit: self.fix_size_limit.unwrap_or(DEFAULT_FIX_SIZE_LIMIT),
+            nested_configs: self.nested_configs.unwrap_or(false),
             allow_out_of_root: self.allow_out_of_root,
             baseline: self.baseline,
         })
@@ -1300,18 +1337,18 @@ impl FilterMode {
 ///   invalid fact).
 /// - `vars` merged as a map; `b`'s values override.
 /// - `ignore` concatenated `a` then `b`.
-/// - `respect_gitignore` takes `b`'s value (its default hides
-///   "unset"; known v0.2 limitation).
-/// - `version` takes `b`'s value.
-/// - `fix_size_limit` takes `b`'s value (same "default hides
-///   unset" caveat as `respect_gitignore`).
+/// - `version`, `respect_gitignore`, `fix_size_limit` and
+///   `nested_configs` take `b`'s value when `b` sets it, else keep
+///   `a`'s (defaults are applied once, in `finalize`). An
+///   `extends:`'d config's values are dropped before the merge
+///   ([`RawConfig::drop_top_level_settings`]).
 /// - `extends` is always left empty on the merged result;
 ///   resolved already.
 pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
-    let version = b.version;
-    let respect_gitignore = b.respect_gitignore;
-    let fix_size_limit = b.fix_size_limit;
-    let nested_configs = b.nested_configs;
+    let version = b.version.or(a.version);
+    let respect_gitignore = b.respect_gitignore.or(a.respect_gitignore);
+    let fix_size_limit = b.fix_size_limit.or(a.fix_size_limit);
+    let nested_configs = b.nested_configs.or(a.nested_configs);
     // `allow_out_of_root` is top-level-only: `b` (the later / child
     // config) wins when it sets a non-default value; an inherited
     // (`a`-side) value only survives if the child is silent. Extended

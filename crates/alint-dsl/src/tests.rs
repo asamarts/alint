@@ -2926,3 +2926,47 @@ fn remote_ruleset_cannot_route_an_env_var_into_since() {
         since: origin/main\n    subject_max_length: 72\n    level: warning\n";
     assert!(try_load_extending(literal, "rules: []\n").is_ok());
 }
+
+#[test]
+fn drop_in_does_not_reset_unset_top_level_settings() {
+    // Audit 2026-10: a drop-in that omits `respect_gitignore` / `fix_size_limit`
+    // / `nested_configs` (or `version`) used to overwrite the main config's
+    // explicit value with the serde default.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nrespect_gitignore: false\nfix_size_limit: null\nnested_configs: true\nrules: []\n",
+    )
+    .unwrap();
+    std::fs::create_dir(tmp.path().join(".alint.d")).unwrap();
+    std::fs::write(tmp.path().join(".alint.d/50-team.yml"), "rules: []\n").unwrap();
+    let c = load(&cfg).unwrap();
+    assert!(!c.respect_gitignore);
+    assert_eq!(c.fix_size_limit, None);
+    assert!(c.nested_configs);
+    assert_eq!(c.version, 1);
+
+    // A drop-in that DOES set a value still wins.
+    std::fs::write(
+        tmp.path().join(".alint.d/60-local.yml"),
+        "respect_gitignore: true\nfix_size_limit: 10\nrules: []\n",
+    )
+    .unwrap();
+    let c = load(&cfg).unwrap();
+    assert!(c.respect_gitignore);
+    assert_eq!(c.fix_size_limit, Some(10));
+}
+
+#[test]
+fn extended_config_top_level_settings_are_ignored() {
+    // An extended config's top-level settings were never honored (the extending
+    // config's default replaced them); keep that explicit now that unset values
+    // no longer clobber set ones.
+    let c = load_local_extends(
+        "version: 1\nrespect_gitignore: false\nfix_size_limit: null\nrules: []\n",
+    )
+    .unwrap();
+    assert!(c.respect_gitignore);
+    assert_eq!(c.fix_size_limit, Some(1 << 20));
+}
