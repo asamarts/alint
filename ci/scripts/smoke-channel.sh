@@ -74,15 +74,25 @@ check_floating() {
 }
 
 # The documented one-liner, as a function so TAG travels as data (env), never
-# spliced into a `bash -c` source string.
+# spliced into a `bash -c` source string. ALINT_REQUIRE_VERIFY=1 makes
+# install.sh fail closed unless the cosign signature actually verified (the
+# workflow installs cosign v3 for this leg), and the log is kept so the caller
+# can prove the verification ran instead of being silently skipped.
+INSTALL_LOG="$(mktemp)"
 install_via_script() {
-  curl -fsSL https://alint.org/install.sh | ALINT_VERSION="$TAG" bash
+  curl -fsSL https://alint.org/install.sh \
+    | ALINT_VERSION="$TAG" ALINT_REQUIRE_VERIFY=1 bash 2>&1 | tee "$INSTALL_LOG"
 }
 
 echo "==> smoke: channel=${CHANNEL} tag=${TAG} ver=${VER} floating=${SMOKE_FLOATING:-0}"
 case "$CHANNEL" in
   install.sh)
     retry install_via_script
+    if ! grep -q '^==> Signature OK' "$INSTALL_LOG"; then
+      echo "  [smoke] FAIL: install.sh did not report a verified cosign signature" >&2
+      exit 1
+    fi
+    echo "  [smoke] OK: install.sh verified the release signature"
     export PATH="${HOME}/.local/bin:${PATH}"       # install.sh's default INSTALL_DIR
     assert_version alint --version
     ;;

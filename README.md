@@ -31,7 +31,7 @@ alint writes those rules down and enforces them. It takes over from [Repolinter]
 
 ```sh
 # Install (Linux and macOS; Windows via npm, cargo, or the release tarball):
-curl -sSL https://alint.org/install.sh | bash
+curl -fsSL https://alint.org/install.sh | bash
 
 # Start from a few bundled rulesets:
 cat > .alint.yml <<'YAML'
@@ -151,7 +151,7 @@ It runs underneath those, and keeps its rules on the filesystem so they can keep
 
 ```bash
 # install.sh (Linux, macOS; x86_64 and aarch64)
-curl -sSL https://alint.org/install.sh | bash
+curl -fsSL https://alint.org/install.sh | bash
 
 # Homebrew (macOS, Linuxbrew)
 brew install asamarts/alint/alint
