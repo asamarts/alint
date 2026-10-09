@@ -109,7 +109,7 @@ fn build_issue(
     let path = violation
         .path
         .as_ref()
-        .map_or_else(|| ".".to_string(), |p| p.display().to_string());
+        .map_or_else(|| ".".to_string(), |p| crate::slash_path(p));
 
     // Base identity: the canonical `violation_fingerprint` when `alint` supplies
     // it (so a unique finding matches SARIF + baseline), else the self-contained

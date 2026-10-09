@@ -18,6 +18,44 @@ use std::str::FromStr;
 
 use alint_core::{FixReport, Report};
 
+/// A repo-relative path rendered with `/` separators, for the CI-consumed
+/// machine formats (GitHub annotations, GitLab Code Quality, `JUnit`): a
+/// Windows `\` separator would otherwise break their repo-file mapping. Only
+/// the platform separator is rewritten -- on Unix `\` is a legal file-name
+/// character and is kept.
+pub(crate) fn slash_path(path: &std::path::Path) -> String {
+    normalize_separators(&path.to_string_lossy(), std::path::MAIN_SEPARATOR)
+}
+
+fn normalize_separators(s: &str, separator: char) -> String {
+    if separator == '/' {
+        s.to_string()
+    } else {
+        s.replace(separator, "/")
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn windows_separators_become_slashes() {
+        assert_eq!(normalize_separators("src\\a\\b.rs", '\\'), "src/a/b.rs");
+        // On a `/` platform a backslash is part of the file name.
+        assert_eq!(normalize_separators("odd\\name.rs", '/'), "odd\\name.rs");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn slash_path_normalizes_on_windows() {
+        assert_eq!(
+            slash_path(std::path::Path::new("src\\a\\b.rs")),
+            "src/a/b.rs"
+        );
+    }
+}
+
 pub use agent::write_agent;
 pub use diff::write_fix_diff;
 pub use github::write_github;

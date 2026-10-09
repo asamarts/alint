@@ -81,7 +81,7 @@ fn write_failure_case(
     violation: &Violation,
 ) -> std::io::Result<()> {
     let case_name = match &violation.path {
-        Some(p) => p.display().to_string(),
+        Some(p) => crate::slash_path(p),
         None => "(repository)".to_string(),
     };
     let level_attr = match result.level {
@@ -117,7 +117,7 @@ fn write_failure_case(
 fn format_failure_body(result: &RuleResult, violation: &Violation) -> String {
     let mut s = String::new();
     if let Some(p) = &violation.path {
-        s.push_str(&p.display().to_string());
+        s.push_str(&crate::slash_path(p));
         if let Some(line) = violation.line {
             s.push(':');
             s.push_str(&line.to_string());
