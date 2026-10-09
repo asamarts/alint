@@ -10,6 +10,10 @@ Byte-level prefix / suffix check. Works on any bytes (binary safe, unlike `file_
 
 Check-only: a fix would risk silently duplicating a near-matching prefix. Pair with `file_prepend` / `file_append` explicitly if you want auto-repair.
 
+**When to use it**: when the exact bytes matter more than the text. Typical prefixes are a shebang on scripts (`prefix: "#!"` on `**/*.sh`), a file signature or magic number, and a fixed licence or generated-file banner. Typical suffixes are a generator's closing sentinel, so a hand-edited or truncated output fails, and a mandatory trailer line.
+
+**Byte-for-byte means newlines too**: a `suffix` ending in `\n` requires the file's final newline, and one without it fails on a file that has one. An empty file fails any non-empty prefix or suffix. For a pattern rather than fixed bytes, use `file_header` / `file_footer`, which match a regex against the first or last lines; for "ends with a newline" alone, [`final_newline`](/docs/rules/text-hygiene/final_newline/) is the dedicated check.
+
 ## Options
 
 | Option | Type | Required | Default | Description |

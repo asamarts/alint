@@ -12,6 +12,10 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 directory directly at the repository root, not nested.
 **Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
+**When to use it**: for the directories a repository's tooling or contributors rely on being there: a `docs/` tree the site build reads, `.github/workflows/` for CI, `tests/` next to the sources. Listing several paths accepts any one of them, so `paths: ["doc", "docs"]` passes with either name.
+
+**One match is enough**: a glob such as `packages/*/src` passes as soon as one package has a `src/`; it fails only when nothing matches at all. To require a `src/` in *every* package, iterate with [`for_each_dir`](/docs/rules/cross-file/for_each_dir/) and nest a `dir_exists` per directory.
+
 ## Options
 
 | Option | Type | Required | Default | Description |

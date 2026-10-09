@@ -8,6 +8,10 @@ categories: ['content', 'structure']
 
 File must have at most `max_lines` lines, using the same accounting as `file_min_lines`. Catches the everything-module anti-pattern — a `lib.rs` / `index.ts` / `helpers.py` that grew unbounded.
 
+**Choosing a limit**: set it just above the largest file you accept today, as a ratchet rather than an ideal, and lower it as modules get split. Scope it to hand-written sources (`paths: "src/**/*.rs"`) and leave out lockfiles, generated code, fixtures and vendored files, which are long by nature. A warning level suits an advisory size budget; an error suits a hard cap.
+
+**Lines and bytes are different budgets**: a minified bundle can be one enormous line, which `file_max_lines` passes. Pair it with `file_max_size` when the concern is repository weight rather than readability.
+
 ## Options
 
 | Option | Type | Required | Default | Description |
