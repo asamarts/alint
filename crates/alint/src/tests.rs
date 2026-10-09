@@ -341,3 +341,17 @@ fn render_facts_dispatches_on_format() {
     assert!(sarif_out.contains("is_py"));
     assert!(!sarif_out.contains("\"facts\""));
 }
+
+#[test]
+fn tracing_ansi_follows_color_choice_no_color_and_tty() {
+    // Without CLICOLOR_FORCE in the environment (the resolve step only
+    // upgrades `auto`), the decision table is:
+    if std::env::var_os("CLICOLOR_FORCE").is_none() {
+        assert!(!tracing_ansi("auto", false, false), "piped stderr");
+        assert!(tracing_ansi("auto", false, true), "stderr TTY");
+        assert!(!tracing_ansi("auto", true, true), "NO_COLOR");
+        assert!(!tracing_ansi("bogus", false, false), "unparsable = auto");
+    }
+    assert!(tracing_ansi("always", true, false));
+    assert!(!tracing_ansi("never", false, true));
+}

@@ -39,8 +39,8 @@ const ALINT_LONG_VERSION: &str = concat!(
 
 fn main() -> ExitCode {
     init_panic_hook();
-    init_tracing();
     let cli = Cli::parse();
+    init_tracing(&cli.color);
     match run(cli) {
         Ok(code) => code,
         Err(e) => {
@@ -135,8 +135,23 @@ fn url_encode(s: &str) -> String {
     out
 }
 
-fn init_tracing() {
+/// Whether `ALINT_LOG` diagnostics on stderr get ANSI styling: the same
+/// `--color` decision the reports use, applied to stderr — `always` /
+/// `CLICOLOR_FORCE` force it, `never` disables it, and `auto` requires a
+/// stderr TTY and no (non-empty) `NO_COLOR`. An unparsable `--color` value
+/// is treated as `auto` here (the command reports that error itself).
+fn tracing_ansi(color: &str, no_color: bool, stderr_tty: bool) -> bool {
+    match color.parse::<ColorChoice>().unwrap_or_default().resolve() {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => stderr_tty && !no_color,
+    }
+}
+
+fn init_tracing(color: &str) {
     use tracing_subscriber::{EnvFilter, fmt};
+    let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+    let ansi = tracing_ansi(color, no_color, io::stderr().is_terminal());
     let filter = EnvFilter::try_from_env("ALINT_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
     // Diagnostics go to stderr, never stdout: a `warn!` (e.g. an empty
     // `include_manifest_paths` set) must not corrupt `--format json`/SARIF, which
@@ -144,6 +159,7 @@ fn init_tracing() {
     let _ = fmt()
         .with_env_filter(filter)
         .with_target(false)
+        .with_ansi(ansi)
         .with_writer(std::io::stderr)
         .try_init();
 }
