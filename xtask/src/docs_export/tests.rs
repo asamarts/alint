@@ -3,6 +3,7 @@ use super::cli::{
     strip_global_options, top_level_only,
 };
 use super::exported_pages::set_frontmatter_description;
+use super::rulesets::rule_sources;
 use super::*;
 
 /// Release-gating of rule-body prose: `<!-- alint:since=X -->` blocks are
@@ -1083,4 +1084,98 @@ fn top_level_only_lists_the_globals_no_subcommand_takes() {
         code_list(&flags(&["--a", "--b", "--c"])),
         "`--a`, `--b` and `--c`"
     );
+}
+
+/// Rule notes come from the comments above a rule and at its key indent; a
+/// divider or blank line cuts the comments above off, a comment nested in a
+/// value belongs to neither, and a paragraph opening with a release tag is
+/// dropped.
+#[test]
+fn rule_sources_split_notes_from_definitions() {
+    let yaml = "\
+version: 1
+rules:
+  # --- Section divider -------------------------------
+  - id: first-rule
+    # Why the first rule exists.
+    # It spans two lines.
+    kind: file_exists
+    paths:
+      # which files count
+      - README.md
+    level: warning
+
+  # A note that floats, cut off by the blank line below.
+
+  # v0.9.18: broadened to more names.
+  #
+  # Why the second rule exists.
+  - id: second-rule
+    kind: file_absent
+    paths: [\".DS_Store\"]
+    level: info
+";
+    let sources = rule_sources(yaml);
+    assert_eq!(sources.len(), 2, "{sources:#?}");
+    assert_eq!(sources[0].id, "first-rule");
+    assert_eq!(
+        sources[0].notes_md,
+        "Why the first rule exists.\nIt spans two lines."
+    );
+    assert_eq!(
+        sources[0].definition,
+        "- id: first-rule\n  kind: file_exists\n  paths:\n    - README.md\n  level: warning"
+    );
+    assert_eq!(sources[1].id, "second-rule");
+    assert_eq!(sources[1].notes_md, "Why the second rule exists.");
+    assert!(
+        !sources[1].definition.contains('#'),
+        "{:?}",
+        sources[1].definition
+    );
+}
+
+/// Every rule serde sees in a bundled ruleset is found by the comment-aware
+/// splitter, in order, with a definition that parses back to the same rule,
+/// and its id slugs to itself (the summary table links `#<id>`).
+#[test]
+fn rule_sources_cover_every_bundled_rule() {
+    let root = crate::workspace_root().expect("workspace root");
+    let rulesets_root = root.join(docs_paths::RULESETS_DIR);
+    for entry in walkdir_plain(&rulesets_root).expect("walk bundled rulesets") {
+        if !entry.is_file()
+            || !matches!(
+                entry.extension().and_then(|ext| ext.to_str()),
+                Some("yml" | "yaml")
+            )
+        {
+            continue;
+        }
+        let source = std::fs::read_to_string(&entry).expect("read bundled ruleset");
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).expect("parse");
+        let rules = yaml
+            .get("rules")
+            .and_then(|r| r.as_sequence())
+            .cloned()
+            .unwrap_or_default();
+        let split = rule_sources(&source);
+        let ids: Vec<&str> = rules
+            .iter()
+            .map(|r| r.get("id").and_then(|v| v.as_str()).unwrap_or(""))
+            .collect();
+        let split_ids: Vec<&str> = split.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, split_ids, "{}", entry.display());
+        for (rule, s) in rules.iter().zip(&split) {
+            let parsed: Vec<serde_yaml_ng::Value> = serde_yaml_ng::from_str(&s.definition)
+                .unwrap_or_else(|e| panic!("{} {}: {e}\n{}", entry.display(), s.id, s.definition));
+            assert_eq!(parsed.first(), Some(rule), "{} {}", entry.display(), s.id);
+            assert!(
+                s.id.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{} {}: id would not slug to itself",
+                entry.display(),
+                s.id
+            );
+        }
+    }
 }
