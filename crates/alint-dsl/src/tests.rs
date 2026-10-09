@@ -2881,3 +2881,48 @@ fn untrusted_rule_cannot_aim_a_trusted_promoting_template() {
         other => panic!("expected a FileRemove fixer, got {other:?}"),
     }
 }
+
+fn try_load_extending(remote_body: &str, top_extra: &str) -> Result<alint_core::Config> {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = extends::Cache::at(tmp.path().join("cache"));
+    let url = seed_remote(&cache, remote_body);
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        format!("version: 1\nextends: [\"{url}\"]\n{top_extra}"),
+    )
+    .unwrap();
+    load_with(&config_path, &LoadOptions::with_cache(cache))
+}
+
+#[test]
+fn remote_ruleset_cannot_route_an_env_var_into_since() {
+    // `since: "${SECRET}"` from a remote was expanded at evaluate time and echoed
+    // in the "could not resolve commit range" error -- an env exfiltration channel.
+    let direct = "version: 1\nrules:\n  - id: cm\n    kind: git_commit_message\n    \
+        since: \"${FAKE_SECRET_TOKEN}\"\n    subject_max_length: 72\n    level: warning\n";
+    let err = try_load_extending(direct, "rules: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("environment variable"), "{err}");
+
+    // ...or contributed by field-merge onto the user's own rule (no `kind`).
+    let merged = "version: 1\nrules:\n  - id: cm\n    since: \"${FAKE_SECRET_TOKEN}\"\n";
+    let top = "rules:\n  - id: cm\n    kind: git_commit_message\n    \
+        subject_max_length: 72\n    level: warning\n";
+    let err = try_load_extending(merged, top).unwrap_err().to_string();
+    assert!(err.contains("since"), "{err}");
+
+    // ...or through a template variable the user's template substitutes.
+    let via_vars = "version: 1\nrules:\n  - id: cm\n    extends_template: user_cm\n    \
+        vars: {base: \"${FAKE_SECRET_TOKEN}\"}\n";
+    let top = "templates:\n  - id: user_cm\n    kind: git_commit_message\n    \
+        since: \"{{vars.base}}\"\n    subject_max_length: 72\n    level: warning\nrules: []\n";
+    let err = try_load_extending(via_vars, top).unwrap_err().to_string();
+    assert!(err.contains("vars.base"), "{err}");
+
+    // A literal ref from a remote is fine.
+    let literal = "version: 1\nrules:\n  - id: cm\n    kind: git_commit_message\n    \
+        since: origin/main\n    subject_max_length: 72\n    level: warning\n";
+    assert!(try_load_extending(literal, "rules: []\n").is_ok());
+}

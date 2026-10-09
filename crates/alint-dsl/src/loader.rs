@@ -168,7 +168,9 @@ pub(crate) fn load_recursive(
                  use https:// with an SRI hash instead"
             )));
         } else if url.starts_with("https://") {
-            load_remote(url, opts, visiting)?
+            let remote = load_remote(url, opts, visiting)?;
+            crate::reject_env_expansion_in(&remote.rules, &remote.templates, url)?;
+            remote
         } else if let Some(spec) = url.strip_prefix("alint://bundled/") {
             load_bundled(spec)?
         } else {

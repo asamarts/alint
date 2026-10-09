@@ -1163,6 +1163,53 @@ pub fn reject_trusted_extends_in(trusted_extends: &[String], source: &str) -> Re
     Ok(())
 }
 
+/// Reject a legacy `${VAR}` environment reference that a REMOTE ruleset could
+/// route into `git_commit_message`'s `since:` -- the one field alint still
+/// expands POSIX-style at evaluate time. Remote bodies are deliberately never
+/// `{{env.*}}`-interpolated (a pinned third-party ruleset must not read the
+/// consumer's environment), but `since:` expansion runs whatever the rule's
+/// source, and the resolved value is echoed in the "could not resolve commit
+/// range" error -- an exfiltration channel into CI logs and SARIF. Scans every
+/// `since:` (including one a remote contributes to a user rule by field-merge,
+/// with no `kind`) and every `vars:` value (which a template could substitute
+/// into `since:`), at every `require:` depth.
+pub(crate) fn reject_env_expansion_in(
+    rules: &[Mapping],
+    templates: &[Mapping],
+    source: &str,
+) -> Result<()> {
+    fn offending(m: &Mapping) -> Option<String> {
+        let has_env = |v: &serde_yaml_ng::Value| v.as_str().is_some_and(|s| s.contains("${"));
+        if m.get("since").is_some_and(has_env) {
+            return Some("since".to_string());
+        }
+        if let Some(vars) = m.get("vars").and_then(|v| v.as_mapping()) {
+            for (k, v) in vars {
+                if has_env(v) {
+                    return Some(format!("vars.{}", k.as_str().unwrap_or("<var>")));
+                }
+            }
+        }
+        m.get("require")
+            .and_then(|v| v.as_sequence())
+            .into_iter()
+            .flatten()
+            .filter_map(serde_yaml_ng::Value::as_mapping)
+            .find_map(offending)
+    }
+    for m in rules.iter().chain(templates) {
+        if let Some(field) = offending(m) {
+            let id = m.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
+            return Err(Error::Other(format!(
+                "{id:?}: `{field}` references an environment variable (`${{...}}`), which \
+                 a remote ruleset ({source}) may not read; set the value in your own \
+                 top-level config instead"
+            )));
+        }
+    }
+    Ok(())
+}
+
 pub(crate) fn apply_rule_filter(
     rules: Vec<serde_yaml_ng::Mapping>,
     entry: &alint_core::ExtendsEntry,
