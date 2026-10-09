@@ -6,8 +6,11 @@ will too.
 
 ## Project status
 
-- **Version:** v0.13.0. Pre-1.0; the DSL, plugin ABI, and `alint-core`
-  public API are not yet committed to semver-major stability. Versioning
+- **Version:** pre-1.0. The current version is `[workspace.package].version`
+  in [`Cargo.toml`](Cargo.toml) and the latest tag on
+  [GitHub Releases](https://github.com/asamarts/alint/releases) (not
+  repeated here, so this page cannot go stale). The DSL, plugin ABI, and
+  `alint-core` public API are not yet committed to semver-major stability. Versioning
   is plain semver `x.y.z`: pre-1.0, a minor bump (`0.y` → `0.(y+1)`) may
   carry breaking changes and a patch bump (`0.y.z` → `0.y.(z+1)`)
   preserves compatibility. v1.0 ships when the surface stops moving; see

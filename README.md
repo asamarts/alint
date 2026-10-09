@@ -69,7 +69,7 @@ rules:
     level: error
 ```
 
-Under the hood, alint walks the repository once, in parallel, honoring `.gitignore`, and reads each file's bytes at most once. That is why a 100,000-file workspace bundle checks in about a second and a half and a million files in under twenty seconds ([benchmarks, measured per release](https://alint.org/benchmarks/)). The engine, the rules, the output formatters, and a language server for editors are all one binary, with no plugin system and nothing from Node, the JVM, or Python in the path. The [concepts guide](https://alint.org/docs/concepts/) and [ARCHITECTURE.md](docs/design/ARCHITECTURE.md) go deeper.
+Under the hood, alint walks the repository once, in parallel, honoring `.gitignore`, and reads each file's bytes at most once. That is why a 100,000-file workspace bundle checks in about a second and a half and a million files in under twenty seconds ([benchmarks, measured per release](https://alint.org/benchmarks/)). The engine, the rules, the output formatters, and a language server for editors are all one binary, with no dynamically loaded plugins (an external tool can only be spawned per file by the opt-in, top-level-only `command` rule kind) and nothing from Node, the JVM, or Python in the path. The [concepts guide](https://alint.org/docs/concepts/) and [ARCHITECTURE.md](docs/design/ARCHITECTURE.md) go deeper.
 
 ## What it can check
 
@@ -142,7 +142,7 @@ alint checks the shape and contents of a repository, not the semantics of the co
 - a code or AST linter (use [ESLint](https://eslint.org/), [Clippy](https://doc.rust-lang.org/clippy/), [Ruff](https://docs.astral.sh/ruff/))
 - a SAST scanner (use [Semgrep](https://semgrep.dev/), [CodeQL](https://codeql.github.com/))
 - an IaC scanner (use [Checkov](https://www.checkov.io/), [Conftest](https://www.conftest.dev/))
-- a commit-message linter (use [commitlint](https://commitlint.js.org/))
+- a full commit-message linter: the `git_commit_*` rule kinds cover basic shape checks (subject length and regex, sign-off, fixup commits), but for conventional-commit grammars, scopes and body/footer rules use [commitlint](https://commitlint.js.org/)
 - a secret scanner (use [gitleaks](https://github.com/gitleaks/gitleaks), [TruffleHog](https://github.com/trufflesecurity/trufflehog))
 
 It runs underneath those, and keeps its rules on the filesystem so they can keep theirs on the code.
@@ -199,7 +199,7 @@ cargo run -- check         # dogfood: alint lints its own repo
 cargo bench -p alint-bench # criterion micro-benches
 ```
 
-alint is a single Cargo workspace of nine crates, of which only `alint` and `alint-core` are published. End-to-end tests are declarative YAML under `crates/alint-e2e/scenarios/`, so adding one is adding a file, and CLI snapshots run through `trycmd`. CI is per-job bash scripts under `ci/scripts/` that behave the same locally and on GitHub. Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
+alint is a single Cargo workspace of nine crates. Six are published to crates.io: `alint` (the binary) and `alint-core` (the library API), plus `alint-dsl`, `alint-rules`, `alint-output` and `alint-lsp`, which publish only because the binary depends on them and are documented as internal, not a stable public API. End-to-end tests are declarative YAML under `crates/alint-e2e/scenarios/`, so adding one is adding a file, and CLI snapshots run through `trycmd`. CI is per-job bash scripts under `ci/scripts/` that behave the same locally and on GitHub. Contributions are welcome; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
