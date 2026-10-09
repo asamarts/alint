@@ -447,10 +447,9 @@ fn generate_rules_pages(
 
     let mut kind_to_family: HashMap<String, String> = HashMap::new();
     let mut all_kinds: Vec<KindEntry> = Vec::new();
-    let mut family_summaries: Vec<FamilySummary> = Vec::new();
-    // (title, display order, slug) per family, for the second-pass family Overview
-    // render (categories-based membership needs all_kinds complete first).
-    let mut families_meta: Vec<(String, u32, String)> = Vec::new();
+    // Per family, for the second-pass family Overview render (categories-based
+    // membership needs all_kinds complete first).
+    let mut families_meta: Vec<FamilyMeta> = Vec::new();
     // Per-rule H3 sections in `docs/rules.md` must be backed by a documented
     // `docs:` example fixture (ADR-0014 Phase 4). Accumulated across all families
     // and surfaced as a single hard failure so a docs PR sees every missing
@@ -505,7 +504,12 @@ fn generate_rules_pages(
             &registry,
             released,
         )?;
-        families_meta.push((h2.title.clone(), family_order, family_slug.clone()));
+        families_meta.push(FamilyMeta {
+            title: h2.title.clone(),
+            order: family_order,
+            slug: family_slug,
+            intro: crate::family_index::family_intro(&h2.body),
+        });
     }
 
     // Hard-fail on any registered kind that rules.md doesn't document. A new
@@ -539,30 +543,53 @@ fn generate_rules_pages(
     enforce_fail_only_allowlist_live(&documented, &registry)?;
     enforce_documented_page_targets(&documented, &kind_to_family)?;
 
-    // Family Overview pages: categories-based membership. Each family lists every
-    // kind whose `**Categories:**` line includes it (by slug), not just the kinds
-    // physically under its H2. At single-membership this equals the directory
-    // membership; at Phase-3 multi-membership it cross-lists automatically.
-    for (title, order, slug) in &families_meta {
+    let family_summaries = emit_family_indexes(&rules_dir, &families_meta, &all_kinds)?;
+    emit_rules_master_index(&rules_dir, &all_kinds, &family_summaries, aliases.len())?;
+    Ok(kind_to_family)
+}
+
+/// One rule family as `generate_rules_pages` found it in `docs/rules.md`.
+struct FamilyMeta {
+    title: String,
+    order: u32,
+    slug: String,
+    intro: Option<String>,
+}
+
+/// Family Overview pages: categories-based membership. Each family lists every
+/// kind whose `**Categories:**` line includes it (by slug), not just the kinds
+/// physically under its H2. At single-membership this equals the directory
+/// membership; at Phase-3 multi-membership it cross-lists automatically.
+fn emit_family_indexes(
+    rules_dir: &Path,
+    families: &[FamilyMeta],
+    all_kinds: &[KindEntry],
+) -> Result<Vec<FamilySummary>> {
+    let mut summaries = Vec::new();
+    for family in families {
         let rules: Vec<RuleEntry> = all_kinds
             .iter()
-            .filter(|k| k.categories.iter().any(|c| c == slug))
+            .filter(|k| k.categories.contains(&family.slug))
             .map(|k| RuleEntry {
                 kind: k.kind.clone(),
                 summary: k.summary.clone(),
                 family_slug: k.family_slug.clone(),
             })
             .collect();
-        emit_family_index(&rules_dir.join(slug), title, *order, &rules)?;
-        family_summaries.push(FamilySummary {
-            title: title.clone(),
-            slug: slug.clone(),
+        emit_family_index(
+            &rules_dir.join(&family.slug),
+            &family.title,
+            family.order,
+            family.intro.as_deref(),
+            &rules,
+        )?;
+        summaries.push(FamilySummary {
+            title: family.title.clone(),
+            slug: family.slug.clone(),
             rule_count: rules.len(),
         });
     }
-
-    emit_rules_master_index(&rules_dir, &all_kinds, &family_summaries, aliases.len())?;
-    Ok(kind_to_family)
+    Ok(summaries)
 }
 
 /// Walk every H3 in a family, emit per-rule pages, and collect
@@ -890,7 +917,7 @@ fn harvest_aliases(src: &str) -> std::collections::HashSet<String> {
 /// mistaken for an abbreviation and correctly ends the sentence. Markdown is
 /// left intact — the website rule index renders it directly; `kind_summary`
 /// (terminal) and `rule_meta_description` (SERP) strip it for their surfaces.
-fn first_sentence(body: &str) -> String {
+pub(super) fn first_sentence(body: &str) -> String {
     const ABBREV: &[&str] = &[
         "e.g", "i.e", "vs", "cf", "etc", "al", "resp", "approx", "fig", "no",
     ];
@@ -1518,11 +1545,12 @@ fn emit_family_index(
     family_dir: &Path,
     family_title: &str,
     family_order: u32,
+    intro: Option<&str>,
     rules: &[RuleEntry],
 ) -> Result<()> {
     fs::write(
         family_dir.join("index.md"),
-        crate::family_index::render(family_title, family_order, rules),
+        crate::family_index::render(family_title, family_order, intro, rules),
     )?;
     Ok(())
 }
@@ -1790,7 +1818,7 @@ fn generate_bundled_ruleset_pages(
         let overview_md = render_overview_from_comments(&yaml_text);
         let summary = first_overview_sentence(&overview_md);
 
-        let page = render_ruleset_page(
+        let page = rulesets::render_ruleset_page(
             &pretty_str,
             &overview_md,
             &yaml_text,
@@ -1853,141 +1881,6 @@ fn generate_bundled_ruleset_pages(
     fs::write(bundled_dir.join("index.md"), index)?;
 
     Ok(())
-}
-
-/// GitHub repo-relative base for source-of-truth links rendered
-/// into the bundled-ruleset pages. Pinned to `main` so readers
-/// always land on the latest version of each ruleset; the page
-/// also embeds a verbatim snapshot of the YAML below the link
-/// for offline / point-in-time reference.
-const ALINT_REPO_BLOB_URL: &str = "https://github.com/asamarts/alint/blob/main";
-
-/// Render the markdown body for a single bundled ruleset. The
-/// page has four sections, in order:
-///
-/// 1. **Overview** — the leading comment block from the YAML,
-///    rendered as natural-language prose (with any inline YAML
-///    code samples promoted to fenced ```yaml``` blocks for
-///    syntax highlighting).
-/// 2. **Adopt with** — a copy-pasteable `extends:` snippet. We
-///    suppress this when the overview already contains an
-///    `alint://bundled/...` reference (that's the layered-overlay
-///    case where the comment author specifies a multi-ruleset
-///    adoption recipe — auto-generating a single-line snippet on
-///    top would be redundant and incorrect).
-/// 3. **Rules** — table-of-contents-style list of every `id` in
-///    the ruleset with kind / level / when / policy / message
-///    pulled from the YAML. Each `kind` is a link into the rule
-///    reference (`/docs/rules/<family>/<kind>/`) when
-///    `kind_to_family` knows about it.
-/// 4. **Source** — a permalink into the alint repo plus the full
-///    YAML file embedded as a fenced code block.
-///
-/// `kind_to_family` is consulted to render each rule's `kind` as
-/// a link into the rules tree. Kinds not in the map (e.g. a
-/// brand-new kind missing from rules.md) render as plain code;
-/// the rules-pages generator emits a warning in that case so the
-/// gap surfaces.
-fn render_ruleset_page(
-    name: &str,
-    overview_md: &str,
-    yaml_text: &str,
-    rel_repo_path: &str,
-    yaml: &serde_yaml_ng::Value,
-    kind_to_family: &std::collections::HashMap<String, String>,
-) -> String {
-    let mut out = String::new();
-    let _ = writeln!(&mut out, "---");
-    let _ = writeln!(&mut out, "title: '{name}@v1'");
-    let ruleset_desc = ruleset_meta_description(name, overview_md);
-    let _ = writeln!(
-        &mut out,
-        "description: '{}'",
-        escape_yaml_string(&ruleset_desc)
-    );
-    let _ = writeln!(&mut out, "---");
-    let _ = writeln!(&mut out);
-
-    if !overview_md.is_empty() {
-        out.push_str(overview_md);
-        let _ = writeln!(&mut out);
-        let _ = writeln!(&mut out);
-    }
-
-    // The overlay-style rulesets (e.g. monorepo/cargo-workspace)
-    // already document a multi-ruleset `extends:` recipe in their
-    // leading comment. Re-rendering a single-line snippet under
-    // them would be both redundant and misleading, so we suppress
-    // the auto-gen Adopt-with whenever the overview already
-    // mentions the bundled-URI scheme.
-    let overview_has_adoption = overview_md.contains("alint://bundled/");
-    if !overview_has_adoption {
-        let _ = writeln!(&mut out, "## Adopt with");
-        let _ = writeln!(&mut out);
-        let _ = writeln!(&mut out, "```yaml");
-        let _ = writeln!(&mut out, "extends:");
-        let _ = writeln!(&mut out, "  - alint://bundled/{name}@v1");
-        let _ = writeln!(&mut out, "```");
-        let _ = writeln!(&mut out);
-    }
-
-    if let Some(rules) = yaml.get("rules").and_then(|r| r.as_sequence()) {
-        let _ = writeln!(&mut out, "## Rules");
-        let _ = writeln!(&mut out);
-
-        for rule in rules {
-            let id = rule.get("id").and_then(|v| v.as_str()).unwrap_or("(no-id)");
-            let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-            let level = rule.get("level").and_then(|v| v.as_str()).unwrap_or("");
-            let when = rule.get("when").and_then(|v| v.as_str());
-            let msg = rule.get("message").and_then(|v| v.as_str());
-            let policy = rule.get("policy_url").and_then(|v| v.as_str());
-
-            let _ = writeln!(&mut out, "### `{id}`");
-            let _ = writeln!(&mut out);
-            if !kind.is_empty() {
-                let kind_md = match kind_to_family.get(kind) {
-                    Some(family) => {
-                        format!("[`{kind}`](/docs/rules/{family}/{kind}/)")
-                    }
-                    None => format!("`{kind}`"),
-                };
-                let _ = writeln!(&mut out, "- **kind**: {kind_md}");
-            }
-            if !level.is_empty() {
-                let _ = writeln!(&mut out, "- **level**: `{level}`");
-            }
-            if let Some(when) = when {
-                let _ = writeln!(&mut out, "- **when**: `{when}`");
-            }
-            if let Some(policy) = policy {
-                let _ = writeln!(&mut out, "- **policy**: <{policy}>");
-            }
-            if let Some(msg) = msg {
-                let _ = writeln!(&mut out);
-                let _ = writeln!(&mut out, "> {}", msg.replace('\n', " "));
-            }
-            let _ = writeln!(&mut out);
-        }
-    } else {
-        let _ = writeln!(&mut out, "_(no rules — this ruleset is a placeholder.)_");
-        let _ = writeln!(&mut out);
-    }
-
-    let _ = writeln!(&mut out, "## Source");
-    let _ = writeln!(&mut out);
-    let _ = writeln!(
-        &mut out,
-        "The full ruleset definition is committed at \
-         [`{rel_repo_path}`]({ALINT_REPO_BLOB_URL}/{rel_repo_path}) in the alint repo \
-         (the snapshot below is generated verbatim from that file).",
-    );
-    let _ = writeln!(&mut out);
-    let _ = writeln!(&mut out, "```yaml");
-    out.push_str(yaml_text.trim_end_matches('\n'));
-    out.push('\n');
-    let _ = writeln!(&mut out, "```");
-    out
 }
 
 /// Parse the leading comment block of a ruleset YAML into
@@ -2081,7 +1974,7 @@ pub(crate) fn render_overview_from_comments(yaml_text: &str) -> String {
             out.push_str("\n\n");
         }
         match b {
-            Block::Para(lines) => out.push_str(&lines.join("\n")),
+            Block::Para(lines) => out.push_str(&rulesets::overview_paragraph(lines)),
             Block::Code(lines) => {
                 out.push_str("```yaml\n");
                 for l in lines {
@@ -2492,6 +2385,7 @@ pub(crate) use examples::is_dangerous_docs_char;
 mod cli;
 mod counts;
 mod exported_pages;
+mod rulesets;
 
 #[cfg(test)]
 mod tests;

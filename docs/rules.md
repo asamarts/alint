@@ -74,6 +74,10 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 directory directly at the repository root, not nested.
 **Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
+**When to use it**: for the directories a repository's tooling or contributors rely on being there: a `docs/` tree the site build reads, `.github/workflows/` for CI, `tests/` next to the sources. Listing several paths accepts any one of them, so `paths: ["doc", "docs"]` passes with either name.
+
+**One match is enough**: a glob such as `packages/*/src` passes as soon as one package has a `src/`; it fails only when nothing matches at all. To require a `src/` in *every* package, iterate with [`for_each_dir`](/docs/rules/cross-file/for_each_dir/) and nest a `dir_exists` per directory.
+
 ### `dir_absent`
 
 **Categories:** Existence
@@ -129,6 +133,10 @@ Byte-level prefix / suffix check. Works on any bytes (binary safe, unlike `file_
 
 Check-only: a fix would risk silently duplicating a near-matching prefix. Pair with `file_prepend` / `file_append` explicitly if you want auto-repair.
 
+**When to use it**: when the exact bytes matter more than the text. Typical prefixes are a shebang on scripts (`prefix: "#!"` on `**/*.sh`), a file signature or magic number, and a fixed licence or generated-file banner. Typical suffixes are a generator's closing sentinel, so a hand-edited or truncated output fails, and a mandatory trailer line.
+
+**Byte-for-byte means newlines too**: a `suffix` ending in `\n` requires the file's final newline, and one without it fails on a file that has one. An empty file fails any non-empty prefix or suffix. For a pattern rather than fixed bytes, use `file_header` / `file_footer`, which match a regex against the first or last lines; for "ends with a newline" alone, [`final_newline`](/docs/rules/text-hygiene/final_newline/) is the dedicated check.
+
 ### `file_hash`
 
 **Categories:** Content, Security / Unicode sanity
@@ -158,6 +166,10 @@ File must have at least `min_lines` lines (`\n`-terminated, with an unterminated
 **Categories:** Content, Structure
 
 File must have at most `max_lines` lines, using the same accounting as `file_min_lines`. Catches the everything-module anti-pattern — a `lib.rs` / `index.ts` / `helpers.py` that grew unbounded.
+
+**Choosing a limit**: set it just above the largest file you accept today, as a ratchet rather than an ideal, and lower it as modules get split. Scope it to hand-written sources (`paths: "src/**/*.rs"`) and leave out lockfiles, generated code, fixtures and vendored files, which are long by nature. A warning level suits an advisory size budget; an error suits a hard cap.
+
+**Lines and bytes are different budgets**: a minified bundle can be one enormous line, which `file_max_lines` passes. Pair it with `file_max_size` when the concern is repository weight rather than readability.
 
 ### `file_footer` (alias: `footer`)
 
@@ -320,6 +332,8 @@ Cap runs of blank lines to `max`. A blank line is empty or whitespace-only.
 
 ## Security / Unicode sanity
 
+Checks for problems that slip past code review: content that reads one way to a reviewer and another way to a compiler, a terminal or git (invisible or direction-changing Unicode, non-ASCII bytes, leftover merge-conflict markers); content, imports, tracked paths or symlinks a project forbids; files that must match a pinned digest or the output of their generator; and commits that must be signed or come from an allowed author. A diff view tends to render the first group harmlessly, which is why a mechanical check is the reliable defence.
+
 ### `no_merge_conflict_markers`
 
 **Categories:** Security / Unicode sanity, Text hygiene
@@ -420,7 +434,7 @@ Per Microsoft's naming rules the check also rejects `COM0` / `LPT0` and the supe
 
 ## Unix metadata
 
-All rules in this family are no-ops on Windows — the +x bit and symlinks don't have a portable cross-platform story, so configs stay identical either way.
+The rules that read the `+x` bit (`executable_bit`, `executable_has_shebang`, `shebang_has_executable`) are no-ops on Windows, which has no executable bit, so the same config runs unchanged on every platform. `no_symlinks` and `file_shebang` check every platform.
 
 ### `no_symlinks`
 
