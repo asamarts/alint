@@ -318,6 +318,10 @@ Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a lin
 
 Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
 
+<!-- alint:since=0.17.1 -->
+Every in-scope file is scanned, including invalid-UTF-8 and binary-looking (NUL-bearing) ones, so neither a junk byte nor a NUL byte can hide a control. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
+<!-- /alint:since -->
+
 ### `no_zero_width_chars`
 
 **Categories:** Security / Unicode sanity, Encoding
@@ -325,6 +329,10 @@ Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069)
 Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). A leading U+FEFF is `no_bom`'s concern.
 
 As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
+
+<!-- alint:since=0.17.1 -->
+Like `no_bidi_controls`, binary-looking (NUL-bearing) files are scanned too; such a finding is reported but not auto-fixed.
+<!-- /alint:since -->
 
 ---
 

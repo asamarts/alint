@@ -14,6 +14,10 @@ impl Fixer for FileStripBidiFixer {
         "strip Unicode bidi control characters".to_string()
     }
 
+    fn can_fix(&self, violation: &Violation) -> bool {
+        !is_binary_finding(violation)
+    }
+
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
         apply_char_filter(
             "bidi",
@@ -50,6 +54,10 @@ pub struct FileStripZeroWidthFixer;
 impl Fixer for FileStripZeroWidthFixer {
     fn describe(&self) -> String {
         "strip zero-width characters (U+200B/C/D, U+2060, U+180E, body-internal U+FEFF)".to_string()
+    }
+
+    fn can_fix(&self, violation: &Violation) -> bool {
+        !is_binary_finding(violation)
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -183,6 +191,17 @@ impl Fixer for FileStripBomFixer {
     }
 }
 
+/// `true` for a bidi / zero-width finding the detector reported in a
+/// binary-looking file (keyed with `BINARY_KEY_PREFIX`). The detectors scan such
+/// files so a NUL can't hide a control, but the char-filter fixers refuse binary
+/// content, so `can_fix` declines these and `check` doesn't tag them fixable.
+fn is_binary_finding(violation: &Violation) -> bool {
+    violation
+        .baseline_key
+        .as_deref()
+        .is_some_and(|k| k.starts_with(crate::no_bidi_controls::BINARY_KEY_PREFIX))
+}
+
 /// Shared read-modify-write helper for "remove every char that
 /// matches `predicate`" fix ops.
 fn apply_char_filter(
@@ -205,9 +224,9 @@ fn apply_char_filter(
     };
     // Binary guard (H3): a NUL byte marks binary content; stripping a
     // bidi/zero-width byte sequence out of a NUL-bearing binary would corrupt
-    // it. The detector carries the SAME guard (so `check` and `fix` agree on
-    // which files are in scope -- otherwise a binary would be flagged-fixable
-    // forever but never fixed).
+    // it. The detector still REPORTS such a file (a NUL must not hide a control)
+    // but keys it so `can_fix` declines it -- `check` and `fix` agree that it is
+    // flagged yet not auto-fixable.
     if looks_binary(&existing) {
         return Ok(FixOutcome::Skipped(format!(
             "{} looks binary; not stripping {label} chars",

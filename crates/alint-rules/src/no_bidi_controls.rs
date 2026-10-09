@@ -21,8 +21,10 @@
 //!   - U+200E LEFT-TO-RIGHT MARK
 //!   - U+200F RIGHT-TO-LEFT MARK
 //!
-//! Non-UTF-8 files are skipped (can't have these codepoints
-//! anyway without being invalid UTF-8).
+//! Every in-scope file is scanned: invalid UTF-8 is decoded lossily and a
+//! binary-looking (NUL-bearing) file is NOT skipped, so neither a junk byte nor
+//! a NUL can hide a control. A finding in a binary-looking file is reported but
+//! not auto-fixed (the strip fixer refuses to edit binary content).
 
 use std::path::Path;
 
@@ -81,14 +83,14 @@ impl PerFileRule for NoBidiControlsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        // Skip binary content (NUL-bearing): the `file_strip_bidi` fixer refuses
-        // it (editing binary would corrupt it), so flagging it here would nag a
-        // file that can never be fixed -- `check` and `fix` must agree on scope.
-        // A lone invalid byte (`0xFF`, no NUL) is NOT binary, so this does not
-        // reopen the fail-open evasion below: such a file is still scanned.
-        if crate::io::looks_binary(bytes) {
-            return Ok(Vec::new());
-        }
+        // NO binary skip: this is a Trojan-Source defense, and skipping a
+        // "binary-looking" file let a single NUL byte hide every bidi control in
+        // it (a trivial fail-open evasion). Every in-scope file is scanned; a
+        // finding in a binary-looking file is still reported, but keyed
+        // `BINARY_KEY_PREFIX` so the strip fixer's `can_fix` declines it (the
+        // fixer refuses to edit binary content) -- `check` never promises a fix
+        // `fix` won't make.
+        let binary = crate::io::looks_binary(bytes);
         // Lossily decode rather than abandon the whole file on the first invalid
         // byte: this is a Trojan-Source (CVE-2021-42574) defense, so a single
         // stray `0xFF` must NOT suppress detection of a bidi override elsewhere
@@ -101,7 +103,8 @@ impl PerFileRule for NoBidiControlsRule {
         let msg = self.message.clone().unwrap_or_else(|| {
             format!(
                 "Unicode bidi control U+{codepoint:04X} at line {line_no} col {col} \
-                 (Trojan-Source defense)"
+                 (Trojan-Source defense){}",
+                if binary { BINARY_NOTE } else { "" }
             )
         });
         Ok(vec![
@@ -113,8 +116,27 @@ impl PerFileRule for NoBidiControlsRule {
                 // path so `fix --baseline` grandfathers the whole file and never
                 // strips a grandfathered control when a NEW one precedes it (audit
                 // F3, 2026-09-20). Matches no_trailing_whitespace.
-                .with_baseline_key(crate::slash(path)),
+                .with_baseline_key(file_key(path, binary)),
         ])
+    }
+}
+
+/// Baseline-key prefix marking a finding in a binary-looking (NUL-bearing) file.
+/// The detectors still report such a file (a NUL must not hide a Trojan-Source /
+/// zero-width char), but the byte-strip fixers refuse binary content, so their
+/// `can_fix` declines a key with this prefix. Shared with `no_zero_width_chars`.
+pub(crate) const BINARY_KEY_PREFIX: &str = "binary:";
+
+/// Default-message suffix for a finding in a binary-looking file.
+pub(crate) const BINARY_NOTE: &str = "; the file looks binary, so it is not auto-fixed";
+
+/// The whole-file baseline key: the path, prefixed with [`BINARY_KEY_PREFIX`]
+/// when the file looks binary.
+pub(crate) fn file_key(path: &Path, binary: bool) -> String {
+    if binary {
+        format!("{BINARY_KEY_PREFIX}{}", crate::slash(path))
+    } else {
+        crate::slash(path)
     }
 }
 
@@ -247,5 +269,49 @@ mod tests {
             1,
             "the RLO after a bad byte must still be flagged"
         );
+    }
+}
+
+#[cfg(test)]
+mod binary_evasion_tests {
+    use super::*;
+
+    #[test]
+    fn a_nul_byte_does_not_hide_a_bidi_control() {
+        // Trojan-Source evasion regression: one NUL made `looks_binary` true and
+        // the rule skipped the file, so `\0` + RLO passed. The security rule now
+        // scans every in-scope file; the finding on a binary-looking file is
+        // reported but marked not-auto-fixable (the strip fixer refuses binary).
+        let idx = alint_core::FileIndex::from_entries(Vec::new());
+        let ctx = Context {
+            root: Path::new("/r"),
+            index: &idx,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+        };
+        let rule = NoBidiControlsRule {
+            id: "no-bidi".to_string(),
+            level: Level::Error,
+            policy_url: None,
+            message: None,
+            scope: Scope::match_all(),
+            fixer: Some(FileStripBidiFixer),
+        };
+        let vs = rule
+            .evaluate_file(&ctx, Path::new("a.rs"), "x\u{0}code\u{202E}evil".as_bytes())
+            .unwrap();
+        assert_eq!(vs.len(), 1, "the RLO in a NUL-bearing file must be flagged");
+        assert!(
+            !FileStripBidiFixer.can_fix(&vs[0]),
+            "check must not promise a fix the binary guard refuses"
+        );
+        // A text file's finding stays fixable.
+        let vs = rule
+            .evaluate_file(&ctx, Path::new("a.rs"), "a\u{202E}b".as_bytes())
+            .unwrap();
+        assert!(FileStripBidiFixer.can_fix(&vs[0]));
     }
 }

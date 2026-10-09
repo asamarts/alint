@@ -77,13 +77,11 @@ impl PerFileRule for NoZeroWidthCharsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        // Skip binary content (NUL-bearing): the `file_strip_zero_width` fixer
-        // refuses it, so flagging it here would nag a file that can never be
-        // fixed -- `check` and `fix` must agree on scope. A lone invalid byte
-        // (no NUL) is NOT binary, so the fail-open evasion below stays closed.
-        if crate::io::looks_binary(bytes) {
-            return Ok(Vec::new());
-        }
+        // NO binary skip (mirrors no_bidi_controls): skipping a binary-looking
+        // file let one NUL byte hide every zero-width char in it. A finding in a
+        // binary-looking file is reported but keyed so the strip fixer's
+        // `can_fix` declines it -- the fixer refuses to edit binary content.
+        let binary = crate::io::looks_binary(bytes);
         // Lossily decode rather than abandon the file on the first invalid byte:
         // this is a security-posture rule, so a stray non-UTF-8 byte must NOT
         // suppress detection of a zero-width char elsewhere (fail-open evasion).
@@ -92,7 +90,14 @@ impl PerFileRule for NoZeroWidthCharsRule {
             return Ok(Vec::new());
         };
         let msg = self.message.clone().unwrap_or_else(|| {
-            format!("zero-width character U+{codepoint:04X} at line {line_no} col {col}")
+            format!(
+                "zero-width character U+{codepoint:04X} at line {line_no} col {col}{}",
+                if binary {
+                    crate::no_bidi_controls::BINARY_NOTE
+                } else {
+                    ""
+                }
+            )
         });
         Ok(vec![
             Violation::new(msg)
@@ -103,7 +108,7 @@ impl PerFileRule for NoZeroWidthCharsRule {
                 // path so `fix --baseline` grandfathers the whole file and never
                 // strips a grandfathered char when a NEW one precedes it (audit
                 // F3, 2026-09-20). Matches no_trailing_whitespace.
-                .with_baseline_key(crate::slash(path)),
+                .with_baseline_key(crate::no_bidi_controls::file_key(path, binary)),
         ])
     }
 }
@@ -230,5 +235,48 @@ mod tests {
             1,
             "the ZWSP after a bad byte must still be flagged"
         );
+    }
+}
+
+#[cfg(test)]
+mod binary_evasion_tests {
+    use super::*;
+
+    #[test]
+    fn a_nul_byte_does_not_hide_a_zero_width_char() {
+        // Evasion regression (mirrors no_bidi_controls): a NUL byte must not
+        // make the rule skip the file. The finding is reported but not marked
+        // auto-fixable, since the strip fixer refuses binary content.
+        let idx = alint_core::FileIndex::from_entries(Vec::new());
+        let ctx = Context {
+            root: Path::new("/r"),
+            index: &idx,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+        };
+        let rule = NoZeroWidthCharsRule {
+            id: "no-zw".to_string(),
+            level: Level::Error,
+            policy_url: None,
+            message: None,
+            scope: Scope::match_all(),
+            fixer: Some(FileStripZeroWidthFixer),
+        };
+        let vs = rule
+            .evaluate_file(&ctx, Path::new("a.rs"), "x\u{0}a\u{200B}b".as_bytes())
+            .unwrap();
+        assert_eq!(
+            vs.len(),
+            1,
+            "the ZWSP in a NUL-bearing file must be flagged"
+        );
+        assert!(!FileStripZeroWidthFixer.can_fix(&vs[0]));
+        let vs = rule
+            .evaluate_file(&ctx, Path::new("a.rs"), "a\u{200B}b".as_bytes())
+            .unwrap();
+        assert!(FileStripZeroWidthFixer.can_fix(&vs[0]));
     }
 }
