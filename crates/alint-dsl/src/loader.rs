@@ -70,6 +70,16 @@ impl MemoKey {
 /// failure is reported with the `source` path; a typed/YAML error
 /// propagates bare so the existing diagnostics are unchanged.
 pub(crate) fn parse_config_interpolated(contents: &str, source: &Path) -> Result<RawConfig> {
+    // Name the file in a YAML/typed error: in an `extends:` chain or a
+    // `.alint.d/` drop-in, a bare "at line 2 column 1" reads as if the
+    // top-level config were at fault.
+    parse_config_interpolated_inner(contents, source).map_err(|e| match e {
+        Error::Yaml(e) => Error::Other(format!("{}: YAML parse error: {e}", source.display())),
+        other => other,
+    })
+}
+
+fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawConfig> {
     // Reject a deeply-nested-flow config before `serde_yaml_ng` (libyaml) chews
     // on it super-linearly — a DoS reachable through an `extends:`'d ruleset.
     if !alint_core::yaml_depth::flow_depth_within_limit(contents) {
@@ -313,7 +323,8 @@ fn load_remote(
             alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
         )));
     }
-    let config: RawConfig = serde_yaml_ng::from_str(body_str)?;
+    let config: RawConfig = serde_yaml_ng::from_str(body_str)
+        .map_err(|e| Error::Other(format!("remote config at {url}: YAML parse error: {e}")))?;
     if !config.extends.is_empty() {
         return Err(Error::Other(format!(
             "remote config at {url} contains its own `extends:`; \

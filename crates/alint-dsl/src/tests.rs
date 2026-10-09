@@ -3021,3 +3021,13 @@ fn fact_with_extra_keys_is_a_load_error() {
         parse("version: 1\nfacts:\n  - id: f\n    any_file_exists: [a, b]\nrules: []\n").unwrap();
     assert_eq!(ok.facts[0].kind.name(), "any_file_exists");
 }
+
+#[test]
+fn parse_error_in_an_extended_config_names_that_file() {
+    let err = load_local_extends("version: 1\nrulez: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("base.yml"), "{err}");
+    // The serde message appears once (it used to repeat as the error's source).
+    assert_eq!(err.matches("unknown field").count(), 1, "{err}");
+}
