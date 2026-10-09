@@ -45,6 +45,8 @@ row() {
   echo "## CI Report"
   echo ""
 
+  echo "Detect Changes: $(status_cell "${CHANGES_RESULT:-}")"
+  echo ""
   echo "### Changes Detected"
   echo "| Component | Changed |"
   echo "|-----------|---------|"
@@ -95,6 +97,13 @@ row() {
 # ── Fail if any critical job failed ──────────────────────────────────
 
 FAILED=false
+# `changes` gates every pipeline via needs.changes.outputs.*: if it fails (or is
+# cancelled), every downstream job is SKIPPED, which would otherwise read as
+# "all checks passed (or were skipped)". Anything but success is a failure.
+if [[ "${CHANGES_RESULT:-}" != "success" ]]; then
+  echo "==> Detect Changes did not succeed (result: ${CHANGES_RESULT:-unset}); downstream skips are not passes" >&2
+  FAILED=true
+fi
 for result in \
   "$SECRETS_INVENTORY_RESULT" \
   "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
