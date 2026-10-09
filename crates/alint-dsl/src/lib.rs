@@ -93,7 +93,7 @@ pub fn load(path: &Path) -> Result<Config> {
 /// directory, and for embeddings that want to plug in a custom
 /// fetcher.
 pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
-    let mut visiting = std::collections::HashSet::new();
+    let mut state = loader::LoadState::default();
     // Confinement boundary for local `extends:` targets — the top-level
     // config's directory. A local extends chain (e.g. a shared ruleset
     // committed to the repo) may not escape this tree to read arbitrary
@@ -110,8 +110,7 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     // recursion passes `false`), so an untrusted ruleset can't lift confinement.
     // `&[]` trusted: the top-level config reads its OWN `trusted_extends:` inside
     // `load_recursive` (is_top), so the seed list is empty.
-    let mut raw =
-        loader::load_recursive(path, &mut visiting, opts, Some(&confine_root), true, &[])?;
+    let mut raw = loader::load_recursive(path, &mut state, opts, Some(&confine_root), true, &[])?;
 
     // `.alint.d/*.yml` drop-ins — auto-discovered next to the
     // top-level config and merged in alphabetical order. The
@@ -137,7 +136,7 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
         // user-controlled), so `is_top: true` — they may open the escape hatch.
         let drop_in = loader::load_recursive(
             &drop_in_path,
-            &mut visiting,
+            &mut state,
             opts,
             Some(&confine_root),
             true,

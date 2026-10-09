@@ -19,6 +19,36 @@ use crate::{
 /// handful deep. See [`load_recursive`] (L5).
 const MAX_EXTENDS_DEPTH: usize = 64;
 
+/// Mutable state shared by one `load_with` call's whole extends resolution.
+#[derive(Default)]
+pub(crate) struct LoadState {
+    /// Ancestors on the current DFS path (cycle detection + depth bound).
+    pub(crate) visiting: std::collections::HashSet<PathBuf>,
+    /// Completed non-top-level local loads, reused across a diamond chain: two
+    /// entries that both extend the same file at every level would otherwise
+    /// reload it once per path through the DAG (2^depth loads, an effective
+    /// hang from a hostile repo). `is_top` loads read their own trust and
+    /// confinement settings and are never memoized.
+    memo: std::collections::HashMap<MemoKey, RawConfig>,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct MemoKey {
+    path: PathBuf,
+    confine: Option<PathBuf>,
+    trusted: Vec<String>,
+}
+
+impl MemoKey {
+    fn new(path: &Path, confine: Option<&Path>, trusted: &[String]) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            confine: confine.map(Path::to_path_buf),
+            trusted: trusted.to_vec(),
+        }
+    }
+}
+
 /// Parse a local config file's `contents` into a [`RawConfig`],
 /// resolving `{{env.X}}` interpolation first. Shared by
 /// `load_recursive` and nested-config loading so every local config
@@ -70,7 +100,7 @@ pub(crate) fn parse_config_interpolated(contents: &str, source: &Path) -> Result
 /// the entire rule.
 pub(crate) fn load_recursive(
     path: &Path,
-    visiting: &mut std::collections::HashSet<PathBuf>,
+    state: &mut LoadState,
     opts: &LoadOptions,
     confine: Option<&Path>,
     is_top: bool,
@@ -85,6 +115,13 @@ pub(crate) fn load_recursive(
         path: path.to_path_buf(),
         source,
     })?;
+    // Diamond chains reload a shared file once per DAG path (2^depth); a
+    // non-top-level load is a pure function of its `MemoKey`, so reuse it.
+    let memo_key = (!is_top).then(|| MemoKey::new(&canonical, confine, trusted));
+    if let Some(cached) = memo_key.as_ref().and_then(|k| state.memo.get(k)) {
+        return Ok(cached.clone());
+    }
+    let visiting = &mut state.visiting;
     if !visiting.insert(canonical.clone()) {
         return Err(Error::Other(format!(
             "cycle in `extends` chain at {}",
@@ -128,6 +165,9 @@ pub(crate) fn load_recursive(
     let extends = std::mem::take(&mut config.extends);
     if extends.is_empty() {
         visiting.remove(&canonical);
+        if let Some(key) = memo_key {
+            state.memo.insert(key, config.clone());
+        }
         return Ok(config);
     }
 
@@ -168,7 +208,7 @@ pub(crate) fn load_recursive(
                  use https:// with an SRI hash instead"
             )));
         } else if url.starts_with("https://") {
-            let remote = load_remote(url, opts, visiting)?;
+            let remote = load_remote(url, opts, &mut state.visiting)?;
             crate::reject_env_expansion_in(&remote.rules, &remote.templates, url)?;
             remote
         } else if let Some(spec) = url.strip_prefix("alint://bundled/") {
@@ -176,7 +216,7 @@ pub(crate) fn load_recursive(
         } else {
             let target = resolve_relative(&source_dir, url);
             confine_extends_target(&target, url, confine)?;
-            load_recursive(&target, visiting, opts, confine, false, trusted)?
+            load_recursive(&target, state, opts, confine, false, trusted)?
         };
         // Extended configs cannot introduce `custom:` facts or
         // `kind: command` rules — both spawn arbitrary processes
@@ -236,7 +276,10 @@ pub(crate) fn load_recursive(
         merged = merge(merged, parent);
     }
     merged = merge(merged, config);
-    visiting.remove(&canonical);
+    state.visiting.remove(&canonical);
+    if let Some(key) = memo_key {
+        state.memo.insert(key, merged.clone());
+    }
     Ok(merged)
 }
 
@@ -458,5 +501,35 @@ mod tests {
         )
         .unwrap();
         assert!(crate::load(&tmp.path().join(".alint.yml")).is_ok());
+    }
+
+    #[test]
+    fn diamond_extends_chain_loads_each_file_once() {
+        // Audit 2026-10: `cN` extends `[./cN+1.yml, ./cN+1.yml]` at every level,
+        // so without memoization the bottom file loads 2^depth times (depth 18
+        // measured at 18s; depth 20 is minutes). Each level also contributes a
+        // rule so the composed result is checked, not just the runtime.
+        let tmp = tempfile::tempdir().unwrap();
+        let depth = 20;
+        for i in 0..=depth {
+            let extends = if i < depth {
+                format!("extends: [./c{n}.yml, ./c{n}.yml]\n", n = i + 1)
+            } else {
+                String::new()
+            };
+            let body = format!(
+                "version: 1\n{extends}rules:\n  - id: r{i}\n    kind: file_exists\n    \
+                 paths: README.md\n    level: warning\n"
+            );
+            std::fs::write(tmp.path().join(format!("c{i}.yml")), body).unwrap();
+        }
+        let started = std::time::Instant::now();
+        let cfg = crate::load(&tmp.path().join("c0.yml")).unwrap();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "diamond chain took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(cfg.rules.len(), depth + 1);
     }
 }
