@@ -296,14 +296,29 @@ impl RawConfig {
         // the extends/nested loaders also reject spawning templates earlier
         // with the offending source named.
         for t in &self.templates {
-            let kind = t.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-            if SPAWNING_RULE_KINDS.contains(&kind) {
-                let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
+            let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
+            // Trust-relevant fields must be literal in a template. `{{vars.*}}` is
+            // substituted at expansion -- after every gate below has inspected the
+            // raw text -- so `kind: "{{vars.k}}"` + `vars: {k: command}` (or an
+            // `applicability` placeholder resolving to `safe`) would otherwise be
+            // judged by its placeholder and executed as its substitution.
+            if let Some(field) = find_template_placeholder_in_guarded_field(t) {
+                return Err(Error::Other(format!(
+                    "template {id:?}: `{field}` must be a literal value; `{{{{vars.*}}}}` \
+                     placeholders are not allowed in a rule kind or a fix applicability \
+                     because they are substituted after the trust gates have run"
+                )));
+            }
+            // Recurse `require:` at every depth: a spawning kind nested inside a
+            // template's `require:` block expands into its instance just like a
+            // top-level one (audit 2026-10).
+            if let Some(kind) = find_spawning_kind(t) {
                 return Err(Error::Other(format!(
                     "template {id:?}: `kind: {kind}` spawns a process and is not allowed \
-                     in a `templates:` block - a template is expanded after the spawn \
-                     gate, so this would let a ruleset run arbitrary code. Declare the \
-                     command rule directly in your top-level `rules:`."
+                     in a `templates:` block (including inside a `require:` block) - a \
+                     template is expanded after the spawn gate, so this would let a \
+                     ruleset run arbitrary code. Declare the command rule directly in \
+                     your top-level `rules:`."
                 )));
             }
             // The same backstop for a spawning FIX op (see `SPAWNING_FIX_OPS`), at
@@ -315,7 +330,6 @@ impl RawConfig {
             // spawning fix in a top-level template is refused too. Confined to a
             // top-level `rules:` entry like a spawning kind, for EVERY source.
             if let Some(op) = find_spawning_fix_op(t) {
-                let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
                 return Err(Error::Other(format!(
                     "template {id:?}: `fix.{op}` spawns a process and is not allowed \
                      in a `templates:` block - a template is expanded after the spawn \
@@ -350,6 +364,12 @@ impl RawConfig {
             let untrusted_fix_source = take_untrusted_fix_source(&mut expanded);
             if untrusted_fix_source {
                 demote_content_fixers_in_rule(&mut expanded);
+                // An untrusted rule may instantiate a TRUSTED template that promotes
+                // a destructive fixer (`file_remove: {applicability: safe}`) and aim
+                // it with its own `paths:`. The promotion belongs to the template's
+                // author, not to this rule, so the effective fixer falls back to its
+                // op's own default tier.
+                strip_fix_promotions_in_rule(&mut expanded);
             }
             let spec: alint_core::RuleSpec = serde_yaml_ng::from_value(
                 serde_yaml_ng::Value::Mapping(expanded),
@@ -627,11 +647,15 @@ pub fn reject_fix_promotion_in(rules: &[Mapping], source: &str) -> Result<()> {
 fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
     if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
         for (op, args) in fix {
+            // A non-mapping op value never reaches here as a valid fixer: the
+            // `fix:` deserializer requires every op's options to be a mapping, so
+            // a sequence-shaped `[safe]` that this scan cannot see is refused
+            // there instead of loading as a positional promotion.
             let promotes = args
                 .as_mapping()
                 .and_then(|m| m.get("applicability"))
                 .and_then(|v| v.as_str())
-                .is_some_and(|a| a.eq_ignore_ascii_case("safe"));
+                .is_some_and(|a| a.eq_ignore_ascii_case("safe") || a.contains("{{"));
             if promotes {
                 let id = rule
                     .get("id")
@@ -870,8 +894,7 @@ fn demote_content_fixers_in_rule(rule: &mut Mapping) {
 /// rule kind ever adds another `Vec<NestedRuleSpec>` option field, gate it
 /// here too.)
 fn reject_spawning_in_rule(rule: &Mapping, source: &str) -> Result<()> {
-    let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-    if SPAWNING_RULE_KINDS.contains(&kind) {
+    if let Some(kind) = find_spawning_kind(rule) {
         let id = rule
             .get("id")
             .and_then(|v| v.as_str())
@@ -883,14 +906,87 @@ fn reject_spawning_in_rule(rule: &Mapping, source: &str) -> Result<()> {
              ruleset run arbitrary code"
         )));
     }
-    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
-        for nested in require {
-            if let Some(nested_map) = nested.as_mapping() {
-                reject_spawning_in_rule(nested_map, source)?;
+    Ok(())
+}
+
+/// The spawning kind (see [`SPAWNING_RULE_KINDS`]) declared by `rule` or by any
+/// nested `require:` spec, recursively. Shared by the per-source rule gate, the
+/// per-source template gate, and the `finalize` template backstop so all three
+/// scan to the SAME depth: a template-nested `require: [{kind: command}]` must
+/// be refused exactly like a rule-nested one.
+fn find_spawning_kind(rule: &Mapping) -> Option<&str> {
+    if let Some(kind) = rule.get("kind").and_then(|v| v.as_str())
+        && SPAWNING_RULE_KINDS.contains(&kind)
+    {
+        return Some(kind);
+    }
+    rule.get("require")
+        .and_then(|v| v.as_sequence())
+        .into_iter()
+        .flatten()
+        .filter_map(serde_yaml_ng::Value::as_mapping)
+        .find_map(find_spawning_kind)
+}
+
+/// The first trust-relevant field of a template (a `kind`, or a
+/// `fix.<op>.applicability`, at any `require:` depth) whose value contains a
+/// `{{` placeholder, named for the error message.
+fn find_template_placeholder_in_guarded_field(rule: &Mapping) -> Option<String> {
+    let has_placeholder = |v: &serde_yaml_ng::Value| v.as_str().is_some_and(|s| s.contains("{{"));
+    if rule.get("kind").is_some_and(has_placeholder) {
+        return Some("kind".to_string());
+    }
+    if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
+        for (op, args) in fix {
+            if args
+                .as_mapping()
+                .and_then(|m| m.get("applicability"))
+                .is_some_and(has_placeholder)
+            {
+                let op = op.as_str().unwrap_or("<fix>");
+                return Some(format!("fix.{op}.applicability"));
             }
         }
     }
-    Ok(())
+    rule.get("require")
+        .and_then(|v| v.as_sequence())
+        .into_iter()
+        .flatten()
+        .filter_map(serde_yaml_ng::Value::as_mapping)
+        .find_map(find_template_placeholder_in_guarded_field)
+}
+
+/// Remove every explicit `applicability: safe` from `rule`'s fix ops (at every
+/// `require:` depth) so each falls back to its op's default tier. Applied to an
+/// effective rule with untrusted provenance: such a rule may never carry a
+/// promotion, whoever authored the fix block it acquired.
+fn strip_fix_promotions_in_rule(rule: &mut Mapping) {
+    if let Some(fix) = rule
+        .get_mut("fix")
+        .and_then(serde_yaml_ng::Value::as_mapping_mut)
+    {
+        for (_op, args) in fix.iter_mut() {
+            if let Some(args_map) = args.as_mapping_mut() {
+                let promotes = args_map
+                    .get("applicability")
+                    .and_then(serde_yaml_ng::Value::as_str)
+                    .is_some_and(|a| a.eq_ignore_ascii_case("safe"));
+                if promotes {
+                    args_map.remove("applicability");
+                }
+            }
+        }
+    }
+    if let Some(require) = rule
+        .get_mut("require")
+        .and_then(serde_yaml_ng::Value::as_sequence_mut)
+    {
+        for nested in require {
+            if let Some(nested_map) = nested.as_mapping_mut() {
+                strip_fix_promotions_in_rule(nested_map);
+            }
+        }
+    }
 }
 
 /// Reject any *spawning* fix op (see [`SPAWNING_FIX_OPS`]) declared in the given
@@ -978,8 +1074,7 @@ pub fn reject_spawning_fix_op_templates_in(templates: &[Mapping], source: &str) 
 /// per-source check names the offending ruleset (`source`) in the error.
 pub fn reject_spawning_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
     for template in templates {
-        let kind = template.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-        if SPAWNING_RULE_KINDS.contains(&kind) {
+        if let Some(kind) = find_spawning_kind(template) {
             let id = template
                 .get("id")
                 .and_then(|v| v.as_str())

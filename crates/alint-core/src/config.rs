@@ -525,6 +525,21 @@ where
             .map(str::to_owned),
         _ => None,
     };
+    // Every op's options must be a mapping. The derived op structs would also
+    // accept a YAML sequence (filling fields by position), and the DSL trust
+    // gates -- which refuse an inherited `applicability: safe` promotion and
+    // demote an untrusted remote's content fixers -- inspect mappings only, so a
+    // positional `file_remove: [safe]` would load as an unreviewed promotion.
+    if let serde_yaml_ng::Value::Mapping(m) = &value
+        && let Some((op, args)) = m.iter().next()
+        && !args.is_mapping()
+    {
+        let op = op.as_str().unwrap_or("<fix>");
+        return Err(D::Error::custom(format!(
+            "`{op}`: a fix op's options must be a mapping (write `{op}: {{}}` for an op \
+             with no options)"
+        )));
+    }
     serde_yaml_ng::from_value(value)
         .map(Some)
         .map_err(|e| match single_op {

@@ -2742,3 +2742,142 @@ fn extends_promoting_file_remove_to_safe_is_rejected() {
     );
     assert!(crate::reject_fix_promotion_in(std::slice::from_ref(&nested), "./base.yml").is_err());
 }
+
+// ── audit 2026-10: trust gates vs. template substitution and op shapes ───────
+// Every gate inspects raw YAML, so each test pins one way the EFFECTIVE rule
+// could differ from what the gate saw: a `{{vars.*}}` placeholder resolving to a
+// guarded value after the gate ran, a spawning kind nested in a template's
+// `require:`, a positional (sequence-shaped) fix op, and a promotion acquired
+// from a trusted template by an untrusted rule.
+
+fn load_local_extends(base_body: &str) -> Result<alint_core::Config> {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("base.yml"), base_body).unwrap();
+    let child = tmp.path().join(".alint.yml");
+    std::fs::write(&child, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    load(&child)
+}
+
+#[test]
+fn template_kind_placeholder_cannot_smuggle_a_spawning_kind() {
+    // `kind: "{{vars.k}}"` passed every spawn gate (they saw the placeholder) and
+    // expanded into `kind: command` at finalize -- arbitrary code execution from
+    // an extended ruleset. The placeholder itself is now refused.
+    let err = load_local_extends(
+        "version: 1\ntemplates:\n  - id: t\n    kind: \"{{vars.k}}\"\n    \
+         paths: \"*.md\"\n    level: error\n    command: [\"sh\", \"-c\", \"echo pwn\"]\n\
+         rules:\n  - id: innocuous\n    extends_template: t\n    vars: {k: command}\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("`kind` must be a literal"), "{err}");
+
+    // Source-agnostic: a top-level template may not parameterize `kind` either.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\ntemplates:\n  - id: t\n    kind: \"{{vars.k}}\"\n    paths: \"*.md\"\n    \
+         level: error\nrules:\n  - id: x\n    extends_template: t\n    vars: {k: file_exists}\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("`kind` must be a literal"), "{err}");
+}
+
+#[test]
+fn template_nested_require_kind_placeholder_is_refused() {
+    let err = load_local_extends(
+        "version: 1\ntemplates:\n  - id: t\n    kind: for_each_dir\n    select: \"pkgs/*\"\n    \
+         level: error\n    require:\n      - kind: \"{{vars.k}}\"\n        paths: \"{path}/*\"\n        \
+         command: [\"sh\", \"-c\", \"echo pwn\"]\nrules:\n  - id: innocuous\n    \
+         extends_template: t\n    vars: {k: command}\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("`kind` must be a literal"), "{err}");
+}
+
+#[test]
+fn spawning_kind_nested_in_template_require_is_refused() {
+    // A literal `kind: command` inside a template's `require:` block expanded into
+    // its instance past both template gates, which only checked the template's
+    // own top-level `kind`.
+    let body = "version: 1\ntemplates:\n  - id: t\n    kind: for_each_dir\n    \
+        select: \"pkgs/*\"\n    level: error\n    require:\n      - kind: command\n        \
+        paths: \"{path}/*\"\n        command: [\"sh\", \"-c\", \"echo pwn\"]\nrules:\n  \
+        - id: innocuous\n    extends_template: t\n";
+    let err = load_local_extends(body).unwrap_err().to_string();
+    assert!(err.contains("kind: command"), "{err}");
+    assert!(err.contains("arbitrary code"), "{err}");
+
+    // The finalize backstop recurses too (top-level template, no extends).
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&cfg, body).unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("templates"), "{err}");
+    assert!(err.contains("kind: command"), "{err}");
+}
+
+#[test]
+fn template_applicability_placeholder_cannot_promote_a_fix() {
+    let err = load_local_extends(
+        "version: 1\ntemplates:\n  - id: t\n    kind: file_absent\n    paths: \"*.md\"\n    \
+         level: error\n    fix: { file_remove: { applicability: \"{{vars.a}}\" } }\n\
+         rules:\n  - id: innocuous\n    extends_template: t\n    vars: {a: safe}\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("applicability"), "{err}");
+}
+
+#[test]
+fn sequence_shaped_fix_op_options_are_refused() {
+    // `file_remove: [safe]` deserialized positionally into
+    // `FileRemoveFixSpec { applicability: Some(Safe) }`, invisible to the
+    // mapping-only promotion gate and demotion pass.
+    for op in [
+        "file_remove: [safe]",
+        "replace: ['foo', 'PWNED']",
+        "file_append_final_newline: []",
+    ] {
+        let err = load_local_extends(&format!(
+            "version: 1\nrules:\n  - id: r\n    kind: file_absent\n    paths: \"*.md\"\n    \
+             level: error\n    fix: {{ {op} }}\n"
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(err.contains("must be a mapping"), "{op}: {err}");
+    }
+    // Including in the user's own top-level config: there is no legitimate
+    // positional form, so the shape is refused for every source.
+    let err = parse(
+        "version: 1\nrules:\n  - id: r\n    kind: file_absent\n    paths: \"*.md\"\n    \
+         level: error\n    fix: { file_remove: [safe] }\n",
+    )
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("must be a mapping"), "{err}");
+}
+
+#[test]
+fn untrusted_rule_cannot_aim_a_trusted_promoting_template() {
+    // The user's own template promotes `file_remove` to safe for its own scope; an
+    // untrusted remote instantiates it with its own `paths:`. The promotion must
+    // not follow the template into the untrusted rule.
+    let remote = "version: 1\nrules:\n  - id: aimed\n    extends_template: user_rm\n    \
+        paths: \"**/*\"\n";
+    let top_template = "templates:\n  - id: user_rm\n    kind: file_absent\n    \
+        paths: \"*.bak\"\n    level: error\n    \
+        fix: { file_remove: { applicability: safe } }\n";
+    let cfg = load_extending(remote, top_template);
+    let rule = cfg.rules.iter().find(|r| r.id == "aimed").unwrap();
+    match rule.fix.as_ref().expect("aimed carries the expanded fixer") {
+        alint_core::FixSpec::FileRemove { file_remove } => assert_eq!(
+            file_remove.applicability, None,
+            "an untrusted rule must fall back to file_remove's default (unsafe) tier"
+        ),
+        other => panic!("expected a FileRemove fixer, got {other:?}"),
+    }
+}
