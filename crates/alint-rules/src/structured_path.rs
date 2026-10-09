@@ -6,7 +6,9 @@
 //!
 //! - **Format** — `Json`, `Yaml`, `Toml`, `Xml`, `Dotenv`, `Properties`, `Ini`, or `Hcl`. The file is
 //!   parsed into a `serde_json::Value` tree regardless (YAML and
-//!   TOML coerce through serde; XML maps via the xmltodict-style
+//!   TOML coerce through serde -- YAML with its `<<` merge keys
+//!   applied and custom tags such as `!Ref` dropped in favour of the
+//!   tagged value; XML maps via the xmltodict-style
 //!   convention in `xml_to_value` — `@attr` / `#text` /
 //!   repeated-element→array, leaf elements collapse to their
 //!   text string, namespaces flatten to local names, every leaf
