@@ -15,6 +15,11 @@ set -euo pipefail
 
 CHANNEL="${1:?channel required (install.sh|cargo|cargo-binstall|npm|docker|homebrew|pypi)}"
 TAG="${2:?tag required (e.g. v0.16.0)}"
+# Fail closed: TAG reaches install scripts and registry queries below.
+if [[ ! "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "  [smoke] invalid tag '${TAG}' (expected vX.Y.Z)" >&2
+  exit 2
+fi
 VER="${TAG#v}"                        # 0.16.0
 IMAGE="ghcr.io/asamarts/alint"
 DOCKER="${DOCKER:-docker}"
@@ -68,10 +73,16 @@ check_floating() {
   echo "  [smoke] OK: ${CHANNEL} latest pointer -> ${VER}"
 }
 
+# The documented one-liner, as a function so TAG travels as data (env), never
+# spliced into a `bash -c` source string.
+install_via_script() {
+  curl -fsSL https://alint.org/install.sh | ALINT_VERSION="$TAG" bash
+}
+
 echo "==> smoke: channel=${CHANNEL} tag=${TAG} ver=${VER} floating=${SMOKE_FLOATING:-0}"
 case "$CHANNEL" in
   install.sh)
-    retry bash -c "curl -fsSL https://alint.org/install.sh | ALINT_VERSION='${TAG}' bash"
+    retry install_via_script
     export PATH="${HOME}/.local/bin:${PATH}"       # install.sh's default INSTALL_DIR
     assert_version alint --version
     ;;

@@ -46,6 +46,12 @@ jobs:
           else
             tag="${latest}"
           fi
+          # Fail closed on anything but a three-part release tag: the value is
+          # handed to install scripts / registries downstream.
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::invalid release tag '${tag}' (expected vX.Y.Z)" >&2
+            exit 1
+          fi
           # is_latest gates the floating-pointer + homebrew checks: those only make
           # sense when the smoked tag is what `latest` / `:latest` / the tap serve.
           if [ "${tag}" = "${latest}" ]; then is_latest=1; else is_latest=0; fi
@@ -112,4 +118,6 @@ jobs:
           # 1 when the smoked tag is the latest release: enables the floating
           # (`latest` / `:latest` / homebrew) pointer checks in the script.
           SMOKE_FLOATING: ${{ needs.resolve.outputs.is_latest }}
-        run: ci/scripts/smoke-channel.sh "${{ matrix.channel }}" "${{ needs.resolve.outputs.tag }}"
+          SMOKE_CHANNEL: ${{ matrix.channel }}
+          SMOKE_TAG: ${{ needs.resolve.outputs.tag }}
+        run: ci/scripts/smoke-channel.sh "$SMOKE_CHANNEL" "$SMOKE_TAG"

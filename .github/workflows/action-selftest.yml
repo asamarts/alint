@@ -72,11 +72,12 @@ jobs:
         # `action-default` job, not here.
         continue-on-error: true
       - name: verify SARIF file exists and parses as JSON
+        env:
+          SARIF_FILE: ${{ steps.alint.outputs.sarif-file }}
         run: |
           set -euo pipefail
-          test -f "${{ steps.alint.outputs.sarif-file }}"
-          python3 -c 'import json,sys; json.load(open(sys.argv[1]))' \
-            "${{ steps.alint.outputs.sarif-file }}"
+          test -f "$SARIF_FILE"
+          python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$SARIF_FILE"
 
   action-json:
     name: json output
