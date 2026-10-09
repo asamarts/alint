@@ -418,6 +418,15 @@ impl FileIndex {
         let map = self.parent_to_children.get_or_init(|| {
             #[cfg(debug_assertions)]
             let start = std::time::Instant::now();
+            // Dir path -> its entry's Arc, built in one pass so promoting a
+            // parent to a map key below is an O(1) probe. The previous per-parent
+            // linear `entries.iter().find(..)` made this build O(dirs x N) despite
+            // the documented O(N): 20k dirs took ~40s in a debug build
+            // (audit 2026-10 finding 6). First occurrence wins, as `find` did.
+            let mut dir_arcs: HashMap<&Path, &Arc<Path>> = HashMap::new();
+            for e in self.entries.iter().filter(|e| e.is_dir) {
+                dir_arcs.entry(&*e.path).or_insert(&e.path);
+            }
             let mut map: HashMap<Arc<Path>, Vec<usize>> = HashMap::new();
             for (idx, entry) in self.entries.iter().enumerate() {
                 let Some(parent) = entry.path.parent() else {
@@ -438,11 +447,9 @@ impl FileIndex {
                 // to allocating a fresh Arc if the parent dir
                 // isn't itself in the index (root-level files,
                 // ancestor dirs the walker excluded, etc.).
-                let key: Arc<Path> = self
-                    .entries
-                    .iter()
-                    .find(|e| e.is_dir && &*e.path == parent)
-                    .map_or_else(|| Arc::<Path>::from(parent), |e| Arc::clone(&e.path));
+                let key: Arc<Path> = dir_arcs
+                    .get(parent)
+                    .map_or_else(|| Arc::<Path>::from(parent), |a| Arc::clone(a));
                 map.insert(key, vec![idx]);
             }
             trace_index_build!("parent_to_children", start, self.entries.len());
@@ -1343,6 +1350,47 @@ mod tests {
         let first = idx.children_of(Path::new(""));
         let second = idx.children_of(Path::new(""));
         assert_eq!(first.as_ptr(), second.as_ptr());
+    }
+
+    #[test]
+    fn children_of_build_is_linear_in_the_dir_count() {
+        // Audit 2026-10 finding 6: the parent -> children build did a linear
+        // `entries.iter().find(..)` per parent dir, O(dirs x N): 20k dirs took
+        // ~40s in a debug build. Linear now; the bound is generous (a debug build
+        // on a loaded CI box), orders of magnitude above the fixed cost and well
+        // below the quadratic one.
+        const DIRS: usize = 20_000;
+        let mut entries = Vec::with_capacity(DIRS * 2);
+        for i in 0..DIRS {
+            let d = format!("d{i}");
+            entries.push(FileEntry {
+                path: Path::new(&d).into(),
+                is_dir: true,
+                size: 0,
+            });
+            entries.push(FileEntry {
+                path: Path::new(&format!("{d}/f.rs")).into(),
+                is_dir: false,
+                size: 1,
+            });
+        }
+        let idx = FileIndex::from_entries(entries);
+        let start = std::time::Instant::now();
+        assert_eq!(idx.children_of(Path::new("")).len(), DIRS);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "children_of build took {elapsed:?} for {DIRS} dirs (quadratic?)"
+        );
+        // Correctness: each dir maps to exactly its own child.
+        for i in [0, DIRS / 2, DIRS - 1] {
+            let kids = idx.children_of(Path::new(&format!("d{i}")));
+            assert_eq!(kids.len(), 1);
+            assert_eq!(
+                &*idx.entries[kids[0]].path,
+                Path::new(&format!("d{i}/f.rs"))
+            );
+        }
     }
 
     #[test]
