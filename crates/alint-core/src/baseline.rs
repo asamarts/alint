@@ -103,9 +103,18 @@ pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> S
 }
 
 /// Normalise a path to a stable, forward-slashed string so a fingerprint
-/// is identical across operating systems.
+/// is identical across operating systems. Only on Windows is `\` a path
+/// separator (and so rewritten to `/`); on unix it is a legal filename byte,
+/// and folding it made `a\b.txt` collide with the different file `a/b.txt`
+/// (audit 2026-10 finding 10). Ordinary paths -- the only ones a baseline
+/// written on either OS can contain portably -- fingerprint exactly as before.
 fn normalize_path(path: &Path) -> String {
-    path.to_string_lossy().replace('\\', "/")
+    let s = path.to_string_lossy();
+    if cfg!(windows) {
+        s.replace('\\', "/")
+    } else {
+        s.into_owned()
+    }
 }
 
 /// The bytes of 1-based line `n` in `bytes`, with a trailing `\r`
@@ -463,6 +472,43 @@ mod tests {
     }
 
     #[test]
+    fn fingerprint_of_an_ordinary_path_is_pinned() {
+        // Compatibility pin: existing `.alint-baseline` files hold these exact
+        // digests, so a change to path normalization must not move them (audit
+        // 2026-10 finding 10 changed only the backslash case below).
+        assert_eq!(
+            fp("r", Some("src/a.rs"), None, None, "m", None),
+            "e442d61e4daffddbab1d9ef55e55aef8974c9cf2983570b0cbbf6e8b869c1817"
+        );
+        assert_eq!(
+            fp(
+                "r",
+                Some("src/a.rs"),
+                Some(2),
+                None,
+                "m",
+                Some(b"x\nbad\ny")
+            ),
+            "232ea2d0041a143141b5bf4abadf6334080156e142cca88872c37497635b3dd4"
+        );
+    }
+
+    #[test]
+    fn backslash_is_a_separator_only_on_windows() {
+        // Audit 2026-10 finding 10: `\` was rewritten to `/` on every OS, so on
+        // unix (where `\` is a legal filename byte) `a\b.txt` and the different
+        // file `a/b.txt` shared one fingerprint -- a baseline entry for one
+        // grandfathered the other, and the fix merge conflated them.
+        let slash = fp("r", Some("a/b.txt"), None, None, "m", None);
+        let back = fp("r", Some("a\\b.txt"), None, None, "m", None);
+        if cfg!(windows) {
+            assert_eq!(slash, back, "on Windows `\\` IS the separator");
+        } else {
+            assert_ne!(slash, back, "on unix `a\\b.txt` is a different file");
+        }
+    }
+
+    #[test]
     fn fingerprint_is_stable_and_64_hex() {
         let a = fp("r", Some("a.rs"), Some(2), None, "m", Some(b"x\nbad\ny"));
         let b = fp("r", Some("a.rs"), Some(2), None, "m", Some(b"x\nbad\ny"));
@@ -592,9 +638,11 @@ mod tests {
     #[test]
     fn paths_normalize_to_forward_slashes() {
         let unix = violation_fingerprint("r", Some(Path::new("a/b.rs")), None, None, "m", None);
-        // A backslash path hashes the same as its forward-slash form.
+        // On Windows a backslash path hashes the same as its forward-slash form
+        // (so a baseline is portable across OSes); on unix `\` is a filename
+        // byte, so it must NOT fold (see `backslash_is_a_separator_only_on_windows`).
         let win = violation_fingerprint("r", Some(Path::new("a\\b.rs")), None, None, "m", None);
-        assert_eq!(unix, win);
+        assert_eq!(unix == win, cfg!(windows));
     }
 
     #[test]
