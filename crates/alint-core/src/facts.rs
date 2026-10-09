@@ -70,11 +70,56 @@ impl OneOrMany {
 }
 
 /// YAML-level declaration of a single fact.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct FactSpec {
     pub id: String,
-    #[serde(flatten)]
     pub kind: FactKind,
+}
+
+impl<'de> Deserialize<'de> for FactSpec {
+    /// `id` plus exactly one fact-kind key. A derived `#[serde(flatten)]` over
+    /// the untagged [`FactKind`] silently kept the first matching kind and
+    /// dropped any other key (a second kind, or a typo), so both are refused
+    /// here by name before the kind body is deserialized.
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        let mut map = serde_yaml_ng::Mapping::deserialize(deserializer)?;
+        let id = match map.remove("id") {
+            Some(serde_yaml_ng::Value::String(id)) => id,
+            Some(_) => return Err(D::Error::custom("fact `id` must be a string")),
+            None => return Err(D::Error::missing_field("id")),
+        };
+        let keys: Vec<String> = map
+            .keys()
+            .map(|k| k.as_str().map_or_else(|| format!("{k:?}"), str::to_owned))
+            .collect();
+        if let Some(unknown) = keys
+            .iter()
+            .find(|k| !FactKind::ALL_NAMES.contains(&k.as_str()))
+        {
+            return Err(D::Error::custom(format!(
+                "fact {id:?}: unknown field `{unknown}`; expected `id` and one of {}",
+                FactKind::ALL_NAMES.join(", ")
+            )));
+        }
+        if keys.len() != 1 {
+            return Err(D::Error::custom(format!(
+                "fact {id:?}: a fact declares exactly one kind key, found {}{}",
+                keys.len(),
+                if keys.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", keys.join(", "))
+                }
+            )));
+        }
+        let kind = serde_yaml_ng::from_value(serde_yaml_ng::Value::Mapping(map))
+            .map_err(|e| D::Error::custom(format!("fact {id:?}: {e}")))?;
+        Ok(Self { id, kind })
+    }
 }
 
 /// The closed set of built-in fact kinds. Serde dispatches via `untagged`

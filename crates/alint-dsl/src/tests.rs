@@ -2970,3 +2970,54 @@ fn extended_config_top_level_settings_are_ignored() {
     assert!(c.respect_gitignore);
     assert_eq!(c.fix_size_limit, Some(1 << 20));
 }
+
+#[test]
+fn extends_entry_typo_is_a_load_error() {
+    // `excpet:` used to be ignored, silently loading every rule including the
+    // one the user meant to drop.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("base.yml"),
+        "version: 1\nrules:\n  - id: r1\n    kind: file_exists\n    paths: README.md\n    \
+         level: warning\n",
+    )
+    .unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nextends:\n  - url: ./base.yml\n    excpet: [r1]\nrules: []\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("excpet"), "{err}");
+
+    std::fs::write(
+        &cfg,
+        "version: 1\nextends:\n  - url: ./base.yml\n    except: [r1]\nrules: []\n",
+    )
+    .unwrap();
+    assert!(load(&cfg).unwrap().rules.is_empty());
+}
+
+#[test]
+fn fact_with_extra_keys_is_a_load_error() {
+    for (body, needle) in [
+        (
+            "facts:\n  - id: f\n    any_file_exists: a\n    count_files: \"*\"\n",
+            "exactly one kind",
+        ),
+        (
+            "facts:\n  - id: f\n    any_file_exists: a\n    bogus: 1\n",
+            "unknown field `bogus`",
+        ),
+        ("facts:\n  - id: f\n", "exactly one kind"),
+    ] {
+        let err = parse(&format!("version: 1\n{body}rules: []\n"))
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains(needle), "{body}: {err}");
+    }
+    let ok =
+        parse("version: 1\nfacts:\n  - id: f\n    any_file_exists: [a, b]\nrules: []\n").unwrap();
+    assert_eq!(ok.facts[0].kind.name(), "any_file_exists");
+}

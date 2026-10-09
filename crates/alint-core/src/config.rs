@@ -191,20 +191,49 @@ impl<'de> Deserialize<'de> for AllowOutOfRoot {
 /// `except:` are mutually exclusive on a single entry; listing an
 /// unknown rule id is a config error so typos surface at load
 /// time.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(
-    untagged,
-    expecting = "a URL or path string, or a `{ url, only?, except? }` map"
-)]
+#[derive(Debug, Clone)]
 pub enum ExtendsEntry {
     Url(String),
     Filtered {
         url: String,
-        #[serde(default)]
         only: Option<Vec<String>>,
-        #[serde(default)]
         except: Option<Vec<String>>,
     },
+}
+
+/// The mapping form of [`ExtendsEntry`], deserialized with
+/// `deny_unknown_fields` so a typo such as `excpet:` is a load error rather
+/// than a silently-ignored filter (an untagged enum variant cannot deny
+/// unknown fields itself).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilteredExtendsEntry {
+    url: String,
+    #[serde(default)]
+    only: Option<Vec<String>>,
+    #[serde(default)]
+    except: Option<Vec<String>>,
+}
+
+impl<'de> Deserialize<'de> for ExtendsEntry {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        match serde_yaml_ng::Value::deserialize(deserializer)? {
+            serde_yaml_ng::Value::String(url) => Ok(Self::Url(url)),
+            value @ serde_yaml_ng::Value::Mapping(_) => {
+                let FilteredExtendsEntry { url, only, except } =
+                    serde_yaml_ng::from_value(value).map_err(D::Error::custom)?;
+                Ok(Self::Filtered { url, only, except })
+            }
+            _ => Err(D::Error::custom(
+                "an `extends:` entry must be a URL or path string, or a \
+                 `{ url, only?, except? }` map",
+            )),
+        }
+    }
 }
 
 impl ExtendsEntry {
