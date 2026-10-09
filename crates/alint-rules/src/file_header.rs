@@ -98,6 +98,12 @@ impl PerFileRule for FileHeaderRule {
                     .with_path(std::sync::Arc::<Path>::from(path)),
             ]);
         };
+        // Match the content AFTER a leading UTF-8 BOM: the BOM is an encoding
+        // signature, not header text, and the `file_prepend` / `insert_header`
+        // fixers write the header after it (preserving it). Matching the raw text
+        // made an anchored `^…` pattern never match a BOM file, so `check` kept
+        // flagging what `fix` reported as already fixed (non-convergent).
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
         let header: String = text.split_inclusive('\n').take(self.lines).collect();
         if self.pattern.is_match(&header) {
             return Ok(Vec::new());
@@ -259,6 +265,42 @@ mod tests {
         )]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty(), "header should match: {v:?}");
+    }
+
+    #[test]
+    fn header_after_a_utf8_bom_matches_and_the_fix_converges() {
+        // Check/fix agreement regression: `file_prepend` / `insert_header` place
+        // the header AFTER a leading UTF-8 BOM (preserving it), but the check
+        // matched the raw text, BOM included, so an anchored `^// SPDX` never
+        // matched: check kept flagging while fix said "already has header".
+        // The check now matches the content after the BOM, where the fixers
+        // write.
+        for fix in [
+            "file_prepend: { content: \"// SPDX-License-Identifier: MIT\\n\" }",
+            "insert_header: { content: \"// SPDX-License-Identifier: MIT\\n\" }",
+        ] {
+            let rule = build(&spec_yaml(&format!(
+                "id: t\nkind: file_header\npaths: \"**/*.rs\"\n\
+                 pattern: \"^// SPDX-License-Identifier:\"\nlevel: error\nfix: {{ {fix} }}\n"
+            )))
+            .unwrap();
+            let body: &[u8] = b"\xEF\xBB\xBFfn main() {}\n";
+            let (tmp, idx) = tempdir_with_files(&[("a.rs", body)]);
+            let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+            assert_eq!(v.len(), 1, "{fix}: missing header is flagged");
+            let Some(alint_core::FixEdit::SetContent { content, .. }) =
+                rule.fixer().unwrap().fix_edit(&v[0], body, tmp.path())
+            else {
+                panic!("{fix}: expected a SetContent edit");
+            };
+            assert!(
+                content.starts_with(b"\xEF\xBB\xBF// SPDX"),
+                "{fix}: BOM kept first"
+            );
+            std::fs::write(tmp.path().join("a.rs"), &content).unwrap();
+            let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+            assert!(v.is_empty(), "{fix}: fixed file must pass the check: {v:?}");
+        }
     }
 
     #[test]
