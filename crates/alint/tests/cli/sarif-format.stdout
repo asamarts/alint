@@ -18,6 +18,7 @@
           ]
         }
       },
+      "columnKind": "unicodeCodePoints",
       "results": [
         {
           "ruleId": "has-readme",
@@ -25,7 +26,18 @@
           "message": {
             "text": "expected a file matching [README.md] at the repo root"
           },
-          "locations": [],
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": ".alint.yml"
+                },
+                "region": {
+                  "startLine": 1
+                }
+              }
+            }
+          ],
           "partialFingerprints": {
             "alint/v1": "[..]"
           }

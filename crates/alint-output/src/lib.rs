@@ -27,7 +27,10 @@ pub use json::{write_fix_json, write_json, write_json_with_baseline};
 pub use junit::write_junit;
 pub use markdown::{write_fix_markdown, write_markdown};
 pub use sanitize::sanitize_terminal;
-pub use sarif::{write_sarif, write_sarif_with_baseline, write_sarif_with_fingerprints};
+pub use sarif::{
+    DEFAULT_CONFIG_URI, write_sarif, write_sarif_for_config, write_sarif_with_baseline,
+    write_sarif_with_fingerprints,
+};
 pub use style::{ColorChoice, GlyphSet, HumanOptions};
 
 /// Per-result baseline output, threaded into the SARIF and JSON emitters so

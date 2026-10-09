@@ -568,6 +568,8 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     require_directory(path)?;
     let loaded = load_rules(path, cli)?;
     let root = loaded.root.clone();
+    // Path-less findings are anchored on the config file in SARIF.
+    let config_rel = loaded.config_rel();
     // The `baseline:` config key, resolved against the repo root being checked.
     // The `--baseline` flag (used as given) overrides it; either one turns on
     // baseline suppression. No silent auto-detect of `.alint-baseline.json`.
@@ -668,14 +670,14 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     // the baseline and emits only the live (new) findings.
     match (format, baseline_marks.as_ref()) {
         (Format::Sarif, Some(marks)) => {
-            alint_output::write_sarif_with_baseline(&report, Some(marks), &mut out)
+            alint_output::write_sarif_for_config(&report, Some(marks), None, &config_rel, &mut out)
         }
         (Format::Sarif, None) => {
             // No baseline, but still emit the canonical `partialFingerprints` so
             // GitHub Code Scanning can correlate alerts across runs (these were
             // baseline-only before). Same fingerprints the GitLab path uses.
             let fps = report_fingerprints(&report, &root);
-            alint_output::write_sarif_with_fingerprints(&report, Some(&fps), &mut out)
+            alint_output::write_sarif_for_config(&report, None, Some(&fps), &config_rel, &mut out)
         }
         (Format::Json, Some(marks)) => alint_output::write_json_with_baseline(
             &report,
@@ -1866,6 +1868,27 @@ struct LoadedConfig {
     fix_size_limit: Option<u64>,
     /// The `baseline:` config key (the raw repo-root-relative path), if set.
     baseline: Option<PathBuf>,
+    /// The loaded top-level config file.
+    config_path: PathBuf,
+}
+
+impl LoadedConfig {
+    /// The config file relative to `root` (for anchoring path-less findings
+    /// in SARIF), or `.alint.yml` when it lives outside the root.
+    fn config_rel(&self) -> PathBuf {
+        let root = self
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.root.clone());
+        let config = self
+            .config_path
+            .canonicalize()
+            .unwrap_or_else(|_| self.config_path.clone());
+        config.strip_prefix(&root).map_or_else(
+            |_| PathBuf::from(alint_output::DEFAULT_CONFIG_URI),
+            Path::to_path_buf,
+        )
+    }
 }
 
 /// Load the effective config from disk and instantiate every rule,
@@ -2098,6 +2121,7 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         extra_ignores: config.ignore,
         fix_size_limit: config.fix_size_limit,
         baseline: config.baseline,
+        config_path,
     })
 }
 
