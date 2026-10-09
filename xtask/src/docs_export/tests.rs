@@ -3,6 +3,7 @@ use super::cli::{
     strip_global_options, top_level_only,
 };
 use super::exported_pages::set_frontmatter_description;
+use super::rulesets::rule_sources;
 use super::*;
 
 /// Release-gating of rule-body prose: `<!-- alint:since=X -->` blocks are
@@ -1082,5 +1083,177 @@ fn top_level_only_lists_the_globals_no_subcommand_takes() {
     assert_eq!(
         code_list(&flags(&["--a", "--b", "--c"])),
         "`--a`, `--b` and `--c`"
+    );
+}
+
+/// Rule notes come from the comments above a rule and at its key indent; a
+/// divider or blank line cuts the comments above off, a comment nested in a
+/// value stays in the definition, and a paragraph opening with a release tag
+/// reads "Changed in".
+#[test]
+fn rule_sources_split_notes_from_definitions() {
+    let yaml = "\
+version: 1
+rules:
+  # --- Section divider -------------------------------
+  - id: first-rule
+    # Why the first rule exists.
+    # It spans two lines.
+    kind: file_exists
+    paths:
+      # which files count
+      - README.md
+    level: warning
+
+  # A note that floats, cut off by the blank line below.
+
+  # v0.9.18: broadened to more names.
+  #
+  # Why the second rule exists.
+  - id: second-rule
+    kind: file_absent
+    paths: [\".DS_Store\"]
+    level: info
+";
+    let sources = rule_sources(yaml);
+    assert_eq!(sources.len(), 2, "{sources:#?}");
+    assert_eq!(sources[0].id, "first-rule");
+    assert_eq!(
+        sources[0].notes_md,
+        "Why the first rule exists. It spans two lines."
+    );
+    assert_eq!(
+        sources[0].definition,
+        "- id: first-rule\n  kind: file_exists\n  paths:\n    # which files count\n    - README.md\n  level: warning"
+    );
+    assert_eq!(sources[1].id, "second-rule");
+    assert_eq!(
+        sources[1].notes_md,
+        "Changed in v0.9.18: broadened to more names.\n\nWhy the second rule exists."
+    );
+    assert!(
+        !sources[1].definition.contains('#'),
+        "{:?}",
+        sources[1].definition
+    );
+}
+
+/// Hard-wrapped comment prose is rejoined and escaped, so a wrapped line
+/// can't turn into a list item and a bare glob can't turn into emphasis;
+/// a list stays a list and a column-aligned block stays preformatted.
+#[test]
+fn rule_notes_render_as_safe_markdown() {
+    let yaml = "\
+rules:
+  # Excludes cover `src/doc/**` and **/*.miri.rs, unique to rust-lang/rust
+  # + similar projects. Copyright <year> holders.
+  #
+  # Two categories:
+  #
+  #   src/doc/**    — doc examples
+  #   tests/ui/**   — UI fixtures
+  #
+  # - first item,
+  #   continued
+  # - second item
+  - id: r
+    kind: file_exists
+    paths: x
+";
+    let notes = &rule_sources(yaml)[0].notes_md;
+    assert_eq!(
+        notes,
+        "Excludes cover `src/doc/**` and \\*\\*/\\*.miri.rs, unique to rust-lang/rust + \
+         similar projects. Copyright `<year>` holders.\n\n\
+         Two categories:\n\n\
+         ```text\nsrc/doc/**    — doc examples\ntests/ui/**   — UI fixtures\n```\n\n\
+         - first item, continued\n- second item"
+    );
+}
+
+#[test]
+fn escape_inline_keeps_code_spans_and_urls() {
+    use super::rulesets::escape_inline;
+    assert_eq!(
+        escape_inline("set <Nullable>enable</Nullable>, or `<Project Sdk=\"x\">`"),
+        "set `<Nullable>enable</Nullable>`, or `<Project Sdk=\"x\">`"
+    );
+    assert_eq!(
+        escape_inline("pin @<sha> (\"Copyright <year>\") if a < b"),
+        "pin @`<sha>` (\"Copyright `<year>`\") if a &lt; b"
+    );
+    assert_eq!(
+        escape_inline("see https://example.com/a_b_c for snake_case"),
+        "see https://example.com/a_b_c for snake\\_case"
+    );
+    assert_eq!(escape_inline("an `unclosed span"), "an \\`unclosed span");
+}
+
+/// Every rule serde sees in a bundled ruleset is found by the comment-aware
+/// splitter, in order, with a definition that parses back to the same rule,
+/// and its id slugs to itself (the summary table links `#<id>`).
+#[test]
+fn rule_sources_cover_every_bundled_rule() {
+    let root = crate::workspace_root().expect("workspace root");
+    let rulesets_root = root.join(docs_paths::RULESETS_DIR);
+    for entry in walkdir_plain(&rulesets_root).expect("walk bundled rulesets") {
+        if !entry.is_file()
+            || !matches!(
+                entry.extension().and_then(|ext| ext.to_str()),
+                Some("yml" | "yaml")
+            )
+        {
+            continue;
+        }
+        let source = std::fs::read_to_string(&entry).expect("read bundled ruleset");
+        let yaml: serde_yaml_ng::Value = serde_yaml_ng::from_str(&source).expect("parse");
+        let rules = yaml
+            .get("rules")
+            .and_then(|r| r.as_sequence())
+            .cloned()
+            .unwrap_or_default();
+        let split = rule_sources(&source);
+        let ids: Vec<&str> = rules
+            .iter()
+            .map(|r| r.get("id").and_then(|v| v.as_str()).unwrap_or(""))
+            .collect();
+        let split_ids: Vec<&str> = split.iter().map(|s| s.id.as_str()).collect();
+        assert_eq!(ids, split_ids, "{}", entry.display());
+        for (rule, s) in rules.iter().zip(&split) {
+            let parsed: Vec<serde_yaml_ng::Value> = serde_yaml_ng::from_str(&s.definition)
+                .unwrap_or_else(|e| panic!("{} {}: {e}\n{}", entry.display(), s.id, s.definition));
+            assert_eq!(parsed.first(), Some(rule), "{} {}", entry.display(), s.id);
+            assert!(
+                s.id.chars()
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-'),
+                "{} {}: id would not slug to itself",
+                entry.display(),
+                s.id
+            );
+        }
+    }
+}
+
+/// A hard-wrapped overview line that happens to start with a list marker
+/// stays prose; a list after a colon, or opening its paragraph, stays a list.
+#[test]
+fn overview_wrapped_marker_lines_stay_prose() {
+    let yaml = "\
+# alint://bundled/x@v1
+#
+# Layouts like `ext/*` + `runtime/`
+# + `cli/` will no-op, and so will
+# 1. this line.
+#
+# Conventions:
+# - `packages/*` for npm,
+#   one per package
+# - `crates/*` for Rust
+version: 1
+";
+    assert_eq!(
+        render_overview_from_comments(yaml),
+        "Layouts like `ext/*` + `runtime/`\n\\+ `cli/` will no-op, and so will\n1\\. this line.\n\n\
+         Conventions:\n- `packages/*` for npm,\n  one per package\n- `crates/*` for Rust"
     );
 }

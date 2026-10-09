@@ -16,8 +16,30 @@ use anyhow::{Context, Result, bail};
 
 use crate::docs_export::{RuleEntry, escape_yaml_string};
 
-/// Render a family overview page: frontmatter, a lede, then the rule table.
-pub(crate) fn render(family_title: &str, family_order: u32, rules: &[RuleEntry]) -> String {
+/// The introduction a family carries in `docs/rules.md`: the first paragraph
+/// between its `##` heading and its first `###` rule, if that is short prose.
+/// A long preamble (Structured query's format notes) is reference material for
+/// the rule pages, not a lede, so it stays off the overview.
+pub(crate) fn family_intro(h2_body: &str) -> Option<String> {
+    let before_rules = h2_body.split("\n### ").next().unwrap_or_default().trim();
+    let first = before_rules.split("\n\n").next()?.trim();
+    if first.is_empty()
+        || first.starts_with(['#', '`', '|', '-', '<'])
+        || first.chars().count() > 600
+    {
+        return None;
+    }
+    Some(first.split_whitespace().collect::<Vec<_>>().join(" "))
+}
+
+/// Render a family overview page: frontmatter, the family's introduction when
+/// it has one, a lede, then the rule table.
+pub(crate) fn render(
+    family_title: &str,
+    family_order: u32,
+    intro: Option<&str>,
+    rules: &[RuleEntry],
+) -> String {
     let mut page = String::new();
     let _ = writeln!(&mut page, "---");
     let _ = writeln!(&mut page, "title: '{}'", escape_yaml_string(family_title));
@@ -31,6 +53,14 @@ pub(crate) fn render(family_title: &str, family_order: u32, rules: &[RuleEntry])
     let _ = writeln!(&mut page, "  label: '{}'", escape_yaml_string(family_title));
     let _ = writeln!(&mut page, "---");
     let _ = writeln!(&mut page);
+    if let Some(intro) = intro {
+        let _ = writeln!(
+            &mut page,
+            "{}",
+            ascii_dashes(intro).replace(['—', '–'], ", ")
+        );
+        let _ = writeln!(&mut page);
+    }
     let _ = writeln!(
         &mut page,
         "Rule kinds in the **{family_title}** family. Each rule below links to its own page with options, an example, and any auto-fix support."
@@ -128,7 +158,7 @@ mod tests {
                 family_slug: "security-unicode-sanity".into(),
             },
         ];
-        let md = render("Existence", 1, &rules);
+        let md = render("Existence", 1, None, &rules);
         assert!(md.contains("| Rule | Description |"));
         assert!(md.contains("| --- | --- |"));
         assert!(md.contains("| [`file_exists`](/docs/rules/existence/file_exists/) |"));
