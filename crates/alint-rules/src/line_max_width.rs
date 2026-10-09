@@ -59,13 +59,11 @@ impl PerFileRule for LineMaxWidthRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        // `chars().count()` requires a UTF-8-validated `&str` —
-        // line widths count Unicode scalars, not bytes. Non-UTF-8
-        // files silently skip, matching the rule-major path.
-        let Ok(text) = std::str::from_utf8(bytes) else {
-            return Ok(Vec::new());
-        };
-        let Some((line_no, width)) = first_overlong_line(text, self.max_width) else {
+        // Line widths count Unicode scalars, not bytes. Decode lossily so a
+        // non-UTF-8 file is still measured rather than silently skipped: each
+        // invalid byte decodes to one U+FFFD and so counts as one column.
+        let text = String::from_utf8_lossy(bytes);
+        let Some((line_no, width)) = first_overlong_line(&text, self.max_width) else {
             return Ok(Vec::new());
         };
         let msg = self.message.clone().unwrap_or_else(|| {
@@ -161,5 +159,28 @@ mod tests {
         assert_eq!(first_overlong_line("☃☃☃\n", 3), None);
         // Under max_width: 2 it's flagged.
         assert_eq!(first_overlong_line("☃☃☃\n", 2), Some((1, 3)));
+    }
+}
+
+#[cfg(test)]
+mod non_utf8_tests {
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+
+    #[test]
+    fn non_utf8_text_is_still_measured() {
+        // Fail-closed regression: one Latin-1 byte used to skip the whole file.
+        // An invalid byte counts as one column (it decodes to one U+FFFD).
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: line_max_width\npaths: \"**/*\"\nmax_width: 10\nlevel: error\n",
+        ))
+        .unwrap();
+        let body: &[u8] = b"caf\xe9\n0123456789abc\n";
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", body)]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(vs.len(), 1);
+        assert_eq!(vs[0].line, Some(2));
+        let ok: &[u8] = b"0123456789\xe9\n";
+        let (tmp, idx) = tempdir_with_files(&[("b.txt", ok)]);
+        assert_eq!(rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().len(), 1);
     }
 }

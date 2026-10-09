@@ -103,6 +103,10 @@ Fix: `file_append` — append declared content.
 
 File contents must NOT match a regex.
 
+<!-- alint:since=0.17.1 -->
+The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact.
+<!-- /alint:since -->
+
 ### `file_header` (alias: `header`)
 
 **Categories:** Content
