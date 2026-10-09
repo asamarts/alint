@@ -966,12 +966,6 @@ pub struct GitUntrackFixSpec {
     pub applicability: Option<crate::rule::Applicability>,
 }
 
-/// `command`: run a user-supplied fix command per violation on a `command` rule
-/// (e.g. check `eslint {path}`, fix `eslint --fix {path}`). A **spawning** fix op:
-/// it shells out, so it is refused from any non-top-level source (auto-fix.md 5.5,
-/// like the `command` rule kind itself) and is **`Unsafe` by default** (running an
-/// arbitrary command on a bare `alint fix` is opt-in). A user may promote a
-/// specific rule to `Safe` in their OWN top-level config.
 /// `dir_create`: create the (single, literal) directory the host `dir_exists`
 /// rule requires. A **fixed-behavior** op: it writes no ruleset bytes and does not
 /// spawn, so it is honored at its tier from any source. **`Safe` by default** (an
@@ -1123,6 +1117,12 @@ pub struct InsertHeaderFixSpec {
     pub applicability: Option<crate::rule::Applicability>,
 }
 
+/// `command`: run a user-supplied fix command per violation on a `command` rule
+/// (e.g. check `eslint {path}`, fix `eslint --fix {path}`). A **spawning** fix op:
+/// it shells out, so it is refused from any non-top-level source (auto-fix.md 5.5,
+/// like the `command` rule kind itself) and is **`Unsafe` by default** (running an
+/// arbitrary command on a bare `alint fix` is opt-in). A user may promote a
+/// specific rule to `Safe` in their OWN top-level config.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandFixSpec {
