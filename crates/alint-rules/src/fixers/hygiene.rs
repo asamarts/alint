@@ -445,14 +445,8 @@ impl Fixer for FileCollapseBlankLinesFixer {
                 path.display()
             )));
         }
-        let Ok(text) = std::str::from_utf8(&existing) else {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} is not UTF-8; cannot collapse",
-                path.display()
-            )));
-        };
-        let collapsed = collapse_blank_lines(text, self.max);
-        if collapsed.as_bytes() == existing {
+        let collapsed = collapse_blank_lines(&existing, self.max);
+        if collapsed == existing {
             return Ok(FixOutcome::Skipped(format!(
                 "{} already clean",
                 path.display()
@@ -466,7 +460,7 @@ impl Fixer for FileCollapseBlankLinesFixer {
                 self.max,
             )));
         }
-        ctx.commit_write(&abs, collapsed.as_bytes())
+        ctx.commit_write(&abs, &collapsed)
             .map_err(|source| Error::Io {
                 path: abs.clone(),
                 source,
@@ -483,42 +477,44 @@ impl Fixer for FileCollapseBlankLinesFixer {
         if looks_binary(bytes) {
             return None;
         }
-        let text = std::str::from_utf8(bytes).ok()?;
-        let collapsed = collapse_blank_lines(text, self.max);
-        if collapsed.as_bytes() == bytes {
+        let collapsed = collapse_blank_lines(bytes, self.max);
+        if collapsed == bytes {
             return None;
         }
         Some(FixEdit::SetContent {
             path: path.to_path_buf(),
-            content: collapsed.into_bytes(),
+            content: collapsed,
         })
     }
 }
 
 /// A "blank" line has content consisting only of spaces or tabs.
-pub(crate) fn line_is_blank(body: &str) -> bool {
-    body.bytes().all(|b| b == b' ' || b == b'\t')
+pub(crate) fn line_is_blank(body: &[u8]) -> bool {
+    body.iter().all(|&b| b == b' ' || b == b'\t')
 }
 
 /// Walk the file in (body, ending) pairs so the final slot after the
 /// last newline doesn't get double-counted as an extra blank line.
-/// Preserves CRLF vs LF verbatim.
-pub(crate) fn collapse_blank_lines(text: &str, max: u32) -> String {
-    let mut out = String::with_capacity(text.len());
+/// Preserves CRLF vs LF verbatim. Byte-level: blank-line structure is pure
+/// ASCII, so a non-UTF-8 file is collapsed too, every other byte kept verbatim
+/// (the detector, equally byte-level, flags such a file).
+pub(crate) fn collapse_blank_lines(text: &[u8], max: u32) -> Vec<u8> {
+    let mut out = Vec::with_capacity(text.len());
     let mut blank_run: u32 = 0;
     let mut remaining = text;
     loop {
-        let (body, ending, rest) = match remaining.find('\n') {
-            Some(i) => {
-                let before = &remaining[..i];
-                let (body, cr) = match before.strip_suffix('\r') {
-                    Some(s) => (s, "\r\n"),
-                    None => (before, "\n"),
-                };
-                (body, cr, &remaining[i + 1..])
-            }
-            None => (remaining, "", ""),
-        };
+        let (body, ending, rest): (&[u8], &[u8], &[u8]) =
+            match remaining.iter().position(|&b| b == b'\n') {
+                Some(i) => {
+                    let before = &remaining[..i];
+                    let (body, cr): (&[u8], &[u8]) = match before.strip_suffix(b"\r") {
+                        Some(s) => (s, b"\r\n"),
+                        None => (before, b"\n"),
+                    };
+                    (body, cr, &remaining[i + 1..])
+                }
+                None => (remaining, b"", b""),
+            };
         let blank = line_is_blank(body);
         if blank {
             blank_run += 1;
@@ -532,8 +528,8 @@ pub(crate) fn collapse_blank_lines(text: &str, max: u32) -> String {
         } else {
             blank_run = 0;
         }
-        out.push_str(body);
-        out.push_str(ending);
+        out.extend_from_slice(body);
+        out.extend_from_slice(ending);
         if ending.is_empty() {
             break;
         }
@@ -755,30 +751,30 @@ mod tests {
 
     #[test]
     fn collapse_blank_lines_keeps_up_to_max() {
-        assert_eq!(collapse_blank_lines("a\n\n\nb\n", 1), "a\n\nb\n");
-        assert_eq!(collapse_blank_lines("a\n\n\n\nb\n", 2), "a\n\n\nb\n");
-        assert_eq!(collapse_blank_lines("a\nb\n", 1), "a\nb\n");
+        assert_eq!(collapse_blank_lines(b"a\n\n\nb\n", 1), b"a\n\nb\n");
+        assert_eq!(collapse_blank_lines(b"a\n\n\n\nb\n", 2), b"a\n\n\nb\n");
+        assert_eq!(collapse_blank_lines(b"a\nb\n", 1), b"a\nb\n");
     }
 
     #[test]
     fn collapse_blank_lines_preserves_trailing_newline() {
         // One existing blank line, max=1 → file must still end with "\n\n"
         // (i.e. the blank line plus the EOF newline).
-        assert_eq!(collapse_blank_lines("a\n\n", 1), "a\n\n");
+        assert_eq!(collapse_blank_lines(b"a\n\n", 1), b"a\n\n");
     }
 
     #[test]
     fn collapse_blank_lines_max_zero_drops_all_blanks() {
-        assert_eq!(collapse_blank_lines("a\n\n\nb\n", 0), "a\nb\n");
-        assert_eq!(collapse_blank_lines("\n", 0), "");
-        assert_eq!(collapse_blank_lines("a\n\n", 0), "a\n");
+        assert_eq!(collapse_blank_lines(b"a\n\n\nb\n", 0), b"a\nb\n");
+        assert_eq!(collapse_blank_lines(b"\n", 0), b"");
+        assert_eq!(collapse_blank_lines(b"a\n\n", 0), b"a\n");
     }
 
     #[test]
     fn collapse_blank_lines_preserves_crlf() {
         assert_eq!(
-            collapse_blank_lines("a\r\n\r\n\r\n\r\nb\r\n", 1),
-            "a\r\n\r\nb\r\n"
+            collapse_blank_lines(b"a\r\n\r\n\r\n\r\nb\r\n", 1),
+            b"a\r\n\r\nb\r\n"
         );
     }
 
@@ -786,12 +782,12 @@ mod tests {
     fn collapse_blank_lines_treats_whitespace_only_as_blank() {
         // Lines with only spaces/tabs count as blank, and dropped
         // copies disappear entirely (their whitespace goes too).
-        assert_eq!(collapse_blank_lines("a\n  \n\t\n\nb\n", 1), "a\n  \nb\n");
+        assert_eq!(collapse_blank_lines(b"a\n  \n\t\n\nb\n", 1), b"a\n  \nb\n");
     }
 
     #[test]
     fn collapse_blank_lines_no_op_on_empty_file() {
-        assert_eq!(collapse_blank_lines("", 2), "");
+        assert_eq!(collapse_blank_lines(b"", 2), b"");
     }
 
     #[test]

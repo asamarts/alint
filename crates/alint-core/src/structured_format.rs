@@ -18,6 +18,10 @@
 
 use serde_json::Value;
 
+#[cfg(test)]
+mod xml_scan_tests;
+mod yaml_value;
+
 /// Maximum INPUT size any structured format will parse into a value tree. The read
 /// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed tree
 /// costs far more RSS: measured up to ~30x the input for attribute-heavy XML
@@ -143,7 +147,7 @@ impl Format {
                         crate::yaml_depth::MAX_YAML_EXPANSION_NODES
                     ));
                 }
-                serde_yaml_ng::from_str(text).map_err(|e| e.to_string())
+                yaml_value::yaml_to_value(text)
             }
             Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),
             Self::Xml => xml_to_value(text),
@@ -394,40 +398,106 @@ const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
 /// wall-clock `DoS`. A cheap linear pre-scan rejects an over-deep OR over-wide
 /// document here (as one ordinary per-file parse-error violation) so a crafted or
 /// accidental `<a><a>…` / `<r a0.. a1..>` file can never abort or hang the run.
-/// Comment / CDATA / PI / declaration regions are skipped so their contents don't
-/// count toward depth or attributes. `Ok(())` when within both limits.
+/// Comment / CDATA / PI regions are skipped so their contents don't count toward
+/// depth or attributes. `Ok(())` when within both limits.
+///
+/// **Lexer parity with roxmltree (0.20) is the security invariant.** Any region
+/// the scan treats as opaque must end exactly where roxmltree's tokenizer ends it;
+/// if the scan ends it EARLIER, a `</a>` roxmltree sees as PI / comment text is
+/// counted as a close, cancels a real `<a>`, and an arbitrarily deep document
+/// reaches the recursive parse (`<a><?p ></a>?>` x 100 000 aborted the process).
+/// So each boundary mirrors the tokenizer: a PI ends at `?>` (searched after the
+/// `<?`), a comment at `-->` searched AFTER `<!--` (so `<!--->` does not close
+/// it), CDATA at `]]>`, and only the leading `<?xml …?>` declaration honors quotes
+/// (its pseudo-attribute values may hold `?>`). Everywhere else the scan fails
+/// closed: a `<!` that is neither comment nor CDATA (a DOCTYPE, rejected because
+/// DTDs are disabled, or an unknown token) is stepped over by two bytes only, so
+/// nothing after it is hidden; and a tag scan stops at any `<` even inside a
+/// quoted value (roxmltree rejects `<` there), so a runaway quote can't swallow
+/// the markup that follows. Hidden-close fixtures are probed against the real
+/// parser in the tests.
 fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
+    xml_within_limits(text, MAX_XML_DEPTH)
+}
+
+/// [`xml_within_parse_limits`] with an explicit depth ceiling, so the parity
+/// property test can probe the scan at the REAL parser's depth.
+fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), String> {
+    /// Byte offset just past the first `needle` at or after `from`, or EOF.
+    fn skip_past(text: &str, from: usize, needle: &str) -> usize {
+        text.get(from..)
+            .and_then(|tail| tail.find(needle))
+            .map_or(text.len(), |p| from + p + needle.len())
+    }
     let bytes = text.as_bytes();
     let mut pos = 0usize;
+    if bytes.starts_with(b"\xEF\xBB\xBF") {
+        pos = 3;
+    }
+    // The XML declaration (`<?xml version=".." ?>`), recognized exactly where
+    // roxmltree does (the very start, after an optional BOM): skip to `?>`
+    // OUTSIDE quotes, since its pseudo-attribute values are quoted strings.
+    if bytes[pos..].starts_with(b"<?xml ") {
+        let mut i = pos + 6;
+        let mut quote: Option<u8> = None;
+        while i < bytes.len() {
+            let ch = bytes[i];
+            if ch == b'<' {
+                // Never legal inside the declaration: stop and re-examine it.
+                break;
+            }
+            match quote {
+                Some(q) if ch == q => quote = None,
+                None if ch == b'"' || ch == b'\'' => quote = Some(ch),
+                None if bytes[i..].starts_with(b"?>") => {
+                    i += 2;
+                    break;
+                }
+                Some(_) | None => {}
+            }
+            i += 1;
+        }
+        pos = i;
+    }
     let mut depth = 0usize;
     while pos < bytes.len() {
         if bytes[pos] != b'<' {
             pos += 1;
             continue;
         }
-        let rest = &text[pos..];
-        if rest.starts_with("</") {
+        let rest = &bytes[pos..];
+        if rest.starts_with(b"</") {
             depth = depth.saturating_sub(1);
             pos += 2;
-        } else if rest.starts_with("<!--") {
-            pos += rest.find("-->").map_or(rest.len(), |p| p + 3);
-        } else if rest.starts_with("<![CDATA[") {
-            pos += rest.find("]]>").map_or(rest.len(), |p| p + 3);
-        } else if rest.starts_with("<!") || rest.starts_with("<?") {
-            // DOCTYPE / PI / other declaration: skip to its terminating `>`.
-            pos += rest.find('>').map_or(rest.len(), |p| p + 1);
+        } else if rest.starts_with(b"<!--") {
+            pos = skip_past(text, pos + 4, "-->");
+        } else if rest.starts_with(b"<![CDATA[") {
+            pos = skip_past(text, pos + 9, "]]>");
+        } else if rest.starts_with(b"<?") {
+            pos = skip_past(text, pos + 2, "?>");
+        } else if rest.starts_with(b"<!") {
+            // DOCTYPE (DTDs are disabled) or an unknown `<!` token: roxmltree
+            // rejects the document right here. Step over `<!` only, so nothing
+            // after it is hidden from the scan.
+            pos += 2;
         } else {
             // `<tag …>` or `<tag/>`: find the closing `>` respecting quoted
             // attribute values (a `>` inside `"…"`/`'…'` isn't the tag end).
             // Count attributes by the `=` signs OUTSIDE quotes: XML requires
             // quoted values, so each attribute contributes exactly one unquoted
-            // `=`, and a `=` inside a value is skipped with the quote run.
-            let tag = rest.as_bytes();
+            // `=`, and a `=` inside a value is skipped with the quote run. A `<`
+            // ends the scan even inside quotes (roxmltree rejects it there), so
+            // a runaway quote cannot hide the elements after it.
+            let tag = rest;
             let mut end = 1usize;
             let mut quote: Option<u8> = None;
             let mut attrs = 0usize;
+            let mut closed = false;
             while end < tag.len() {
                 let ch = tag[end];
+                if ch == b'<' {
+                    break;
+                }
                 if let Some(q) = quote {
                     if ch == q {
                         quote = None;
@@ -444,6 +514,7 @@ fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
                         break;
                     }
                 } else if ch == b'>' {
+                    closed = true;
                     break;
                 }
                 end += 1;
@@ -454,17 +525,19 @@ fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
                      attributes ({MAX_XML_ATTRS_PER_ELEMENT})"
                 ));
             }
-            // Self-closing `<tag/>` opens and closes, so it adds no depth.
-            let self_closing = end >= 2 && tag[end - 1] == b'/';
+            // Self-closing `<tag/>` opens and closes, so it adds no depth. An
+            // unterminated tag conservatively counts as an open.
+            let self_closing = closed && end >= 2 && tag[end - 1] == b'/';
             if !self_closing {
                 depth += 1;
-                if depth > MAX_XML_DEPTH {
+                if depth > max_depth {
                     return Err(format!(
-                        "XML nesting exceeds the maximum supported depth ({MAX_XML_DEPTH})"
+                        "XML nesting exceeds the maximum supported depth ({max_depth})"
                     ));
                 }
             }
-            pos += end + 1;
+            // Past the `>`; or, when the scan stopped AT a `<`, re-examine it.
+            pos += if closed { end + 1 } else { end };
         }
     }
     Ok(())
@@ -997,27 +1070,6 @@ mod tests {
         // and report the *strict* parser's message.
         let err = Format::Json.parse("{ \"x\": 1, \"y\" }").unwrap_err();
         assert!(err.contains("expected"), "strict error preserved: {err}");
-    }
-
-    #[test]
-    fn xml_depth_scan_does_not_count_comments_cdata_or_self_closing() {
-        // The pre-scan must not over-count: comment/CDATA contents and
-        // self-closing tags don't add nesting, so valid shallow docs pass.
-        assert!(
-            xml_within_parse_limits(
-                "<r><!-- <a><a><a> --><c/><![CDATA[ <b><b> ]]><d attr=\"x>y\"/></r>"
-            )
-            .is_ok()
-        );
-        // A genuinely deep run is rejected with a depth message.
-        let deep = format!("{}{}", "<a>".repeat(300), "</a>".repeat(300));
-        let err = xml_within_parse_limits(&deep).unwrap_err();
-        assert!(err.contains("depth"), "depth rejection: {err}");
-        // Real manifest depth is fine.
-        assert!(xml_within_parse_limits(
-            "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"
-        )
-        .is_ok());
     }
 
     #[test]

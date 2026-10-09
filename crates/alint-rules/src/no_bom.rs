@@ -7,7 +7,9 @@
 //!   - UTF-32 LE : FF FE 00 00
 //!   - UTF-32 BE : 00 00 FE FF
 //!
-//! Fixable via `file_strip_bom` — removes the leading BOM bytes.
+//! Fixable via `file_strip_bom` — removes a leading UTF-8 BOM (a stacked run of
+//! them). A UTF-16 / UTF-32 BOM is reported but not auto-fixed: dropping its
+//! bytes without transcoding the file would corrupt it.
 
 use std::path::Path;
 
@@ -72,31 +74,20 @@ pub fn detect_bom(bytes: &[u8]) -> Option<BomKind> {
     None
 }
 
-/// The first BOM kind and the total byte length of the run of consecutive
-/// BOMs at the very start of `bytes`.
-///
-/// A file can carry a *stack* of BOMs -- e.g. a tool prepends a UTF-8 BOM to a
-/// file that already had one, or two conversion passes each add one. The
-/// `no_bom` check flags a file whenever `detect_bom` matches its leading bytes,
-/// so a fixer that strips only the first mark leaves a second leading BOM that
-/// the check immediately re-flags: `fix` would not converge. Reporting the
-/// whole run lets the fixer strip it in a single shot and land on a genuine
-/// fixed point (content whose prefix no longer matches any BOM signature).
-///
-/// The dominant real case is a homogeneous stack of the same mark. A
-/// heterogeneous run (e.g. a UTF-8 BOM followed by bytes that look like a
-/// UTF-16 BOM) is adversarial/corrupt rather than genuine text -- valid UTF-8
-/// after a UTF-8 BOM can never start with `FF FE`/`FE FF` -- but the check
-/// flags it all the same, so stripping the run is exactly what convergence
-/// requires. Runs whose bytes include NUL (the UTF-32 marks) are moot here:
-/// the fixer's `looks_binary` guard skips such files before this is consulted.
-pub fn leading_bom_run(bytes: &[u8]) -> Option<(BomKind, usize)> {
-    let first = detect_bom(bytes)?;
-    let mut len = first.byte_len();
-    while let Some(next) = detect_bom(&bytes[len..]) {
-        len += next.byte_len();
+/// Baseline-key prefix of a `no_bom` finding for a UTF-16 / UTF-32 BOM, which
+/// `file_strip_bom` declines (`can_fix`): stripping it needs transcoding.
+pub(crate) const NEEDS_TRANSCODING_KEY_PREFIX: &str = "bom-needs-transcoding:";
+
+/// Byte length of the run of consecutive UTF-8 BOMs at the start of `bytes`
+/// (`0` when it does not start with one). `file_strip_bom` strips exactly this:
+/// a UTF-16 / UTF-32 mark cannot be removed byte-for-byte without corrupting the
+/// file, so even after a UTF-8 BOM it is left for `check` to report (unfixable).
+pub fn utf8_bom_run_len(bytes: &[u8]) -> usize {
+    let mut len = 0;
+    while bytes[len..].starts_with(&[0xEF, 0xBB, 0xBF]) {
+        len += 3;
     }
-    Some((first, len))
+    len
 }
 
 #[derive(Debug)]
@@ -158,15 +149,33 @@ impl PerFileRule for NoBomRule {
         let Some(kind) = detect_bom(bytes) else {
             return Ok(Vec::new());
         };
-        let msg = self
-            .message
-            .clone()
-            .unwrap_or_else(|| format!("file begins with a {} BOM", kind.name()));
-        Ok(vec![
-            Violation::new(msg)
-                .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(1, 1),
-        ])
+        let utf8 = kind == BomKind::Utf8;
+        let msg = self.message.clone().unwrap_or_else(|| {
+            if utf8 {
+                format!("file begins with a {} BOM", kind.name())
+            } else {
+                format!(
+                    "file begins with a {} BOM; not auto-fixed (removing it without \
+                     transcoding the file would corrupt it)",
+                    kind.name()
+                )
+            }
+        });
+        let v = Violation::new(msg)
+            .with_path(std::sync::Arc::<Path>::from(path))
+            .with_location(1, 1);
+        // Only a UTF-8 BOM is strippable byte-for-byte: a UTF-16 / UTF-32 file
+        // needs transcoding, which `file_strip_bom` never does (it skips such a
+        // file). Key that finding so the fixer's `can_fix` declines it and
+        // `check` doesn't tag as fixable what `fix` won't touch.
+        Ok(vec![if utf8 {
+            v
+        } else {
+            v.with_baseline_key(format!(
+                "{NEEDS_TRANSCODING_KEY_PREFIX}{}",
+                crate::slash(path)
+            ))
+        }])
     }
 
     fn max_bytes_needed(&self) -> Option<usize> {
@@ -233,25 +242,99 @@ mod tests {
     }
 
     #[test]
-    fn leading_bom_run_spans_a_stacked_bom() {
-        // Regression (round-3 audit F3): a *stack* of BOMs must be reported as a
-        // single run so `file_strip_bom` removes it all in one shot. Stripping
-        // one mark leaves a leading BOM the rule re-flags -- `fix` never
-        // converges.
+    fn utf8_bom_run_spans_a_stacked_bom() {
+        // Regression (round-3 audit F3): a *stack* of UTF-8 BOMs must be measured
+        // as a single run so `file_strip_bom` removes it all in one shot.
+        // Stripping one mark leaves a leading BOM the rule re-flags -- `fix`
+        // never converges. (A stack arises when a tool prepends a UTF-8 BOM to a
+        // file that already had one.)
         let two = b"\xEF\xBB\xBF\xEF\xBB\xBF# h\n";
-        assert_eq!(leading_bom_run(two), Some((BomKind::Utf8, 6)));
+        assert_eq!(utf8_bom_run_len(two), 6);
         // Stripping the whole run yields content with no leading BOM: a genuine
         // fixed point (the rule's pass condition is `detect_bom == None`).
-        let (_, n) = leading_bom_run(two).unwrap();
-        assert!(detect_bom(&two[n..]).is_none());
-        // Degenerate cases: a lone BOM is a run of one; no BOM is None.
-        assert_eq!(leading_bom_run(b"\xEF\xBB\xBFx"), Some((BomKind::Utf8, 3)));
-        assert_eq!(leading_bom_run(b"plain"), None);
-        // A mixed run (UTF-8 then a UTF-16 BE mark) is still one run: the check
-        // flags either leading mark, so convergence requires stripping both.
-        assert_eq!(
-            leading_bom_run(b"\xEF\xBB\xBF\xFE\xFFx"),
-            Some((BomKind::Utf8, 5))
+        assert!(detect_bom(&two[6..]).is_none());
+        // Degenerate cases: a lone BOM is a run of one; no BOM is 0.
+        assert_eq!(utf8_bom_run_len(b"\xEF\xBB\xBFx"), 3);
+        assert_eq!(utf8_bom_run_len(b"plain"), 0);
+        // A UTF-16 mark is never part of the strippable run (stripping it needs
+        // transcoding): after the UTF-8 mark it is left for the check to report
+        // as not auto-fixable, and the fixer's binary guard refuses that file.
+        assert_eq!(utf8_bom_run_len(b"\xEF\xBB\xBF\xFE\xFFx"), 3);
+        assert_eq!(utf8_bom_run_len(b"\xFF\xFEx"), 0);
+    }
+}
+
+#[cfg(test)]
+mod utf16_tests {
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+    use alint_core::Fixer;
+
+    /// UTF-16 LE text of `中文` behind its BOM: NO NUL byte, so the old
+    /// NUL-only binary guard let byte-level fixers edit it.
+    const UTF16_NO_NUL: &[u8] = &[0xFF, 0xFE, 0x2D, 0x4E, 0x87, 0x65];
+
+    #[test]
+    fn utf16_bom_is_flagged_but_never_stripped() {
+        // Stripping a UTF-16 BOM without transcoding corrupts the file (the
+        // code units lose their byte-order signature), and `check` must not
+        // promise a fix the fixer refuses: the finding is reported, not fixable.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: no_bom\npaths: \"**/*\"\nlevel: warning\n\
+             fix:\n  file_strip_bom: {}\n",
+        ))
+        .unwrap();
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", UTF16_NO_NUL)]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(vs.len(), 1, "a UTF-16 BOM is still reported");
+        let fixer = rule.fixer().unwrap();
+        assert!(!fixer.can_fix(&vs[0]), "but not tagged fixable");
+        assert!(
+            fixer.fix_edit(&vs[0], UTF16_NO_NUL, tmp.path()).is_none(),
+            "the editor path must not strip it"
         );
+        let fctx = alint_core::FixContext {
+            root: tmp.path(),
+            dry_run: false,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+        };
+        let outcome = fixer.apply(&vs[0], &fctx).unwrap();
+        assert!(
+            matches!(outcome, alint_core::FixOutcome::Skipped(_)),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join("a.txt")).unwrap(),
+            UTF16_NO_NUL
+        );
+        // A UTF-8 BOM stays reported AND fixable.
+        let (tmp, idx) = tempdir_with_files(&[("b.txt", b"\xEF\xBB\xBFhi\n")]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert!(fixer.can_fix(&vs[0]));
+    }
+
+    #[test]
+    fn byte_level_hygiene_fixers_never_edit_utf16_text() {
+        // `\n` appended to UTF-16 is half a code unit; a stripped `0x20` byte
+        // may be half of one. Every byte-level fixer refuses BOM-marked
+        // UTF-16 / UTF-32 content, even without a NUL byte.
+        let v = alint_core::Violation::new("x").with_path(std::path::Path::new("a.txt"));
+        let root = std::path::Path::new("/r");
+        let fixers: [&dyn Fixer; 3] = [
+            &crate::fixers::FileAppendFinalNewlineFixer::new(),
+            &crate::fixers::FileTrimTrailingWhitespaceFixer::new(),
+            &crate::fixers::FileStripZeroWidthFixer,
+        ];
+        let trailing_space_unit: &[u8] = &[0xFF, 0xFE, 0x20, 0x4E, 0x20, 0x4E];
+        for f in fixers {
+            for body in [UTF16_NO_NUL, trailing_space_unit] {
+                assert!(f.fix_edit(&v, body, root).is_none(), "{}", f.describe());
+            }
+        }
+        assert!(crate::io::looks_binary(UTF16_NO_NUL));
+        assert!(crate::io::looks_binary(&[0xFE, 0xFF, 0x4E, 0x2D]));
+        assert!(!crate::io::looks_binary(b"\xEF\xBB\xBFplain utf-8\n"));
     }
 }

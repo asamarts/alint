@@ -5,7 +5,7 @@ use std::path::Path;
 use alint_core::{
     Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
-use regex::Regex;
+use regex::bytes::Regex;
 use serde::Deserialize;
 
 use crate::fixers::ReplaceFixer;
@@ -82,15 +82,15 @@ impl PerFileRule for FileContentForbiddenRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        // Non-UTF-8 files are silently skipped; they can't contain a
-        // text regex match. Use `file_is_text` to flag binaries.
-        let Ok(text) = std::str::from_utf8(bytes) else {
+        // Match the RAW bytes (a `regex::bytes` pattern) so a non-UTF-8 file is
+        // not a free pass: one Latin-1 `\xe9` used to fail `from_utf8` and skip
+        // the whole file, hiding e.g. a secret after it (fail-open). An invalid
+        // byte never matches a Unicode class, but every literal / ASCII match is
+        // still found, and on valid UTF-8 the semantics are unchanged.
+        let Some(m) = self.pattern.find(bytes) else {
             return Ok(Vec::new());
         };
-        let Some(m) = self.pattern.find(text) else {
-            return Ok(Vec::new());
-        };
-        let line = text[..m.start()].matches('\n').count() + 1;
+        let line = bytes[..m.start()].split(|&b| b == b'\n').count();
         let msg = self
             .message
             .clone()
@@ -269,5 +269,53 @@ mod tests {
         let (tmp, idx) = tempdir_with_files(&[("img.bin", &[0xff, 0xfe])]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod non_utf8_tests {
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+    use alint_core::Fixer as _;
+
+    #[test]
+    fn non_utf8_text_is_not_a_free_pass() {
+        // Fail-closed regression: a Latin-1 `\xe9` made `from_utf8` fail and the
+        // file was silently skipped, so the AWS key after it went unreported.
+        // Matching now runs over the raw bytes.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: file_content_forbidden\npaths: \"**/*\"\n\
+             pattern: \"AKIA[0-9A-Z]{16}\"\nlevel: error\n",
+        ))
+        .unwrap();
+        let body: &[u8] = b"caf\xe9\nkey = AKIAABCDEFGHIJKLMNOP\n";
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", body)]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(vs.len(), 1, "forbidden content in non-UTF-8 text is found");
+        assert_eq!(vs[0].line, Some(2));
+    }
+
+    #[test]
+    fn replace_fixer_edits_non_utf8_files_at_true_byte_offsets() {
+        // The located `replace` fixer agrees with the detector: it matches the
+        // raw bytes, so its ranges are true byte offsets and the invalid byte
+        // around them survives verbatim.
+        let f = crate::fixers::ReplaceFixer::new(
+            regex::bytes::Regex::new("AKIA[0-9A-Z]{16}").unwrap(),
+            "REDACTED".to_string(),
+            alint_core::Applicability::Unsafe,
+        );
+        let body: &[u8] = b"caf\xe9 AKIAABCDEFGHIJKLMNOP\n";
+        let edits = f.collect_edits(
+            &[],
+            std::path::Path::new("a.txt"),
+            body,
+            std::path::Path::new("/r"),
+        );
+        assert_eq!(edits.len(), 1);
+        let alint_core::FixEdit::ReplaceRange { range, content, .. } = &edits[0].edit else {
+            panic!("expected ReplaceRange");
+        };
+        assert_eq!(range.clone(), 5..25);
+        assert_eq!(content.as_slice(), b"REDACTED");
     }
 }

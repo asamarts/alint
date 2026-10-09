@@ -14,6 +14,10 @@ impl Fixer for FileStripBidiFixer {
         "strip Unicode bidi control characters".to_string()
     }
 
+    fn can_fix(&self, violation: &Violation) -> bool {
+        !is_binary_finding(violation)
+    }
+
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
         apply_char_filter(
             "bidi",
@@ -50,6 +54,10 @@ pub struct FileStripZeroWidthFixer;
 impl Fixer for FileStripZeroWidthFixer {
     fn describe(&self) -> String {
         "strip zero-width characters (U+200B/C/D, U+2060, U+180E, body-internal U+FEFF)".to_string()
+    }
+
+    fn can_fix(&self, violation: &Violation) -> bool {
+        !is_binary_finding(violation)
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -110,11 +118,19 @@ impl Default for FileStripBomFixer {
 
 impl Fixer for FileStripBomFixer {
     fn describe(&self) -> String {
-        "strip leading BOM".to_string()
+        "strip leading UTF-8 BOM".to_string()
     }
 
     fn applicability(&self) -> Applicability {
         self.applicability
+    }
+
+    fn can_fix(&self, violation: &Violation) -> bool {
+        // A UTF-16 / UTF-32 BOM needs transcoding, which this fixer never does.
+        !violation
+            .baseline_key
+            .as_deref()
+            .is_some_and(|k| k.starts_with(crate::no_bom::NEEDS_TRANSCODING_KEY_PREFIX))
     }
 
     fn apply(&self, violation: &Violation, ctx: &FixContext<'_>) -> Result<FixOutcome> {
@@ -128,22 +144,25 @@ impl Fixer for FileStripBomFixer {
             alint_core::ReadForFix::Bytes(b) => b,
             alint_core::ReadForFix::Skipped(outcome) => return Ok(outcome),
         };
+        // `looks_binary` also covers a UTF-16 / UTF-32 BOM: dropping those bytes
+        // without transcoding would corrupt the file.
         if looks_binary(&existing) {
             return Ok(FixOutcome::Skipped(format!(
-                "{} looks binary; not stripping a BOM",
+                "{} looks binary or is UTF-16/UTF-32; not stripping a BOM",
                 path.display()
             )));
         }
-        // Strip the whole *run* of leading BOMs, not just the first: a stacked
-        // BOM (a tool prepended a mark to a file that already had one) would
-        // otherwise leave a leading BOM that `no_bom` re-flags, and `fix` would
-        // not converge. See `no_bom::leading_bom_run` for the reasoning.
-        let Some((bom, strip_len)) = crate::no_bom::leading_bom_run(&existing) else {
+        // Strip the whole *run* of leading UTF-8 BOMs, not just the first: a
+        // stacked BOM (a tool prepended a mark to a file that already had one)
+        // would otherwise leave a leading BOM that `no_bom` re-flags, and `fix`
+        // would not converge. Only UTF-8 marks: see `no_bom::utf8_bom_run_len`.
+        let strip_len = crate::no_bom::utf8_bom_run_len(&existing);
+        if strip_len == 0 {
             return Ok(FixOutcome::Skipped(format!(
-                "{} has no BOM",
+                "{} has no UTF-8 BOM",
                 path.display()
             )));
-        };
+        }
         // Dry-run AFTER the read + guards, so a preview matches the real run
         // (Skipped for a binary/oversized/no-BOM file, not a false "would strip").
         if ctx.dry_run {
@@ -159,8 +178,7 @@ impl Fixer for FileStripBomFixer {
                 source,
             })?;
         Ok(FixOutcome::Applied(format!(
-            "stripped {} BOM from {}",
-            bom.name(),
+            "stripped UTF-8 BOM from {}",
             path.display()
         )))
     }
@@ -173,14 +191,28 @@ impl Fixer for FileStripBomFixer {
         if looks_binary(bytes) {
             return None;
         }
-        // Strip the whole run of leading BOMs so the editor path converges in
-        // one shot, exactly like `apply` on disk (see `leading_bom_run`).
-        let (_, strip_len) = crate::no_bom::leading_bom_run(bytes)?;
+        // Strip the whole run of leading UTF-8 BOMs so the editor path converges
+        // in one shot, exactly like `apply` on disk (see `utf8_bom_run_len`).
+        let strip_len = crate::no_bom::utf8_bom_run_len(bytes);
+        if strip_len == 0 {
+            return None;
+        }
         Some(FixEdit::SetContent {
             path: path.to_path_buf(),
             content: bytes[strip_len..].to_vec(),
         })
     }
+}
+
+/// `true` for a bidi / zero-width finding the detector reported in a
+/// binary-looking file (keyed with `BINARY_KEY_PREFIX`). The detectors scan such
+/// files so a NUL can't hide a control, but the char-filter fixers refuse binary
+/// content, so `can_fix` declines these and `check` doesn't tag them fixable.
+fn is_binary_finding(violation: &Violation) -> bool {
+    violation
+        .baseline_key
+        .as_deref()
+        .is_some_and(|k| k.starts_with(crate::no_bidi_controls::BINARY_KEY_PREFIX))
 }
 
 /// Shared read-modify-write helper for "remove every char that
@@ -205,9 +237,9 @@ fn apply_char_filter(
     };
     // Binary guard (H3): a NUL byte marks binary content; stripping a
     // bidi/zero-width byte sequence out of a NUL-bearing binary would corrupt
-    // it. The detector carries the SAME guard (so `check` and `fix` agree on
-    // which files are in scope -- otherwise a binary would be flagged-fixable
-    // forever but never fixed).
+    // it. The detector still REPORTS such a file (a NUL must not hide a control)
+    // but keys it so `can_fix` declines it -- `check` and `fix` agree that it is
+    // flagged yet not auto-fixable.
     if looks_binary(&existing) {
         return Ok(FixOutcome::Skipped(format!(
             "{} looks binary; not stripping {label} chars",

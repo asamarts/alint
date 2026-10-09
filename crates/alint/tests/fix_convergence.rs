@@ -11,7 +11,10 @@
 //!     Trojan-Source override must not survive `alint fix` just because the
 //!     attacker also dropped one invalid byte.
 //!   * NUL-bearing binary: the fixers refuse it (editing binary corrupts it), so
-//!     the detectors now skip it too -- `check` and `fix` agree.
+//!     the hygiene detectors now skip it too -- `check` and `fix` agree. The two
+//!     SECURITY detectors (bidi / zero-width) are the exception: a NUL must not
+//!     hide a Trojan-Source control, so they still flag the file, but tag the
+//!     finding not-fixable -- `fix` leaves it byte-identical and `check` stays red.
 //!   * unreadable file (mode 000 / permission denied): `check` and `fix` read
 //!     through different paths (the engine's file-major dispatch vs each rule's
 //!     whole-index `evaluate`) and once disagreed on it. Round 4 made both fail
@@ -158,10 +161,11 @@ fn sort_preserves_a_leading_bom_and_converges() {
     assert!(check_is_clean(root), "converged after one sort");
 }
 
-/// F3: every byte-level content rule skips a NUL-bearing binary at the DETECTOR,
+/// F3: every byte-level HYGIENE rule skips a NUL-bearing binary at the DETECTOR,
 /// so `check` reports nothing and `fix` touches nothing (agreement, not the old
 /// "flagged fixable forever, never fixed"). One representative file exercised by
-/// all six rules on a broad glob.
+/// the four hygiene rules on a broad glob. (The bidi / zero-width security rules
+/// flag it instead -- see `security_detectors_flag_binary_but_never_rewrite_it`.)
 #[test]
 fn detectors_skip_binary_so_check_and_fix_agree() {
     let tmp = tempfile::tempdir().unwrap();
@@ -176,13 +180,11 @@ fn detectors_skip_binary_so_check_and_fix_agree() {
          \x20 - id: ws\n    kind: no_trailing_whitespace\n    paths: \"**/*.bin\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n\
          \x20 - id: eof\n    kind: final_newline\n    paths: \"**/*.bin\"\n    level: error\n    fix: { file_append_final_newline: {} }\n\
          \x20 - id: le\n    kind: line_endings\n    paths: \"**/*.bin\"\n    target: lf\n    level: error\n    fix: { file_normalize_line_endings: {} }\n\
-         \x20 - id: blanks\n    kind: max_consecutive_blank_lines\n    paths: \"**/*.bin\"\n    max: 1\n    level: error\n    fix: { file_collapse_blank_lines: {} }\n\
-         \x20 - id: bidi\n    kind: no_bidi_controls\n    paths: \"**/*.bin\"\n    level: error\n    fix: { file_strip_bidi: {} }\n\
-         \x20 - id: zw\n    kind: no_zero_width_chars\n    paths: \"**/*.bin\"\n    level: error\n    fix: { file_strip_zero_width: {} }\n",
+         \x20 - id: blanks\n    kind: max_consecutive_blank_lines\n    paths: \"**/*.bin\"\n    max: 1\n    level: error\n    fix: { file_collapse_blank_lines: {} }\n",
     );
     assert!(
         check_is_clean(root),
-        "no content rule may flag a NUL-bearing binary (its fixer would refuse it)"
+        "no hygiene rule may flag a NUL-bearing binary (its fixer would refuse it)"
     );
     fix(root);
     assert_eq!(
@@ -190,6 +192,36 @@ fn detectors_skip_binary_so_check_and_fix_agree() {
         binary,
         "the binary is left byte-identical"
     );
+}
+
+/// Trojan-Source evasion regression: a single NUL used to make the bidi /
+/// zero-width detectors skip a file, so `\0` + RLO passed `check`. They now flag
+/// it (a NUL must not hide a control) while the strip fixers still refuse to edit
+/// binary content -- so `fix` leaves the file byte-identical and `check` stays red
+/// (the finding is reported as not auto-fixable rather than looping).
+#[test]
+fn security_detectors_flag_binary_but_never_rewrite_it() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let binary: &[u8] = b"a\x00 \xE2\x80\xAE\xE2\x80\x8Bb";
+    write(root, "blob.bin", binary);
+    config(
+        root,
+        "version: 1\nrules:\n\
+         \x20 - id: bidi\n    kind: no_bidi_controls\n    paths: \"**/*.bin\"\n    level: error\n    fix: { file_strip_bidi: {} }\n\
+         \x20 - id: zw\n    kind: no_zero_width_chars\n    paths: \"**/*.bin\"\n    level: error\n    fix: { file_strip_zero_width: {} }\n",
+    );
+    assert!(
+        !check_is_clean(root),
+        "a bidi / zero-width char in a NUL-bearing file must still be flagged"
+    );
+    fix(root);
+    assert_eq!(
+        std::fs::read(root.join("blob.bin")).unwrap(),
+        binary,
+        "the strip fixers never rewrite binary content"
+    );
+    assert!(!check_is_clean(root), "the finding stands after fix");
 }
 
 /// Audit H1 regression: the Phase-4 whole-file content fixers `sort`,

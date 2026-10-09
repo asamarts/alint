@@ -178,6 +178,12 @@ impl MarkdownLinksResolveRule {
         if path_part.is_empty() {
             return None;
         }
+        // Root-absoluteness is a property of the RAW target: `%2Fx.md` is a
+        // relative link whose path happens to decode to a leading `/`. Deciding
+        // it after decoding made such a link look root-absolute and, with no
+        // `root_map`, be skipped unchecked. (A literal backslash counts, as
+        // browsers normalize it to `/` in special-scheme URLs.)
+        let root_absolute = path_part.starts_with('/') || path_part.starts_with('\\');
         let decoded = percent_decode(path_part);
         // URL paths use `/` on every host. Treat literal or percent-encoded
         // backslashes as separators too, so traversal and lookup semantics do
@@ -185,7 +191,7 @@ impl MarkdownLinksResolveRule {
         // normalize backslashes in special-scheme URLs).
         let decoded = decoded.replace('\\', "/");
 
-        if decoded.starts_with('/') {
+        if root_absolute {
             let map = self.root_map.as_ref()?;
             let suffix = decoded.strip_prefix(&map.url_prefix)?;
             let mapped = if suffix.is_empty() {
@@ -214,7 +220,9 @@ impl MarkdownLinksResolveRule {
         }
 
         let base = source.parent().unwrap_or_else(|| Path::new(""));
-        let Some(resolved) = normalize_link_path(&base.join(&decoded)) else {
+        // An encoded leading slash must not turn the join absolute.
+        let relative = decoded.trim_start_matches('/');
+        let Some(resolved) = normalize_link_path(&base.join(relative)) else {
             return Some(format!(
                 "relative Markdown link `{raw_target}` escapes the repository root"
             ));
@@ -681,6 +689,30 @@ mod tests {
         assert!(violations[0].message.contains("docs/missing.md"));
         assert!(violations[1].message.contains("escapes"));
         assert!(violations[2].message.contains("escapes"));
+    }
+
+    #[test]
+    fn an_encoded_leading_slash_is_a_relative_link_not_a_root_absolute_one() {
+        // FN regression: `%2F` was decoded BEFORE the root-absolute check, so
+        // `[a](%2Fnonexistent.md)` looked root-absolute and, with no `root_map`,
+        // was silently skipped. Root-absoluteness is a property of the raw
+        // target; the encoded slash is part of a relative path, checked as such.
+        let (tmp, idx) = tempdir_with_files(&[
+            (
+                "docs/guide.md",
+                b"[a](%2Fnonexistent.md) [b](%2Fpresent.md)\n",
+            ),
+            ("docs/present.md", b"# here\n"),
+        ]);
+        let rule = build(&spec("")).unwrap();
+        let violations = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(violations.len(), 1, "{violations:#?}");
+        assert!(violations[0].message.contains("docs/nonexistent.md"));
+        // Under `relative: forbid` it is a (forbidden) relative link too.
+        let rule = build(&spec("relative: forbid\n")).unwrap();
+        let violations = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(violations.len(), 2, "{violations:#?}");
+        assert!(violations[0].message.contains("forbidden"));
     }
 
     #[test]

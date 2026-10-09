@@ -155,21 +155,34 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
     let mut in_fenced = false;
     let mut fence_marker: Option<char> = None;
     let mut fence_len: usize = 0;
+    // Blockquote nesting (`>` count) the open fence lives in.
+    let mut fence_depth: usize = 0;
 
     for (line_idx, line) in text.lines().enumerate() {
         let line_no = line_idx + 1;
+        // Fences and indented code blocks can sit inside a `>` blockquote; judge
+        // them on the content after the markers. A fence left open when its
+        // blockquote ends closes with it (CommonMark: a fenced block never
+        // lazily continues), so the rest of the file is still scanned.
+        let (depth, content) = strip_blockquote_markers(line);
+        if in_fenced && depth < fence_depth {
+            in_fenced = false;
+            fence_marker = None;
+            fence_len = 0;
+        }
 
         // Detect fenced-code-block boundaries. CommonMark allows
         // ``` and ~~~ with at least 3 markers; the closing fence
         // must use the same character and at least as many
         // markers. `info string` (e.g. ```yaml) follows the
         // opening fence; we don't care about its content.
-        let trimmed = line.trim_start();
+        let trimmed = content.trim_start();
         if let Some((ch, n)) = detect_fence(trimmed) {
             if !in_fenced {
                 in_fenced = true;
                 fence_marker = Some(ch);
                 fence_len = n;
+                fence_depth = depth;
             } else if fence_marker == Some(ch) && n >= fence_len && only_fence(trimmed, ch) {
                 in_fenced = false;
                 fence_marker = None;
@@ -187,7 +200,7 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
         // as code unless it's a continuation of a list item, which
         // we don't track here. Acceptable: false-skip rate >
         // false-flag rate for our use.
-        if line.starts_with("    ") || line.starts_with('\t') {
+        if content.starts_with("    ") || content.starts_with('\t') {
             continue;
         }
 
@@ -211,8 +224,10 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
             // Find the matching closing run.
             let close_start = find_closing_run(&bytes[i..], run_len).map(|p| i + p);
             let Some(close) = close_start else {
-                // Unmatched backticks → not a span; bail this line.
-                break;
+                // Unmatched run → per CommonMark it is literal text, not a
+                // span; keep scanning after it (a later span on the line is
+                // still a candidate).
+                continue;
             };
             let token_bytes = &bytes[i..close];
             // Inline-code spans wrap their content with one space
@@ -230,6 +245,25 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
         }
     }
     out
+}
+
+/// Strip leading blockquote markers (`>` after at most 3 spaces, plus one
+/// optional following space), returning the nesting depth and the content.
+fn strip_blockquote_markers(line: &str) -> (usize, &str) {
+    let mut depth = 0;
+    let mut rest = line;
+    loop {
+        let after_indent = rest.trim_start_matches(' ');
+        if rest.len() - after_indent.len() > 3 {
+            break;
+        }
+        let Some(inner) = after_indent.strip_prefix('>') else {
+            break;
+        };
+        rest = inner.strip_prefix(' ').unwrap_or(inner);
+        depth += 1;
+    }
+    (depth, rest)
 }
 
 /// If `s` starts with N+ backticks or tildes (N ≥ 3), return the
@@ -273,8 +307,14 @@ fn find_closing_run(bytes: &[u8], len: usize) -> Option<usize> {
     None
 }
 
+/// A token is a candidate when it starts with a prefix -- directly, or after a
+/// leading `./` (`./src/x` names the same path as `src/x`).
 fn starts_with_any_prefix(s: &str, prefixes: &[String]) -> bool {
-    prefixes.iter().any(|p| s.starts_with(p))
+    prefixes.iter().any(|p| {
+        s.starts_with(p.as_str())
+            || s.strip_prefix("./")
+                .is_some_and(|rest| rest.starts_with(p.as_str()))
+    })
 }
 
 /// True if `s` contains a template-variable marker
@@ -331,6 +371,17 @@ fn looks_like_command_arguments(arguments: &str) -> bool {
 /// against the file index (any-of); plain paths use exact
 /// lookup of either file or directory.
 fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
+    if lookup.is_empty() {
+        return false;
+    }
+    // Normalize `.` / `..` segments lexically first: `./src/foo.c` and
+    // `src/../src/foo.c` name `src/foo.c`, which is how the index keys it. A
+    // `..` that climbs out of the repo (or an absolute path) never resolves.
+    let Some(normalized) = crate::pathsafe::normalize_confined(Path::new(lookup)) else {
+        return false;
+    };
+    let normalized = crate::slash(&normalized);
+    let lookup = normalized.as_str();
     if lookup.is_empty() {
         return false;
     }
@@ -456,6 +507,84 @@ mod tests {
         let pf = prefixes(&["src/"]);
         let cands = scan_markdown_paths("`src/foo.ts unmatched", &pf);
         assert_eq!(cands, Vec::new());
+    }
+
+    fn findings(md: &str, prefixes: &str, files: &[&str]) -> Vec<String> {
+        use crate::test_support::{ctx, index, spec_yaml};
+        let rule = build(&spec_yaml(&format!(
+            "id: t\nkind: markdown_paths_resolve\npaths: \"**/*.md\"\n\
+             prefixes: {prefixes}\nlevel: error\n"
+        )))
+        .unwrap();
+        let idx = index(files);
+        rule.as_per_file()
+            .unwrap()
+            .evaluate_file(
+                &ctx(Path::new("/fake"), &idx),
+                Path::new("README.md"),
+                md.as_bytes(),
+            )
+            .unwrap()
+            .into_iter()
+            .map(|v| v.baseline_key.unwrap_or_default().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn dot_and_dotdot_segments_are_normalized_before_lookup() {
+        // FP regression: `./src/foo.c` / `src/../src/foo.c` name an existing file
+        // but were looked up verbatim and reported as unresolved.
+        const NONE: [String; 0] = [];
+        let files = ["src/foo.c"];
+        assert_eq!(
+            findings("see `src/../src/foo.c`", "[\"src/\"]", &files),
+            NONE
+        );
+        assert_eq!(findings("see `./src/foo.c`", "[\"./\"]", &files), NONE);
+        // A `./`-led path is a candidate for a `src/` prefix too -- and a broken
+        // one is still reported.
+        assert_eq!(findings("see `./src/foo.c`", "[\"src/\"]", &files), NONE);
+        assert_eq!(
+            findings("see `./src/gone.c`", "[\"src/\"]", &files),
+            vec!["./src/gone.c"]
+        );
+        // `..` that climbs out of the repo never resolves.
+        assert_eq!(
+            findings("see `src/../../src/foo.c`", "[\"src/\"]", &files),
+            vec!["src/../../src/foo.c"]
+        );
+    }
+
+    #[test]
+    fn fences_inside_blockquotes_are_code() {
+        // FP regression: a fence opened inside a `>` blockquote was not
+        // recognized, so its sample paths were checked as factual claims.
+        let pf = prefixes(&["src/"]);
+        let md = "> ```sh\n> cat `src/sample.ts`\n> ```\n> after `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+        // A fence left open when its blockquote ends closes with it (CommonMark),
+        // so the rest of the file is still scanned.
+        let md = "> ```\n> `src/sample.ts`\n\nplain `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+    }
+
+    #[test]
+    fn an_unmatched_backtick_run_is_literal_not_the_end_of_the_line() {
+        // FN regression: an opening run with no matching close abandoned the
+        // rest of the line. Per CommonMark it is literal text; scanning goes on.
+        let pf = prefixes(&["src/"]);
+        let md = "a `` stray then `src/real.ts`";
+        let cands = scan_markdown_paths(md, &pf);
+        assert_eq!(cands.len(), 1, "{cands:?}");
+        assert_eq!(cands[0].token, "src/real.ts");
     }
 
     #[test]

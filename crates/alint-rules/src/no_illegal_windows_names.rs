@@ -4,13 +4,16 @@
 //! Categories flagged (case-insensitive for the reserved names):
 //!
 //! - Reserved device names: `CON`, `PRN`, `AUX`, `NUL`,
-//!   `COM1..COM9`, `LPT1..LPT9`. Reserved regardless of extension,
-//!   so `con.txt` and `nul.py` also fail.
+//!   `COM0..COM9`, `LPT0..LPT9`, and the superscript-digit ports
+//!   `COM¹ COM² COM³` / `LPT¹ LPT² LPT³`. Reserved regardless of
+//!   extension (`con.txt`, `nul.tar.gz`) and of spaces before it
+//!   (`CON .txt`).
 //! - Trailing dots or spaces (`foo.` / `foo `): both get stripped
 //!   silently by Windows and break git checkout round-trips.
 //! - Characters Windows disallows in filenames: `<`, `>`, `:`,
-//!   `"`, `|`, `?`, `*`. (`/` and `\\` are path separators in
-//!   alint's Unix-shaped indexes; we don't flag them.)
+//!   `"`, `|`, `?`, `*`, a `\\` inside a component (a separator on
+//!   Windows), and the control characters U+0000..U+001F (tab
+//!   included).
 //!
 //! Check-only. The "correct" rename is a user decision.
 
@@ -60,10 +63,14 @@ impl Rule for NoIllegalWindowsNamesRule {
 }
 
 /// Classify a single path component. Returns a human-readable
-/// reason if it's Windows-illegal, `None` otherwise.
+/// reason if it's Windows-illegal, `None` otherwise. Follows Microsoft's
+/// "Naming Files, Paths, and Namespaces" rules.
 pub fn illegal_reason(name: &str) -> Option<&'static str> {
     if name.is_empty() {
         return None;
+    }
+    if name.chars().any(|c| c < '\u{20}') {
+        return Some("contains a control character Windows forbids in filenames");
     }
     if name.ends_with('.') {
         return Some("Windows strips trailing dots on checkout");
@@ -81,42 +88,36 @@ pub fn illegal_reason(name: &str) -> Option<&'static str> {
 }
 
 fn is_reserved_char(c: char) -> bool {
-    // `/` and `\` are path separators in our Unix-shaped indexes;
-    // they won't appear inside a single path component.
-    matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*')
+    // `/` never appears inside a component. A `\` can, on a Unix index (it is
+    // an ordinary filename byte there), but Windows reads it as a separator --
+    // so it is flagged; a Windows index never yields one inside a component.
+    matches!(c, '<' | '>' | ':' | '"' | '|' | '?' | '*' | '\\')
 }
 
 fn is_reserved_device_name(name: &str) -> bool {
-    // The reservation applies to the stem regardless of extension.
+    // The reservation applies to the stem regardless of extension (`NUL.txt`,
+    // `NUL.tar.gz`), and Windows ignores spaces between the device name and the
+    // extension, so `CON .txt` opens the CON device too.
     let stem = match name.find('.') {
         Some(idx) => &name[..idx],
         None => name,
     };
-    let upper = stem.to_ascii_uppercase();
+    let upper = stem.trim_end_matches(' ').to_ascii_uppercase();
+    if matches!(upper.as_str(), "CON" | "PRN" | "AUX" | "NUL") {
+        return true;
+    }
+    // COM0..COM9 / LPT0..LPT9, plus the superscript-digit ports Windows also
+    // reserves (`COM¹`, `COM²`, `COM³`, and the LPT equivalents).
+    let Some(port) = upper
+        .strip_prefix("COM")
+        .or_else(|| upper.strip_prefix("LPT"))
+    else {
+        return false;
+    };
+    let mut chars = port.chars();
     matches!(
-        upper.as_str(),
-        "CON"
-            | "PRN"
-            | "AUX"
-            | "NUL"
-            | "COM1"
-            | "COM2"
-            | "COM3"
-            | "COM4"
-            | "COM5"
-            | "COM6"
-            | "COM7"
-            | "COM8"
-            | "COM9"
-            | "LPT1"
-            | "LPT2"
-            | "LPT3"
-            | "LPT4"
-            | "LPT5"
-            | "LPT6"
-            | "LPT7"
-            | "LPT8"
-            | "LPT9"
+        (chars.next(), chars.next()),
+        (Some('0'..='9' | '\u{B9}' | '\u{B2}' | '\u{B3}'), None)
     )
 }
 
@@ -164,11 +165,43 @@ mod tests {
 
     #[test]
     fn does_not_flag_nearby_non_reserved() {
-        assert!(illegal_reason("COM0").is_none());
         assert!(illegal_reason("COM10").is_none());
-        assert!(illegal_reason("LPT0").is_none());
+        assert!(illegal_reason("LPT10").is_none());
+        assert!(illegal_reason("COM\u{2074}").is_none()); // superscript 4 is not reserved
         assert!(illegal_reason("confused").is_none());
         assert!(illegal_reason("conventional").is_none());
+        assert!(illegal_reason("CONSOLE.txt").is_none());
+        assert!(illegal_reason("a.con").is_none());
+    }
+
+    #[test]
+    fn follows_microsofts_full_naming_rules() {
+        // FN regressions against "Naming Files, Paths, and Namespaces":
+        // COM0 / LPT0 and the superscript-digit ports are reserved too.
+        for name in [
+            "COM0",
+            "lpt0",
+            "COM\u{b9}",
+            "COM\u{b2}",
+            "com\u{b3}.txt",
+            "LPT\u{b9}",
+        ] {
+            assert!(illegal_reason(name).is_some(), "{name:?}");
+        }
+        // A reserved stem followed by spaces before the extension still names
+        // the device (`CON .txt` opens CON), as does a multi-dot extension.
+        for name in ["CON .txt", "nul  .tar.gz", "AUX .", "PRN.tar.gz"] {
+            assert!(illegal_reason(name).is_some(), "{name:?}");
+        }
+        // Control characters (U+0001..U+001F, incl. tab) and NUL are forbidden.
+        for name in ["a\tb", "a\u{1}b", "a\u{1f}b", "a\u{0}b"] {
+            assert!(illegal_reason(name).is_some(), "{name:?}");
+        }
+        // A backslash inside a (Unix) path component is a separator on Windows.
+        assert!(illegal_reason("a\\b").is_some());
+        // DEL (U+007F) and ordinary Unicode are allowed.
+        assert!(illegal_reason("a\u{7f}b").is_none());
+        assert!(illegal_reason("caf\u{e9}.md").is_none());
     }
 
     #[test]
