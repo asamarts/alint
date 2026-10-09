@@ -195,6 +195,15 @@ fn write_output(body: &str, opts: &RunOptions) -> Result<()> {
         (None, false) => {
             // stdout — `cmd_export_agents_md` configured the
             // anstream wrapper.
+            // A terminal must not receive raw control / bidi characters from
+            // config-derived text (messages, policy URLs). The JSON format
+            // already escapes control chars and must stay valid JSON, so only
+            // the markdown body is sanitized.
+            let body = if opts.format == OutputFormat::Json {
+                std::borrow::Cow::Borrowed(body)
+            } else {
+                alint_output::sanitize_terminal(body)
+            };
             std::io::stdout()
                 .write_all(body.as_bytes())
                 .context("writing to stdout")?;

@@ -20,6 +20,12 @@ use crate::{BaselineMarks, ResultMarks};
 /// Code Scanning's alert correlation aligns with the baseline.
 const FINGERPRINT_KEY: &str = "alint/v1";
 
+/// The artifact a path-less finding (a missing file, a tree-level rule) is
+/// anchored on when the caller doesn't supply the config's own path. GitHub
+/// Code Scanning drops a result that has no location at all, so every result
+/// carries one -- the config that declared the rule, matching the LSP.
+pub const DEFAULT_CONFIG_URI: &str = ".alint.yml";
+
 pub fn write_sarif(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
     write_sarif_with_baseline(report, None, w)
 }
@@ -36,7 +42,7 @@ pub fn write_sarif_with_baseline(
     baseline: Option<&BaselineMarks>,
     w: &mut dyn Write,
 ) -> std::io::Result<()> {
-    emit_sarif(&build_sarif(report, baseline, None), w)
+    emit_sarif(&build_sarif(report, baseline, None, DEFAULT_CONFIG_URI), w)
 }
 
 /// SARIF with pre-computed canonical fingerprints but no baseline in effect.
@@ -54,7 +60,31 @@ pub fn write_sarif_with_fingerprints(
     fingerprints: Option<&[Vec<String>]>,
     w: &mut dyn Write,
 ) -> std::io::Result<()> {
-    emit_sarif(&build_sarif(report, None, fingerprints), w)
+    emit_sarif(
+        &build_sarif(report, None, fingerprints, DEFAULT_CONFIG_URI),
+        w,
+    )
+}
+
+/// The full-control SARIF writer the CLI uses: optional baseline marks (as
+/// [`write_sarif_with_baseline`]), optional no-baseline fingerprints (as
+/// [`write_sarif_with_fingerprints`]; ignored when `baseline` is set), and
+/// `config_path` -- the repo-relative path of the config file, on which
+/// path-less findings are anchored (see [`DEFAULT_CONFIG_URI`]).
+pub fn write_sarif_for_config(
+    report: &Report,
+    baseline: Option<&BaselineMarks>,
+    fingerprints: Option<&[Vec<String>]>,
+    config_path: &std::path::Path,
+    w: &mut dyn Write,
+) -> std::io::Result<()> {
+    let config_uri = path_to_uri(config_path);
+    let fingerprints = if baseline.is_some() {
+        None
+    } else {
+        fingerprints
+    };
+    emit_sarif(&build_sarif(report, baseline, fingerprints, &config_uri), w)
 }
 
 /// Serialize a built [`Sarif`] as pretty JSON with a trailing newline.
@@ -68,6 +98,7 @@ fn build_sarif(
     report: &Report,
     baseline: Option<&BaselineMarks>,
     fingerprints: Option<&[Vec<String>]>,
+    config_uri: &str,
 ) -> Sarif {
     let mut rules = Vec::with_capacity(report.results.len());
     let mut results = Vec::new();
@@ -85,7 +116,7 @@ fn build_sarif(
 
         // Live (new) findings — drive the exit code; tagged `new` under a baseline.
         for (vi, v) in rr.violations.iter().enumerate() {
-            let mut res = base_result(rr.rule_id.as_ref(), rr.level, v);
+            let mut res = base_result(rr.rule_id.as_ref(), rr.level, v, config_uri);
             // `partialFingerprints` carries the canonical `violation_fingerprint`
             // so GitHub Code Scanning correlates alerts across runs. The value is
             // the baseline marks' fingerprint when a baseline is in effect, else
@@ -111,7 +142,7 @@ fn build_sarif(
         // (rather than closes-then-reopens) the alert.
         if let Some(m) = marks {
             for sf in &m.suppressed {
-                let mut res = base_result(rr.rule_id.as_ref(), rr.level, &sf.violation);
+                let mut res = base_result(rr.rule_id.as_ref(), rr.level, &sf.violation, config_uri);
                 res.suppressions = vec![SarifSuppression { kind: "external" }];
                 res.baseline_state = Some("unchanged");
                 res.partial_fingerprints = Some(fingerprint_map(&sf.fingerprint));
@@ -132,6 +163,9 @@ fn build_sarif(
                     rules,
                 },
             },
+            // alint's columns (and fix regions) count Unicode scalar values,
+            // not UTF-16 code units (the SARIF default when absent).
+            column_kind: "unicodeCodePoints",
             results,
         }],
     }
@@ -151,7 +185,8 @@ fn level_to_sarif(l: Level) -> &'static str {
 /// Scanning's repo-file mapping) and percent-encoding of every byte that
 /// isn't URI-path-safe (space, `#`, `%`, controls, non-ASCII), so a path
 /// like `src/a b#c.rs` neither mis-parses nor fails a format-asserting
-/// SARIF validator.
+/// SARIF validator. `:` is encoded too: in a relative reference a colon in
+/// the first segment (`a:b.txt`) would otherwise parse as a URI scheme.
 fn path_to_uri(path: &std::path::Path) -> String {
     let s = path.to_string_lossy();
     let mut out = String::with_capacity(s.len());
@@ -176,7 +211,6 @@ fn path_to_uri(path: &std::path::Path) -> String {
             | ','
             | ';'
             | '='
-            | ':'
             | '@' => out.push(ch),
             other => {
                 use std::fmt::Write as _;
@@ -191,7 +225,7 @@ fn path_to_uri(path: &std::path::Path) -> String {
 }
 
 /// A SARIF result with the shared fields filled in (no baseline annotations).
-fn base_result(rule_id: &str, level: Level, v: &Violation) -> SarifResult {
+fn base_result(rule_id: &str, level: Level, v: &Violation, config_uri: &str) -> SarifResult {
     let region = if v.line.is_some() || v.column.is_some() {
         Some(SarifRegion {
             start_line: v.line,
@@ -212,7 +246,21 @@ fn base_result(rule_id: &str, level: Level, v: &Violation) -> SarifResult {
             },
         }]
     } else {
-        Vec::new()
+        // A path-less finding is anchored on the config file (line 1), so
+        // Code Scanning keeps it (a result with no location is dropped).
+        vec![SarifLocation {
+            physical_location: SarifPhysicalLocation {
+                artifact_location: SarifArtifactLocation {
+                    uri: config_uri.to_string(),
+                },
+                region: Some(SarifRegion {
+                    start_line: Some(v.line.unwrap_or(1)),
+                    start_column: v.column,
+                    end_line: None,
+                    end_column: None,
+                }),
+            },
+        }]
     };
     SarifResult {
         rule_id: rule_id.to_string(),
@@ -295,6 +343,8 @@ struct Sarif {
 #[derive(Serialize)]
 struct SarifRun {
     tool: SarifTool,
+    #[serde(rename = "columnKind")]
+    column_kind: &'static str,
     results: Vec<SarifResult>,
 }
 
@@ -432,6 +482,9 @@ mod tests {
         assert_eq!(path_to_uri(Path::new("src\\a\\b.rs")), "src/a/b.rs");
         // Space / `#` / `%` are percent-encoded per RFC 3986 uri-reference.
         assert_eq!(path_to_uri(Path::new("a b#c%d.rs")), "a%20b%23c%25d.rs");
+        // A `:` would make `a:b.txt` parse as scheme `a` -- encode it.
+        assert_eq!(path_to_uri(Path::new("a:b.txt")), "a%3Ab.txt");
+        assert_eq!(path_to_uri(Path::new("dir/x:y")), "dir/x%3Ay");
     }
 
     fn render(report: &Report) -> Value {
@@ -645,7 +698,7 @@ mod tests {
     }
 
     #[test]
-    fn violations_without_path_emit_empty_locations() {
+    fn violations_without_path_anchor_on_the_config_file() {
         let report = Report {
             results: vec![RuleResult {
                 rule_id: "r".into(),
@@ -658,7 +711,82 @@ mod tests {
         };
         let v = render(&report);
         let locs = v["runs"][0]["results"][0]["locations"].as_array().unwrap();
-        assert_eq!(locs, &Vec::<serde_json::Value>::new());
+        // GitHub Code Scanning drops a result without a location, so a
+        // path-less finding is anchored on the config file.
+        assert_eq!(locs.len(), 1, "{locs:?}");
+        let loc = &locs[0]["physicalLocation"];
+        assert_eq!(loc["artifactLocation"]["uri"], DEFAULT_CONFIG_URI);
+        assert_eq!(loc["region"]["startLine"], 1);
+
+        // The CLI passes the real config path.
+        let mut buf = Vec::new();
+        write_sarif_for_config(
+            &report,
+            None,
+            None,
+            Path::new("cfg/alint config.yml"),
+            &mut buf,
+        )
+        .unwrap();
+        let v: Value = serde_json::from_slice(&buf).unwrap();
+        assert_eq!(
+            v["runs"][0]["results"][0]["locations"][0]["physicalLocation"]["artifactLocation"]["uri"],
+            "cfg/alint%20config.yml"
+        );
+    }
+
+    #[test]
+    fn run_declares_unicode_code_point_columns() {
+        let v = render(&Report { results: vec![] });
+        assert_eq!(v["runs"][0]["columnKind"], "unicodeCodePoints");
+    }
+
+    /// Structural SARIF 2.1.0 checks every emitted document must pass (the
+    /// official schema is too large to vendor): required properties, a
+    /// non-empty `locations` per result with a relative `uri` that has no
+    /// scheme, 1-based positive line/column numbers, and a valid
+    /// `columnKind`.
+    #[test]
+    fn every_result_is_structurally_valid_sarif() {
+        let report = Report {
+            results: vec![RuleResult {
+                rule_id: "r".into(),
+                level: Level::Warning,
+                policy_url: Some("https://example.com/p".into()),
+                violations: vec![
+                    Violation::new("no-path"),
+                    Violation::new("colon")
+                        .with_path(PathBuf::from("a:b.txt"))
+                        .with_location(2, 4),
+                ],
+                notes: Vec::new(),
+                is_fixable: false,
+            }],
+        };
+        let v = render(&report);
+        assert_eq!(v["version"], "2.1.0");
+        let run = &v["runs"][0];
+        assert_eq!(run["tool"]["driver"]["name"], "alint");
+        assert!(
+            ["utf16CodeUnits", "unicodeCodePoints"].contains(&run["columnKind"].as_str().unwrap())
+        );
+        for res in run["results"].as_array().unwrap() {
+            assert!(res["message"]["text"].is_string());
+            assert!(res["ruleId"].is_string());
+            let locs = res["locations"].as_array().unwrap();
+            assert!(!locs.is_empty(), "every result has a location: {res}");
+            for loc in locs {
+                let pl = &loc["physicalLocation"];
+                let uri = pl["artifactLocation"]["uri"].as_str().unwrap();
+                let first = uri.split('/').next().unwrap();
+                assert!(!first.contains(':'), "no scheme-like first segment: {uri}");
+                for key in ["startLine", "startColumn", "endLine", "endColumn"] {
+                    if let Some(n) = pl["region"].get(key) {
+                        assert!(n.as_u64().unwrap() >= 1, "{key} is 1-based: {pl}");
+                    }
+                }
+            }
+        }
     }
 
     #[test]

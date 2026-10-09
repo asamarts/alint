@@ -29,7 +29,7 @@ pub fn write_github(report: &Report, w: &mut dyn Write) -> std::io::Result<()> {
         for v in &rr.violations {
             let mut props: Vec<String> = vec![format!("title={}", escape_prop(&rr.rule_id))];
             if let Some(path) = &v.path {
-                props.push(format!("file={}", escape_prop(&path.display().to_string())));
+                props.push(format!("file={}", escape_prop(&crate::slash_path(path))));
             }
             if let Some(line) = v.line {
                 props.push(format!("line={line}"));

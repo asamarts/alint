@@ -161,3 +161,24 @@ rules:
         "dry-run must NOT spawn the command"
     );
 }
+
+/// Audit 2026-10 finding 8: `fix --dry-run --format json` was shaped exactly
+/// like a real run. The top-level `dry_run` flag now tells them apart
+/// (statuses stay `applied` for compatibility).
+#[test]
+fn json_fix_report_marks_dry_runs() {
+    let tmp = setup();
+    let o = run(tmp.path(), &["fix", "--dry-run", "--format", "json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["dry_run"], true, "{v}");
+    assert_eq!(v["summary"]["applied"], 1, "{v}");
+    assert_eq!(
+        std::fs::read_to_string(tmp.path().join("a.rs")).unwrap(),
+        "fn a() {}   \nTODO\n",
+        "dry run writes nothing"
+    );
+
+    let o = run(tmp.path(), &["fix", "--format", "json"]);
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    assert_eq!(v["dry_run"], false, "{v}");
+}

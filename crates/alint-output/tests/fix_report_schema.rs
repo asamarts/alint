@@ -10,7 +10,7 @@
 //! integrations).
 
 use alint_core::{FixEdit, FixItem, FixReport, FixRuleResult, FixStatus, Level, Violation};
-use alint_output::write_fix_json;
+use alint_output::{write_fix_json, write_fix_json_with_mode};
 
 const FIX_REPORT_SCHEMA: &str = include_str!("../../../schemas/v1/fix-report.json");
 
@@ -113,6 +113,7 @@ fn fix_report_shape_matches_expected_keys() {
     let report = canonical_fix_report();
     let json: serde_json::Value = serde_json::from_str(&render_json(&report)).unwrap();
     assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["dry_run"], false);
     let summary = &json["summary"];
     assert_eq!(summary["applied"], 1);
     assert_eq!(summary["skipped"], 1);
@@ -146,4 +147,14 @@ fn non_convergent_report_surfaces_the_flag_and_validates() {
     validate(&text);
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(json["summary"]["non_convergent"], true);
+}
+
+#[test]
+fn dry_run_report_carries_the_flag_and_validates() {
+    let mut buf = Vec::new();
+    write_fix_json_with_mode(&canonical_fix_report(), true, &mut buf).unwrap();
+    let text = String::from_utf8(buf).unwrap();
+    validate(&text);
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["dry_run"], true);
 }

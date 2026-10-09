@@ -18,15 +18,57 @@ use std::str::FromStr;
 
 use alint_core::{FixReport, Report};
 
+/// A repo-relative path rendered with `/` separators, for the CI-consumed
+/// machine formats (GitHub annotations, GitLab Code Quality, `JUnit`): a
+/// Windows `\` separator would otherwise break their repo-file mapping. Only
+/// the platform separator is rewritten -- on Unix `\` is a legal file-name
+/// character and is kept.
+pub(crate) fn slash_path(path: &std::path::Path) -> String {
+    normalize_separators(&path.to_string_lossy(), std::path::MAIN_SEPARATOR)
+}
+
+fn normalize_separators(s: &str, separator: char) -> String {
+    if separator == '/' {
+        s.to_string()
+    } else {
+        s.replace(separator, "/")
+    }
+}
+
+#[cfg(test)]
+mod path_tests {
+    use super::*;
+
+    #[test]
+    fn windows_separators_become_slashes() {
+        assert_eq!(normalize_separators("src\\a\\b.rs", '\\'), "src/a/b.rs");
+        // On a `/` platform a backslash is part of the file name.
+        assert_eq!(normalize_separators("odd\\name.rs", '/'), "odd\\name.rs");
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn slash_path_normalizes_on_windows() {
+        assert_eq!(
+            slash_path(std::path::Path::new("src\\a\\b.rs")),
+            "src/a/b.rs"
+        );
+    }
+}
+
 pub use agent::write_agent;
 pub use diff::write_fix_diff;
 pub use github::write_github;
 pub use gitlab::write_gitlab;
 pub use human::{wrap_message, write_fix_human, write_human};
-pub use json::{write_fix_json, write_json, write_json_with_baseline};
+pub use json::{write_fix_json, write_fix_json_with_mode, write_json, write_json_with_baseline};
 pub use junit::write_junit;
 pub use markdown::{write_fix_markdown, write_markdown};
-pub use sarif::{write_sarif, write_sarif_with_baseline, write_sarif_with_fingerprints};
+pub use sanitize::sanitize_terminal;
+pub use sarif::{
+    DEFAULT_CONFIG_URI, write_sarif, write_sarif_for_config, write_sarif_with_baseline,
+    write_sarif_with_fingerprints,
+};
 pub use style::{ColorChoice, GlyphSet, HumanOptions};
 
 /// Per-result baseline output, threaded into the SARIF and JSON emitters so
@@ -136,6 +178,20 @@ impl Format {
         w: &mut dyn Write,
         opts: HumanOptions,
     ) -> std::io::Result<()> {
+        self.write_fix_report(report, w, opts, false)
+    }
+
+    /// Like [`Format::write_fix_with_options`], for a run that may be a dry
+    /// run: the JSON report carries `dry_run` so a preview is
+    /// distinguishable from a real run. (The human and markdown renderers
+    /// already word dry-run outcomes as "would ...".)
+    pub fn write_fix_report(
+        self,
+        report: &FixReport,
+        w: &mut dyn Write,
+        opts: HumanOptions,
+        dry_run: bool,
+    ) -> std::io::Result<()> {
         match self {
             Self::Human
             | Self::Sarif
@@ -148,7 +204,7 @@ impl Format {
             // falls back to the human formatter so logs from
             // `alint fix --format=agent` still read sensibly.
             | Self::Agent => write_fix_human(report, w, opts),
-            Self::Json => write_fix_json(report, w),
+            Self::Json => write_fix_json_with_mode(report, dry_run, w),
             Self::Markdown => write_fix_markdown(report, w),
         }
     }
