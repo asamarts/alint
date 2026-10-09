@@ -60,14 +60,20 @@ points are explicit.
    `release.yml` `preflight` job runs the same gates remotely; this
    is the pre-push sanity gate.
 
-   Three recurrence guards bundled into `test` / `dep-floors`:
+   Recurrence guards bundled into `test` / `dep-floors` (plus the MSRV leg):
    - README-count claims (rule kinds, families, bundled rulesets,
      fix ops, output formats, subcommands) are asserted against
      the workspace truth by
      `crates/alint-e2e/tests/coverage_audit_readme_claims.rs`.
    - `[workspace.dependencies]` API-compat floors are asserted
      `<= workspace.package.version` by
-     `ci/scripts/check-workspace-dep-floors.sh`.
+     `ci/scripts/check-workspace-dep-floors.sh` (also run by ci.yml's
+     `MSRV` job and the `release.yml` preflight).
+   - The workspace compiles on the exact MSRV
+     (`[workspace.package].rust-version`) via `ci/scripts/msrv.sh`, run
+     by ci.yml's `MSRV` job and the `release.yml` preflight (so no crate
+     publishes advertising an MSRV it was not built on). Not part of
+     `preflight.sh`; run it locally when touching dependencies.
    - GitHub Action resolution is asserted for explicit inputs, exact tags,
      branches, local actions, and commit SHAs by
      `ci/scripts/test-action-version.sh`; release tag/workspace/baked-version

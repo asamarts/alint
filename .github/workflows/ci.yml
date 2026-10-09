@@ -132,7 +132,11 @@ jobs:
   # Cargo's MSRV-aware resolver can only protect this contract when every
   # dependency declares an accurate rust-version. Compile the full workspace
   # with the exact minimum so an undeclared dependency bump cannot make the
-  # documented `rust-version` silently untrue.
+  # documented `rust-version` silently untrue. The toolchain is DERIVED from
+  # Cargo.toml's [workspace.package].rust-version by msrv.sh (never
+  # hand-copied here; test-ci-pr-routing.sh rejects a literal pin). The same
+  # script runs in release.yml's preflight. This job also owns the other
+  # workspace-manifest contract, the [workspace.dependencies] API floors.
   msrv:
     name: MSRV
     needs: [changes, fmt]
@@ -142,13 +146,17 @@ jobs:
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - id: msrv
+        run: echo "toolchain=$(ci/scripts/msrv.sh --print)" >> "$GITHUB_OUTPUT"
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: 1.88.0
+          toolchain: ${{ steps.msrv.outputs.toolchain }}
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: ci-msrv
-      - run: cargo check --locked --workspace --all-targets
+      - run: ci/scripts/msrv.sh
+      - name: workspace dependency floors (<= workspace.package.version)
+        run: bash ci/scripts/check-workspace-dep-floors.sh
 
   clippy:
     name: Clippy

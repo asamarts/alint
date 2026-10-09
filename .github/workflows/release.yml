@@ -27,8 +27,11 @@ jobs:
   # change-gates jobs (needs.changes.outputs.*) to keep PRs fast,
   # but a release must verify the whole tree regardless of the diff.
   #
-  # Parity with ci.yml correctness jobs: fmt, clippy, test, build,
-  # docs, dogfood, examples, shell-tests, deny. deny.sh bootstraps
+  # Parity with ci.yml correctness jobs: fmt, msrv (+ dep-floors), clippy,
+  # test, build, docs, dogfood (+ demo-drift), examples, shell-tests, deny.
+  # The MSRV leg matters most here: every published crate advertises
+  # `rust-version` from [workspace.package], so it must actually compile on
+  # that toolchain before publish-crates runs. deny.sh bootstraps
   # cargo-deny on demand so the license / supply-chain gate works on
   # ubuntu-latest too. Deliberately NOT here:
   #   audit       — audit.sh is advisory-only by design (never fails
@@ -44,7 +47,7 @@ jobs:
   # homebrew, publish-crates) `needs:` this job; if it fails, no
   # artefacts are published.
   preflight:
-    name: preflight (fmt/clippy/test/build/docs/dogfood/examples/shell/deny)
+    name: preflight (fmt/msrv/clippy/test/build/docs/dogfood/examples/shell/deny)
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -89,12 +92,23 @@ jobs:
         run: bash ci/scripts/check-version-pins.sh --verify-action-tag
       - name: dogfood (alint check on its own repo)
         run: ci/scripts/dogfood.sh
+      - name: demo-drift (README demo GIF still tells the truth)
+        # dogfood.sh has just built target/release/alint; same pairing as
+        # ci.yml's Dogfood job.
+        run: ci/scripts/demo-drift.sh
       - name: examples-validate (every examples/*/.alint.yml)
         run: ci/scripts/examples-validate.sh
       - name: shell-tests (test-*.sh harnesses incl. homebrew golden)
         run: ci/scripts/shell-tests.sh
       - name: deny (licenses + bans + sources; advisories advisory)
         run: ci/scripts/deny.sh
+      - name: workspace dependency floors (<= workspace.package.version)
+        run: bash ci/scripts/check-workspace-dep-floors.sh
+      - name: msrv (cargo check on [workspace.package].rust-version)
+        # Last on purpose: msrv.sh installs the MSRV toolchain and checks with
+        # `cargo +<msrv>`, leaving the stable default untouched for the steps
+        # above. Gates build -> publish-crates via `needs: preflight`.
+        run: ci/scripts/msrv.sh
 
   build:
     name: build (${{ matrix.target }})
