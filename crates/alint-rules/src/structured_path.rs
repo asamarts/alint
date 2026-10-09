@@ -425,6 +425,41 @@ pub(crate) fn matches_baseline_key(path_src: &str, matches_regex_src: &str, m: &
     format!("{path_src}\u{0}=~ {matches_regex_src}\u{0}got {m}")
 }
 
+/// Deep equality for `equals:` with numbers compared BY VALUE: `1` equals `1.0`
+/// (and `1e2` equals `100`), recursively through arrays and objects. Plain
+/// `serde_json::Value` equality distinguishes an integer from a float, so
+/// `equals: 1` failed against a document's `1.0` -- and which one a document
+/// yields is a parser detail (TOML / YAML keep `1.0` a float, `hcl-rs`
+/// normalizes it to `1`). Value equality is the same in every format. Two
+/// integers compare exactly (no float rounding of large `i64` / `u64`); a float
+/// against anything compares as `f64`. No other coercion: `"1"` never equals `1`.
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => {
+            if let (Some(i), Some(j)) = (x.as_i64(), y.as_i64()) {
+                i == j
+            } else if let (Some(i), Some(j)) = (x.as_u64(), y.as_u64()) {
+                i == j
+            } else if x.is_f64() || y.is_f64() {
+                x.as_f64() == y.as_f64()
+            } else {
+                // One negative i64 and one u64 beyond i64::MAX: never equal.
+                false
+            }
+        }
+        (Value::Array(xs), Value::Array(ys)) => {
+            xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| values_equal(x, y))
+        }
+        (Value::Object(xs), Value::Object(ys)) => {
+            xs.len() == ys.len()
+                && xs
+                    .iter()
+                    .all(|(k, x)| ys.get(k).is_some_and(|y| values_equal(x, y)))
+        }
+        _ => a == b,
+    }
+}
+
 /// Return `Some(message)` if the match fails the op; `None` if it passes.
 fn check_match(m: &Value, op: &Op) -> Option<String> {
     match op {
@@ -432,7 +467,7 @@ fn check_match(m: &Value, op: &Op) -> Option<String> {
         // the per-match loop; a stray call is a pass.
         Op::Absent => None,
         Op::Equals(expected) => {
-            if m == expected {
+            if values_equal(m, expected) {
                 None
             } else {
                 Some(format!(
@@ -905,6 +940,49 @@ mod tests {
             tempdir_with_files(&[("package.json", br#"{"name":"demo","version":"1.0.0"}"#)]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty(), "matching value should pass: {v:?}");
+    }
+
+    #[test]
+    fn numeric_equals_compares_by_value_in_every_format() {
+        // Regression: `equals: 1` failed against a document `1.0` (and vice
+        // versa) because serde_json's `Value` equality distinguishes an integer
+        // from a float. Numbers now compare by value, recursively, in every
+        // format -- no string coercion, and a different value still fails.
+        let check = |kind: &str, file: &str, body: &str, equals: &str| -> usize {
+            let rule = crate::builtin_registry()
+                .build(&spec_yaml(&format!(
+                    "id: t\nkind: {kind}\npaths: \"{file}\"\npath: \"$.v\"\n\
+                     equals: {equals}\nlevel: error\n"
+                )))
+                .unwrap();
+            let (tmp, idx) = tempdir_with_files(&[(file, body.as_bytes())]);
+            rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().len()
+        };
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": 1.0}"#, "1"), 0);
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": 1}"#, "1.0"), 0);
+        assert_eq!(
+            check("json_path_equals", "a.json", r#"{"v": 1e2}"#, "100"),
+            0
+        );
+        assert_eq!(
+            check(
+                "json_path_equals",
+                "a.json",
+                r#"{"v": [1.0, {"b": 2}]}"#,
+                "[1, {b: 2.0}]"
+            ),
+            0
+        );
+        assert_eq!(check("yaml_path_equals", "a.yaml", "v: 1.0\n", "1"), 0);
+        assert_eq!(check("toml_path_equals", "a.toml", "v = 1.0\n", "1"), 0);
+        assert_eq!(check("hcl_path_equals", "a.hcl", "v = 1\n", "1.0"), 0);
+        // Different values (or a numeric string) still fail.
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": 1.5}"#, "1"), 1);
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": "1"}"#, "1"), 1);
+        assert_eq!(
+            check("json_path_equals", "a.json", r#"{"v": [1, 2]}"#, "[1]"),
+            1
+        );
     }
 
     #[test]
