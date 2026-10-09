@@ -386,6 +386,10 @@ Checks that reject tree shapes which work on one OS but break checkouts elsewher
 
 Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.
 
+<!-- alint:since=0.17.1 -->
+Directories count too: a file `Lib` beside a directory `lib/`, or directories `Docs/` + `docs/`, collide. A collision is reported once, at the shallowest colliding level, not again for every path beneath it.
+<!-- /alint:since -->
+
 ### `no_illegal_windows_names`
 
 **Categories:** Portable metadata, Naming
