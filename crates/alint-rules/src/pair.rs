@@ -133,7 +133,9 @@ fn normalize_rel(rel: &str) -> Option<PathBuf> {
     if parts.is_empty() {
         return None;
     }
-    Some(parts.iter().collect())
+    // Re-join with `/`, not the OS separator: messages show this path, and
+    // Windows `Path` equality already treats `/` and `\` alike for the lookup.
+    Some(PathBuf::from(parts.join("/")))
 }
 
 fn resolves_to_self(partner: &Path, primary: &Path) -> bool {

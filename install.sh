@@ -133,11 +133,11 @@ main() {
 
   if [[ "${VERSION}" == "latest" ]]; then
     echo "==> Resolving latest release tag"
-    # Fetch first so `set -o pipefail` does not trip on curl's SIGPIPE when
-    # awk exits early after the first match.
+    # Fetch first, then feed awk from a here-string rather than a pipe: awk
+    # exits after the first match, and with `set -o pipefail` any writer still
+    # pushing the (often >64 KiB) release JSON into the pipe dies of SIGPIPE.
     RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
-    VERSION=$(printf '%s\n' "${RELEASE_JSON}" \
-      | awk -F'"' '/"tag_name":/ {print $4; exit}')
+    VERSION=$(awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"${RELEASE_JSON}")
     if [[ -z "${VERSION}" ]]; then
       echo "error: could not resolve latest release tag from github api"
       echo "       try specifying ALINT_VERSION=v0.1.0 explicitly."
