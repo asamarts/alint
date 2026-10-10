@@ -96,7 +96,11 @@ impl PerFileRule for FileHeaderRule {
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Ok(vec![
                 Violation::new("file is not valid UTF-8; cannot match header")
-                    .with_path(std::sync::Arc::<Path>::from(path)),
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    // No fix resolves this: the fixer would prepend bytes, but the
+                    // file would still not be valid UTF-8 (and a UTF-16 / binary
+                    // file is refused outright), so `check` must not promise one.
+                    .with_not_fixable(),
             ]);
         };
         // Match the content AFTER a leading UTF-8 BOM: the BOM is an encoding
@@ -118,7 +122,10 @@ impl PerFileRule for FileHeaderRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(1, 1),
+                .with_location(1, 1)
+                // The prepend / insert-header fixers refuse a binary-looking file
+                // (e.g. valid UTF-8 with a NUL), so don't tag it fixable.
+                .with_not_fixable_if(crate::io::looks_binary(bytes)),
         ])
     }
 }
@@ -387,5 +394,36 @@ mod tests {
         let (tmp, idx) = tempdir_with_files(&[("src/main.rs", content.as_bytes())]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn non_utf8_and_binary_findings_are_not_fixable() {
+        // The prepend fixer refuses binary / UTF-16 content, and prepending to a
+        // non-UTF-8 file can never make it match, so `check` must not tag these
+        // findings fixable (fix would never converge).
+        let rule = build(&spec_yaml(
+            "id: t\nkind: file_header\npaths: \"**/*\"\npattern: \"^// ok\"\n\
+             level: error\nfix:\n  file_prepend:\n    content: \"// ok\\n\"\n",
+        ))
+        .unwrap();
+        let (tmp, idx) = tempdir_with_files(&[
+            ("utf16.txt", &[0xFF, 0xFE, 0x2D, 0x4E, 0x87, 0x65][..]),
+            ("nul.txt", b"code\0more\n"),
+            ("plain.txt", b"code\n"),
+        ]);
+        let mut v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        v.sort_by(|a, b| a.path.cmp(&b.path));
+        let flags: Vec<(String, bool)> = v
+            .iter()
+            .map(|x| (crate::slash(x.path.as_deref().unwrap()), x.not_fixable))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                ("nul.txt".to_string(), true),
+                ("plain.txt".to_string(), false),
+                ("utf16.txt".to_string(), true),
+            ]
+        );
     }
 }

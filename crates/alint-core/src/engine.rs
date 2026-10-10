@@ -1762,17 +1762,27 @@ impl Engine {
                      into the located branch before shipping such a fixer",
                     entry.rule.id()
                 );
+                // Violations the located fixer DECLINED (collected no edit for) --
+                // reported as skips so a standing violation is not silently
+                // dropped (see below).
+                let mut declined: Vec<FixItem> = Vec::new();
                 let mut by_file: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
                 for v in violations {
+                    // A finding `check` reports as not fixable is never handed to
+                    // the fixer: it is reported `unfixable`, exactly as `check`
+                    // promised (see `is_unfixable_finding`).
+                    if is_unfixable_finding(f, &v) {
+                        declined.push(FixItem {
+                            violation: v,
+                            status: FixStatus::Unfixable,
+                        });
+                        continue;
+                    }
                     let Some(key) = v.path.as_deref().map(Path::to_path_buf) else {
                         continue;
                     };
                     by_file.entry(key).or_default().push(v);
                 }
-                // Violations the located fixer DECLINED (collected no edit for) --
-                // reported as skips so a standing violation is not silently
-                // dropped (see below).
-                let mut declined: Vec<FixItem> = Vec::new();
                 for (file, file_violations) in by_file {
                     let abs = root.join(&file);
                     let bytes = match read_for_fix(&abs, &file, &fix_ctx) {
@@ -1873,6 +1883,11 @@ impl Engine {
             let mut items: Vec<FixItem> = Vec::with_capacity(violations.len());
             for v in violations {
                 let status = match fixer {
+                    // A finding `check` reports as not fixable (the rule marked it
+                    // `not_fixable`, or the fixer's `can_fix` declines it) is never
+                    // handed to the fixer: it stands, reported `unfixable` -- the
+                    // same verdict `check` gave it -- not a fixer "skip".
+                    Some(f) if is_unfixable_finding(f, &v) => FixStatus::Unfixable,
                     // `--changed` confinement (2b): this fix would write OUTSIDE the
                     // changed set (and the files this run created), so demote it to a
                     // Suggestion carrying the proposed edit -- whatever its tier --
@@ -2819,6 +2834,15 @@ fn run_entry(
 /// bare `fix` never delivers -- `--unsafe-fixes` is required, which `check` does
 /// not assume). The rule-level [`RuleResult::is_fixable`] ("the rule declares a
 /// fixer") is independent and still backs the machine formats.
+/// Whether `v` is a finding its rule's fixer can never resolve: the rule marked
+/// it [`Violation::not_fixable`], or the fixer's per-violation
+/// [`Fixer::can_fix`] declines it. `check` never tags such a finding fixable
+/// ([`mark_fixability`]) and `fix` reports it `unfixable` without invoking the
+/// fixer, so the two always agree.
+fn is_unfixable_finding(fixer: &dyn Fixer, v: &Violation) -> bool {
+    v.not_fixable || !fixer.can_fix(v)
+}
+
 fn mark_fixability(
     mut violations: Vec<Violation>,
     fixer: Option<&dyn Fixer>,
@@ -2832,7 +2856,7 @@ fn mark_fixability(
                 // An unreadable-file finding is never auto-fixable: the fixer would
                 // hit the same read error, so `check` must not promise a fix.
                 v.is_fixable = applies_by_default
-                    && f.can_fix(v)
+                    && !is_unfixable_finding(f, v)
                     && v.baseline_key.as_deref() != Some(crate::rule::UNREADABLE_FILE_KEY);
             }
             (violations, true)
@@ -3544,6 +3568,64 @@ mod tests {
             })],
             RuleRegistry::new(),
         )
+    }
+
+    #[derive(Debug)]
+    struct NotFixableRule {
+        fixer: GrowFixer,
+    }
+    impl Rule for NotFixableRule {
+        fn id(&self) -> &'static str {
+            "nf"
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            None
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            Ok(vec![Violation::new("stuck").with_not_fixable()])
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(&self.fixer)
+        }
+    }
+
+    #[test]
+    fn a_not_fixable_finding_is_unfixable_in_check_and_fix() {
+        // A finding the rule marks `not_fixable` (e.g. a UTF-16 BOM, a bidi
+        // control in a binary file) is not tagged fixable by `check`, and `fix`
+        // reports it `Unfixable` WITHOUT invoking the fixer (it used to call the
+        // fixer and list a "skipped"), so the two verdicts agree.
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("grow.txt");
+        std::fs::write(&target, b"").unwrap();
+        let engine = Engine::new(
+            vec![Box::new(NotFixableRule {
+                fixer: GrowFixer {
+                    target: target.clone(),
+                },
+            })],
+            RuleRegistry::new(),
+        );
+        let report = engine.run(tmp.path(), &idx(&["grow.txt"])).unwrap();
+        assert!(!report.results[0].violations[0].is_fixable);
+        let fix = engine
+            .fix(
+                tmp.path(),
+                &idx(&["grow.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Unsafe,
+            )
+            .unwrap();
+        assert_eq!(fix.unfixable(), 1);
+        assert_eq!(fix.skipped() + fix.applied(), 0);
+        assert!(
+            std::fs::read(&target).unwrap().is_empty(),
+            "the fixer must not run on a not-fixable finding"
+        );
     }
 
     fn grow_fix(target: &Path, stop_at: Option<usize>) -> FixReport {

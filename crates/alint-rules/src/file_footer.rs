@@ -108,7 +108,11 @@ impl PerFileRule for FileFooterRule {
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Ok(vec![
                 Violation::new("file is not valid UTF-8; cannot match footer")
-                    .with_path(std::sync::Arc::<Path>::from(path)),
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    // No fix resolves this: the fixer would append bytes, but the
+                    // file would still not be valid UTF-8 (and a UTF-16 / binary
+                    // file is refused outright), so `check` must not promise one.
+                    .with_not_fixable(),
             ]);
         };
         let footer = last_lines(text, self.lines);
@@ -122,7 +126,11 @@ impl PerFileRule for FileFooterRule {
             )
         });
         Ok(vec![
-            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                // The append fixer refuses a binary-looking file (e.g. valid
+                // UTF-8 with a NUL), so don't tag it fixable.
+                .with_not_fixable_if(crate::io::looks_binary(bytes)),
         ])
     }
 }

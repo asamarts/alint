@@ -126,7 +126,10 @@ pub enum FixStatus {
         summary: String,
         edit: Option<FixEdit>,
     },
-    /// The rule has no fixer; violation stands.
+    /// The rule has no fixer, or its fixer cannot resolve this particular
+    /// violation (it is marked [`crate::Violation::not_fixable`] or the fixer's
+    /// `can_fix` declines it -- the same verdict `check` reports); the violation
+    /// stands.
     Unfixable,
 }
 

@@ -108,7 +108,9 @@ impl PerFileRule for NoZeroWidthCharsRule {
                 // path so `fix --baseline` grandfathers the whole file and never
                 // strips a grandfathered char when a NEW one precedes it (audit
                 // F3, 2026-09-20). Matches no_trailing_whitespace.
-                .with_baseline_key(crate::no_bidi_controls::file_key(path, binary)),
+                .with_baseline_key(crate::slash(path))
+                // The strip fixer refuses binary content (see no_bidi_controls).
+                .with_not_fixable_if(binary),
         ])
     }
 }
@@ -261,11 +263,12 @@ mod binary_evasion_tests {
             1,
             "the ZWSP in a NUL-bearing file must be flagged"
         );
-        assert!(!FileStripZeroWidthFixer.can_fix(&vs[0]));
+        assert!(vs[0].not_fixable);
         let vs = rule
             .evaluate_file(&ctx, Path::new("a.rs"), "a\u{200B}b".as_bytes())
             .unwrap();
-        assert!(FileStripZeroWidthFixer.can_fix(&vs[0]));
+        assert!(!vs[0].not_fixable);
+        assert_eq!(vs[0].baseline_key.as_deref(), Some("a.rs"));
     }
 
     fn rule() -> NoZeroWidthCharsRule {
@@ -299,7 +302,8 @@ mod binary_evasion_tests {
         // still scanned, so the NUL cannot hide the char.
         let vs = eval("int x;\u{0}// \u{200B} evil\n".as_bytes());
         assert_eq!(vs.len(), 1);
-        assert!(!FileStripZeroWidthFixer.can_fix(&vs[0]));
+        assert!(vs[0].not_fixable);
+        assert_eq!(vs[0].baseline_key.as_deref(), Some("f"));
     }
 
     #[test]

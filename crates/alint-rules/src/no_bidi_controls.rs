@@ -91,8 +91,8 @@ impl PerFileRule for NoBidiControlsRule {
         // file (the Trojan-Source fail-open evasion); but a genuinely binary file
         // (PNG / font / JPEG: invalid UTF-8) is skipped, because a lossy decode
         // of random bytes manufactures controls out of noise (`D8 9C` is U+061C).
-        // A finding in a binary-looking file is reported but keyed so the strip
-        // fixer's `can_fix` declines it (the fixer refuses binary content).
+        // A finding in a binary-looking file is reported but marked not fixable
+        // (the strip fixer refuses binary content).
         //
         // A non-binary file with a stray invalid byte is still scanned (each
         // invalid run counts as one U+FFFD), so a lone `0xFF` cannot suppress
@@ -121,29 +121,18 @@ impl PerFileRule for NoBidiControlsRule {
                 // path so `fix --baseline` grandfathers the whole file and never
                 // strips a grandfathered control when a NEW one precedes it (audit
                 // F3, 2026-09-20). Matches no_trailing_whitespace.
-                .with_baseline_key(file_key(path, binary)),
+                .with_baseline_key(crate::slash(path))
+                // The strip fixer refuses binary content, so `check` must not
+                // promise a fix for a binary-looking file (a flag, not a key
+                // prefix, so the baseline fingerprint stays the path).
+                .with_not_fixable_if(binary),
         ])
     }
 }
 
-/// Baseline-key prefix marking a finding in a binary-looking (NUL-bearing) file.
-/// The detectors still report such a file (a NUL must not hide a Trojan-Source /
-/// zero-width char), but the byte-strip fixers refuse binary content, so their
-/// `can_fix` declines a key with this prefix. Shared with `no_zero_width_chars`.
-pub(crate) const BINARY_KEY_PREFIX: &str = "binary:";
-
-/// Default-message suffix for a finding in a binary-looking file.
+/// Default-message suffix for a finding in a binary-looking file. Shared with
+/// `no_zero_width_chars`.
 pub(crate) const BINARY_NOTE: &str = "; the file looks binary, so it is not auto-fixed";
-
-/// The whole-file baseline key: the path, prefixed with [`BINARY_KEY_PREFIX`]
-/// when the file looks binary.
-pub(crate) fn file_key(path: &Path, binary: bool) -> String {
-    if binary {
-        format!("{BINARY_KEY_PREFIX}{}", crate::slash(path))
-    } else {
-        crate::slash(path)
-    }
-}
 
 /// Scan for the first bidi control character and return
 /// (1-based line, 1-based column, codepoint as u32).
@@ -298,14 +287,15 @@ mod binary_evasion_tests {
             .unwrap();
         assert_eq!(vs.len(), 1, "the RLO in a NUL-bearing file must be flagged");
         assert!(
-            !FileStripBidiFixer.can_fix(&vs[0]),
+            vs[0].not_fixable,
             "check must not promise a fix the binary guard refuses"
         );
         // A text file's finding stays fixable.
         let vs = rule
             .evaluate_file(&ctx, Path::new("a.rs"), "a\u{202E}b".as_bytes())
             .unwrap();
-        assert!(FileStripBidiFixer.can_fix(&vs[0]));
+        assert!(!vs[0].not_fixable);
+        assert_eq!(vs[0].baseline_key.as_deref(), Some("a.rs"));
     }
 
     fn rule() -> NoBidiControlsRule {
@@ -339,7 +329,9 @@ mod binary_evasion_tests {
         // still scanned, so the NUL cannot hide the char.
         let vs = eval("int x;\u{0}// \u{202E} evil\n".as_bytes());
         assert_eq!(vs.len(), 1);
-        assert!(!FileStripBidiFixer.can_fix(&vs[0]));
+        assert!(vs[0].not_fixable);
+        // Fixability is a flag, never folded into the baseline fingerprint.
+        assert_eq!(vs[0].baseline_key.as_deref(), Some("f"));
     }
 
     #[test]
