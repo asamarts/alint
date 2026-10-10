@@ -26,10 +26,16 @@
 //! A differential property test pins the parity against the real parser.
 
 /// Real config/manifest YAML nests a handful of flow levels; anything past this
-/// is a bomb. Chosen far above any legitimate document yet far below the depth
-/// where libyaml starts to slow (~tens of thousands), so the margin is huge in
-/// both directions.
-pub const MAX_YAML_FLOW_DEPTH: usize = 1024;
+/// is a bomb. Pinned to `serde_yaml_ng`'s own recursion limit: its deserializer
+/// allows 128 nested collections (block or flow) and fails the 129th, so a
+/// document whose flow nesting alone exceeds 128 can never deserialize into a
+/// value anyway -- rejecting it here introduces no new false reject, only skips
+/// the libyaml tokenizing (whose per-token simple-key bookkeeping grows with the
+/// flow depth) that would end in that same error. (The one exception is a
+/// subtree serde IGNORES -- `IgnoredAny` skips events without a depth check --
+/// which no alint path relies on: configs are `deny_unknown_fields`, and every
+/// structured query builds the whole tree.)
+pub const MAX_YAML_FLOW_DEPTH: usize = 128;
 
 /// `true` when the YAML text's flow-collection nesting stays within
 /// [`MAX_YAML_FLOW_DEPTH`]. A cheap single-pass scan with libyaml's own lexical
@@ -54,50 +60,92 @@ fn flow_depth_within_limit_with(text: &str, max: usize) -> bool {
     within
 }
 
-/// Maximum number of nodes a YAML document may EXPAND to once aliases are replayed.
-/// `serde_yaml_ng` materializes each `*alias` by copying its anchor's whole subtree,
-/// and its OWN limits do not bound this: the recursion limit (128) only catches
-/// *nested* aliases (classic billion-laughs), and the alias-DEREF counter
-/// (`jumpcount > events.len()*100`) is never reached by a SINGLE anchor referenced
-/// many times -- N flat `*a` refs make only N derefs but N x (anchor size) node
-/// materializations. So a ~150 KB crafted file (one 1000-element anchor, 20-50k
-/// refs, or a `<<: *a` merge variant) expands to 20-50M nodes: hundreds of MB and
-/// seconds of CPU -- a crafted-small-file `DoS` reachable from any untrusted YAML (a
-/// `yaml_path_*` / `json_schema_passes` / `extract` target, or a config / `extends:`
-/// body). The heaviest LEGIT alias use measured is ~300K nodes (a big merge-key
-/// bundle), so 8M keeps a >25x margin while catching the multi-million-node bombs;
-/// it also caps a single alias-bearing file's tree at a few hundred MB.
-pub const MAX_YAML_EXPANSION_NODES: usize = 8_000_000;
+/// The fixed part of the alias-expansion budget: the estimated bytes a YAML
+/// document's tree may occupy once aliases are replayed (see
+/// [`YAML_NODE_COST`] for the estimate, [`expansion_budget`] for the whole
+/// budget).
+///
+/// `serde_yaml_ng` materializes each `*alias` by COPYING its anchor's whole
+/// subtree -- every node and every scalar string -- and its OWN limits do not
+/// bound this: the recursion limit (128) only catches *nested* aliases (classic
+/// billion-laughs), and the alias-DEREF counter (`jumpcount > events.len()*100`)
+/// is never reached by a SINGLE anchor referenced many times -- N flat `*a` refs
+/// make only N derefs but N x (anchor size) materializations. Measured (release,
+/// peak RSS, both the `serde_yaml_ng::Value` config path and the
+/// `serde_json::Value` structured-query path): an 18.5 KB `a: &a [{k: v} x 500]` +
+/// 5000 refs (7.5M nodes, ~235 B/node) took 1.6-1.8 GB and 2-3 s, and a 1 MB
+/// `a: &a "<1 MB>"` + 4000 refs (only 4000 nodes, but 4 GB of string copies)
+/// took 3.8 GB. So the budget is charged in BYTES, not nodes: a node-count limit
+/// is blind to a big anchored scalar. Reachable from any untrusted YAML (a
+/// `yaml_path_*` / `json_schema_passes` / `extract` target, or a config /
+/// `extends:` / `suggest` body).
+///
+/// The heaviest LEGIT alias use measured is ~4 MB by this estimate (`GitLab`'s own
+/// `rules.gitlab-ci.yml`: 1100 aliases, 14.6K expanded nodes, 400 KB of scalar
+/// copies; large docker-compose / Helm / GitHub-Actions files with anchors are far
+/// below that), so 256 MiB keeps a >60x margin while a bomb is cut off at roughly
+/// 256 MiB of tree.
+pub const MAX_YAML_EXPANSION_BYTES: usize = 256 * 1024 * 1024;
 
-/// Upper bound on [`MAX_YAML_EXPANSION_NODES`], enforced at compile time: set it
+/// Bytes charged per expanded node (sequence, mapping, scalar, tag) on top of
+/// its scalar text. An upper estimate of the per-node tree cost: measured ~235
+/// B/node for a map-heavy tree (each `{k: v}` is a map + key + value), ~70 B for
+/// a flat integer sequence.
+pub const YAML_NODE_COST: usize = 256;
+
+/// Budget bytes allowed per byte of input, on top of [`MAX_YAML_EXPANSION_BYTES`].
+/// A LARGE alias-bearing document is not an amplification attack just because
+/// its tree is big -- an alias-free document of the same size costs the same and
+/// is bounded only by the structured-parse byte cap. So the budget grows with
+/// the input at one node's cost per 16 input bytes (real YAML runs ~20-30 bytes
+/// per node), and only the AMPLIFIED part is capped by the fixed allowance.
+pub const YAML_EXPANSION_BYTES_PER_INPUT_BYTE: usize = YAML_NODE_COST / 16;
+
+/// Upper bounds on the budget constants, enforced at compile time: set them
 /// absurdly high (or `usize::MAX`) and the guard would never fire, silently
-/// re-opening the alias-bomb `DoS` while the small-budget mechanism test still passes.
+/// re-opening the alias-bomb `DoS` while the small-budget mechanism tests still
+/// pass. At the 32 MiB structured-parse cap the whole budget stays <= ~1.3 GB.
 const _: () = assert!(
-    MAX_YAML_EXPANSION_NODES <= 64_000_000,
-    "MAX_YAML_EXPANSION_NODES is too high to meaningfully bound alias expansion"
+    MAX_YAML_EXPANSION_BYTES <= 512 * 1024 * 1024
+        && YAML_EXPANSION_BYTES_PER_INPUT_BYTE <= 32
+        && YAML_NODE_COST >= 128,
+    "the YAML alias-expansion budget is too loose to meaningfully bound expansion"
 );
 
-/// `true` when the YAML text's ALIAS expansion stays within
-/// [`MAX_YAML_EXPANSION_NODES`]. Only a document that actually uses an alias
+/// The alias-expansion budget for a document of `len` input bytes: the fixed
+/// [`MAX_YAML_EXPANSION_BYTES`] amplification allowance plus a share
+/// proportional to the input (see [`YAML_EXPANSION_BYTES_PER_INPUT_BYTE`]),
+/// counted up to the structured-parse byte cap so padding a config body (which
+/// has no such cap) cannot buy more: the budget never exceeds ~768 MiB.
+#[must_use]
+pub fn expansion_budget(len: usize) -> usize {
+    let len = len.min(crate::structured_format::MAX_STRUCTURED_BYTES);
+    MAX_YAML_EXPANSION_BYTES + len * YAML_EXPANSION_BYTES_PER_INPUT_BYTE
+}
+
+/// `true` when the YAML text's ALIAS expansion stays within its
+/// [`expansion_budget`]. Only a document that actually uses an alias
 /// (`*name`) can amplify, so alias-free text short-circuits to `true` at zero cost
 /// (its node count is ~linear in bytes, already bounded by the read cap). For
 /// alias-bearing text a cheap DISCARD-ONLY pass drives `serde_yaml_ng`'s
 /// deserializer, which replays anchored events through the visitor -- so the
-/// expansion is counted and the pass bails once the budget is exceeded (measured: a
-/// 30M-node flat bomb aborts in ~0.3s, a tagged variant in ~1.3s, both bounded). It
-/// builds NO value, so
-/// it cannot change the real parse's output; the caller runs the real parse only
-/// after this returns `true`. A non-budget deserialize error (malformed YAML, or an
-/// unusual node the counter doesn't model) is ignored -- only a genuine budget
-/// overflow returns `false`, and everything else falls through to the real parse,
-/// which produces the proper error. This is fail-safe: a real bomb is ordinary
-/// scalars / sequences / maps (and tagged nodes, via `visit_enum`) and is counted.
+/// expansion is charged ([`YAML_NODE_COST`] per node plus every scalar's bytes,
+/// exactly the copies the real parse would make) and the pass bails once the
+/// budget is exceeded (measured, release: both reported bombs -- 7.5M map
+/// nodes, and 4000 copies of a 1 MB scalar -- are rejected in well under a
+/// second without allocating). It builds NO value, so it cannot change the real
+/// parse's output; the caller runs the real parse only after this returns
+/// `true`. A non-budget deserialize error (malformed YAML, or an unusual node the
+/// counter doesn't model) is ignored -- only a genuine budget overflow returns
+/// `false`, and everything else falls through to the real parse, which produces
+/// the proper error. This is fail-safe: a real bomb is ordinary scalars /
+/// sequences / maps (and tagged nodes, via `visit_enum`) and is counted.
 #[must_use]
 pub fn expansion_within_limit(text: &str) -> bool {
-    expansion_within_limit_with(text, MAX_YAML_EXPANSION_NODES)
+    expansion_within_limit_with(text, expansion_budget(text.len()))
 }
 
-/// [`expansion_within_limit`] with an explicit node budget, so tests can exercise
+/// [`expansion_within_limit`] with an explicit byte budget, so tests can exercise
 /// the counting + bail + alias-gate logic with a small budget (fast) instead of
 /// materializing millions of nodes at the production ceiling.
 fn expansion_within_limit_with(text: &str, max: usize) -> bool {
@@ -177,12 +225,17 @@ struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     fn new(text: &'a str) -> Self {
-        let b = text.as_bytes();
-        // libyaml's reader consumes a leading BOM before the scanner sees input.
-        let i = if b.starts_with(b"\xEF\xBB\xBF") { 3 } else { 0 };
+        // No BOM special-casing here: `serde_yaml_ng` sets the parser's encoding
+        // to UTF-8 explicitly, so libyaml's reader never runs its BOM detection
+        // and hands a leading BOM to the scanner. The scanner skips it in
+        // `scan_to_next_token` (at column 0, like any line start) with an
+        // ordinary `SKIP`, which ADVANCES the column: a `---` right after a BOM
+        // sits at column 1 and is not a document marker. Stripping the BOM up
+        // front left the lexer one column behind libyaml on line 1, which hid
+        // flow bombs and aliases behind a `\u{feff}---`.
         Self {
-            b,
-            i,
+            b: text.as_bytes(),
+            i: 0,
             line: 0,
             col: 0,
             flow: 0,
@@ -400,6 +453,8 @@ impl<'a> Lexer<'a> {
     /// one it errors and stops.)
     fn scan_to_next_token(&mut self) {
         loop {
+            // libyaml skips ONE BOM at column 0 as an ordinary character (the
+            // column advances to 1), so a second BOM starts a plain scalar.
             if self.col == 0 && self.b[self.i.min(self.b.len())..].starts_with(b"\xEF\xBB\xBF") {
                 self.advance();
             }
@@ -645,8 +700,9 @@ impl<'a> Lexer<'a> {
     }
 }
 
-/// A discard-only `serde` seed that counts every node it visits, decrementing a
-/// shared budget and flagging + erroring the instant it underflows. Used by
+/// A discard-only `serde` seed that charges every node it visits
+/// ([`YAML_NODE_COST`]) and every scalar's text (its length) against a shared
+/// byte budget, flagging + erroring the instant it underflows. Used by
 /// [`expansion_within_limit`] to bound YAML alias expansion without materializing a
 /// value. `Copy` (it holds only shared `Cell` refs), so it seeds child nodes freely.
 #[derive(Clone, Copy)]
@@ -655,16 +711,23 @@ struct NodeBudget<'a> {
     exceeded: &'a std::cell::Cell<bool>,
 }
 
-impl<'de> serde::de::DeserializeSeed<'de> for NodeBudget<'_> {
-    type Value = ();
-    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
-        let Some(n) = self.remaining.get().checked_sub(1) else {
+impl NodeBudget<'_> {
+    fn charge<E: serde::de::Error>(self, cost: usize) -> Result<(), E> {
+        let Some(n) = self.remaining.get().checked_sub(cost) else {
             self.exceeded.set(true);
-            return Err(serde::de::Error::custom(
-                "YAML alias expansion exceeds the maximum supported node count",
+            return Err(E::custom(
+                "YAML alias expansion exceeds the maximum supported size",
             ));
         };
         self.remaining.set(n);
+        Ok(())
+    }
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for NodeBudget<'_> {
+    type Value = ();
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
+        self.charge::<D::Error>(YAML_NODE_COST)?;
         d.deserialize_any(self)
     }
 }
@@ -695,7 +758,16 @@ impl<'de> serde::de::Visitor<'de> for NodeBudget<'_> {
     fn visit_newtype_struct<D: serde::Deserializer<'de>>(self, d: D) -> Result<(), D::Error> {
         serde::de::DeserializeSeed::deserialize(self, d)
     }
-    // Scalars are already counted (once) in `deserialize` above; just accept them.
+    // Every node is charged once in `deserialize` above; a string scalar (a value,
+    // a key, or a tag name) is additionally charged its length, since each alias
+    // replay copies it into the materialized tree (`visit_borrowed_str` /
+    // `visit_string` forward here). Fixed-size scalars cost no more.
+    fn visit_str<E: serde::de::Error>(self, v: &str) -> Result<(), E> {
+        self.charge(v.len())
+    }
+    fn visit_bytes<E: serde::de::Error>(self, v: &[u8]) -> Result<(), E> {
+        self.charge(v.len())
+    }
     fn visit_bool<E>(self, _: bool) -> Result<(), E> {
         Ok(())
     }
@@ -712,12 +784,6 @@ impl<'de> serde::de::Visitor<'de> for NodeBudget<'_> {
         Ok(())
     }
     fn visit_f64<E>(self, _: f64) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_str<E>(self, _: &str) -> Result<(), E> {
-        Ok(())
-    }
-    fn visit_bytes<E>(self, _: &[u8]) -> Result<(), E> {
         Ok(())
     }
     fn visit_none<E>(self) -> Result<(), E> {
@@ -753,6 +819,31 @@ mod tests {
         // Curly flow maps too.
         let bomb3 = format!("x: {}1{}", "{a: ".repeat(2000), "}".repeat(2000));
         assert!(!flow_depth_within_limit(&bomb3));
+    }
+
+    #[test]
+    fn flow_depth_limit_matches_serde_yaml_ngs_recursion_limit() {
+        // The ceiling sits exactly at serde_yaml_ng's recursion limit: the
+        // deepest flow document it can deserialize passes the guard and parses
+        // to the same value as without the guard, and one level deeper is a
+        // document serde_yaml_ng could never deserialize (so the guard adds no
+        // new false reject). A regression to a looser ceiling (1024 before) fails
+        // the second half.
+        let at = MAX_YAML_FLOW_DEPTH;
+        let ok = bomb(at);
+        assert!(flow_depth_within_limit(&ok));
+        let parsed = serde_yaml_ng::from_str::<serde_json::Value>(&ok).unwrap();
+        assert_eq!(crate::Format::Yaml.parse(&ok).unwrap(), parsed);
+        let over = bomb(at + 1);
+        assert!(serde_yaml_ng::from_str::<serde_json::Value>(&over).is_err());
+        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&over).is_err());
+        assert!(!flow_depth_within_limit(&over));
+        // Curly flow maps count the same way.
+        let maps = |n: usize| format!("{}1{}", "{a: ".repeat(n), "}".repeat(n));
+        assert!(serde_yaml_ng::from_str::<serde_json::Value>(&maps(at)).is_ok());
+        assert!(flow_depth_within_limit(&maps(at)));
+        assert!(serde_yaml_ng::from_str::<serde_json::Value>(&maps(at + 1)).is_err());
+        assert!(!flow_depth_within_limit(&maps(at + 1)));
     }
 
     #[test]
@@ -805,7 +896,7 @@ mod tests {
         let refs: String = (0..500).map(|_| "  - *a\n".to_string()).collect();
         let hidden = format!("desc: it's fine\nanchor: &a [{anchor}]\nrefs:\n{refs}");
         assert!(
-            !expansion_within_limit_with(&hidden, 10_000),
+            !expansion_within_limit_with(&hidden, 10_000 * YAML_NODE_COST),
             "alias bomb hidden behind a plain-scalar quote must still be rejected"
         );
     }
@@ -996,8 +1087,100 @@ mod tests {
         let anchor = "1,".repeat(1000);
         let refs = "*a,".repeat(50);
         let doc = format!("a: &a [{anchor}]\ns: |\n  \"\nb: [{refs}]\nc: \"\"\n");
-        assert!(!expansion_within_limit_with(&doc, 10_000));
+        assert!(!expansion_within_limit_with(&doc, 10_000 * YAML_NODE_COST));
     }
+
+    #[test]
+    fn leading_bom_does_not_desync_the_line_one_column() {
+        // Regression: the lexer stripped a leading BOM without advancing the
+        // column, but libyaml (UTF-8 encoding set explicitly by serde_yaml_ng)
+        // skips it as a column-0 character, so `\u{feff}---` is NOT a document
+        // marker to libyaml. The off-by-one hid everything after it inside a
+        // phantom single-quoted scalar: a 60 000-deep flow bomb passed the guard
+        // (7.7 s in libyaml), and an alias bomb skipped the expansion budget
+        // (3.5 GB). Reachable through config / `extends:` / `suggest` bodies,
+        // which are guarded on the raw text (`Format::parse` strips BOMs first).
+        let b = bomb(MAX_YAML_FLOW_DEPTH + 76);
+        for boms in ["\u{feff}", "\u{feff}\u{feff}"] {
+            let flow = format!("{boms}--- 'x: {b}\n'\n");
+            assert!(libyaml_sees_deep_nesting(&flow), "{boms:?}: real nesting");
+            assert!(
+                !flow_depth_within_limit(&flow),
+                "{boms:?}: hidden flow bomb"
+            );
+            let alias = format!("{boms}--- 'x: *undefined_zz\n'\n");
+            assert!(libyaml_sees_alias(&alias), "{boms:?}: real alias");
+            assert!(contains_alias(&alias), "{boms:?}: hidden alias");
+        }
+        // The reported alias-bomb shape, end to end.
+        let anchor = "1,".repeat(1000);
+        let refs = "*a,".repeat(50);
+        let doc = format!(
+            "\u{feff}--- 'k: {{a: &a [{anchor}], b: [{refs}], c: \"{{{{env.HOME}}}}\"}}\n'\n"
+        );
+        assert!(!expansion_within_limit_with(&doc, 10_000 * YAML_NODE_COST));
+        // A BOM before an ordinary document still scans like the document.
+        assert!(flow_depth_within_limit("\u{feff}---\na: [1, [2]]\n"));
+        assert!(!contains_alias("\u{feff}---\na: '*x'\n"));
+    }
+
+    /// The body of the differential parity property (see
+    /// [`scanner_never_misses_what_libyaml_sees`]), shared by its BOM variant.
+    fn check_parity(prefix: &str, sep: &str) -> Result<(), proptest::test_runner::TestCaseError> {
+        let deep = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(300));
+        let shallow = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(1));
+        if libyaml_bomb_causes_deep_nesting(&deep, &shallow) {
+            proptest::prop_assert!(
+                !flow_depth_within_limit_with(&deep, 200),
+                "scanner missed a real flow bomb: {deep:?}"
+            );
+        }
+        let alias = format!("{prefix}{sep}*undefined_zz\nc: \"\"\n");
+        if libyaml_sees_alias(&alias) {
+            proptest::prop_assert!(contains_alias(&alias), "missed alias: {alias:?}");
+        }
+        Ok(())
+    }
+
+    const PARITY_ALPHABET: &[&str] = &[
+        "\"",
+        "'",
+        "''",
+        "#",
+        " #",
+        " ",
+        "\n",
+        "  ",
+        "|",
+        ">",
+        "|2",
+        ">-",
+        "-",
+        "- ",
+        "?",
+        "? ",
+        ":",
+        ": ",
+        "k: ",
+        "x",
+        "[",
+        "]",
+        "{",
+        "}",
+        ",",
+        "&a ",
+        "!t ",
+        "*a ",
+        "\\",
+        "\t",
+        "\u{85}",
+        "\r\n",
+        "---\n",
+        "a#b",
+        "k: |\n  ",
+        "- k: |\n    ",
+    ];
+    const PARITY_SEPS: &[&str] = &["\n", " ", "\n  ", ", ", "\nb: "];
 
     proptest::proptest! {
         /// Differential parity against the real parser: whatever adversarial
@@ -1007,29 +1190,28 @@ mod tests {
         #[test]
         fn scanner_never_misses_what_libyaml_sees(
             prefix in proptest::collection::vec(
-                proptest::sample::select(vec![
-                    "\"", "'", "''", "#", " #", " ", "\n", "  ", "|", ">", "|2", ">-",
-                    "-", "- ", "?", "? ", ":", ": ", "k: ", "x", "[", "]", "{", "}",
-                    ",", "&a ", "!t ", "*a ", "\\", "\t", "\u{85}", "\r\n", "---\n",
-                    "a#b", "k: |\n  ", "- k: |\n    ",
-                ]),
+                proptest::sample::select(PARITY_ALPHABET), 0..14,
+            ),
+            sep in proptest::sample::select(PARITY_SEPS),
+        ) {
+            check_parity(&prefix.concat(), sep)?;
+        }
+
+        /// The same parity behind one or two leading BOMs, with the document
+        /// markers and quotes that a line-1 column desync turns into hiding
+        /// places (a BOM can also follow a line break, so the alphabet has it).
+        #[test]
+        fn scanner_never_misses_what_libyaml_sees_with_bom(
+            boms in 1usize..3,
+            prefix in proptest::collection::vec(
+                proptest::sample::select(
+                    [PARITY_ALPHABET, &["---", "--- ", "--- '", "...", "\u{feff}", "%"]].concat()
+                ),
                 0..14,
             ),
-            sep in proptest::sample::select(vec!["\n", " ", "\n  ", ", ", "\nb: "]),
+            sep in proptest::sample::select(PARITY_SEPS),
         ) {
-            let prefix = prefix.concat();
-            let deep = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(300));
-            let shallow = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(1));
-            if libyaml_bomb_causes_deep_nesting(&deep, &shallow) {
-                proptest::prop_assert!(
-                    !flow_depth_within_limit_with(&deep, 200),
-                    "scanner missed a real flow bomb: {deep:?}"
-                );
-            }
-            let alias = format!("{prefix}{sep}*undefined_zz\nc: \"\"\n");
-            if libyaml_sees_alias(&alias) {
-                proptest::prop_assert!(contains_alias(&alias), "missed alias: {alias:?}");
-            }
+            check_parity(&format!("{}{}", "\u{feff}".repeat(boms), prefix.concat()), sep)?;
         }
     }
 
@@ -1043,7 +1225,7 @@ mod tests {
         let refs: String = (0..500).map(|_| "  - *a\n".to_string()).collect();
         let bomb = format!("anchor: &a [{anchor}]\nrefs:\n{refs}");
         assert!(
-            !expansion_within_limit_with(&bomb, 10_000),
+            !expansion_within_limit_with(&bomb, 10_000 * YAML_NODE_COST),
             "single-level alias bomb must be rejected"
         );
         // Merge-key (`<<: *a`) is the same materialization path -> also rejected.
@@ -1052,7 +1234,7 @@ mod tests {
             "anchor: &a {{a: 0, b: 0, c: 0, d: 0, e: 0, f: 0, g: 0, h: 0, i: 0, j: 0}}\nrefs:\n{merge}"
         );
         assert!(
-            !expansion_within_limit_with(&merge_bomb, 1_000),
+            !expansion_within_limit_with(&merge_bomb, 1_000 * YAML_NODE_COST),
             "merge-key alias bomb must be rejected"
         );
         // Legit DRY alias use stays well under budget.
@@ -1061,12 +1243,104 @@ mod tests {
             dry.push_str("  - <<: *d\n    n: 1\n");
         }
         assert!(
-            expansion_within_limit_with(&dry, 10_000),
+            expansion_within_limit_with(&dry, 10_000 * YAML_NODE_COST),
             "legit DRY alias bundle must pass"
         );
         // Alias-free text short-circuits (never even parses here) -> always within.
         assert!(expansion_within_limit_with(&"k: v\n".repeat(100_000), 10));
         // A quoted glob is not an alias -> short-circuits, passes.
         assert!(expansion_within_limit_with("paths:\n  - \"**/*.rs\"\n", 5));
+    }
+
+    #[test]
+    fn alias_expansion_budget_is_charged_in_bytes() {
+        // Regression: the budget counted NODES, so one big anchored scalar
+        // replayed N times cost N, not N x its size. A 1 MB scalar x 4000 refs
+        // (4000 nodes) passed and the real parse copied 4 GB (3.8 GB peak RSS) on
+        // both the Value config path and the structured-query path. Production
+        // budget, the reported shape (scaled to 3000 refs, still 3 GB of copies).
+        let big = format!(
+            "a: &a \"{}\"\nb: [{}]\n",
+            "x".repeat(1_000_000),
+            "*a,".repeat(3000)
+        );
+        assert!(!expansion_within_limit(&big));
+        // The same scalar replayed a handful of times is fine.
+        let few = format!("a: &a \"{}\"\nb: [*a, *a, *a]\n", "x".repeat(1_000_000));
+        assert!(expansion_within_limit(&few));
+        // Mechanism, small budget: keys and tag names are charged too.
+        let s = "y".repeat(1000);
+        let key = format!("a: &a {{\"{s}\": 1}}\nb: [{}]\n", "*a,".repeat(200));
+        assert!(!expansion_within_limit_with(&key, 300_000));
+        let tag = format!("a: &a !{s} 1\nb: [{}]\n", "*a,".repeat(200));
+        assert!(!expansion_within_limit_with(&tag, 300_000));
+    }
+
+    #[test]
+    fn map_heavy_alias_bomb_is_rejected_at_the_production_budget() {
+        // Regression: 8M nodes was too loose for map-heavy content (~235 B/node):
+        // an 18.5 KB `[{k: v} x 500]` anchor x 5000 refs passed and parsed for
+        // 4.9 s / 1.76 GB. The byte budget cuts it off at ~1M nodes.
+        let doc = format!(
+            "a: &a [{}]\nb: [{}]\n",
+            "{k: v},".repeat(500),
+            "*a,".repeat(5000)
+        );
+        assert!(!expansion_within_limit(&doc));
+    }
+
+    #[test]
+    fn realistic_anchor_heavy_yaml_passes_with_a_wide_margin() {
+        // The other half: real alias use must keep a big margin under the budget.
+        // Shaped after the heaviest real file measured (GitLab's
+        // `rules.gitlab-ci.yml`: ~1100 aliases into rule lists, ~4 MB by the
+        // budget's estimate) plus docker-compose `x-` anchors with `<<:` merges:
+        // 65K expanded nodes + 1.3 MB of scalar copies (~18 MB estimated, 12 MB
+        // real peak RSS), ~4.5x that file -- and it must pass a budget 10x
+        // TIGHTER than production.
+        let mut doc = String::from("x-common: &common\n  restart: unless-stopped\n");
+        doc.push_str("  environment: &env\n");
+        doc.extend(
+            (0..40).map(|i| format!("    VAR_{i}: \"value-{i}-with-a-realistic-length\"\n")),
+        );
+        doc.push_str("  logging: {driver: json-file, options: {max-size: 10m}}\n");
+        doc.push_str(".patterns:\n  code: &code\n");
+        doc.extend((0..5).map(|p| format!("    - \"{{app,lib,ee/app,ee/lib}}/**/*-{p}.rb\"\n")));
+        doc.push_str(".rules:\n");
+        for r in 0..300 {
+            doc.push_str("  rules-");
+            doc.push_str(&r.to_string());
+            doc.push_str(": &rules-");
+            doc.push_str(&r.to_string());
+            doc.push('\n');
+            doc.extend((0..3).map(|k| {
+                format!(
+                    "    - if: '$CI_MERGE_REQUEST_LABELS =~ /pipeline:run-{r}-{k}/ && \
+                     $CI_PIPELINE_SOURCE == \"merge_request_event\"'\n      \
+                     changes: *code\n      when: on_success\n"
+                )
+            }));
+        }
+        doc.push_str("services:\n");
+        doc.extend((0..60).map(|s| {
+            format!(
+                "  svc-{s}:\n    <<: *common\n    image: \"registry.example.com/svc-{s}:1.2.3\"\n    \
+                 environment:\n      <<: *env\n      SVC: \"{s}\"\n"
+            )
+        }));
+        doc.push_str("jobs:\n");
+        doc.extend((0..1000).map(|j| {
+            format!(
+                "  job-{j}:\n    script: [\"make test-{j}\"]\n    rules: *rules-{}\n",
+                j % 300
+            )
+        }));
+        assert!(contains_alias(&doc));
+        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&doc).is_ok());
+        assert!(expansion_within_limit_with(
+            &doc,
+            MAX_YAML_EXPANSION_BYTES / 10
+        ));
+        assert!(expansion_within_limit(&doc));
     }
 }

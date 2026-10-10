@@ -355,6 +355,51 @@ fn deeply_nested_flow_config_is_rejected_before_libyaml_parses_it() {
 }
 
 #[test]
+fn bom_prefixed_config_bombs_are_rejected_before_libyaml_parses_them() {
+    // Regression: the guards scan the RAW config text, and a leading BOM put
+    // their lexer one column behind libyaml on line 1, so `\u{feff}--- '...`
+    // hid a flow bomb (7.7 s) or an alias bomb (3.5 GB) inside a phantom
+    // single-quoted scalar. Both reported repros, through the real loader.
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    let n = 60_000;
+    let flow = format!("\u{feff}--- 'x: {}1{}\n'\n", "[".repeat(n), "]".repeat(n));
+    std::fs::write(&cfg, flow).unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("flow nesting"), "BOM flow bomb; got: {err}");
+    let alias = format!(
+        "\u{feff}--- 'k: {{a: &a [{}], b: [{}], c: \"{{{{env.HOME}}}}\"}}\n'\n",
+        "1,".repeat(1000),
+        "*a,".repeat(50_000)
+    );
+    std::fs::write(&cfg, &alias).unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(
+        err.contains("alias expansion"),
+        "BOM alias bomb; got: {err}"
+    );
+    let err = crate::parse(&alias).unwrap_err().to_string();
+    assert!(
+        err.contains("alias expansion"),
+        "BOM alias bomb; got: {err}"
+    );
+}
+
+#[test]
+fn big_scalar_alias_bomb_config_is_rejected_before_libyaml_parses_it() {
+    // Regression: the alias budget counted nodes, so a 1 MB anchored scalar
+    // replayed 4000 times (4000 nodes, 4 GB of string copies into the
+    // `serde_yaml_ng::Value` the loader builds) passed the guard.
+    let body = format!(
+        "x: &a \"{}\"\ny: [{}]\n",
+        "x".repeat(1_000_000),
+        "*a,".repeat(4000)
+    );
+    let err = crate::parse(&body).unwrap_err().to_string();
+    assert!(err.contains("alias expansion"), "got: {err}");
+}
+
+#[test]
 fn local_extends_out_of_root_allowed_with_top_level_flag() {
     // M2: the same blanket `allow_out_of_root: true` that lifts per-rule
     // read confinement also lifts the local-extends boundary — for users
