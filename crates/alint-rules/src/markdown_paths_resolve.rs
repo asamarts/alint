@@ -164,7 +164,12 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
         // them on the content after the markers. A fence left open when its
         // blockquote ends closes with it (CommonMark: a fenced block never
         // lazily continues), so the rest of the file is still scanned.
-        let (depth, content) = strip_blockquote_markers(line);
+        //
+        // Inside an open fence only the markers of the fence's OWN container are
+        // structure: a `>` beyond that depth is fence content (a quoted line in a
+        // code sample), so `> ```` inside a top-level fence must not close it.
+        let max_depth = if in_fenced { fence_depth } else { usize::MAX };
+        let (depth, content) = strip_blockquote_markers(line, max_depth);
         if in_fenced && depth < fence_depth {
             in_fenced = false;
             fence_marker = None;
@@ -247,12 +252,13 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
     out
 }
 
-/// Strip leading blockquote markers (`>` after at most 3 spaces, plus one
-/// optional following space), returning the nesting depth and the content.
-fn strip_blockquote_markers(line: &str) -> (usize, &str) {
+/// Strip up to `max_depth` leading blockquote markers (`>` after at most 3
+/// spaces, plus one optional following space), returning the nesting depth
+/// stripped and the content.
+fn strip_blockquote_markers(line: &str, max_depth: usize) -> (usize, &str) {
     let mut depth = 0;
     let mut rest = line;
-    loop {
+    while depth < max_depth {
         let after_indent = rest.trim_start_matches(' ');
         if rest.len() - after_indent.len() > 3 {
             break;
@@ -569,6 +575,27 @@ mod tests {
         // A fence left open when its blockquote ends closes with it (CommonMark),
         // so the rest of the file is still scanned.
         let md = "> ```\n> `src/sample.ts`\n\nplain `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+    }
+
+    #[test]
+    fn a_quoted_fence_line_inside_a_top_level_fence_does_not_close_it() {
+        // FP regression: blockquote markers were stripped even inside an open
+        // fence, so a `> ```` sample line closed a top-level fence and the rest
+        // of the code sample was scanned as prose.
+        let pf = prefixes(&["src/"]);
+        let md = "```md\n> ```\n`src/sample.ts`\n```\nafter `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+        // A fence inside a blockquote still closes on its own quoted fence line.
+        let md = "> ```\n> > ```\n> `src/sample.ts`\n> ```\n> `src/real.ts`\n";
         let tokens: Vec<_> = scan_markdown_paths(md, &pf)
             .into_iter()
             .map(|c| c.token)
