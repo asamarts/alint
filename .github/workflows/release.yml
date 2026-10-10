@@ -232,6 +232,16 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # Rollback guard: a backport (v0.16.2 after v0.17.0) or a re-run of an old
+      # tag must not move the floating pointers backwards. Decided once, here,
+      # from every published tag; the GitHub "Latest" badge and the major tag
+      # below only move when this tag is the highest release overall.
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
+
       - name: download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
         with:
@@ -301,6 +311,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+          # "Latest" drives install.sh's and the Action's default version, so a
+          # backport must not take it (rollback guard, see `pointers`).
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         shell: bash
         run: |
           set -euo pipefail
@@ -316,10 +329,13 @@ jobs:
             echo "::notice::Release ${TAG} already exists (job re-run); refreshing its assets with --clobber"
             gh release upload "$TAG" --repo "$REPO" --clobber "${assets[@]}"
           else
+            latest=false
+            if [[ "$HIGHEST_OVERALL" == "true" ]]; then latest=true; fi
             gh release create "$TAG" \
               --repo "$REPO" \
               --title "alint $TAG" \
               --generate-notes \
+              --latest="$latest" \
               "${assets[@]}"
           fi
           expected="$(printf '%s\n' "${assets[@]}" | sort)"
@@ -387,6 +403,7 @@ jobs:
       - name: move the major tag (e.g. v0) to this release
         env:
           GH_TOKEN: ${{ github.token }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         run: |
           set -euo pipefail
           # Consumers pin `asamarts/alint@v<major>` (e.g. @v0) to always track the
@@ -396,6 +413,11 @@ jobs:
           # with GITHUB_TOKEN, so it does NOT re-trigger this workflow
           # (anti-recursion); the `v*.*.*` filter above also excludes bare major tags.
           MAJOR="${GITHUB_REF_NAME%%.*}"   # v0.14.1 -> v0
+          # Rollback guard: only the highest release overall moves the pointer.
+          if [[ "$HIGHEST_OVERALL" != "true" ]]; then
+            echo "::notice::${GITHUB_REF_NAME} is not the highest release (backport or old-tag re-run); leaving ${MAJOR} where it is."
+            exit 0
+          fi
           echo "Moving major tag ${MAJOR} -> ${GITHUB_SHA} (from ${GITHUB_REF_NAME})"
           git tag -f "$MAJOR" "$GITHUB_SHA"
           git push -f origin "refs/tags/${MAJOR}"
@@ -467,12 +489,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
+
       - name: derive image tags
         id: tags
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
           OWNER: ${{ github.repository_owner }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
+          HIGHEST_IN_MINOR: ${{ steps.pointers.outputs.highest_in_minor }}
         run: |
           set -euo pipefail
           # Lowercase the owner for the image reference (OCI requires
@@ -482,12 +512,25 @@ jobs:
           image="ghcr.io/${owner_lc}/alint"
           # Strip the leading `v` for semver-style tags: v0.4.7 →
           # 0.4.7 + 0.4 + latest. Keep the v-prefixed tag too for
-          # users who pin to the exact git tag.
+          # users who pin to the exact git tag. The exact-version tags are
+          # immutable; the floating :X.Y and :latest move only when this is
+          # the highest release in its minor line / overall (rollback guard).
           ver="${TAG#v}"
           minor="${ver%.*}"
+          tags="${image}:${TAG},${image}:${ver}"
+          if [[ "$HIGHEST_IN_MINOR" == "true" ]]; then
+            tags="${tags},${image}:${minor}"
+          else
+            echo "::notice::${TAG} is not the highest ${minor}.x release; not moving :${minor}."
+          fi
+          if [[ "$HIGHEST_OVERALL" == "true" ]]; then
+            tags="${tags},${image}:latest"
+          else
+            echo "::notice::${TAG} is not the highest release; not moving :latest."
+          fi
           {
             echo "image=${image}"
-            echo "tags=${image}:${TAG},${image}:${ver},${image}:${minor},${image}:latest"
+            echo "tags=${tags}"
           } >> "$GITHUB_OUTPUT"
 
       - name: build + push multi-arch image
@@ -590,6 +633,14 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: use an OIDC-capable npm (Trusted Publishing needs npm >= 11.5.1; pin the latest 11.x)
         run: npm install -g npm@11.19.0   # not 12.x: it may drop Node 22 support
+      # The version itself is immutable, but npm's `latest` dist-tag is a moving
+      # pointer (and npm refuses to implicitly move it below the current one), so
+      # a backport publishes under a per-minor dist-tag instead (rollback guard).
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
       - name: stamp package version from tag + publish
         env:
           # Tokenless publish via npm Trusted Publishing (OIDC): no NPM_TOKEN, so
@@ -602,6 +653,7 @@ jobs:
           # build-provenance. The optionalDependencies migration (ADR-0015 / P2) will
           # ship native bytes so the same provenance covers real payload.
           TAG: ${{ github.ref_name }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         shell: bash
         run: |
           set -euo pipefail
@@ -626,9 +678,16 @@ jobs:
             echo "::notice::@asamarts/alint@${ver} is already on npm; skipping publish (re-run)."
             exit 0
           fi
+          # Only the highest release moves the `latest` dist-tag; a backport
+          # lands on `release-<major>.<minor>` (rollback guard).
+          dist_tag=latest
+          if [[ "$HIGHEST_OVERALL" != "true" ]]; then
+            dist_tag="release-${ver%.*}"
+            echo "::notice::${TAG} is not the highest release; publishing under dist-tag ${dist_tag}, leaving 'latest' alone."
+          fi
           # --provenance rides the OIDC id-token; with Trusted Publishing npm also
           # generates provenance automatically, so this is explicit-and-belt.
-          npm publish --access public --provenance
+          npm publish --access public --provenance --tag "$dist_tag"
 
   publish-pypi:
     name: publish alint to PyPI
@@ -702,6 +761,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # The tap serves ONE formula (the latest); a backport or an old-tag re-run
+      # must not overwrite it with an older version (rollback guard).
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
+
       - name: download SHA256SUMS from this release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -747,8 +814,13 @@ jobs:
       - name: commit + push
         env:
           TAG: ${{ github.ref_name }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         run: |
           set -euo pipefail
+          if [[ "$HIGHEST_OVERALL" != "true" ]]; then
+            echo "::notice::${TAG} is not the highest release (backport or old-tag re-run); leaving the Homebrew formula alone."
+            exit 0
+          fi
           cd tap
           git config user.name "alint release bot"
           git config user.email "asamarts@alint.org"

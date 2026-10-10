@@ -86,7 +86,7 @@ for f in install.sh SHA256SUMS SHA256SUMS.cosign.bundle THIRD-PARTY-LICENSES.htm
          alint-v1.2.3-x86_64-unknown-linux-musl.tar.gz alint-v1.2.3-x86_64-unknown-linux-musl.tar.gz.sha256; do
   : > "$rel/release-artifacts/$f"
 done
-REL_ENV=(TAG=v1.2.3 REPO=o/r GH_ASSET_DIR="$rel/release-artifacts")
+REL_ENV=(TAG=v1.2.3 REPO=o/r GH_ASSET_DIR="$rel/release-artifacts" HIGHEST_OVERALL=true)
 run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=0
 expect "release: first run creates the Release" 0 '^gh release create v1\.2\.3 ' '^gh release upload'
 run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=1
@@ -99,11 +99,11 @@ expect "release: a drifted asset set fails the step" nonzero '' ''
 NPM_STEP='stamp package version from tag + publish'
 mkdir -p "$sandbox/npmw/npm"
 echo '{"name":"@asamarts/alint","version":"0.0.0"}' > "$sandbox/npmw/npm/package.json"
-run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 NPM_VIEW_OUT=1.2.3
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=1.2.3
 expect "npm: already-published version is skipped (exit 0, no publish)" 0 '^npm view @asamarts/alint@1\.2\.3 version' '^npm publish'
-run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 NPM_VIEW_OUT=
-expect "npm: unpublished version is published" 0 '^npm publish --access public --provenance$' ''
-run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 NPM_VIEW_OUT=1.2.2
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=
+expect "npm: unpublished version is published" 0 '^npm publish --access public --provenance --tag latest$' ''
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=1.2.2
 expect "npm: an older registry version does not suppress the publish" 0 '^npm publish ' ''
 
 # ── 3. VS Code / Open VSX: --skip-duplicate is a real argument ────────
@@ -128,9 +128,9 @@ expect "jetbrains: a feed lookup failure falls through to the publish" 0 '^gradl
 
 # ── 5. Homebrew: an unchanged formula is a no-op, not a push ──────────
 mkdir -p "$sandbox/hb/tap"
-run_step homebrew 'commit + push' "$sandbox/hb" TAG=v1.2.3 GIT_DIFF_RC=0
+run_step homebrew 'commit + push' "$sandbox/hb" TAG=v1.2.3 HIGHEST_OVERALL=true GIT_DIFF_RC=0
 expect "homebrew: unchanged formula pushes nothing" 0 '^git diff --cached --quiet' '^git (commit|push)'
-run_step homebrew 'commit + push' "$sandbox/hb" TAG=v1.2.3 GIT_DIFF_RC=1
+run_step homebrew 'commit + push' "$sandbox/hb" TAG=v1.2.3 HIGHEST_OVERALL=true GIT_DIFF_RC=1
 expect "homebrew: changed formula is committed and pushed" 0 '^git push origin main$' ''
 
 # ── Non-run guards (plain config / helper script) ─────────────────────

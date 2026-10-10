@@ -261,6 +261,45 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   `gh run rerun <id> --failed`; the publish script is idempotent, so already-published
   crates are skipped.
 
+## Backport releases and re-running an old tag
+
+`release.yml` publishes two kinds of things. **Immutable** publishes (crates.io,
+PyPI, the npm version itself, the GitHub Release and its assets, Docker
+`:vX.Y.Z` / `:X.Y.Z`) are always safe to (re-)run for any tag. **Floating
+pointers** are not: the major tag (`v0`), the GitHub "Latest" release (which
+`install.sh` and the Action resolve by default), Docker `:latest` and `:X.Y`, the
+Homebrew formula (the tap serves one version) and npm's `latest` dist-tag.
+
+Every step that moves a floating pointer is gated by
+`ci/scripts/release-pointer-guard.sh`, which compares the tag against every
+published `vX.Y.Z` tag (pre-releases and the `v0` pointer are ignored; a
+pre-release tag never moves anything):
+
+| Pointer | Moves only when the tag is ... |
+|---|---|
+| `v0` major tag, GitHub "Latest", Docker `:latest`, Homebrew formula, npm `latest` | the highest release overall (equal counts, so re-running the newest release is fine) |
+| Docker `:X.Y` | the highest release in its `X.Y` line |
+
+Otherwise the step logs a `::notice::` and leaves the pointer where it is (npm
+publishes the backport under a `release-X.Y` dist-tag instead of `latest`).
+`ci/scripts/test-release-pointer-guard.sh` pins the comparison and that each of
+those steps honours it.
+
+So, to ship a **backport** (say `v0.16.2` after `v0.17.0`): branch from the
+`v0.16.x` tag, cherry-pick the fix, bump with `ci/scripts/bump-version.sh`, and
+push the `v0.16.2` tag as usual. Every channel publishes `0.16.2`; `v0`,
+"Latest", `:latest`, Homebrew and npm `latest` stay on `v0.17.0`, and `:0.16`
+moves to `0.16.2`. Users on the newest line are unaffected; a `0.16` user pins
+`0.16.2` explicitly (`ALINT_VERSION=v0.16.2`, `@asamarts/alint@0.16.2`,
+`ghcr.io/asamarts/alint:0.16`).
+
+**Re-running an old tag's job** (`gh run rerun <id> --failed` on, say, the
+`v0.16.1` run after `v0.17.0` shipped) is likewise safe: the immutable publishes
+are idempotent (see above) and the floating pointers are skipped, so nothing
+moves backwards. To deliberately move a pointer to an older release (for
+example, after yanking the newest one), do it by hand, not by re-running a
+release job.
+
 ## Editor extensions / IDE plugins
 
 The six editor integrations live under `editors/`. Two distribution
