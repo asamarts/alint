@@ -13,7 +13,7 @@ crate-type = ["cdylib"]
 # bumps the wasm ABI). The editors CI job compile-checks this pin via
 # `cargo build --target wasm32-wasip1`; re-confirm it matches the
 # registry's toolchain before publishing.
-zed_extension_api = "0.6.0"
+zed_extension_api = "0.7.0"
 
 # Standalone workspace so the parent alint Cargo workspace doesn't try to
 # absorb this wasm cdylib crate (different target, separate Cargo.lock).
