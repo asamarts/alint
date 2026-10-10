@@ -3345,3 +3345,25 @@ fn untrusted_remote_when_cannot_read_the_environment() {
     let remote = "version: 1\nrules:\n  - id: r\n    extends_template: ci_only\n";
     assert!(try_load_extending(remote, top).is_ok());
 }
+
+#[test]
+fn untrusted_remote_cannot_declare_ignore() {
+    // Audit R2: a remote `ignore: ["src/**"]` silently removed files from every
+    // rule, the user's own included.
+    let remote = "version: 1\nignore: [\"src/**\"]\nrules: []\n";
+    let err = try_load_extending(remote, "rules: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`ignore:` is not allowed from an untrusted extends source"),
+        "{err}"
+    );
+    assert!(err.contains("example.invalid"), "{err}");
+
+    // An allowlisted remote, and a local `extends:`, still contribute it.
+    let trusted = "trusted_extends: [\"https://example.invalid/remote.yml\"]\nrules: []\n";
+    let cfg = try_load_extending(remote, trusted).unwrap();
+    assert_eq!(cfg.ignore, vec!["src/**".to_string()]);
+    let cfg = load_local_extends(remote).unwrap();
+    assert_eq!(cfg.ignore, vec!["src/**".to_string()]);
+}

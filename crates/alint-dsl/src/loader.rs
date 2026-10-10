@@ -291,6 +291,8 @@ fn cap_untrusted_remote(parent: &mut RawConfig, url: &str) -> Result<()> {
     // from a template at finalize (hence the provenance mark).
     crate::reject_env_reads_in_when(&parent.rules, &parent.templates, url)?;
     crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::UntrustedRemote, url);
+    // It may not hide files from every rule (yours included) with `ignore:`.
+    crate::reject_untrusted_ignore_in(&parent.ignore, url)?;
     // W2 content-fixer trust (auto-fix.md 5.5): an untrusted remote may PROPOSE a
     // content edit but never auto-write one -- demote its content-injecting fixers
     // to `suggestion` before the merge. Local / nested targets (the user's own

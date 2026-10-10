@@ -1575,6 +1575,23 @@ pub fn reject_baseline_in(baseline: &Option<std::path::PathBuf>, source: &str) -
     Ok(())
 }
 
+/// Reject a top-level `ignore:` from an untrusted remote (an `https://` source
+/// not in `trusted_extends:`). `ignore:` removes paths from the walk for EVERY
+/// rule, the user's own included, so a remote ruleset declaring `ignore:
+/// ["src/**"]` would silently switch off checks it never wrote, the same "choose
+/// which findings disappear" power [`reject_baseline_in`] withholds from every
+/// extended source. Local and bundled sources, and allowlisted remotes, keep
+/// contributing `ignore:` entries. `source` names the offending config.
+pub fn reject_untrusted_ignore_in(ignore: &[String], source: &str) -> Result<()> {
+    if !ignore.is_empty() {
+        return Err(Error::Other(format!(
+            "{source}: `ignore:` is not allowed from an untrusted extends source (it can \
+             hide files from every rule); add the URL to `trusted_extends:` to allow it"
+        )));
+    }
+    Ok(())
+}
+
 /// Reject a `trusted_extends:` in an inherited ruleset. The allowlist grants a
 /// remote's content-injecting fixers auto-apply rights, so a remote (or any
 /// non-top-level config) that could set it would allowlist ITSELF, defeating the
