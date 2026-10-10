@@ -149,7 +149,7 @@ fn spawning_allowlist_matches_the_rules_that_actually_spawn() {
          \n  modules that actually spawn : {found:?}\
          \n  SPAWNING_RULE_KINDS (as .rs) : {expected:?}\n\
          \nIf you added a rule that shells out, add its kind to SPAWNING_RULE_KINDS \
-         (crates/alint-dsl/src/lib.rs) — without it, an `extends:`'d or nested \
+         (crates/alint-dsl/src/trust.rs) — without it, an `extends:`'d or nested \
          ruleset can run the rule as arbitrary code (the `gff` regression class). \
          If you removed a spawner, drop its stale allow-list entry. If a spawning \
          module is not named `<kind>.rs` at the top level, teach this audit the \

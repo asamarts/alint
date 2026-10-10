@@ -1431,7 +1431,10 @@ fn w2_content_injecting_ssot_is_exhaustive_and_valid() {
         // classified via SPAWNING_FIX_OPS (refused from any non-top-level source),
         // a strictly stronger gate than the content demotion.
     ];
-    let content: BTreeSet<&str> = crate::CONTENT_INJECTING_FIX_OPS.iter().copied().collect();
+    let content: BTreeSet<&str> = crate::trust::CONTENT_INJECTING_FIX_OPS
+        .iter()
+        .copied()
+        .collect();
     let fixed: BTreeSet<&str> = FIXED_BEHAVIOR_FIX_OPS.iter().copied().collect();
     let spawning: BTreeSet<&str> = crate::SPAWNING_FIX_OPS.iter().copied().collect();
     let all: BTreeSet<&str> = alint_core::FixSpec::ALL_OP_NAMES.iter().copied().collect();

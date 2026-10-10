@@ -112,7 +112,7 @@ fn spawning_fix_op_allowlist_matches_the_fixers_that_actually_spawn() {
          not match the SPAWNING_FIX_OPS allow-list.\n  modules that actually spawn : {found:?}\n\
          allow-listed modules        : {expected:?}\n\
          If you added a fixer that shells out, add its op to SPAWNING_FIX_OPS \
-         (crates/alint-dsl/src/lib.rs) AND a row to SPAWNING_FIX_OP_MODULES here — \
+         (crates/alint-dsl/src/trust.rs) AND a row to SPAWNING_FIX_OP_MODULES here — \
          without it, an `extends:`'d or nested ruleset can make `alint fix` run \
          arbitrary code. If a spawning fixer moved modules, update the row."
     );
