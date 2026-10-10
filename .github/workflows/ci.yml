@@ -458,7 +458,7 @@ jobs:
   # time: typecheck + bundle the VS Code TS extension, wasm-build the Zed
   # extension, and build the JetBrains plugin (compiles against LSP4IJ +
   # the IntelliJ SDK). GitHub-hosted runner (needs Node + the wasm target
-  # + a full JDK 17). setup-gradle caches the IntelliJ SDK between runs.
+  # + a full JDK 21). setup-gradle caches the IntelliJ SDK between runs.
   editors:
     name: Editors (VS Code + Zed + JetBrains)
     needs: changes
@@ -487,7 +487,7 @@ jobs:
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
-          java-version: "17"
+          java-version: "21"
       - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
       - name: JetBrains — build + verify plugin
         working-directory: editors/jetbrains
