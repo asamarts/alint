@@ -2,6 +2,7 @@
 //! every opaque-region boundary is probed against the real roxmltree parser.
 
 use super::*;
+use crate::structured_format::Format;
 use std::fmt::Write as _;
 
 #[test]
