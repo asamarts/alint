@@ -108,7 +108,7 @@ Fix: `file_append` — append declared content.
 File contents must NOT match a regex.
 
 <!-- alint:since=0.18.0 -->
-The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact.
+The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact. A binary-looking file that is not valid UTF-8 (an image, a font, an archive) is still skipped, and the `replace` fix never edits a binary-looking file (a valid-UTF-8 file with a NUL byte is searched, but its finding is reported as not auto-fixable).
 <!-- /alint:since -->
 
 ### `file_header` (alias: `header`)
