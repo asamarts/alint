@@ -12,8 +12,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 
 plugins {
-    kotlin("jvm") version "2.0.21"
-    id("org.jetbrains.intellij.platform") version "2.1.0"
+    kotlin("jvm") version "2.4.20"
+    id("org.jetbrains.intellij.platform") version "2.19.0"
 }
 
 group = "org.alint"
@@ -43,7 +43,7 @@ dependencies {
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
     }
     // Used by the managed-download path to extract the release .tar.gz.
-    implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.apache.commons:commons-compress:1.28.0")
     testImplementation("junit:junit:4.13.2")
     // The platform test fixtures (UsefulTestCase) reference opentest4j,
     // which isn't pulled onto the gradle test classpath transitively.
