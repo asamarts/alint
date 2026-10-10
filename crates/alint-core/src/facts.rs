@@ -345,8 +345,8 @@ fn run_custom_with_timeout(spec: &CustomFact, root: &Path, timeout: Duration) ->
     cmd.args(args)
         .current_dir(root)
         .stdin(std::process::Stdio::null());
-    // Shared bounded runner: concurrent drain, the timeout kills the whole
-    // process group (a grandchild holding stdout can't outlive it), and a
+    // Shared bounded runner: concurrent drain, a bounded timeout (the whole
+    // process group in a non-interactive run; see `crate::process`), and a
     // backgrounded descendant can't stall the run after the child exits.
     // Custom facts are tiny by nature (a branch, a count); cap defensively.
     match crate::process::run_bounded(cmd, timeout, 1024 * 1024, false) {

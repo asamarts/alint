@@ -826,6 +826,10 @@ Environment threaded into the child:
 
 `timeout: <seconds>` (default 30) bounds each invocation; past the limit the child is killed and a violation reports the timeout.
 
+<!-- alint:since=0.18.0 -->
+Output is drained while the child runs (a child writing more than a pipe buffer cannot deadlock), and after the child exits alint waits at most 2 seconds for descendants still holding its output pipes. What the timeout kills depends on whether alint's stdin is a terminal. In a non-interactive run (CI, the language server, piped stdin) each spawned process (the `command` rule, `generated_file_fresh`, `command_idempotent`, the `command` fix, `custom:` facts) gets its own process group on Unix: the timeout kills the whole group, grandchildren included. In an interactive run (stdin is a terminal) the child stays in alint's process group so Ctrl-C reaches it and it can prompt on `/dev/tty`; the timeout then kills only the direct child. A timeout too large to represent means no deadline. On Windows only the direct child is killed.
+<!-- /alint:since -->
+
 **Trust gate.** Every process-spawning rule kind — `command`, `generated_file_fresh`, and `command_idempotent` — is allowed only in the user's own top-level config. Any of them introduced via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — the same gate that protects `custom:` facts. Adopting a published ruleset must never imply granting it arbitrary code execution.
 
 **Path confinement + `allow_out_of_root`.** Every config-declared path is confined to the repo root — a rule can't read or resolve a file outside the tree it was pointed at. The top-level-only `allow_out_of_root:` key relaxes this for *reads* (`json_schema_passes` `schema_path:`, `pair_hash` `target:`, `registry_paths_resolve` `source:`) when a trusted config must reference an external file. It is **rejected from `extends:`'d rulesets** (same trust model as the spawn gate above) and a permitted read emits a note. See [Configuration → `allow_out_of_root`](/docs/configuration/#allow_out_of_root).
