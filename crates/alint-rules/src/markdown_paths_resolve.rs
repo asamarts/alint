@@ -222,6 +222,11 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
         let bytes = line.as_bytes();
         let runs = backtick_runs(bytes);
         let next_same = next_same_len_run(&runs);
+        // Columns are 1-based Unicode code points (SARIF's `columnKind:
+        // unicodeCodePoints`, which the LSP converts from), not byte offsets:
+        // count chars incrementally from the last reported position so the
+        // scan stays linear.
+        let (mut col_byte, mut col_chars) = (0usize, 0usize);
         let mut k = 0;
         while k < runs.len() {
             let (run_start, run_len) = runs[k];
@@ -238,10 +243,13 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
             // CommonMark trims one leading + one trailing space.
             let token = std::str::from_utf8(token_bytes).unwrap_or("").trim();
             if !token.is_empty() && starts_with_any_prefix(token, prefixes) {
+                // `run_start` is a backtick, so always a char boundary.
+                col_chars += line[col_byte..run_start].chars().count();
+                col_byte = run_start;
                 out.push(Candidate {
                     token: token.to_string(),
                     line: line_no,
-                    column: run_start + 1, // 1-indexed; points at opening backtick
+                    column: col_chars + 1, // 1-indexed; points at opening backtick
                 });
             }
             // Resume after the closing run.
@@ -651,6 +659,17 @@ mod tests {
             next_same_len_run(&backtick_runs(b"`a``b`c``")),
             vec![Some(2), Some(3), None, None]
         );
+    }
+
+    #[test]
+    fn column_counts_code_points_not_bytes() {
+        // SARIF declares `columnKind: unicodeCodePoints`: `中文中文 ` is 5 code
+        // points (13 bytes), so the opening backtick is column 6, not 14.
+        let pf = prefixes(&["src/"]);
+        let cands = scan_markdown_paths("中文中文 `src/missing.rs` и `src/b.rs`", &pf);
+        assert_eq!(cands.len(), 2);
+        assert_eq!(cands[0].column, 6);
+        assert_eq!(cands[1].column, 25);
     }
 
     #[test]
