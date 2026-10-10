@@ -57,6 +57,14 @@ pub struct Violation {
     /// whenever the rule has no fixer. The rule-level [`RuleResult::is_fixable`]
     /// ("the rule declares a fixer") is independent and backs the machine formats.
     pub is_fixable: bool,
+    /// Rule-set: this finding can NOT be auto-fixed even though the rule declares
+    /// a fixer (e.g. a bidi control in a binary-looking file, a UTF-16 BOM that
+    /// would need transcoding, a header missing from a non-UTF-8 file). The engine
+    /// then never tags it [`Violation::is_fixable`], and `alint fix` reports it as
+    /// unfixable without invoking the fixer. Carried as a flag -- NOT folded into
+    /// [`Violation::baseline_key`] -- so fixability never changes a finding's
+    /// baseline fingerprint. Defaults to `false`.
+    pub not_fixable: bool,
     /// Check-side-computed concrete edits a fix would make to resolve *this*
     /// violation, for the machine formats (SARIF `result.fixes[]`) to render as
     /// source region + replacement text. Empty by default and for every
@@ -77,8 +85,22 @@ impl Violation {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            not_fixable: false,
             proposed_edits: Vec::new(),
         }
+    }
+
+    /// Mark this finding as not auto-fixable. See [`Violation::not_fixable`].
+    #[must_use]
+    pub fn with_not_fixable(mut self) -> Self {
+        self.not_fixable = true;
+        self
+    }
+
+    /// [`Violation::with_not_fixable`] when `cond` holds; unchanged otherwise.
+    #[must_use]
+    pub fn with_not_fixable_if(self, cond: bool) -> Self {
+        if cond { self.with_not_fixable() } else { self }
     }
 
     /// Mark this finding as an informational note rather than a

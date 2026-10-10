@@ -29,7 +29,7 @@ when: [check, fix_unsafe, check]
 expect:
   - violations:
       - {rule: ind, level: error, path: a.py}
-  - skipped: [ind]
+  - unfixable: [ind]
   - violations:
       - {rule: ind, level: error, path: a.py}
 

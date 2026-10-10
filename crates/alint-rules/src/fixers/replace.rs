@@ -74,6 +74,13 @@ impl Fixer for ReplaceFixer {
         // matched (an invalid byte just never matches a Unicode class), the
         // ranges are true byte offsets, and every byte outside a match --
         // invalid ones included -- survives the splice verbatim.
+        //
+        // Never edit a binary-looking file (defense in depth: the detector skips
+        // invalid-UTF-8 binaries and marks a NUL-bearing text finding not
+        // fixable): a regex splice into an image or archive corrupts it.
+        if crate::io::looks_binary(bytes) {
+            return Vec::new();
+        }
         // One ReplaceRange per (non-overlapping, leftmost) match. `captures_iter`
         // yields disjoint matches, so the batch never self-overlaps; the byte
         // offsets are into the file's current bytes, exactly what ReplaceRange
@@ -213,8 +220,13 @@ mod tests {
         // at its true byte offset and the invalid bytes are left alone.
         let f = fixer("x", "y");
         assert_eq!(
-            ranges(&f.collect_edits(&[], Path::new("a"), &[0xff, 0xfe, b'x'], Path::new("/r"))),
-            vec![(2, 3, "y".to_string())]
+            ranges(&f.collect_edits(
+                &[],
+                Path::new("a"),
+                &[b'a', 0xff, 0xfe, b'x'],
+                Path::new("/r")
+            )),
+            vec![(3, 4, "y".to_string())]
         );
     }
 

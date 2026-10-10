@@ -182,9 +182,10 @@ impl GeneratedFileFreshRule {
             ("ALINT_RULE_ID", self.id.clone()),
             ("ALINT_LEVEL", self.level.as_str().to_string()),
         ];
-        crate::spawn::run_capturing(
+        crate::spawn::run_in_workdir(
             &self.command,
-            &ctx.root.join(&self.workdir),
+            ctx.root,
+            &self.workdir,
             &env,
             Duration::from_secs(self.timeout),
         )
@@ -545,7 +546,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         message: spec.message.clone(),
         mode,
         command: opts.command,
-        workdir: opts.workdir.unwrap_or_else(|| ".".to_string()),
+        workdir: {
+            let workdir = opts.workdir.unwrap_or_else(|| ".".to_string());
+            // Refuse an escaping `workdir:` up front (defense in depth: these
+            // kinds are spawn-gated, but the child's cwd must stay in the repo).
+            crate::spawn::lexical_workdir(&workdir).map_err(|e| Error::rule_config(&spec.id, e))?;
+            workdir
+        },
         normalize: opts.normalize,
         timeout: opts
             .timeout

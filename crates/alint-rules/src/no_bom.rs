@@ -74,9 +74,21 @@ pub fn detect_bom(bytes: &[u8]) -> Option<BomKind> {
     None
 }
 
-/// Baseline-key prefix of a `no_bom` finding for a UTF-16 / UTF-32 BOM, which
-/// `file_strip_bom` declines (`can_fix`): stripping it needs transcoding.
-pub(crate) const NEEDS_TRANSCODING_KEY_PREFIX: &str = "bom-needs-transcoding:";
+/// How many leading bytes `no_bom` inspects: enough for a few stacked UTF-8
+/// BOMs plus the UTF-16 / UTF-32 mark that may follow them (see
+/// [`strippable_bom_run`]).
+const BOM_PREFIX_LEN: usize = 16;
+
+/// Whether `file_strip_bom` can strip the leading BOM(s) of `bytes`
+/// byte-for-byte: the file starts with a run of UTF-8 BOMs that is NOT followed
+/// by a UTF-16 / UTF-32 mark. A UTF-16 / UTF-32 BOM needs transcoding (which the
+/// fixer never does), and stripping only the UTF-8 marks in front of one would
+/// expose that mark rather than converge. Returns the run length when
+/// strippable.
+pub fn strippable_bom_run(bytes: &[u8]) -> Option<usize> {
+    let run = utf8_bom_run_len(bytes);
+    (run > 0 && detect_bom(&bytes[run..]).is_none()).then_some(run)
+}
 
 /// Byte length of the run of consecutive UTF-8 BOMs at the start of `bytes`
 /// (`0` when it does not start with one). `file_strip_bom` strips exactly this:
@@ -114,7 +126,7 @@ impl Rule for NoBomRule {
             let full = ctx.root.join(&entry.path);
             // A genuine read error fails CLOSED, matching `check`'s file-major
             // dispatch (audit 2026-10 finding 7); `NotFound` stays a skip.
-            let bytes = match read_prefix_n(&full, 4) {
+            let bytes = match read_prefix_n(&full, BOM_PREFIX_LEN) {
                 Ok(b) => b,
                 Err(e) => {
                     violations.extend(crate::io::io_error_violation(&entry.path, &e));
@@ -149,37 +161,37 @@ impl PerFileRule for NoBomRule {
         let Some(kind) = detect_bom(bytes) else {
             return Ok(Vec::new());
         };
-        let utf8 = kind == BomKind::Utf8;
+        // Only a UTF-8 BOM (run) is strippable byte-for-byte: a UTF-16 / UTF-32
+        // file needs transcoding, which `file_strip_bom` never does, and a UTF-8
+        // BOM in front of a UTF-16 / UTF-32 mark would leave that mark behind.
+        // Such a finding is reported but marked not fixable (a flag, so the
+        // baseline fingerprint is unchanged).
+        let fixable = strippable_bom_run(bytes).is_some();
         let msg = self.message.clone().unwrap_or_else(|| {
-            if utf8 {
+            if fixable {
                 format!("file begins with a {} BOM", kind.name())
             } else {
                 format!(
                     "file begins with a {} BOM; not auto-fixed (removing it without \
                      transcoding the file would corrupt it)",
-                    kind.name()
+                    if kind == BomKind::Utf8 {
+                        "UTF-8 + UTF-16/UTF-32"
+                    } else {
+                        kind.name()
+                    }
                 )
             }
         });
-        let v = Violation::new(msg)
-            .with_path(std::sync::Arc::<Path>::from(path))
-            .with_location(1, 1);
-        // Only a UTF-8 BOM is strippable byte-for-byte: a UTF-16 / UTF-32 file
-        // needs transcoding, which `file_strip_bom` never does (it skips such a
-        // file). Key that finding so the fixer's `can_fix` declines it and
-        // `check` doesn't tag as fixable what `fix` won't touch.
-        Ok(vec![if utf8 {
-            v
-        } else {
-            v.with_baseline_key(format!(
-                "{NEEDS_TRANSCODING_KEY_PREFIX}{}",
-                crate::slash(path)
-            ))
-        }])
+        Ok(vec![
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                .with_location(1, 1)
+                .with_not_fixable_if(!fixable),
+        ])
     }
 
     fn max_bytes_needed(&self) -> Option<usize> {
-        Some(4)
+        Some(BOM_PREFIX_LEN)
     }
 }
 
@@ -287,7 +299,11 @@ mod utf16_tests {
         let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(vs.len(), 1, "a UTF-16 BOM is still reported");
         let fixer = rule.fixer().unwrap();
-        assert!(!fixer.can_fix(&vs[0]), "but not tagged fixable");
+        assert!(vs[0].not_fixable, "but not tagged fixable");
+        assert_eq!(
+            vs[0].baseline_key, None,
+            "fixability must not change the baseline fingerprint"
+        );
         assert!(
             fixer.fix_edit(&vs[0], UTF16_NO_NUL, tmp.path()).is_none(),
             "the editor path must not strip it"
@@ -312,7 +328,7 @@ mod utf16_tests {
         // A UTF-8 BOM stays reported AND fixable.
         let (tmp, idx) = tempdir_with_files(&[("b.txt", b"\xEF\xBB\xBFhi\n")]);
         let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
-        assert!(fixer.can_fix(&vs[0]));
+        assert!(!vs[0].not_fixable);
     }
 
     #[test]
@@ -336,5 +352,28 @@ mod utf16_tests {
         assert!(crate::io::looks_binary(UTF16_NO_NUL));
         assert!(crate::io::looks_binary(&[0xFE, 0xFF, 0x4E, 0x2D]));
         assert!(!crate::io::looks_binary(b"\xEF\xBB\xBFplain utf-8\n"));
+    }
+
+    #[test]
+    fn utf8_bom_in_front_of_a_utf16_mark_is_not_fixable() {
+        // Stripping the UTF-8 BOM would only expose the UTF-16 mark behind it
+        // (never converging), so the finding is reported but not fixable and the
+        // fixer leaves the file alone.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: no_bom\npaths: \"**/*\"\nlevel: warning\n\
+             fix:\n  file_strip_bom: {}\n",
+        ))
+        .unwrap();
+        let body: &[u8] = b"\xEF\xBB\xBF\xEF\xBB\xBF\xFE\xFFxx";
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", body)]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(vs.len(), 1);
+        assert!(vs[0].not_fixable);
+        assert!(
+            rule.fixer()
+                .unwrap()
+                .fix_edit(&vs[0], body, tmp.path())
+                .is_none()
+        );
     }
 }

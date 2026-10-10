@@ -48,6 +48,12 @@ impl PerFileRule for NoMergeConflictMarkersRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // A binary-looking file that is not valid UTF-8 (image, archive) is
+        // skipped, as before the lossy decode: random bytes can spell a marker
+        // line. Valid-UTF-8 text with a NUL is still scanned.
+        if crate::io::char_scan_mode(bytes) == crate::io::CharScan::Skip {
+            return Ok(Vec::new());
+        }
         // Decode lossily: one stray non-UTF-8 byte must not hide the markers
         // (they are ASCII, so an invalid byte -> U+FFFD never creates or masks
         // one, and line numbers are unchanged).
@@ -247,5 +253,18 @@ mod non_utf8_tests {
         let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(vs.len(), 1);
         assert_eq!(vs[0].line, Some(2));
+    }
+
+    #[test]
+    fn invalid_utf8_binaries_are_skipped() {
+        // Regression: the lossy decode scanned binaries, so marker-shaped bytes
+        // in an archive were reported.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: no_merge_conflict_markers\npaths: \"**/*\"\nlevel: error\n",
+        ))
+        .unwrap();
+        let blob: &[u8] = b"\x00\xff\xfe\n<<<<<<< HEAD\nx\n>>>>>>> b\n\xc3";
+        let (tmp, idx) = tempdir_with_files(&[("a.bin", blob)]);
+        assert!(rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().is_empty());
     }
 }

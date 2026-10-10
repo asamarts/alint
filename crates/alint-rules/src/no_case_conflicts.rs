@@ -79,38 +79,46 @@ impl Rule for NoCaseConflictsRule {
             if members.len() < 2 {
                 continue;
             }
-            // Members fold equal, so their parents fold equal too. If those
-            // parents differ in case, the collision is already reported at the
-            // parent level (shallowest first) -- don't repeat it for every
-            // path beneath (`Docs/a.md` + `docs/a.md` is one `Docs`/`docs`
-            // collision, not two).
-            let parents: std::collections::BTreeSet<&str> = members
-                .iter()
-                .map(|(actual, _)| actual.rsplit_once('/').map_or("", |(parent, _)| parent))
-                .collect();
-            if parents.len() > 1 {
-                continue;
+            // Members fold equal, so their parents fold equal too. Members
+            // whose parents differ in case are already reported at the parent
+            // level (shallowest first) -- `Docs/a.md` + `docs/a.md` is one
+            // `Docs`/`docs` collision, not two. But members sharing an EXACT
+            // parent collide in that one directory (`docs/a.md` + `docs/A.md`),
+            // whatever else collides above them: partition by exact parent and
+            // report every partition with two or more members.
+            let mut by_parent: BTreeMap<&str, Vec<std::sync::Arc<std::path::Path>>> =
+                BTreeMap::new();
+            for (actual, path) in &members {
+                let parent = actual.rsplit_once('/').map_or("", |(parent, _)| parent);
+                by_parent.entry(parent).or_default().push((*path).clone());
             }
-            let paths: Vec<std::sync::Arc<std::path::Path>> =
-                members.iter().map(|(_, p)| (*p).clone()).collect();
-            let names: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-            for p in &paths {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "case-insensitive collision: {} (collides with: {})",
-                        p.display(),
-                        names
-                            .iter()
-                            .filter(|n| *n != &p.display().to_string())
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                });
-                violations.push(Violation::new(msg).with_path(p.clone()));
+            for paths in by_parent.into_values().filter(|p| p.len() >= 2) {
+                self.report(&paths, &mut violations);
             }
         }
         Ok(violations)
+    }
+}
+
+impl NoCaseConflictsRule {
+    /// One violation per member of a colliding set of same-directory paths.
+    fn report(&self, paths: &[std::sync::Arc<std::path::Path>], violations: &mut Vec<Violation>) {
+        let names: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        for p in paths {
+            let msg = self.message.clone().unwrap_or_else(|| {
+                format!(
+                    "case-insensitive collision: {} (collides with: {})",
+                    p.display(),
+                    names
+                        .iter()
+                        .filter(|n| *n != &p.display().to_string())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+            violations.push(Violation::new(msg).with_path(p.clone()));
+        }
     }
 }
 
@@ -235,6 +243,12 @@ mod tests {
         let i = index(&["Docs/a.md", "docs/a.md"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
         assert_eq!(paths(v), vec!["Docs", "docs"]);
+        // But a same-directory collision under a colliding parent is its own
+        // collision and is still reported (it was dropped when the parents also
+        // collided).
+        let i = index(&["Docs/a.md", "docs/a.md", "docs/A.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(paths(v), vec!["Docs", "docs", "docs/A.md", "docs/a.md"]);
         // Same-case directories are fine.
         let i = index(&["docs/a.md", "docs/b.md"]);
         assert!(

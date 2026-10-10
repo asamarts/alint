@@ -21,10 +21,13 @@
 //!   - U+200E LEFT-TO-RIGHT MARK
 //!   - U+200F RIGHT-TO-LEFT MARK
 //!
-//! Every in-scope file is scanned: invalid UTF-8 is decoded lossily and a
-//! binary-looking (NUL-bearing) file is NOT skipped, so neither a junk byte nor
-//! a NUL can hide a control. A finding in a binary-looking file is reported but
-//! not auto-fixed (the strip fixer refuses to edit binary content).
+//! Text files are scanned even when they hold stray invalid UTF-8 (each
+//! invalid run counts as one U+FFFD), so a junk byte cannot hide a control. A
+//! binary-looking file is scanned only when it is valid UTF-8 -- NUL is valid
+//! UTF-8, so a NUL byte cannot hide a control in a crafted source file -- and a
+//! binary-looking file that is not valid UTF-8 (images, fonts, archives) is
+//! skipped. A finding in a binary-looking file is reported but not auto-fixed
+//! (the strip fixer refuses to edit binary content).
 
 use std::path::Path;
 
@@ -83,21 +86,23 @@ impl PerFileRule for NoBidiControlsRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        // NO binary skip: this is a Trojan-Source defense, and skipping a
-        // "binary-looking" file let a single NUL byte hide every bidi control in
-        // it (a trivial fail-open evasion). Every in-scope file is scanned; a
-        // finding in a binary-looking file is still reported, but keyed
-        // `BINARY_KEY_PREFIX` so the strip fixer's `can_fix` declines it (the
-        // fixer refuses to edit binary content) -- `check` never promises a fix
-        // `fix` won't make.
-        let binary = crate::io::looks_binary(bytes);
-        // Lossily decode rather than abandon the whole file on the first invalid
-        // byte: this is a Trojan-Source (CVE-2021-42574) defense, so a single
-        // stray `0xFF` must NOT suppress detection of a bidi override elsewhere
-        // in the file (a trivial fail-open evasion otherwise). `U+FFFD` replaces
-        // only the invalid bytes; bidi controls in the valid runs are preserved.
-        let text = String::from_utf8_lossy(bytes);
-        let Some((line_no, col, codepoint)) = first_bidi(&text) else {
+        // A binary-looking file is scanned only when it is valid UTF-8. NUL is
+        // valid UTF-8, so one NUL byte cannot hide a control in a crafted source
+        // file (the Trojan-Source fail-open evasion); but a genuinely binary file
+        // (PNG / font / JPEG: invalid UTF-8) is skipped, because a lossy decode
+        // of random bytes manufactures controls out of noise (`D8 9C` is U+061C).
+        // A finding in a binary-looking file is reported but marked not fixable
+        // (the strip fixer refuses binary content).
+        //
+        // A non-binary file with a stray invalid byte is still scanned (each
+        // invalid run counts as one U+FFFD), so a lone `0xFF` cannot suppress
+        // detection either.
+        let binary = match crate::io::char_scan_mode(bytes) {
+            crate::io::CharScan::Skip => return Ok(Vec::new()),
+            crate::io::CharScan::BinaryUtf8 => true,
+            crate::io::CharScan::Text => false,
+        };
+        let Some((line_no, col, codepoint)) = first_bidi(bytes) else {
             return Ok(Vec::new());
         };
         let msg = self.message.clone().unwrap_or_else(|| {
@@ -116,47 +121,24 @@ impl PerFileRule for NoBidiControlsRule {
                 // path so `fix --baseline` grandfathers the whole file and never
                 // strips a grandfathered control when a NEW one precedes it (audit
                 // F3, 2026-09-20). Matches no_trailing_whitespace.
-                .with_baseline_key(file_key(path, binary)),
+                .with_baseline_key(crate::slash(path))
+                // The strip fixer refuses binary content, so `check` must not
+                // promise a fix for a binary-looking file (a flag, not a key
+                // prefix, so the baseline fingerprint stays the path).
+                .with_not_fixable_if(binary),
         ])
     }
 }
 
-/// Baseline-key prefix marking a finding in a binary-looking (NUL-bearing) file.
-/// The detectors still report such a file (a NUL must not hide a Trojan-Source /
-/// zero-width char), but the byte-strip fixers refuse binary content, so their
-/// `can_fix` declines a key with this prefix. Shared with `no_zero_width_chars`.
-pub(crate) const BINARY_KEY_PREFIX: &str = "binary:";
-
-/// Default-message suffix for a finding in a binary-looking file.
+/// Default-message suffix for a finding in a binary-looking file. Shared with
+/// `no_zero_width_chars`.
 pub(crate) const BINARY_NOTE: &str = "; the file looks binary, so it is not auto-fixed";
-
-/// The whole-file baseline key: the path, prefixed with [`BINARY_KEY_PREFIX`]
-/// when the file looks binary.
-pub(crate) fn file_key(path: &Path, binary: bool) -> String {
-    if binary {
-        format!("{BINARY_KEY_PREFIX}{}", crate::slash(path))
-    } else {
-        crate::slash(path)
-    }
-}
 
 /// Scan for the first bidi control character and return
 /// (1-based line, 1-based column, codepoint as u32).
-fn first_bidi(text: &str) -> Option<(usize, usize, u32)> {
-    let mut line = 1usize;
-    let mut col = 1usize;
-    for c in text.chars() {
-        if is_bidi_control(c) {
-            return Some((line, col, c as u32));
-        }
-        if c == '\n' {
-            line += 1;
-            col = 1;
-        } else {
-            col += 1;
-        }
-    }
-    None
+fn first_bidi(bytes: impl AsRef<[u8]>) -> Option<(usize, usize, u32)> {
+    crate::io::first_char_where(bytes.as_ref(), |c, _| is_bidi_control(c))
+        .map(|(l, c, ch)| (l, c, ch as u32))
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -215,7 +197,7 @@ mod tests {
         // L1: ALM, LRM, RLM complete the Trojan-Source set (rustc flags these).
         for &cp in &[0x061Cu32, 0x200E, 0x200F] {
             let c = char::from_u32(cp).unwrap();
-            let got = first_bidi(&format!("a{c}b")).unwrap();
+            let got = first_bidi(format!("a{c}b")).unwrap();
             assert_eq!(got.2, cp, "codepoint U+{cp:04X} must be flagged");
         }
     }
@@ -305,13 +287,74 @@ mod binary_evasion_tests {
             .unwrap();
         assert_eq!(vs.len(), 1, "the RLO in a NUL-bearing file must be flagged");
         assert!(
-            !FileStripBidiFixer.can_fix(&vs[0]),
+            vs[0].not_fixable,
             "check must not promise a fix the binary guard refuses"
         );
         // A text file's finding stays fixable.
         let vs = rule
             .evaluate_file(&ctx, Path::new("a.rs"), "a\u{202E}b".as_bytes())
             .unwrap();
-        assert!(FileStripBidiFixer.can_fix(&vs[0]));
+        assert!(!vs[0].not_fixable);
+        assert_eq!(vs[0].baseline_key.as_deref(), Some("a.rs"));
+    }
+
+    fn rule() -> NoBidiControlsRule {
+        NoBidiControlsRule {
+            id: "no-bidi".to_string(),
+            level: Level::Error,
+            policy_url: None,
+            message: None,
+            scope: Scope::match_all(),
+            fixer: Some(FileStripBidiFixer),
+        }
+    }
+
+    fn eval(bytes: &[u8]) -> Vec<Violation> {
+        let idx = alint_core::FileIndex::from_entries(Vec::new());
+        let ctx = Context {
+            root: Path::new("/r"),
+            index: &idx,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+        };
+        rule().evaluate_file(&ctx, Path::new("f"), bytes).unwrap()
+    }
+
+    #[test]
+    fn crafted_valid_utf8_with_nul_is_still_scanned() {
+        // NUL is valid UTF-8: a source file with a NUL is binary-looking but
+        // still scanned, so the NUL cannot hide the char.
+        let vs = eval("int x;\u{0}// \u{202E} evil\n".as_bytes());
+        assert_eq!(vs.len(), 1);
+        assert!(vs[0].not_fixable);
+        // Fixability is a flag, never folded into the baseline fingerprint.
+        assert_eq!(vs[0].baseline_key.as_deref(), Some("f"));
+    }
+
+    #[test]
+    fn png_like_invalid_utf8_binary_is_skipped() {
+        // Real binaries (images, fonts) are invalid UTF-8; a lossy decode would
+        // turn random bytes into controls (`D8 9C` -> U+061C; `E2 80 8B` is a
+        // ZWSP). Such files are skipped, as before the evasion fix.
+        let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR\xff\xfe".to_vec();
+        png.extend_from_slice(b"\xd8\x9c\x00\xe2\x80\x8b\xe2\x80\xae\x00\xc3");
+        assert!(
+            eval(&png).is_empty(),
+            "invalid-UTF-8 binary must be skipped"
+        );
+    }
+
+    #[test]
+    fn stray_invalid_byte_counts_as_one_column() {
+        // A text file with a lone invalid byte is scanned; the bad run counts as
+        // one U+FFFD column, matching a lossy decode.
+        let mut b = b"a\xffb".to_vec();
+        b.extend_from_slice("\u{202E}".as_bytes());
+        let vs = eval(&b);
+        assert_eq!(vs.len(), 1);
+        assert_eq!(vs[0].column, Some(4));
     }
 }

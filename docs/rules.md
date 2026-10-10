@@ -108,7 +108,7 @@ Fix: `file_append` — append declared content.
 File contents must NOT match a regex.
 
 <!-- alint:since=0.18.0 -->
-The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact.
+The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact. A binary-looking file that is not valid UTF-8 (an image, a font, an archive) is still skipped, and the `replace` fix never edits a binary-looking file (a valid-UTF-8 file with a NUL byte is searched, but its finding is reported as not auto-fixable).
 <!-- /alint:since -->
 
 ### `file_header` (alias: `header`)
@@ -230,7 +230,7 @@ Query a structured document with a JSONPath expression and assert every match de
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
 - Unparseable files — one violation per file (not silently skipped).
 <!-- alint:since=0.18.0 -->
-- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
+- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. The comparison is exact: an integer equals a float only when the float is a whole number of exactly that value, so `9007199254740993` does not equal `9007199254740992.0` even though both round to the same 64-bit float. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
 <!-- /alint:since -->
 
 <a id="xml-mapping"></a>
@@ -314,6 +314,10 @@ Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single fi
 
 Cap line length in characters (not bytes — code points). Optional `tab_width` for tab expansion.
 
+<!-- alint:since=0.18.0 -->
+A text file with stray invalid UTF-8 is measured (each invalid byte counts as one column) rather than skipped; binary-looking files are skipped.
+<!-- /alint:since -->
+
 ### `indent_style`
 
 **Categories:** Text hygiene
@@ -340,6 +344,10 @@ Checks for problems that slip past code review: content that reads one way to a 
 
 Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a line — almost always left over from an unresolved merge. The anchor markers carry a trailing ref (`<<<<<<< HEAD`), so they never collide with prose; a bare `=======` is reported only when the file also contains one of those anchors, because on its own a seven-character `=======` is indistinguishable from a reST/Markdown setext heading underline (so docs trees no longer need to be excluded).
 
+<!-- alint:since=0.18.0 -->
+A text file with stray invalid UTF-8 is still scanned rather than skipped; a binary-looking file that is not valid UTF-8 (an image, an archive) is skipped.
+<!-- /alint:since -->
+
 ### `no_bidi_controls`
 
 **Categories:** Security / Unicode sanity, Encoding
@@ -347,7 +355,7 @@ Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a lin
 Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
 
 <!-- alint:since=0.18.0 -->
-Every in-scope file is scanned, including invalid-UTF-8 and binary-looking (NUL-bearing) ones, so neither a junk byte nor a NUL byte can hide a control. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
+A text file with stray invalid UTF-8 is still scanned, so a junk byte cannot hide a control. A binary-looking file (for example one with a NUL byte) is scanned when it is valid UTF-8, so a NUL byte cannot hide a control in a crafted source file either; a binary-looking file that is not valid UTF-8 (images, fonts, archives) is skipped, which keeps `paths: "**/*"` free of false positives from random binary bytes. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
 <!-- /alint:since -->
 
 ### `no_zero_width_chars`
@@ -359,7 +367,7 @@ Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leadin
 As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
 
 <!-- alint:since=0.18.0 -->
-Like `no_bidi_controls`, binary-looking (NUL-bearing) files are scanned too; such a finding is reported but not auto-fixed.
+Same binary policy as `no_bidi_controls`: a binary-looking file is scanned only when it is valid UTF-8 (so a NUL byte cannot hide a character), invalid-UTF-8 binaries are skipped, and a finding in a binary-looking file is reported but not auto-fixed.
 <!-- /alint:since -->
 
 ---
@@ -411,7 +419,7 @@ Checks that reject tree shapes which work on one OS but break checkouts elsewher
 Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.
 
 <!-- alint:since=0.18.0 -->
-Directories count too: a file `Lib` beside a directory `lib/`, or directories `Docs/` + `docs/`, collide. A collision is reported once, at the shallowest colliding level, not again for every path beneath it.
+Directories count too: a file `Lib` beside a directory `lib/`, or directories `Docs/` + `docs/`, collide. The compared set is the in-scope files plus their ancestor directories, so a directory is reported when in-scope files live under two spellings of it, even if the directory path itself does not match `paths:`. A collision is reported once, at the shallowest colliding level, not again for every path beneath it; a separate collision inside one directory (`docs/a.md` + `docs/A.md`) is still reported alongside a `Docs/` + `docs/` one.
 <!-- /alint:since -->
 
 ### `no_illegal_windows_names`
@@ -729,6 +737,10 @@ A committed artefact must equal what a declared `command` generator produces, in
 - **stdout mode** (`file:`) — the generator writes its single output to stdout; alint captures it and compares to the one committed `file`. Never writes the tree.
 - **mutating / in-place mode** (`outputs:`, a glob or list) — for the common `make gen && git diff --exit-code` pattern, where the generator rewrites files in place. alint **snapshots** the `outputs`, runs the generator, **diffs** (flagging each stale / newly-created / removed file), and **restores the snapshot** — so `alint check` leaves the working tree byte-identical (the restore is panic-safe). The generator must confine its writes to `outputs`.
 
+<!-- alint:since=0.18.0 -->
+The optional `workdir` (the child's working directory, relative to the lint root) must stay inside the repository: an absolute path or a `..` that climbs out is rejected when the config loads, and a `workdir` that resolves outside the repository through a symlink is refused at run time (reported as a spawn failure) instead of running the command there.
+<!-- /alint:since -->
+
 ### `import_gate`
 
 **Categories:** Cross-file, Security / Unicode sanity
@@ -754,6 +766,10 @@ it, one violation for the whole invocation. A non-zero exit is
 never swallowed into a pass. Single-shot, opt-in. Trust-gated
 like `command` (see below): declarable only in your own
 top-level config.
+
+<!-- alint:since=0.18.0 -->
+As with `generated_file_fresh`, the optional `workdir` (the child's working directory, relative to the lint root) must stay inside the repository: an absolute path or a `..` that climbs out is rejected when the config loads, and a `workdir` that resolves outside the repository through a symlink is refused at run time (reported as a spawn failure) instead of running the command there.
+<!-- /alint:since -->
 
 ### `for_each_dir` / `for_each_file`
 

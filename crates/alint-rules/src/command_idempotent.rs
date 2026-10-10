@@ -108,9 +108,10 @@ impl Rule for CommandIdempotentRule {
             ("ALINT_RULE_ID", self.id.clone()),
             ("ALINT_LEVEL", self.level.as_str().to_string()),
         ];
-        let (status, stdout_b, stderr_b) = match crate::spawn::run_capturing(
+        let (status, stdout_b, stderr_b) = match crate::spawn::run_in_workdir(
             &self.command,
-            &ctx.root.join(&self.workdir),
+            ctx.root,
+            &self.workdir,
             &env,
             Duration::from_secs(self.timeout),
         ) {
@@ -259,7 +260,13 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
         command: opts.command,
-        workdir: opts.workdir.unwrap_or_else(|| ".".to_string()),
+        workdir: {
+            let workdir = opts.workdir.unwrap_or_else(|| ".".to_string());
+            // Refuse an escaping `workdir:` up front (defense in depth: these
+            // kinds are spawn-gated, but the child's cwd must stay in the repo).
+            crate::spawn::lexical_workdir(&workdir).map_err(|e| Error::rule_config(&spec.id, e))?;
+            workdir
+        },
         files_from: opts.files_from,
         files_pattern,
         timeout: opts
@@ -386,6 +393,20 @@ mod tests {
         let v = eval(&r, dir.path());
         assert_eq!(v.len(), 1);
         assert!(v[0].message.contains("could not be spawned"));
+    }
+
+    #[test]
+    fn build_rejects_an_escaping_workdir() {
+        let spec = crate::test_support::spec_yaml(
+            "id: t\nkind: command_idempotent\ncommand: [\"true\"]\n\
+             workdir: \"../elsewhere\"\nlevel: error\n",
+        );
+        assert!(
+            build(&spec)
+                .unwrap_err()
+                .to_string()
+                .contains("escapes the repository root")
+        );
     }
 
     #[test]

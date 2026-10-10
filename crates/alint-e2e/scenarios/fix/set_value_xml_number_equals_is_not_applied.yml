@@ -7,7 +7,7 @@ tags: [fix, xml_path_equals, set_value, xml, verify]
 #   1. `check` does NOT advertise this as auto-fixable -- the fixer's `can_fix`
 #      declines a non-string `equals` on a string-leaf format.
 #   2. `fix` forms NO edit (the same static check declines in `collect_edits`),
-#      so the violation is `skipped` with "no applicable fix" -- not surfaced as
+#      so the violation is `unfixable` (as check reported it) -- not surfaced as
 #      a suggestion that could never resolve the rule.
 # The tree is byte-identical and the violation survives: check and fix agree.
 
@@ -32,7 +32,7 @@ when: [check, fix, check]
 expect:
   - violations:
       - {rule: port-num, level: error, path: ports.xml}
-  - skipped: [port-num]
+  - unfixable: [port-num]
   - violations:
       - {rule: port-num, level: error, path: ports.xml}
 

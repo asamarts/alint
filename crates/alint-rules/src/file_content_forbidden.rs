@@ -87,6 +87,17 @@ impl PerFileRule for FileContentForbiddenRule {
         // the whole file, hiding e.g. a secret after it (fail-open). An invalid
         // byte never matches a Unicode class, but every literal / ASCII match is
         // still found, and on valid UTF-8 the semantics are unchanged.
+        //
+        // But a binary-looking file that is NOT valid UTF-8 (an image, a font,
+        // an archive) is skipped, as it always was: random bytes match ASCII
+        // patterns by chance, and the `replace` fix would corrupt the binary. A
+        // binary-looking file that IS valid UTF-8 (text with a NUL) is still
+        // searched, as before, but its finding is not auto-fixed.
+        let binary = match crate::io::char_scan_mode(bytes) {
+            crate::io::CharScan::Skip => return Ok(Vec::new()),
+            crate::io::CharScan::BinaryUtf8 => true,
+            crate::io::CharScan::Text => false,
+        };
         let Some(m) = self.pattern.find(bytes) else {
             return Ok(Vec::new());
         };
@@ -103,7 +114,9 @@ impl PerFileRule for FileContentForbiddenRule {
                 // matched line's content (which would churn on any edit to that
                 // line). Mirrors `no_trailing_whitespace`/`line_endings` (M14).
                 // See `docs/design/baseline.md` §4.
-                .with_baseline_key(crate::slash(path)),
+                .with_baseline_key(crate::slash(path))
+                // The `replace` fixer never edits a binary-looking file.
+                .with_not_fixable_if(binary),
         ])
     }
 }
@@ -317,5 +330,37 @@ mod non_utf8_tests {
         };
         assert_eq!(range.clone(), 5..25);
         assert_eq!(content.as_slice(), b"REDACTED");
+    }
+
+    #[test]
+    fn binary_files_are_skipped_and_never_rewritten() {
+        // Regression: matching raw bytes with no binary guard flagged (and the
+        // `replace` fix rewrote) a PNG that happened to contain the pattern.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: file_content_forbidden\npaths: \"**/*\"\n\
+             pattern: \"SECRET[0-9]+\"\nlevel: error\n\
+             fix:\n  replace:\n    replacement: \"X\"\n",
+        ))
+        .unwrap();
+        let png: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR SECRET123 \x00\xff\xfe";
+        let nul_text: &[u8] = b"code\0 SECRET9\n";
+        let (tmp, idx) = tempdir_with_files(&[("img.png", png), ("nul.txt", nul_text)]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(vs.len(), 1, "{vs:?}");
+        assert_eq!(vs[0].path.as_deref(), Some(std::path::Path::new("nul.txt")));
+        assert!(
+            vs[0].not_fixable,
+            "a binary-looking file is never rewritten"
+        );
+        // Defense in depth: the fixer itself refuses binary bytes.
+        let f = rule.fixer().unwrap();
+        assert!(
+            f.collect_edits(&vs, std::path::Path::new("img.png"), png, tmp.path())
+                .is_empty()
+        );
+        assert!(
+            f.collect_edits(&vs, std::path::Path::new("nul.txt"), nul_text, tmp.path())
+                .is_empty()
+        );
     }
 }
