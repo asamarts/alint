@@ -40,6 +40,44 @@ for ((n = 1; n < total; n++)); do
   fi
 done
 
+# The prefix loop above only notices a premature top-level command if it
+# reaches a stubbed tool (curl/uname/tar/cosign) or prints a `==>` line; a
+# top-level `mkdir`, `cd` or variable assignment would slip through. So also
+# pin the SHAPE: run everything except the final `main "$@"` under a DEBUG trap
+# (which fires before every simple command, builtins and assignments included,
+# but not for function definitions) and require that the only top-level
+# command is the leading `set -euo pipefail`.
+{
+  # shellcheck disable=SC2016  # $BASH_COMMAND / $TOPLOG expand in the child
+  printf '%s\n' 'trap '\''printf "%s\n" "$BASH_COMMAND" >> "$TOPLOG"'\'' DEBUG'
+  sed '$d' install.sh
+} > "$sandbox/toplevel.sh"
+: > "$sandbox/toplevel.log"
+env -i PATH="$sandbox/bin:/usr/bin:/bin" HOME="$sandbox" STUB_LOG="$sandbox/log" \
+  TOPLOG="$sandbox/toplevel.log" bash "$sandbox/toplevel.sh" > "$sandbox/out" 2>&1 || true
+toplevel=$(cat "$sandbox/toplevel.log")
+if [[ "$toplevel" != 'set -euo pipefail' ]]; then
+  echo "[test-install-sh] install.sh must be only 'set -euo pipefail' + function definitions" >&2
+  echo "                  before the final 'main \"\$@\"'; top-level commands found:" >&2
+  printf '                    %s\n' "${toplevel:-<none: is set -euo pipefail missing?>}" >&2
+  fail=1
+fi
+
+# With neither INSTALL_DIR nor HOME set, `set -u` used to abort with an opaque
+# "HOME: unbound variable"; it must fail with an actionable error BEFORE any
+# network access.
+: > "$sandbox/log"
+if env -i PATH="$sandbox/bin:/usr/bin:/bin" STUB_LOG="$sandbox/log" \
+    bash install.sh > "$sandbox/out" 2>&1; then
+  echo "[test-install-sh] install.sh succeeded with neither INSTALL_DIR nor HOME set" >&2
+  fail=1
+elif ! grep -q 'neither INSTALL_DIR nor HOME is set' "$sandbox/out" ||
+     grep -q 'unbound variable' "$sandbox/out" || [[ -s "$sandbox/log" ]]; then
+  echo "[test-install-sh] unset INSTALL_DIR + HOME must fail early with a clear error:" >&2
+  cat "$sandbox/out" "$sandbox/log" >&2
+  fail=1
+fi
+
 # Documented one-liners must fail on HTTP errors (-f), not pipe an error page
 # into bash. Scan the docs this repo owns.
 if grep -rnE 'curl -sSL[^|]*install\.sh' README.md install.sh docs/site 2>/dev/null; then
