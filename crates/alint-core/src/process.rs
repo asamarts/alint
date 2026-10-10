@@ -13,7 +13,10 @@
 //!    - *stdin is NOT a terminal* (CI, the LSP, pipes, cron; "grouped mode"):
 //!      on unix the child is spawned in its own process group and the timeout
 //!      kills the whole GROUP, so a grandchild (`sh -c "sleep 15; echo x"`'s
-//!      `sleep`) cannot outlive the deadline.
+//!      `sleep`) cannot outlive the deadline. After a normal exit, leftover
+//!      descendants still holding an output pipe (`sh -c "sleep 100 & echo
+//!      hi"`) are killed with the group as well, so a long-running process (the
+//!      LSP) leaks neither them nor the reader threads blocked on their pipes.
 //!    - *stdin IS a terminal* (an interactive run): the child stays in alint's
 //!      own process group. A separate group is outside the terminal's
 //!      foreground group, so Ctrl-C would kill alint but orphan the child, and
@@ -54,6 +57,13 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// descendant that inherited the pipe. Generous so a heavily loaded machine
 /// never truncates a legitimate child's output.
 pub const READER_GRACE: Duration = Duration::from_secs(2);
+
+/// Grouped mode, after a normal exit: how long the readers get to reach EOF
+/// before alint concludes a leftover descendant holds a pipe and kills the
+/// group. Short, because the child's own output is already buffered; a miss
+/// under load only costs a group kill (which never loses buffered output).
+/// Probing first keeps the common case free of the extra `kill` spawn.
+const LEFTOVER_PROBE: Duration = Duration::from_millis(50);
 
 /// Outcome of [`run_bounded`].
 #[derive(Debug)]
@@ -119,14 +129,25 @@ fn run_bounded_in(
         Ok(c) => c,
         Err(e) => return RunOutcome::SpawnError(e),
     };
-    let out = Reader::start(child.stdout.take(), cap);
-    let err = Reader::start(child.stderr.take(), cap);
+    let mut out = Reader::start(child.stdout.take(), cap);
+    let mut err = Reader::start(child.stderr.take(), cap);
 
     // `None`: the timeout is too large to represent, i.e. no deadline.
     let deadline = Instant::now().checked_add(timeout);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                if grouped {
+                    // A leftover descendant (`sh -c "sleep 100 & echo hi"`)
+                    // holds a pipe open: kill the rest of the group so it
+                    // neither outlives the run nor pins the reader threads.
+                    // The pgid cannot have been recycled: the live pipe holder
+                    // keeps the group (and so the id) allocated.
+                    let probe = Instant::now() + LEFTOVER_PROBE;
+                    if !(out.wait_eof(probe) && err.wait_eof(probe)) {
+                        kill_group(child.id());
+                    }
+                }
                 let grace = Instant::now() + READER_GRACE;
                 return RunOutcome::Exited {
                     status,
@@ -358,6 +379,52 @@ mod tests {
                 start.elapsed()
             );
         }
+    }
+
+    fn pid_is_gone(pid: &str) -> bool {
+        // A reaped process is gone; a zombie awaiting a non-reaping init is dead.
+        let out = Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .expect("ps");
+        let stat = String::from_utf8_lossy(&out.stdout);
+        stat.trim().is_empty() || stat.trim_start().starts_with('Z')
+    }
+
+    #[test]
+    fn grouped_normal_exit_kills_the_leftover_descendant() {
+        // `sleep 100 &` inherits stdout. Without the post-exit group kill it
+        // outlived the run (a process + reader-thread leak in the LSP) and the
+        // run waited the full READER_GRACE for it.
+        let start = Instant::now();
+        let out = run_bounded_in(
+            sh("sleep 100 & echo $!"),
+            Duration::from_secs(30),
+            1024,
+            true,
+            true,
+        );
+        let elapsed = start.elapsed();
+        let RunOutcome::Exited { stdout, .. } = out else {
+            panic!("expected exit, got {out:?}");
+        };
+        let pid = String::from_utf8(stdout).unwrap();
+        let pid = pid.trim();
+        let gone = (0..100).any(|_| {
+            let g = pid_is_gone(pid);
+            if !g {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            g
+        });
+        if !gone {
+            let _ = Command::new("kill").args(["-9", pid]).status();
+        }
+        assert!(gone, "leftover descendant {pid} survived the run");
+        assert!(
+            elapsed < READER_GRACE,
+            "waited for the descendant: {elapsed:?}"
+        );
     }
 
     #[test]
