@@ -1632,7 +1632,8 @@ mod json_ {
 /// sequence-element path, a multi-line / non-scalar value, and a flow member whose
 /// key does not own its line).
 ///
-/// THREE `saphyr` 0.0.12 quirks handled here (all verified empirically + gated):
+/// THREE `saphyr` quirks handled here (all verified empirically + gated; re-checked
+/// on 0.1.0, which additionally resolves an empty plain node to `""`, not null):
 /// (1) `Marker::index` is a CHAR offset despite the `index()` rustdoc claiming
 /// bytes, so spans are converted char->byte; a bump must re-verify this. (2) a
 /// QUOTED scalar's `span.end` runs to end-of-line (past a trailing comment), so

@@ -1238,6 +1238,17 @@ fn yaml_value_span_declines_block_scalars_and_implicit_null() {
 }
 
 #[test]
+fn yaml_value_span_for_an_explicit_empty_key_is_none_or_exactly_the_value() {
+    // saphyr 0.1.0 resolves the empty key of `? \n: 8080` to `""` (0.0.12: null;
+    // saphyr-rs/saphyr#136 may restore null). Either way the resolver must decline
+    // or point at exactly the value -- never a bogus span.
+    let src = "? \n: 8080\n";
+    if let Some(span) = resolve_value_span(Format::Yaml, src.as_bytes(), &[key("")]) {
+        assert_eq!(&src[span], "8080");
+    }
+}
+
+#[test]
 fn yaml_value_span_offsets_past_a_leading_bom() {
     // Regression (YAML audit): mirror JSON -- the check side strips a leading BOM,
     // but saphyr rejects it, so a BOM YAML was advertised-fixable yet always skipped.
