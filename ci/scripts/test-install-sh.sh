@@ -85,14 +85,49 @@ if grep -rnE 'curl -sSL[^|]*install\.sh' README.md install.sh docs/site 2>/dev/n
   fail=1
 fi
 
-# The post-publish install.sh smoke must prove verification RAN: it requires
-# verification and asserts the exact success line install.sh prints.
-if ! grep -q 'ALINT_REQUIRE_VERIFY=1' ci/scripts/smoke-channel.sh ||
-   ! grep -q "'^==> Signature OK'" ci/scripts/smoke-channel.sh ||
-   ! grep -q 'echo "==> Signature OK' install.sh; then
-  echo "[test-install-sh] smoke-channel.sh must run install.sh with ALINT_REQUIRE_VERIFY=1 and assert '==> Signature OK'" >&2
+# The post-publish install.sh smoke must prove verification RAN for every
+# signed release (v0.15.1+): run its install.sh leg against a stubbed curl that
+# serves a fake installer recording ALINT_REQUIRE_VERIFY, and assert the leg is
+# strict for signed tags (requires + asserts "==> Signature OK") but does not
+# demand a signature from a tag that predates signing (v0.15.0 has no bundle).
+if ! grep -q 'echo "==> Signature OK' install.sh; then
+  echo "[test-install-sh] install.sh no longer prints '==> Signature OK' (smoke-channel.sh asserts it)" >&2
   fail=1
 fi
+smoke_leg() { # smoke_leg <tag> <fake installer prints Signature OK: 1|0> -> exit status
+  local tag=$1 sig=$2 home="$sandbox/smoke-home"
+  rm -rf "$home" "$sandbox/smokebin"
+  mkdir -p "$home" "$sandbox/smokebin"
+  cat > "$sandbox/smokebin/curl" <<STUB
+#!/usr/bin/env bash
+cat <<'INSTALLER'
+echo "REQUIRE=\${ALINT_REQUIRE_VERIFY:-unset}" >> "$sandbox/smoke-req"
+if [[ "$sig" == 1 ]]; then echo "==> Signature OK (stub)"; fi
+mkdir -p "\$HOME/.local/bin"
+printf '#!/usr/bin/env bash\necho "alint %s (stub)"\n' "\${ALINT_VERSION#v}" > "\$HOME/.local/bin/alint"
+chmod +x "\$HOME/.local/bin/alint"
+INSTALLER
+STUB
+  chmod +x "$sandbox/smokebin/curl"
+  : > "$sandbox/smoke-req"
+  env -i PATH="$sandbox/smokebin:/usr/bin:/bin" HOME="$home" TMPDIR="${TMPDIR:-/tmp}" \
+    RETRY_MAX=1 RETRY_SLEEP=0 bash ci/scripts/smoke-channel.sh install.sh "$tag" > "$sandbox/smoke-out" 2>&1
+}
+smoke_case() { # smoke_case <label> <tag> <sig> <want: pass|fail> <want REQUIRE=...>
+  local got=pass
+  smoke_leg "$2" "$3" || got=fail
+  if [[ "$got" != "$4" ]] || ! grep -qx "REQUIRE=$5" "$sandbox/smoke-req"; then
+    echo "[test-install-sh] smoke install.sh leg, $1: want $4 with REQUIRE=$5, got $got with $(cat "$sandbox/smoke-req")" >&2
+    sed 's/^/    | /' "$sandbox/smoke-out" >&2
+    fail=1
+  fi
+}
+smoke_case "signed release, verified"           v0.17.0 1 pass 1
+smoke_case "signed release, verification absent" v0.17.0 0 fail 1
+smoke_case "first signed release is strict"      v0.15.1 0 fail 1
+smoke_case "pre-signing tag (no bundle)"         v0.15.0 0 pass 0
+smoke_case "numeric compare (0.9 < 0.15.1)"      v0.9.0  0 pass 0
+smoke_case "numeric compare (0.100 > 0.15.1)"    v0.100.0 0 fail 1
 
 [[ "$fail" -eq 0 ]] && echo "[test-install-sh] OK - every truncated prefix of install.sh executes nothing"
 exit "$fail"
