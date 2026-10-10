@@ -35,8 +35,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Untrusted remote rulesets** (an `https://` source not in
   `trusted_extends:`) may no longer read the environment through `when:` /
   `when_iter:` (`env.*` directly, a `{{...}}` placeholder in a template's
-  `when`, or a var whose value comes from `{{env.X}}`), and may no longer
-  declare top-level `ignore:`, which could hide every file from every rule.
+  `when`, or a var whose value comes from `{{env.X}}`), may no longer splice
+  an env-derived template var into a rule field such as `message:`, and may
+  no longer declare top-level `ignore:`, which could hide every file from
+  every rule.
   Each was a way to leak a secret through which rules fire, or to silence the
   run. Allowlist the URL in `trusted_extends:` to restore the old behavior.
 
