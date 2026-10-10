@@ -386,6 +386,20 @@ fn bom_prefixed_config_bombs_are_rejected_before_libyaml_parses_them() {
 }
 
 #[test]
+fn big_scalar_alias_bomb_config_is_rejected_before_libyaml_parses_it() {
+    // Regression: the alias budget counted nodes, so a 1 MB anchored scalar
+    // replayed 4000 times (4000 nodes, 4 GB of string copies into the
+    // `serde_yaml_ng::Value` the loader builds) passed the guard.
+    let body = format!(
+        "x: &a \"{}\"\ny: [{}]\n",
+        "x".repeat(1_000_000),
+        "*a,".repeat(4000)
+    );
+    let err = crate::parse(&body).unwrap_err().to_string();
+    assert!(err.contains("alias expansion"), "got: {err}");
+}
+
+#[test]
 fn local_extends_out_of_root_allowed_with_top_level_flag() {
     // M2: the same blanket `allow_out_of_root: true` that lifts per-rule
     // read confinement also lifts the local-extends boundary — for users

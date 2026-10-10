@@ -142,10 +142,9 @@ impl Format {
                 // which balloons a small file into millions of nodes. Cheap
                 // discard-only pre-count; alias-free text short-circuits for free.
                 if !crate::yaml_depth::expansion_within_limit(text) {
-                    return Err(format!(
-                        "YAML alias expansion exceeds the maximum supported node count ({})",
-                        crate::yaml_depth::MAX_YAML_EXPANSION_NODES
-                    ));
+                    return Err(
+                        "YAML alias expansion exceeds the maximum supported size".to_string()
+                    );
                 }
                 yaml_value::yaml_to_value(text)
             }

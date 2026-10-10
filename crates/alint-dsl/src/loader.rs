@@ -107,9 +107,8 @@ fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawC
     // same way -- `serde_yaml_ng`'s own limits don't catch it.
     if !alint_core::yaml_depth::expansion_within_limit(contents) {
         return Err(Error::Other(format!(
-            "{}: YAML alias expansion exceeds the maximum supported node count ({})",
+            "{}: YAML alias expansion exceeds the maximum supported size",
             source.display(),
-            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
         )));
     }
     if contents.contains("{{") {
@@ -333,8 +332,7 @@ fn load_remote(
     }
     if !alint_core::yaml_depth::expansion_within_limit(body_str) {
         return Err(Error::Other(format!(
-            "remote config at {url}: YAML alias expansion exceeds the maximum supported node count ({})",
-            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
+            "remote config at {url}: YAML alias expansion exceeds the maximum supported size"
         )));
     }
     let config: RawConfig = serde_yaml_ng::from_str(body_str)
