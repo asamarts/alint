@@ -58,6 +58,15 @@ const UNTRUSTED_FIX_SOURCE_MARKER: &str = "__alint_internal_untrusted_fix_source
 /// id-based field-merging has hidden where each field came from.
 const PROVENANCE_MARKER: &str = "__alint_internal_provenance";
 
+/// Internal raw-mapping marker on a rule whose own (template-instance) `vars:`
+/// holds values interpolated from the environment: a mapping from each such
+/// var's name to its raw, pre-interpolation text (`{{env.NPM_TOKEN}}`).
+/// Recorded by the local-config parser (only local configs are interpolated),
+/// replaced together with `vars:` when a later source overrides the rule's
+/// `vars:` ([`merge_mapping_fields`]), and removed by [`RawConfig::finalize`]
+/// before the effective rule is deserialized.
+const ENV_VARS_MARKER: &str = "__alint_internal_env_vars";
+
 /// A class of `extends:` source recorded in [`PROVENANCE_MARKER`].
 #[derive(Clone, Copy)]
 pub(crate) enum SourceClass {
@@ -379,6 +388,31 @@ pub(crate) struct RawConfig {
     /// there), so it is not carried onto `Config`. See auto-fix.md 5.5.
     #[serde(default)]
     trusted_extends: Vec<String>,
+    /// The top-level `vars:` whose value was interpolated from the environment,
+    /// mapped to the raw pre-interpolation text (`{{env.NPM_TOKEN}}`). Filled by
+    /// the local-config parser and kept in step with `vars` by [`merge`] (a
+    /// later literal value for the name clears the mark, a later env-derived one
+    /// sets it). Not part of the schema.
+    #[serde(skip)]
+    env_vars: std::collections::HashMap<String, String>,
+    /// Every `vars.<NAME>` read in a `when:` / `when_iter:` of an untrusted
+    /// remote, recorded per source before the merge. Whether a read is refused
+    /// depends on [`Self::env_vars`], which is only final once every local
+    /// config has merged, so `finalize` judges them. Not part of the schema.
+    #[serde(skip)]
+    untrusted_when_var_reads: Vec<UntrustedWhenVarRead>,
+}
+
+/// One `vars.<NAME>` read in a `when` expression of an untrusted remote.
+#[derive(Debug, Clone)]
+pub(crate) struct UntrustedWhenVarRead {
+    source: String,
+    /// `rule` or `template`.
+    what: &'static str,
+    id: String,
+    /// The field path, e.g. `when` or `require[0].when_iter`.
+    field: String,
+    var: String,
 }
 
 const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
@@ -485,6 +519,10 @@ impl RawConfig {
                 )));
             }
         }
+        // An untrusted remote's `when` may read ordinary vars, but not one the
+        // user's config interpolated from the environment; that set is final only
+        // now, after every local config has merged.
+        reject_untrusted_env_var_reads(&self.untrusted_when_var_reads, &self.env_vars)?;
         let templates_by_id: std::collections::HashMap<String, &Mapping> = self
             .templates
             .iter()
@@ -502,8 +540,10 @@ impl RawConfig {
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
             reject_remote_assembled_env_refs(m, &templates_by_id, &id_hint)?;
-            reject_untrusted_assembled_when(m, &templates_by_id, &id_hint)?;
+            reject_untrusted_assembled_when(m, &templates_by_id, &id_hint, &self.env_vars)?;
+            reject_untrusted_env_instance_vars(m, &templates_by_id, &id_hint)?;
             let mut expanded = expand_template(m, &templates_by_id)?;
+            expanded.remove(ENV_VARS_MARKER);
             // A source-local cap is not enough: an untrusted rule can instantiate
             // a fixer-bearing trusted template, and a trusted rule can instantiate
             // a template partly defined by an untrusted source. Carry one bit of
@@ -716,49 +756,71 @@ const WHEN_FIELDS: &[&str] = &["when", "when_iter"];
 enum WhenRefusal {
     /// The expression reads `env.<NAME>`.
     ReadsEnv { field: String, name: String },
+    /// The expression reads `vars.<NAME>`, whose value the user's own config
+    /// interpolated from the environment (`raw` is its pre-interpolation text).
+    ReadsEnvVar {
+        field: String,
+        name: String,
+        raw: String,
+    },
     /// The expression carries a `{{...}}` placeholder, so what it reads is only
     /// known after template expansion (checked again there).
     Placeholder { field: String },
 }
 
-/// The first `when` / `when_iter` in `rule` (or any nested `require:` rule) that
-/// reads the environment, or that holds a placeholder when `allow_placeholders`
-/// is false. An expression that does not parse is left to the rule builder,
-/// which reports the parse error with the rule's id.
-fn find_when_refusal(rule: &Mapping, allow_placeholders: bool) -> Option<WhenRefusal> {
-    fn walk(rule: &Mapping, allow_placeholders: bool, prefix: &str) -> Option<WhenRefusal> {
+/// Call `f` with the field path and source of every `when` / `when_iter` in
+/// `rule` and its nested `require:` rules (any depth), stopping at the first
+/// `Some`.
+fn find_in_whens<T>(rule: &Mapping, f: &mut impl FnMut(String, &str) -> Option<T>) -> Option<T> {
+    fn walk<T>(
+        rule: &Mapping,
+        prefix: &str,
+        f: &mut impl FnMut(String, &str) -> Option<T>,
+    ) -> Option<T> {
         for field in WHEN_FIELDS {
-            let Some(src) = rule.get(*field).and_then(|v| v.as_str()) else {
-                continue;
-            };
-            let field = format!("{prefix}{field}");
-            if src.contains("{{") && !allow_placeholders {
-                return Some(WhenRefusal::Placeholder { field });
-            }
-            if let Ok(expr) = alint_core::when::parse(src)
-                && let Some(name) = expr.first_env_ref()
+            if let Some(src) = rule.get(*field).and_then(|v| v.as_str())
+                && let Some(found) = f(format!("{prefix}{field}"), src)
             {
-                return Some(WhenRefusal::ReadsEnv {
-                    field,
-                    name: name.to_string(),
-                });
+                return Some(found);
             }
         }
-        rule.get("require")
-            .and_then(|v| v.as_sequence())
-            .into_iter()
-            .flatten()
-            .enumerate()
-            .find_map(|(i, nested)| {
-                let nested = nested.as_mapping()?;
-                walk(
-                    nested,
-                    allow_placeholders,
-                    &format!("{prefix}require[{i}]."),
-                )
-            })
+        let require = rule.get("require").and_then(|v| v.as_sequence())?;
+        require.iter().enumerate().find_map(|(i, nested)| {
+            walk(nested.as_mapping()?, &format!("{prefix}require[{i}]."), f)
+        })
     }
-    walk(rule, allow_placeholders, "")
+    walk(rule, "", f)
+}
+
+/// The first `when` / `when_iter` in `rule` (or any nested `require:` rule) that
+/// reads the environment -- directly, or through a var named in `env_vars`
+/// (env-derived top-level vars) -- or that holds a placeholder when
+/// `allow_placeholders` is false. An expression that does not parse is left to
+/// the rule builder, which reports the parse error with the rule's id.
+fn find_when_refusal(
+    rule: &Mapping,
+    allow_placeholders: bool,
+    env_vars: &std::collections::HashMap<String, String>,
+) -> Option<WhenRefusal> {
+    find_in_whens(rule, &mut |field, src| {
+        if src.contains("{{") && !allow_placeholders {
+            return Some(WhenRefusal::Placeholder { field });
+        }
+        let expr = alint_core::when::parse(src).ok()?;
+        if let Some(name) = expr.first_env_ref() {
+            return Some(WhenRefusal::ReadsEnv {
+                field,
+                name: name.to_string(),
+            });
+        }
+        expr.var_refs().into_iter().find_map(|name| {
+            env_vars.get(name).map(|raw| WhenRefusal::ReadsEnvVar {
+                field: field.clone(),
+                name: name.to_string(),
+                raw: raw.clone(),
+            })
+        })
+    })
 }
 
 fn when_refusal_error(what: &str, id: &str, refusal: &WhenRefusal, source: &str) -> Error {
@@ -767,6 +829,11 @@ fn when_refusal_error(what: &str, id: &str, refusal: &WhenRefusal, source: &str)
             "{source}: {what} `{id}`: `{field}:` reads `env.{name}`; an untrusted extends \
              source may not read the environment. Add the URL to `trusted_extends:` to \
              allow it"
+        )),
+        WhenRefusal::ReadsEnvVar { field, name, raw } => Error::Other(format!(
+            "{source}: {what} `{id}`: `{field}:` reads `vars.{name}`, whose value comes \
+             from the environment (`{raw}`); an untrusted extends source may not read the \
+             environment. Add the URL to `trusted_extends:` to allow it"
         )),
         WhenRefusal::Placeholder { field } => Error::Other(format!(
             "{source}: {what} `{id}`: `{field}:` contains a `{{{{...}}}}` placeholder; an \
@@ -787,31 +854,69 @@ fn when_refusal_error(what: &str, id: &str, refusal: &WhenRefusal, source: &str)
 /// variables are supplied later, by whichever instance expands it. An instance
 /// that an untrusted remote shaped is re-checked after expansion
 /// ([`reject_untrusted_assembled_when`]).
+///
+/// A `vars.*` read is the same oracle when the user's config interpolated that
+/// var from the environment, but which vars are env-derived is only known once
+/// every local config has merged. So every `vars.*` read is returned, to be
+/// judged by `finalize` ([`reject_untrusted_env_var_reads`]).
 pub(crate) fn reject_env_reads_in_when(
     rules: &[Mapping],
     templates: &[Mapping],
     source: &str,
-) -> Result<()> {
+) -> Result<Vec<UntrustedWhenVarRead>> {
     let id_of = |m: &Mapping| {
         m.get("id")
             .and_then(|v| v.as_str())
             .unwrap_or("(unknown)")
             .to_string()
     };
-    for rule in rules {
-        // A rule's own fields are never substituted, so a placeholder there is
-        // inert text the `when` parser rejects at build; only env reads matter.
-        if let Some(refusal) = find_when_refusal(rule, true) {
-            return Err(when_refusal_error("rule", &id_of(rule), &refusal, source));
+    let no_env_vars = std::collections::HashMap::new();
+    let mut var_reads = Vec::new();
+    for (what, list, allow_placeholders) in [("rule", rules, true), ("template", templates, false)]
+    {
+        for m in list {
+            // A rule's own fields are never substituted, so a placeholder there is
+            // inert text the `when` parser rejects at build; only env reads matter.
+            if let Some(refusal) = find_when_refusal(m, allow_placeholders, &no_env_vars) {
+                return Err(when_refusal_error(what, &id_of(m), &refusal, source));
+            }
+            find_in_whens(m, &mut |field, src| {
+                let expr = alint_core::when::parse(src).ok()?;
+                for var in expr.var_refs() {
+                    var_reads.push(UntrustedWhenVarRead {
+                        source: source.to_string(),
+                        what,
+                        id: id_of(m),
+                        field: field.clone(),
+                        var: var.to_string(),
+                    });
+                }
+                None::<()>
+            });
         }
     }
-    for template in templates {
-        if let Some(refusal) = find_when_refusal(template, false) {
+    Ok(var_reads)
+}
+
+/// Refuse every `vars.<NAME>` read an untrusted remote's `when` made (recorded
+/// per source by [`reject_env_reads_in_when`]) of a top-level var whose
+/// EFFECTIVE value the user's config interpolated from the environment.
+fn reject_untrusted_env_var_reads(
+    reads: &[UntrustedWhenVarRead],
+    env_vars: &std::collections::HashMap<String, String>,
+) -> Result<()> {
+    for read in reads {
+        if let Some(raw) = env_vars.get(&read.var) {
+            let refusal = WhenRefusal::ReadsEnvVar {
+                field: read.field.clone(),
+                name: read.var.clone(),
+                raw: raw.clone(),
+            };
             return Err(when_refusal_error(
-                "template",
-                &id_of(template),
+                read.what,
+                &read.id,
                 &refusal,
-                source,
+                &read.source,
             ));
         }
     }
@@ -820,7 +925,8 @@ pub(crate) fn reject_env_reads_in_when(
 
 /// The post-expansion half of [`reject_env_reads_in_when`]: an instance that an
 /// untrusted remote shaped (its `vars:`, its `extends_template:`, ...) may fill a
-/// TRUSTED template's `when: "{{vars.cond}}"` with `env.TOKEN matches "^g"`.
+/// TRUSTED template's `when: "{{vars.cond}}"` with `env.TOKEN matches "^g"`
+/// (or with a read of an env-derived top-level var, named in `env_vars`).
 /// Re-check every `when` the expansion produced from a placeholder. A `when`
 /// the template wrote literally is the template author's choice, not the
 /// remote's, and stays allowed.
@@ -828,6 +934,7 @@ fn reject_untrusted_assembled_when(
     rule: &Mapping,
     templates_by_id: &std::collections::HashMap<String, &Mapping>,
     id: &str,
+    env_vars: &std::collections::HashMap<String, String>,
 ) -> Result<()> {
     let Some(source) = Provenance::read(rule).untrusted_remote else {
         return Ok(());
@@ -843,10 +950,81 @@ fn reject_untrusted_assembled_when(
     // Keep only the `when` fields that held a placeholder, rendered; the rest of
     // the template is irrelevant to what the remote could assemble.
     let rendered = render_placeholder_whens(template, &vars);
-    if let Some(refusal) = find_when_refusal(&rendered, true) {
+    if let Some(refusal) = find_when_refusal(&rendered, true, env_vars) {
         return Err(when_refusal_error("rule", id, &refusal, &source));
     }
     Ok(())
+}
+
+/// Refuse to expand a template into an instance when an untrusted remote shaped
+/// either of them and the template substitutes an env-derived instance var
+/// (`vars: {token: "{{env.NPM_TOKEN}}"}` on the user's own instance, recorded in
+/// [`ENV_VARS_MARKER`]) into ANY field. A remote can add a field to a template
+/// the user defined under the same id (`message: "{{vars.token}}"`, or a
+/// `pattern:` / `paths:` that turns the secret into an oracle), and the value
+/// would then reach rule output, CI logs and SARIF.
+fn reject_untrusted_env_instance_vars(
+    rule: &Mapping,
+    templates_by_id: &std::collections::HashMap<String, &Mapping>,
+    id: &str,
+) -> Result<()> {
+    fn strings(v: &serde_yaml_ng::Value, f: &mut impl FnMut(&str)) {
+        match v {
+            serde_yaml_ng::Value::String(s) => f(s),
+            serde_yaml_ng::Value::Sequence(seq) => seq.iter().for_each(|v| strings(v, f)),
+            serde_yaml_ng::Value::Mapping(m) => m.values().for_each(|v| strings(v, f)),
+            _ => {}
+        }
+    }
+    let Some(env_vars) = rule.get(ENV_VARS_MARKER).and_then(|v| v.as_mapping()) else {
+        return Ok(());
+    };
+    let Some((template_id, template)) = rule
+        .get("extends_template")
+        .and_then(|v| v.as_str())
+        .and_then(|t| templates_by_id.get(t).map(|m| (t, *m)))
+    else {
+        return Ok(());
+    };
+    let Some(source) = Provenance::read(rule)
+        .untrusted_remote
+        .or_else(|| Provenance::read(template).untrusted_remote)
+    else {
+        return Ok(());
+    };
+    // Scan with the expansion's own placeholder parser, so spacing variants
+    // (`{{ vars.token }}`) are found exactly when expansion would substitute them.
+    let hit = std::cell::RefCell::new(None::<String>);
+    let mut probe = |s: &str| {
+        alint_core::template::render_message(s, |ns, key| {
+            let mut hit = hit.borrow_mut();
+            if hit.is_none() && ns == "vars" && env_vars.contains_key(key) {
+                *hit = Some(key.to_string());
+            }
+            None
+        });
+    };
+    for (k, v) in template {
+        if k.as_str() != Some(PROVENANCE_MARKER) {
+            strings(v, &mut probe);
+        }
+    }
+    let Some(name) = hit.into_inner() else {
+        return Ok(());
+    };
+    let raw = env_vars
+        .get(name.as_str())
+        .and_then(|v| v.as_str())
+        .unwrap_or_default();
+    Err(Error::rule_config(
+        id,
+        format!(
+            "template `{template_id}` substitutes `{{{{vars.{name}}}}}`, whose value comes \
+             from the environment (`{raw}`), but an untrusted extends source ({source}) \
+             shapes this rule or its template; an untrusted extends source may not read \
+             the environment. Add the URL to `trusted_extends:` to allow it"
+        ),
+    ))
 }
 
 /// A copy of `rule` keeping only the `when` / `when_iter` fields that contain a
@@ -1260,6 +1438,11 @@ fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
     let untrusted_fix_source =
         has_untrusted_fix_source(existing) || has_untrusted_fix_source(&incoming);
     union_provenance(existing, &incoming);
+    // The env-derived mark describes the `vars:` it was recorded with; a later
+    // `vars:` replaces the map wholesale, so it replaces (or drops) the mark too.
+    if incoming.contains_key("vars") {
+        existing.remove(ENV_VARS_MARKER);
+    }
     for (key, value) in incoming {
         if !matches!(
             key.as_str(),
@@ -1864,8 +2047,19 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     let mut ignore = a.ignore;
     ignore.extend(b.ignore);
 
+    // The env-derived mark follows the value that wins: `b` overriding a name
+    // with a literal clears it, with an interpolated value sets it.
+    let mut env_vars = a.env_vars;
+    for name in b.vars.keys() {
+        match b.env_vars.get(name) {
+            Some(raw) => env_vars.insert(name.clone(), raw.clone()),
+            None => env_vars.remove(name),
+        };
+    }
     let mut vars = a.vars;
     vars.extend(b.vars);
+    let mut untrusted_when_var_reads = a.untrusted_when_var_reads;
+    untrusted_when_var_reads.extend(b.untrusted_when_var_reads);
 
     let mut facts_by_id: std::collections::BTreeMap<String, FactSpec> =
         std::collections::BTreeMap::new();
@@ -1958,6 +2152,8 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         allow_out_of_root,
         baseline,
         trusted_extends,
+        env_vars,
+        untrusted_when_var_reads,
     }
 }
 

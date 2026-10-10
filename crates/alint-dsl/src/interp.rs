@@ -189,6 +189,22 @@ where
     })
 }
 
+/// Whether interpolating `input` would read the environment: true when it
+/// holds at least one `{{env.X}}` span (with or without a `| default(...)`
+/// filter, and with any spacing the real resolver accepts). Runs the real
+/// span resolver with a probe lookup, so it agrees with
+/// [`interpolate_scalar`] on every boundary; a span that does not parse is
+/// left to the real interpolation pass to report.
+pub(crate) fn reads_env(input: &str) -> bool {
+    let read = std::cell::Cell::new(false);
+    let probe = |_: &str| {
+        read.set(true);
+        Some("x".to_owned())
+    };
+    let _ = interpolate_scalar(input, &probe);
+    read.get()
+}
+
 enum SpanResult {
     /// An `env.X` span resolved to a value.
     Resolved(String),
@@ -643,6 +659,20 @@ mod tests {
         let seq = v.as_mapping().unwrap()["paths"].as_sequence().unwrap();
         assert_eq!(seq[0].as_str().unwrap(), "pkgs/a");
         assert_eq!(seq[1].as_str().unwrap(), "pkgs/b");
+    }
+
+    #[test]
+    fn reads_env_matches_the_resolver() {
+        assert!(reads_env("{{env.NPM_TOKEN}}"));
+        assert!(reads_env("{{ env.NPM_TOKEN }}"));
+        assert!(reads_env("{{  env . NPM_TOKEN | default('x') }}"));
+        assert!(reads_env("prefix-{{env.A}}-suffix"));
+        assert!(reads_env("{{vars.a}}{{env.B}}"));
+        assert!(!reads_env("{{vars.token}}"));
+        assert!(!reads_env("{{ctx.path}}"));
+        assert!(!reads_env("{{end}}"));
+        assert!(!reads_env("plain"));
+        assert!(!reads_env("{{env.UNCLOSED"));
     }
 
     #[test]
