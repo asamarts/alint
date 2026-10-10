@@ -4905,7 +4905,7 @@
       ]
     },
     "ignore": {
-      "description": "Additional glob patterns excluded on top of .gitignore.",
+      "description": "Additional glob patterns excluded on top of .gitignore. Refused from a remote `extends:` that is not listed in `trusted_extends:`, because it hides files from every rule.",
       "items": {
         "type": "string"
       },
@@ -4936,7 +4936,7 @@
       "type": "array"
     },
     "trusted_extends": {
-      "description": "Remote `extends:` URLs (matched with or without the `#sha256-` integrity fragment) whose content-injecting fixers (`replace`, `file_create`, `file_prepend`, `file_append`) are honored at their declared tier instead of demoted to a suggestion. By default a content fixer reached through a remote `extends:` may only PROPOSE an edit -- it never auto-writes third-party bytes into your files; listing the URL here opts it back into auto-applying. Honored only from the user's own top-level config (and `.alint.d/` drop-ins): a `trusted_extends:` from an `extends:`'d or nested config is refused, because a ruleset must not allowlist itself.",
+      "description": "Remote `extends:` URLs (matched with or without the `#sha256-` integrity fragment) whose content-injecting fixers (`replace`, `file_create`, `file_prepend`, `file_append`) are honored at their declared tier instead of demoted to a suggestion. By default a content fixer reached through a remote `extends:` may only PROPOSE an edit -- it never auto-writes third-party bytes into your files; listing the URL here opts it back into auto-applying. Honored only from the user's own top-level config (and `.alint.d/` drop-ins): a `trusted_extends:` from an `extends:`'d or nested config is refused, because a ruleset must not allowlist itself. A listed remote may also read `env.*` in a `when:` / `when_iter:` expression and declare `ignore:`, both refused from an untrusted remote.",
       "items": {
         "type": "string"
       },
