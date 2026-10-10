@@ -777,6 +777,10 @@ The `iter` namespace exposes:
 
 `when_iter:` composes with the rule's outer `when:` (whole-rule gate, evaluated once) and with each nested rule's `when:` (which now also sees the same `iter.*` context). Same field is available on `for_each_file` and `every_matching_has`.
 
+<!-- alint:since=0.18.0 -->
+**Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
+<!-- /alint:since -->
+
 ### `dir_contains`
 
 **Categories:** Cross-file, Structure
@@ -825,6 +829,10 @@ Environment threaded into the child:
 | `ALINT_FACT_<NAME>` | one per resolved fact, stringified |
 
 `timeout: <seconds>` (default 30) bounds each invocation; past the limit the child is killed and a violation reports the timeout.
+
+<!-- alint:since=0.18.0 -->
+Output is drained while the child runs (a child writing more than a pipe buffer cannot deadlock), and after the child exits alint waits at most 2 seconds for descendants still holding its output pipes. What the timeout kills depends on whether alint's stdin is a terminal. In a non-interactive run (CI, the language server, piped stdin) each spawned process (the `command` rule, `generated_file_fresh`, `command_idempotent`, the `command` fix, `custom:` facts) gets its own process group on Unix: the timeout kills the whole group, grandchildren included, and descendants left holding the output pipes after a normal exit are killed too. In an interactive run (stdin is a terminal) the child stays in alint's process group so Ctrl-C reaches it and it can prompt on `/dev/tty`; the timeout then kills only the direct child. A timeout too large to represent means no deadline. On Windows only the direct child is killed.
+<!-- /alint:since -->
 
 **Trust gate.** Every process-spawning rule kind — `command`, `generated_file_fresh`, and `command_idempotent` — is allowed only in the user's own top-level config. Any of them introduced via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — the same gate that protects `custom:` facts. Adopting a published ruleset must never imply granting it arbitrary code execution.
 

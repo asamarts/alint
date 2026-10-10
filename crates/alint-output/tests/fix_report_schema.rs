@@ -150,6 +150,49 @@ fn non_convergent_report_surfaces_the_flag_and_validates() {
 }
 
 #[test]
+fn skipped_items_carry_their_skip_kind_and_validate() {
+    let item = |status| FixItem {
+        violation: Violation::new("expected a file matching [.env]"),
+        status,
+    };
+    let report = FixReport {
+        non_convergent: false,
+        results: vec![FixRuleResult {
+            rule_id: "env".into(),
+            level: Level::Error,
+            items: vec![
+                item(FixStatus::unresolved(
+                    "fix ran but the violation still stands",
+                )),
+                item(FixStatus::declined("already exists")),
+                item(FixStatus::errored("fix error: read-only")),
+                item(FixStatus::baselined("baselined")),
+                item(FixStatus::Unfixable),
+            ],
+        }],
+    };
+    let text = render_json(&report);
+    validate(&text);
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let kinds: Vec<_> = json["results"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i.get("skip_kind").cloned())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            Some("unresolved".into()),
+            Some("declined".into()),
+            Some("errored".into()),
+            Some("baselined".into()),
+            None,
+        ]
+    );
+}
+
+#[test]
 fn dry_run_report_carries_the_flag_and_validates() {
     let mut buf = Vec::new();
     write_fix_json_with_mode(&canonical_fix_report(), true, &mut buf).unwrap();

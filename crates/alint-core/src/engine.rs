@@ -1028,17 +1028,17 @@ impl Engine {
             // Single-pass preview: a dry run writes nothing, so there is no
             // changed tree to re-walk. It shows the first pass; a real `fix` may
             // do more (docs/design/v0.17/fixpoint.md 2). No stage sink.
-            return self
-                .fix_run(
-                    root,
-                    index,
-                    &std::collections::HashSet::new(),
-                    true,
-                    threshold,
-                    false,
-                    None,
-                )
-                .map(|(report, _staged)| report);
+            let (mut report, _) = self.fix_run(
+                root,
+                index,
+                &std::collections::HashSet::new(),
+                true,
+                threshold,
+                None,
+                None,
+            )?;
+            self.predict_unresolved_creates(root, index, walk_opts, &mut report);
+            return Ok(report);
         }
         // Byte-level fixpoint (docs/design/v0.17/fixpoint.md): re-walk and re-fix
         // until a pass applies nothing (`applied() == 0`), bounded by MAX_PASSES.
@@ -1082,9 +1082,20 @@ impl Engine {
             std::collections::HashSet::new()
         };
         let mut created: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        // Write targets whose failure was already reported: a persistent failure
+        // (a read-only file) re-fires on every pass, but is printed once.
+        let write_failures_reported = RefCell::new(HashSet::new());
         for _pass in 0..MAX_PASSES {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (report, _buf) = self.fix_run(root, cur, &created, false, threshold, true, None)?;
+            let (report, _buf) = self.fix_run(
+                root,
+                cur,
+                &created,
+                false,
+                threshold,
+                Some(&write_failures_reported),
+                None,
+            )?;
             // F4 tripwire (audit 2026-09-20): the cross-pass merge below keys items
             // by `violation_key`, which for a path-bearing, keyless violation
             // collapses to `(rule_id, path)` (line/column/message ignored). Every
@@ -1209,7 +1220,7 @@ impl Engine {
         // and stays non-convergent.
         if !converged {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, false, None)?;
+            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, None, None)?;
             if confirm.applied() == 0 {
                 converged = true;
                 final_keys = confirm
@@ -1258,7 +1269,7 @@ impl Engine {
                     if let FixStatus::Applied(summary) = &it.status
                         && final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
                     {
-                        it.status = FixStatus::declined(format!(
+                        it.status = FixStatus::unresolved(format!(
                             "fix ran ({summary}) but the violation still stands on re-check \
                              (is the written path ignored, outside the rule's scope, or \
                              different from the path the rule checks?)"
@@ -1331,7 +1342,7 @@ impl Engine {
             /* created */ &std::collections::HashSet::new(),
             /* dry_run */ false,
             threshold,
-            /* flush */ false,
+            /* flush */ None,
             Some(&stage_ops),
         )?;
 
@@ -1415,6 +1426,63 @@ impl Engine {
         Ok((report, staged))
     }
 
+    /// `--dry-run` has no re-walk to discover that a fix will not stick, so
+    /// predict the known cases the real `fix` demotes after its re-check: a
+    /// would-be-`Applied` create (`file_create`) whose target the walk would
+    /// not index (gitignored, `ignore:`d) or that lies outside the rule's
+    /// `paths:`. Those become the same unresolved skip the real run reports.
+    /// Other ways a fix can fail its re-check (a cascade through another
+    /// rule, content a fixer writes that the rule still rejects) are only
+    /// found by running it; `docs/site/cli/fix.md` documents the limit.
+    fn predict_unresolved_creates(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        walk_opts: &crate::WalkOptions,
+        report: &mut FixReport,
+    ) {
+        for rr in &mut report.results {
+            let Some(entry) = self.entries.iter().find(|e| e.rule.id() == &*rr.rule_id) else {
+                continue;
+            };
+            let Some(fixer) = entry.rule.fixer() else {
+                continue;
+            };
+            for it in &mut rr.items {
+                let FixStatus::Applied(summary) = &it.status else {
+                    continue;
+                };
+                let Some(FixEdit::CreateFile { path, .. }) =
+                    fixer.fix_edit(&it.violation, &[], root)
+                else {
+                    continue;
+                };
+                let target: PathBuf = path
+                    .components()
+                    .filter(|c| !matches!(c, std::path::Component::CurDir))
+                    .collect();
+                let why = if crate::walker::would_walk_skip(root, walk_opts, &target, false) {
+                    format!(
+                        "{} is excluded from the walk (.gitignore / `ignore:`), so the rule \
+                         would never see it",
+                        target.display()
+                    )
+                } else if entry
+                    .rule
+                    .path_scope()
+                    .is_some_and(|scope| !scope.matches(&target, index))
+                {
+                    format!("{} is outside the rule's `paths:`", target.display())
+                } else {
+                    continue;
+                };
+                it.status = FixStatus::unresolved(format!(
+                    "fix would run ({summary}) but would not resolve the violation: {why}"
+                ));
+            }
+        }
+    }
+
     /// Identity key for grouping a violation's report items ACROSS fixpoint
     /// passes (docs/design/v0.17/fixpoint.md 7). Reuses the baseline fingerprint
     /// (it folds in `rule_id` + path + the rule's stable identity via
@@ -1457,7 +1525,10 @@ impl Engine {
         created: &HashSet<PathBuf>,
         dry_run: bool,
         threshold: Applicability,
-        flush: bool,
+        // `Some` = write the compose buffer; the set holds the targets whose
+        // write failure this `fix` run already printed (reported once, not once
+        // per fixpoint pass). `None` for a preview (`--dry-run` / `--diff`).
+        flush: Option<&RefCell<HashSet<PathBuf>>>,
         stage_ops: Option<&RefCell<Vec<FixEdit>>>,
     ) -> Result<(FixReport, BTreeMap<PathBuf, Vec<u8>>)> {
         self.ensure_manifest_scope_resolvable()?;
@@ -2089,7 +2160,7 @@ impl Engine {
         // Flush the compose buffer: one atomic write per file any content fixer
         // touched, in deterministic (BTreeMap) order. Keys are the resolved
         // absolute write targets (a symlink and its in-tree target share one
-        // key), written directly. `flush` is false for a stage (`--diff`) so the
+        // key), written directly. `flush` is `None` for a stage (`--diff`) so the
         // buffer is left unwritten for `stage_fixes` to diff; `--dry-run` has no
         // buffer, so both are no-ops there.
         //
@@ -2102,11 +2173,15 @@ impl Engine {
         // A read-only target genuinely fails here: `write_atomic` refuses it
         // explicitly, since its temp+rename would otherwise succeed on directory
         // permissions alone and silently replace the file.
-        if flush && let Some(buf) = &compose_buf {
+        if let Some(reported) = flush
+            && let Some(buf) = &compose_buf
+        {
             let mut failed: Vec<PathBuf> = Vec::new();
             for (target, bytes) in buf.borrow().iter() {
                 if let Err(source) = write_atomic(target, bytes) {
-                    eprintln!("alint: could not write {}: {source}", target.display());
+                    if reported.borrow_mut().insert(target.clone()) {
+                        eprintln!("alint: could not write {}: {source}", target.display());
+                    }
                     failed.push(target.clone());
                 }
             }

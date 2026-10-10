@@ -2,23 +2,42 @@
 //! facts, the `command` rule, `generated_file_fresh`, `command_idempotent`,
 //! the `command` fix op).
 //!
-//! Three properties, each a past bug class (audit 2026-10):
+//! Properties, each a past bug class (audit 2026-10):
 //!
 //! 1. **Concurrent drain.** stdout/stderr are read on their own threads while
 //!    the child runs. Reading only after exit deadlocks a child that writes more
 //!    than a pipe buffer (~64 KiB): it blocks on the full pipe, never exits, and
 //!    the wait loop reports a bogus timeout.
-//! 2. **The timeout kills the whole tree.** On unix the child is spawned in its
-//!    own process group and the GROUP is killed on timeout, so a grandchild
-//!    (`sh -c "sleep 15; echo x"`'s `sleep`) cannot outlive the deadline. Killing
-//!    only the direct child left the grandchild holding the pipe's write end, and
-//!    the reader join then blocked until it exited on its own.
+//! 2. **The process-group mode follows whether alint's stdin is a terminal**
+//!    ([`use_own_process_group`]).
+//!    - *stdin is NOT a terminal* (CI, the LSP, pipes, cron; "grouped mode"):
+//!      on unix the child is spawned in its own process group and the timeout
+//!      kills the whole GROUP, so a grandchild (`sh -c "sleep 15; echo x"`'s
+//!      `sleep`) cannot outlive the deadline. After a normal exit, leftover
+//!      descendants still holding an output pipe (`sh -c "sleep 100 & echo
+//!      hi"`) are killed with the group as well, so a long-running process (the
+//!      LSP) leaks neither them nor the reader threads blocked on their pipes.
+//!    - *stdin IS a terminal* (an interactive run): the child stays in alint's
+//!      own process group. A separate group is outside the terminal's
+//!      foreground group, so Ctrl-C would kill alint but orphan the child, and
+//!      a child reading `/dev/tty` (a credential prompt) would be stopped by
+//!      `SIGTTIN` and hang until the timeout. Here the timeout kills only the
+//!      direct child; a grandchild can keep running, and property 3 bounds how
+//!      long alint waits on it.
+//!
+//!    "stdin is a terminal" is the agreed proxy for "interactive session with a
+//!    controlling terminal": one portable `isatty`, decided once per process.
+//!    Redirecting stdin (`alint check < /dev/null`) opts an interactive run into
+//!    grouped mode.
 //! 3. **Reader joins are bounded.** Once the direct child has exited (or been
 //!    killed), whatever it wrote is already in the pipe and drains at once; a
-//!    reader still blocked after [`READER_GRACE`] is held open by a backgrounded
-//!    descendant (`sh -c "sleep 6 & echo hi"`). The output read so far is
-//!    returned and the reader is abandoned (it ends when that descendant closes
-//!    the pipe), instead of stalling the run for the descendant's lifetime.
+//!    reader still blocked after [`READER_GRACE`] is held open by a descendant
+//!    that survived (ungrouped mode, or one that left the group via `setsid`).
+//!    The output read so far is returned and the reader is abandoned (it ends
+//!    when that descendant closes the pipe), instead of stalling the run for the
+//!    descendant's lifetime.
+//! 4. **No deadline overflow.** A `timeout` too large to add to `Instant::now()`
+//!    (`timeout: 18446744073709551615`) means "no deadline", not a panic.
 //!
 //! On Windows there is no process group here (a job object needs `unsafe`
 //! FFI, which the workspace forbids): the direct child is killed and property
@@ -26,7 +45,7 @@
 
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::sync::mpsc::{Receiver, RecvTimeoutError, channel};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 /// Poll granularity of the wait loop.
@@ -39,6 +58,13 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 /// never truncates a legitimate child's output.
 pub const READER_GRACE: Duration = Duration::from_secs(2);
 
+/// Grouped mode, after a normal exit: how long the readers get to reach EOF
+/// before alint concludes a leftover descendant holds a pipe and kills the
+/// group. Short, because the child's own output is already buffered; a miss
+/// under load only costs a group kill (which never loses buffered output).
+/// Probing first keeps the common case free of the extra `kill` spawn.
+const LEFTOVER_PROBE: Duration = Duration::from_millis(50);
+
 /// Outcome of [`run_bounded`].
 #[derive(Debug)]
 pub enum RunOutcome {
@@ -50,7 +76,8 @@ pub enum RunOutcome {
     },
     /// `spawn()` (or the post-spawn wait) failed.
     SpawnError(std::io::Error),
-    /// Killed (with its process group, on unix) after exceeding the timeout.
+    /// Killed after exceeding the timeout (with its process group in grouped
+    /// mode; see the module docs).
     TimedOut,
 }
 
@@ -58,12 +85,33 @@ pub enum RunOutcome {
 /// stdout piped and stderr piped when `capture_stderr` (else discarded), and run
 /// it to completion within `timeout`. Each captured stream keeps at most `cap`
 /// bytes; any excess is read and discarded so the child never blocks on a full
-/// pipe. See the module docs for the timeout / grandchild semantics.
-pub fn run_bounded(
+/// pipe. The process-group mode follows [`use_own_process_group`] for alint's
+/// stdin; see the module docs for the timeout / descendant semantics.
+pub fn run_bounded(cmd: Command, timeout: Duration, cap: u64, capture_stderr: bool) -> RunOutcome {
+    static GROUPED: OnceLock<bool> = OnceLock::new();
+    let grouped = *GROUPED.get_or_init(|| {
+        use std::io::IsTerminal as _;
+        use_own_process_group(std::io::stdin().is_terminal())
+    });
+    run_bounded_in(cmd, timeout, cap, capture_stderr, grouped)
+}
+
+/// The process-group rule: the child gets its own group (so a timeout kills
+/// the whole tree) only on unix and only when alint's stdin is NOT a terminal.
+/// With a terminal the child must stay in the foreground group so Ctrl-C
+/// reaches it and it may read `/dev/tty`.
+#[must_use]
+pub fn use_own_process_group(stdin_is_terminal: bool) -> bool {
+    cfg!(unix) && !stdin_is_terminal
+}
+
+/// [`run_bounded`] with the process-group mode chosen explicitly.
+fn run_bounded_in(
     mut cmd: Command,
     timeout: Duration,
     cap: u64,
     capture_stderr: bool,
+    grouped: bool,
 ) -> RunOutcome {
     cmd.stdout(Stdio::piped()).stderr(if capture_stderr {
         Stdio::piped()
@@ -71,7 +119,7 @@ pub fn run_bounded(
         Stdio::null()
     });
     #[cfg(unix)]
-    {
+    if grouped {
         use std::os::unix::process::CommandExt as _;
         // Own process group (pgid == child pid) so a timeout can kill every
         // descendant that did not deliberately leave the group.
@@ -81,13 +129,25 @@ pub fn run_bounded(
         Ok(c) => c,
         Err(e) => return RunOutcome::SpawnError(e),
     };
-    let out = Reader::start(child.stdout.take(), cap);
-    let err = Reader::start(child.stderr.take(), cap);
+    let mut out = Reader::start(child.stdout.take(), cap);
+    let mut err = Reader::start(child.stderr.take(), cap);
 
-    let deadline = Instant::now() + timeout;
+    // `None`: the timeout is too large to represent, i.e. no deadline.
+    let deadline = Instant::now().checked_add(timeout);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
+                if grouped {
+                    // A leftover descendant (`sh -c "sleep 100 & echo hi"`)
+                    // holds a pipe open: kill the rest of the group so it
+                    // neither outlives the run nor pins the reader threads.
+                    // The pgid cannot have been recycled: the live pipe holder
+                    // keeps the group (and so the id) allocated.
+                    let probe = Instant::now() + LEFTOVER_PROBE;
+                    if !(out.wait_eof(probe) && err.wait_eof(probe)) {
+                        kill_group(child.id());
+                    }
+                }
                 let grace = Instant::now() + READER_GRACE;
                 return RunOutcome::Exited {
                     status,
@@ -96,8 +156,8 @@ pub fn run_bounded(
                 };
             }
             Ok(None) => {
-                if Instant::now() >= deadline {
-                    kill_tree(&mut child);
+                if deadline.is_some_and(|d| Instant::now() >= d) {
+                    kill_tree(&mut child, grouped);
                     let grace = Instant::now() + READER_GRACE;
                     let _ = out.finish(grace);
                     let _ = err.finish(grace);
@@ -106,7 +166,7 @@ pub fn run_bounded(
                 std::thread::sleep(POLL_INTERVAL);
             }
             Err(e) => {
-                kill_tree(&mut child);
+                kill_tree(&mut child, grouped);
                 let grace = Instant::now() + READER_GRACE;
                 let _ = out.finish(grace);
                 let _ = err.finish(grace);
@@ -116,24 +176,33 @@ pub fn run_bounded(
     }
 }
 
-/// Kill the child and (on unix) its whole process group, then reap it.
-fn kill_tree(child: &mut Child) {
+/// Kill the child (with its whole process group in grouped mode), then reap it.
+fn kill_tree(child: &mut Child, grouped: bool) {
+    if grouped {
+        kill_group(child.id());
+    }
+    let _ = child.kill();
+    let _ = child.wait();
+}
+
+/// SIGKILL process group `pgid` (unix; a no-op elsewhere).
+fn kill_group(pgid: u32) {
     #[cfg(unix)]
     {
         // `process_group(0)` made the pgid equal to the child's pid. std has no
         // killpg and the workspace forbids `unsafe`, so signal the group through
         // the POSIX `kill` utility. Best-effort: if it is unavailable the direct
-        // child is still killed below and the bounded reader join still caps
-        // the wait.
+        // child is still killed by `kill_tree` and the bounded reader join still
+        // caps the wait.
         let _ = Command::new("kill")
-            .args(["-s", "KILL", "--", &format!("-{}", child.id())])
+            .args(["-s", "KILL", "--", &format!("-{pgid}")])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
     }
-    let _ = child.kill();
-    let _ = child.wait();
+    #[cfg(not(unix))]
+    let _ = pgid;
 }
 
 /// A pipe drained on its own thread into a shared, capped buffer.
@@ -175,14 +244,27 @@ impl Reader {
         }
     }
 
+    /// Wait for EOF until `deadline`; `true` once the reader has finished (or
+    /// there is no pipe). Callable more than once, before [`Reader::finish`].
+    fn wait_eof(&mut self, deadline: Instant) -> bool {
+        let Some(rx) = &self.done else {
+            return true;
+        };
+        let left = deadline.saturating_duration_since(Instant::now());
+        match rx.recv_timeout(left) {
+            Ok(()) | Err(RecvTimeoutError::Disconnected) => {
+                // Finished: later waits must not block on the spent channel.
+                self.done = None;
+                true
+            }
+            Err(RecvTimeoutError::Timeout) => false,
+        }
+    }
+
     /// Wait for EOF until `deadline`, then return what has been read. A reader
     /// that has not finished by then is abandoned (see the module docs).
-    fn finish(self, deadline: Instant) -> Vec<u8> {
-        if let Some(rx) = &self.done {
-            let left = deadline.saturating_duration_since(Instant::now());
-            // EOF, a dead reader, or the grace expiring all end the wait.
-            let _: Result<(), RecvTimeoutError> = rx.recv_timeout(left);
-        }
+    fn finish(mut self, deadline: Instant) -> Vec<u8> {
+        let _ = self.wait_eof(deadline);
         std::mem::take(
             &mut *self
                 .buf
@@ -238,35 +320,167 @@ mod tests {
     fn timeout_kills_the_grandchild_holding_the_pipe() {
         // `sleep` is a grandchild that inherits stdout; killing only `sh` left it
         // holding the pipe and the run took the full 15s.
+        // Grouped mode (stdin not a terminal).
         let start = Instant::now();
-        let out = run_bounded(
+        let out = run_bounded_in(
             sh("sleep 15; echo x"),
             Duration::from_millis(500),
             1024,
             true,
+            true,
         );
         assert!(matches!(out, RunOutcome::TimedOut), "{out:?}");
         assert!(
-            start.elapsed() < Duration::from_secs(5),
+            start.elapsed() < Duration::from_secs(2),
             "timeout not enforced: {:?}",
             start.elapsed()
         );
     }
 
     #[test]
-    fn backgrounded_descendant_does_not_stall_after_exit() {
+    fn ungrouped_timeout_is_still_bounded_by_the_reader_grace() {
+        // Terminal mode: only `sh` is killed; the grandchild keeps the pipe, so
+        // the wait is bounded by READER_GRACE instead.
         let start = Instant::now();
-        let out = run_bounded(sh("sleep 8 & echo hi"), Duration::from_secs(30), 1024, true);
-        let RunOutcome::Exited { status, stdout, .. } = out else {
-            panic!("expected exit, got {out:?}");
-        };
-        assert!(status.success());
-        assert_eq!(stdout, b"hi\n");
+        let out = run_bounded_in(
+            sh("sleep 15; echo x"),
+            Duration::from_millis(300),
+            1024,
+            true,
+            false,
+        );
+        assert!(matches!(out, RunOutcome::TimedOut), "{out:?}");
         assert!(
             start.elapsed() < Duration::from_secs(6),
-            "stalled on the background descendant: {:?}",
+            "{:?}",
             start.elapsed()
         );
+    }
+
+    #[test]
+    fn backgrounded_descendant_does_not_stall_after_exit() {
+        for grouped in [true, false] {
+            let start = Instant::now();
+            let out = run_bounded_in(
+                sh("sleep 8 & echo hi"),
+                Duration::from_secs(30),
+                1024,
+                true,
+                grouped,
+            );
+            let RunOutcome::Exited { status, stdout, .. } = out else {
+                panic!("expected exit, got {out:?}");
+            };
+            assert!(status.success());
+            assert_eq!(stdout, b"hi\n");
+            assert!(
+                start.elapsed() < Duration::from_secs(6),
+                "grouped={grouped}: stalled on the background descendant: {:?}",
+                start.elapsed()
+            );
+        }
+    }
+
+    fn pid_is_gone(pid: &str) -> bool {
+        // A reaped process is gone; a zombie awaiting a non-reaping init is dead.
+        let out = Command::new("ps")
+            .args(["-o", "stat=", "-p", pid])
+            .output()
+            .expect("ps");
+        let stat = String::from_utf8_lossy(&out.stdout);
+        stat.trim().is_empty() || stat.trim_start().starts_with('Z')
+    }
+
+    #[test]
+    fn grouped_normal_exit_kills_the_leftover_descendant() {
+        // `sleep 100 &` inherits stdout. Without the post-exit group kill it
+        // outlived the run (a process + reader-thread leak in the LSP) and the
+        // run waited the full READER_GRACE for it.
+        let start = Instant::now();
+        let out = run_bounded_in(
+            sh("sleep 100 & echo $!"),
+            Duration::from_secs(30),
+            1024,
+            true,
+            true,
+        );
+        let elapsed = start.elapsed();
+        let RunOutcome::Exited { stdout, .. } = out else {
+            panic!("expected exit, got {out:?}");
+        };
+        let pid = String::from_utf8(stdout).unwrap();
+        let pid = pid.trim();
+        let gone = (0..100).any(|_| {
+            let g = pid_is_gone(pid);
+            if !g {
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            g
+        });
+        if !gone {
+            let _ = Command::new("kill").args(["-9", pid]).status();
+        }
+        assert!(gone, "leftover descendant {pid} survived the run");
+        assert!(
+            elapsed < READER_GRACE,
+            "waited for the descendant: {elapsed:?}"
+        );
+    }
+
+    #[test]
+    fn huge_timeout_means_no_deadline_not_a_panic() {
+        // `timeout: 18446744073709551615` overflowed `Instant + Duration`.
+        for grouped in [true, false] {
+            let out = run_bounded_in(sh("echo ok"), Duration::MAX, 1024, true, grouped);
+            let RunOutcome::Exited { status, stdout, .. } = out else {
+                panic!("expected exit, got {out:?}");
+            };
+            assert!(status.success());
+            assert_eq!(stdout, b"ok\n");
+        }
+        let out = run_bounded(sh("true"), Duration::from_secs(u64::MAX), 1024, false);
+        assert!(matches!(out, RunOutcome::Exited { .. }), "{out:?}");
+    }
+
+    #[test]
+    fn group_mode_follows_whether_stdin_is_a_terminal() {
+        assert!(
+            !use_own_process_group(true),
+            "a terminal keeps the child in alint's group"
+        );
+        assert!(use_own_process_group(false));
+    }
+
+    /// `(child's own pid, child's pgid)` as reported by `ps`.
+    fn child_pid_and_pgid(grouped: bool) -> (String, String) {
+        let out = run_bounded_in(
+            sh("echo $$; ps -o pgid= -p $$"),
+            Duration::from_secs(10),
+            1024,
+            true,
+            grouped,
+        );
+        let RunOutcome::Exited { stdout, .. } = out else {
+            panic!("expected exit, got {out:?}");
+        };
+        let s = String::from_utf8(stdout).unwrap();
+        let mut lines = s.lines().map(|l| l.trim().to_string());
+        (lines.next().unwrap(), lines.next().unwrap())
+    }
+
+    #[test]
+    fn ungrouped_child_stays_in_the_callers_process_group() {
+        // Terminal mode: Ctrl-C reaches the child and `/dev/tty` reads work
+        // because the child shares alint's (foreground) process group.
+        let ours = Command::new("ps")
+            .args(["-o", "pgid=", "-p", &std::process::id().to_string()])
+            .output()
+            .expect("ps");
+        let ours = String::from_utf8_lossy(&ours.stdout).trim().to_string();
+        let (_, child_pgid) = child_pid_and_pgid(false);
+        assert_eq!(child_pgid, ours);
+        let (leader, group) = child_pid_and_pgid(true);
+        assert_eq!(group, leader, "grouped mode: the child leads its own group");
     }
 
     #[test]

@@ -6,9 +6,10 @@
 //! stderr captured **concurrently** (so the full output is preserved — the
 //! generator's stdout is diffed; the checker's offender list must not be
 //! truncated — and a large output cannot deadlock on a full pipe buffer),
-//! the timeout kills the child's whole process group on unix (a grandchild
-//! cannot hold the pipe open past the deadline), and reader joins are
-//! bounded after exit (a backgrounded descendant cannot stall the run).
+//! the wait is bounded even when a grandchild holds the pipe (in a
+//! non-interactive run the timeout kills the whole process group on unix; see
+//! `alint_core::process`), and reader joins are bounded after exit (a
+//! backgrounded descendant cannot stall the run).
 //!
 //! The `command` rule uses the same runner with a small per-file cap.
 
@@ -42,7 +43,8 @@ pub(crate) enum SpawnOutcome {
 /// draining stdout+stderr concurrently while enforcing
 /// `timeout`. On exit returns the status + full captured output;
 /// on a spawn/wait error returns [`SpawnOutcome::SpawnError`];
-/// past `timeout` the child (and, on unix, its process group) is killed and
+/// past `timeout` the child (and its process group in a non-interactive unix
+/// run) is killed and
 /// [`SpawnOutcome::TimedOut`] is returned (captured output
 /// discarded).
 pub(crate) fn run_capturing(

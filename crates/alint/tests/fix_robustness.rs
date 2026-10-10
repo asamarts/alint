@@ -164,3 +164,39 @@ fn fix_only_surfaces_a_fix_error_and_exits_nonzero() {
         "--fix-only must fail when a fix errored"
     );
 }
+
+#[test]
+fn a_persistent_write_failure_is_reported_once_not_once_per_pass() {
+    // The fixpoint re-runs while some other file still changes; a read-only
+    // target fails on every pass, and "could not write" was printed per pass.
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), CONFIG).unwrap();
+    std::fs::write(root.join("good.rs"), "fn a() {}   \n").unwrap();
+    std::fs::write(root.join("locked.rs"), "fn b() {}   \n").unwrap();
+    std::fs::set_permissions(
+        root.join("locked.rs"),
+        std::fs::Permissions::from_mode(0o444),
+    )
+    .unwrap();
+
+    let out = run(root, &["fix", "."]);
+    let stderr = String::from_utf8_lossy(&out.stderr);
+
+    assert_eq!(
+        std::fs::read_to_string(root.join("good.rs")).unwrap(),
+        "fn a() {}\n"
+    );
+    assert_eq!(
+        std::fs::read_to_string(root.join("locked.rs")).unwrap(),
+        "fn b() {}   \n",
+        "the read-only file is left alone"
+    );
+    assert_eq!(
+        stderr.matches("could not write").count(),
+        1,
+        "reported exactly once; stderr:\n{stderr}"
+    );
+    assert_eq!(out.status.code(), Some(1));
+}

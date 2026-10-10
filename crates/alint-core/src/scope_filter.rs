@@ -44,7 +44,7 @@
 //! ~750 ms — and that's before the file-read savings the
 //! filter unlocks.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
@@ -298,20 +298,27 @@ impl ManifestPredicate {
     /// [`FileIndex`]. An unparseable manifest / bad extract yields the empty set
     /// (the engine warns); the predicate then contributes nothing.
     ///
-    /// The result is in DECLARED order (first occurrence kept): a workspace
+    /// The result is in DECLARED order: a workspace
     /// entry prefixed `!` (`!packages/internal` in a pnpm / npm `workspaces`
     /// list) is an EXCLUDE, resolved like any other entry and returned with a
     /// leading `!` (e.g. `!packages/internal`). [`ManifestSet::from_paths`]
     /// evaluates the entries in order, last match wins. Before, the `!` entry
     /// was resolved as a literal path that matched nothing, so the excluded
     /// package silently stayed in scope (audit 2026-10 finding 8).
+    ///
+    /// A repeated entry keeps only its LAST occurrence. Under last-match-wins an
+    /// earlier copy can never decide (the later identical entry matches the
+    /// same files and comes after it), so dropping it is exact; keeping the
+    /// FIRST occurrence instead dropped a later re-include, and
+    /// `["packages/*", "!packages/internal", "packages/*"]` wrongly excluded
+    /// `packages/internal`.
     pub(crate) fn resolve_set(&self, text: &str) -> Vec<PathBuf> {
         let base = self.source.parent().unwrap_or_else(|| Path::new(""));
         let Ok(raw) = extract_values(&self.extract, text) else {
             return Vec::new();
         };
-        let mut seen: HashSet<PathBuf> = HashSet::new();
-        raw.into_iter()
+        let resolved: Vec<PathBuf> = raw
+            .into_iter()
             .filter(|e| !is_non_literal(e))
             .filter_map(|entry| {
                 let (negated, entry) = match entry.strip_prefix('!') {
@@ -345,8 +352,13 @@ impl ManifestPredicate {
                     resolved
                 })
             })
-            .filter(|p| seen.insert(p.clone()))
-            .collect()
+            .collect();
+        // Keep each entry's LAST occurrence (see above): walk backwards, then
+        // restore declared order.
+        let mut seen: HashSet<&PathBuf> = HashSet::new();
+        let mut keep: Vec<&PathBuf> = resolved.iter().rev().filter(|p| seen.insert(*p)).collect();
+        keep.reverse();
+        keep.into_iter().cloned().collect()
     }
 }
 
@@ -372,12 +384,40 @@ pub struct ManifestSet {
     literals: HashSet<PathBuf>,
     globs: GlobSet,
     glob_patterns: Vec<String>,
-    /// Set when any member is negated: every member in declared order,
-    /// `(negated, member)`. `None` keeps the unordered fast path.
-    ordered: Option<Vec<(bool, ManifestMember)>>,
+    /// Set when any member is negated (see [`OrderedMembers`]). `None` keeps
+    /// the unordered fast path.
+    ordered: Option<OrderedMembers>,
 }
 
-/// One compiled manifest member for the ordered (negation-aware) evaluation.
+/// The negation-aware form, indexed so a lookup costs O(path depth), not
+/// O(members): a literal member matches a file iff it EQUALS one of the file's
+/// component-prefixes (directory-aware `starts_with`), so literals live in a
+/// hash map; glob members are one [`GlobSet`] queried per prefix. Each member
+/// carries its declared position; the highest-positioned match decides (last
+/// match wins). A linear scan over members was files x members x depth: a
+/// 5,000-entry workspace with one `!` took ~27 s for 100k files (now ~45 ms).
+///
+/// A short list (the usual `["packages/*", "!packages/internal"]`) instead
+/// scans its members from LAST to first and stops at the first match, which
+/// is cheaper than probing every prefix of the file.
+#[derive(Debug, Clone, Default)]
+struct OrderedMembers {
+    /// Set for a list of at most [`SMALL_ORDERED`] members: `(negated, member)`
+    /// in declared order, scanned in reverse.
+    small: Option<Vec<(bool, ManifestMember)>>,
+    /// Literal member -> (declared position, negated). A repeated literal keeps
+    /// its last position (the one that can decide).
+    literals: HashMap<PathBuf, (usize, bool)>,
+    /// Every glob member, in declared order.
+    globs: GlobSet,
+    /// Per `globs` index: (declared position, negated).
+    glob_meta: Vec<(usize, bool)>,
+}
+
+/// Member count up to which [`OrderedMembers`] scans linearly.
+const SMALL_ORDERED: usize = 8;
+
+/// One compiled member of a short ordered list.
 #[derive(Debug, Clone)]
 enum ManifestMember {
     Literal(PathBuf),
@@ -398,6 +438,43 @@ impl ManifestMember {
                 })
             }
         }
+    }
+}
+
+impl OrderedMembers {
+    fn contains_file(&self, file: &Path) -> bool {
+        if let Some(small) = &self.small {
+            // Last match wins: the first match scanning backwards decides.
+            return small
+                .iter()
+                .rev()
+                .find(|(_, m)| m.matches(file))
+                .is_some_and(|(negated, _)| !negated);
+        }
+        let mut last: Option<(usize, bool)> = None;
+        let mut consider = |m: (usize, bool)| {
+            if last.is_none_or(|(pos, _)| m.0 > pos) {
+                last = Some(m);
+            }
+        };
+        let mut prefix = PathBuf::new();
+        let mut hits: Vec<usize> = Vec::new();
+        for comp in file.components() {
+            prefix.push(comp);
+            if let Some(&m) = self.literals.get(&prefix) {
+                consider(m);
+            }
+            if !self.glob_meta.is_empty() {
+                let candidate = globset::Candidate::new(&prefix);
+                if self.globs.is_match_candidate(&candidate) {
+                    self.globs.matches_candidate_into(&candidate, &mut hits);
+                    for &i in &hits {
+                        consider(self.glob_meta[i]);
+                    }
+                }
+            }
+        }
+        last.is_some_and(|(_, negated)| !negated)
     }
 }
 
@@ -450,40 +527,53 @@ impl ManifestSet {
         }
     }
 
-    /// The negation-aware form: members kept in declared order.
+    /// The negation-aware form: members indexed by declared position.
     fn ordered(paths: Vec<PathBuf>) -> Self {
-        let mut members = Vec::with_capacity(paths.len());
+        let mut ordered = OrderedMembers::default();
+        let mut small = (paths.len() <= SMALL_ORDERED).then(Vec::new);
+        let mut builder = GlobSetBuilder::new();
         let mut glob_patterns = Vec::new();
         let mut literals = HashSet::new();
-        for p in paths {
+        for (pos, p) in paths.into_iter().enumerate() {
             let s = p.to_string_lossy().into_owned();
             let (negated, body) = match s.strip_prefix('!') {
                 Some(rest) => (true, rest.to_string()),
                 None => (false, s),
             };
-            let member = if is_glob_member(&body) {
+            if is_glob_member(&body) {
                 let Some(glob) = compile_member(&body) else {
                     continue;
                 };
+                if let Some(small) = &mut small {
+                    small.push((negated, ManifestMember::Glob(glob.compile_matcher())));
+                }
+                builder.add(glob);
+                ordered.glob_meta.push((pos, negated));
                 if !negated {
                     glob_patterns.push(body);
                 }
-                ManifestMember::Glob(glob.compile_matcher())
             } else {
                 if !negated {
                     literals.insert(PathBuf::from(&body));
                 }
-                ManifestMember::Literal(PathBuf::from(body))
-            };
-            members.push((negated, member));
+                if let Some(small) = &mut small {
+                    small.push((negated, ManifestMember::Literal(PathBuf::from(&body))));
+                }
+                ordered.literals.insert(PathBuf::from(body), (pos, negated));
+            }
         }
+        ordered.small = small;
+        ordered.globs = builder.build().unwrap_or_else(|_| {
+            ordered.glob_meta.clear();
+            GlobSet::empty()
+        });
         // `literals` / `glob_patterns` keep only the POSITIVE members, so
         // `is_empty` stays "declares nothing to include"; matching uses `ordered`.
         Self {
             literals,
             globs: GlobSet::empty(),
             glob_patterns,
-            ordered: Some(members),
+            ordered: Some(ordered),
         }
     }
 
@@ -502,24 +592,16 @@ impl ManifestSet {
     #[must_use]
     pub(crate) fn contains_file(&self, file: &Path) -> bool {
         if let Some(ordered) = &self.ordered {
-            let mut inside = false;
-            for (negated, member) in ordered {
-                if member.matches(file) {
-                    inside = !negated;
-                }
-            }
-            return inside;
+            return ordered.contains_file(file);
         }
-        if self.literals.iter().any(|d| file.starts_with(d)) {
-            return true;
-        }
-        if self.glob_patterns.is_empty() {
-            return false;
-        }
+        // A literal matches iff it equals one of `file`'s component-prefixes
+        // (`starts_with`): a hash probe per prefix, not a scan of the literals.
         let mut prefix = PathBuf::new();
         for comp in file.components() {
             prefix.push(comp);
-            if self.globs.is_match(&prefix) {
+            if self.literals.contains(&prefix)
+                || (!self.glob_patterns.is_empty() && self.globs.is_match(&prefix))
+            {
                 return true;
             }
         }
@@ -1464,15 +1546,145 @@ mod tests {
         let f = manifest_filter(
             "include_manifest_paths:\n  source: web/package.json\n  extract: { json: \"$.workspaces[*]\" }",
         );
-        let text = r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/*"] }"#;
+        let text = r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/app"] }"#;
         let set = f.manifest_predicates()[0].resolve_set(text);
         assert_eq!(
             set,
             vec![
                 PathBuf::from("web/packages/*"),
                 PathBuf::from("!web/packages/internal"),
+                PathBuf::from("web/packages/app"),
             ],
-            "declared order, `!` kept, duplicate dropped"
+            "declared order, `!` kept"
+        );
+    }
+
+    #[test]
+    fn resolve_set_dedup_keeps_the_last_occurrence_so_a_re_include_wins() {
+        // A repeated positive entry after a negation is a re-include under
+        // last-match-wins, exactly like a distinct one (`packages/int*`). The
+        // first-occurrence dedup dropped it and excluded `internal`.
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: package.json\n  extract: { json: \"$.workspaces[*]\" }",
+        );
+        let resolve = |text: &str| {
+            let set = f.manifest_predicates()[0].resolve_set(text);
+            ManifestSet::from_paths(set)
+        };
+        let dup =
+            resolve(r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/*"] }"#);
+        let distinct =
+            resolve(r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/int*"] }"#);
+        for set in [&dup, &distinct] {
+            assert!(set.contains_file(Path::new("packages/internal/a.txt")));
+            assert!(set.contains_file(Path::new("packages/app/a.txt")));
+        }
+        // A plain duplicate collapses to its last position.
+        let set =
+            f.manifest_predicates()[0].resolve_set(r#"{ "workspaces": ["a", "!b", "a", "!b"] }"#);
+        assert_eq!(set, vec![PathBuf::from("a"), PathBuf::from("!b")]);
+        // ...and the exclusion still holds when nothing re-includes it.
+        let set =
+            resolve(r#"{ "workspaces": ["packages/*", "packages/*", "!packages/internal"] }"#);
+        assert!(!set.contains_file(Path::new("packages/internal/a.txt")));
+    }
+
+    /// Naive last-match-wins oracle over `(negated, pattern)` members.
+    fn oracle(members: &[String], file: &Path) -> bool {
+        let mut inside = false;
+        for m in members {
+            let (negated, body) = match m.strip_prefix('!') {
+                Some(rest) => (true, rest),
+                None => (false, m.as_str()),
+            };
+            let hit = if is_glob_member(body) {
+                let g = compile_member(body).unwrap().compile_matcher();
+                let mut prefix = PathBuf::new();
+                file.components().any(|c| {
+                    prefix.push(c);
+                    g.is_match(&prefix)
+                })
+            } else {
+                file.starts_with(body)
+            };
+            if hit {
+                inside = !negated;
+            }
+        }
+        inside
+    }
+
+    #[test]
+    fn large_ordered_manifest_set_matches_the_last_match_oracle() {
+        // The indexed (> SMALL_ORDERED members) and the short reverse-scan forms
+        // must both agree with plain last-match-wins.
+        let large: Vec<String> = (0..40)
+            .map(|i| format!("packages/p{i}"))
+            .chain([
+                "!packages/p3".into(),
+                "!packages/p1*".into(),
+                "packages/p12".into(),
+                "libs/*".into(),
+                "!libs/b/gen".into(),
+                "packages/p5".into(),
+                "!packages/p5/test/**".into(),
+            ])
+            .collect();
+        let small: Vec<String> = ["packages/*", "!packages/p1*", "packages/p12", "!**/test/**"]
+            .into_iter()
+            .map(String::from)
+            .collect();
+        let files = [
+            "packages/p0/a.rs",
+            "packages/p3/a.rs",
+            "packages/p10/a.rs",
+            "packages/p12/a.rs",
+            "packages/p12/test/a.rs",
+            "packages/p5/src/a.rs",
+            "packages/p5/test/a.rs",
+            "packages/p99/a.rs",
+            "libs/a/x.rs",
+            "libs/b/gen/x.rs",
+            "libs/b/src/x.rs",
+            "other/x.rs",
+        ];
+        for members in [&large, &small] {
+            let set = ManifestSet::from_paths(members.iter().map(PathBuf::from));
+            for f in files {
+                assert_eq!(
+                    set.contains_file(Path::new(f)),
+                    oracle(members, Path::new(f)),
+                    "{f} with {} members",
+                    members.len()
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn large_ordered_manifest_set_is_not_files_times_members() {
+        // A 5,000-entry workspace list with one `!` scanned every member for
+        // every file: ~27 s for 100k files in release. Indexed, this debug-build
+        // run of 40k files takes well under a second; the bound is generous.
+        let members = (0..5000)
+            .map(|i| PathBuf::from(format!("packages/p{i}")))
+            .chain([PathBuf::from("!packages/p17")]);
+        let set = ManifestSet::from_paths(members);
+        let start = std::time::Instant::now();
+        let n = (0..40_000)
+            .filter(|i| {
+                set.contains_file(Path::new(&format!(
+                    "packages/p{}/src/m{}/f.rs",
+                    i % 5000,
+                    i % 7
+                )))
+            })
+            .count();
+        assert_eq!(n, 40_000 - 8);
+        assert!(
+            start.elapsed() < std::time::Duration::from_secs(5),
+            "{:?}",
+            start.elapsed()
         );
     }
 

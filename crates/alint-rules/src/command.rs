@@ -184,8 +184,9 @@ fn run_one(
     // Shared bounded runner (audit 2026-10 findings 4/5): stdout/stderr are
     // drained CONCURRENTLY (draining only after exit deadlocked a child writing
     // more than a pipe buffer, which then hit a bogus "did not exit" timeout),
-    // and the timeout kills the whole process group so a grandchild holding the
-    // pipe cannot outlive it. Output past the cap is read and discarded.
+    // and the wait is bounded even when a grandchild holds the pipe (in a
+    // non-interactive run the timeout kills the whole process group; see
+    // `alint_core::process`). Output past the cap is read and discarded.
     match run_bounded(cmd, timeout, OUTPUT_CAP_BYTES, true) {
         RunOutcome::Exited { status, .. } if status.success() => Outcome::Pass,
         RunOutcome::Exited {
