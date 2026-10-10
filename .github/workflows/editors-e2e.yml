@@ -44,7 +44,10 @@ jobs:
 
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
-          node-version: "20"
+          # @vscode/test-electron 3 requires Node >= 22 (Node 20 is EOL). This
+          # is only the runner's Node; the tests themselves run inside the
+          # pinned VS Code's own extension host.
+          node-version: "22"
 
       - name: VS Code e2e (xvfb)
         working-directory: editors/vscode
