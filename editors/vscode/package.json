@@ -15,7 +15,7 @@
     "url": "https://github.com/asamarts/alint/issues"
   },
   "engines": {
-    "vscode": "^1.85.0"
+    "vscode": "^1.91.0"
   },
   "categories": [
     "Linters"
@@ -56,7 +56,7 @@
             "verbose"
           ],
           "default": "off",
-          "description": "Trace the communication between VS Code and the alint language server in the 'alint' output channel."
+          "markdownDescription": "Trace the communication between VS Code and the alint language server in the `alint` output channel. Takes effect only while that channel's log level is **Trace** (run **Developer: Set Log Level...** and pick `alint`)."
         }
       }
     },
@@ -89,12 +89,12 @@
   },
   "dependencies": {
     "tar": "^7.5.22",
-    "vscode-languageclient": "^9.0.1"
+    "vscode-languageclient": "^10.1.2"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.7",
     "@types/node": "^18.19.0",
-    "@types/vscode": "^1.85.0",
+    "@types/vscode": "~1.91.0",
     "@vscode/test-electron": "^2.4.1",
     "@vscode/vsce": "^4.0.0",
     "esbuild": "^0.28.2",

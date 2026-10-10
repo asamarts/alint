@@ -20,7 +20,8 @@ lives in alint itself.
 
 ## Requirements
 
-The extension needs the `alint` binary. It looks for it in this order:
+VS Code 1.91 or newer (or a VS Code-based editor at that API level). The
+extension needs the `alint` binary. It looks for it in this order:
 
 1. the `alint.path` setting,
 2. `alint` on your `PATH`,
