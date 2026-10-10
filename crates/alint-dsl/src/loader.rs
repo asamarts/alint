@@ -74,9 +74,23 @@ pub(crate) fn parse_config_interpolated(contents: &str, source: &Path) -> Result
     // `.alint.d/` drop-in, a bare "at line 2 column 1" reads as if the
     // top-level config were at fault.
     parse_config_interpolated_inner(contents, source).map_err(|e| match e {
-        Error::Yaml(e) => Error::Other(format!("{}: YAML parse error: {e}", source.display())),
+        Error::Yaml(e) => Error::Other(format!("{}: YAML parse error: {e}", display_path(source))),
         other => other,
     })
+}
+
+/// `path` for a user-facing message, without the `\\?\` verbatim prefix that
+/// `canonicalize` adds on Windows (`\\?\UNC\server\share` becomes
+/// `\\server\share`). The prefix never occurs on Unix, so this is a no-op there.
+fn display_path(path: &Path) -> String {
+    let shown = path.display().to_string();
+    if let Some(unc) = shown.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(local) = shown.strip_prefix(r"\\?\") {
+        local.to_owned()
+    } else {
+        shown
+    }
 }
 
 fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawConfig> {
@@ -141,7 +155,7 @@ pub(crate) fn load_recursive(
     if !visiting.insert(canonical.clone()) {
         return Err(Error::Other(format!(
             "cycle in `extends` chain at {}",
-            canonical.display()
+            display_path(&canonical)
         )));
     }
     // Bound the depth of an *acyclic* chain (the cycle guard above only catches
@@ -154,7 +168,7 @@ pub(crate) fn load_recursive(
         return Err(Error::Other(format!(
             "`extends:` chain exceeds the maximum depth of {MAX_EXTENDS_DEPTH} (at {}); \
              flatten the chain or split the ruleset",
-            canonical.display(),
+            display_path(&canonical),
         )));
     }
 
@@ -450,6 +464,24 @@ fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_path_strips_the_windows_verbatim_prefix() {
+        // `canonicalize` on Windows yields `\\?\C:\...`; error messages must
+        // show the path the way the user would write it.
+        assert_eq!(
+            display_path(Path::new(r"\\?\C:\repo\.alint.yml")),
+            r"C:\repo\.alint.yml"
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share\.alint.yml")),
+            r"\\server\share\.alint.yml"
+        );
+        assert_eq!(
+            display_path(Path::new("/repo/.alint.yml")),
+            "/repo/.alint.yml"
+        );
+    }
 
     #[test]
     fn confine_none_disables_the_check() {
