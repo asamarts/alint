@@ -65,6 +65,8 @@ pub(crate) enum SourceClass {
     Extended,
     /// An `https://` `extends:` entry, allowlisted in `trusted_extends:` or not.
     Remote,
+    /// An `https://` `extends:` entry NOT allowlisted in `trusted_extends:`.
+    UntrustedRemote,
 }
 
 impl SourceClass {
@@ -72,6 +74,7 @@ impl SourceClass {
         match self {
             Self::Extended => "extended",
             Self::Remote => "remote",
+            Self::UntrustedRemote => "untrusted_remote",
         }
     }
 }
@@ -81,6 +84,7 @@ impl SourceClass {
 struct Provenance {
     extended: Option<String>,
     remote: Option<String>,
+    untrusted_remote: Option<String>,
 }
 
 impl Provenance {
@@ -96,6 +100,7 @@ impl Provenance {
         Self {
             extended: source(SourceClass::Extended),
             remote: source(SourceClass::Remote),
+            untrusted_remote: source(SourceClass::UntrustedRemote),
         }
     }
 }
@@ -481,6 +486,7 @@ impl RawConfig {
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
             reject_remote_assembled_env_refs(m, &templates_by_id, &id_hint)?;
+            reject_untrusted_assembled_when(m, &templates_by_id, &id_hint)?;
             let mut expanded = expand_template(m, &templates_by_id)?;
             // A source-local cap is not enough: an untrusted rule can instantiate
             // a fixer-bearing trusted template, and a trusted rule can instantiate
@@ -684,6 +690,176 @@ fn reject_remote_assembled_env_refs(
         ));
     }
     Ok(())
+}
+
+/// Rule fields holding a `when` expression: the rule gate itself and the
+/// per-iteration filter of the `for_each_*` / `every_matching_has` kinds.
+const WHEN_FIELDS: &[&str] = &["when", "when_iter"];
+
+/// Why a rule's `when` expression is refused from an untrusted source.
+enum WhenRefusal {
+    /// The expression reads `env.<NAME>`.
+    ReadsEnv { field: String, name: String },
+    /// The expression carries a `{{...}}` placeholder, so what it reads is only
+    /// known after template expansion (checked again there).
+    Placeholder { field: String },
+}
+
+/// The first `when` / `when_iter` in `rule` (or any nested `require:` rule) that
+/// reads the environment, or that holds a placeholder when `allow_placeholders`
+/// is false. An expression that does not parse is left to the rule builder,
+/// which reports the parse error with the rule's id.
+fn find_when_refusal(rule: &Mapping, allow_placeholders: bool) -> Option<WhenRefusal> {
+    fn walk(rule: &Mapping, allow_placeholders: bool, prefix: &str) -> Option<WhenRefusal> {
+        for field in WHEN_FIELDS {
+            let Some(src) = rule.get(*field).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let field = format!("{prefix}{field}");
+            if src.contains("{{") && !allow_placeholders {
+                return Some(WhenRefusal::Placeholder { field });
+            }
+            if let Ok(expr) = alint_core::when::parse(src)
+                && let Some(name) = expr.first_env_ref()
+            {
+                return Some(WhenRefusal::ReadsEnv {
+                    field,
+                    name: name.to_string(),
+                });
+            }
+        }
+        rule.get("require")
+            .and_then(|v| v.as_sequence())
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .find_map(|(i, nested)| {
+                let nested = nested.as_mapping()?;
+                walk(
+                    nested,
+                    allow_placeholders,
+                    &format!("{prefix}require[{i}]."),
+                )
+            })
+    }
+    walk(rule, allow_placeholders, "")
+}
+
+fn when_refusal_error(what: &str, id: &str, refusal: &WhenRefusal, source: &str) -> Error {
+    match refusal {
+        WhenRefusal::ReadsEnv { field, name } => Error::Other(format!(
+            "{source}: {what} `{id}`: `{field}:` reads `env.{name}`; an untrusted extends \
+             source may not read the environment. Add the URL to `trusted_extends:` to \
+             allow it"
+        )),
+        WhenRefusal::Placeholder { field } => Error::Other(format!(
+            "{source}: {what} `{id}`: `{field}:` contains a `{{{{...}}}}` placeholder; an \
+             untrusted extends source may not build a `when` expression from template \
+             variables, because it could read the environment. Add the URL to \
+             `trusted_extends:` to allow it"
+        )),
+    }
+}
+
+/// Refuse an `env.*` read in a `when:` / `when_iter:` declared by an untrusted
+/// remote (an `https://` source not in `trusted_extends:`). Each `when` is a
+/// boolean oracle on the consumer's environment: three rules gated on
+/// `env.TOKEN matches "^g"` / `"^h"` / `"^i"` leak a secret one character at
+/// a time through which of them fires. Checked on the PARSED expression (so
+/// spacing and parentheses cannot hide a read), in rules and templates, at every
+/// `require:` depth. A template's `when` may not carry a placeholder at all: its
+/// variables are supplied later, by whichever instance expands it. An instance
+/// that an untrusted remote shaped is re-checked after expansion
+/// ([`reject_untrusted_assembled_when`]).
+pub(crate) fn reject_env_reads_in_when(
+    rules: &[Mapping],
+    templates: &[Mapping],
+    source: &str,
+) -> Result<()> {
+    let id_of = |m: &Mapping| {
+        m.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(unknown)")
+            .to_string()
+    };
+    for rule in rules {
+        // A rule's own fields are never substituted, so a placeholder there is
+        // inert text the `when` parser rejects at build; only env reads matter.
+        if let Some(refusal) = find_when_refusal(rule, true) {
+            return Err(when_refusal_error("rule", &id_of(rule), &refusal, source));
+        }
+    }
+    for template in templates {
+        if let Some(refusal) = find_when_refusal(template, false) {
+            return Err(when_refusal_error(
+                "template",
+                &id_of(template),
+                &refusal,
+                source,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The post-expansion half of [`reject_env_reads_in_when`]: an instance that an
+/// untrusted remote shaped (its `vars:`, its `extends_template:`, ...) may fill a
+/// TRUSTED template's `when: "{{vars.cond}}"` with `env.TOKEN matches "^g"`.
+/// Re-check every `when` the expansion produced from a placeholder. A `when`
+/// the template wrote literally is the template author's choice, not the
+/// remote's, and stays allowed.
+fn reject_untrusted_assembled_when(
+    rule: &Mapping,
+    templates_by_id: &std::collections::HashMap<String, &Mapping>,
+    id: &str,
+) -> Result<()> {
+    let Some(source) = Provenance::read(rule).untrusted_remote else {
+        return Ok(());
+    };
+    let Some(template) = rule
+        .get("extends_template")
+        .and_then(|v| v.as_str())
+        .and_then(|t| templates_by_id.get(t))
+    else {
+        return Ok(());
+    };
+    let vars = instance_vars(rule);
+    // Keep only the `when` fields that held a placeholder, rendered; the rest of
+    // the template is irrelevant to what the remote could assemble.
+    let rendered = render_placeholder_whens(template, &vars);
+    if let Some(refusal) = find_when_refusal(&rendered, true) {
+        return Err(when_refusal_error("rule", id, &refusal, &source));
+    }
+    Ok(())
+}
+
+/// A copy of `rule` keeping only the `when` / `when_iter` fields that contain a
+/// `{{` placeholder (rendered with `vars`) and the `require:` structure leading
+/// to them, so field paths in an error still line up with the template.
+fn render_placeholder_whens(
+    rule: &Mapping,
+    vars: &std::collections::HashMap<String, String>,
+) -> Mapping {
+    let mut out = Mapping::new();
+    for field in WHEN_FIELDS {
+        if let Some(src) = rule.get(*field).and_then(|v| v.as_str())
+            && src.contains("{{")
+        {
+            out.insert((*field).into(), render_template_vars(src, vars).into());
+        }
+    }
+    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
+        let nested: Vec<serde_yaml_ng::Value> = require
+            .iter()
+            .map(|n| {
+                n.as_mapping().map_or(serde_yaml_ng::Value::Null, |m| {
+                    render_placeholder_whens(m, vars).into()
+                })
+            })
+            .collect();
+        out.insert("require".into(), nested.into());
+    }
+    out
 }
 
 /// The path of the first `key:` string in `m` (at any depth) whose value holds a

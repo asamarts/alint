@@ -3261,3 +3261,87 @@ fn remote_template_vars_cannot_assemble_an_env_ref_in_since() {
     let remote = "version: 1\nrules:\n  - id: cm\n    extends_template: user_cm\n";
     assert!(try_load_extending(remote, top).is_ok());
 }
+
+#[test]
+fn untrusted_remote_when_cannot_read_the_environment() {
+    // Audit R2: an untrusted remote's `when: env.X matches "^g"|"^h"|"^i"` rules
+    // leaked a secret one character at a time through which rule fired.
+    let oracle = |c: char| {
+        format!(
+            "  - id: probe-{c}\n    kind: file_exists\n    paths: README.md\n    \
+             level: warning\n    when: env.FAKE_SECRET matches \"^{c}\"\n"
+        )
+    };
+    let remote = format!(
+        "version: 1\nrules:\n{}{}{}",
+        oracle('g'),
+        oracle('h'),
+        oracle('i')
+    );
+    let err = try_load_extending(&remote, "rules: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains(
+            "rule `probe-g`: `when:` reads `env.FAKE_SECRET`; an untrusted extends source"
+        ),
+        "{err}"
+    );
+    assert!(err.contains("example.invalid"), "{err}");
+    assert!(err.contains("trusted_extends:"), "{err}");
+
+    // An allowlisted remote keeps working as before.
+    let trusted = "trusted_extends: [\"https://example.invalid/remote.yml\"]\nrules: []\n";
+    assert_eq!(try_load_extending(&remote, trusted).unwrap().rules.len(), 3);
+
+    // Nested `require:` rules and a `when_iter:` filter are refused too.
+    for body in [
+        "  - id: each\n    kind: for_each_dir\n    select: \"*\"\n    level: warning\n    \
+         require:\n      - kind: file_exists\n        paths: \"{path}/x\"\n        \
+         when: (env.CI)\n",
+        "  - id: each\n    kind: for_each_dir\n    select: \"*\"\n    level: warning\n    \
+         when_iter: \"iter.has_file(env.CI)\"\n    require:\n      - kind: file_exists\n        \
+         paths: \"{path}/x\"\n",
+    ] {
+        let err = try_load_extending(&format!("version: 1\nrules:\n{body}"), "rules: []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("reads `env.CI`"), "{err}");
+    }
+
+    // A remote template may neither read the environment nor leave its `when`
+    // to an instance's variables.
+    for (when, needle) in [
+        ("env.CI", "reads `env.CI`"),
+        ("\"{{vars.cond}}\"", "placeholder"),
+    ] {
+        let remote = format!(
+            "version: 1\ntemplates:\n  - id: t\n    kind: file_exists\n    \
+             paths: README.md\n    level: warning\n    when: {when}\nrules: []\n"
+        );
+        let err = try_load_extending(&remote, "rules: []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("template `t`"), "{err}");
+        assert!(err.contains(needle), "{err}");
+    }
+
+    // An untrusted instance cannot fill a trusted template's `when` placeholder
+    // with an env read.
+    let top = "templates:\n  - id: gated\n    kind: file_exists\n    paths: README.md\n    \
+        level: warning\n    when: \"{{vars.cond}}\"\nrules: []\n";
+    let remote = "version: 1\nrules:\n  - id: probe\n    extends_template: gated\n    \
+        vars: {cond: \"env.FAKE_SECRET matches '^g'\"}\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("reads `env.FAKE_SECRET`"), "{err}");
+
+    // Unaffected: a remote `when` on facts, and a remote instance of a template
+    // whose env read the user wrote literally.
+    let remote = "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    \
+        paths: README.md\n    level: warning\n    when: facts.is_rust\n";
+    assert!(try_load_extending(remote, "rules: []\n").is_ok());
+    let top = "templates:\n  - id: ci_only\n    kind: file_exists\n    paths: README.md\n    \
+        level: warning\n    when: env.CI\nrules: []\n";
+    let remote = "version: 1\nrules:\n  - id: r\n    extends_template: ci_only\n";
+    assert!(try_load_extending(remote, top).is_ok());
+}

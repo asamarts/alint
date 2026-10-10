@@ -251,44 +251,13 @@ pub(crate) fn load_recursive(
             load_recursive(&target, state, opts, confine, false, trusted)?
         };
         gate_extended_source(&parent, url)?;
-        // Remember that this source shaped these rules / templates, so `finalize`
-        // can refuse it as a contributor to a spawning rule after the id-based
-        // field-merge has blurred where each field came from.
-        crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Extended, url);
-        crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Extended, url);
-        if url.starts_with("https://") {
-            crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Remote, url);
-            crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Remote, url);
-        }
+        mark_extended_provenance(&mut parent, url);
         parent.drop_top_level_settings(url);
         parent.rules = apply_rule_filter(parent.rules, entry)?;
-        // W2 content-fixer trust (auto-fix.md 5.5): a REMOTE `extends:` the user has
-        // NOT listed in `trusted_extends:` may PROPOSE a content edit but never
-        // auto-write one -- demote its content-injecting fixers to `suggestion`
-        // before the merge. Local / nested targets (the user's own tree) and bundled
-        // (first-party) sources are honored at their declared tier. A remote is a
-        // leaf (no nested `extends:`), so this caps exactly that source's own rules;
-        // the URL matches with or without its `#sha256-` integrity fragment.
-        //
-        // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
-        // spliced into its referencing rule at `finalize` (after this per-source
-        // gate), so a remote content fixer smuggled through a `templates:` entry
-        // would otherwise escape the cap (the template analogue of
-        // `reject_fix_promotion_templates_in`).
-        //
-        // The raw mappings also receive a monotonic provenance marker. It survives
-        // id-based field merges and template expansion, then `finalize` demotes the
-        // EFFECTIVE fixer. That closes both mixed-source directions: an untrusted
-        // rule instantiating a trusted template, and a trusted rule instantiating a
-        // template partly defined by an untrusted source.
         if url.starts_with("https://") {
             let base = url.split('#').next().unwrap_or(url);
-            let trusted_remote = trusted.iter().any(|t| t == base || t == url);
-            if !trusted_remote {
-                crate::demote_content_fixers_in(&mut parent.rules);
-                crate::demote_content_fixers_in(&mut parent.templates);
-                crate::mark_untrusted_fix_sources_in(&mut parent.rules);
-                crate::mark_untrusted_fix_sources_in(&mut parent.templates);
+            if !trusted.iter().any(|t| t == base || t == url) {
+                cap_untrusted_remote(&mut parent, url)?;
             }
         }
         merged = merge(merged, parent);
@@ -299,6 +268,52 @@ pub(crate) fn load_recursive(
         state.memo.insert(key, merged.clone());
     }
     Ok(merged)
+}
+
+/// Record that the `extends:` source `url` shaped `parent`'s rules / templates,
+/// so `finalize` can judge the EFFECTIVE rule after the id-based field-merge has
+/// blurred where each field came from (e.g. refuse any contribution to a
+/// spawning rule, or a remote-assembled `${` env reference).
+fn mark_extended_provenance(parent: &mut RawConfig, url: &str) {
+    crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Extended, url);
+    crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Extended, url);
+    if url.starts_with("https://") {
+        crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Remote, url);
+        crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Remote, url);
+    }
+}
+
+/// Apply the restrictions on a remote `extends:` the user has NOT listed in
+/// `trusted_extends:` (the URL matches with or without its `#sha256-` fragment).
+fn cap_untrusted_remote(parent: &mut RawConfig, url: &str) -> Result<()> {
+    // It may not read the consumer's environment through a `when:` (a boolean
+    // oracle on each variable), including one an instance it shapes assembles
+    // from a template at finalize (hence the provenance mark).
+    crate::reject_env_reads_in_when(&parent.rules, &parent.templates, url)?;
+    crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::UntrustedRemote, url);
+    // W2 content-fixer trust (auto-fix.md 5.5): an untrusted remote may PROPOSE a
+    // content edit but never auto-write one -- demote its content-injecting fixers
+    // to `suggestion` before the merge. Local / nested targets (the user's own
+    // tree) and bundled (first-party) sources are honored at their declared tier.
+    // A remote is a leaf (no nested `extends:`), so this caps exactly that
+    // source's own rules.
+    //
+    // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
+    // spliced into its referencing rule at `finalize` (after this per-source
+    // gate), so a remote content fixer smuggled through a `templates:` entry
+    // would otherwise escape the cap (the template analogue of
+    // `reject_fix_promotion_templates_in`).
+    //
+    // The raw mappings also receive a monotonic provenance marker. It survives
+    // id-based field merges and template expansion, then `finalize` demotes the
+    // EFFECTIVE fixer. That closes both mixed-source directions: an untrusted
+    // rule instantiating a trusted template, and a trusted rule instantiating a
+    // template partly defined by an untrusted source.
+    crate::demote_content_fixers_in(&mut parent.rules);
+    crate::demote_content_fixers_in(&mut parent.templates);
+    crate::mark_untrusted_fix_sources_in(&mut parent.rules);
+    crate::mark_untrusted_fix_sources_in(&mut parent.templates);
+    Ok(())
 }
 
 fn load_remote(
