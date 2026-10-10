@@ -57,4 +57,5 @@ jobs:
       - name: brew install the latest published alint via the tap
         env:
           SMOKE_FLOATING: "1"                    # tag == latest, so the leg runs (not skips)
-        run: ci/scripts/smoke-channel.sh homebrew "${{ steps.rel.outputs.tag }}"
+          SMOKE_TAG: ${{ steps.rel.outputs.tag }}
+        run: ci/scripts/smoke-channel.sh homebrew "$SMOKE_TAG"

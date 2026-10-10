@@ -26,7 +26,7 @@ when: [check, fix_unsafe, check]
 expect:
   - violations:
       - {rule: spaces-4, level: error, path: app.py}
-  - skipped: [spaces-4]
+  - unfixable: [spaces-4]
   - violations:
       - {rule: spaces-4, level: error, path: app.py}
 

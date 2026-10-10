@@ -30,51 +30,95 @@ impl Rule for NoCaseConflictsRule {
     alint_core::rule_common_impl!();
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        // Group paths by their lowercased form. Storing
-        // `Arc<Path>` here lets us hand the same allocation to
-        // every violation later without re-cloning bytes.
-        let mut groups: BTreeMap<String, Vec<std::sync::Arc<std::path::Path>>> = BTreeMap::new();
+        // Every distinct path that must exist on disk: each in-scope file AND
+        // each of its ancestor directories. A file `Lib` next to a directory
+        // `lib/`, or directories `Docs/` + `docs/`, can't coexist on a
+        // case-insensitive filesystem any more than two files can, and
+        // comparing full file paths alone (`Docs/a.md` vs `docs/b.md`) misses
+        // them. Keyed by the actual path so a shared directory counts once.
+        let mut entities: BTreeMap<String, std::sync::Arc<std::path::Path>> = BTreeMap::new();
         for entry in ctx.index.files() {
             if !self.scope.matches(&entry.path, ctx.index) {
                 continue;
             }
-            let Some(as_str) = entry.path.to_str() else {
-                continue;
-            };
-            // Unicode lowercasing (not ASCII-only): a case-insensitive
-            // filesystem folds `Ω.txt`/`ω.txt` and `É`/`é` too, so an
-            // ASCII-only fold would miss those real cross-platform collisions
-            // (L2). `to_lowercase` is the std Unicode fold — a strict, portable
-            // default for a "no case conflicts" convention (it may report a
-            // collision a specific OS fold table wouldn't, the safe direction).
-            groups
-                .entry(as_str.to_lowercase())
-                .or_default()
-                .push(entry.path.clone());
-        }
-        let mut violations = Vec::new();
-        for (_lower, paths) in groups {
-            if paths.len() < 2 {
+            if entry.path.to_str().is_none() {
                 continue;
             }
-            let names: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
-            for p in &paths {
-                let msg = self.message.clone().unwrap_or_else(|| {
-                    format!(
-                        "case-insensitive collision: {} (collides with: {})",
-                        p.display(),
-                        names
-                            .iter()
-                            .filter(|n| *n != &p.display().to_string())
-                            .cloned()
-                            .collect::<Vec<_>>()
-                            .join(", ")
-                    )
-                });
-                violations.push(Violation::new(msg).with_path(p.clone()));
+            for p in entry.path.ancestors() {
+                if p.as_os_str().is_empty() {
+                    break;
+                }
+                let key = crate::slash(p);
+                if entities.contains_key(&key) {
+                    break; // its ancestors are already in too
+                }
+                let arc = if p == &*entry.path {
+                    entry.path.clone()
+                } else {
+                    std::sync::Arc::from(p)
+                };
+                entities.insert(key, arc);
+            }
+        }
+        // Group by the lowercased form. Unicode lowercasing (not ASCII-only): a
+        // case-insensitive filesystem folds `Ω.txt`/`ω.txt` and `É`/`é` too, so
+        // an ASCII-only fold would miss those real cross-platform collisions
+        // (L2). `to_lowercase` is the std Unicode fold — a strict, portable
+        // default for a "no case conflicts" convention (it may report a
+        // collision a specific OS fold table wouldn't, the safe direction).
+        let mut groups: BTreeMap<String, Vec<(&str, &std::sync::Arc<std::path::Path>)>> =
+            BTreeMap::new();
+        for (actual, path) in &entities {
+            groups
+                .entry(actual.to_lowercase())
+                .or_default()
+                .push((actual.as_str(), path));
+        }
+        let mut violations = Vec::new();
+        for (_lower, members) in groups {
+            if members.len() < 2 {
+                continue;
+            }
+            // Members fold equal, so their parents fold equal too. Members
+            // whose parents differ in case are already reported at the parent
+            // level (shallowest first) -- `Docs/a.md` + `docs/a.md` is one
+            // `Docs`/`docs` collision, not two. But members sharing an EXACT
+            // parent collide in that one directory (`docs/a.md` + `docs/A.md`),
+            // whatever else collides above them: partition by exact parent and
+            // report every partition with two or more members.
+            let mut by_parent: BTreeMap<&str, Vec<std::sync::Arc<std::path::Path>>> =
+                BTreeMap::new();
+            for (actual, path) in &members {
+                let parent = actual.rsplit_once('/').map_or("", |(parent, _)| parent);
+                by_parent.entry(parent).or_default().push((*path).clone());
+            }
+            for paths in by_parent.into_values().filter(|p| p.len() >= 2) {
+                self.report(&paths, &mut violations);
             }
         }
         Ok(violations)
+    }
+}
+
+impl NoCaseConflictsRule {
+    /// One violation per member of a colliding set of same-directory paths.
+    fn report(&self, paths: &[std::sync::Arc<std::path::Path>], violations: &mut Vec<Violation>) {
+        let names: Vec<String> = paths.iter().map(|p| p.display().to_string()).collect();
+        for p in paths {
+            let msg = self.message.clone().unwrap_or_else(|| {
+                format!(
+                    "case-insensitive collision: {} (collides with: {})",
+                    p.display(),
+                    names
+                        .iter()
+                        .filter(|n| *n != &p.display().to_string())
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
+            });
+            violations.push(Violation::new(msg).with_path(p.clone()));
+        }
     }
 }
 
@@ -172,6 +216,46 @@ mod tests {
         let i = index(&["É.txt", "é.txt", "Ω.md", "ω.md"]);
         let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
         assert_eq!(v.len(), 4, "both Unicode case pairs collide");
+    }
+
+    #[test]
+    fn directory_prefixes_collide_too() {
+        // FN regression: only full file paths were compared, but a file `Lib`
+        // next to a directory `lib/`, or two directories `Docs/` + `docs/`,
+        // can't coexist on a case-insensitive filesystem either.
+        let rule = build(&spec_yaml(
+            "id: t\nkind: no_case_conflicts\npaths: \"**\"\nlevel: warning\n",
+        ))
+        .unwrap();
+        let paths = |v: Vec<Violation>| -> Vec<String> {
+            v.iter()
+                .map(|x| crate::slash(x.path.as_deref().unwrap()))
+                .collect()
+        };
+        let i = index(&["Lib", "lib/x.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(paths(v), vec!["Lib", "lib"]);
+        let i = index(&["Docs/a.md", "docs/b.md", "src/x.rs"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(paths(v), vec!["Docs", "docs"]);
+        // A deeper collision implied by a colliding ancestor is reported once,
+        // at the shallowest level (not again for every file under it).
+        let i = index(&["Docs/a.md", "docs/a.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(paths(v), vec!["Docs", "docs"]);
+        // But a same-directory collision under a colliding parent is its own
+        // collision and is still reported (it was dropped when the parents also
+        // collided).
+        let i = index(&["Docs/a.md", "docs/a.md", "docs/A.md"]);
+        let v = rule.evaluate(&ctx(Path::new("/fake"), &i)).unwrap();
+        assert_eq!(paths(v), vec!["Docs", "docs", "docs/A.md", "docs/a.md"]);
+        // Same-case directories are fine.
+        let i = index(&["docs/a.md", "docs/b.md"]);
+        assert!(
+            rule.evaluate(&ctx(Path::new("/fake"), &i))
+                .unwrap()
+                .is_empty()
+        );
     }
 
     #[test]

@@ -9,13 +9,19 @@ cd "$REPO_ROOT"
 # release.yml preflight). Install on demand, pinned with --locked,
 # so the gate is portable across both. Swatinem/rust-cache persists
 # ~/.cargo/bin so the install only pays once per cache window.
-if ! command -v cargo-deny >/dev/null 2>&1; then
-    echo "==> cargo-deny not found; installing (cargo install --locked)"
+#
+# The version is PINNED because deny.toml's schema and the lint codes passed
+# below are cargo-deny-version specific; a runner with a different version
+# gets the pinned one installed. Bump it deliberately (and re-check deny.toml
+# against that release's config docs).
+CARGO_DENY_VERSION="0.19.9"
+if [[ "$(cargo deny --version 2>/dev/null || true)" != "cargo-deny ${CARGO_DENY_VERSION}" ]]; then
+    echo "==> cargo-deny ${CARGO_DENY_VERSION} not found; installing (cargo install --locked)"
     # Clear RUSTFLAGS for the tool build only: CI sets `-D warnings`
     # for *alint's* code, but applying it while compiling a
     # third-party tool would fail the install on any upstream
     # warning under the current toolchain.
-    RUSTFLAGS= cargo install cargo-deny --locked
+    RUSTFLAGS='' cargo install cargo-deny --locked --version "${CARGO_DENY_VERSION}"
 fi
 
 echo "==> Running cargo deny check licenses bans sources (blocking)"
@@ -25,12 +31,11 @@ echo "==> Running cargo deny check licenses bans sources (blocking)"
 # fails CI and blocks a release. Policy lives in deny.toml.
 cargo deny check licenses bans sources
 
-echo "==> Running cargo deny check advisories (advisory-only)"
-# Mirrors ci/scripts/audit.sh: RustSec advisories are surfaced but
-# must not block the pipeline (cargo audit is the primary surface;
-# this is a secondary view over the same DB). Revisit if/when a
-# blocking advisory policy is adopted.
-cargo deny check advisories || {
-    echo "==> WARNING: cargo deny advisories found issues (see above)"
-    echo "==> Advisory-only; not failing the pipeline (see audit.sh)"
-}
+echo "==> Running cargo deny check advisories (blocking on vulnerabilities)"
+# BLOCKING: a RustSec vulnerability advisory against any crate in the graph
+# fails CI and the release preflight. The informational `unmaintained` and
+# `unsound` advisories are demoted to warnings here (-W; cargo-deny has no
+# config-file level for them) and yanked crates warn via deny.toml
+# `yanked = "warn"`. Waivers live in deny.toml [advisories].ignore, the single
+# list ci/scripts/audit.sh also honours.
+cargo deny check -W unmaintained -W unsound advisories

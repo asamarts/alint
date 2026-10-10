@@ -26,7 +26,7 @@ mod markdown;
 mod splice;
 
 use std::fs;
-use std::io::Write;
+use std::io::{IsTerminal as _, Write};
 use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 use std::str::FromStr;
@@ -195,6 +195,17 @@ fn write_output(body: &str, opts: &RunOptions) -> Result<()> {
         (None, false) => {
             // stdout — `cmd_export_agents_md` configured the
             // anstream wrapper.
+            // A terminal must not receive raw control / bidi characters from
+            // config-derived text (messages, policy URLs). Only a terminal:
+            // redirected output (`> AGENTS.md`) is a file and must match what
+            // `--output` writes byte for byte (sanitizing would turn an emoji
+            // ZWJ sequence into a literal `\u{200d}`). The JSON format already
+            // escapes control chars and must stay valid JSON.
+            let body = if opts.format == OutputFormat::Json || !std::io::stdout().is_terminal() {
+                std::borrow::Cow::Borrowed(body)
+            } else {
+                alint_output::sanitize_terminal(body)
+            };
             std::io::stdout()
                 .write_all(body.as_bytes())
                 .context("writing to stdout")?;

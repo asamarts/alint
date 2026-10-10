@@ -76,7 +76,21 @@ impl Rule for PairRule {
                 );
                 continue;
             }
-            let partner_path = PathBuf::from(&partner_rel);
+            // Lexically normalize `.` / `..` / empty segments so a template like
+            // `{dir}/../include/{stem}.h` resolves to the in-index path. A `..`
+            // that climbs above the repository root is never a valid partner.
+            let Some(partner_path) = normalize_rel(&partner_rel) else {
+                violations.push(
+                    Violation::new(format!(
+                        "partner template {:?} resolves outside the repository root for {} \
+                         ({partner_rel})",
+                        self.partner_template,
+                        entry.path.display(),
+                    ))
+                    .with_path(entry.path.clone()),
+                );
+                continue;
+            };
             if resolves_to_self(&partner_path, &entry.path) {
                 violations.push(
                     Violation::new(format!(
@@ -97,6 +111,31 @@ impl Rule for PairRule {
         }
         Ok(violations)
     }
+}
+
+/// Lexically normalize a rendered repo-relative partner path: drop empty and
+/// `.` segments and resolve `..` against the preceding segment. Returns `None`
+/// when a `..` would climb above the root (or nothing is left), so the lookup
+/// stays confined to the repository. No filesystem access: symlinks are not
+/// followed, matching the index's own lexical paths. `\` is a separator only on
+/// Windows (elsewhere it is a legal filename byte).
+fn normalize_rel(rel: &str) -> Option<PathBuf> {
+    let mut parts: Vec<&str> = Vec::new();
+    for seg in rel.split(|c: char| c == '/' || (cfg!(windows) && c == '\\')) {
+        match seg {
+            "" | "." => {}
+            ".." => {
+                parts.pop()?;
+            }
+            s => parts.push(s),
+        }
+    }
+    if parts.is_empty() {
+        return None;
+    }
+    // Re-join with `/`, not the OS separator: messages show this path, and
+    // Windows `Path` equality already treats `/` and `\` alike for the lookup.
+    Some(PathBuf::from(parts.join("/")))
 }
 
 fn resolves_to_self(partner: &Path, primary: &Path) -> bool {
@@ -258,6 +297,43 @@ mod tests {
         let v = eval(&r, &["src/foo.c"]);
         assert_eq!(v.len(), 1);
         assert!(v[0].message.contains("empty path"));
+    }
+
+    #[test]
+    fn root_level_primary_with_dir_template_finds_its_partner() {
+        // Audit 2026-10 finding 3: `{dir}` is empty for a root-level file, so
+        // `{dir}/{stem}.h` used to resolve to `/top.h` and never matched.
+        let r = rule("**/*.c", "{dir}/{stem}.h", None);
+        assert!(eval(&r, &["top.c", "top.h"]).is_empty());
+        let v = eval(&r, &["top.c"]);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].message.contains("at top.h"), "{}", v[0].message);
+    }
+
+    #[test]
+    fn partner_template_with_dot_dot_is_lexically_normalized() {
+        // `{dir}/../include/{stem}.h` must resolve to `include/foo.h` (the index
+        // holds normalized paths, so the raw `src/../include/foo.h` never hit).
+        let r = rule("src/*.c", "{dir}/../include/{stem}.h", None);
+        assert!(eval(&r, &["src/foo.c", "include/foo.h"]).is_empty());
+        let r = rule("**/*.c", "{dir}/./{stem}.h", None);
+        assert!(eval(&r, &["a/foo.c", "a/foo.h"]).is_empty());
+    }
+
+    #[test]
+    fn partner_template_escaping_the_root_is_a_violation() {
+        let r = rule("**/*.c", "{dir}/../../{stem}.h", None);
+        let v = eval(&r, &["src/foo.c", "foo.h"]);
+        assert_eq!(v.len(), 1);
+        assert!(v[0].message.contains("outside the repository root"));
+    }
+
+    #[test]
+    fn normalize_rel_cases() {
+        assert_eq!(normalize_rel("a/./b//c"), Some(PathBuf::from("a/b/c")));
+        assert_eq!(normalize_rel("a/../b"), Some(PathBuf::from("b")));
+        assert_eq!(normalize_rel("../b"), None);
+        assert_eq!(normalize_rel("a/.."), None);
     }
 
     #[test]

@@ -96,6 +96,24 @@ pub enum SkipKind {
     /// baseline-suppressed `check` finding. Benign: NOT unresolved, never a
     /// nonzero exit.
     Baselined,
+    /// The fix RAN (or, under `--dry-run`, would run) but does not resolve the
+    /// violation: the rule's re-check still reports it, e.g. a `file_create`
+    /// into a gitignored / `ignore:`d path the walk never indexes, or a path
+    /// outside the rule's `paths:`. The violation stands, like `Declined`.
+    Unresolved,
+}
+
+impl SkipKind {
+    /// Stable machine name (the JSON fix report's `skip_kind`).
+    #[must_use]
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Declined => "declined",
+            Self::Errored => "errored",
+            Self::Baselined => "baselined",
+            Self::Unresolved => "unresolved",
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -126,7 +144,10 @@ pub enum FixStatus {
         summary: String,
         edit: Option<FixEdit>,
     },
-    /// The rule has no fixer; violation stands.
+    /// The rule has no fixer, or its fixer cannot resolve this particular
+    /// violation (it is marked [`crate::Violation::not_fixable`] or the fixer's
+    /// `can_fix` declines it -- the same verdict `check` reports); the violation
+    /// stands.
     Unfixable,
 }
 
@@ -146,6 +167,15 @@ impl FixStatus {
         Self::Skipped {
             reason: reason.into(),
             kind: SkipKind::Errored,
+        }
+    }
+
+    /// A `Skipped` for a fix that ran (or would run) without resolving the
+    /// violation (see [`SkipKind::Unresolved`]).
+    pub fn unresolved(reason: impl Into<String>) -> Self {
+        Self::Skipped {
+            reason: reason.into(),
+            kind: SkipKind::Unresolved,
         }
     }
 

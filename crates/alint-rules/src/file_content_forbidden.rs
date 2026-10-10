@@ -5,7 +5,7 @@ use std::path::Path;
 use alint_core::{
     Context, Error, FixSpec, Fixer, Level, PerFileRule, Result, Rule, RuleSpec, Scope, Violation,
 };
-use regex::Regex;
+use regex::bytes::Regex;
 use serde::Deserialize;
 
 use crate::fixers::ReplaceFixer;
@@ -49,16 +49,17 @@ impl Rule for FileContentForbiddenRule {
             // via the `for_each`-nested path (which bypasses the engine's cap).
             // Over-cap → skip, matching the engine's per-file batch so the same
             // rule behaves identically whether top-level or nested (M3-F1).
-            // A read error (permission / I/O) now skips too -- not just the
-            // over-cap case above -- failing open to match `check`'s per-file read
-            // path (`read_capped_or_skip`, which skips an unreadable file before it
-            // ever calls `evaluate_file`). Flagging it here (this whole-index
-            // `evaluate` is the read path `fix` uses) made `fix` exit 1 with an
-            // unfixable "could not read file" while `check` skipped and exited 0 on
-            // the same tree. Per-file content rules fail open by design
-            // (`MAX_ANALYZE_BYTES`).
-            let Ok(bytes) = crate::io::read_capped(&full) else {
-                continue;
+            // A genuine read error (permission / I/O) fails CLOSED with a
+            // "could not read file" finding, exactly as `check`'s file-major
+            // dispatch reports it, so `check` and `fix` (this whole-index
+            // `evaluate` is the read path `fix` uses) agree; `NotFound` (a
+            // mid-walk delete) and over-cap stay skips (audit 2026-10 finding 7).
+            let bytes = match crate::io::read_capped(&full) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.extend(crate::io::read_cap_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
@@ -81,15 +82,26 @@ impl PerFileRule for FileContentForbiddenRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
-        // Non-UTF-8 files are silently skipped; they can't contain a
-        // text regex match. Use `file_is_text` to flag binaries.
-        let Ok(text) = std::str::from_utf8(bytes) else {
+        // Match the RAW bytes (a `regex::bytes` pattern) so a non-UTF-8 file is
+        // not a free pass: one Latin-1 `\xe9` used to fail `from_utf8` and skip
+        // the whole file, hiding e.g. a secret after it (fail-open). An invalid
+        // byte never matches a Unicode class, but every literal / ASCII match is
+        // still found, and on valid UTF-8 the semantics are unchanged.
+        //
+        // But a binary-looking file that is NOT valid UTF-8 (an image, a font,
+        // an archive) is skipped, as it always was: random bytes match ASCII
+        // patterns by chance, and the `replace` fix would corrupt the binary. A
+        // binary-looking file that IS valid UTF-8 (text with a NUL) is still
+        // searched, as before, but its finding is not auto-fixed.
+        let binary = match crate::io::char_scan_mode(bytes) {
+            crate::io::CharScan::Skip => return Ok(Vec::new()),
+            crate::io::CharScan::BinaryUtf8 => true,
+            crate::io::CharScan::Text => false,
+        };
+        let Some(m) = self.pattern.find(bytes) else {
             return Ok(Vec::new());
         };
-        let Some(m) = self.pattern.find(text) else {
-            return Ok(Vec::new());
-        };
-        let line = text[..m.start()].matches('\n').count() + 1;
+        let line = bytes[..m.start()].split(|&b| b == b'\n').count();
         let msg = self
             .message
             .clone()
@@ -102,7 +114,9 @@ impl PerFileRule for FileContentForbiddenRule {
                 // matched line's content (which would churn on any edit to that
                 // line). Mirrors `no_trailing_whitespace`/`line_endings` (M14).
                 // See `docs/design/baseline.md` §4.
-                .with_baseline_key(crate::slash(path)),
+                .with_baseline_key(crate::slash(path))
+                // The `replace` fixer never edits a binary-looking file.
+                .with_not_fixable_if(binary),
         ])
     }
 }
@@ -268,5 +282,85 @@ mod tests {
         let (tmp, idx) = tempdir_with_files(&[("img.bin", &[0xff, 0xfe])]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod non_utf8_tests {
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+    use alint_core::Fixer as _;
+
+    #[test]
+    fn non_utf8_text_is_not_a_free_pass() {
+        // Fail-closed regression: a Latin-1 `\xe9` made `from_utf8` fail and the
+        // file was silently skipped, so the AWS key after it went unreported.
+        // Matching now runs over the raw bytes.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: file_content_forbidden\npaths: \"**/*\"\n\
+             pattern: \"AKIA[0-9A-Z]{16}\"\nlevel: error\n",
+        ))
+        .unwrap();
+        let body: &[u8] = b"caf\xe9\nkey = AKIAABCDEFGHIJKLMNOP\n";
+        let (tmp, idx) = tempdir_with_files(&[("a.txt", body)]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(vs.len(), 1, "forbidden content in non-UTF-8 text is found");
+        assert_eq!(vs[0].line, Some(2));
+    }
+
+    #[test]
+    fn replace_fixer_edits_non_utf8_files_at_true_byte_offsets() {
+        // The located `replace` fixer agrees with the detector: it matches the
+        // raw bytes, so its ranges are true byte offsets and the invalid byte
+        // around them survives verbatim.
+        let f = crate::fixers::ReplaceFixer::new(
+            regex::bytes::Regex::new("AKIA[0-9A-Z]{16}").unwrap(),
+            "REDACTED".to_string(),
+            alint_core::Applicability::Unsafe,
+        );
+        let body: &[u8] = b"caf\xe9 AKIAABCDEFGHIJKLMNOP\n";
+        let edits = f.collect_edits(
+            &[],
+            std::path::Path::new("a.txt"),
+            body,
+            std::path::Path::new("/r"),
+        );
+        assert_eq!(edits.len(), 1);
+        let alint_core::FixEdit::ReplaceRange { range, content, .. } = &edits[0].edit else {
+            panic!("expected ReplaceRange");
+        };
+        assert_eq!(range.clone(), 5..25);
+        assert_eq!(content.as_slice(), b"REDACTED");
+    }
+
+    #[test]
+    fn binary_files_are_skipped_and_never_rewritten() {
+        // Regression: matching raw bytes with no binary guard flagged (and the
+        // `replace` fix rewrote) a PNG that happened to contain the pattern.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: file_content_forbidden\npaths: \"**/*\"\n\
+             pattern: \"SECRET[0-9]+\"\nlevel: error\n\
+             fix:\n  replace:\n    replacement: \"X\"\n",
+        ))
+        .unwrap();
+        let png: &[u8] = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR SECRET123 \x00\xff\xfe";
+        let nul_text: &[u8] = b"code\0 SECRET9\n";
+        let (tmp, idx) = tempdir_with_files(&[("img.png", png), ("nul.txt", nul_text)]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        assert_eq!(vs.len(), 1, "{vs:?}");
+        assert_eq!(vs[0].path.as_deref(), Some(std::path::Path::new("nul.txt")));
+        assert!(
+            vs[0].not_fixable,
+            "a binary-looking file is never rewritten"
+        );
+        // Defense in depth: the fixer itself refuses binary bytes.
+        let f = rule.fixer().unwrap();
+        assert!(
+            f.collect_edits(&vs, std::path::Path::new("img.png"), png, tmp.path())
+                .is_empty()
+        );
+        assert!(
+            f.collect_edits(&vs, std::path::Path::new("nul.txt"), nul_text, tmp.path())
+                .is_empty()
+        );
     }
 }

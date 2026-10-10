@@ -1,0 +1,40 @@
+name: include_manifest_paths honours a negated workspace entry (!packages/internal)
+tags: [check, scope_filter, filename_case]
+
+# pnpm / npm workspaces exclude a package with a `!`-prefixed entry. The `!`
+# entry used to be resolved as a literal path that matched nothing, so the
+# excluded package silently stayed in scope (audit 2026-10 finding 8). Entries
+# are now evaluated in declared order, last match wins: `packages/internal` is
+# out, while a later positive entry (`packages/internal/keep`) re-includes its
+# subtree.
+
+given:
+  config: |
+    version: 1
+    rules:
+      - id: names
+        kind: filename_case
+        case: snake
+        paths: "**/*.ts"
+        level: error
+        scope_filter:
+          include_manifest_paths:
+            source: package.json
+            extract: { json: "$.workspaces[*]" }
+  tree:
+    package.json: |
+      { "workspaces": ["packages/*", "!packages/internal", "packages/internal/keep"] }
+    packages:
+      app:
+        "BadName.ts": "export {}\n"
+      internal:
+        "AlsoBad.ts": "export {}\n"
+        keep:
+          "KeptBad.ts": "export {}\n"
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: names, level: error, path: packages/app/BadName.ts}
+      - {rule: names, level: error, path: packages/internal/keep/KeptBad.ts}

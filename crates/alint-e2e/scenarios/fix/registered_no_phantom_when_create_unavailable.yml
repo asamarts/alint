@@ -31,7 +31,7 @@ expect:
       - {rule: r, level: error, path: crates/docs/Cargo.toml}
   # The create is skipped (no content); NO registration finding fires (gated on
   # existence), so nothing is appended.
-  - skipped: [r]
+  - unfixable: [r]
     applied: []
   # The missing member still stands -- honest, no false convergence.
   - violations:

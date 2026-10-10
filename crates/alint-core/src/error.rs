@@ -4,6 +4,18 @@ use thiserror::Error;
 
 pub type Result<T, E = Error> = std::result::Result<T, E>;
 
+impl From<ignore::Error> for Error {
+    fn from(e: ignore::Error) -> Self {
+        Self::Walk(e)
+    }
+}
+
+impl From<serde_yaml_ng::Error> for Error {
+    fn from(e: serde_yaml_ng::Error) -> Self {
+        Self::Yaml(e)
+    }
+}
+
 #[derive(Debug, Error)]
 pub enum Error {
     #[error("I/O error at {path}: {source}")]
@@ -13,8 +25,12 @@ pub enum Error {
         source: std::io::Error,
     },
 
+    // `Walk` and `Yaml` render their inner error in their own message, so it is
+    // deliberately NOT also exposed as `source()` (no `#[from]`): an
+    // `anyhow` `{:#}` chain would otherwise print it twice. The `From` impls
+    // below keep `?` working.
     #[error("walk error: {0}")]
-    Walk(#[from] ignore::Error),
+    Walk(ignore::Error),
 
     #[error("invalid glob {pattern:?}: {source}")]
     Glob {
@@ -24,7 +40,7 @@ pub enum Error {
     },
 
     #[error("YAML parse error: {0}")]
-    Yaml(#[from] serde_yaml_ng::Error),
+    Yaml(serde_yaml_ng::Error),
 
     #[error("unknown rule kind {0:?}")]
     UnknownRuleKind(String),

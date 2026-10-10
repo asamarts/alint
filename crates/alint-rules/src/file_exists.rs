@@ -70,16 +70,14 @@ pub struct FileExistsRule {
     fixer: Option<FileCreateFixer>,
 }
 
-/// True when `pattern` is a plain literal path string - no glob
-/// metacharacters, no `!` exclude prefix. Such patterns can be
-/// answered by an O(1) hash-set lookup against
-/// [`alint_core::FileIndex::contains_file`] instead of a O(N)
-/// scope-match scan.
-fn is_literal_path(pattern: &str) -> bool {
-    !pattern.starts_with('!')
-        && !pattern
-            .chars()
-            .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
+/// The literal path `pattern` names (escapes resolved), when it has no glob
+/// metacharacters and no `!` exclude prefix. Such patterns can be answered by
+/// an O(1) hash-set lookup against [`alint_core::FileIndex::contains_file`]
+/// instead of a O(N) scope-match scan. See
+/// [`alint_core::template::literal_glob_path`] (a `\` is an escape on
+/// non-Windows, so a raw metacharacter scan is not enough).
+fn literal_path(pattern: &str) -> Option<PathBuf> {
+    alint_core::template::literal_glob_path(pattern).map(PathBuf::from)
 }
 
 /// True iff `paths` is a flat list (single string or `Many`)
@@ -239,12 +237,11 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     // present AND tracked. When all preconditions hold,
     // `literal_paths` carries the parsed `PathBuf`s ready for
     // `FileIndex::contains_file` lookup at evaluate time.
-    let literal_paths =
-        if paths_spec_has_no_excludes(paths) && patterns.iter().all(|p| is_literal_path(p)) {
-            Some(patterns.iter().map(PathBuf::from).collect())
-        } else {
-            None
-        };
+    let literal_paths = if paths_spec_has_no_excludes(paths) {
+        patterns.iter().map(|p| literal_path(p)).collect()
+    } else {
+        None
+    };
     let fixer = match &spec.fix {
         Some(FixSpec::FileCreate { file_create: cfg }) => {
             let target = cfg
@@ -306,10 +303,7 @@ fn literal_is_nested(p: &Path) -> bool {
 /// pattern is a glob - in that case the caller must require an
 /// explicit `fix.file_create.path`.
 fn first_literal_path(patterns: &[String]) -> Option<PathBuf> {
-    patterns
-        .iter()
-        .find(|p| !p.chars().any(|c| matches!(c, '*' | '?' | '[' | '{')))
-        .map(PathBuf::from)
+    patterns.iter().find_map(|p| literal_path(p))
 }
 
 fn patterns_of(spec: &PathsSpec) -> Vec<String> {

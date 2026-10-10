@@ -1,0 +1,34 @@
+name: a file_create whose path differs from the rule's paths is reported unresolved, not applied
+tags: [fix, interactions, file_exists, file_create]
+
+# Regression (audit 2026-10, finding 1): `file_create.path: LICENSE` cannot
+# satisfy `paths: [LICENSE.md]`. The fix writes LICENSE, but the re-check still
+# reports the violation, so `fix` must not claim it applied (and exit 0).
+given:
+  tree:
+    README.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: has-license
+        kind: file_exists
+        paths: ["LICENSE.md"]
+        level: error
+        fix:
+          file_create:
+            path: LICENSE
+            content: "MIT\n"
+
+when: [fix, check]
+
+expect:
+  - applied: []
+    skipped: [has-license]
+    suggested: []
+    unfixable: []
+  - violations:
+      - {rule: has-license, level: error}
+
+expect_tree:
+  README.md: "# demo\n"
+  LICENSE: "MIT\n"

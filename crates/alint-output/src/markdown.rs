@@ -435,6 +435,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    not_fixable: false,
                     proposed_edits: Vec::new(),
                 }],
             )],
@@ -460,6 +461,7 @@ mod tests {
                         is_note: false,
                         baseline_key: None,
                         is_fixable: false,
+                        not_fixable: false,
                         proposed_edits: Vec::new(),
                     }],
                 ),
@@ -474,6 +476,7 @@ mod tests {
                         is_note: false,
                         baseline_key: None,
                         is_fixable: false,
+                        not_fixable: false,
                         proposed_edits: Vec::new(),
                     }],
                 ),
@@ -604,6 +607,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    not_fixable: false,
                     proposed_edits: Vec::new(),
                 }],
             )],
@@ -623,6 +627,7 @@ mod tests {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            not_fixable: false,
             proposed_edits: Vec::new(),
         };
         let v2 = Violation {
@@ -633,6 +638,7 @@ mod tests {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            not_fixable: false,
             proposed_edits: Vec::new(),
         };
         let r1 = Report {
@@ -680,6 +686,7 @@ mod tests {
                         is_note: false,
                         baseline_key: None,
                         is_fixable: false,
+                        not_fixable: false,
                         proposed_edits: Vec::new(),
                     },
                     status: FixStatus::Suggested {
@@ -722,6 +729,7 @@ mod tests {
                             is_note: false,
                             baseline_key: None,
                             is_fixable: false,
+                            not_fixable: false,
                             proposed_edits: Vec::new(),
                         },
                         status: FixStatus::Applied("trimmed trailing whitespace in a.rs".into()),
@@ -735,6 +743,7 @@ mod tests {
                             is_note: false,
                             baseline_key: None,
                             is_fixable: false,
+                            not_fixable: false,
                             proposed_edits: Vec::new(),
                         },
                         status: FixStatus::Unfixable,

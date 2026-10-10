@@ -195,15 +195,20 @@ fn iter_has_file(iter: Option<&IterEnv<'_>>, pattern: &str) -> Result<bool, When
     if !iter.is_dir {
         return Ok(false);
     }
-    if !pattern
-        .chars()
-        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
-        && !pattern.starts_with('!')
-    {
-        let candidate = iter.path.join(pattern);
+    // Literal fast path, escapes resolved (a `\` is a glob escape on
+    // non-Windows, which a raw metacharacter scan missed).
+    if let Some(literal) = crate::template::literal_glob_path(pattern) {
+        let candidate = iter.path.join(literal);
         return Ok(iter.index.contains_file(&candidate));
     }
-    let combined = format!("{}/{}", iter.path.to_string_lossy(), pattern);
+    // The iterated path is a real directory name, not a pattern: escape it so a
+    // dir like `app/[slug]` or `pkgs/*` matches only itself (only the user's
+    // `pattern` keeps its glob meaning).
+    let combined = format!(
+        "{}/{}",
+        crate::template::glob_escape(&iter.path.to_string_lossy()),
+        pattern
+    );
     let scope = Scope::from_patterns(std::slice::from_ref(&combined))
         .map_err(|e| WhenError::Eval(format!("iter.has_file: invalid glob: {e}")))?;
     Ok(iter

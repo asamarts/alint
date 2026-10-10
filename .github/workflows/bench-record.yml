@@ -227,10 +227,20 @@ jobs:
 
       - name: derive output label
         id: label
+        env:
+          # Via env, never `${{ }}` inside the script: a dispatch input expanded
+          # into shell source is a script-injection vector.
+          INPUT_LABEL: ${{ github.event.inputs.label }}
         run: |
           set -euo pipefail
-          input_label='${{ github.event.inputs.label }}'
+          input_label="${INPUT_LABEL:-}"
           if [[ -n "$input_label" ]]; then
+            # The label becomes a docs/benchmarks/ directory name and a branch
+            # name; allow only a conservative path-segment alphabet.
+            if [[ ! "$input_label" =~ ^[A-Za-z0-9._-]+$ || "$input_label" == .* ]]; then
+              echo "::error::invalid label '${input_label}' (allowed: [A-Za-z0-9._-]+, no leading dot)" >&2
+              exit 1
+            fi
             echo "label=$input_label" >> "$GITHUB_OUTPUT"
           elif [[ "$GITHUB_REF" == refs/tags/* ]]; then
             # Tag push: docs/benchmarks/.../v0.9.7/ shape.

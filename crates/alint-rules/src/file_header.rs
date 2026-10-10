@@ -60,16 +60,17 @@ impl Rule for FileHeaderRule {
             // via the `for_each`-nested path (which bypasses the engine's cap).
             // Over-cap → skip, matching the engine's per-file batch so the same
             // rule behaves identically whether top-level or nested (M3-F1).
-            // A read error (permission / I/O) now skips too -- not just the
-            // over-cap case above -- failing open to match `check`'s per-file read
-            // path (`read_capped_or_skip`, which skips an unreadable file before it
-            // ever calls `evaluate_file`). Flagging it here (this whole-index
-            // `evaluate` is the read path `fix` uses) made `fix` exit 1 with an
-            // unfixable "could not read file" while `check` skipped and exited 0 on
-            // the same tree. Per-file content rules fail open by design
-            // (`MAX_ANALYZE_BYTES`).
-            let Ok(bytes) = crate::io::read_capped(&full) else {
-                continue;
+            // A genuine read error (permission / I/O) fails CLOSED with a
+            // "could not read file" finding, exactly as `check`'s file-major
+            // dispatch reports it, so `check` and `fix` (this whole-index
+            // `evaluate` is the read path `fix` uses) agree; `NotFound` (a
+            // mid-walk delete) and over-cap stay skips (audit 2026-10 finding 7).
+            let bytes = match crate::io::read_capped(&full) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.extend(crate::io::read_cap_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
@@ -95,9 +96,19 @@ impl PerFileRule for FileHeaderRule {
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Ok(vec![
                 Violation::new("file is not valid UTF-8; cannot match header")
-                    .with_path(std::sync::Arc::<Path>::from(path)),
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    // No fix resolves this: the fixer would prepend bytes, but the
+                    // file would still not be valid UTF-8 (and a UTF-16 / binary
+                    // file is refused outright), so `check` must not promise one.
+                    .with_not_fixable(),
             ]);
         };
+        // Match the content AFTER a leading UTF-8 BOM: the BOM is an encoding
+        // signature, not header text, and the `file_prepend` / `insert_header`
+        // fixers write the header after it (preserving it). Matching the raw text
+        // made an anchored `^…` pattern never match a BOM file, so `check` kept
+        // flagging what `fix` reported as already fixed (non-convergent).
+        let text = text.strip_prefix('\u{FEFF}').unwrap_or(text);
         let header: String = text.split_inclusive('\n').take(self.lines).collect();
         if self.pattern.is_match(&header) {
             return Ok(Vec::new());
@@ -111,7 +122,10 @@ impl PerFileRule for FileHeaderRule {
         Ok(vec![
             Violation::new(msg)
                 .with_path(std::sync::Arc::<Path>::from(path))
-                .with_location(1, 1),
+                .with_location(1, 1)
+                // The prepend / insert-header fixers refuse a binary-looking file
+                // (e.g. valid UTF-8 with a NUL), so don't tag it fixable.
+                .with_not_fixable_if(crate::io::looks_binary(bytes)),
         ])
     }
 }
@@ -262,6 +276,42 @@ mod tests {
     }
 
     #[test]
+    fn header_after_a_utf8_bom_matches_and_the_fix_converges() {
+        // Check/fix agreement regression: `file_prepend` / `insert_header` place
+        // the header AFTER a leading UTF-8 BOM (preserving it), but the check
+        // matched the raw text, BOM included, so an anchored `^// SPDX` never
+        // matched: check kept flagging while fix said "already has header".
+        // The check now matches the content after the BOM, where the fixers
+        // write.
+        for fix in [
+            "file_prepend: { content: \"// SPDX-License-Identifier: MIT\\n\" }",
+            "insert_header: { content: \"// SPDX-License-Identifier: MIT\\n\" }",
+        ] {
+            let rule = build(&spec_yaml(&format!(
+                "id: t\nkind: file_header\npaths: \"**/*.rs\"\n\
+                 pattern: \"^// SPDX-License-Identifier:\"\nlevel: error\nfix: {{ {fix} }}\n"
+            )))
+            .unwrap();
+            let body: &[u8] = b"\xEF\xBB\xBFfn main() {}\n";
+            let (tmp, idx) = tempdir_with_files(&[("a.rs", body)]);
+            let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+            assert_eq!(v.len(), 1, "{fix}: missing header is flagged");
+            let Some(alint_core::FixEdit::SetContent { content, .. }) =
+                rule.fixer().unwrap().fix_edit(&v[0], body, tmp.path())
+            else {
+                panic!("{fix}: expected a SetContent edit");
+            };
+            assert!(
+                content.starts_with(b"\xEF\xBB\xBF// SPDX"),
+                "{fix}: BOM kept first"
+            );
+            std::fs::write(tmp.path().join("a.rs"), &content).unwrap();
+            let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+            assert!(v.is_empty(), "{fix}: fixed file must pass the check: {v:?}");
+        }
+    }
+
+    #[test]
     fn evaluate_fires_when_header_missing() {
         let spec = spec_yaml(
             "id: t\n\
@@ -344,5 +394,36 @@ mod tests {
         let (tmp, idx) = tempdir_with_files(&[("src/main.rs", content.as_bytes())]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1);
+    }
+
+    #[test]
+    fn non_utf8_and_binary_findings_are_not_fixable() {
+        // The prepend fixer refuses binary / UTF-16 content, and prepending to a
+        // non-UTF-8 file can never make it match, so `check` must not tag these
+        // findings fixable (fix would never converge).
+        let rule = build(&spec_yaml(
+            "id: t\nkind: file_header\npaths: \"**/*\"\npattern: \"^// ok\"\n\
+             level: error\nfix:\n  file_prepend:\n    content: \"// ok\\n\"\n",
+        ))
+        .unwrap();
+        let (tmp, idx) = tempdir_with_files(&[
+            ("utf16.txt", &[0xFF, 0xFE, 0x2D, 0x4E, 0x87, 0x65][..]),
+            ("nul.txt", b"code\0more\n"),
+            ("plain.txt", b"code\n"),
+        ]);
+        let mut v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        v.sort_by(|a, b| a.path.cmp(&b.path));
+        let flags: Vec<(String, bool)> = v
+            .iter()
+            .map(|x| (crate::slash(x.path.as_deref().unwrap()), x.not_fixable))
+            .collect();
+        assert_eq!(
+            flags,
+            vec![
+                ("nul.txt".to_string(), true),
+                ("plain.txt".to_string(), false),
+                ("utf16.txt".to_string(), true),
+            ]
+        );
     }
 }

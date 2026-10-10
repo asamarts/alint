@@ -347,3 +347,60 @@ rules:
     let instance = yaml_to_json(yaml);
     assert_invalid(&validator, &instance, "rule id with uppercase");
 }
+
+/// Every fix op the engine deserializes has a schema branch, and the schema
+/// agrees with serde on the op's `applicability` field and on unknown keys.
+/// The hand-written `$defs/fix` once covered only 15 of the 26 ops and rejected
+/// `applicability` on the hygiene ops, so schema-aware editors flagged configs
+/// `alint validate-config` accepted (audit 2026-10).
+#[test]
+fn fix_schema_matches_every_fix_op() {
+    let validator = compile_schema();
+    let schema: serde_json::Value = serde_json::from_str(CONFIG_SCHEMA_V1).expect("valid JSON");
+    let branches = schema["$defs"]["fix"]["oneOf"]
+        .as_array()
+        .expect("$defs/fix is a oneOf");
+    let schema_ops: Vec<&str> = branches
+        .iter()
+        .filter_map(|b| b["required"][0].as_str())
+        .collect();
+
+    for op in alint_core::FixSpec::ALL_OP_NAMES {
+        assert!(
+            schema_ops.contains(op),
+            "fix op `{op}` has no `$defs/fix` branch"
+        );
+        // The minimal body serde requires for this op.
+        let base = match *op {
+            "replace" => "replacement: x\n",
+            "command" => "run: [x]\n",
+            "file_create" | "file_prepend" | "file_append" => "content: x\n",
+            _ => "",
+        };
+        for (extra, label) in [
+            ("applicability: suggestion\n", "applicability"),
+            ("bogus: 1\n", "unknown key"),
+        ] {
+            let body = format!("{base}{extra}");
+            let fix_yaml = format!("{op}:\n{}", indent(&body));
+            let serde_ok = serde_yaml_ng::from_str::<alint_core::FixSpec>(&fix_yaml).is_ok();
+            let config = yaml_to_json(&format!(
+                "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    paths: x\n    \
+                 level: error\n    fix:\n{}",
+                indent(&indent(&indent(&fix_yaml)))
+            ));
+            assert_eq!(
+                validator.is_valid(&config),
+                serde_ok,
+                "schema and serde disagree on `{op}` with {label}"
+            );
+        }
+    }
+}
+
+fn indent(s: &str) -> String {
+    s.lines().fold(String::new(), |mut out, l| {
+        let _ = writeln!(out, "  {l}");
+        out
+    })
+}

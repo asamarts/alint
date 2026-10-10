@@ -155,21 +155,39 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
     let mut in_fenced = false;
     let mut fence_marker: Option<char> = None;
     let mut fence_len: usize = 0;
+    // Blockquote nesting (`>` count) the open fence lives in.
+    let mut fence_depth: usize = 0;
 
     for (line_idx, line) in text.lines().enumerate() {
         let line_no = line_idx + 1;
+        // Fences and indented code blocks can sit inside a `>` blockquote; judge
+        // them on the content after the markers. A fence left open when its
+        // blockquote ends closes with it (CommonMark: a fenced block never
+        // lazily continues), so the rest of the file is still scanned.
+        //
+        // Inside an open fence only the markers of the fence's OWN container are
+        // structure: a `>` beyond that depth is fence content (a quoted line in a
+        // code sample), so `> ```` inside a top-level fence must not close it.
+        let max_depth = if in_fenced { fence_depth } else { usize::MAX };
+        let (depth, content) = strip_blockquote_markers(line, max_depth);
+        if in_fenced && depth < fence_depth {
+            in_fenced = false;
+            fence_marker = None;
+            fence_len = 0;
+        }
 
         // Detect fenced-code-block boundaries. CommonMark allows
         // ``` and ~~~ with at least 3 markers; the closing fence
         // must use the same character and at least as many
         // markers. `info string` (e.g. ```yaml) follows the
         // opening fence; we don't care about its content.
-        let trimmed = line.trim_start();
+        let trimmed = content.trim_start();
         if let Some((ch, n)) = detect_fence(trimmed) {
             if !in_fenced {
                 in_fenced = true;
                 fence_marker = Some(ch);
                 fence_len = n;
+                fence_depth = depth;
             } else if fence_marker == Some(ch) && n >= fence_len && only_fence(trimmed, ch) {
                 in_fenced = false;
                 fence_marker = None;
@@ -187,7 +205,7 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
         // as code unless it's a continuation of a list item, which
         // we don't track here. Acceptable: false-skip rate >
         // false-flag rate for our use.
-        if line.starts_with("    ") || line.starts_with('\t') {
+        if content.starts_with("    ") || content.starts_with('\t') {
             continue;
         }
 
@@ -196,40 +214,98 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
         // backticks. Per CommonMark, longer runs nest the span so
         // it can contain shorter backtick sequences. Most paths
         // use single backticks, which is what we optimise for.
+        //
+        // Linear in the line length: every backtick run is indexed once, and
+        // each run is linked to the next run of the SAME length (its only
+        // possible closer). Re-searching the rest of the line for every
+        // unmatched run was O(n^1.5) on a line of many distinct run lengths.
         let bytes = line.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] != b'`' {
-                i += 1;
+        let runs = backtick_runs(bytes);
+        let next_same = next_same_len_run(&runs);
+        // Columns are 1-based Unicode code points (SARIF's `columnKind:
+        // unicodeCodePoints`, which the LSP converts from), not byte offsets:
+        // count chars incrementally from the last reported position so the
+        // scan stays linear.
+        let (mut col_byte, mut col_chars) = (0usize, 0usize);
+        let mut k = 0;
+        while k < runs.len() {
+            let (run_start, run_len) = runs[k];
+            let Some(j) = next_same[k] else {
+                // Unmatched run -> per CommonMark it is literal text, not a
+                // span; keep scanning after it (a later span on the line is
+                // still a candidate).
+                k += 1;
                 continue;
-            }
-            let run_start = i;
-            while i < bytes.len() && bytes[i] == b'`' {
-                i += 1;
-            }
-            let run_len = i - run_start;
-            // Find the matching closing run.
-            let close_start = find_closing_run(&bytes[i..], run_len).map(|p| i + p);
-            let Some(close) = close_start else {
-                // Unmatched backticks → not a span; bail this line.
-                break;
             };
-            let token_bytes = &bytes[i..close];
+            let token_bytes = &bytes[run_start + run_len..runs[j].0];
             // Inline-code spans wrap their content with one space
             // padding when the content starts/ends with a backtick;
             // CommonMark trims one leading + one trailing space.
             let token = std::str::from_utf8(token_bytes).unwrap_or("").trim();
             if !token.is_empty() && starts_with_any_prefix(token, prefixes) {
+                // `run_start` is a backtick, so always a char boundary.
+                col_chars += line[col_byte..run_start].chars().count();
+                col_byte = run_start;
                 out.push(Candidate {
                     token: token.to_string(),
                     line: line_no,
-                    column: run_start + 1, // 1-indexed; points at opening backtick
+                    column: col_chars + 1, // 1-indexed; points at opening backtick
                 });
             }
-            i = close + run_len;
+            // Resume after the closing run.
+            k = j + 1;
         }
     }
     out
+}
+
+/// Every maximal run of backticks in `bytes`, as `(start, len)`, in order.
+fn backtick_runs(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i] == b'`' {
+            i += 1;
+        }
+        runs.push((start, i - start));
+    }
+    runs
+}
+
+/// For each run, the index of the next run with exactly the same length (the
+/// only run that can close it), or `None`. One backward pass.
+fn next_same_len_run(runs: &[(usize, usize)]) -> Vec<Option<usize>> {
+    let mut next = vec![None; runs.len()];
+    let mut last_seen: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (k, &(_, len)) in runs.iter().enumerate().rev() {
+        next[k] = last_seen.insert(len, k);
+    }
+    next
+}
+
+/// Strip up to `max_depth` leading blockquote markers (`>` after at most 3
+/// spaces, plus one optional following space), returning the nesting depth
+/// stripped and the content.
+fn strip_blockquote_markers(line: &str, max_depth: usize) -> (usize, &str) {
+    let mut depth = 0;
+    let mut rest = line;
+    while depth < max_depth {
+        let after_indent = rest.trim_start_matches(' ');
+        if rest.len() - after_indent.len() > 3 {
+            break;
+        }
+        let Some(inner) = after_indent.strip_prefix('>') else {
+            break;
+        };
+        rest = inner.strip_prefix(' ').unwrap_or(inner);
+        depth += 1;
+    }
+    (depth, rest)
 }
 
 /// If `s` starts with N+ backticks or tildes (N ≥ 3), return the
@@ -252,29 +328,14 @@ fn only_fence(s: &str, ch: char) -> bool {
     s.trim_end().chars().all(|c| c == ch)
 }
 
-/// Find the position (relative to `bytes` start) of the next run
-/// of exactly `len` backticks. Returns None if not found in
-/// `bytes`.
-fn find_closing_run(bytes: &[u8], len: usize) -> Option<usize> {
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'`' {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < bytes.len() && bytes[i] == b'`' {
-            i += 1;
-        }
-        if i - start == len {
-            return Some(start);
-        }
-    }
-    None
-}
-
+/// A token is a candidate when it starts with a prefix -- directly, or after a
+/// leading `./` (`./src/x` names the same path as `src/x`).
 fn starts_with_any_prefix(s: &str, prefixes: &[String]) -> bool {
-    prefixes.iter().any(|p| s.starts_with(p))
+    prefixes.iter().any(|p| {
+        s.starts_with(p.as_str())
+            || s.strip_prefix("./")
+                .is_some_and(|rest| rest.starts_with(p.as_str()))
+    })
 }
 
 /// True if `s` contains a template-variable marker
@@ -331,6 +392,17 @@ fn looks_like_command_arguments(arguments: &str) -> bool {
 /// against the file index (any-of); plain paths use exact
 /// lookup of either file or directory.
 fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
+    if lookup.is_empty() {
+        return false;
+    }
+    // Normalize `.` / `..` segments lexically first: `./src/foo.c` and
+    // `src/../src/foo.c` name `src/foo.c`, which is how the index keys it. A
+    // `..` that climbs out of the repo (or an absolute path) never resolves.
+    let Some(normalized) = crate::pathsafe::normalize_confined(Path::new(lookup)) else {
+        return false;
+    };
+    let normalized = crate::slash(&normalized);
+    let lookup = normalized.as_str();
     if lookup.is_empty() {
         return false;
     }
@@ -456,6 +528,148 @@ mod tests {
         let pf = prefixes(&["src/"]);
         let cands = scan_markdown_paths("`src/foo.ts unmatched", &pf);
         assert_eq!(cands, Vec::new());
+    }
+
+    fn findings(md: &str, prefixes: &str, files: &[&str]) -> Vec<String> {
+        use crate::test_support::{ctx, index, spec_yaml};
+        let rule = build(&spec_yaml(&format!(
+            "id: t\nkind: markdown_paths_resolve\npaths: \"**/*.md\"\n\
+             prefixes: {prefixes}\nlevel: error\n"
+        )))
+        .unwrap();
+        let idx = index(files);
+        rule.as_per_file()
+            .unwrap()
+            .evaluate_file(
+                &ctx(Path::new("/fake"), &idx),
+                Path::new("README.md"),
+                md.as_bytes(),
+            )
+            .unwrap()
+            .into_iter()
+            .map(|v| v.baseline_key.unwrap_or_default().into_owned())
+            .collect()
+    }
+
+    #[test]
+    fn dot_and_dotdot_segments_are_normalized_before_lookup() {
+        // FP regression: `./src/foo.c` / `src/../src/foo.c` name an existing file
+        // but were looked up verbatim and reported as unresolved.
+        const NONE: [String; 0] = [];
+        let files = ["src/foo.c"];
+        assert_eq!(
+            findings("see `src/../src/foo.c`", "[\"src/\"]", &files),
+            NONE
+        );
+        assert_eq!(findings("see `./src/foo.c`", "[\"./\"]", &files), NONE);
+        // A `./`-led path is a candidate for a `src/` prefix too -- and a broken
+        // one is still reported.
+        assert_eq!(findings("see `./src/foo.c`", "[\"src/\"]", &files), NONE);
+        assert_eq!(
+            findings("see `./src/gone.c`", "[\"src/\"]", &files),
+            vec!["./src/gone.c"]
+        );
+        // `..` that climbs out of the repo never resolves.
+        assert_eq!(
+            findings("see `src/../../src/foo.c`", "[\"src/\"]", &files),
+            vec!["src/../../src/foo.c"]
+        );
+    }
+
+    #[test]
+    fn fences_inside_blockquotes_are_code() {
+        // FP regression: a fence opened inside a `>` blockquote was not
+        // recognized, so its sample paths were checked as factual claims.
+        let pf = prefixes(&["src/"]);
+        let md = "> ```sh\n> cat `src/sample.ts`\n> ```\n> after `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+        // A fence left open when its blockquote ends closes with it (CommonMark),
+        // so the rest of the file is still scanned.
+        let md = "> ```\n> `src/sample.ts`\n\nplain `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+    }
+
+    #[test]
+    fn a_quoted_fence_line_inside_a_top_level_fence_does_not_close_it() {
+        // FP regression: blockquote markers were stripped even inside an open
+        // fence, so a `> ```` sample line closed a top-level fence and the rest
+        // of the code sample was scanned as prose.
+        let pf = prefixes(&["src/"]);
+        let md = "```md\n> ```\n`src/sample.ts`\n```\nafter `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+        // A fence inside a blockquote still closes on its own quoted fence line.
+        let md = "> ```\n> > ```\n> `src/sample.ts`\n> ```\n> `src/real.ts`\n";
+        let tokens: Vec<_> = scan_markdown_paths(md, &pf)
+            .into_iter()
+            .map(|c| c.token)
+            .collect();
+        assert_eq!(tokens, vec!["src/real.ts"]);
+    }
+
+    #[test]
+    fn an_unmatched_backtick_run_is_literal_not_the_end_of_the_line() {
+        // FN regression: an opening run with no matching close abandoned the
+        // rest of the line. Per CommonMark it is literal text; scanning goes on.
+        let pf = prefixes(&["src/"]);
+        let md = "a `` stray then `src/real.ts`";
+        let cands = scan_markdown_paths(md, &pf);
+        assert_eq!(cands.len(), 1, "{cands:?}");
+        assert_eq!(cands[0].token, "src/real.ts");
+    }
+
+    #[test]
+    fn many_distinct_unmatched_runs_scan_in_linear_time() {
+        // Perf regression: each unmatched run re-searched the rest of the line
+        // for a closer, so a long line of runs of lengths 1..N (all unmatched)
+        // took O(n^1.5) -- tens of seconds on a few MB. Linked by length, the
+        // scan is linear; this ~2 MB line must finish near-instantly.
+        let pf = prefixes(&["src/"]);
+        let mut line = String::new();
+        for n in 2..=2000 {
+            line.push_str(&"`".repeat(n));
+            line.push('x');
+        }
+        line.push_str(" `src/real.ts`");
+        let t = std::time::Instant::now();
+        let cands = scan_markdown_paths(&line, &pf);
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            t.elapsed()
+        );
+        // Every run of length >= 2 is unique (unmatched, literal); the trailing
+        // single-backtick span is still found, at its byte position.
+        assert_eq!(cands.len(), 1, "{cands:?}");
+        assert_eq!(cands[0].token, "src/real.ts");
+        // Pairing is by exact length, in order: `a``b`c`` -> run 0 closes at run
+        // 2, run 1 at run 3.
+        assert_eq!(
+            next_same_len_run(&backtick_runs(b"`a``b`c``")),
+            vec![Some(2), Some(3), None, None]
+        );
+    }
+
+    #[test]
+    fn column_counts_code_points_not_bytes() {
+        // SARIF declares `columnKind: unicodeCodePoints`: `中文中文 ` is 5 code
+        // points (13 bytes), so the opening backtick is column 6, not 14.
+        let pf = prefixes(&["src/"]);
+        let cands = scan_markdown_paths("中文中文 `src/missing.rs` и `src/b.rs`", &pf);
+        assert_eq!(cands.len(), 2);
+        assert_eq!(cands[0].column, 6);
+        assert_eq!(cands[1].column, 25);
     }
 
     #[test]

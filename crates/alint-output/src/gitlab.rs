@@ -109,7 +109,7 @@ fn build_issue(
     let path = violation
         .path
         .as_ref()
-        .map_or_else(|| ".".to_string(), |p| p.display().to_string());
+        .map_or_else(|| ".".to_string(), |p| crate::slash_path(p));
 
     // Base identity: the canonical `violation_fingerprint` when `alint` supplies
     // it (so a unique finding matches SARIF + baseline), else the self-contained
@@ -262,6 +262,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    not_fixable: false,
                     proposed_edits: Vec::new(),
                 }],
             )],
@@ -351,6 +352,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    not_fixable: false,
                     proposed_edits: Vec::new(),
                 }],
             )],
@@ -373,6 +375,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    not_fixable: false,
                     proposed_edits: Vec::new(),
                 }],
             )],
@@ -404,6 +407,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    not_fixable: false,
                     proposed_edits: Vec::new(),
                 }],
             )],
@@ -427,6 +431,7 @@ mod tests {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            not_fixable: false,
             proposed_edits: Vec::new(),
         };
         let report = Report {
@@ -457,6 +462,7 @@ mod tests {
             is_note: false,
             baseline_key: None,
             is_fixable: false,
+            not_fixable: false,
             proposed_edits: Vec::new(),
         };
         let report = Report {
@@ -523,6 +529,7 @@ mod tests {
                     is_note: false,
                     baseline_key: None,
                     is_fixable: false,
+                    not_fixable: false,
                     proposed_edits: Vec::new(),
                 }],
             )],
@@ -532,6 +539,13 @@ mod tests {
         let parsed: Value = serde_json::from_str(&out).unwrap();
         let issue = &parsed[0];
         assert_eq!(issue["check_name"], "r/special");
-        assert_eq!(issue["location"]["path"], r#"a"b\c.rs"#);
+        // `\` is a separator on Windows (normalized to `/`) but an ordinary
+        // filename byte on Unix (kept, and JSON-escaped).
+        let expected = if cfg!(windows) {
+            r#"a"b/c.rs"#
+        } else {
+            r#"a"b\c.rs"#
+        };
+        assert_eq!(issue["location"]["path"], expected);
     }
 }

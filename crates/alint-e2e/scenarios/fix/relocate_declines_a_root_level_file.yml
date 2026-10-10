@@ -30,7 +30,7 @@ expect:
   # An already-at-root file has nowhere to go: relocate declines (Skipped), never
   # moving it onto itself. Pin the other outcome fields empty so a phantom
   # applied/suggestion would fail the gate.
-  - skipped: [lockfile-nowhere]
+  - unfixable: [lockfile-nowhere]
     applied: []
     suggested: []
   # And it genuinely still stands (no loop, no spurious convergence): check agrees.

@@ -31,6 +31,33 @@ fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
     std::fs::File::open(path)
 }
 
+/// The fail-closed outcome of a per-file content rule's OWN read (its
+/// rule-major `evaluate` loop -- the read path `alint fix` uses) failing with
+/// an I/O error: `Some(could-not-read violation)` for a genuine error
+/// (permission, I/O), `None` for a `NotFound` (deleted mid-walk, a benign
+/// race). Mirrors the engine's file-major dispatch, which reports the same
+/// [`alint_core::unreadable_file_violation`], so `check` and `fix` agree
+/// (audit 2026-10 finding 7; this reverses the earlier fail-open choice).
+pub(crate) fn io_error_violation(
+    rel: &Path,
+    err: &std::io::Error,
+) -> Option<alint_core::Violation> {
+    (err.kind() != std::io::ErrorKind::NotFound)
+        .then(|| alint_core::unreadable_file_violation(rel, err))
+}
+
+/// [`io_error_violation`] for a [`read_capped`] failure. An over-cap file
+/// stays a skip (matching the engine's `MAX_ANALYZE_BYTES` behaviour).
+pub(crate) fn read_cap_error_violation(
+    rel: &Path,
+    err: &ReadCapError,
+) -> Option<alint_core::Violation> {
+    match err {
+        ReadCapError::TooLarge(_) => None,
+        ReadCapError::Io(e) => io_error_violation(rel, e),
+    }
+}
+
 /// Read up to `TEXT_INSPECT_LEN` bytes from the start of a file. Returned
 /// `Ok(None)` means the file was empty; `Err` is propagated I/O error.
 pub fn read_prefix(path: &Path) -> std::io::Result<Vec<u8>> {
@@ -98,12 +125,79 @@ pub fn classify_bytes(bytes: &[u8]) -> Classification {
 /// (reorder / reindent / splice). The explicit full scan closes that (audit R2).
 /// `content_inspector` still supplies the broader statistical heuristics (encoding,
 /// control-char density) over its leading window.
+///
+/// A file that opens with a UTF-16 / UTF-32 byte-order mark counts too, NUL or
+/// not: its code units are 2 / 4 bytes wide, so every byte-level edit these
+/// fixers make (append a `\n`, drop a `0x20` byte, strip the 2-byte mark without
+/// transcoding) desynchronizes or corrupts it -- and UTF-16 text in non-Latin
+/// scripts (`中文` is `2D 4E 87 65`) carries no NUL for the check above to see.
 pub fn looks_binary(bytes: &[u8]) -> bool {
     if bytes.contains(&0) {
         return true;
     }
+    if crate::no_bom::detect_bom(bytes).is_some_and(|k| k != crate::no_bom::BomKind::Utf8) {
+        return true;
+    }
     let window = &bytes[..bytes.len().min(TEXT_INSPECT_LEN)];
     classify_bytes(window) == Classification::Binary
+}
+
+/// How a security-posture character scan (`no_bidi_controls`,
+/// `no_zero_width_chars`) treats a file, decided from its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CharScan {
+    /// Not binary-looking: scan (lossily; invalid bytes count as one U+FFFD).
+    Text,
+    /// Binary-looking (a NUL, a UTF-16/32 BOM, ...) but VALID UTF-8: scan it.
+    /// NUL is valid UTF-8, so a crafted source file cannot hide a control
+    /// behind one NUL byte. Findings are reported but not auto-fixed (the
+    /// byte-strip fixers refuse binary content).
+    BinaryUtf8,
+    /// Binary-looking AND invalid UTF-8 (a PNG, a font, a JPEG): skipped. A
+    /// lossy decode of random bytes manufactures controls out of noise
+    /// (`D8 9C` decodes to U+061C), so scanning these is all false positives.
+    Skip,
+}
+
+/// Classify `bytes` for a [`CharScan`].
+pub(crate) fn char_scan_mode(bytes: &[u8]) -> CharScan {
+    if !looks_binary(bytes) {
+        CharScan::Text
+    } else if std::str::from_utf8(bytes).is_ok() {
+        CharScan::BinaryUtf8
+    } else {
+        CharScan::Skip
+    }
+}
+
+/// Find the first char of `bytes` (decoded as UTF-8, lossily) for which
+/// `pred(char, is_first_char)` holds, returning `(1-based line, 1-based
+/// column in chars, char)`. Each maximal invalid byte sequence counts as ONE
+/// U+FFFD, exactly as `String::from_utf8_lossy` would decode it, but nothing is
+/// allocated -- a big file is walked in place.
+pub(crate) fn first_char_where(
+    bytes: &[u8],
+    mut pred: impl FnMut(char, bool) -> bool,
+) -> Option<(usize, usize, char)> {
+    let mut line = 1usize;
+    let mut col = 1usize;
+    let mut first = true;
+    for chunk in bytes.utf8_chunks() {
+        let invalid = (!chunk.invalid().is_empty()).then_some('\u{FFFD}');
+        for c in chunk.valid().chars().chain(invalid) {
+            if pred(c, first) {
+                return Some((line, col, c));
+            }
+            first = false;
+            if c == '\n' {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+    }
+    None
 }
 
 /// Atomic whole-file write, re-exported from `alint-core` so the fixers and the

@@ -188,6 +188,10 @@ pub fn write_json_with_baseline(
 #[derive(Serialize)]
 struct JsonFixReport<'a> {
     schema_version: u32,
+    /// `true` for `alint fix --dry-run`: nothing was written, and every
+    /// `applied` item is what WOULD be applied. Distinguishes a preview from
+    /// a real run without parsing the human-oriented `detail` text.
+    dry_run: bool,
     summary: FixSummary,
     results: Vec<JsonFixRuleResult<'a>>,
 }
@@ -229,9 +233,26 @@ struct JsonFixItem<'a> {
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<&'a str>,
+    /// For a `skipped` item, WHY it was not fixed: `declined` (the fixer
+    /// declined), `errored` (an I/O error), `baselined` (grandfathered by
+    /// `fix --baseline`), or `unresolved` (the fix ran, or would run, but the
+    /// rule still reports the violation). Absent for other statuses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_kind: Option<&'static str>,
 }
 
 pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<()> {
+    write_fix_json_with_mode(report, false, w)
+}
+
+/// [`write_fix_json`] for a run that may be a dry run: `dry_run` is emitted
+/// as the top-level `dry_run` field (statuses stay `applied` etc. for
+/// compatibility; `dry_run: true` says none of them were written).
+pub fn write_fix_json_with_mode(
+    report: &FixReport,
+    dry_run: bool,
+    w: &mut dyn Write,
+) -> std::io::Result<()> {
     let results: Vec<JsonFixRuleResult<'_>> = report
         .results
         .iter()
@@ -242,13 +263,15 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
                 .items
                 .iter()
                 .map(|it| {
-                    let (status, detail) = match &it.status {
-                        FixStatus::Applied(s) => ("applied", Some(s.as_str())),
-                        FixStatus::Skipped { reason: s, .. } => ("skipped", Some(s.as_str())),
-                        FixStatus::Suggested { summary, .. } => {
-                            ("suggested", Some(summary.as_str()))
+                    let (status, detail, skip_kind) = match &it.status {
+                        FixStatus::Applied(s) => ("applied", Some(s.as_str()), None),
+                        FixStatus::Skipped { reason: s, kind } => {
+                            ("skipped", Some(s.as_str()), Some(kind.as_str()))
                         }
-                        FixStatus::Unfixable => ("unfixable", None),
+                        FixStatus::Suggested { summary, .. } => {
+                            ("suggested", Some(summary.as_str()), None)
+                        }
+                        FixStatus::Unfixable => ("unfixable", None, None),
                     };
                     JsonFixItem {
                         path: lossy_path(it.violation.path.as_deref()),
@@ -257,6 +280,7 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
                         column: it.violation.column,
                         status,
                         detail,
+                        skip_kind,
                     }
                 })
                 .collect(),
@@ -264,6 +288,7 @@ pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<
         .collect();
     let out = JsonFixReport {
         schema_version: 1,
+        dry_run,
         summary: FixSummary {
             applied: report.applied(),
             skipped: report.skipped(),

@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 use std::process::ExitCode;
 
 use alint_core::{Engine, FixReport, FixRuleResult, FixStatus, RuleRegistry, WalkOptions, walk};
-use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions};
+use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions, sanitize_terminal as term};
 use anyhow::{Context, Result, bail};
 use clap::Parser;
 
@@ -17,6 +17,7 @@ mod export_agents_md;
 mod init;
 mod progress;
 mod rules;
+mod safe_write;
 mod suggest;
 
 use cli::{Cli, Command, RulesCommand};
@@ -38,12 +39,15 @@ const ALINT_LONG_VERSION: &str = concat!(
 
 fn main() -> ExitCode {
     init_panic_hook();
-    init_tracing();
     let cli = Cli::parse();
+    init_tracing(&cli.color);
     match run(cli) {
         Ok(code) => code,
+        // The reader closed stdout early (`alint list | head -1`): not an
+        // alint error. Exit quietly, as if the output had been consumed.
+        Err(e) if is_broken_pipe(&e) => ExitCode::SUCCESS,
         Err(e) => {
-            eprintln!("alint: {e:#}");
+            eprintln!("alint: {}", term(&format!("{e:#}")));
             // Exit 3 for an internal alint error (a bug), 2 for a config /
             // CLI-usage error the user can fix (M11).
             if error_is_internal(&e) {
@@ -64,6 +68,35 @@ fn error_is_internal(err: &anyhow::Error) -> bool {
             .downcast_ref::<alint_core::Error>()
             .is_some_and(alint_core::Error::is_internal)
     })
+}
+
+/// Whether the error chain carries an EPIPE: stdout's reader went away.
+fn is_broken_pipe(err: &anyhow::Error) -> bool {
+    err.chain().any(|cause| {
+        cause
+            .downcast_ref::<io::Error>()
+            .is_some_and(|e| e.kind() == io::ErrorKind::BrokenPipe)
+    })
+}
+
+/// Treat a closed stdout (EPIPE, e.g. `alint check -f json | head -1`) as a
+/// completed report write, so the command still returns the exit code its
+/// findings call for instead of a spurious "Broken pipe" error.
+fn tolerate_broken_pipe(res: io::Result<()>) -> io::Result<()> {
+    match res {
+        Err(e) if e.kind() == io::ErrorKind::BrokenPipe => Ok(()),
+        other => other,
+    }
+}
+
+/// Write `text` plus a newline to stdout (locked, then flushed). A closed
+/// stdout (EPIPE) is tolerated like a consumed write, so the command keeps
+/// the exit code it would have had; `println!` would panic instead.
+fn print_stdout_line(text: &str) -> Result<()> {
+    use std::io::Write as _;
+    let mut out = io::stdout().lock();
+    tolerate_broken_pipe(writeln!(out, "{text}").and_then(|()| out.flush()))
+        .context("writing output")
 }
 
 /// Install a custom panic hook that prints a pre-filled GitHub-issue
@@ -134,8 +167,23 @@ fn url_encode(s: &str) -> String {
     out
 }
 
-fn init_tracing() {
+/// Whether `ALINT_LOG` diagnostics on stderr get ANSI styling: the same
+/// `--color` decision the reports use, applied to stderr — `always` /
+/// `CLICOLOR_FORCE` force it, `never` disables it, and `auto` requires a
+/// stderr TTY and no (non-empty) `NO_COLOR`. An unparsable `--color` value
+/// is treated as `auto` here (the command reports that error itself).
+fn tracing_ansi(color: &str, no_color: bool, stderr_tty: bool) -> bool {
+    match color.parse::<ColorChoice>().unwrap_or_default().resolve() {
+        ColorChoice::Always => true,
+        ColorChoice::Never => false,
+        ColorChoice::Auto => stderr_tty && !no_color,
+    }
+}
+
+fn init_tracing(color: &str) {
     use tracing_subscriber::{EnvFilter, fmt};
+    let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
+    let ansi = tracing_ansi(color, no_color, io::stderr().is_terminal());
     let filter = EnvFilter::try_from_env("ALINT_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
     // Diagnostics go to stderr, never stdout: a `warn!` (e.g. an empty
     // `include_manifest_paths` set) must not corrupt `--format json`/SARIF, which
@@ -143,6 +191,7 @@ fn init_tracing() {
     let _ = fmt()
         .with_env_filter(filter)
         .with_target(false)
+        .with_ansi(ansi)
         .with_writer(std::io::stderr)
         .try_init();
 }
@@ -276,7 +325,7 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         Command::ValidateConfig { path, format } => cmd_validate_config(path, &format, &cli),
         Command::Lsp => {
             reject_non_human_format(&cli, "lsp")?;
-            cmd_lsp()
+            cmd_lsp(cli.show_notes)
         }
         Command::Rules { command } => rules::run(&command, &cli),
     }
@@ -297,10 +346,14 @@ fn reject_non_human_format(cli: &Cli, cmd: &str) -> anyhow::Result<()> {
 }
 
 /// Start the LSP server over stdio. Blocks (running its own async
-/// runtime inside `alint-lsp`) until the client disconnects.
-fn cmd_lsp() -> Result<ExitCode> {
-    alint_lsp::run_stdio().context("running language server")?;
-    Ok(ExitCode::SUCCESS)
+/// runtime inside `alint-lsp`) until the client sends `exit` or
+/// disconnects; exits `0` after a clean `shutdown` + `exit`, `1` for an
+/// `exit` without `shutdown` (per the LSP specification).
+/// `--show-notes` lists informational notes on stderr after each check.
+fn cmd_lsp(show_notes: bool) -> Result<ExitCode> {
+    let code = alint_lsp::run_stdio(alint_lsp::LspOptions { show_notes })
+        .context("running language server")?;
+    Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))
 }
 
 #[derive(Debug)]
@@ -382,7 +435,9 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
     // than we do.
     for name in [".alint.yml", ".alint.yaml", "alint.yml", "alint.yaml"] {
         let candidate = path.join(name);
-        if candidate.is_file() {
+        // `symlink_metadata`, not `is_file`: a (dangling) symlink counts as
+        // existing, so `init` never writes through it to a file elsewhere.
+        if std::fs::symlink_metadata(&candidate).is_ok() {
             bail!(
                 "{} already exists; refusing to overwrite. Delete it first if you really \
                  want to regenerate, or edit it directly.",
@@ -394,21 +449,22 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
     let detection = init::detect(path, monorepo);
     let body = init::render(&detection);
     let target = path.join(".alint.yml");
-    std::fs::write(&target, &body).with_context(|| format!("writing {}", target.display()))?;
+    safe_write::create_new(&target, body.as_bytes(), "config")?;
 
     let summary = init::render_summary(&detection);
     if summary.is_empty() {
-        println!(
-            "Wrote {} - extends `oss-baseline@v1` only.",
-            target.display()
-        );
-        println!(
-            "  No language manifests detected. Add an `extends:` line for your stack \
-             (`alint://bundled/rust@v1`, `node@v1`, …) when ready."
-        );
+        print_stdout_line(&format!(
+            "Wrote {} - extends `oss-baseline@v1` only.\n  \
+             No language manifests detected. Add an `extends:` line for your stack \
+             (`alint://bundled/rust@v1`, `node@v1`, …) when ready.",
+            term(&target.display().to_string())
+        ))?;
     } else {
-        println!("Wrote {} - detected: {}.", target.display(), summary);
-        println!("  Run `alint check` to lint against the generated config.");
+        print_stdout_line(&format!(
+            "Wrote {} - detected: {}.\n  Run `alint check` to lint against the generated config.",
+            term(&target.display().to_string()),
+            summary
+        ))?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -561,6 +617,8 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     require_directory(path)?;
     let loaded = load_rules(path, cli)?;
     let root = loaded.root.clone();
+    // Path-less findings are anchored on the config file in SARIF.
+    let config_rel = loaded.config_rel();
     // The `baseline:` config key, resolved against the repo root being checked.
     // The `--baseline` flag (used as given) overrides it; either one turns on
     // baseline suppression. No silent auto-detect of `.alint-baseline.json`.
@@ -659,16 +717,16 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
     // SARIF and JSON render baselined findings (marked / counted) so Code
     // Scanning dismisses rather than re-opens them; every other format ignores
     // the baseline and emits only the live (new) findings.
-    match (format, baseline_marks.as_ref()) {
+    let written = match (format, baseline_marks.as_ref()) {
         (Format::Sarif, Some(marks)) => {
-            alint_output::write_sarif_with_baseline(&report, Some(marks), &mut out)
+            alint_output::write_sarif_for_config(&report, Some(marks), None, &config_rel, &mut out)
         }
         (Format::Sarif, None) => {
             // No baseline, but still emit the canonical `partialFingerprints` so
             // GitHub Code Scanning can correlate alerts across runs (these were
             // baseline-only before). Same fingerprints the GitLab path uses.
             let fps = report_fingerprints(&report, &root);
-            alint_output::write_sarif_with_fingerprints(&report, Some(&fps), &mut out)
+            alint_output::write_sarif_for_config(&report, None, Some(&fps), &config_rel, &mut out)
         }
         (Format::Json, Some(marks)) => alint_output::write_json_with_baseline(
             &report,
@@ -686,8 +744,8 @@ fn cmd_check(path: &Path, changed: &ChangedMode, only: &[String], cli: &Cli) -> 
             alint_output::write_gitlab(&report, Some(&fps), &mut out)
         }
         _ => format.write_with_options(&report, &mut out, opts),
-    }
-    .context("writing output")?;
+    };
+    tolerate_broken_pipe(written).context("writing output")?;
     out.flush().ok();
 
     // Informational notes (non-violation findings) — surfaced on
@@ -840,11 +898,15 @@ fn report_baseline_summary(
             match &s.violation.path {
                 Some(p) => eprintln!(
                     "  baselined: {}: [{}] {}",
-                    p.display(),
-                    s.rule_id,
-                    s.violation.message
+                    term(&p.display().to_string()),
+                    term(&s.rule_id),
+                    term(&s.violation.message)
                 ),
-                None => eprintln!("  baselined: [{}] {}", s.rule_id, s.violation.message),
+                None => eprintln!(
+                    "  baselined: [{}] {}",
+                    term(&s.rule_id),
+                    term(&s.violation.message)
+                ),
             }
         }
     }
@@ -902,6 +964,15 @@ fn cmd_baseline(
         },
         Path::to_path_buf,
     );
+    // A baseline path that comes from the repo (the `baseline:` key or the
+    // default) is untrusted: it must stay inside the repository and not be a
+    // symlink, so a crafted config / committed link can't make `alint
+    // baseline` overwrite a file elsewhere. An explicit `--output` is the
+    // user's own choice and may point anywhere (still never through a link).
+    // A repo-derived baseline path (the `baseline:` key or the default) is
+    // confined to the repository; an explicit `--output` is not. Neither may
+    // be a symlink. Checked up front so a bad target fails before the run.
+    safe_write::check_output(&root, &out_path, output.is_some(), "baseline")?;
 
     let engine = Engine::from_entries(loaded.entries, loaded.registry)
         .with_facts(loaded.facts)
@@ -973,14 +1044,19 @@ fn cmd_baseline(
         }
     }
 
-    std::fs::write(&out_path, new_baseline.to_jsonl())
-        .with_context(|| format!("writing baseline {}", out_path.display()))?;
+    safe_write::write_output(
+        &root,
+        &out_path,
+        new_baseline.to_jsonl().as_bytes(),
+        output.is_some(),
+        "baseline",
+    )?;
     if !cli.quiet {
         let n = new_baseline.entries.len();
         let total = new_baseline.total();
         eprintln!(
             "alint: wrote {} ({n} entr{}, {total} occurrence{})",
-            out_path.display(),
+            term(&out_path.display().to_string()),
             if n == 1 { "y" } else { "ies" },
             if total == 1 { "" } else { "s" },
         );
@@ -1002,8 +1078,12 @@ fn report_notes_to_stderr(report: &alint_core::Report, show_notes: bool) {
         for result in &report.results {
             for note in &result.notes {
                 match &note.path {
-                    Some(p) => eprintln!("  note: {}: {}", p.display(), note.message),
-                    None => eprintln!("  note: {}", note.message),
+                    Some(p) => eprintln!(
+                        "  note: {}: {}",
+                        term(&p.display().to_string()),
+                        term(&note.message)
+                    ),
+                    None => eprintln!("  note: {}", term(&note.message)),
                 }
             }
         }
@@ -1136,7 +1216,8 @@ fn cmd_fix(
             .stage_fixes(&root, &index, threshold)
             .context("staging fixes")?;
         let (mut out, _opts) = render_env(cli)?;
-        alint_output::write_fix_diff(&staged, &mut out).context("writing diff")?;
+        tolerate_broken_pipe(alint_output::write_fix_diff(&staged, &mut out))
+            .context("writing diff")?;
         out.flush().ok();
         return Ok(fix_exit_code(&report, fix_only, cli));
     }
@@ -1187,12 +1268,10 @@ fn cmd_fix(
                 })
                 .collect(),
         };
-        format
-            .write_fix_with_options(&applied_only, &mut out, opts)
+        tolerate_broken_pipe(format.write_fix_report(&applied_only, &mut out, opts, dry_run))
             .context("writing output")?;
     } else {
-        format
-            .write_fix_with_options(&report, &mut out, opts)
+        tolerate_broken_pipe(format.write_fix_report(&report, &mut out, opts, dry_run))
             .context("writing output")?;
     }
     out.flush().ok();
@@ -1311,13 +1390,13 @@ fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         write!(
             out,
             "{level_style}{label}{level_style:#}{pad} {}",
-            rule.id()
+            term(rule.id())
         )?;
         // Surface the rule's kind (and a fixable marker) in the human list,
         // matching what `list --format json` already carries — otherwise the
         // human inventory can't answer "what kind is this rule?".
         if !entry.kind().is_empty() {
-            write!(out, "  {dim}{}{dim:#}", entry.kind())?;
+            write!(out, "  {dim}{}{dim:#}", term(entry.kind()))?;
         }
         if entry.when.is_some() {
             write!(out, " {dim}[when]{dim:#}")?;
@@ -1328,6 +1407,7 @@ fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         if opts.show_docs
             && let Some(url) = rule.policy_url()
         {
+            let url = term(url);
             write!(out, "  {dim}({dim:#}{docs}{url}{docs:#}{dim}){dim:#}")?;
         }
         writeln!(out)?;
@@ -1446,8 +1526,10 @@ fn render_facts_human(
         let kind_pad = " ".repeat(kind_width.saturating_sub(kind_name.len()));
         writeln!(
             out,
-            "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{value_str}{value_style:#}",
-            spec.id,
+            "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{}{value_style:#}",
+            term(&spec.id),
+            // A fact value can come from repo content or a `custom:` command.
+            term(&value_str),
         )?;
     }
     Ok(())
@@ -1512,10 +1594,10 @@ fn write_scope_filter_explain(
     if let Some(sf) = entry.scope_filter() {
         writeln!(out, "{dim}scope_filter:{dim:#}")?;
         if let Some(ha) = &sf.has_ancestor {
-            writeln!(out, "  {dim}has_ancestor: {dim:#} {}", ha.join(", "))?;
+            writeln!(out, "  {dim}has_ancestor: {dim:#} {}", term(&ha.join(", ")))?;
         }
         if let Some(cs) = &sf.changed_since {
-            writeln!(out, "  {dim}changed_since:{dim:#} {cs}")?;
+            writeln!(out, "  {dim}changed_since:{dim:#} {}", term(cs))?;
         }
         if (sf.include_manifest_paths.is_some() || sf.exclude_manifest_paths.is_some())
             && let Ok(filter) = alint_core::ScopeFilter::from_spec(entry.rule.id(), sf.clone())
@@ -1538,10 +1620,13 @@ fn write_scope_filter_explain(
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
+                // Both the manifest's own path and the paths it lists (read
+                // from repo content, e.g. package.json) are untrusted.
                 writeln!(
                     out,
-                    "  {dim}{key}:{dim:#} {} -> {paths}",
-                    res.source.display().to_string().replace('\\', "/")
+                    "  {dim}{key}:{dim:#} {} -> {}",
+                    term(&res.source.display().to_string().replace('\\', "/")),
+                    term(&paths)
                 )?;
             }
         }
@@ -1581,9 +1666,9 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         Level::Info => style::INFO,
         Level::Off => style::DIM,
     };
-    writeln!(out, "{dim}id:        {dim:#} {}", rule.id())?;
+    writeln!(out, "{dim}id:        {dim:#} {}", term(rule.id()))?;
     if !entry.kind().is_empty() {
-        writeln!(out, "{dim}kind:      {dim:#} {}", entry.kind())?;
+        writeln!(out, "{dim}kind:      {dim:#} {}", term(entry.kind()))?;
         let cats = rules::categories_for_kind(entry.kind());
         if !cats.is_empty() {
             writeln!(out, "{dim}categories:{dim:#} {}", cats.join(", "))?;
@@ -1600,7 +1685,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
             writeln!(
                 out,
                 "{dim}docs:      {dim:#} {docs}https://alint.org/docs/rules/{family}/{}/{docs:#}",
-                rules::canonical_kind(entry.kind()),
+                term(rules::canonical_kind(entry.kind())),
             )?;
         }
     }
@@ -1610,7 +1695,11 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
         rule.level().as_str(),
     )?;
     if let Some(paths) = entry.paths() {
-        writeln!(out, "{dim}paths:     {dim:#} {}", paths.render_scope())?;
+        writeln!(
+            out,
+            "{dim}paths:     {dim:#} {}",
+            term(&paths.render_scope())
+        )?;
     }
     if entry.expect_matches() {
         writeln!(out, "{dim}expect_matches:{dim:#} true")?;
@@ -1620,7 +1709,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     // the `options:` label, the rest indented under the value column. A
     // spec-less entry has no options, so the flattened iterator is empty.
     for (i, (k, v)) in entry.extra().into_iter().flatten().enumerate() {
-        let key = k.as_str().unwrap_or_default();
+        let key = term(k.as_str().unwrap_or_default());
         let val = match serde_json::to_value(v) {
             // A single-line string renders bare; a multi-line string (and every
             // non-string) renders as compact JSON, so an embedded newline cannot
@@ -1629,6 +1718,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
             Ok(jv) => jv.to_string(),
             Err(_) => String::new(),
         };
+        let val = term(&val);
         if i == 0 {
             writeln!(out, "{dim}options:   {dim:#} {dim}{key}:{dim:#} {val}")?;
         } else {
@@ -1642,7 +1732,7 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     if let Some(msg) = entry.message() {
         let msg = msg.trim_end_matches('\n');
         if !msg.trim().is_empty() {
-            let msg = msg.replace('\n', &format!("\n{}", " ".repeat(12)));
+            let msg = term(msg).replace('\n', &format!("\n{}", " ".repeat(12)));
             writeln!(out, "{dim}message:   {dim:#} {msg}")?;
         }
     }
@@ -1651,16 +1741,17 @@ fn cmd_explain(rule_id: &str, cli: &Cli) -> Result<ExitCode> {
     if opts.show_docs
         && let Some(url) = rule.policy_url()
     {
+        let url = term(url);
         writeln!(out, "{dim}policy_url:{dim:#} {docs}{url}{docs:#}")?;
     }
     if let Some(when) = entry.when_src() {
-        writeln!(out, "{dim}when:      {dim:#} {when}")?;
+        writeln!(out, "{dim}when:      {dim:#} {}", term(when))?;
     }
     if let Some(fixer) = rule.fixer() {
         writeln!(
             out,
             "{dim}fix:       {dim:#} {}",
-            alint_core::Fixer::describe(fixer)
+            term(&alint_core::Fixer::describe(fixer))
         )?;
     }
     out.flush().ok();
@@ -1830,6 +1921,27 @@ struct LoadedConfig {
     fix_size_limit: Option<u64>,
     /// The `baseline:` config key (the raw repo-root-relative path), if set.
     baseline: Option<PathBuf>,
+    /// The loaded top-level config file.
+    config_path: PathBuf,
+}
+
+impl LoadedConfig {
+    /// The config file relative to `root` (for anchoring path-less findings
+    /// in SARIF), or `.alint.yml` when it lives outside the root.
+    fn config_rel(&self) -> PathBuf {
+        let root = self
+            .root
+            .canonicalize()
+            .unwrap_or_else(|_| self.root.clone());
+        let config = self
+            .config_path
+            .canonicalize()
+            .unwrap_or_else(|_| self.config_path.clone());
+        config.strip_prefix(&root).map_or_else(
+            |_| PathBuf::from(alint_output::DEFAULT_CONFIG_URI),
+            Path::to_path_buf,
+        )
+    }
 }
 
 /// Load the effective config from disk and instantiate every rule,
@@ -1948,13 +2060,13 @@ fn emit_validate_success(rule_count: usize, config_path: &Path, format: &str) ->
             "config_path": config_path.display().to_string(),
             "error": serde_json::Value::Null,
         });
-        println!("{}", serde_json::to_string(&envelope)?);
+        print_stdout_line(&serde_json::to_string(&envelope)?)?;
     } else {
         // human format
-        println!(
+        print_stdout_line(&format!(
             "✓ Config valid: {rule_count} rule(s) loaded from {}",
-            config_path.display()
-        );
+            term(&config_path.display().to_string())
+        ))?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -1974,13 +2086,13 @@ fn emit_validate_failure(
             "config_path": config_path.map(|p| p.display().to_string()),
             "error": chain,
         });
-        println!("{}", serde_json::to_string(&envelope)?);
+        print_stdout_line(&serde_json::to_string(&envelope)?)?;
     } else {
         // Human format prints to stderr to stay out of the way of
         // stdout consumers, then a one-line summary on stdout so
         // terminals show something either way.
-        eprintln!("alint: {err:#}");
-        println!("✗ Config invalid");
+        eprintln!("alint: {}", term(&format!("{err:#}")));
+        print_stdout_line("✗ Config invalid")?;
     }
     // An internal error (an alint bug — e.g. a shipped bundled ruleset that
     // fails to parse) is not the user's config being "invalid"; surface it as
@@ -2062,6 +2174,7 @@ fn load_rules(cwd: &Path, cli: &Cli) -> Result<LoadedConfig> {
         extra_ignores: config.ignore,
         fix_size_limit: config.fix_size_limit,
         baseline: config.baseline,
+        config_path,
     })
 }
 

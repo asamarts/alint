@@ -21,7 +21,6 @@ const path = require('path');
 const https = require('https');
 const crypto = require('crypto');
 const os = require('os');
-const tar = require('tar');
 
 const REPO = 'asamarts/alint';
 const PKG_VERSION = require('./package.json').version;
@@ -46,16 +45,24 @@ function shouldSkip() {
 
 // Map Node platform/arch to the alint release-target triple.
 // The list mirrors install.sh and the release.yml build matrix.
-function resolveTarget() {
-  const platform = process.platform;
-  const arch = process.arch;
-  const map = {
-    'linux/x64': 'x86_64-unknown-linux-musl',
-    'linux/arm64': 'aarch64-unknown-linux-musl',
-    'darwin/x64': 'x86_64-apple-darwin',
-    'darwin/arm64': 'aarch64-apple-darwin',
-    'win32/x64': 'x86_64-pc-windows-msvc',
-  };
+// package.json's `os` x `cpu` admits every combination of these keys, so
+// each one MUST map to a target the release actually builds
+// (ci/scripts/test-npm-shim.sh enforces both directions).
+//
+// win32/arm64: there is no native Windows-on-ARM build. Windows 11 on ARM
+// runs x64 binaries under its built-in emulation, so ship the x64 binary
+// rather than fail the postinstall outright.
+const TARGETS = {
+  'linux/x64': 'x86_64-unknown-linux-musl',
+  'linux/arm64': 'aarch64-unknown-linux-musl',
+  'darwin/x64': 'x86_64-apple-darwin',
+  'darwin/arm64': 'aarch64-apple-darwin',
+  'win32/x64': 'x86_64-pc-windows-msvc',
+  'win32/arm64': 'x86_64-pc-windows-msvc',
+};
+
+function resolveTarget(platform = process.platform, arch = process.arch) {
+  const map = TARGETS;
   const key = `${platform}/${arch}`;
   const target = map[key];
   if (!target) {
@@ -111,6 +118,12 @@ async function main() {
   }
 
   const target = resolveTarget();
+  if (process.platform === 'win32' && process.arch === 'arm64') {
+    process.stderr.write(
+      '@asamarts/alint: no native Windows-on-ARM build; installing the x64 binary ' +
+        '(runs under Windows 11 x64 emulation)\n',
+    );
+  }
   const archive = `alint-${VERSION_TAG}-${target}.tar.gz`;
   const baseUrl = `https://github.com/${REPO}/releases/download/${VERSION_TAG}`;
   const tarUrl = `${baseUrl}/${archive}`;
@@ -141,6 +154,9 @@ async function main() {
   // Tarball layout: alint-<tag>-<target>/alint (or alint.exe).
   // We extract the whole thing under tmp, then move just the
   // binary into ./bin-platform/.
+  // Required lazily so the target table can be unit-tested without
+  // node_modules (ci/scripts/test-npm-shim.sh).
+  const tar = require('tar');
   await tar.x({ file: tarPath, cwd: tmpDir });
   const isWindows = process.platform === 'win32';
   const binaryName = isWindows ? 'alint.exe' : 'alint';
@@ -170,7 +186,11 @@ async function main() {
   process.stderr.write(`@asamarts/alint: installed ${binaryName} for ${target}\n`);
 }
 
-main().catch((err) => {
-  process.stderr.write(`@asamarts/alint: postinstall failed: ${err.message}\n`);
-  process.exit(1);
-});
+module.exports = { TARGETS, resolveTarget };
+
+if (require.main === module) {
+  main().catch((err) => {
+    process.stderr.write(`@asamarts/alint: postinstall failed: ${err.message}\n`);
+    process.exit(1);
+  });
+}

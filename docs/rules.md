@@ -107,11 +107,19 @@ Fix: `file_append` — append declared content.
 
 File contents must NOT match a regex.
 
+<!-- alint:since=0.18.0 -->
+The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact. A binary-looking file that is not valid UTF-8 (an image, a font, an archive) is still skipped, and the `replace` fix never edits a binary-looking file (a valid-UTF-8 file with a NUL byte is searched, but its finding is reported as not auto-fixable).
+<!-- /alint:since -->
+
 ### `file_header` (alias: `header`)
 
 **Categories:** Content
 
 The first N lines must match a regex (line-oriented). For a byte-level prefix check, prefer `file_starts_with`.
+
+<!-- alint:since=0.18.0 -->
+A leading UTF-8 BOM is not part of the header: the lines are read after it, which is where both fixes insert the header, so a `^`-anchored pattern matches a BOM file and the fix converges.
+<!-- /alint:since -->
 
 Fix: `file_prepend` — inject declared content at the top, at BOF (after any UTF-8 BOM, which it preserves). Blind to a shebang / XML declaration (it would push either off line 1) -- use `insert_header` when that matters.
 
@@ -207,6 +215,9 @@ JSONPath queries over structured documents per [RFC 9535](https://datatracker.ie
 - **Large / based numbers diverge.** An integer beyond `i64` becomes a lossy float in JSON but a parse error in YAML / TOML / HCL. TOML parses `0x1F` / `0o17` / `0b101` / `1_000` (underscores included) as numbers; YAML parses the base prefixes (`0x1F` -> 31, `0o17`, `0b101`) but keeps an underscored `1_000` as the string `"1_000"`; HCL **rejects** non-decimal literals like `0x1F` / `1_000` as parse errors; the stringly formats keep every such literal as a string.
 - **`*_path_matches` does not stringify native values.** A JSON / YAML / TOML / HCL number or boolean selected by a `*_path_matches` rule produces a "value is not a string" violation instead of being converted to its source spelling. Use `*_path_equals` with a typed `equals:` value when the semantic value matters. When the exact textual spelling matters (for example, a version encoded as a number), use `file_content_matches` against the source text instead.
 - **YAML input must contain one document.** Structured YAML rules currently parse one document per file. A `---`-separated multi-document manifest produces one parse-error violation; exclude that file from structured rules or use a text rule when the convention spans a multi-document stream.
+<!-- alint:since=0.18.0 -->
+- **YAML merge keys are applied; custom tags are dropped.** A YAML 1.1 merge key (`<<: *base`, or `<<: [*a, *b]`) is resolved before querying: the merged keys appear in the enclosing mapping (explicit keys win; in a merge list, earlier mappings win), so `$.derived.x` sees a merged `x` and no literal `<<` key exists. Only a plain `<<` merges: a quoted `"<<"` / `'<<'` key, or a `<<` whose value is not a mapping, stays an ordinary key. A custom tag (CloudFormation `!Ref` / `!GetAtt`, GitLab CI `!reference`, ...) is dropped and the tagged value kept, so `!Ref Bucket` queries as `"Bucket"` and `!GetAtt [B, Arn]` as `["B", "Arn"]`, instead of the file failing to parse.
+<!-- /alint:since -->
 
 ### `json_path_equals`, `yaml_path_equals`, `toml_path_equals`, `xml_path_equals`, `dotenv_path_equals`, `properties_path_equals`, `ini_path_equals`, `hcl_path_equals`
 
@@ -218,6 +229,9 @@ Query a structured document with a JSONPath expression and assert every match de
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
 - Unparseable files — one violation per file (not silently skipped).
+<!-- alint:since=0.18.0 -->
+- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. The comparison is exact: an integer equals a float only when the float is a whole number of exactly that value, so `9007199254740993` does not equal `9007199254740992.0` even though both round to the same 64-bit float. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
+<!-- /alint:since -->
 
 <a id="xml-mapping"></a>
 **XML mapping** applies to every XML surface: `xml_path_*`, `json_schema_passes` `format: xml`, and the `xml:` extract used by `cross_file` / `file_graph` / `registry_paths_resolve`. XML is mapped to the queryable tree with the xmltodict-style convention so the JSONPath reads like the XML — the document is `{ <root-element>: … }` (`$.Project…`, `$.project…`); attributes are `@name` keys (`['@Version']`, in bracket notation, since `.@Version` is not valid JSONPath); a leaf element collapses to its text (`<TargetFramework>net8.0</TargetFramework>` → `"net8.0"`); namespaces flatten to the local name (Maven's default `pom.xml` namespace just works). Two properties of XML's data model to keep in mind:
@@ -300,6 +314,10 @@ Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single fi
 
 Cap line length in characters (not bytes — code points). Optional `tab_width` for tab expansion.
 
+<!-- alint:since=0.18.0 -->
+A text file with stray invalid UTF-8 is measured (each invalid byte counts as one column) rather than skipped; binary-looking files are skipped.
+<!-- /alint:since -->
+
 ### `indent_style`
 
 **Categories:** Text hygiene
@@ -326,11 +344,19 @@ Checks for problems that slip past code review: content that reads one way to a 
 
 Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a line — almost always left over from an unresolved merge. The anchor markers carry a trailing ref (`<<<<<<< HEAD`), so they never collide with prose; a bare `=======` is reported only when the file also contains one of those anchors, because on its own a seven-character `=======` is indistinguishable from a reST/Markdown setext heading underline (so docs trees no longer need to be excluded).
 
+<!-- alint:since=0.18.0 -->
+A text file with stray invalid UTF-8 is still scanned rather than skipped; a binary-looking file that is not valid UTF-8 (an image, an archive) is skipped.
+<!-- /alint:since -->
+
 ### `no_bidi_controls`
 
 **Categories:** Security / Unicode sanity, Encoding
 
 Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
+
+<!-- alint:since=0.18.0 -->
+A text file with stray invalid UTF-8 is still scanned, so a junk byte cannot hide a control. A binary-looking file (for example one with a NUL byte) is scanned when it is valid UTF-8, so a NUL byte cannot hide a control in a crafted source file either; a binary-looking file that is not valid UTF-8 (images, fonts, archives) is skipped, which keeps `paths: "**/*"` free of false positives from random binary bytes. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
+<!-- /alint:since -->
 
 ### `no_zero_width_chars`
 
@@ -339,6 +365,10 @@ Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069)
 Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). A leading U+FEFF is `no_bom`'s concern.
 
 As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
+
+<!-- alint:since=0.18.0 -->
+Same binary policy as `no_bidi_controls`: a binary-looking file is scanned only when it is valid UTF-8 (so a NUL byte cannot hide a character), invalid-UTF-8 binaries are skipped, and a finding in a binary-looking file is reported but not auto-fixed.
+<!-- /alint:since -->
 
 ---
 
@@ -349,6 +379,10 @@ As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongo
 **Categories:** Encoding, Text hygiene
 
 Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer strips whichever BOM is detected.
+
+<!-- alint:since=0.18.0 -->
+As of v0.18, the fixer strips only a leading UTF-8 BOM (a stacked run of them in one pass); a UTF-16 / UTF-32 BOM is reported but not auto-fixed, since removing it without transcoding the file would corrupt it (the byte-level text fixers likewise leave UTF-16 / UTF-32 files alone).
+<!-- /alint:since -->
 
 ---
 
@@ -384,6 +418,10 @@ Checks that reject tree shapes which work on one OS but break checkouts elsewher
 
 Flag paths that differ only by case (e.g. `README.md` + `readme.md`). They can't coexist on macOS HFS+/APFS or Windows NTFS defaults, so a Linux-only dev committing both breaks checkouts for teammates.
 
+<!-- alint:since=0.18.0 -->
+Directories count too: a file `Lib` beside a directory `lib/`, or directories `Docs/` + `docs/`, collide. The compared set is the in-scope files plus their ancestor directories, so a directory is reported when in-scope files live under two spellings of it, even if the directory path itself does not match `paths:`. A collision is reported once, at the shallowest colliding level, not again for every path beneath it; a separate collision inside one directory (`docs/a.md` + `docs/A.md`) is still reported alongside a `Docs/` + `docs/` one.
+<!-- /alint:since -->
+
 ### `no_illegal_windows_names`
 
 **Categories:** Portable metadata, Naming
@@ -395,6 +433,10 @@ The rejected forms are:
 - Reserved device names (`CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9`) — case-insensitive, regardless of extension. `con.txt` fails; `COM10` and `confused` correctly pass.
 - Trailing dots (`foo.`) or trailing spaces (`foo `) — Windows silently strips these on checkout.
 - Reserved chars: `<`, `>`, `:`, `"`, `|`, `?`, `*`.
+
+<!-- alint:since=0.18.0 -->
+Per Microsoft's naming rules the check also rejects `COM0` / `LPT0` and the superscript-digit ports (`COM¹`, `COM²`, `COM³`, `LPT¹`, `LPT²`, `LPT³`); a reserved name followed by spaces before its extension (`CON .txt`); control characters U+0000 to U+001F (tab included); and a `\` inside a path component (a separator on Windows).
+<!-- /alint:since -->
 
 ---
 
@@ -664,6 +706,10 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
 
 Assemble the repo's *file → file* reference graph and assert a global structural property the 1-level cross-file kinds can't express. `nodes` (a glob) selects the graph's files. The `edges` block takes one of two extractors: `from_content` (extract one reference per match — `extract` is the same one-of as `registry_paths_resolve`: `toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` JSONPath, `lines`, `regex` capture group 1 — then `resolve` it to a path, `relative_to_file` default or `relative_to_repo_root`) for the reference-graph modes, or `derive_target` (`{ from: <regex on the node path>, to: <template, e.g. $1.pb.go> }`) for the `fresh` codegen-freshness mode **or** the `no_dangling` derived-sibling-existence mode. Bare module names, absolute paths, URLs, and computed/interpolated references are **dropped, not mis-resolved** (resolving module *names* is the package-graph non-goal — nodes stay path-based). `require` is a closed set — three bare-string modes and three configured map modes: `acyclic` (no dependency cycle among the nodes, each reported once as a rotation-canonical path list); `no_dangling` (every path-shaped edge must resolve to a path that exists on disk — the doc-cross-link / generic `markdown_paths_resolve` integrity check; with `edges.derive_target` it instead asserts each node's *derived* sibling exists, e.g. every `licenses/X-LICENSE.txt` needs an `X-NOTICE.txt`); `no_orphans` (no node is unreferenced by another node, except those matching a `roots:` glob — the registry / staging orphan detector); `{ forbidden_edges: [{ from, to }] }` (one violation per edge whose source matches `from` and resolved target matches `to` — the whole-repo layering firewall, where `import_gate` is the cheap per-file version); `{ no_orphans: { roots: [...] } }` (the `no_orphans` form with declared entry points); and `{ fresh: { hash, marker } }` (needs `edges.derive_target`: the generated file must embed the source's current `hash` digest, captured by `marker` group 1 — content-hash, never mtime; the alint-native form of generate-then-`git diff`, with no generator run). Pure-parse and extraction-based: it never shells out. Cross-file (whole-index).
 
+<!-- alint:since=0.18.0 -->
+As of v0.18, `acyclic` reports each set of mutually dependent files (a strongly connected component) once, naming every file on any of its cycles; a component that is one simple cycle is still rendered as its path, so existing baselines keep matching.
+<!-- /alint:since -->
+
 ### `ordered_block`
 
 **Categories:** Cross-file, Text hygiene
@@ -691,6 +737,10 @@ A committed artefact must equal what a declared `command` generator produces, in
 - **stdout mode** (`file:`) — the generator writes its single output to stdout; alint captures it and compares to the one committed `file`. Never writes the tree.
 - **mutating / in-place mode** (`outputs:`, a glob or list) — for the common `make gen && git diff --exit-code` pattern, where the generator rewrites files in place. alint **snapshots** the `outputs`, runs the generator, **diffs** (flagging each stale / newly-created / removed file), and **restores the snapshot** — so `alint check` leaves the working tree byte-identical (the restore is panic-safe). The generator must confine its writes to `outputs`.
 
+<!-- alint:since=0.18.0 -->
+The optional `workdir` (the child's working directory, relative to the lint root) must stay inside the repository: an absolute path or a `..` that climbs out is rejected when the config loads, and a `workdir` that resolves outside the repository through a symlink is refused at run time (reported as a spawn failure) instead of running the command there.
+<!-- /alint:since -->
+
 ### `import_gate`
 
 **Categories:** Cross-file, Security / Unicode sanity
@@ -717,6 +767,10 @@ never swallowed into a pass. Single-shot, opt-in. Trust-gated
 like `command` (see below): declarable only in your own
 top-level config.
 
+<!-- alint:since=0.18.0 -->
+As with `generated_file_fresh`, the optional `workdir` (the child's working directory, relative to the lint root) must stay inside the repository: an absolute path or a `..` that climbs out is rejected when the config loads, and a `workdir` that resolves outside the repository through a symlink is refused at run time (reported as a spawn failure) instead of running the command there.
+<!-- /alint:since -->
+
 ### `for_each_dir` / `for_each_file`
 
 **Categories:** Cross-file
@@ -738,6 +792,10 @@ The `iter` namespace exposes:
 | `iter.has_file(pattern)` | bool | Glob match relative to the iterated dir. `iter.has_file("Cargo.toml")`, `iter.has_file("**/*.bzl")`. Always false for file iteration. |
 
 `when_iter:` composes with the rule's outer `when:` (whole-rule gate, evaluated once) and with each nested rule's `when:` (which now also sees the same `iter.*` context). Same field is available on `for_each_file` and `every_matching_has`.
+
+<!-- alint:since=0.18.0 -->
+**Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
+<!-- /alint:since -->
 
 ### `dir_contains`
 
@@ -787,6 +845,10 @@ Environment threaded into the child:
 | `ALINT_FACT_<NAME>` | one per resolved fact, stringified |
 
 `timeout: <seconds>` (default 30) bounds each invocation; past the limit the child is killed and a violation reports the timeout.
+
+<!-- alint:since=0.18.0 -->
+Output is drained while the child runs (a child writing more than a pipe buffer cannot deadlock), and after the child exits alint waits at most 2 seconds for descendants still holding its output pipes. What the timeout kills depends on whether alint's stdin is a terminal. In a non-interactive run (CI, the language server, piped stdin) each spawned process (the `command` rule, `generated_file_fresh`, `command_idempotent`, the `command` fix, `custom:` facts) gets its own process group on Unix: the timeout kills the whole group, grandchildren included, and descendants left holding the output pipes after a normal exit are killed too. In an interactive run (stdin is a terminal) the child stays in alint's process group so Ctrl-C reaches it and it can prompt on `/dev/tty`; the timeout then kills only the direct child. A timeout too large to represent means no deadline. On Windows only the direct child is killed.
+<!-- /alint:since -->
 
 **Trust gate.** Every process-spawning rule kind — `command`, `generated_file_fresh`, and `command_idempotent` — is allowed only in the user's own top-level config. Any of them introduced via `extends:` (local file, HTTPS URL, or `alint://bundled/`) is a load-time error — the same gate that protects `custom:` facts. Adopting a published ruleset must never imply granting it arbitrary code execution.
 

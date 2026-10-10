@@ -7,7 +7,7 @@ tags: [fix, dotenv_path_equals, set_value, dotenv, verify]
 #   1. `check` does NOT advertise this as auto-fixable -- the fixer's `can_fix`
 #      consults the same static predicate `collect_edits` does, which includes
 #      "can this value be serialized to this format?".
-#   2. `fix` forms NO edit, so the violation is `skipped` ("no applicable fix"),
+#   2. `fix` forms NO edit, so the violation is `unfixable` (check never tagged it fixable),
 #      not surfaced as a suggestion that could never resolve the rule.
 # The tree is byte-identical and the violation survives: check and fix agree.
 # (The control char is written as the text `\x0b` here; the config parser
@@ -34,7 +34,7 @@ when: [check, fix, check]
 expect:
   - violations:
       - {rule: msg, level: error, path: .env}
-  - skipped: [msg]
+  - unfixable: [msg]
   - violations:
       - {rule: msg, level: error, path: .env}
 

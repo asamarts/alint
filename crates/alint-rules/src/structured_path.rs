@@ -6,7 +6,9 @@
 //!
 //! - **Format** — `Json`, `Yaml`, `Toml`, `Xml`, `Dotenv`, `Properties`, `Ini`, or `Hcl`. The file is
 //!   parsed into a `serde_json::Value` tree regardless (YAML and
-//!   TOML coerce through serde; XML maps via the xmltodict-style
+//!   TOML coerce through serde -- YAML with its `<<` merge keys
+//!   applied and custom tags such as `!Ref` dropped in favour of the
+//!   tagged value; XML maps via the xmltodict-style
 //!   convention in `xml_to_value` — `@attr` / `#text` /
 //!   repeated-element→array, leaf elements collapse to their
 //!   text string, namespaces flatten to local names, every leaf
@@ -69,17 +71,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_json_path::JsonPath;
 
-/// True when `pattern` is a plain relative-path literal - no
-/// glob metacharacters, no `!` exclude prefix. Mirrors
-/// `file_exists::is_literal_path`; kept local to dodge a
-/// crate-wide pub-helper module just for two rules.
-fn is_literal_path(pattern: &str) -> bool {
-    !pattern.starts_with('!')
-        && !pattern
-            .chars()
-            .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
-}
-
 /// Collect every literal pattern from `spec` IFF every entry is
 /// a literal AND the spec carries no excludes. Returns `None`
 /// when any pattern is a glob or there are excludes - the slow
@@ -93,11 +84,13 @@ fn extract_literal_paths(spec: &PathsSpec) -> Option<Vec<PathBuf>> {
         }
         PathsSpec::IncludeExclude { .. } => return None,
     };
-    if patterns.iter().all(|p| is_literal_path(p)) {
-        Some(patterns.iter().map(PathBuf::from).collect())
-    } else {
-        None
-    }
+    // `literal_glob_path` resolves escapes (a rendered `a\\b` names the
+    // directory `a\b`); a raw metacharacter scan looked such a path up verbatim
+    // and silently found nothing.
+    patterns
+        .iter()
+        .map(|p| alint_core::template::literal_glob_path(p).map(PathBuf::from))
+        .collect()
 }
 
 /// Comparison op - keeps the rule builders thin.
@@ -261,9 +254,14 @@ impl Rule for StructuredPathRule {
                 }
                 let full = ctx.root.join(literal);
                 // Cap the read so a multi-GB file matched here can't OOM the
-                // run; over-cap or unreadable → skip (M3).
-                let Ok(bytes) = crate::io::read_capped(&full) else {
-                    continue;
+                // run; over-cap → skip (M3). A genuine read error fails CLOSED,
+                // matching `check`'s file-major dispatch (audit 2026-10 finding 7).
+                let bytes = match crate::io::read_capped(&full) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        violations.extend(crate::io::read_cap_error_violation(literal, &e));
+                        continue;
+                    }
                 };
                 violations.extend(self.evaluate_file(ctx, literal, &bytes)?);
             }
@@ -273,10 +271,15 @@ impl Rule for StructuredPathRule {
                     continue;
                 }
                 let full = ctx.root.join(&entry.path);
-                // Cap the read (multi-GB OOM guard, M3); permission / race /
-                // over-cap → silent skip, like other content rules.
-                let Ok(bytes) = crate::io::read_capped(&full) else {
-                    continue;
+                // Cap the read (multi-GB OOM guard, M3); race / over-cap → skip.
+                // A genuine read error fails CLOSED, matching `check`'s
+                // file-major dispatch (audit 2026-10 finding 7).
+                let bytes = match crate::io::read_capped(&full) {
+                    Ok(b) => b,
+                    Err(e) => {
+                        violations.extend(crate::io::read_cap_error_violation(&entry.path, &e));
+                        continue;
+                    }
                 };
                 violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
             }
@@ -423,6 +426,76 @@ pub(crate) fn matches_baseline_key(path_src: &str, matches_regex_src: &str, m: &
     format!("{path_src}\u{0}=~ {matches_regex_src}\u{0}got {m}")
 }
 
+/// Deep equality for `equals:` with numbers compared BY VALUE: `1` equals `1.0`
+/// (and `1e2` equals `100`), recursively through arrays and objects. Plain
+/// `serde_json::Value` equality distinguishes an integer from a float, so
+/// `equals: 1` failed against a document's `1.0` -- and which one a document
+/// yields is a parser detail (TOML / YAML keep `1.0` a float, `hcl-rs`
+/// normalizes it to `1`). Value equality is the same in every format. Two
+/// integers compare exactly (no float rounding of large `i64` / `u64`), and so
+/// does an integer against a float: equal only when the float is finite,
+/// integral and in the integer's range, and then exactly (`9007199254740993`
+/// does NOT equal `9007199254740992.0`, though both round to the same `f64`).
+/// Two floats compare as `f64`. No other coercion: `"1"` never equals `1`.
+fn values_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(x), Value::Number(y)) => numbers_equal(x, y),
+        (Value::Array(xs), Value::Array(ys)) => {
+            xs.len() == ys.len() && xs.iter().zip(ys).all(|(x, y)| values_equal(x, y))
+        }
+        (Value::Object(xs), Value::Object(ys)) => {
+            xs.len() == ys.len()
+                && xs
+                    .iter()
+                    .all(|(k, x)| ys.get(k).is_some_and(|y| values_equal(x, y)))
+        }
+        _ => a == b,
+    }
+}
+
+/// Exact numeric equality (see [`values_equal`]).
+fn numbers_equal(x: &serde_json::Number, y: &serde_json::Number) -> bool {
+    match (
+        x.as_f64().filter(|_| x.is_f64()),
+        y.as_f64().filter(|_| y.is_f64()),
+    ) {
+        #[allow(clippy::float_cmp)] // exact value equality is the point
+        (Some(f), Some(g)) => f == g,
+        (Some(f), None) => int_equals_float(y, f),
+        (None, Some(g)) => int_equals_float(x, g),
+        (None, None) => {
+            if let (Some(i), Some(j)) = (x.as_i64(), y.as_i64()) {
+                i == j
+            } else if let (Some(i), Some(j)) = (x.as_u64(), y.as_u64()) {
+                i == j
+            } else {
+                // One negative i64 and one u64 beyond i64::MAX: never equal.
+                false
+            }
+        }
+    }
+}
+
+/// Whether integer `n` equals float `f` EXACTLY: `f` must be finite, integral
+/// and within the integer type's range; only then is the cast to it lossless.
+fn int_equals_float(n: &serde_json::Number, f: f64) -> bool {
+    // 2^63 and 2^64 are exactly representable as f64.
+    const TWO_63: f64 = 9_223_372_036_854_775_808.0;
+    const TWO_64: f64 = 18_446_744_073_709_551_616.0;
+    if !f.is_finite() || f.fract() != 0.0 {
+        return false;
+    }
+    if let Some(i) = n.as_i64() {
+        #[allow(clippy::cast_possible_truncation)] // range-checked: exact
+        return (-TWO_63..TWO_63).contains(&f) && f as i64 == i;
+    }
+    if let Some(u) = n.as_u64() {
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)] // range-checked
+        return (0.0..TWO_64).contains(&f) && f as u64 == u;
+    }
+    false
+}
+
 /// Return `Some(message)` if the match fails the op; `None` if it passes.
 fn check_match(m: &Value, op: &Op) -> Option<String> {
     match op {
@@ -430,7 +503,7 @@ fn check_match(m: &Value, op: &Op) -> Option<String> {
         // the per-match loop; a stray call is a pass.
         Op::Absent => None,
         Op::Equals(expected) => {
-            if m == expected {
+            if values_equal(m, expected) {
                 None
             } else {
                 Some(format!(
@@ -903,6 +976,76 @@ mod tests {
             tempdir_with_files(&[("package.json", br#"{"name":"demo","version":"1.0.0"}"#)]);
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(v.is_empty(), "matching value should pass: {v:?}");
+    }
+
+    #[test]
+    fn numeric_equals_compares_by_value_in_every_format() {
+        // Regression: `equals: 1` failed against a document `1.0` (and vice
+        // versa) because serde_json's `Value` equality distinguishes an integer
+        // from a float. Numbers now compare by value, recursively, in every
+        // format -- no string coercion, and a different value still fails.
+        let check = |kind: &str, file: &str, body: &str, equals: &str| -> usize {
+            let rule = crate::builtin_registry()
+                .build(&spec_yaml(&format!(
+                    "id: t\nkind: {kind}\npaths: \"{file}\"\npath: \"$.v\"\n\
+                     equals: {equals}\nlevel: error\n"
+                )))
+                .unwrap();
+            let (tmp, idx) = tempdir_with_files(&[(file, body.as_bytes())]);
+            rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().len()
+        };
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": 1.0}"#, "1"), 0);
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": 1}"#, "1.0"), 0);
+        assert_eq!(
+            check("json_path_equals", "a.json", r#"{"v": 1e2}"#, "100"),
+            0
+        );
+        assert_eq!(
+            check(
+                "json_path_equals",
+                "a.json",
+                r#"{"v": [1.0, {"b": 2}]}"#,
+                "[1, {b: 2.0}]"
+            ),
+            0
+        );
+        assert_eq!(check("yaml_path_equals", "a.yaml", "v: 1.0\n", "1"), 0);
+        assert_eq!(check("toml_path_equals", "a.toml", "v = 1.0\n", "1"), 0);
+        assert_eq!(check("hcl_path_equals", "a.hcl", "v = 1\n", "1.0"), 0);
+        // Different values (or a numeric string) still fail.
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": 1.5}"#, "1"), 1);
+        assert_eq!(check("json_path_equals", "a.json", r#"{"v": "1"}"#, "1"), 1);
+        assert_eq!(
+            check("json_path_equals", "a.json", r#"{"v": [1, 2]}"#, "[1]"),
+            1
+        );
+    }
+
+    #[test]
+    fn integer_against_float_compares_exactly() {
+        // Regression: an int-vs-float pair went through `as_f64`, so integers
+        // beyond 2^53 equalled a nearby float they don't (main flagged these).
+        let n = |s: &str| serde_json::from_str::<Value>(s).unwrap();
+        assert!(!values_equal(
+            &n("9007199254740993"),
+            &n("9007199254740992.0")
+        ));
+        assert!(values_equal(
+            &n("9007199254740992"),
+            &n("9007199254740992.0")
+        ));
+        assert!(!values_equal(
+            &n("18446744073709551615"),
+            &n("1.8446744073709552e19")
+        ));
+        assert!(!values_equal(
+            &n("9223372036854775807"),
+            &n("9.223372036854775807e18")
+        ));
+        assert!(values_equal(&n("-3"), &n("-3.0")));
+        assert!(values_equal(&n("3.0"), &n("3")));
+        assert!(!values_equal(&n("3"), &n("3.5")));
+        assert!(values_equal(&n("1.5"), &n("1.5")));
     }
 
     #[test]

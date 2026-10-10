@@ -72,16 +72,17 @@ impl Rule for FileFooterRule {
             // via the `for_each`-nested path (which bypasses the engine's cap).
             // Over-cap → skip, matching the engine's per-file batch so the same
             // rule behaves identically whether top-level or nested (M3-F1).
-            // A read error (permission / I/O) now skips too -- not just the
-            // over-cap case above -- failing open to match `check`'s per-file read
-            // path (`read_capped_or_skip`, which skips an unreadable file before it
-            // ever calls `evaluate_file`). Flagging it here (this whole-index
-            // `evaluate` is the read path `fix` uses) made `fix` exit 1 with an
-            // unfixable "could not read file" while `check` skipped and exited 0 on
-            // the same tree. Per-file content rules fail open by design
-            // (`MAX_ANALYZE_BYTES`).
-            let Ok(bytes) = crate::io::read_capped(&full) else {
-                continue;
+            // A genuine read error (permission / I/O) fails CLOSED with a
+            // "could not read file" finding, exactly as `check`'s file-major
+            // dispatch reports it, so `check` and `fix` (this whole-index
+            // `evaluate` is the read path `fix` uses) agree; `NotFound` (a
+            // mid-walk delete) and over-cap stay skips (audit 2026-10 finding 7).
+            let bytes = match crate::io::read_capped(&full) {
+                Ok(b) => b,
+                Err(e) => {
+                    violations.extend(crate::io::read_cap_error_violation(&entry.path, &e));
+                    continue;
+                }
             };
             violations.extend(self.evaluate_file(ctx, &entry.path, &bytes)?);
         }
@@ -107,7 +108,11 @@ impl PerFileRule for FileFooterRule {
         let Ok(text) = std::str::from_utf8(bytes) else {
             return Ok(vec![
                 Violation::new("file is not valid UTF-8; cannot match footer")
-                    .with_path(std::sync::Arc::<Path>::from(path)),
+                    .with_path(std::sync::Arc::<Path>::from(path))
+                    // No fix resolves this: the fixer would append bytes, but the
+                    // file would still not be valid UTF-8 (and a UTF-16 / binary
+                    // file is refused outright), so `check` must not promise one.
+                    .with_not_fixable(),
             ]);
         };
         let footer = last_lines(text, self.lines);
@@ -121,7 +126,11 @@ impl PerFileRule for FileFooterRule {
             )
         });
         Ok(vec![
-            Violation::new(msg).with_path(std::sync::Arc::<Path>::from(path)),
+            Violation::new(msg)
+                .with_path(std::sync::Arc::<Path>::from(path))
+                // The append fixer refuses a binary-looking file (e.g. valid
+                // UTF-8 with a NUL), so don't tag it fixable.
+                .with_not_fixable_if(crate::io::looks_binary(bytes)),
         ])
     }
 }

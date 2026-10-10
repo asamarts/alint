@@ -33,20 +33,28 @@ pub mod extends;
 mod interp;
 mod loader;
 mod nested;
+mod trust;
+
+pub(crate) use trust::{
+    ENV_VARS_MARKER, PROVENANCE_MARKER, Provenance, SourceClass, UNTRUSTED_FIX_SOURCE_MARKER,
+    UntrustedWhenVarRead, demote_content_fixers_in, demote_content_fixers_in_rule,
+    find_spawning_fix_op, find_spawning_kind, find_template_placeholder_in_guarded_field,
+    has_untrusted_fix_source, mark_provenance_in, mark_untrusted_fix_sources_in,
+    merge_mapping_fields, reject_ambiguous_yaml_in, reject_env_expansion_in,
+    reject_env_reads_in_when, reject_remote_assembled_env_refs, reject_untrusted_assembled_when,
+    reject_untrusted_env_instance_vars, reject_untrusted_env_var_reads,
+    strip_fix_promotions_in_rule, take_untrusted_fix_source, union_provenance,
+};
+pub use trust::{
+    SPAWNING_FIX_OPS, SPAWNING_RULE_KINDS, reject_allow_out_of_root_in, reject_baseline_in,
+    reject_command_rules_in, reject_fix_promotion_in, reject_fix_promotion_templates_in,
+    reject_spawning_fix_op_templates_in, reject_spawning_fix_ops_in, reject_spawning_templates_in,
+    reject_trusted_extends_in, reject_untrusted_ignore_in,
+};
 
 use alint_core::{Config, Error, FactSpec, Result};
 use serde::Deserialize;
 use serde_yaml_ng::Mapping;
-
-/// Internal raw-mapping marker carried through composition until template
-/// expansion. It is deliberately not part of the public config schema or the
-/// typed [`RuleSpec`]: [`RawConfig::finalize`] consumes it before deserializing
-/// the effective rule.
-///
-/// The marker is monotonic. [`merge`] combines it with logical OR, so a later
-/// field override cannot accidentally erase the fact that an untrusted remote
-/// or nested source helped define the effective rule/template.
-const UNTRUSTED_FIX_SOURCE_MARKER: &str = "__alint_internal_untrusted_fix_source";
 
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
 /// files. Embedded at build time from the in-crate copy at
@@ -93,7 +101,43 @@ pub fn load(path: &Path) -> Result<Config> {
 /// directory, and for embeddings that want to plug in a custom
 /// fetcher.
 pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
-    let mut visiting = std::collections::HashSet::new();
+    let mut raw = load_top_level_raw(path, opts)?;
+
+    // Nested `.alint.yml` discovery (opt-in via `nested_configs:
+    // true` on the root config). Walks from the root config's
+    // directory, finds any sub-directory configs, scopes their
+    // rules to their directory, and appends them to the root's
+    // rule list.
+    if raw.nested_configs == Some(true) {
+        let root_dir = path
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        let canonical_root_cfg = path.canonicalize().map_err(|source| Error::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let discovered = nested::discover_nested(&root_dir, &canonical_root_cfg, &raw)?;
+        raw.rules.extend(discovered);
+    }
+
+    let merged = raw.finalize()?;
+    validate(&merged)?;
+    Ok(merged)
+}
+
+/// Whether the config at `path` (with its `extends:` chain and
+/// `.alint.d/` drop-ins, exactly as [`load`] resolves them) turns on
+/// `nested_configs:`. Skips the nested-config walk itself, so it is cheap
+/// enough for an embedder (the LSP) to ask which ancestor config governs
+/// a file.
+pub fn nested_configs_enabled(path: &Path) -> Result<bool> {
+    Ok(load_top_level_raw(path, &LoadOptions::default())?.nested_configs == Some(true))
+}
+
+/// The top-level config plus its `extends:` chain and `.alint.d/`
+/// drop-ins, merged but not yet finalised (and without nested configs).
+fn load_top_level_raw(path: &Path, opts: &LoadOptions) -> Result<RawConfig> {
+    let mut state = loader::LoadState::default();
     // Confinement boundary for local `extends:` targets — the top-level
     // config's directory. A local extends chain (e.g. a shared ruleset
     // committed to the repo) may not escape this tree to read arbitrary
@@ -110,8 +154,7 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
     // recursion passes `false`), so an untrusted ruleset can't lift confinement.
     // `&[]` trusted: the top-level config reads its OWN `trusted_extends:` inside
     // `load_recursive` (is_top), so the seed list is empty.
-    let mut raw =
-        loader::load_recursive(path, &mut visiting, opts, Some(&confine_root), true, &[])?;
+    let mut raw = loader::load_recursive(path, &mut state, opts, Some(&confine_root), true, &[])?;
 
     // `.alint.d/*.yml` drop-ins — auto-discovered next to the
     // top-level config and merged in alphabetical order. The
@@ -137,7 +180,7 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
         // user-controlled), so `is_top: true` — they may open the escape hatch.
         let drop_in = loader::load_recursive(
             &drop_in_path,
-            &mut visiting,
+            &mut state,
             opts,
             Some(&confine_root),
             true,
@@ -146,27 +189,7 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
         )?;
         raw = merge(raw, drop_in);
     }
-
-    // Nested `.alint.yml` discovery (opt-in via `nested_configs:
-    // true` on the root config). Walks from the root config's
-    // directory, finds any sub-directory configs, scopes their
-    // rules to their directory, and appends them to the root's
-    // rule list.
-    if raw.nested_configs {
-        let root_dir = path
-            .parent()
-            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        let canonical_root_cfg = path.canonicalize().map_err(|source| Error::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        let discovered = nested::discover_nested(&root_dir, &canonical_root_cfg, &raw)?;
-        raw.rules.extend(discovered);
-    }
-
-    let merged = raw.finalize()?;
-    validate(&merged)?;
-    Ok(merged)
+    Ok(raw)
 }
 
 /// List `.alint.d/*.{yml,yaml}` files alphabetically. Returns
@@ -213,14 +236,18 @@ fn collect_drop_ins(dir: &Path) -> Result<Vec<PathBuf>> {
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
 pub(crate) struct RawConfig {
+    // The four top-level settings below are `Option` so `merge` can tell "set"
+    // from "unset": a `.alint.d/` drop-in that omits one must not reset the
+    // main config's explicit value to the serde default. `finalize` applies
+    // the defaults once, after every source has merged.
     #[serde(default)]
-    version: u32,
+    version: Option<u32>,
     #[serde(default)]
     extends: Vec<alint_core::ExtendsEntry>,
     #[serde(default)]
     ignore: Vec<String>,
-    #[serde(default = "default_respect_gitignore")]
-    respect_gitignore: bool,
+    #[serde(default)]
+    respect_gitignore: Option<bool>,
     #[serde(default)]
     vars: std::collections::HashMap<String, String>,
     #[serde(default)]
@@ -236,10 +263,13 @@ pub(crate) struct RawConfig {
     templates: Vec<Mapping>,
     #[serde(default)]
     rules: Vec<Mapping>,
-    #[serde(default = "default_fix_size_limit")]
-    fix_size_limit: Option<u64>,
+    /// Outer `None` = unset; `Some(None)` = an explicit `fix_size_limit: null`
+    /// (no cap), which must survive a later source that omits the key.
+    #[serde(default, deserialize_with = "deserialize_explicit")]
+    #[allow(clippy::option_option)] // unset vs explicit `null` vs a limit
+    fix_size_limit: Option<Option<u64>>,
     #[serde(default)]
-    nested_configs: bool,
+    nested_configs: Option<bool>,
     /// `allow_out_of_root:` — the top-level escape hatch for path
     /// confinement. Parsed here (the YAML-facing form); the loader
     /// rejects a non-default value from any `extends:`'d ruleset, and
@@ -262,15 +292,58 @@ pub(crate) struct RawConfig {
     /// there), so it is not carried onto `Config`. See auto-fix.md 5.5.
     #[serde(default)]
     trusted_extends: Vec<String>,
+    /// The top-level `vars:` whose value was interpolated from the environment,
+    /// mapped to the raw pre-interpolation text (`{{env.NPM_TOKEN}}`). Filled by
+    /// the local-config parser and kept in step with `vars` by [`merge`] (a
+    /// later literal value for the name clears the mark, a later env-derived one
+    /// sets it). Not part of the schema.
+    #[serde(skip)]
+    env_vars: std::collections::HashMap<String, String>,
+    /// Every `vars.<NAME>` read in a `when:` / `when_iter:` of an untrusted
+    /// remote, recorded per source before the merge. Whether a read is refused
+    /// depends on [`Self::env_vars`], which is only final once every local
+    /// config has merged, so `finalize` judges them. Not part of the schema.
+    #[serde(skip)]
+    untrusted_when_var_reads: Vec<UntrustedWhenVarRead>,
 }
 
-fn default_respect_gitignore() -> bool {
-    true
+const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
+
+/// Deserialize a present key (including an explicit `null`) as `Some(value)`,
+/// leaving a missing key to `#[serde(default)]`'s `None`.
+fn deserialize_explicit<'de, D, T>(deserializer: D) -> std::result::Result<Option<T>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+    T: serde::Deserialize<'de>,
+{
+    T::deserialize(deserializer).map(Some)
 }
 
-#[allow(clippy::unnecessary_wraps)]
-fn default_fix_size_limit() -> Option<u64> {
-    Some(1 << 20)
+impl RawConfig {
+    /// Drop the top-level settings an `extends:`'d config declared. They were
+    /// never honored from an extended source (the extending config's own
+    /// value -- or its default -- always replaced them), and an inherited
+    /// ruleset lifting `fix_size_limit` or `respect_gitignore` for the
+    /// consumer is not its call; warn instead of silently ignoring.
+    pub(crate) fn drop_top_level_settings(&mut self, source: &str) {
+        // `version:` describes the extended file itself, not the consumer.
+        self.version = None;
+        let declared: Vec<&str> = [
+            ("respect_gitignore", self.respect_gitignore.take().is_some()),
+            ("fix_size_limit", self.fix_size_limit.take().is_some()),
+            ("nested_configs", self.nested_configs.take().is_some()),
+        ]
+        .into_iter()
+        .filter_map(|(name, was_set)| was_set.then_some(name))
+        .collect();
+        if !declared.is_empty() {
+            tracing::warn!(
+                "extended config {source} sets {}; top-level settings are only read from \
+                 your own config and its `.alint.d/` drop-ins, so the value is ignored",
+                declared.join(", ")
+            );
+        }
+    }
 }
 
 impl RawConfig {
@@ -296,14 +369,29 @@ impl RawConfig {
         // the extends/nested loaders also reject spawning templates earlier
         // with the offending source named.
         for t in &self.templates {
-            let kind = t.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-            if SPAWNING_RULE_KINDS.contains(&kind) {
-                let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
+            let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
+            // Trust-relevant fields must be literal in a template. `{{vars.*}}` is
+            // substituted at expansion -- after every gate below has inspected the
+            // raw text -- so `kind: "{{vars.k}}"` + `vars: {k: command}` (or an
+            // `applicability` placeholder resolving to `safe`) would otherwise be
+            // judged by its placeholder and executed as its substitution.
+            if let Some(field) = find_template_placeholder_in_guarded_field(t) {
+                return Err(Error::Other(format!(
+                    "template {id:?}: `{field}` must be a literal value; `{{{{vars.*}}}}` \
+                     placeholders are not allowed in a rule kind or a fix applicability \
+                     because they are substituted after the trust gates have run"
+                )));
+            }
+            // Recurse `require:` at every depth: a spawning kind nested inside a
+            // template's `require:` block expands into its instance just like a
+            // top-level one (audit 2026-10).
+            if let Some(kind) = find_spawning_kind(t) {
                 return Err(Error::Other(format!(
                     "template {id:?}: `kind: {kind}` spawns a process and is not allowed \
-                     in a `templates:` block - a template is expanded after the spawn \
-                     gate, so this would let a ruleset run arbitrary code. Declare the \
-                     command rule directly in your top-level `rules:`."
+                     in a `templates:` block (including inside a `require:` block) - a \
+                     template is expanded after the spawn gate, so this would let a \
+                     ruleset run arbitrary code. Declare the command rule directly in \
+                     your top-level `rules:`."
                 )));
             }
             // The same backstop for a spawning FIX op (see `SPAWNING_FIX_OPS`), at
@@ -315,7 +403,6 @@ impl RawConfig {
             // spawning fix in a top-level template is refused too. Confined to a
             // top-level `rules:` entry like a spawning kind, for EVERY source.
             if let Some(op) = find_spawning_fix_op(t) {
-                let id = t.get("id").and_then(|v| v.as_str()).unwrap_or("(unknown)");
                 return Err(Error::Other(format!(
                     "template {id:?}: `fix.{op}` spawns a process and is not allowed \
                      in a `templates:` block - a template is expanded after the spawn \
@@ -324,6 +411,10 @@ impl RawConfig {
                 )));
             }
         }
+        // An untrusted remote's `when` may read ordinary vars, but not one the
+        // user's config interpolated from the environment; that set is final only
+        // now, after every local config has merged.
+        reject_untrusted_env_var_reads(&self.untrusted_when_var_reads, &self.env_vars)?;
         let templates_by_id: std::collections::HashMap<String, &Mapping> = self
             .templates
             .iter()
@@ -340,7 +431,11 @@ impl RawConfig {
                 .get("id")
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
+            reject_remote_assembled_env_refs(m, &templates_by_id, &id_hint)?;
+            reject_untrusted_assembled_when(m, &templates_by_id, &id_hint, &self.env_vars)?;
+            reject_untrusted_env_instance_vars(m, &templates_by_id, &id_hint)?;
             let mut expanded = expand_template(m, &templates_by_id)?;
+            expanded.remove(ENV_VARS_MARKER);
             // A source-local cap is not enough: an untrusted rule can instantiate
             // a fixer-bearing trusted template, and a trusted rule can instantiate
             // a template partly defined by an untrusted source. Carry one bit of
@@ -348,8 +443,41 @@ impl RawConfig {
             // Remove the private marker before RuleSpec deserialization so it never
             // leaks into the public DSL or runtime model.
             let untrusted_fix_source = take_untrusted_fix_source(&mut expanded);
+            let provenance = Provenance::read(&expanded);
+            expanded.remove(PROVENANCE_MARKER);
+            // A spawning rule runs whatever its fields say, so ALL of them must
+            // come from the user's own config. An extended source cannot declare
+            // a spawning kind or fix op (the per-source gates), but it could share
+            // the id of the user's spawning rule (or define the template it
+            // instantiates) and field-merge a `workdir:` / `paths:` / `command:` /
+            // `require:` into it -- the kind-less contribution passes every
+            // per-source gate. Refuse any such contribution to a rule whose
+            // EFFECTIVE kind or fix spawns (audit R2).
+            if let Some(source) = &provenance.extended {
+                let spawns = find_spawning_kind(&expanded)
+                    .map(|k| format!("`kind: {k}`"))
+                    .or_else(|| find_spawning_fix_op(&expanded).map(|op| format!("`fix.{op}`")));
+                if let Some(what) = spawns {
+                    return Err(Error::rule_config(
+                        &id_hint,
+                        format!(
+                            "{what} spawns a process, but an extended config ({source}) \
+                             contributes fields to this rule (it shares the rule's id, or \
+                             defines the template the rule instantiates). A spawning rule \
+                             must be declared entirely in your own top-level config; give \
+                             it an id no extended config uses."
+                        ),
+                    ));
+                }
+            }
             if untrusted_fix_source {
                 demote_content_fixers_in_rule(&mut expanded);
+                // An untrusted rule may instantiate a TRUSTED template that promotes
+                // a destructive fixer (`file_remove: {applicability: safe}`) and aim
+                // it with its own `paths:`. The promotion belongs to the template's
+                // author, not to this rule, so the effective fixer falls back to its
+                // op's own default tier.
+                strip_fix_promotions_in_rule(&mut expanded);
             }
             let spec: alint_core::RuleSpec = serde_yaml_ng::from_value(
                 serde_yaml_ng::Value::Mapping(expanded),
@@ -360,15 +488,15 @@ impl RawConfig {
             rules.push(spec);
         }
         Ok(Config {
-            version: self.version,
+            version: self.version.unwrap_or(0),
             extends: Vec::new(),
             ignore: self.ignore,
-            respect_gitignore: self.respect_gitignore,
+            respect_gitignore: self.respect_gitignore.unwrap_or(true),
             vars: self.vars,
             facts: self.facts,
             rules,
-            fix_size_limit: self.fix_size_limit,
-            nested_configs: self.nested_configs,
+            fix_size_limit: self.fix_size_limit.unwrap_or(DEFAULT_FIX_SIZE_LIMIT),
+            nested_configs: self.nested_configs.unwrap_or(false),
             allow_out_of_root: self.allow_out_of_root,
             baseline: self.baseline,
         })
@@ -416,8 +544,43 @@ fn expand_template(
         ));
     }
 
-    let vars: std::collections::HashMap<String, String> = rule
-        .get("vars")
+    let vars = instance_vars(rule);
+
+    let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
+    let mut expanded = (*template).clone();
+    let template_provenance = expanded.remove(PROVENANCE_MARKER);
+    expanded = substitute_template_vars(expanded, &vars);
+    expanded.remove("id");
+
+    for (k, v) in rule {
+        let key = k.as_str().unwrap_or_default();
+        if matches!(
+            key,
+            "extends_template" | "vars" | UNTRUSTED_FIX_SOURCE_MARKER | PROVENANCE_MARKER
+        ) {
+            continue;
+        }
+        expanded.insert(k.clone(), v.clone());
+    }
+    // The effective rule was shaped by both the instance and the template.
+    union_provenance(&mut expanded, rule);
+    if let Some(marker) = template_provenance {
+        let mut from_template = Mapping::new();
+        from_template.insert(PROVENANCE_MARKER.into(), marker);
+        union_provenance(&mut expanded, &from_template);
+    }
+    if untrusted_fix_source {
+        expanded.insert(
+            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            serde_yaml_ng::Value::Bool(true),
+        );
+    }
+    Ok(expanded)
+}
+
+/// A template instance's `vars:` map, as strings (numbers and bools stringify).
+fn instance_vars(rule: &Mapping) -> std::collections::HashMap<String, String> {
+    rule.get("vars")
         .and_then(|v| v.as_mapping())
         .map(|m| {
             m.iter()
@@ -435,30 +598,19 @@ fn expand_template(
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
-    let mut expanded = (*template).clone();
-    expanded = substitute_template_vars(expanded, &vars);
-    expanded.remove("id");
-
-    for (k, v) in rule {
-        let key = k.as_str().unwrap_or_default();
-        if matches!(
-            key,
-            "extends_template" | "vars" | UNTRUSTED_FIX_SOURCE_MARKER
-        ) {
-            continue;
+/// Render the `{{vars.<name>}}` placeholders of one string (other namespaces
+/// and unknown names stay literal), exactly as template expansion does.
+fn render_template_vars(s: &str, vars: &std::collections::HashMap<String, String>) -> String {
+    alint_core::template::render_message(s, |ns, key| {
+        if ns == "vars" {
+            vars.get(key).cloned()
+        } else {
+            None
         }
-        expanded.insert(k.clone(), v.clone());
-    }
-    if untrusted_fix_source {
-        expanded.insert(
-            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
-            serde_yaml_ng::Value::Bool(true),
-        );
-    }
-    Ok(expanded)
+    })
 }
 
 /// Recursively walk a YAML mapping and substitute
@@ -483,16 +635,7 @@ fn substitute_template_vars_value(
 ) -> serde_yaml_ng::Value {
     use serde_yaml_ng::Value;
     match value {
-        Value::String(s) => {
-            let rendered = alint_core::template::render_message(&s, |ns, key| {
-                if ns == "vars" {
-                    vars.get(key).cloned()
-                } else {
-                    None
-                }
-            });
-            Value::String(rendered)
-        }
+        Value::String(s) => Value::String(render_template_vars(&s, vars)),
         Value::Sequence(seq) => Value::Sequence(
             seq.into_iter()
                 .map(|v| substitute_template_vars_value(v, vars))
@@ -544,10 +687,9 @@ pub fn parse(yaml: &str) -> Result<Config> {
         )));
     }
     if !alint_core::yaml_depth::expansion_within_limit(yaml) {
-        return Err(Error::Other(format!(
-            "YAML alias expansion exceeds the maximum supported node count ({})",
-            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
-        )));
+        return Err(Error::Other(
+            "YAML alias expansion exceeds the maximum supported size".to_string(),
+        ));
     }
     let config: Config = serde_yaml_ng::from_str(yaml)?;
     if !config.extends.is_empty() {
@@ -567,507 +709,6 @@ pub fn parse(yaml: &str) -> Result<Config> {
 /// non-empty, and that every listed id actually exists in the
 /// ruleset (unknown ids are almost always typos worth catching at
 /// load time).
-/// Rule kinds that spawn an arbitrary user-supplied process.
-/// Every one is trust-gated identically by
-/// [`reject_command_rules_in`]: it may only be declared in the
-/// user's own top-level config, never introduced via `extends:`.
-/// Keep in sync with the rule implementations in `alint-rules`
-/// that shell out — `command` (per-file CLI),
-/// `generated_file_fresh` (runs a generator), `command_idempotent`
-/// (runs a checker). Adding a spawn-capable rule kind without
-/// adding it here is a code-execution gap.
-pub const SPAWNING_RULE_KINDS: &[&str] = &["command", "generated_file_fresh", "command_idempotent"];
-
-/// Fix ops that shell out, trust-gated identically to
-/// [`SPAWNING_RULE_KINDS`]: a spawning fix may be declared **only** in the
-/// user's own top-level config, never introduced via `extends:` / a nested
-/// `.alint.yml` / a `templates:` block / bundled (auto-fix.md 5.5). Enforced by
-/// [`reject_spawning_fix_ops_in`] (rules, at every `require:` depth),
-/// [`reject_spawning_fix_op_templates_in`] (inherited templates), and a
-/// `finalize` backstop that refuses one in ANY source's templates. Adding a
-/// spawn-capable op without listing it here is a code-execution gap, exactly as
-/// for rule kinds; `spawning_fix_ops_are_gated` asserts every entry is a real op.
-/// `git_untrack` (`git rm --cached`) and `command` (a user-supplied `run:` fix
-/// command on the `command` rule) are the two spawning fix ops.
-pub const SPAWNING_FIX_OPS: &[&str] = &["git_untrack", "command"];
-
-/// Reject any process-spawning rule kind (see
-/// [`SPAWNING_RULE_KINDS`]) in the given mapping list. Used by the
-/// `extends:` resolver to enforce that only the user's own
-/// top-level config can declare a rule that shells out. Same trust
-/// model as `alint_core::facts::reject_custom_facts_in` —
-/// extending a ruleset must never gain you arbitrary code
-/// execution. `source` is shown in the error to help the user
-/// identify which extended config introduced the violation.
-///
-/// (Kept its original name for API stability; it now gates the
-/// whole spawning-kind set, not only `kind: command`.)
-pub fn reject_command_rules_in(rules: &[Mapping], source: &str) -> Result<()> {
-    for rule in rules {
-        reject_spawning_in_rule(rule, source)?;
-    }
-    Ok(())
-}
-
-/// Reject a per-rule fix-tier PROMOTION (`fix: { <op>: { applicability: safe } }`)
-/// declared in an inherited config. `file_remove` defaults to `Unsafe` -- a bare
-/// `alint fix` will not delete a file irreversibly -- and a user may promote it
-/// back to `Safe` on a specific rule, but that is ONLY the user's own top-level
-/// config's call (auto-fix.md 5.5: an inherited fixer may be *demoted*, never
-/// *promoted*). An extended ruleset promoting `file_remove` to `Safe` would
-/// silently opt a repo into auto-deletion, so it is refused here. Same trust
-/// model as [`reject_command_rules_in`]. Scans nested `require:` blocks too.
-pub fn reject_fix_promotion_in(rules: &[Mapping], source: &str) -> Result<()> {
-    for rule in rules {
-        reject_fix_promotion_in_rule(rule, source)?;
-    }
-    Ok(())
-}
-
-fn reject_fix_promotion_in_rule(rule: &Mapping, source: &str) -> Result<()> {
-    if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
-        for (op, args) in fix {
-            let promotes = args
-                .as_mapping()
-                .and_then(|m| m.get("applicability"))
-                .and_then(|v| v.as_str())
-                .is_some_and(|a| a.eq_ignore_ascii_case("safe"));
-            if promotes {
-                let id = rule
-                    .get("id")
-                    .and_then(|v| v.as_str())
-                    .unwrap_or("(unknown)");
-                let op = op.as_str().unwrap_or("<fix>");
-                return Err(Error::Other(format!(
-                    "rule {id:?}: `fix.{op}.applicability: safe` promotes a fix to auto-apply and \
-                     is only allowed in your own top-level config; an extended config ({source}) \
-                     may not opt this repo into auto-applying a destructive fix (it may still \
-                     demote to `suggestion`/`never`). Declare the promotion in your top-level \
-                     `rules:`."
-                )));
-            }
-        }
-    }
-    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
-        for nested in require {
-            if let Some(nested_map) = nested.as_mapping() {
-                reject_fix_promotion_in_rule(nested_map, source)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// The `fix:` ops a remote `extends:` could abuse to mutate YOUR files, so they
-/// demote to `suggestion` from an untrusted (non-`trusted_extends:`) remote
-/// (auto-fix.md 5.5). Two kinds: ops that write ruleset-authored BYTES (a regex
-/// `replace`ment template, the inline `content:` / `content_from:` of a create /
-/// prepend / append, a `set_value`), AND ops the ruleset can AIM at a file to
-/// change its content or meaning even though the bytes are the victim's own
-/// (`sync_from` picks which file overwrites which; `sort` reorders / dedups a
-/// file the rule's `paths:` selects). The genuinely fixed-behavior ops (the
-/// hygiene normalizers, `file_remove`, `file_rename`, `chmod`, `remove_value`,
-/// `dir_create`, `relocate`, `git_untrack`) are honored at their own tier from
-/// any source; a destructive one like `file_remove` is already gated by its
-/// Unsafe tier, independent of source.
-pub(crate) const CONTENT_INJECTING_FIX_OPS: &[&str] = &[
-    "replace",
-    "file_create",
-    "file_prepend",
-    "file_append",
-    // `set_value` writes the host rule's `equals:` value into the file -- ruleset-
-    // authored bytes, so a remote must PROPOSE it, never auto-write (auto-fix.md
-    // 5.5). `remove_value` is a DELETION (no ruleset bytes) -> fixed-behavior,
-    // gated by its Unsafe tier like `file_remove`, so it is deliberately absent.
-    "set_value",
-    // `sync_from` overwrites a target with another file's bytes wholesale, and the
-    // host `cross_file` rule's `source:` chooses which file overwrites which -- so
-    // an untrusted remote could aim it at your files. It PROPOSES, never
-    // auto-writes, from an untrusted remote (auto-fix.md 5.5).
-    "sync_from",
-    // `create_and_register` appends a ruleset-chosen member value into a manifest
-    // list (and, in a follow-up, creates a file from ruleset-authored content), so
-    // an untrusted remote must PROPOSE it, never auto-write (auto-fix.md 5.5).
-    "create_and_register",
-    // `sort` writes no ruleset bytes -- it reorders (and, with `unique`, dedups)
-    // the victim's OWN lines -- but the host `ordered_block` rule's `paths:` +
-    // `comparator` let an untrusted remote AIM a reorder at an order-SIGNIFICANT
-    // file (`.gitignore` negation order, `CODEOWNERS` last-match precedence) to
-    // change its meaning at the Safe tier. Same "aim it at your files" risk as
-    // `sync_from`, so it PROPOSES, never auto-writes, from an untrusted remote.
-    "sort",
-    // `indent_style` rewrites the victim's OWN leading whitespace (tabs -> spaces),
-    // writing no ruleset bytes -- but a remote's `paths:` can AIM the reindent at an
-    // indent-SIGNIFICANT file (a `Makefile` recipe needs a literal tab; converting
-    // it to spaces is a HARD build break). It is `Unsafe` by DEFAULT (so a bare fix
-    // never auto-applies it), and content-injecting here too as belt-and-suspenders:
-    // it PROPOSES, never auto-writes, from an untrusted remote even if a rule set an
-    // explicit `applicability: safe`. Same aim risk as `sort`.
-    "indent_style",
-    // `insert_line` splices the host `ordered_block` rule's `require:` lines --
-    // ruleset-authored bytes -- into the victim's file (e.g. a `CODEOWNERS` owner
-    // line), the clearest injection case. An untrusted remote must PROPOSE it.
-    "insert_line",
-    // `insert_header` inserts the host `file_header` rule's `content` /
-    // `content_from` header bytes near the top of the victim's file -- ruleset-
-    // authored bytes, like `file_prepend` (which it refines). An untrusted remote
-    // must PROPOSE it.
-    "insert_header",
-    // `file_normalize_line_endings` writes no ruleset bytes -- it rewrites the
-    // victim's OWN line endings -- but line endings are SIGNIFICANCE-bearing, so a
-    // remote's `paths:` can AIM a CRLF rewrite at a `#!/bin/sh` shebang (breaking
-    // it) at the Safe tier. Same aim risk as `sort` / `indent_style`, so it PROPOSES,
-    // never auto-writes, from an untrusted remote (audit: partition MED).
-    "file_normalize_line_endings",
-    // `file_rename` writes no ruleset bytes, but a remote's `paths:` + `filename_case`
-    // can AIM a mass case-rename at the victim's source, breaking case-sensitive
-    // imports at the Safe tier. Aimable like `sort`, so it PROPOSES from an untrusted
-    // remote (audit: partition MED). (The rename TARGET is derived, never
-    // remote-chosen, so this is availability-only, not a content-injection.)
-    "file_rename",
-    // The hygiene normalizers + `chmod` below write no ruleset bytes, but a remote's
-    // `paths:` can AIM them at a file where the "cosmetic" change is load-bearing, so
-    // an untrusted remote demotes each to a suggestion (asamarts, 2026-09-27 audit R3
-    // -- extends the "aimable at the Safe tier" principle to non-semantic hygiene).
-    // `file_strip_bidi` / `file_strip_zero_width` are DELIBERATELY EXCLUDED (stay in
-    // FIXED_BEHAVIOR): they are security-POSITIVE (they remove Trojan-Source / other
-    // zero-width attacks), so honoring them from any source is the safe default --
-    // demoting them would let a remote-sourced attack survive.
-    // `file_trim_trailing_whitespace`: trailing whitespace is significant in some
-    // formats (a Markdown hard line break is two trailing spaces).
-    "file_trim_trailing_whitespace",
-    // `file_append_final_newline`: the final byte can matter to downstream tooling.
-    "file_append_final_newline",
-    // `file_strip_bom`: a BOM is an encoding signature some consumers require.
-    "file_strip_bom",
-    // `file_collapse_blank_lines`: blank-line runs are significant where they delimit
-    // paragraphs / sections.
-    "file_collapse_blank_lines",
-    // `chmod`: a +/-x flip aimed at a script (loses +x -> breaks) or a data file
-    // (gains +x -> exec surface) is a real permission change -- only the 0o111 bits
-    // move, but the effect is remote-aimable. Unsafe-gated locally, demoted from a
-    // remote.
-    "chmod",
-];
-
-/// Demote every content-injecting fixer in `rules` to `applicability: suggestion`
-/// (unless it already declares the stricter `suggestion` / `never`), so a remote
-/// `extends:` the user has NOT listed in `trusted_extends:` can PROPOSE a content
-/// edit but never auto-write it. Rewrites the raw `Mapping` in place, before the
-/// merge, so the built fixer carries the capped tier. Scans nested `require:`
-/// blocks too (a `for_each_dir` etc. can bury a content fixer). Mirrors the
-/// read-only [`reject_fix_promotion_in`] navigation.
-pub(crate) fn demote_content_fixers_in(rules: &mut [Mapping]) {
-    for rule in rules.iter_mut() {
-        demote_content_fixers_in_rule(rule);
-    }
-}
-
-/// Tag raw rule/template mappings whose eventual effective fixer must be capped
-/// after composition and template expansion. The source-local demotion still
-/// happens immediately; this marker closes mixed-source cases where the fixer is
-/// acquired only later.
-pub(crate) fn mark_untrusted_fix_sources_in(mappings: &mut [Mapping]) {
-    for mapping in mappings {
-        mapping.insert(
-            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
-            serde_yaml_ng::Value::Bool(true),
-        );
-    }
-}
-
-fn has_untrusted_fix_source(mapping: &Mapping) -> bool {
-    mapping
-        .get(UNTRUSTED_FIX_SOURCE_MARKER)
-        .and_then(serde_yaml_ng::Value::as_bool)
-        .unwrap_or(false)
-}
-
-fn take_untrusted_fix_source(mapping: &mut Mapping) -> bool {
-    mapping
-        .remove(UNTRUSTED_FIX_SOURCE_MARKER)
-        .and_then(|value| value.as_bool())
-        .unwrap_or(false)
-}
-
-/// Field-merge one raw rule/template mapping while preserving the monotonic
-/// provenance bit. Treating the marker like an ordinary last-wins YAML field
-/// would let a later mapping erase an earlier untrusted contribution.
-fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
-    let untrusted_fix_source =
-        has_untrusted_fix_source(existing) || has_untrusted_fix_source(&incoming);
-    for (key, value) in incoming {
-        if key.as_str() != Some(UNTRUSTED_FIX_SOURCE_MARKER) {
-            existing.insert(key, value);
-        }
-    }
-    if untrusted_fix_source {
-        existing.insert(
-            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
-            serde_yaml_ng::Value::Bool(true),
-        );
-    }
-}
-
-fn demote_content_fixers_in_rule(rule: &mut Mapping) {
-    if let Some(fix) = rule
-        .get_mut("fix")
-        .and_then(serde_yaml_ng::Value::as_mapping_mut)
-    {
-        for (op, args) in fix.iter_mut() {
-            let is_content = op
-                .as_str()
-                .is_some_and(|o| CONTENT_INJECTING_FIX_OPS.contains(&o));
-            if !is_content {
-                continue;
-            }
-            let Some(args_map) = args.as_mapping_mut() else {
-                continue;
-            };
-            // Cap to `suggestion`, but never PROMOTE a stricter declared tier: a
-            // ruleset that opted its own content fix out entirely (`never`) or down
-            // to `suggestion` already stays there. A demote is one-directional.
-            let already_stricter = args_map
-                .get("applicability")
-                .and_then(serde_yaml_ng::Value::as_str)
-                .is_some_and(|a| {
-                    a.eq_ignore_ascii_case("suggestion") || a.eq_ignore_ascii_case("never")
-                });
-            if !already_stricter {
-                args_map.insert(
-                    serde_yaml_ng::Value::from("applicability"),
-                    serde_yaml_ng::Value::from("suggestion"),
-                );
-            }
-        }
-    }
-    // Recurse the NESTED-RULE `require:` block (`for_each_dir` etc. carry a
-    // `Vec<NestedRuleSpec>` here). NOTE: `ordered_block` also has a `require:` key,
-    // but its items are SCALARS (exact lines), so `as_mapping_mut()` skips them --
-    // the two same-named features never cross wires. Keep this mapping-only guard
-    // if either feature changes (an ordered_block require line authored as a
-    // mapping must not be treated as a nested rule).
-    if let Some(require) = rule
-        .get_mut("require")
-        .and_then(serde_yaml_ng::Value::as_sequence_mut)
-    {
-        for nested in require {
-            if let Some(nested_map) = nested.as_mapping_mut() {
-                demote_content_fixers_in_rule(nested_map);
-            }
-        }
-    }
-}
-
-/// Reject a spawning `kind` in `rule` OR in any of its nested `require:`
-/// specs, recursively. `for_each_dir` / `for_each_file` /
-/// `every_matching_has` carry a `require:` block of nested rules
-/// (`Vec<NestedRuleSpec>`) whose `kind`/`command` flatten into the parent
-/// rule's options — a third spawn vector the top-level `kind` check (and a
-/// post-`finalize` scan) would miss, since the nested spec is buried in the
-/// parent's options and never becomes a top-level `RuleSpec`. We must scan
-/// the raw mappings here, before instantiation, at every depth. (If a new
-/// rule kind ever adds another `Vec<NestedRuleSpec>` option field, gate it
-/// here too.)
-fn reject_spawning_in_rule(rule: &Mapping, source: &str) -> Result<()> {
-    let kind = rule.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-    if SPAWNING_RULE_KINDS.contains(&kind) {
-        let id = rule
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(unknown)");
-        return Err(Error::Other(format!(
-            "rule {id:?}: `kind: {kind}` spawns a process and is only allowed in the \
-             user's top-level config; declaring one in an extended config ({source}) - \
-             including inside a `require:` block - is refused because it would let a \
-             ruleset run arbitrary code"
-        )));
-    }
-    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
-        for nested in require {
-            if let Some(nested_map) = nested.as_mapping() {
-                reject_spawning_in_rule(nested_map, source)?;
-            }
-        }
-    }
-    Ok(())
-}
-
-/// Reject any *spawning* fix op (see [`SPAWNING_FIX_OPS`]) declared in the given
-/// mapping list. The fix-op analogue of [`reject_command_rules_in`]: a fixer that
-/// shells out (today `git_untrack`, `git rm --cached`) is a code-execution
-/// surface, so it may be declared ONLY in the user's own top-level config, never
-/// introduced via `extends:` / a nested `.alint.yml` / bundled (auto-fix.md 5.5).
-/// The existing spawn gate keys on the rule *kind*, so a spawning FIXER attached
-/// to a non-spawning kind (a `git_untrack` fix on `file_absent`) slips past it --
-/// this gate closes that gap. `source` names the offending config in the error.
-/// Scans nested `require:` blocks at every depth, exactly like the kind gate.
-pub fn reject_spawning_fix_ops_in(rules: &[Mapping], source: &str) -> Result<()> {
-    for rule in rules {
-        reject_spawning_fix_op_in_rule(rule, source)?;
-    }
-    Ok(())
-}
-
-fn reject_spawning_fix_op_in_rule(rule: &Mapping, source: &str) -> Result<()> {
-    if let Some(op) = find_spawning_fix_op(rule) {
-        let id = rule
-            .get("id")
-            .and_then(|v| v.as_str())
-            .unwrap_or("(unknown)");
-        return Err(Error::Other(format!(
-            "rule {id:?}: `fix.{op}` spawns a process and is only allowed in the \
-             user's top-level config; declaring one in an extended config ({source}) - \
-             including inside a `require:` block or a `templates:` entry - is refused \
-             because it would let a ruleset run arbitrary code on a bare `alint fix`"
-        )));
-    }
-    Ok(())
-}
-
-/// The name of a spawning fix op (see [`SPAWNING_FIX_OPS`]) declared in `rule`'s
-/// `fix:` block or any nested `require:` (recursively), if any. Shared by the
-/// per-source refusal ([`reject_spawning_fix_op_in_rule`]) and the `finalize`
-/// template backstop so both scan to the SAME depth: a spawning fix must be
-/// refused whether it sits at a rule/template's top level OR inside its `require:`.
-fn find_spawning_fix_op(rule: &Mapping) -> Option<&str> {
-    if let Some(fix) = rule.get("fix").and_then(|v| v.as_mapping()) {
-        for (op, _args) in fix {
-            if let Some(op) = op.as_str()
-                && SPAWNING_FIX_OPS.contains(&op)
-            {
-                return Some(op);
-            }
-        }
-    }
-    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
-        for nested in require {
-            if let Some(nested_map) = nested.as_mapping()
-                && let Some(op) = find_spawning_fix_op(nested_map)
-            {
-                return Some(op);
-            }
-        }
-    }
-    None
-}
-
-/// Reject a spawning fix op declared inside a `templates:` block of an inherited
-/// ruleset. A template's `fix:` block splices into its referencing rule at
-/// `finalize` (after the per-rule gate above), so a spawning fixer smuggled
-/// through a `templates:` entry would otherwise expand into a spawning fix past
-/// the gate -- the fix-op analogue of [`reject_spawning_templates_in`]. A
-/// template is shaped like a rule (`fix:` + optional `require:`), so the same
-/// per-rule scan applies. `finalize` enforces the same invariant for every
-/// source; this earlier per-source check names the offending ruleset.
-pub fn reject_spawning_fix_op_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
-    for template in templates {
-        reject_spawning_fix_op_in_rule(template, source)?;
-    }
-    Ok(())
-}
-
-/// Reject any process-spawning rule kind (see [`SPAWNING_RULE_KINDS`])
-/// declared inside a `templates:` block of an inherited ruleset. A
-/// template instance (`extends_template:`) carries no `kind` of its own,
-/// so a spawning template would slip past [`reject_command_rules_in`]
-/// (which inspects `rules[].kind`) and expand into a `command` rule at
-/// `finalize` time — the C1 code-execution bypass. Spawning kinds are
-/// confined to the user's own top-level `rules:`, never a template.
-/// `finalize` enforces the same invariant for every source; this earlier
-/// per-source check names the offending ruleset (`source`) in the error.
-pub fn reject_spawning_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
-    for template in templates {
-        let kind = template.get("kind").and_then(|v| v.as_str()).unwrap_or("");
-        if SPAWNING_RULE_KINDS.contains(&kind) {
-            let id = template
-                .get("id")
-                .and_then(|v| v.as_str())
-                .unwrap_or("(unknown)");
-            return Err(Error::Other(format!(
-                "template {id:?}: `kind: {kind}` spawns a process and is not allowed in \
-                 an inherited ruleset ({source}); a spawning kind may only appear in a \
-                 top-level `rules:` entry, never in a `templates:` block, because a \
-                 template instance expands after the spawn gate and would let the \
-                 ruleset run arbitrary code"
-            )));
-        }
-    }
-    Ok(())
-}
-
-/// Reject a fix-tier PROMOTION (`fix: { <op>: { applicability: safe } }`)
-/// declared inside a `templates:` block of an inherited ruleset -- the template
-/// analogue of [`reject_fix_promotion_in`]. A template instance
-/// (`extends_template:`) carries the template's `fix:` block, which is spliced
-/// into the referencing rule at `finalize` time -- AFTER the rule-level
-/// promotion gate has run -- so a promotion smuggled through a template would
-/// silently opt a repo into auto-applying a destructive fix (a bare `alint fix`
-/// deleting files), defeating the whole point of that gate (5.5: inherited
-/// fixers may be demoted, never promoted). Same trust model as
-/// [`reject_spawning_templates_in`]; each template is rule-shaped, so it is
-/// scanned exactly like a rule (its `fix` block plus any nested `require:`).
-///
-/// A `finalize` backstop cannot substitute here: unlike a spawning kind (never
-/// legal in any template), a promotion in the user's OWN top-level template is
-/// legitimate, so the refusal must be source-aware -- which only this
-/// extends-time, per-source check is.
-pub fn reject_fix_promotion_templates_in(templates: &[Mapping], source: &str) -> Result<()> {
-    for template in templates {
-        reject_fix_promotion_in_rule(template, source)?;
-    }
-    Ok(())
-}
-
-/// Reject a non-default `allow_out_of_root:` in an inherited ruleset.
-/// Like [`reject_command_rules_in`], the path-confinement escape hatch
-/// may only be opened by the user's own top-level config — an
-/// `extends:`'d ruleset granting itself reads outside the repo root is
-/// the exact threat confinement exists to stop. `source` names the
-/// offending config. See `docs/design/v0.12/allow_out_of_root.md`.
-pub fn reject_allow_out_of_root_in(allow: &alint_core::AllowOutOfRoot, source: &str) -> Result<()> {
-    if !allow.is_confined() {
-        return Err(Error::Other(format!(
-            "`allow_out_of_root:` is only allowed in the user's top-level config; \
-             declaring it in an extended config ({source}) is refused because it would \
-             let a ruleset grant itself reads outside the repo root"
-        )));
-    }
-    Ok(())
-}
-
-/// Reject a `baseline:` in an inherited ruleset. Like
-/// [`reject_allow_out_of_root_in`], the baseline path is a trusted top-level
-/// input: an `extends:`'d ruleset that pointed the gate at its own baseline
-/// could silently suppress findings the user never reviewed. `source` names
-/// the offending config. See `docs/design/baseline.md` §2.3.
-pub fn reject_baseline_in(baseline: &Option<std::path::PathBuf>, source: &str) -> Result<()> {
-    if baseline.is_some() {
-        return Err(Error::Other(format!(
-            "`baseline:` is only allowed in the user's top-level config; \
-             declaring it in an extended config ({source}) is refused because it would \
-             let a ruleset choose which findings the gate suppresses"
-        )));
-    }
-    Ok(())
-}
-
-/// Reject a `trusted_extends:` in an inherited ruleset. The allowlist grants a
-/// remote's content-injecting fixers auto-apply rights, so a remote (or any
-/// non-top-level config) that could set it would allowlist ITSELF, defeating the
-/// gate. Only the user's own top-level config (and its `.alint.d/` drop-ins) may
-/// grant trust. `source` names the offending config. See auto-fix.md 5.5.
-pub fn reject_trusted_extends_in(trusted_extends: &[String], source: &str) -> Result<()> {
-    if !trusted_extends.is_empty() {
-        return Err(Error::Other(format!(
-            "`trusted_extends:` is only allowed in the user's top-level config; \
-             declaring it in an extended config ({source}) is refused because it would \
-             let a ruleset allowlist itself into auto-applying its own content fixers"
-        )));
-    }
-    Ok(())
-}
-
 pub(crate) fn apply_rule_filter(
     rules: Vec<serde_yaml_ng::Mapping>,
     entry: &alint_core::ExtendsEntry,
@@ -1159,18 +800,18 @@ impl FilterMode {
 ///   invalid fact).
 /// - `vars` merged as a map; `b`'s values override.
 /// - `ignore` concatenated `a` then `b`.
-/// - `respect_gitignore` takes `b`'s value (its default hides
-///   "unset"; known v0.2 limitation).
-/// - `version` takes `b`'s value.
-/// - `fix_size_limit` takes `b`'s value (same "default hides
-///   unset" caveat as `respect_gitignore`).
+/// - `version`, `respect_gitignore`, `fix_size_limit` and
+///   `nested_configs` take `b`'s value when `b` sets it, else keep
+///   `a`'s (defaults are applied once, in `finalize`). An
+///   `extends:`'d config's values are dropped before the merge
+///   ([`RawConfig::drop_top_level_settings`]).
 /// - `extends` is always left empty on the merged result;
 ///   resolved already.
 pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
-    let version = b.version;
-    let respect_gitignore = b.respect_gitignore;
-    let fix_size_limit = b.fix_size_limit;
-    let nested_configs = b.nested_configs;
+    let version = b.version.or(a.version);
+    let respect_gitignore = b.respect_gitignore.or(a.respect_gitignore);
+    let fix_size_limit = b.fix_size_limit.or(a.fix_size_limit);
+    let nested_configs = b.nested_configs.or(a.nested_configs);
     // `allow_out_of_root` is top-level-only: `b` (the later / child
     // config) wins when it sets a non-default value; an inherited
     // (`a`-side) value only survives if the child is silent. Extended
@@ -1189,8 +830,19 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     let mut ignore = a.ignore;
     ignore.extend(b.ignore);
 
+    // The env-derived mark follows the value that wins: `b` overriding a name
+    // with a literal clears it, with an interpolated value sets it.
+    let mut env_vars = a.env_vars;
+    for name in b.vars.keys() {
+        match b.env_vars.get(name) {
+            Some(raw) => env_vars.insert(name.clone(), raw.clone()),
+            None => env_vars.remove(name),
+        };
+    }
     let mut vars = a.vars;
     vars.extend(b.vars);
+    let mut untrusted_when_var_reads = a.untrusted_when_var_reads;
+    untrusted_when_var_reads.extend(b.untrusted_when_var_reads);
 
     let mut facts_by_id: std::collections::BTreeMap<String, FactSpec> =
         std::collections::BTreeMap::new();
@@ -1283,6 +935,8 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         allow_out_of_root,
         baseline,
         trusted_extends,
+        env_vars,
+        untrusted_when_var_reads,
     }
 }
 

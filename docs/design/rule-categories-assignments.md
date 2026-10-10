@@ -1,6 +1,7 @@
 # Rule category assignments (Phase 0 curated table)
 
-Status: proposed (2026-07-08). Companion to `docs/design/rule-categories.md` (the
+Status: shipped in v0.14.0 (proposed 2026-07-08); the live table is generated from
+`docs/rules.md` and parity-gated against `alint-core`'s `Category` enum. Companion to `docs/design/rule-categories.md` (the
 many-to-many design) and ADR-0009 (the CLI). This is the curated kind-to-category
 table the feature seeds from: Phase 1 lands each kind's PRIMARY only (behavior-neutral),
 and Phase 3 flips the data to the full multi-membership recorded here.

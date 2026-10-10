@@ -51,6 +51,13 @@ jobs:
           set -euo pipefail
           CRATES=(alint-core alint-dsl alint-rules alint-output alint alint-lsp alint-bench alint-testkit alint-e2e)
           if [ -n "${MANUAL:-}" ]; then
+            # Only an exact workspace crate name from the list above.
+            ok=0
+            for c in "${CRATES[@]}"; do [ "$c" = "$MANUAL" ] && ok=1; done
+            if [ "$ok" -ne 1 ]; then
+              echo "::error::unknown crate '${MANUAL}' (expected one of: ${CRATES[*]})" >&2
+              exit 1
+            fi
             TARGET="$MANUAL"
           else
             DOY=$(date +%j)
@@ -72,19 +79,26 @@ jobs:
         # the signal we care about) but still surface infra
         # failures (compile error, baseline-test error, etc.).
         #
-        # cargo-mutants exit codes (v27.x):
+        # cargo-mutants exit codes (upstream src/exit_code.rs and
+        # book/src/exit-codes.md):
         #   0 = all mutants caught (or none generated) — OK
         #   2 = some mutants escaped the test suite — OK, this
         #       IS the signal we want surfaced via the artifact
         #   1 = command-line / argument error — fail
-        #   3 = baseline test or build failed — fail (real infra)
-        #   4 = timeout-only (no caught/missed split) — fail
+        #   3 = one or more tests timed out (a mutant looped, or
+        #       --timeout is too low) — fail
+        #   4 = baseline tests already fail in the unmutated tree,
+        #       so nothing was tested — fail (real infra)
+        #   5/6 = --in-diff mismatch / invalid (unused here) — fail
+        #   70 = internal cargo-mutants error — fail
         #
         # Treat 0 and 2 as success; anything else surfaces.
+        env:
+          TARGET: ${{ steps.pick.outputs.target }}
         run: |
           mkdir -p target/mutants
           set +e
-          cargo mutants --package "${{ steps.pick.outputs.target }}" \
+          cargo mutants --package "$TARGET" \
                        --no-shuffle \
                        --output target/mutants \
                        --timeout 300

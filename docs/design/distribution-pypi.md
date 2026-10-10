@@ -1,6 +1,7 @@
 # Design doc: PyPI distribution (wheels for `uvx` / `pipx` / pre-commit)
 
-Status: **Approved for build (decision 2026-09-03).** Audited and re-verified against
+Status: **Shipped in v0.16.1** (the PyPI channel is live: `pip` / `uvx` / `uv tool`;
+release.yml `publish-pypi`). Approved for build 2026-09-03. Audited and re-verified against
 primary sources; the four decisions in §11 are resolved: **Path B**, the
 `alint-pre-commit` **mirror repo**, the name **`alint`**, and **building the channel now**
 (promoted from demand-gated). Scopes and builds the PyPI channel that `distribution.md` §4

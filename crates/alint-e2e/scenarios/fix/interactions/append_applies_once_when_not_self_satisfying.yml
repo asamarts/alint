@@ -10,13 +10,14 @@ tags: [fix, interactions, file_content_matches, file_append, fixpoint]
 #   pass 1: the pattern is absent -> append the boilerplate (the file changes)
 #   pass 2: the file already ends with the boilerplate -> file_append SKIPS
 #           (nothing changed) -> the loop converges
-# The gate: exactly ONE appended copy, the append is reported (Applied-wins keeps
-# pass 1's `Applied` from being masked by pass 2's idempotence skip), and the
-# violation honestly still stands (`check` fails) because the config is
-# non-self-satisfying. A broken fixpoint (re-append every pass) would show many
-# copies here; a broken Applied-wins aggregation would report a skip, not applied.
-# The load-bearing checks are the byte-exact `expect_tree` (one copy) and the
-# `applied:` set.
+# The gate: exactly ONE appended copy, and the violation honestly still stands
+# because the config is non-self-satisfying. Since audit 2026-10 (finding 1) the
+# converged pass still seeing the violation DEMOTES pass 1's `Applied` to a
+# declined skip ("fix ran (...) but the violation still stands on re-check"):
+# `fix` must never report success while `check` fails. A broken fixpoint
+# (re-append every pass) would show many copies here; a regressed demotion would
+# report `applied` again. The load-bearing checks are the byte-exact
+# `expect_tree` (one copy) and the `applied:`/`skipped:` sets.
 
 given:
   tree:
@@ -36,10 +37,10 @@ given:
 when: [fix, check]
 
 expect:
-  # Applied once (pass 1); pass 2's idempotence skip is suppressed by the lock, so
-  # it neither masks the Applied nor leaks as a spurious skip.
-  - applied: [needs-spdx]
-    skipped: []
+  # Appended once (pass 1), but the violation stands, so it is reported as an
+  # unresolved skip, not as applied.
+  - applied: []
+    skipped: [needs-spdx]
   # The append does not contain the pattern, so the violation legitimately
   # STANDS -- `check` still reports it. That is honest: the config is
   # non-self-satisfying, not silently "fixed".

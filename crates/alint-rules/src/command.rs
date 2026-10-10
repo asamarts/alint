@@ -44,11 +44,11 @@
 //! execution simply by being fetched. Mirrors the existing
 //! `custom:` fact gate.
 
-use std::io::Read;
 use std::path::Path;
 use std::process::{Command as StdCommand, Stdio};
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
+use alint_core::process::{RunOutcome, run_bounded};
 use alint_core::template::{PathTokens, render_path_argv};
 use alint_core::{
     Applicability, Context, Error, FactValue, FixSpec, Fixer, Level, Result, Rule, RuleSpec, Scope,
@@ -66,13 +66,7 @@ const DEFAULT_TIMEOUT_SECS: u64 = 30;
 /// Cap on each of stdout / stderr captured into a violation
 /// message. Tools like cargo can emit tens of MB on a single
 /// failed file; bound it to keep reports legible and memory low.
-const OUTPUT_CAP_BYTES: usize = 16 * 1024;
-
-/// Granularity of the wait-loop. 10ms is short enough that fast
-/// tools (10–50ms typical for shellcheck per file) don't see
-/// noticeable polling overhead, and long enough to keep CPU
-/// idle while the child runs.
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
+const OUTPUT_CAP_BYTES: u64 = 16 * 1024;
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
@@ -171,8 +165,6 @@ fn run_one(
     cmd.args(rest)
         .current_dir(root)
         .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
         .env("ALINT_PATH", rel_path.to_string_lossy().as_ref())
         .env("ALINT_ROOT", root.to_string_lossy().as_ref())
         .env("ALINT_RULE_ID", rule_id)
@@ -189,69 +181,32 @@ fn run_one(
         }
     }
 
-    let mut child = match cmd.spawn() {
-        Ok(c) => c,
-        Err(e) => {
-            return Outcome::Fail(format!(
-                "could not spawn `{}`: {} \
-                 (is it on PATH? working dir: {})",
-                program,
-                e,
-                root.display()
-            ));
-        }
-    };
-
-    let start = Instant::now();
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                let stdout_bytes = drain(child.stdout.take());
-                let stderr_bytes = drain(child.stderr.take());
-                if status.success() {
-                    return Outcome::Pass;
-                }
-                return Outcome::Fail(format_failure(
-                    program,
-                    status.code(),
-                    &stdout_bytes,
-                    &stderr_bytes,
-                ));
-            }
-            Ok(None) => {
-                if start.elapsed() >= timeout {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                    return Outcome::Fail(format!(
-                        "`{}` did not exit within {}s (raise `timeout:` on the rule to extend)",
-                        program,
-                        timeout.as_secs()
-                    ));
-                }
-                std::thread::sleep(POLL_INTERVAL);
-            }
-            Err(e) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                return Outcome::Fail(format!("`{program}` wait error: {e}"));
-            }
-        }
+    // Shared bounded runner (audit 2026-10 findings 4/5): stdout/stderr are
+    // drained CONCURRENTLY (draining only after exit deadlocked a child writing
+    // more than a pipe buffer, which then hit a bogus "did not exit" timeout),
+    // and the wait is bounded even when a grandchild holds the pipe (in a
+    // non-interactive run the timeout kills the whole process group; see
+    // `alint_core::process`). Output past the cap is read and discarded.
+    match run_bounded(cmd, timeout, OUTPUT_CAP_BYTES, true) {
+        RunOutcome::Exited { status, .. } if status.success() => Outcome::Pass,
+        RunOutcome::Exited {
+            status,
+            stdout,
+            stderr,
+        } => Outcome::Fail(format_failure(program, status.code(), &stdout, &stderr)),
+        RunOutcome::SpawnError(e) => Outcome::Fail(format!(
+            "could not spawn `{}`: {} \
+             (is it on PATH? working dir: {})",
+            program,
+            e,
+            root.display()
+        )),
+        RunOutcome::TimedOut => Outcome::Fail(format!(
+            "`{}` did not exit within {}s (raise `timeout:` on the rule to extend)",
+            program,
+            timeout.as_secs()
+        )),
     }
-}
-
-/// Read up to [`OUTPUT_CAP_BYTES`] from a captured pipe. Errors
-/// drain to an empty buffer so the failure-message render still
-/// produces something useful for the user.
-fn drain(pipe: Option<impl Read>) -> Vec<u8> {
-    let Some(mut p) = pipe else {
-        return Vec::new();
-    };
-    let mut buf = Vec::with_capacity(1024);
-    let _ = p
-        .by_ref()
-        .take(OUTPUT_CAP_BYTES as u64)
-        .read_to_end(&mut buf);
-    buf
 }
 
 fn format_failure(program: &str, code: Option<i32>, stdout: &[u8], stderr: &[u8]) -> String {
@@ -454,6 +409,72 @@ mod tests {
             v[0].message.contains("did not exit"),
             "msg: {}",
             v[0].message
+        );
+    }
+
+    #[test]
+    fn output_larger_than_a_pipe_buffer_does_not_time_out() {
+        // Audit 2026-10 finding 4: stdout was drained only after `try_wait`
+        // reported exit, so a child writing > 64 KiB blocked on the full pipe
+        // and was reported as "did not exit within 3s".
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"x").unwrap();
+        let index = idx(&["a.txt"]);
+        let r = rule(
+            vec![
+                "/bin/sh",
+                "-c",
+                "head -c 200000 /dev/zero | tr '\\0' x; exit 0",
+            ],
+            "*.txt",
+            Duration::from_secs(3),
+        );
+        let v = r.evaluate(&ctx(tmp.path(), &index)).unwrap();
+        assert!(v.is_empty(), "unexpected violations: {v:?}");
+        // A failing run with huge output still reports, with the output capped.
+        let r = rule(
+            vec![
+                "/bin/sh",
+                "-c",
+                "head -c 200000 /dev/zero | tr '\\0' x; exit 3",
+            ],
+            "*.txt",
+            Duration::from_secs(3),
+        );
+        let v = r.evaluate(&ctx(tmp.path(), &index)).unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].message.contains("exit 3"),
+            "msg len {}",
+            v[0].message.len()
+        );
+        assert!(v[0].message.len() < 20 * 1024);
+    }
+
+    #[test]
+    fn timeout_is_enforced_when_a_grandchild_holds_the_pipe() {
+        // Audit 2026-10 finding 5: killing only `sh` left `sleep` holding
+        // stdout; the run took the full sleep instead of the timeout.
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::write(tmp.path().join("a.txt"), b"x").unwrap();
+        let index = idx(&["a.txt"]);
+        let r = rule(
+            vec!["/bin/sh", "-c", "sleep 15; echo x"],
+            "*.txt",
+            Duration::from_millis(500),
+        );
+        let start = std::time::Instant::now();
+        let v = r.evaluate(&ctx(tmp.path(), &index)).unwrap();
+        assert_eq!(v.len(), 1);
+        assert!(
+            v[0].message.contains("did not exit"),
+            "msg: {}",
+            v[0].message
+        );
+        assert!(
+            start.elapsed() < Duration::from_secs(6),
+            "{:?}",
+            start.elapsed()
         );
     }
 

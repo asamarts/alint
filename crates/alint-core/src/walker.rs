@@ -38,7 +38,42 @@ pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
 /// alive and observable (M3). A genuine read error (permission, I/O) is logged
 /// at `warn` so it's observable with `-v` / `RUST_LOG` rather than silent (L7);
 /// a `NotFound` is a silent skip (the benign deleted-between-walk-and-read race).
+///
+/// A genuine read error is folded into `None` here; the per-file content
+/// dispatch (engine + [`crate::eval_per_file`]) uses [`read_for_analysis`]
+/// instead so it can fail CLOSED on it.
 pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
+    match read_for_analysis(path, size) {
+        AnalysisRead::Bytes(b) => Some(b),
+        AnalysisRead::Skip => None,
+        AnalysisRead::Unreadable(e) => {
+            tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
+            None
+        }
+    }
+}
+
+/// Outcome of [`read_for_analysis`]. A genuine read error is only logged at
+/// `debug` there: the per-file dispatch surfaces it as a finding instead.
+#[derive(Debug)]
+pub enum AnalysisRead {
+    /// The file's bytes (within [`MAX_ANALYZE_BYTES`]).
+    Bytes(Vec<u8>),
+    /// A deliberate, benign skip: the file vanished between the walk and the
+    /// read (`NotFound`), or it exceeds the analysis cap (logged at `warn`).
+    Skip,
+    /// A genuine read error (permission denied, I/O). The caller must surface
+    /// it: a content rule that silently passes a file it could not read is a
+    /// fail-open false negative (audit 2026-10 finding 7) -- a mode-000 file
+    /// with trailing whitespace read "All rules passed". See
+    /// [`crate::unreadable_file_violation`].
+    Unreadable(std::io::Error),
+}
+
+/// [`read_capped_or_skip`], but distinguishing a genuine read error
+/// ([`AnalysisRead::Unreadable`]) from a benign skip, so per-file content
+/// dispatch can report the former instead of passing the file.
+pub fn read_for_analysis(path: &Path, size: u64) -> AnalysisRead {
     if size > MAX_ANALYZE_BYTES {
         tracing::warn!(
             path = %path.display(),
@@ -46,7 +81,7 @@ pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
             cap = MAX_ANALYZE_BYTES,
             "skipping file larger than the analysis cap"
         );
-        return None;
+        return AnalysisRead::Skip;
     }
     // M3-F2 (TOCTOU): the walk-time `size` above is a fast reject only — it can
     // be stale, so a file that GREW past the cap between the walk and here would
@@ -55,7 +90,7 @@ pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
     // `size` is ALSO forwarded as the read buffer's preallocation hint — alint
     // already stat-ed it during the walk, so it costs nothing and lets the read
     // finish in one syscall (see `read_bounded`).
-    read_bounded(path, MAX_ANALYZE_BYTES, size)
+    read_bounded_classified(path, MAX_ANALYZE_BYTES, size)
 }
 
 /// Read a whole file bounded to `cap` bytes — TOCTOU-safe: the read itself
@@ -76,14 +111,24 @@ pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
 /// wall clock. Sizing the buffer up front restores the single-read behaviour
 /// `std::fs::read` had before the OOM cap. See
 /// docs/benchmarks/investigations/2026-07-v0.14-s2-harness-artifact/.
+#[cfg(test)]
 pub(crate) fn read_bounded(path: &Path, cap: u64, size_hint: u64) -> Option<Vec<u8>> {
+    match read_bounded_classified(path, cap, size_hint) {
+        AnalysisRead::Bytes(b) => Some(b),
+        AnalysisRead::Skip | AnalysisRead::Unreadable(_) => None,
+    }
+}
+
+/// The classifying core of `read_bounded` (see its docs for the TOCTOU bound
+/// and the preallocation hint).
+fn read_bounded_classified(path: &Path, cap: u64, size_hint: u64) -> AnalysisRead {
     use std::io::Read as _;
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return None,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AnalysisRead::Skip,
         Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
-            return None;
+            tracing::debug!(path = %path.display(), error = %e, "unreadable file");
+            return AnalysisRead::Unreadable(e);
         }
     };
     let prealloc = usize::try_from(size_hint.min(cap.saturating_add(1))).unwrap_or(0);
@@ -95,12 +140,12 @@ pub(crate) fn read_bounded(path: &Path, cap: u64, size_hint: u64) -> Option<Vec<
                 cap,
                 "skipping file larger than the analysis cap (grew past its walk-time size)"
             );
-            None
+            AnalysisRead::Skip
         }
-        Ok(_) => Some(buf),
+        Ok(_) => AnalysisRead::Bytes(buf),
         Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
-            None
+            tracing::debug!(path = %path.display(), error = %e, "unreadable file");
+            AnalysisRead::Unreadable(e)
         }
     }
 }
@@ -418,6 +463,15 @@ impl FileIndex {
         let map = self.parent_to_children.get_or_init(|| {
             #[cfg(debug_assertions)]
             let start = std::time::Instant::now();
+            // Dir path -> its entry's Arc, built in one pass so promoting a
+            // parent to a map key below is an O(1) probe. The previous per-parent
+            // linear `entries.iter().find(..)` made this build O(dirs x N) despite
+            // the documented O(N): 20k dirs took ~40s in a debug build
+            // (audit 2026-10 finding 6). First occurrence wins, as `find` did.
+            let mut dir_arcs: HashMap<&Path, &Arc<Path>> = HashMap::new();
+            for e in self.entries.iter().filter(|e| e.is_dir) {
+                dir_arcs.entry(&*e.path).or_insert(&e.path);
+            }
             let mut map: HashMap<Arc<Path>, Vec<usize>> = HashMap::new();
             for (idx, entry) in self.entries.iter().enumerate() {
                 let Some(parent) = entry.path.parent() else {
@@ -438,11 +492,9 @@ impl FileIndex {
                 // to allocating a fresh Arc if the parent dir
                 // isn't itself in the index (root-level files,
                 // ancestor dirs the walker excluded, etc.).
-                let key: Arc<Path> = self
-                    .entries
-                    .iter()
-                    .find(|e| e.is_dir && &*e.path == parent)
-                    .map_or_else(|| Arc::<Path>::from(parent), |e| Arc::clone(&e.path));
+                let key: Arc<Path> = dir_arcs
+                    .get(parent)
+                    .map_or_else(|| Arc::<Path>::from(parent), |a| Arc::clone(a));
                 map.insert(key, vec![idx]);
             }
             trace_index_build!("parent_to_children", start, self.entries.len());
@@ -605,6 +657,134 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
 /// of the original `walk()` body's setup half so both the
 /// sequential test path and the parallel runtime path stay in
 /// sync.
+/// The walk's override set: `.git/` plus every config `ignore:` pattern, each
+/// an exclusion.
+fn build_overrides(root: &Path, opts: &WalkOptions) -> Result<ignore::overrides::Override> {
+    let mut overrides_builder = OverrideBuilder::new(root);
+    overrides_builder
+        .add("!.git")
+        .map_err(|e| Error::Other(format!("ignore pattern .git: {e}")))?;
+    for pattern in &opts.extra_ignores {
+        let pattern = if pattern.starts_with('!') {
+            pattern.clone()
+        } else {
+            format!("!{pattern}")
+        };
+        overrides_builder
+            .add(&pattern)
+            .map_err(|e| Error::Other(format!("ignore pattern {pattern:?}: {e}")))?;
+    }
+    overrides_builder
+        .build()
+        .map_err(|e| Error::Other(format!("failed to build overrides: {e}")))
+}
+
+/// Whether [`walk`] would leave the repo-relative path `rel` out of the index
+/// if it existed (as a directory when `is_dir`): excluded by the config's
+/// `ignore:` / `.git`, or (with `respect_gitignore`) by a `.ignore` /
+/// `.gitignore` in `rel`'s ancestors, `.git/info/exclude`, or the global git
+/// excludes file -- itself or through an excluded ancestor directory, which
+/// the walk never descends into. `fix --dry-run` uses it to predict that a
+/// file a fix would create stays invisible to the rule, as the real `fix`
+/// discovers on its re-walk.
+///
+/// Mirrors the walker's precedence (overrides first; then, nearest directory
+/// first, `.ignore` before `.gitignore`; then `.git/info/exclude`; then the
+/// global excludes). A file that does not exist yet has no other walk
+/// filter to consult. Errors building a matcher read as "not ignored".
+#[must_use]
+pub fn would_walk_skip(root: &Path, opts: &WalkOptions, rel: &Path, is_dir: bool) -> bool {
+    use ignore::Match;
+    use ignore::gitignore::{Gitignore, GitignoreBuilder};
+    let rel: PathBuf = rel
+        .components()
+        .filter(|c| !matches!(c, std::path::Component::CurDir))
+        .collect();
+    if rel.as_os_str().is_empty() {
+        return false;
+    }
+    let overrides = build_overrides(root, opts).ok();
+    let load = |dir: &Path, name: &str| -> Option<Gitignore> {
+        let file = dir.join(name);
+        if !file.is_file() {
+            return None;
+        }
+        let mut b = GitignoreBuilder::new(dir);
+        b.add(&file);
+        b.build().ok()
+    };
+    // Matchers per ancestor directory, nearest first, built once.
+    let mut dirs: Vec<PathBuf> = Vec::new();
+    let mut d = rel.parent();
+    while let Some(p) = d {
+        dirs.push(root.join(p));
+        d = p.parent();
+    }
+    if dirs.last().map(PathBuf::as_path) != Some(root) {
+        dirs.push(root.to_path_buf());
+    }
+    let (dot_ignore, git_ignore): (Vec<Gitignore>, Vec<Gitignore>) = if opts.respect_gitignore {
+        (
+            dirs.iter().filter_map(|d| load(d, ".ignore")).collect(),
+            dirs.iter().filter_map(|d| load(d, ".gitignore")).collect(),
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    };
+    let exclude_file = root.join(".git/info/exclude");
+    let exclude = if opts.respect_gitignore && exclude_file.is_file() {
+        let mut b = GitignoreBuilder::new(root);
+        b.add(&exclude_file);
+        b.build().ok()
+    } else {
+        None
+    };
+    let global = opts.respect_gitignore.then(|| Gitignore::global().0);
+
+    let ignored = |abs: &Path, is_dir: bool| -> bool {
+        if let Some(ov) = &overrides {
+            match ov.matched(abs, is_dir) {
+                Match::Ignore(_) => return true,
+                Match::Whitelist(_) => return false,
+                Match::None => {}
+            }
+        }
+        for set in [&dot_ignore, &git_ignore] {
+            for gi in set {
+                // Only a matcher rooted at an ancestor of `abs` applies.
+                if !abs.starts_with(gi.path()) {
+                    continue;
+                }
+                match gi.matched(abs, is_dir) {
+                    Match::Ignore(_) => return true,
+                    Match::Whitelist(_) => return false,
+                    Match::None => {}
+                }
+            }
+        }
+        for gi in exclude.iter().chain(global.iter()) {
+            match gi.matched(abs, is_dir) {
+                Match::Ignore(_) => return true,
+                Match::Whitelist(_) => return false,
+                Match::None => {}
+            }
+        }
+        false
+    };
+    // The path itself, and every ancestor directory (an excluded directory is
+    // never descended into, so nothing below it is indexed).
+    let mut prefix = PathBuf::new();
+    let parts: Vec<_> = rel.components().collect();
+    for (i, c) in parts.iter().enumerate() {
+        prefix.push(c);
+        let last = i + 1 == parts.len();
+        if ignored(&root.join(&prefix), if last { is_dir } else { true }) {
+            return true;
+        }
+    }
+    false
+}
+
 fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, EscapingSink)> {
     let mut builder = WalkBuilder::new(root);
     builder
@@ -620,24 +800,7 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
     // `hidden(false)` and `require_git(false)` so the `ignore`
     // crate doesn't apply its own implicit `.git/` exclusion;
     // this override puts it back.
-    let mut overrides_builder = OverrideBuilder::new(root);
-    overrides_builder
-        .add("!.git")
-        .map_err(|e| Error::Other(format!("ignore pattern .git: {e}")))?;
-    for pattern in &opts.extra_ignores {
-        let pattern = if pattern.starts_with('!') {
-            pattern.clone()
-        } else {
-            format!("!{pattern}")
-        };
-        overrides_builder
-            .add(&pattern)
-            .map_err(|e| Error::Other(format!("ignore pattern {pattern:?}: {e}")))?;
-    }
-    let overrides = overrides_builder
-        .build()
-        .map_err(|e| Error::Other(format!("failed to build overrides: {e}")))?;
-    builder.overrides(overrides);
+    builder.overrides(build_overrides(root, opts)?);
 
     // Prune symlinks whose target escapes the repo root. With
     // `follow_links(true)`, a followed out-of-tree symlink would
@@ -1346,6 +1509,47 @@ mod tests {
     }
 
     #[test]
+    fn children_of_build_is_linear_in_the_dir_count() {
+        // Audit 2026-10 finding 6: the parent -> children build did a linear
+        // `entries.iter().find(..)` per parent dir, O(dirs x N): 20k dirs took
+        // ~40s in a debug build. Linear now; the bound is generous (a debug build
+        // on a loaded CI box), orders of magnitude above the fixed cost and well
+        // below the quadratic one.
+        const DIRS: usize = 20_000;
+        let mut entries = Vec::with_capacity(DIRS * 2);
+        for i in 0..DIRS {
+            let d = format!("d{i}");
+            entries.push(FileEntry {
+                path: Path::new(&d).into(),
+                is_dir: true,
+                size: 0,
+            });
+            entries.push(FileEntry {
+                path: Path::new(&format!("{d}/f.rs")).into(),
+                is_dir: false,
+                size: 1,
+            });
+        }
+        let idx = FileIndex::from_entries(entries);
+        let start = std::time::Instant::now();
+        assert_eq!(idx.children_of(Path::new("")).len(), DIRS);
+        let elapsed = start.elapsed();
+        assert!(
+            elapsed < std::time::Duration::from_secs(5),
+            "children_of build took {elapsed:?} for {DIRS} dirs (quadratic?)"
+        );
+        // Correctness: each dir maps to exactly its own child.
+        for i in [0, DIRS / 2, DIRS - 1] {
+            let kids = idx.children_of(Path::new(&format!("d{i}")));
+            assert_eq!(kids.len(), 1);
+            assert_eq!(
+                &*idx.entries[kids[0]].path,
+                Path::new(&format!("d{i}/f.rs"))
+            );
+        }
+    }
+
+    #[test]
     fn file_basenames_of_filters_subdirs() {
         let idx = synthetic_index(&[
             ("pkg", true),
@@ -1408,6 +1612,74 @@ mod tests {
             .map(|e| e.path.to_str().unwrap())
             .collect();
         assert_eq!(descendants, vec!["crates/api/lib.rs"]);
+    }
+
+    #[test]
+    fn would_walk_skip_agrees_with_the_walk() {
+        // `fix --dry-run` predicts with this whether a file a fix would create
+        // is ever indexed; it must agree with `walk` on the same tree.
+        let tmp = td();
+        let root = tmp.path();
+        std::fs::write(root.join(".gitignore"), ".env\nbuild/\n*.log\n").unwrap();
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::write(root.join("sub/.gitignore"), "!keep.log\nlocal.txt\n").unwrap();
+        std::fs::write(root.join(".ignore"), "scratch.txt\n").unwrap();
+        let opts = WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: vec!["vendor/**".into()],
+        };
+        let cases = [
+            (".env", true),
+            ("build/out.txt", true),
+            ("a.log", true),
+            ("sub/keep.log", false),
+            ("sub/local.txt", true),
+            ("local.txt", false),
+            ("scratch.txt", true),
+            ("vendor/x.rs", true),
+            ("src/main.rs", false),
+            ("./README.md", false),
+        ];
+        for (rel, _) in cases {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, b"x").unwrap();
+        }
+        let idx = walk(root, &opts).unwrap();
+        for (rel, skipped) in cases {
+            let clean: PathBuf = Path::new(rel)
+                .components()
+                .filter(|c| !matches!(c, std::path::Component::CurDir))
+                .collect();
+            assert_eq!(
+                idx.contains_file(&clean),
+                !skipped,
+                "walk disagrees with the expectation for {rel}"
+            );
+            assert_eq!(
+                would_walk_skip(root, &opts, Path::new(rel), false),
+                skipped,
+                "{rel}"
+            );
+        }
+        // Without `respect_gitignore`, only `ignore:` (and `.git`) exclude.
+        let opts = WalkOptions {
+            respect_gitignore: false,
+            extra_ignores: vec!["vendor/**".into()],
+        };
+        assert!(!would_walk_skip(root, &opts, Path::new(".env"), false));
+        assert!(would_walk_skip(
+            root,
+            &opts,
+            Path::new("vendor/x.rs"),
+            false
+        ));
+        assert!(would_walk_skip(
+            root,
+            &opts,
+            Path::new(".git/config"),
+            false
+        ));
     }
 
     #[test]

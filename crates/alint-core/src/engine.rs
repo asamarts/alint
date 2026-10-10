@@ -617,9 +617,11 @@ impl Engine {
         // Final assembly preserves `self.entries` order so the
         // output Vec is deterministic + tests that index by
         // position keep working. Each entry slot fills from
-        // either the cross-file or per-file partition; rules
-        // filtered out (by `--changed` scope, `when: false`, or
-        // passing with no violations) leave their slot empty.
+        // either the cross-file or per-file partition. A PASSING
+        // rule still fills its slot (an empty-violations
+        // `RuleResult`, so it counts toward "N rule(s) passed");
+        // only a rule that did not run -- skipped by `--changed`
+        // scope or a false `when:` -- leaves its slot empty.
         let t_assembly = Instant::now();
         let mut cross_by_idx: HashMap<usize, RuleResult> = cross_results.into_iter().collect();
         let mut per_file_by_idx: HashMap<usize, RuleResult> =
@@ -640,10 +642,12 @@ impl Engine {
     /// Per-file dispatch loop. Walks `index.files()` in parallel
     /// and, for each file, calls every applicable per-file rule's
     /// `evaluate_file` against a single `std::fs::read`. Returns
-    /// `(entry-index, RuleResult)` tuples for every per-file
-    /// rule that emitted at least one violation; passing rules
-    /// (zero violations) are omitted, matching the rule-major
-    /// path's semantics.
+    /// `(entry-index, RuleResult)` tuples for every live per-file
+    /// rule -- a passing rule (zero violations) included, as an
+    /// empty-violations `RuleResult`, matching the cross-file path
+    /// (which always emits a result) so it counts as passed -- plus
+    /// the gate results `collect_live_per_file_entries` short-circuited
+    /// (a `when` error or a failed `expect_matches`).
     #[allow(clippy::too_many_lines)]
     fn run_per_file<'a>(
         &'a self,
@@ -717,14 +721,32 @@ impl Engine {
                     // analysis cap (from the index size, no extra
                     // stat) so a multi-GB blob can't OOM the run (M3).
                     // A genuinely-absent file (deleted mid-walk) skips
-                    // silently; a real read error (permission, I/O) or
-                    // an over-cap file is logged at `warn` so it isn't
-                    // silently mistaken for "file absent" (L7). Either
-                    // way the run stays resilient.
+                    // silently. A real read error (permission, I/O)
+                    // fails CLOSED: every applicable rule reports
+                    // "could not read file" on it at its own level, so
+                    // an unreadable in-scope file can never read as
+                    // "passed" (audit 2026-10 finding 7). `eval_per_file`
+                    // and the rules' own `evaluate` loops (the `fix`
+                    // read path) report the same, so `check` and `fix`
+                    // agree.
                     let abs = root.join(&file_entry.path);
-                    let Some(bytes) = crate::walker::read_capped_or_skip(&abs, file_entry.size)
-                    else {
-                        return Vec::new();
+                    let bytes = match crate::walker::read_for_analysis(&abs, file_entry.size) {
+                        crate::walker::AnalysisRead::Bytes(b) => b,
+                        crate::walker::AnalysisRead::Skip => return Vec::new(),
+                        crate::walker::AnalysisRead::Unreadable(e) => {
+                            return applicable
+                                .iter()
+                                .map(|(entry_idx, _)| {
+                                    (
+                                        *entry_idx,
+                                        crate::rule::unreadable_file_violation(
+                                            &file_entry.path,
+                                            &e,
+                                        ),
+                                    )
+                                })
+                                .collect();
+                        }
                     };
                     // 3. Dispatch. Every applicable rule sees the
                     // same byte slice; the file is read exactly once
@@ -1006,17 +1028,17 @@ impl Engine {
             // Single-pass preview: a dry run writes nothing, so there is no
             // changed tree to re-walk. It shows the first pass; a real `fix` may
             // do more (docs/design/v0.17/fixpoint.md 2). No stage sink.
-            return self
-                .fix_run(
-                    root,
-                    index,
-                    &std::collections::HashSet::new(),
-                    true,
-                    threshold,
-                    false,
-                    None,
-                )
-                .map(|(report, _staged)| report);
+            let (mut report, _) = self.fix_run(
+                root,
+                index,
+                &std::collections::HashSet::new(),
+                true,
+                threshold,
+                None,
+                None,
+            )?;
+            self.predict_unresolved_creates(root, index, walk_opts, &mut report);
+            return Ok(report);
         }
         // Byte-level fixpoint (docs/design/v0.17/fixpoint.md): re-walk and re-fix
         // until a pass applies nothing (`applied() == 0`), bounded by MAX_PASSES.
@@ -1060,9 +1082,20 @@ impl Engine {
             std::collections::HashSet::new()
         };
         let mut created: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        // Write targets whose failure was already reported: a persistent failure
+        // (a read-only file) re-fires on every pass, but is printed once.
+        let write_failures_reported = RefCell::new(HashSet::new());
         for _pass in 0..MAX_PASSES {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (report, _buf) = self.fix_run(root, cur, &created, false, threshold, true, None)?;
+            let (report, _buf) = self.fix_run(
+                root,
+                cur,
+                &created,
+                false,
+                threshold,
+                Some(&write_failures_reported),
+                None,
+            )?;
             // F4 tripwire (audit 2026-09-20): the cross-pass merge below keys items
             // by `violation_key`, which for a path-bearing, keyless violation
             // collapses to `(rule_id, path)` (line/column/message ignored). Every
@@ -1187,7 +1220,7 @@ impl Engine {
         // and stays non-convergent.
         if !converged {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, false, None)?;
+            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, None, None)?;
             if confirm.applied() == 0 {
                 converged = true;
                 final_keys = confirm
@@ -1216,12 +1249,33 @@ impl Engine {
         // state), so its key leaves `final_keys` and it is dropped -> exit 0,
         // agreeing with `check`. Keeping it here would strand a phantom I/O error
         // on a clean tree.
+        //
+        // An `Applied` whose violation the converged pass STILL saw is not a
+        // resolution: the fix wrote something, but the rule's re-evaluation on
+        // the fresh tree reports the same violation (e.g. `file_create` made a
+        // gitignored `.env` the walker never indexes, or a `file_create.path`
+        // that differs from the rule's `paths:`). The lock above hid the converged
+        // pass's own item for that key, so without this demotion `fix` would print
+        // "applied" and exit 0 while `check` still fails. Demote it to a declined
+        // skip (the violation stands -> nonzero exit at `level: error`), keeping
+        // what was done in the reason so the user can see why it did not stick.
         if converged {
             for rr in &mut results {
                 rr.items.retain(|it| {
                     matches!(it.status, FixStatus::Applied(_))
                         || final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
                 });
+                for it in &mut rr.items {
+                    if let FixStatus::Applied(summary) = &it.status
+                        && final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
+                    {
+                        it.status = FixStatus::unresolved(format!(
+                            "fix ran ({summary}) but the violation still stands on re-check \
+                             (is the written path ignored, outside the rule's scope, or \
+                             different from the path the rule checks?)"
+                        ));
+                    }
+                }
             }
         }
         // A rule whose every item was superseded (and not re-emitted) drops out,
@@ -1288,7 +1342,7 @@ impl Engine {
             /* created */ &std::collections::HashSet::new(),
             /* dry_run */ false,
             threshold,
-            /* flush */ false,
+            /* flush */ None,
             Some(&stage_ops),
         )?;
 
@@ -1372,6 +1426,63 @@ impl Engine {
         Ok((report, staged))
     }
 
+    /// `--dry-run` has no re-walk to discover that a fix will not stick, so
+    /// predict the known cases the real `fix` demotes after its re-check: a
+    /// would-be-`Applied` create (`file_create`) whose target the walk would
+    /// not index (gitignored, `ignore:`d) or that lies outside the rule's
+    /// `paths:`. Those become the same unresolved skip the real run reports.
+    /// Other ways a fix can fail its re-check (a cascade through another
+    /// rule, content a fixer writes that the rule still rejects) are only
+    /// found by running it; `docs/site/cli/fix.md` documents the limit.
+    fn predict_unresolved_creates(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        walk_opts: &crate::WalkOptions,
+        report: &mut FixReport,
+    ) {
+        for rr in &mut report.results {
+            let Some(entry) = self.entries.iter().find(|e| e.rule.id() == &*rr.rule_id) else {
+                continue;
+            };
+            let Some(fixer) = entry.rule.fixer() else {
+                continue;
+            };
+            for it in &mut rr.items {
+                let FixStatus::Applied(summary) = &it.status else {
+                    continue;
+                };
+                let Some(FixEdit::CreateFile { path, .. }) =
+                    fixer.fix_edit(&it.violation, &[], root)
+                else {
+                    continue;
+                };
+                let target: PathBuf = path
+                    .components()
+                    .filter(|c| !matches!(c, std::path::Component::CurDir))
+                    .collect();
+                let why = if crate::walker::would_walk_skip(root, walk_opts, &target, false) {
+                    format!(
+                        "{} is excluded from the walk (.gitignore / `ignore:`), so the rule \
+                         would never see it",
+                        target.display()
+                    )
+                } else if entry
+                    .rule
+                    .path_scope()
+                    .is_some_and(|scope| !scope.matches(&target, index))
+                {
+                    format!("{} is outside the rule's `paths:`", target.display())
+                } else {
+                    continue;
+                };
+                it.status = FixStatus::unresolved(format!(
+                    "fix would run ({summary}) but would not resolve the violation: {why}"
+                ));
+            }
+        }
+    }
+
     /// Identity key for grouping a violation's report items ACROSS fixpoint
     /// passes (docs/design/v0.17/fixpoint.md 7). Reuses the baseline fingerprint
     /// (it folds in `rule_id` + path + the rule's stable identity via
@@ -1414,7 +1525,10 @@ impl Engine {
         created: &HashSet<PathBuf>,
         dry_run: bool,
         threshold: Applicability,
-        flush: bool,
+        // `Some` = write the compose buffer; the set holds the targets whose
+        // write failure this `fix` run already printed (reported once, not once
+        // per fixpoint pass). `None` for a preview (`--dry-run` / `--diff`).
+        flush: Option<&RefCell<HashSet<PathBuf>>>,
         stage_ops: Option<&RefCell<Vec<FixEdit>>>,
     ) -> Result<(FixReport, BTreeMap<PathBuf, Vec<u8>>)> {
         self.ensure_manifest_scope_resolvable()?;
@@ -1719,17 +1833,27 @@ impl Engine {
                      into the located branch before shipping such a fixer",
                     entry.rule.id()
                 );
+                // Violations the located fixer DECLINED (collected no edit for) --
+                // reported as skips so a standing violation is not silently
+                // dropped (see below).
+                let mut declined: Vec<FixItem> = Vec::new();
                 let mut by_file: BTreeMap<PathBuf, Vec<Violation>> = BTreeMap::new();
                 for v in violations {
+                    // A finding `check` reports as not fixable is never handed to
+                    // the fixer: it is reported `unfixable`, exactly as `check`
+                    // promised (see `is_unfixable_finding`).
+                    if is_unfixable_finding(f, &v) {
+                        declined.push(FixItem {
+                            violation: v,
+                            status: FixStatus::Unfixable,
+                        });
+                        continue;
+                    }
                     let Some(key) = v.path.as_deref().map(Path::to_path_buf) else {
                         continue;
                     };
                     by_file.entry(key).or_default().push(v);
                 }
-                // Violations the located fixer DECLINED (collected no edit for) --
-                // reported as skips so a standing violation is not silently
-                // dropped (see below).
-                let mut declined: Vec<FixItem> = Vec::new();
                 for (file, file_violations) in by_file {
                     let abs = root.join(&file);
                     let bytes = match read_for_fix(&abs, &file, &fix_ctx) {
@@ -1830,6 +1954,11 @@ impl Engine {
             let mut items: Vec<FixItem> = Vec::with_capacity(violations.len());
             for v in violations {
                 let status = match fixer {
+                    // A finding `check` reports as not fixable (the rule marked it
+                    // `not_fixable`, or the fixer's `can_fix` declines it) is never
+                    // handed to the fixer: it stands, reported `unfixable` -- the
+                    // same verdict `check` gave it -- not a fixer "skip".
+                    Some(f) if is_unfixable_finding(f, &v) => FixStatus::Unfixable,
                     // `--changed` confinement (2b): this fix would write OUTSIDE the
                     // changed set (and the files this run created), so demote it to a
                     // Suggestion carrying the proposed edit -- whatever its tier --
@@ -2046,7 +2175,7 @@ impl Engine {
         // Flush the compose buffer: one atomic write per file any content fixer
         // touched, in deterministic (BTreeMap) order. Keys are the resolved
         // absolute write targets (a symlink and its in-tree target share one
-        // key), written directly. `flush` is false for a stage (`--diff`) so the
+        // key), written directly. `flush` is `None` for a stage (`--diff`) so the
         // buffer is left unwritten for `stage_fixes` to diff; `--dry-run` has no
         // buffer, so both are no-ops there.
         //
@@ -2056,11 +2185,18 @@ impl Engine {
         // path, where a failed `write_atomic` inside a fixer surfaces as
         // `Skipped("fix error: ...")` and the other fixers proceed (a single
         // read-only file must not abort the whole run or lose unrelated fixes).
-        if flush && let Some(buf) = &compose_buf {
+        // A read-only target genuinely fails here: `write_atomic` refuses it
+        // explicitly, since its temp+rename would otherwise succeed on directory
+        // permissions alone and silently replace the file.
+        if let Some(reported) = flush
+            && let Some(buf) = &compose_buf
+        {
             let mut failed: Vec<PathBuf> = Vec::new();
             for (target, bytes) in buf.borrow().iter() {
                 if let Err(source) = write_atomic(target, bytes) {
-                    eprintln!("alint: could not write {}: {source}", target.display());
+                    if reported.borrow_mut().insert(target.clone()) {
+                        eprintln!("alint: could not write {}: {source}", target.display());
+                    }
                     failed.push(target.clone());
                 }
             }
@@ -2773,6 +2909,15 @@ fn run_entry(
 /// bare `fix` never delivers -- `--unsafe-fixes` is required, which `check` does
 /// not assume). The rule-level [`RuleResult::is_fixable`] ("the rule declares a
 /// fixer") is independent and still backs the machine formats.
+/// Whether `v` is a finding its rule's fixer can never resolve: the rule marked
+/// it [`Violation::not_fixable`], or the fixer's per-violation
+/// [`Fixer::can_fix`] declines it. `check` never tags such a finding fixable
+/// ([`mark_fixability`]) and `fix` reports it `unfixable` without invoking the
+/// fixer, so the two always agree.
+fn is_unfixable_finding(fixer: &dyn Fixer, v: &Violation) -> bool {
+    v.not_fixable || !fixer.can_fix(v)
+}
+
 fn mark_fixability(
     mut violations: Vec<Violation>,
     fixer: Option<&dyn Fixer>,
@@ -2783,7 +2928,11 @@ fn mark_fixability(
             // does not apply here, so those violations are not "auto-fixable".
             let applies_by_default = f.applicability().applies_at(Applicability::Safe);
             for v in &mut violations {
-                v.is_fixable = applies_by_default && f.can_fix(v);
+                // An unreadable-file finding is never auto-fixable: the fixer would
+                // hit the same read error, so `check` must not promise a fix.
+                v.is_fixable = applies_by_default
+                    && !is_unfixable_finding(f, v)
+                    && v.baseline_key.as_deref() != Some(crate::rule::UNREADABLE_FILE_KEY);
             }
             (violations, true)
         }
@@ -3084,12 +3233,42 @@ mod tests {
         // so an Applied for one node cannot lock-mask a standing Skipped for another.
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
-        let rule: Box<dyn Rule> = Box::new(MixedBatchRule {
-            id: "mixed".into(),
-            scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
-            fixer: MixedBatchFixture,
-        });
-        let report = Engine::new(vec![rule], RuleRegistry::new())
+        let mixed = || -> Box<dyn Rule> {
+            Box::new(MixedBatchRule {
+                id: "mixed".into(),
+                scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
+                fixer: MixedBatchFixture,
+            })
+        };
+        let count = |r: &FixReport, applied: bool| {
+            r.results
+                .iter()
+                .flat_map(|r| &r.items)
+                .filter(|i| matches!(i.status, FixStatus::Applied(_)) == applied)
+                .count()
+        };
+        // Within ONE pass (a dry run is single-pass): the real edit reports
+        // Applied, the identity edit a per-edit no-op Skipped.
+        let preview = Engine::new(vec![mixed()], RuleRegistry::new())
+            .fix(
+                tmp.path(),
+                &idx(&["a.txt"]),
+                &crate::WalkOptions::default(),
+                true,
+                Applicability::Safe,
+            )
+            .unwrap();
+        assert_eq!(
+            count(&preview, true),
+            1,
+            "only the real edit is Applied; the identity edit is a per-edit no-op"
+        );
+        assert_eq!(
+            count(&preview, false),
+            1,
+            "the identity edit is downgraded to Skipped"
+        );
+        let report = Engine::new(vec![mixed()], RuleRegistry::new())
             .fix(
                 tmp.path(),
                 &idx(&["a.txt"]),
@@ -3103,20 +3282,17 @@ mod tests {
             std::fs::read(tmp.path().join("a.txt")).unwrap(),
             b"X1234567"
         );
-        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
-        let applied = items
-            .iter()
-            .filter(|i| matches!(i.status, FixStatus::Applied(_)))
-            .count();
-        let skipped = items
-            .iter()
-            .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
-            .count();
+        // The fixture rule flags every `.txt` file unconditionally, so the
+        // converged pass still sees the 0..1 edit's key: the violation STANDS, so
+        // the earlier Applied must not survive as a success (audit 2026-10
+        // finding 1: never "applied" while the violation stands).
         assert_eq!(
-            applied, 1,
-            "only the real edit is Applied; the identity edit is a per-edit no-op"
+            count(&report, true),
+            0,
+            "an Applied whose violation the converged pass still sees is demoted"
         );
-        assert_eq!(skipped, 1, "the identity edit is downgraded to Skipped");
+        assert!(report.has_unfixable_errors());
+        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
         // Pre-req 1: two edits on one file get DISTINCT keys (range-keyed), not a
         // single `(rule, path)` that could lock-mask one behind the other.
         let keys: std::collections::HashSet<String> = items
@@ -3140,35 +3316,40 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         std::fs::write(tmp.path().join("a.txt"), b"01234567").unwrap();
         let engine = Engine::new(vec![located_rule()], RuleRegistry::new());
-        let report = engine
-            .fix(
-                tmp.path(),
-                &idx(&["a.txt"]),
-                &crate::WalkOptions::default(),
-                false,
-                Applicability::Safe,
-            )
-            .unwrap();
+        let run = |dry_run: bool| {
+            engine
+                .fix(
+                    tmp.path(),
+                    &idx(&["a.txt"]),
+                    &crate::WalkOptions::default(),
+                    dry_run,
+                    Applicability::Safe,
+                )
+                .unwrap()
+        };
+        let count = |r: &FixReport, applied: bool| {
+            r.results
+                .iter()
+                .flat_map(|r| &r.items)
+                .filter(|i| matches!(i.status, FixStatus::Applied(_)) == applied)
+                .count()
+        };
+        // Within ONE pass (dry run): the first edit of the group applies, the
+        // second (same isolation group) is a conflict skip.
+        let preview = run(true);
+        assert_eq!(count(&preview, true), 1);
+        assert_eq!(count(&preview, false), 1);
+        let report = run(false);
         // First edit (0..1 -> X) applied; the second (same group) is a conflict.
         assert_eq!(
             std::fs::read(tmp.path().join("a.txt")).unwrap(),
             b"X1234567"
         );
-        let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
-        assert_eq!(
-            items
-                .iter()
-                .filter(|i| matches!(i.status, FixStatus::Applied(_)))
-                .count(),
-            1
-        );
-        assert_eq!(
-            items
-                .iter()
-                .filter(|i| matches!(i.status, FixStatus::Skipped { .. }))
-                .count(),
-            1
-        );
+        // The fixture rule flags the file unconditionally, so the converged pass
+        // still sees both edits' keys: nothing may be reported Applied while the
+        // violation stands (audit 2026-10 finding 1), and both items remain.
+        assert_eq!(count(&report, true), 0);
+        assert_eq!(count(&report, false), 2);
         // The batch applies on pass 1 and the identity re-collect on pass 2 nets
         // no change (the no-op downgrade), so the loop CONVERGES -- it must not
         // churn to the cap.
@@ -3462,6 +3643,64 @@ mod tests {
             })],
             RuleRegistry::new(),
         )
+    }
+
+    #[derive(Debug)]
+    struct NotFixableRule {
+        fixer: GrowFixer,
+    }
+    impl Rule for NotFixableRule {
+        fn id(&self) -> &'static str {
+            "nf"
+        }
+        fn level(&self) -> Level {
+            Level::Error
+        }
+        fn path_scope(&self) -> Option<&Scope> {
+            None
+        }
+        fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+            Ok(vec![Violation::new("stuck").with_not_fixable()])
+        }
+        fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+            Some(&self.fixer)
+        }
+    }
+
+    #[test]
+    fn a_not_fixable_finding_is_unfixable_in_check_and_fix() {
+        // A finding the rule marks `not_fixable` (e.g. a UTF-16 BOM, a bidi
+        // control in a binary file) is not tagged fixable by `check`, and `fix`
+        // reports it `Unfixable` WITHOUT invoking the fixer (it used to call the
+        // fixer and list a "skipped"), so the two verdicts agree.
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("grow.txt");
+        std::fs::write(&target, b"").unwrap();
+        let engine = Engine::new(
+            vec![Box::new(NotFixableRule {
+                fixer: GrowFixer {
+                    target: target.clone(),
+                },
+            })],
+            RuleRegistry::new(),
+        );
+        let report = engine.run(tmp.path(), &idx(&["grow.txt"])).unwrap();
+        assert!(!report.results[0].violations[0].is_fixable);
+        let fix = engine
+            .fix(
+                tmp.path(),
+                &idx(&["grow.txt"]),
+                &crate::WalkOptions::default(),
+                false,
+                Applicability::Unsafe,
+            )
+            .unwrap();
+        assert_eq!(fix.unfixable(), 1);
+        assert_eq!(fix.skipped() + fix.applied(), 0);
+        assert!(
+            std::fs::read(&target).unwrap().is_empty(),
+            "the fixer must not run on a not-fixable finding"
+        );
     }
 
     fn grow_fix(target: &Path, stop_at: Option<usize>) -> FixReport {

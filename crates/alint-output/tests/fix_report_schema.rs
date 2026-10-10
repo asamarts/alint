@@ -10,7 +10,7 @@
 //! integrations).
 
 use alint_core::{FixEdit, FixItem, FixReport, FixRuleResult, FixStatus, Level, Violation};
-use alint_output::write_fix_json;
+use alint_output::{write_fix_json, write_fix_json_with_mode};
 
 const FIX_REPORT_SCHEMA: &str = include_str!("../../../schemas/v1/fix-report.json");
 
@@ -113,6 +113,7 @@ fn fix_report_shape_matches_expected_keys() {
     let report = canonical_fix_report();
     let json: serde_json::Value = serde_json::from_str(&render_json(&report)).unwrap();
     assert_eq!(json["schema_version"], 1);
+    assert_eq!(json["dry_run"], false);
     let summary = &json["summary"];
     assert_eq!(summary["applied"], 1);
     assert_eq!(summary["skipped"], 1);
@@ -146,4 +147,68 @@ fn non_convergent_report_surfaces_the_flag_and_validates() {
     validate(&text);
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(json["summary"]["non_convergent"], true);
+}
+
+#[test]
+fn skipped_items_carry_their_skip_kind_and_validate() {
+    let item = |status| FixItem {
+        violation: Violation::new("expected a file matching [.env]"),
+        status,
+    };
+    let report = FixReport {
+        non_convergent: false,
+        results: vec![FixRuleResult {
+            rule_id: "env".into(),
+            level: Level::Error,
+            items: vec![
+                item(FixStatus::unresolved(
+                    "fix ran but the violation still stands",
+                )),
+                item(FixStatus::declined("already exists")),
+                item(FixStatus::errored("fix error: read-only")),
+                item(FixStatus::baselined("baselined")),
+                item(FixStatus::Unfixable),
+            ],
+        }],
+    };
+    let text = render_json(&report);
+    validate(&text);
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    let kinds: Vec<_> = json["results"][0]["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|i| i.get("skip_kind").cloned())
+        .collect();
+    assert_eq!(
+        kinds,
+        vec![
+            Some("unresolved".into()),
+            Some("declined".into()),
+            Some("errored".into()),
+            Some("baselined".into()),
+            None,
+        ]
+    );
+}
+
+#[test]
+fn dry_run_report_carries_the_flag_and_validates() {
+    let mut buf = Vec::new();
+    write_fix_json_with_mode(&canonical_fix_report(), true, &mut buf).unwrap();
+    let text = String::from_utf8(buf).unwrap();
+    validate(&text);
+    let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+    assert_eq!(json["dry_run"], true);
+}
+
+#[test]
+fn report_without_dry_run_still_validates() {
+    // `dry_run` was added within schema_version 1, so it is optional: a fix
+    // report from an older alint (which never emitted it) must still
+    // validate against the published schema.
+    let mut json: serde_json::Value =
+        serde_json::from_str(&render_json(&canonical_fix_report())).unwrap();
+    json.as_object_mut().unwrap().remove("dry_run");
+    validate(&json.to_string());
 }

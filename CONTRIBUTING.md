@@ -75,6 +75,28 @@ ci/scripts/check-workspace-dep-floors.sh   # [workspace.dependencies] floors <= 
 ci/scripts/dogfood.sh                      # cargo build --release + alint check on this repo
 ```
 
+Not in `preflight.sh` (slower; CI's `MSRV` job and the release preflight run
+it): `ci/scripts/msrv.sh` compiles the workspace with the exact toolchain named
+by `[workspace.package].rust-version`, so the MSRV is never hand-copied into CI.
+
+### Dependency advisories
+
+`ci/scripts/deny.sh` (cargo-deny) and `ci/scripts/audit.sh` (cargo audit) fail
+CI and the release preflight on any RustSec **vulnerability** advisory against
+a crate in `Cargo.lock`; `unmaintained` / `unsound` advisories and yanked
+crates are reported as warnings. Fix a red advisory gate by upgrading the
+affected dependency. Only when the advisory provably does not affect alint,
+waive it in `deny.toml`, the single waiver list both gates read:
+
+```toml
+[advisories]
+ignore = [
+    { id = "RUSTSEC-YYYY-NNNN", reason = "why alint is unaffected; tracking issue" },
+]
+```
+
+Remove the waiver as soon as a fixed version is available.
+
 ### Bumping the workspace version
 
 Single source of truth: `[workspace.package].version` in `Cargo.toml`. The
@@ -188,7 +210,7 @@ if it's a content rule that fans out over `**/*.rs`.
 
 - Passing the PR CI workflows: `ci.yml` (preflight: fmt/clippy/test/docs/version-pins/dogfood, plus the `bench-smoke` and advisory `perf-gate` jobs) and `cross-platform.yml` (Linux/macOS/Windows tests). (`release.yml` is tag-triggered only and does not gate PRs.)
   - **Temporary security hold:** every PR currently runs the portable gate
-    (fmt/clippy/test/build/audit/deny/docs/dogfood/examples/shell-tests) on
+    (fmt/msrv/clippy/test/build/audit/deny/docs/dogfood/examples/shell-tests) on
     ephemeral GitHub-hosted `ubuntu-latest` runners. The legacy fixed-label
     listener is offline, so box-only `bench-smoke`, `perf-gate`, and `coverage`
     are skipped for PRs. Exact admitted human PRs may return to local compute

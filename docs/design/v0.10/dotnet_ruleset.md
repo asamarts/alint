@@ -26,7 +26,7 @@ per-repo tracker in
 (`dotnet@v1` row: dotnet-runtime — "1,091 `.csproj` + 234
 solution files + 257 `Directory.Build.{props,targets}` ≈ 2,300
 XML manifests"). Canonical scope:
-[`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+[`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#10; "Single demand source but huge adopter surface … Depends
 on `xml_path_*`" — now shipped as #7).
 

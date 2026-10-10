@@ -18,6 +18,14 @@
 
 use serde_json::Value;
 
+mod xml_scan;
+mod yaml_value;
+
+#[cfg(test)]
+use xml_scan::MAX_XML_ATTRS_PER_ELEMENT;
+pub use xml_scan::MAX_XML_DEPTH;
+use xml_scan::xml_within_parse_limits;
+
 /// Maximum INPUT size any structured format will parse into a value tree. The read
 /// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed tree
 /// costs far more RSS: measured up to ~30x the input for attribute-heavy XML
@@ -138,12 +146,11 @@ impl Format {
                 // which balloons a small file into millions of nodes. Cheap
                 // discard-only pre-count; alias-free text short-circuits for free.
                 if !crate::yaml_depth::expansion_within_limit(text) {
-                    return Err(format!(
-                        "YAML alias expansion exceeds the maximum supported node count ({})",
-                        crate::yaml_depth::MAX_YAML_EXPANSION_NODES
-                    ));
+                    return Err(
+                        "YAML alias expansion exceeds the maximum supported size".to_string()
+                    );
                 }
-                serde_yaml_ng::from_str(text).map_err(|e| e.to_string())
+                yaml_value::yaml_to_value(text)
             }
             Self::Toml => toml::from_str(text).map_err(|e| e.to_string()),
             Self::Xml => xml_to_value(text),
@@ -319,164 +326,14 @@ fn strip_jsonc(src: &str) -> String {
 // `docs/design/v0.10/xml_path.md`.
 // ---------------------------------------------------------------
 
-/// Maximum XML element-nesting depth `xml_to_value` will
-/// descend. Real config/manifest XML (`.csproj`, `pom.xml`, …)
-/// is a handful of levels deep; 128 is far beyond any real
-/// manifest yet far below the recursion depth that would
-/// overflow the stack. A document nested deeper is rejected as a
-/// parse error (one per-file violation via the existing
-/// parse-error path) rather than recursed into — a crafted or
-/// accidental deeply-nested file must never abort the run. Unlike
-/// HCL, XML parses on the CALLING thread (a rayon worker, ~2 MB
-/// stack by Rust's std-thread default). roxmltree recurses ~1
-/// frame per element; measured overflow is around depth ~350 on a
-/// 2 MB debug stack (the realistic worker) and ~175 on a
-/// constrained 1 MB stack, with far deeper limits in release
-/// (~3100 on 2 MB). 128 keeps a ~2.7x margin on the 2 MB worker
-/// (still ~1.4x even on a 1 MB stack), matching the JSON recursion
-/// limit and the `when`-parser's calibration. The other formats'
-/// parsers carry their own internal recursion limits; this is the
-/// XML arm's equivalent.
-pub const MAX_XML_DEPTH: usize = 128;
-
-/// The analytically-safe ceiling for [`MAX_XML_DEPTH`], enforced at compile time
-/// below. roxmltree recurses ~1 frame per element; the smallest stack alint
-/// realistically parses XML on is a ~2 MiB rayon worker, which overflows (debug)
-/// around ~350 elements deep, so ~half of that keeps a >=2x margin. This ceiling is
-/// SCOPED to that 2 MiB production worker; the shipping `MAX_XML_DEPTH = 128` also
-/// survives a constrained 1 MiB stack (~1.4x), but a raise all the way to this
-/// ceiling would erode that non-production 1 MiB margin to ~1.1x (fine on 2 MiB) --
-/// so treat a bump toward 160 as 2-MiB-only. Raising `MAX_XML_DEPTH` PAST this risks
-/// a stack-overflow process-abort even on the 2 MiB worker -- and the depth tests
-/// only exercise the REJECTION path (they run on a >=2 MiB harness stack where even
-/// 300-deep survives), so a careless re-widening would pass every runtime test. This
-/// static bound is the real guard.
-// Rust 1.88's dead-code analysis does not count this use from an unnamed const;
-// keep the MSRV build warning-free without widening the internal API.
-#[allow(dead_code)]
-const SAFE_MAX_XML_DEPTH: usize = 160;
-const _: () = assert!(
-    MAX_XML_DEPTH <= SAFE_MAX_XML_DEPTH,
-    "MAX_XML_DEPTH exceeds its analytically-safe ceiling -- a deeply-nested XML \
-     file could overflow the rayon-worker stack inside roxmltree parsing (SIGABRT)."
-);
-
-/// Maximum attributes on a single XML element that `xml_to_value` will accept.
-/// roxmltree 0.20 validates per-element attribute UNIQUENESS in O(n^2) -- each new
-/// attribute is compared against every prior attribute on the same element -- so a
-/// single element bearing tens of thousands of distinct attributes turns a tiny
-/// file into MINUTES of parse time (`<r a0=".." a1=".." …/>`: ~64 K attrs ≈ 96 s,
-/// clean quadratic), an algorithmic-complexity `DoS` that NO nesting guard catches
-/// (all the depth guards bound height, not width). Bounding attributes per element
-/// makes total parse cost linear in the input: the aggregate work is
-/// `sum(k_i^2) <= cap * sum(k_i) = cap * total_attrs`, and `total_attrs` is bounded
-/// by the `MAX_ANALYZE_BYTES` (256 MiB) read cap, so the whole document is O(bytes).
-/// The cap ALSO sets the constant: at 256 a crafted attribute-dense file parses at
-/// roughly benign-XML speed (measured ~1.5x a same-size ordinary file, vs ~5x at
-/// 1024), so it no longer costs meaningfully more than any other file of its size --
-/// unlike HCL, XML has no format-specific byte cap (real XML data files can be large
-/// and must not false-error), so the per-element cap is the sole width bound and is
-/// kept tight. 256 is still ~5x beyond even an attribute-heavy real element (an
-/// `MSBuild` `<Csc>`/`<Vbc>` task, the widest common case, exposes ~40; SVG/`.csproj`
-/// nodes have far fewer) -- XML expresses repetition with child ELEMENTS, not
-/// hundreds of attributes on one tag. roxmltree can't be bumped to fix this (0.21
-/// stack-overflows on nesting; pinned at 0.20). An over-cap element is rejected as
-/// one ordinary per-file parse-error violation.
-const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
-
-/// Conservatively bound the raw XML's element-nesting DEPTH and per-element
-/// attribute WIDTH BEFORE `roxmltree::Document::parse` sees it, in one linear scan.
-/// `Document::parse` descends recursively per element and overflows the stack —
-/// **aborting the whole process** — on deeply-nested input (tens of thousands of
-/// levels); the `element_to_value` [`MAX_XML_DEPTH`] guard is post-parse, so it
-/// only catches depths the parser already survived. It also validates attribute
-/// uniqueness in O(n^2) per element (see [`MAX_XML_ATTRS_PER_ELEMENT`]), a separate
-/// wall-clock `DoS`. A cheap linear pre-scan rejects an over-deep OR over-wide
-/// document here (as one ordinary per-file parse-error violation) so a crafted or
-/// accidental `<a><a>…` / `<r a0.. a1..>` file can never abort or hang the run.
-/// Comment / CDATA / PI / declaration regions are skipped so their contents don't
-/// count toward depth or attributes. `Ok(())` when within both limits.
-fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
-    let bytes = text.as_bytes();
-    let mut pos = 0usize;
-    let mut depth = 0usize;
-    while pos < bytes.len() {
-        if bytes[pos] != b'<' {
-            pos += 1;
-            continue;
-        }
-        let rest = &text[pos..];
-        if rest.starts_with("</") {
-            depth = depth.saturating_sub(1);
-            pos += 2;
-        } else if rest.starts_with("<!--") {
-            pos += rest.find("-->").map_or(rest.len(), |p| p + 3);
-        } else if rest.starts_with("<![CDATA[") {
-            pos += rest.find("]]>").map_or(rest.len(), |p| p + 3);
-        } else if rest.starts_with("<!") || rest.starts_with("<?") {
-            // DOCTYPE / PI / other declaration: skip to its terminating `>`.
-            pos += rest.find('>').map_or(rest.len(), |p| p + 1);
-        } else {
-            // `<tag …>` or `<tag/>`: find the closing `>` respecting quoted
-            // attribute values (a `>` inside `"…"`/`'…'` isn't the tag end).
-            // Count attributes by the `=` signs OUTSIDE quotes: XML requires
-            // quoted values, so each attribute contributes exactly one unquoted
-            // `=`, and a `=` inside a value is skipped with the quote run.
-            let tag = rest.as_bytes();
-            let mut end = 1usize;
-            let mut quote: Option<u8> = None;
-            let mut attrs = 0usize;
-            while end < tag.len() {
-                let ch = tag[end];
-                if let Some(q) = quote {
-                    if ch == q {
-                        quote = None;
-                    }
-                } else if ch == b'"' || ch == b'\'' {
-                    quote = Some(ch);
-                } else if ch == b'=' {
-                    attrs += 1;
-                    // Bail the instant the cap is exceeded, so a pathological
-                    // single tag (up to `MAX_ANALYZE_BYTES`) can't even make the
-                    // pre-scan read to its end -- work stays bounded by the cap,
-                    // not the tag size.
-                    if attrs > MAX_XML_ATTRS_PER_ELEMENT {
-                        break;
-                    }
-                } else if ch == b'>' {
-                    break;
-                }
-                end += 1;
-            }
-            if attrs > MAX_XML_ATTRS_PER_ELEMENT {
-                return Err(format!(
-                    "an XML element has more than the maximum supported number of \
-                     attributes ({MAX_XML_ATTRS_PER_ELEMENT})"
-                ));
-            }
-            // Self-closing `<tag/>` opens and closes, so it adds no depth.
-            let self_closing = end >= 2 && tag[end - 1] == b'/';
-            if !self_closing {
-                depth += 1;
-                if depth > MAX_XML_DEPTH {
-                    return Err(format!(
-                        "XML nesting exceeds the maximum supported depth ({MAX_XML_DEPTH})"
-                    ));
-                }
-            }
-            pos += end + 1;
-        }
-    }
-    Ok(())
-}
-
 /// Parse XML into the same `serde_json::Value` tree the rest of
 /// the family queries. The document maps to
 /// `{ <root-element-name>: <root value> }` so the root element is
 /// the first `JSONPath` segment (`$.Project…`, `$.project…`).
 fn xml_to_value(text: &str) -> std::result::Result<Value, String> {
-    // Reject over-deep OR over-wide XML before `Document::parse` can overflow the
-    // stack (depth) or hang in O(n^2) attribute validation (width).
+    // Reject over-deep, over-wide or namespace-heavy XML before `Document::parse`
+    // can overflow the stack (depth) or hang in O(n^2) attribute validation
+    // (width) or namespace resolution.
     xml_within_parse_limits(text)?;
     let doc = roxmltree::Document::parse(text).map_err(|e| {
         let msg = e.to_string();
@@ -997,27 +854,6 @@ mod tests {
         // and report the *strict* parser's message.
         let err = Format::Json.parse("{ \"x\": 1, \"y\" }").unwrap_err();
         assert!(err.contains("expected"), "strict error preserved: {err}");
-    }
-
-    #[test]
-    fn xml_depth_scan_does_not_count_comments_cdata_or_self_closing() {
-        // The pre-scan must not over-count: comment/CDATA contents and
-        // self-closing tags don't add nesting, so valid shallow docs pass.
-        assert!(
-            xml_within_parse_limits(
-                "<r><!-- <a><a><a> --><c/><![CDATA[ <b><b> ]]><d attr=\"x>y\"/></r>"
-            )
-            .is_ok()
-        );
-        // A genuinely deep run is rejected with a depth message.
-        let deep = format!("{}{}", "<a>".repeat(300), "</a>".repeat(300));
-        let err = xml_within_parse_limits(&deep).unwrap_err();
-        assert!(err.contains("depth"), "depth rejection: {err}");
-        // Real manifest depth is fine.
-        assert!(xml_within_parse_limits(
-            "<Project><PropertyGroup><TargetFramework>net8.0</TargetFramework></PropertyGroup></Project>"
-        )
-        .is_ok());
     }
 
     #[test]

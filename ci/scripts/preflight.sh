@@ -10,10 +10,12 @@
 #
 # Skipped from the default preflight (CI runs them, but they're
 # too slow / network-dependent for routine push):
-#   - cargo audit (network-dependent; CI runs the `audit` job, so
-#     a CVE that landed minutes ago can fail CI even though
-#     preflight just passed — opt in with `bash ci/scripts/audit.sh`
-#     before a tag push if you want belt-and-suspenders)
+#   - cargo audit / cargo deny advisories (network-dependent; CI's
+#     `audit` + `deny` jobs and the release preflight run them and FAIL
+#     on a vulnerability, so a CVE that landed minutes ago can fail CI
+#     even though preflight just passed. Opt in with
+#     `bash ci/scripts/audit.sh` before a tag push; waivers go in
+#     deny.toml [advisories].ignore)
 #   - bench-smoke (~3 min; bench harness re-runs the smoke set)
 #   - coverage (~5 min; not load-bearing for correctness)
 #   - cross-platform build matrix (~10 min wall-clock for the five

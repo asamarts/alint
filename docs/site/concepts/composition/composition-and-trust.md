@@ -60,6 +60,14 @@ Sources are not equally trusted, and the boundary is drawn at `extends:`. Your o
 - **read outside the repo** (`allow_out_of_root:` is a top-level-only grant), or
 - **choose which findings are suppressed** (`baseline:` is a top-level-only input).
 
+<!-- alint:since=0.18.0 -->
+Merging by `id` cannot be used to get around this. A rule whose kind or fix spawns a process must be declared entirely in your own config: if an extended config shares its `id` (contributing a `workdir:`, `paths:`, or any other field) or defines the template it instantiates, loading fails and names that config. Rename your rule to keep it separate.
+
+An `https://` entry you have not listed under `trusted_extends:` is held to further limits, because each would let it read or reshape your repository without running code: its `when:` / `when_iter:` expressions may not read `env.*` (including through a `{{vars.*}}` placeholder it fills in one of your templates, or through a `vars.*` whose value you interpolated from the environment, such as `token: "{{env.NPM_TOKEN}}"`; literal vars stay readable), its templates may not substitute such an environment-derived value from your rules' own `vars:` into any field, and it may not declare `ignore:`, which hides files from every rule. Listing the URL under `trusted_extends:` lifts them all.
+
+Rules and templates may not use YAML tags (`!tag`), non-string keys, or `<<` merge keys, in any config. alint does not interpret them, and a tag would otherwise let a field slip past the checks above while still being read as that field.
+<!-- /alint:since -->
+
 For `https://` entries, a **SHA-256 subresource-integrity hash** (`#sha256-...`) pins exactly which bytes are trusted; an `https://` entry that omits the pin is refused outright, a plain `http://` URL is rejected, and a fetched body that does not match its hash is refused. Bundled rulesets ship inside the binary and are resolved offline, so there is nothing to fetch or pin. The hash pins *which* bytes load, and the trust boundary governs *what those bytes may do*.
 
 ## In practice

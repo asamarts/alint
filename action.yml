@@ -79,15 +79,16 @@ runs:
         # `github.action_ref` is populated for ANY remote `uses:`
         # reference. It is only empty for `uses: ./` (a local
         # checkout-based action), which is what `action-selftest.yml`
-        # does inside this repo. For that path, `main` is the
-        # intended fallback because we're testing the bundled
-        # install.sh at HEAD; for every external consumer the
-        # fallback is unreachable.
+        # does inside this repo. For that path we run the install.sh
+        # bundled beside this action.yml (`github.action_path`), i.e.
+        # the copy at the commit under test, so a PR's install.sh
+        # change is exercised pre-merge instead of `main`'s copy.
+        # For every external consumer this branch is unreachable.
         #
         # `GITHUB_REPOSITORY` lets us defensively assert this: if
         # someone outside the asamarts/alint repo somehow hits an
-        # empty action_ref, we fail loudly rather than silently
-        # fetch `main` from the canonical repo.
+        # empty action_ref, we fail loudly rather than run an
+        # unexpected installer.
         ACTION_REF: ${{ github.action_ref }}
         ACTION_PATH: ${{ github.action_path }}
         SOURCE_REPO: ${{ github.repository }}
@@ -98,7 +99,7 @@ runs:
             echo "::error::action_ref is empty but the action is running outside asamarts/alint (${SOURCE_REPO}). Pin the action to a tag, e.g. uses: asamarts/alint@v0.17.0" >&2
             exit 1
           fi
-          ref="main"
+          ref=""
         else
           ref="$ACTION_REF"
         fi
@@ -114,24 +115,33 @@ runs:
           "${ACTION_REF:-}" \
           "$ALINT_BAKED_VERSION")"
         export ALINT_VERSION="$ver"
-        echo "alint action: installing '${ver}' (action_ref='${ACTION_REF:-<local>}', install.sh ref='${ref}')"
-        # Fetch install.sh with retries: raw.githubusercontent.com can return a
-        # transient 403 (rate-limit / CDN edge) that previously failed the action
-        # outright. Portable retry loop (no curl --retry-all-errors version
-        # dependency), up to 3 attempts before giving up.
-        install_url="https://raw.githubusercontent.com/asamarts/alint/${ref}/install.sh"
-        install_sh="${RUNNER_TEMP:-/tmp}/alint-install.sh"
-        for attempt in 1 2 3; do
-          if curl -fsSL "$install_url" -o "$install_sh"; then
-            break
-          fi
-          if [[ "$attempt" -eq 3 ]]; then
-            echo "::error::failed to fetch install.sh from ${install_url} after 3 attempts (transient raw.githubusercontent error, e.g. rate-limit or CDN)" >&2
+        if [[ -z "$ref" ]]; then
+          install_sh="$ACTION_PATH/install.sh"
+          echo "alint action: installing '${ver}' (action_ref='<local>', install.sh=bundled ${install_sh})"
+          if [[ ! -f "$install_sh" ]]; then
+            echo "::error::local action checkout has no install.sh at ${install_sh}" >&2
             exit 1
           fi
-          echo "alint action: install.sh fetch failed (attempt ${attempt}/3), retrying in 2s..." >&2
-          sleep 2
-        done
+        else
+          echo "alint action: installing '${ver}' (action_ref='${ACTION_REF}', install.sh ref='${ref}')"
+          # Fetch install.sh with retries: raw.githubusercontent.com can return a
+          # transient 403 (rate-limit / CDN edge) that previously failed the action
+          # outright. Portable retry loop (no curl --retry-all-errors version
+          # dependency), up to 3 attempts before giving up.
+          install_url="https://raw.githubusercontent.com/asamarts/alint/${ref}/install.sh"
+          install_sh="${RUNNER_TEMP:-/tmp}/alint-install.sh"
+          for attempt in 1 2 3; do
+            if curl -fsSL "$install_url" -o "$install_sh"; then
+              break
+            fi
+            if [[ "$attempt" -eq 3 ]]; then
+              echo "::error::failed to fetch install.sh from ${install_url} after 3 attempts (transient raw.githubusercontent error, e.g. rate-limit or CDN)" >&2
+              exit 1
+            fi
+            echo "alint action: install.sh fetch failed (attempt ${attempt}/3), retrying in 2s..." >&2
+            sleep 2
+          done
+        fi
         bash "$install_sh"
         echo "$INSTALL_DIR" >> "$GITHUB_PATH"
 

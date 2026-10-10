@@ -6,7 +6,7 @@ use alint_core::{
     Applicability, CollectedEdit, EditVerifier, FixContext, FixEdit, FixOutcome, Fixer, Result,
     Violation,
 };
-use regex::Regex;
+use regex::bytes::Regex;
 
 /// Rewrites every span matching `pattern` with `replacement` (regex capture
 /// substitution). A *located* fixer: `collect_edits` scans the file's bytes and
@@ -69,11 +69,18 @@ impl Fixer for ReplaceFixer {
         bytes: &[u8],
         _root: &Path,
     ) -> Vec<CollectedEdit> {
-        // Regex operates on UTF-8 text; a non-UTF-8 file can't be matched (the
-        // host rule doesn't flag one either), so emit no edits.
-        let Ok(text) = std::str::from_utf8(bytes) else {
+        // Match the RAW bytes (a `regex::bytes` pattern), exactly as the host
+        // `file_content_forbidden` detector does: a non-UTF-8 file is still
+        // matched (an invalid byte just never matches a Unicode class), the
+        // ranges are true byte offsets, and every byte outside a match --
+        // invalid ones included -- survives the splice verbatim.
+        //
+        // Never edit a binary-looking file (defense in depth: the detector skips
+        // invalid-UTF-8 binaries and marks a NUL-bearing text finding not
+        // fixable): a regex splice into an image or archive corrupts it.
+        if crate::io::looks_binary(bytes) {
             return Vec::new();
-        };
+        }
         // One ReplaceRange per (non-overlapping, leftmost) match. `captures_iter`
         // yields disjoint matches, so the batch never self-overlaps; the byte
         // offsets are into the file's current bytes, exactly what ReplaceRange
@@ -81,11 +88,11 @@ impl Fixer for ReplaceFixer {
         let mut nonconverging = 0usize;
         let edits: Vec<CollectedEdit> = self
             .pattern
-            .captures_iter(text)
+            .captures_iter(bytes)
             .filter_map(|caps| {
                 let m = caps.get(0)?;
-                let mut content = String::new();
-                caps.expand(&self.replacement, &mut content);
+                let mut content = Vec::new();
+                caps.expand(self.replacement.as_bytes(), &mut content);
                 // CONVERGENCE guard (this fixer only serves `file_content_forbidden`,
                 // where the pattern is FORBIDDEN): a replacement that itself still
                 // matches the pattern is not a valid fix -- applying it leaves the
@@ -105,7 +112,7 @@ impl Fixer for ReplaceFixer {
                     edit: FixEdit::ReplaceRange {
                         path: file.to_path_buf(),
                         range: m.start()..m.end(),
-                        content: content.into_bytes(),
+                        content,
                     },
                     applicability: self.applicability,
                     // A regex rewrite is not a structured op: correctness is
@@ -207,11 +214,19 @@ mod tests {
     }
 
     #[test]
-    fn non_utf8_emits_nothing() {
+    fn non_utf8_is_matched_at_byte_offsets_like_the_detector() {
+        // The detector matches raw bytes (a non-UTF-8 file is not a free pass),
+        // so the fixer must too: the match after the invalid bytes is rewritten
+        // at its true byte offset and the invalid bytes are left alone.
         let f = fixer("x", "y");
-        assert!(
-            f.collect_edits(&[], Path::new("a"), &[0xff, 0xfe, b'x'], Path::new("/r"))
-                .is_empty()
+        assert_eq!(
+            ranges(&f.collect_edits(
+                &[],
+                Path::new("a"),
+                &[b'a', 0xff, 0xfe, b'x'],
+                Path::new("/r")
+            )),
+            vec![(3, 4, "y".to_string())]
         );
     }
 

@@ -23,7 +23,7 @@ bigger scale; "completes the structured-query family
 JSON/YAML/TOML/XML") and the per-repo tracker in
 [`examples/README.md`](../../../examples/README.md#primitive-demand-tracker)
 (`xml_path_*` row: spark, dotnet-runtime). Canonical scope:
-[`../ROADMAP.md`](../ROADMAP.md#v010--case-study-coverage-push)
+[`../ROADMAP.md`](../ROADMAP.md#v010-case-study-coverage-push)
 (#7; the `dotnet@v1` bundled ruleset #10 depends on it).
 
 ## Problem

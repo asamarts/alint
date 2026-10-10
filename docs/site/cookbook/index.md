@@ -331,7 +331,7 @@ rules:
     paths: ["**/*"]
     level: error
     fix:
-      file_strip_bidi_controls: {}
+      file_strip_bidi: {}
 
   - id: no-zero-width
     kind: no_zero_width_chars

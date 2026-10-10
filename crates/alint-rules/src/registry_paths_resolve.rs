@@ -507,12 +507,12 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         ));
     }
     // A glob source is resolved against the index; a literal one
-    // is read directly. `is_glob` mirrors the structured-path /
+    // is read directly. The literal test mirrors the structured-path /
     // file_exists literal test.
-    let is_glob = opts
-        .source
-        .chars()
-        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'));
+    // `literal_glob_path` resolves escapes, so a `source` rendered from a
+    // directory literally named `a\b` (`a\\b`) reads that file.
+    let literal_source = alint_core::template::literal_glob_path(&opts.source);
+    let is_glob = literal_source.is_none();
     let registry_scope = if is_glob {
         Some(
             Scope::from_patterns(std::slice::from_ref(&opts.source))
@@ -535,7 +535,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         level: spec.level,
         policy_url: spec.policy_url.clone(),
         message: spec.message.clone(),
-        source: opts.source,
+        source: literal_source.unwrap_or(opts.source),
         registry_scope,
         extract,
         base: Base::parse(opts.base.as_deref()),

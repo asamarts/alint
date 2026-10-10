@@ -191,20 +191,49 @@ impl<'de> Deserialize<'de> for AllowOutOfRoot {
 /// `except:` are mutually exclusive on a single entry; listing an
 /// unknown rule id is a config error so typos surface at load
 /// time.
-#[derive(Debug, Clone, Deserialize)]
-#[serde(
-    untagged,
-    expecting = "a URL or path string, or a `{ url, only?, except? }` map"
-)]
+#[derive(Debug, Clone)]
 pub enum ExtendsEntry {
     Url(String),
     Filtered {
         url: String,
-        #[serde(default)]
         only: Option<Vec<String>>,
-        #[serde(default)]
         except: Option<Vec<String>>,
     },
+}
+
+/// The mapping form of [`ExtendsEntry`], deserialized with
+/// `deny_unknown_fields` so a typo such as `excpet:` is a load error rather
+/// than a silently-ignored filter (an untagged enum variant cannot deny
+/// unknown fields itself).
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct FilteredExtendsEntry {
+    url: String,
+    #[serde(default)]
+    only: Option<Vec<String>>,
+    #[serde(default)]
+    except: Option<Vec<String>>,
+}
+
+impl<'de> Deserialize<'de> for ExtendsEntry {
+    fn deserialize<D>(deserializer: D) -> std::result::Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        use serde::de::Error as _;
+        match serde_yaml_ng::Value::deserialize(deserializer)? {
+            serde_yaml_ng::Value::String(url) => Ok(Self::Url(url)),
+            value @ serde_yaml_ng::Value::Mapping(_) => {
+                let FilteredExtendsEntry { url, only, except } =
+                    serde_yaml_ng::from_value(value).map_err(D::Error::custom)?;
+                Ok(Self::Filtered { url, only, except })
+            }
+            _ => Err(D::Error::custom(
+                "an `extends:` entry must be a URL or path string, or a \
+                 `{ url, only?, except? }` map",
+            )),
+        }
+    }
 }
 
 impl ExtendsEntry {
@@ -525,6 +554,21 @@ where
             .map(str::to_owned),
         _ => None,
     };
+    // Every op's options must be a mapping. The derived op structs would also
+    // accept a YAML sequence (filling fields by position), and the DSL trust
+    // gates -- which refuse an inherited `applicability: safe` promotion and
+    // demote an untrusted remote's content fixers -- inspect mappings only, so a
+    // positional `file_remove: [safe]` would load as an unreviewed promotion.
+    if let serde_yaml_ng::Value::Mapping(m) = &value
+        && let Some((op, args)) = m.iter().next()
+        && !args.is_mapping()
+    {
+        let op = op.as_str().unwrap_or("<fix>");
+        return Err(D::Error::custom(format!(
+            "`{op}`: a fix op's options must be a mapping (write `{op}: {{}}` for an op \
+             with no options)"
+        )));
+    }
     serde_yaml_ng::from_value(value)
         .map(Some)
         .map_err(|e| match single_op {
@@ -922,12 +966,6 @@ pub struct GitUntrackFixSpec {
     pub applicability: Option<crate::rule::Applicability>,
 }
 
-/// `command`: run a user-supplied fix command per violation on a `command` rule
-/// (e.g. check `eslint {path}`, fix `eslint --fix {path}`). A **spawning** fix op:
-/// it shells out, so it is refused from any non-top-level source (auto-fix.md 5.5,
-/// like the `command` rule kind itself) and is **`Unsafe` by default** (running an
-/// arbitrary command on a bare `alint fix` is opt-in). A user may promote a
-/// specific rule to `Safe` in their OWN top-level config.
 /// `dir_create`: create the (single, literal) directory the host `dir_exists`
 /// rule requires. A **fixed-behavior** op: it writes no ruleset bytes and does not
 /// spawn, so it is honored at its tier from any source. **`Safe` by default** (an
@@ -1079,6 +1117,12 @@ pub struct InsertHeaderFixSpec {
     pub applicability: Option<crate::rule::Applicability>,
 }
 
+/// `command`: run a user-supplied fix command per violation on a `command` rule
+/// (e.g. check `eslint {path}`, fix `eslint --fix {path}`). A **spawning** fix op:
+/// it shells out, so it is refused from any non-top-level source (auto-fix.md 5.5,
+/// like the `command` rule kind itself) and is **`Unsafe` by default** (running an
+/// arbitrary command on a bare `alint fix` is opt-in). A user may promote a
+/// specific rule to `Safe` in their OWN top-level config.
 #[derive(Debug, Clone, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommandFixSpec {
@@ -1281,7 +1325,7 @@ impl NestedRuleSpec {
                     "git_tracked_only",
                     "respect_gitignore",
                 ];
-                crate::template::render_mapping(self.extra.clone(), tokens)
+                crate::template::render_nested_options(&self.kind, self.extra.clone(), tokens)
                     .into_iter()
                     .filter(|(k, _)| k.as_str().is_none_or(|s| !PARENT_FIELDS.contains(&s)))
                     .collect()

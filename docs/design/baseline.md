@@ -99,6 +99,9 @@ entries, sorted by `(rule_id, path, fingerprint)`:
   collision; resolves §7-Q6). It is the **only** field used for matching.
 - `count` — collapses identical fingerprints (§3.2).
 - `path` — repo-relative, forward-slashed, or `null` for repo-level violations.
+  (Only Windows `\` separators are rewritten to `/`; on unix a `\` is a legal
+  filename byte and is kept, so `a\b.txt` and `a/b.txt` never share a
+  fingerprint.)
   **Advisory only** (for human review and the sort key); not matched on (the path
   is already inside the fingerprint).
 - `message` — the rendered violation text. **Advisory only, never matched.** It

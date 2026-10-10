@@ -332,6 +332,68 @@ impl WhenExpr {
         let v = eval(self, env)?;
         Ok(v.truthy())
     }
+
+    /// The name of the first `env.<NAME>` variable this expression reads, if
+    /// any, searching every branch (evaluation may short-circuit; this does not).
+    /// Lets a config loader refuse an environment read from a source it does
+    /// not trust without evaluating anything.
+    #[must_use]
+    pub fn first_env_ref(&self) -> Option<&str> {
+        match self {
+            Self::Literal(_) => None,
+            Self::Ident { ns, name } => (*ns == Namespace::Env).then_some(name.as_str()),
+            Self::Call { args: items, .. } | Self::List(items) => {
+                items.iter().find_map(Self::first_env_ref)
+            }
+            Self::Not(inner) | Self::Matches { left: inner, .. } => inner.first_env_ref(),
+            Self::And(l, r)
+            | Self::Or(l, r)
+            | Self::Cmp {
+                left: l, right: r, ..
+            } => l.first_env_ref().or_else(|| r.first_env_ref()),
+        }
+    }
+
+    /// Every `vars.<NAME>` this expression reads, in source order (duplicates
+    /// kept), searching every branch like [`Self::first_env_ref`]. Lets a config
+    /// loader refuse a read of a var whose value came from the environment.
+    #[must_use]
+    pub fn var_refs(&self) -> Vec<&str> {
+        fn walk<'a>(expr: &'a WhenExpr, out: &mut Vec<&'a str>) {
+            match expr {
+                WhenExpr::Literal(_) => {}
+                WhenExpr::Ident { ns, name } => {
+                    if *ns == Namespace::Vars {
+                        out.push(name.as_str());
+                    }
+                }
+                WhenExpr::Call { args: items, .. } | WhenExpr::List(items) => {
+                    for item in items {
+                        walk(item, out);
+                    }
+                }
+                WhenExpr::Not(inner) | WhenExpr::Matches { left: inner, .. } => walk(inner, out),
+                WhenExpr::And(l, r)
+                | WhenExpr::Or(l, r)
+                | WhenExpr::Cmp {
+                    left: l, right: r, ..
+                } => {
+                    walk(l, out);
+                    walk(r, out);
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(self, &mut out);
+        out
+    }
+
+    /// The first `vars.<NAME>` this expression reads, if any (see
+    /// [`Self::var_refs`]).
+    #[must_use]
+    pub fn first_var_ref(&self) -> Option<&str> {
+        self.var_refs().into_iter().next()
+    }
 }
 
 mod eval;
@@ -377,6 +439,30 @@ mod tests {
         assert!(check("facts.is_rust"));
         assert!(!check("facts.is_node"));
         assert!(check("not facts.is_node"));
+    }
+
+    #[test]
+    fn double_negation_parses() {
+        assert!(check("not not facts.is_rust"));
+        assert!(!check("not not not facts.is_rust"));
+    }
+
+    #[test]
+    fn negative_integer_literals() {
+        assert!(check("facts.n_files > -1"));
+        assert!(check("-5 < facts.n_files"));
+        assert!(!check("facts.n_files == -42"));
+        assert!(check("-3 in [-1, -2, -3]"));
+    }
+
+    #[test]
+    fn long_flat_chain_reports_complexity_not_nesting() {
+        let src = vec!["facts.is_rust"; 80].join(" or ");
+        let err = parse(&src).unwrap_err().to_string();
+        assert!(err.contains("too complex"), "{err}");
+        // A long `not` run is bounded the same way (it nests the AST).
+        let src = format!("{}facts.is_rust", "not ".repeat(100_000));
+        assert!(parse(&src).is_err());
     }
 
     #[test]
@@ -771,6 +857,41 @@ mod tests {
     }
 
     #[test]
+    fn iter_has_file_escapes_glob_metacharacters_in_the_iterated_path() {
+        // Audit 2026-10 finding 2: the iterated dir is a real name, not a
+        // pattern. `app/[slug]` (Next.js) was compiled as a character class and
+        // missed its own file (FP); `pkgs/*` matched a sibling's file (FN);
+        // `pkgs/nobrace{` was an invalid-glob error.
+        let index = idx(&[
+            ("app/[slug]", true),
+            ("app/[slug]/page.tsx", false),
+            ("pkgs/*", true),
+            ("pkgs/other", true),
+            ("pkgs/other/a.rs", false),
+            ("pkgs/nobrace{", true),
+            ("pkgs/nobrace{/b.rs", false),
+        ]);
+        assert!(check_iter(
+            "iter.has_file(\"*.tsx\")",
+            Path::new("app/[slug]"),
+            true,
+            &index,
+        ));
+        assert!(!check_iter(
+            "iter.has_file(\"*.rs\")",
+            Path::new("pkgs/*"),
+            true,
+            &index,
+        ));
+        assert!(check_iter(
+            "iter.has_file(\"*.rs\")",
+            Path::new("pkgs/nobrace{"),
+            true,
+            &index,
+        ));
+    }
+
+    #[test]
     fn iter_has_file_returns_false_for_file_iteration() {
         let index = idx(&[("a.rs", false)]);
         assert!(!check_iter(
@@ -850,5 +971,53 @@ mod tests {
             panic!("expected eval error");
         };
         assert!(msg.contains("must be a string"), "msg: {msg}");
+    }
+
+    #[test]
+    fn first_env_ref_finds_env_reads_in_every_branch() {
+        let env_ref = |src: &str| parse(src).unwrap().first_env_ref().map(str::to_owned);
+        assert_eq!(env_ref("env.CI"), Some("CI".into()));
+        assert_eq!(
+            env_ref("facts.is_rust or env.TOKEN matches \"^g\""),
+            Some("TOKEN".into())
+        );
+        assert_eq!(
+            env_ref("not (facts.a and env.X == \"1\")"),
+            Some("X".into())
+        );
+        assert_eq!(env_ref("\"a\" in [vars.org, env.Y]"), Some("Y".into()));
+        assert_eq!(env_ref("iter.has_file(env.F)"), Some("F".into()));
+        assert_eq!(env_ref("facts.is_rust and vars.org == \"env.X\""), None);
+        assert_eq!(env_ref("iter.has_file(\"Cargo.toml\")"), None);
+    }
+
+    #[test]
+    fn var_refs_finds_var_reads_in_every_branch() {
+        let refs = |src: &str| {
+            parse(src)
+                .unwrap()
+                .var_refs()
+                .into_iter()
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(refs("vars.token"), vec!["token"]);
+        assert_eq!(
+            refs("facts.is_rust or vars.token matches \"^g\""),
+            vec!["token"]
+        );
+        assert_eq!(
+            refs("not (vars.a == \"1\" and env.X == vars.b)"),
+            vec!["a", "b"]
+        );
+        assert_eq!(refs("\"a\" in [env.Y, vars.org]"), vec!["org"]);
+        assert_eq!(refs("iter.has_file(vars.f)"), vec!["f"]);
+        assert_eq!(
+            refs("facts.is_rust and env.X == \"vars.token\""),
+            Vec::<String>::new()
+        );
+        let first = |src: &str| parse(src).unwrap().first_var_ref().map(str::to_owned);
+        assert_eq!(first("env.A or vars.z or vars.y"), Some("z".into()));
+        assert_eq!(first("env.A"), None);
     }
 }

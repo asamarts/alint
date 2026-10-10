@@ -74,10 +74,24 @@ impl Parser {
     /// never re-enter `parse_expr`, where the paren/bracket re-entry guard
     /// lives (H5 flat-chain gap).
     fn bump_depth(&mut self) -> Result<(), WhenError> {
+        self.bump_depth_for("expression nests too deeply (max depth 64)")
+    }
+
+    /// [`bump_depth`](Self::bump_depth) for an operator chain, whose limit is
+    /// hit by a long FLAT `a or b or …` list rather than visible nesting; say
+    /// so, or the "nests too deeply" message points at the wrong cause.
+    fn bump_chain_depth(&mut self) -> Result<(), WhenError> {
+        self.bump_depth_for(
+            "expression is too complex: more than 64 combined levels of nesting and \
+             chained `and` / `or` / `not` terms; split it with a fact",
+        )
+    }
+
+    fn bump_depth_for(&mut self, message: &str) -> Result<(), WhenError> {
         self.depth += 1;
         if self.depth > MAX_DEPTH {
             self.depth -= 1;
-            return Err(self.err("expression nests too deeply (max depth 64)"));
+            return Err(self.err(message));
         }
         Ok(())
     }
@@ -106,7 +120,7 @@ impl Parser {
             // its own single nesting bump, so chain depth correctly accumulates
             // along the spine (H5 flat-chain gap). Restoring it here would let a
             // ~MAX_DEPTH² tree parse and abort on Drop — DO NOT.
-            self.bump_depth()?;
+            self.bump_chain_depth()?;
             let right = self.parse_and()?;
             left = WhenExpr::Or(Box::new(left), Box::new(right));
         }
@@ -119,7 +133,7 @@ impl Parser {
             self.advance();
             // See `parse_or`: bump per `and` node and never restore, so `depth`
             // bounds the AST's cumulative structural depth (Drop/eval-safe).
-            self.bump_depth()?;
+            self.bump_chain_depth()?;
             let right = self.parse_not()?;
             left = WhenExpr::And(Box::new(left), Box::new(right));
         }
@@ -129,8 +143,17 @@ impl Parser {
     fn parse_not(&mut self) -> Result<WhenExpr, WhenError> {
         if matches!(self.peek(), Some(Tok::KwNot)) {
             self.advance();
-            let inner = self.parse_cmp()?;
-            return Ok(WhenExpr::Not(Box::new(inner)));
+            // Recurse so `not not x` parses. Each `not` nests the AST (and this
+            // call stack) by one, so it counts against the depth bound while its
+            // operand is parsed: a `not not not …` run is bounded like nesting.
+            // Restore it afterwards, unlike a chain operator: a `not` is a unary
+            // node over its OWN operand and does not deepen the surrounding
+            // chain's spine, so `not a and not b and …` must cost one level per
+            // `and`, not two (33 such terms used to hit the 64 limit).
+            self.bump_chain_depth()?;
+            let inner = self.parse_not();
+            self.depth -= 1;
+            return Ok(WhenExpr::Not(Box::new(inner?)));
         }
         self.parse_cmp()
     }
@@ -298,5 +321,51 @@ impl Parser {
                 message: "expected literal, identifier, '(' or '['".into(),
             }),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::super::{WhenEnv, WhenError, parse};
+    use crate::facts::{FactValue, FactValues};
+    use std::collections::HashMap;
+
+    /// `not facts.f1 and not facts.f2 and …` with `n` terms.
+    fn negated_conjunction(n: usize) -> String {
+        (1..=n)
+            .map(|i| format!("not facts.f{i}"))
+            .collect::<Vec<_>>()
+            .join(" and ")
+    }
+
+    #[test]
+    fn a_long_conjunction_of_negations_parses_and_evaluates() {
+        // Each `not` bumped the cumulative depth without restoring it, so 33
+        // `not x and` terms (2 levels each) hit the 64 limit although v0.17
+        // parsed them. A `not` only nests its own operand.
+        let expr = parse(&negated_conjunction(60)).expect("60 negated terms parse");
+        let mut facts = FactValues::new();
+        for i in 1..=60 {
+            facts.insert(format!("f{i}"), FactValue::Bool(false));
+        }
+        let vars = HashMap::new();
+        assert!(expr.evaluate(&WhenEnv::new(&facts, &vars)).unwrap());
+    }
+
+    #[test]
+    fn a_deep_not_run_is_still_bounded() {
+        let err = parse(&format!("{}facts.x", "not ".repeat(65))).unwrap_err();
+        assert!(
+            matches!(&err, WhenError::Parse { message, .. } if message.contains("too complex")),
+            "{err:?}"
+        );
+        assert!(parse(&format!("{}facts.x", "not ".repeat(60))).is_ok());
+        // A `not` over a parenthesised chain keeps that chain's depth: nesting
+        // the 60-term chain under `not (…) and …` stays rejected.
+        let mut e = negated_conjunction(60);
+        for _ in 0..10 {
+            e = format!("not ({e}) and facts.y");
+        }
+        assert!(parse(&e).is_err());
     }
 }

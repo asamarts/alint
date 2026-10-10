@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use alint_core::{AllowOutOfRoot, Error, Result};
+use serde_yaml_ng::Mapping;
 
 use crate::extends;
 use crate::{
@@ -18,6 +19,42 @@ use crate::{
 /// hostile deeply-nested (acyclic) chain. Generous: real compositions are a
 /// handful deep. See [`load_recursive`] (L5).
 const MAX_EXTENDS_DEPTH: usize = 64;
+
+/// Mutable state shared by one `load_with` call's whole extends resolution.
+#[derive(Default)]
+pub(crate) struct LoadState {
+    /// Ancestors on the current DFS path (cycle detection + depth bound).
+    pub(crate) visiting: std::collections::HashSet<PathBuf>,
+    /// Completed non-top-level local loads, reused across a diamond chain: two
+    /// entries that both extend the same file at every level would otherwise
+    /// reload it once per path through the DAG (2^depth loads, an effective
+    /// hang from a hostile repo). `is_top` loads read their own trust and
+    /// confinement settings and are never memoized.
+    memo: std::collections::HashMap<MemoKey, RawConfig>,
+}
+
+#[derive(PartialEq, Eq, Hash)]
+struct MemoKey {
+    path: PathBuf,
+    confine: Option<PathBuf>,
+    trusted: Vec<String>,
+}
+
+impl LoadState {
+    fn cached(&self, key: Option<&MemoKey>) -> Option<RawConfig> {
+        key.and_then(|k| self.memo.get(k)).cloned()
+    }
+}
+
+impl MemoKey {
+    fn new(path: &Path, confine: Option<&Path>, trusted: &[String]) -> Self {
+        Self {
+            path: path.to_path_buf(),
+            confine: confine.map(Path::to_path_buf),
+            trusted: trusted.to_vec(),
+        }
+    }
+}
 
 /// Parse a local config file's `contents` into a [`RawConfig`],
 /// resolving `{{env.X}}` interpolation first. Shared by
@@ -34,6 +71,30 @@ const MAX_EXTENDS_DEPTH: usize = 64;
 /// failure is reported with the `source` path; a typed/YAML error
 /// propagates bare so the existing diagnostics are unchanged.
 pub(crate) fn parse_config_interpolated(contents: &str, source: &Path) -> Result<RawConfig> {
+    // Name the file in a YAML/typed error: in an `extends:` chain or a
+    // `.alint.d/` drop-in, a bare "at line 2 column 1" reads as if the
+    // top-level config were at fault.
+    parse_config_interpolated_inner(contents, source).map_err(|e| match e {
+        Error::Yaml(e) => Error::Other(format!("{}: YAML parse error: {e}", display_path(source))),
+        other => other,
+    })
+}
+
+/// `path` for a user-facing message, without the `\\?\` verbatim prefix that
+/// `canonicalize` adds on Windows (`\\?\UNC\server\share` becomes
+/// `\\server\share`). The prefix never occurs on Unix, so this is a no-op there.
+fn display_path(path: &Path) -> String {
+    let shown = path.display().to_string();
+    if let Some(unc) = shown.strip_prefix(r"\\?\UNC\") {
+        format!(r"\\{unc}")
+    } else if let Some(local) = shown.strip_prefix(r"\\?\") {
+        local.to_owned()
+    } else {
+        shown
+    }
+}
+
+fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawConfig> {
     // Reject a deeply-nested-flow config before `serde_yaml_ng` (libyaml) chews
     // on it super-linearly — a DoS reachable through an `extends:`'d ruleset.
     if !alint_core::yaml_depth::flow_depth_within_limit(contents) {
@@ -47,19 +108,62 @@ pub(crate) fn parse_config_interpolated(contents: &str, source: &Path) -> Result
     // same way -- `serde_yaml_ng`'s own limits don't catch it.
     if !alint_core::yaml_depth::expansion_within_limit(contents) {
         return Err(Error::Other(format!(
-            "{}: YAML alias expansion exceeds the maximum supported node count ({})",
+            "{}: YAML alias expansion exceeds the maximum supported size",
             source.display(),
-            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
         )));
     }
-    if contents.contains("{{") {
+    let config: RawConfig = if contents.contains("{{") {
         let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(contents)?;
+        // Which vars take their value from the environment, read off the RAW
+        // text before interpolation erases the difference.
+        let env_vars = env_derived_vars(value.get("vars"));
+        let rule_env_vars: Vec<Mapping> = value
+            .get("rules")
+            .and_then(serde_yaml_ng::Value::as_sequence)
+            .map(|rules| {
+                rules
+                    .iter()
+                    .map(|r| {
+                        env_derived_vars(r.get("vars"))
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v.into()))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         crate::interp::interpolate_value(&mut value, &|n| std::env::var(n).ok())
             .map_err(|e| Error::Other(format!("{}: interpolation error: {e}", source.display())))?;
-        Ok(serde_yaml_ng::from_value(value)?)
+        let mut config: RawConfig = serde_yaml_ng::from_value(value)?;
+        config.env_vars = env_vars;
+        for (rule, marks) in config.rules.iter_mut().zip(rule_env_vars) {
+            if !marks.is_empty() {
+                rule.insert(crate::ENV_VARS_MARKER.into(), marks.into());
+            }
+        }
+        config
     } else {
-        Ok(serde_yaml_ng::from_str(contents)?)
-    }
+        serde_yaml_ng::from_str(contents)?
+    };
+    crate::reject_ambiguous_yaml_in(&config, &display_path(source))?;
+    Ok(config)
+}
+
+/// The entries of a raw (pre-interpolation) `vars:` mapping whose value reads
+/// the environment (`{{env.X}}`, any spacing, with or without a default),
+/// mapped to that raw text. Only these become secret: a `{{vars.X}}` span in a
+/// var value is never resolved against other vars, so it cannot launder one.
+fn env_derived_vars(
+    vars: Option<&serde_yaml_ng::Value>,
+) -> std::collections::HashMap<String, String> {
+    vars.and_then(serde_yaml_ng::Value::as_mapping)
+        .into_iter()
+        .flatten()
+        .filter_map(|(k, v)| {
+            let (name, raw) = (k.as_str()?, v.as_str()?);
+            crate::interp::reads_env(raw).then(|| (name.to_string(), raw.to_string()))
+        })
+        .collect()
 }
 
 /// Recursively load `path`, resolving its `extends:` chain
@@ -70,7 +174,7 @@ pub(crate) fn parse_config_interpolated(contents: &str, source: &Path) -> Result
 /// the entire rule.
 pub(crate) fn load_recursive(
     path: &Path,
-    visiting: &mut std::collections::HashSet<PathBuf>,
+    state: &mut LoadState,
     opts: &LoadOptions,
     confine: Option<&Path>,
     is_top: bool,
@@ -85,10 +189,17 @@ pub(crate) fn load_recursive(
         path: path.to_path_buf(),
         source,
     })?;
+    // Diamond chains reload a shared file once per DAG path (2^depth); a
+    // non-top-level load is a pure function of its `MemoKey`, so reuse it.
+    let memo_key = (!is_top).then(|| MemoKey::new(&canonical, confine, trusted));
+    if let Some(cached) = state.cached(memo_key.as_ref()) {
+        return Ok(cached);
+    }
+    let visiting = &mut state.visiting;
     if !visiting.insert(canonical.clone()) {
         return Err(Error::Other(format!(
             "cycle in `extends` chain at {}",
-            canonical.display()
+            display_path(&canonical)
         )));
     }
     // Bound the depth of an *acyclic* chain (the cycle guard above only catches
@@ -101,7 +212,7 @@ pub(crate) fn load_recursive(
         return Err(Error::Other(format!(
             "`extends:` chain exceeds the maximum depth of {MAX_EXTENDS_DEPTH} (at {}); \
              flatten the chain or split the ruleset",
-            canonical.display(),
+            display_path(&canonical),
         )));
     }
 
@@ -128,6 +239,9 @@ pub(crate) fn load_recursive(
     let extends = std::mem::take(&mut config.extends);
     if extends.is_empty() {
         visiting.remove(&canonical);
+        if let Some(key) = memo_key {
+            state.memo.insert(key, config.clone());
+        }
         return Ok(config);
     }
 
@@ -168,74 +282,93 @@ pub(crate) fn load_recursive(
                  use https:// with an SRI hash instead"
             )));
         } else if url.starts_with("https://") {
-            load_remote(url, opts, visiting)?
+            let remote = load_remote(url, opts, &mut state.visiting)?;
+            crate::reject_env_expansion_in(&remote.rules, &remote.templates, url)?;
+            remote
         } else if let Some(spec) = url.strip_prefix("alint://bundled/") {
             load_bundled(spec)?
         } else {
             let target = resolve_relative(&source_dir, url);
             confine_extends_target(&target, url, confine)?;
-            load_recursive(&target, visiting, opts, confine, false, trusted)?
+            load_recursive(&target, state, opts, confine, false, trusted)?
         };
-        // Extended configs cannot introduce `custom:` facts or
-        // `kind: command` rules — both spawn arbitrary processes
-        // on behalf of a ruleset whose code the user didn't
-        // write. Same trust model on both sides.
-        alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
-        reject_command_rules_in(&parent.rules, url)?;
-        // A *spawning* fix op (`git_untrack`) is the RCE analogue of a spawning
-        // rule kind: refuse it from any extended source, at every `require:` depth
-        // (auto-fix.md 5.5). The kind gate above misses it because a spawning
-        // FIXER can hang off a non-spawning kind (`git_untrack` on `file_absent`).
-        crate::reject_spawning_fix_ops_in(&parent.rules, url)?;
-        crate::reject_fix_promotion_in(&parent.rules, url)?;
-        reject_spawning_templates_in(&parent.templates, url)?;
-        // ...and the template analogue: a spawning fix in a `templates:` block
-        // would splice into its referencing rule at finalize, past the gate above.
-        crate::reject_spawning_fix_op_templates_in(&parent.templates, url)?;
-        // ...and the same promotion refusal for a `templates:` block, which a
-        // template instance would otherwise smuggle a `fix.<op>.applicability:
-        // safe` past the rule-level gate above (it expands at finalize time).
-        crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
-        reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
-        reject_baseline_in(&parent.baseline, url)?;
-        // A ruleset may not allowlist ITSELF into auto-applying content fixers;
-        // only the user's top-level config grants that via `trusted_extends:`.
-        crate::reject_trusted_extends_in(&parent.trusted_extends, url)?;
+        gate_extended_source(&parent, url)?;
+        mark_extended_provenance(&mut parent, url);
+        parent.drop_top_level_settings(url);
         parent.rules = apply_rule_filter(parent.rules, entry)?;
-        // W2 content-fixer trust (auto-fix.md 5.5): a REMOTE `extends:` the user has
-        // NOT listed in `trusted_extends:` may PROPOSE a content edit but never
-        // auto-write one -- demote its content-injecting fixers to `suggestion`
-        // before the merge. Local / nested targets (the user's own tree) and bundled
-        // (first-party) sources are honored at their declared tier. A remote is a
-        // leaf (no nested `extends:`), so this caps exactly that source's own rules;
-        // the URL matches with or without its `#sha256-` integrity fragment.
-        //
-        // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
-        // spliced into its referencing rule at `finalize` (after this per-source
-        // gate), so a remote content fixer smuggled through a `templates:` entry
-        // would otherwise escape the cap (the template analogue of
-        // `reject_fix_promotion_templates_in`).
-        //
-        // The raw mappings also receive a monotonic provenance marker. It survives
-        // id-based field merges and template expansion, then `finalize` demotes the
-        // EFFECTIVE fixer. That closes both mixed-source directions: an untrusted
-        // rule instantiating a trusted template, and a trusted rule instantiating a
-        // template partly defined by an untrusted source.
         if url.starts_with("https://") {
             let base = url.split('#').next().unwrap_or(url);
-            let trusted_remote = trusted.iter().any(|t| t == base || t == url);
-            if !trusted_remote {
-                crate::demote_content_fixers_in(&mut parent.rules);
-                crate::demote_content_fixers_in(&mut parent.templates);
-                crate::mark_untrusted_fix_sources_in(&mut parent.rules);
-                crate::mark_untrusted_fix_sources_in(&mut parent.templates);
+            if !trusted.iter().any(|t| t == base || t == url) {
+                cap_untrusted_remote(&mut parent, url)?;
             }
         }
         merged = merge(merged, parent);
     }
     merged = merge(merged, config);
-    visiting.remove(&canonical);
+    state.visiting.remove(&canonical);
+    if let Some(key) = memo_key {
+        state.memo.insert(key, merged.clone());
+    }
     Ok(merged)
+}
+
+/// Record that the `extends:` source `url` shaped `parent`'s rules / templates,
+/// so `finalize` can judge the EFFECTIVE rule after the id-based field-merge has
+/// blurred where each field came from (e.g. refuse any contribution to a
+/// spawning rule, or a remote-assembled `${` env reference).
+fn mark_extended_provenance(parent: &mut RawConfig, url: &str) {
+    crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Extended, url);
+    crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Extended, url);
+    if url.starts_with("https://") {
+        crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Remote, url);
+        crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Remote, url);
+    }
+}
+
+/// Apply the restrictions on a remote `extends:` the user has NOT listed in
+/// `trusted_extends:` (the URL matches with or without its `#sha256-` fragment).
+fn cap_untrusted_remote(parent: &mut RawConfig, url: &str) -> Result<()> {
+    // It may not read the consumer's environment through a `when:` (a boolean
+    // oracle on each variable), including one an instance it shapes assembles
+    // from a template at finalize (hence the provenance mark).
+    // A `vars.*` read is recorded here and refused at finalize when the var's
+    // effective value came from the environment (only known once every local
+    // config has merged).
+    parent.untrusted_when_var_reads =
+        crate::reject_env_reads_in_when(&parent.rules, &parent.templates, url)?;
+    crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::UntrustedRemote, url);
+    // ...and a template it shapes may not splice an env-derived instance var
+    // (`{{vars.token}}`) into the rule a user's instance expands it into.
+    crate::mark_provenance_in(
+        &mut parent.templates,
+        crate::SourceClass::UntrustedRemote,
+        url,
+    );
+    // It may not hide files from every rule (yours included) with `ignore:`.
+    crate::reject_untrusted_ignore_in(&parent.ignore, url)?;
+    // W2 content-fixer trust (auto-fix.md 5.5): an untrusted remote may PROPOSE a
+    // content edit but never auto-write one -- demote its content-injecting fixers
+    // to `suggestion` before the merge. Local / nested targets (the user's own
+    // tree) and bundled (first-party) sources are honored at their declared tier.
+    // A remote is a leaf (no nested `extends:`), so this caps exactly that
+    // source's own rules.
+    //
+    // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
+    // spliced into its referencing rule at `finalize` (after this per-source
+    // gate), so a remote content fixer smuggled through a `templates:` entry
+    // would otherwise escape the cap (the template analogue of
+    // `reject_fix_promotion_templates_in`).
+    //
+    // The raw mappings also receive a monotonic provenance marker. It survives
+    // id-based field merges and template expansion, then `finalize` demotes the
+    // EFFECTIVE fixer. That closes both mixed-source directions: an untrusted
+    // rule instantiating a trusted template, and a trusted rule instantiating a
+    // template partly defined by an untrusted source.
+    crate::demote_content_fixers_in(&mut parent.rules);
+    crate::demote_content_fixers_in(&mut parent.templates);
+    crate::mark_untrusted_fix_sources_in(&mut parent.rules);
+    crate::mark_untrusted_fix_sources_in(&mut parent.templates);
+    Ok(())
 }
 
 fn load_remote(
@@ -281,11 +414,12 @@ fn load_remote(
     }
     if !alint_core::yaml_depth::expansion_within_limit(body_str) {
         return Err(Error::Other(format!(
-            "remote config at {url}: YAML alias expansion exceeds the maximum supported node count ({})",
-            alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
+            "remote config at {url}: YAML alias expansion exceeds the maximum supported size"
         )));
     }
-    let config: RawConfig = serde_yaml_ng::from_str(body_str)?;
+    let config: RawConfig = serde_yaml_ng::from_str(body_str)
+        .map_err(|e| Error::Other(format!("remote config at {url}: YAML parse error: {e}")))?;
+    crate::reject_ambiguous_yaml_in(&config, url.as_str())?;
     if !config.extends.is_empty() {
         return Err(Error::Other(format!(
             "remote config at {url} contains its own `extends:`; \
@@ -300,6 +434,37 @@ fn load_remote(
     }
     visiting.remove(&token);
     Ok(config)
+}
+
+/// Every per-source trust refusal for one `extends:`'d config. Runs before the
+/// config merges, so `url` names the offending source in each error.
+fn gate_extended_source(parent: &RawConfig, url: &str) -> Result<()> {
+    // Extended configs cannot introduce `custom:` facts or
+    // `kind: command` rules — both spawn arbitrary processes
+    // on behalf of a ruleset whose code the user didn't
+    // write. Same trust model on both sides.
+    alint_core::facts::reject_custom_facts_in(&parent.facts, url)?;
+    reject_command_rules_in(&parent.rules, url)?;
+    // A *spawning* fix op (`git_untrack`) is the RCE analogue of a spawning
+    // rule kind: refuse it from any extended source, at every `require:` depth
+    // (auto-fix.md 5.5). The kind gate above misses it because a spawning
+    // FIXER can hang off a non-spawning kind (`git_untrack` on `file_absent`).
+    crate::reject_spawning_fix_ops_in(&parent.rules, url)?;
+    crate::reject_fix_promotion_in(&parent.rules, url)?;
+    reject_spawning_templates_in(&parent.templates, url)?;
+    // ...and the template analogue: a spawning fix in a `templates:` block
+    // would splice into its referencing rule at finalize, past the gate above.
+    crate::reject_spawning_fix_op_templates_in(&parent.templates, url)?;
+    // ...and the same promotion refusal for a `templates:` block, which a
+    // template instance would otherwise smuggle a `fix.<op>.applicability:
+    // safe` past the rule-level gate above (it expands at finalize time).
+    crate::reject_fix_promotion_templates_in(&parent.templates, url)?;
+    reject_allow_out_of_root_in(&parent.allow_out_of_root, url)?;
+    reject_baseline_in(&parent.baseline, url)?;
+    // A ruleset may not allowlist ITSELF into auto-applying content fixers;
+    // only the user's top-level config grants that via `trusted_extends:`.
+    crate::reject_trusted_extends_in(&parent.trusted_extends, url)?;
+    Ok(())
 }
 
 /// Load an `alint://bundled/<name>@<rev>` ruleset from the
@@ -333,6 +498,8 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
         // bug, not the user's config — Internal → CLI exit 3 (M11).
         Error::internal(format!("built-in ruleset '{spec}' failed to parse: {e}"))
     })?;
+    crate::reject_ambiguous_yaml_in(&config, &format!("alint://bundled/{spec}"))
+        .map_err(|e| Error::internal(e.to_string()))?;
     if !config.extends.is_empty() {
         return Err(Error::internal(format!(
             "bundled ruleset '{spec}' declares its own `extends:`"
@@ -380,6 +547,24 @@ fn resolve_relative(source_dir: &Path, entry: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn display_path_strips_the_windows_verbatim_prefix() {
+        // `canonicalize` on Windows yields `\\?\C:\...`; error messages must
+        // show the path the way the user would write it.
+        assert_eq!(
+            display_path(Path::new(r"\\?\C:\repo\.alint.yml")),
+            r"C:\repo\.alint.yml"
+        );
+        assert_eq!(
+            display_path(Path::new(r"\\?\UNC\server\share\.alint.yml")),
+            r"\\server\share\.alint.yml"
+        );
+        assert_eq!(
+            display_path(Path::new("/repo/.alint.yml")),
+            "/repo/.alint.yml"
+        );
+    }
 
     #[test]
     fn confine_none_disables_the_check() {
@@ -456,5 +641,35 @@ mod tests {
         )
         .unwrap();
         assert!(crate::load(&tmp.path().join(".alint.yml")).is_ok());
+    }
+
+    #[test]
+    fn diamond_extends_chain_loads_each_file_once() {
+        // Audit 2026-10: `cN` extends `[./cN+1.yml, ./cN+1.yml]` at every level,
+        // so without memoization the bottom file loads 2^depth times (depth 18
+        // measured at 18s; depth 20 is minutes). Each level also contributes a
+        // rule so the composed result is checked, not just the runtime.
+        let tmp = tempfile::tempdir().unwrap();
+        let depth = 20;
+        for i in 0..=depth {
+            let extends = if i < depth {
+                format!("extends: [./c{n}.yml, ./c{n}.yml]\n", n = i + 1)
+            } else {
+                String::new()
+            };
+            let body = format!(
+                "version: 1\n{extends}rules:\n  - id: r{i}\n    kind: file_exists\n    \
+                 paths: README.md\n    level: warning\n"
+            );
+            std::fs::write(tmp.path().join(format!("c{i}.yml")), body).unwrap();
+        }
+        let started = std::time::Instant::now();
+        let cfg = crate::load(&tmp.path().join("c0.yml")).unwrap();
+        assert!(
+            started.elapsed() < std::time::Duration::from_secs(5),
+            "diamond chain took {:?}",
+            started.elapsed()
+        );
+        assert_eq!(cfg.rules.len(), depth + 1);
     }
 }
