@@ -16,7 +16,7 @@ run_summary() {
   env -i PATH="$PATH" GITHUB_STEP_SUMMARY=/dev/null \
     RUST_CHANGED=false DOCS_CHANGED=false BENCH_CHANGED=false \
     EXAMPLES_CHANGED=false EDITORS_CHANGED=false SUPPLY_CHAIN_CHANGED=false \
-    PACKAGING_CHANGED=false \
+    PACKAGING_CHANGED=false SHELL_CHANGED=false \
     SECRETS_INVENTORY_RESULT=success FMT_RESULT=skipped MSRV_RESULT=skipped \
     CLIPPY_RESULT=skipped TEST_RESULT=skipped AUDIT_RESULT=skipped \
     DENY_RESULT=skipped SUPPLY_CHAIN_RESULT=skipped BUILD_RESULT=skipped \
@@ -46,6 +46,24 @@ expect "changes cancelled"           fail CHANGES_RESULT=cancelled
 expect "changes result missing"      fail
 expect "a job failed"                fail CHANGES_RESULT=success DENY_RESULT=failure
 expect "packaging failed"            fail CHANGES_RESULT=success PACKAGING_RESULT=failure
+expect "shell-only route, harness failed" fail CHANGES_RESULT=success SHELL_CHANGED=true SHELL_TESTS_RESULT=failure
+
+# A shell-only route must render as a real result, not "(no changes)".
+row=$(env -i PATH="$PATH" CHANGES_RESULT=success RUST_CHANGED=false DOCS_CHANGED=false \
+  BENCH_CHANGED=false EXAMPLES_CHANGED=false EDITORS_CHANGED=false \
+  SUPPLY_CHAIN_CHANGED=false PACKAGING_CHANGED=false SHELL_CHANGED=true \
+  SECRETS_INVENTORY_RESULT=success FMT_RESULT=skipped MSRV_RESULT=skipped \
+  CLIPPY_RESULT=skipped TEST_RESULT=skipped AUDIT_RESULT=skipped DENY_RESULT=skipped \
+  SUPPLY_CHAIN_RESULT=skipped BUILD_RESULT=skipped DOCS_JOB_RESULT=skipped \
+  DOGFOOD_RESULT=skipped BENCH_SMOKE_RESULT=skipped EXAMPLES_RESULT=skipped \
+  SHELL_TESTS_RESULT=success EDITORS_RESULT=skipped PACKAGING_RESULT=skipped \
+  bash ci/scripts/summary.sh 2>/dev/null | grep '^| Shell tests ' || true)
+if [[ "$row" == "| Shell tests | pass |" ]]; then
+  pass=$((pass + 1))
+else
+  echo "  FAIL: shell-only route renders as '${row}', expected '| Shell tests | pass |'" >&2
+  fail=$((fail + 1))
+fi
 
 python3 - <<'PY'
 import re
@@ -62,7 +80,16 @@ if missing:
     sys.exit(1)
 script = Path('ci/scripts/summary.sh').read_text(encoding='utf-8')
 envs = re.findall(r'^\s+([A-Z_]+_RESULT): \$\{\{ needs\.', body, re.MULTILINE)
+envs += re.findall(r'^\s+([A-Z_]+_CHANGED): \$\{\{ needs\.changes\.outputs\.', body, re.MULTILINE)
 unused = [e for e in envs if f'${e}' not in script and '${' + e not in script]
+# Every routing flag the changes job exports must reach the summary.
+outputs = re.search(r'^  changes:\n(?:.*\n)*?    outputs:\n(?P<o>(?:      .+\n)+)', ci, re.MULTILINE).group('o')
+flags = re.findall(r'^      ([a-z_]+): \$\{\{ steps\.detect\.outputs\.', outputs, re.MULTILINE)
+forwarded = re.findall(r'needs\.changes\.outputs\.([a-z_]+)', body)
+missing_flags = [f for f in flags if f not in forwarded]
+if missing_flags:
+    print(f'[test-summary] ci.yml summary does not forward routing flags: {missing_flags}', file=sys.stderr)
+    sys.exit(1)
 if unused:
     print(f'[test-summary] summary.sh ignores forwarded results: {unused}', file=sys.stderr)
     sys.exit(1)
