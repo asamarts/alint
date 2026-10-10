@@ -177,12 +177,17 @@ struct Lexer<'a> {
 
 impl<'a> Lexer<'a> {
     fn new(text: &'a str) -> Self {
-        let b = text.as_bytes();
-        // libyaml's reader consumes a leading BOM before the scanner sees input.
-        let i = if b.starts_with(b"\xEF\xBB\xBF") { 3 } else { 0 };
+        // No BOM special-casing here: `serde_yaml_ng` sets the parser's encoding
+        // to UTF-8 explicitly, so libyaml's reader never runs its BOM detection
+        // and hands a leading BOM to the scanner. The scanner skips it in
+        // `scan_to_next_token` (at column 0, like any line start) with an
+        // ordinary `SKIP`, which ADVANCES the column: a `---` right after a BOM
+        // sits at column 1 and is not a document marker. Stripping the BOM up
+        // front left the lexer one column behind libyaml on line 1, which hid
+        // flow bombs and aliases behind a `\u{feff}---`.
         Self {
-            b,
-            i,
+            b: text.as_bytes(),
+            i: 0,
             line: 0,
             col: 0,
             flow: 0,
@@ -400,6 +405,8 @@ impl<'a> Lexer<'a> {
     /// one it errors and stops.)
     fn scan_to_next_token(&mut self) {
         loop {
+            // libyaml skips ONE BOM at column 0 as an ordinary character (the
+            // column advances to 1), so a second BOM starts a plain scalar.
             if self.col == 0 && self.b[self.i.min(self.b.len())..].starts_with(b"\xEF\xBB\xBF") {
                 self.advance();
             }
@@ -999,6 +1006,98 @@ mod tests {
         assert!(!expansion_within_limit_with(&doc, 10_000));
     }
 
+    #[test]
+    fn leading_bom_does_not_desync_the_line_one_column() {
+        // Regression: the lexer stripped a leading BOM without advancing the
+        // column, but libyaml (UTF-8 encoding set explicitly by serde_yaml_ng)
+        // skips it as a column-0 character, so `\u{feff}---` is NOT a document
+        // marker to libyaml. The off-by-one hid everything after it inside a
+        // phantom single-quoted scalar: a 60 000-deep flow bomb passed the guard
+        // (7.7 s in libyaml), and an alias bomb skipped the expansion budget
+        // (3.5 GB). Reachable through config / `extends:` / `suggest` bodies,
+        // which are guarded on the raw text (`Format::parse` strips BOMs first).
+        let b = bomb(MAX_YAML_FLOW_DEPTH + 76);
+        for boms in ["\u{feff}", "\u{feff}\u{feff}"] {
+            let flow = format!("{boms}--- 'x: {b}\n'\n");
+            assert!(libyaml_sees_deep_nesting(&flow), "{boms:?}: real nesting");
+            assert!(
+                !flow_depth_within_limit(&flow),
+                "{boms:?}: hidden flow bomb"
+            );
+            let alias = format!("{boms}--- 'x: *undefined_zz\n'\n");
+            assert!(libyaml_sees_alias(&alias), "{boms:?}: real alias");
+            assert!(contains_alias(&alias), "{boms:?}: hidden alias");
+        }
+        // The reported alias-bomb shape, end to end.
+        let anchor = "1,".repeat(1000);
+        let refs = "*a,".repeat(50);
+        let doc = format!(
+            "\u{feff}--- 'k: {{a: &a [{anchor}], b: [{refs}], c: \"{{{{env.HOME}}}}\"}}\n'\n"
+        );
+        assert!(!expansion_within_limit_with(&doc, 10_000));
+        // A BOM before an ordinary document still scans like the document.
+        assert!(flow_depth_within_limit("\u{feff}---\na: [1, [2]]\n"));
+        assert!(!contains_alias("\u{feff}---\na: '*x'\n"));
+    }
+
+    /// The body of the differential parity property (see
+    /// [`scanner_never_misses_what_libyaml_sees`]), shared by its BOM variant.
+    fn check_parity(prefix: &str, sep: &str) -> Result<(), proptest::test_runner::TestCaseError> {
+        let deep = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(300));
+        let shallow = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(1));
+        if libyaml_bomb_causes_deep_nesting(&deep, &shallow) {
+            proptest::prop_assert!(
+                !flow_depth_within_limit_with(&deep, 200),
+                "scanner missed a real flow bomb: {deep:?}"
+            );
+        }
+        let alias = format!("{prefix}{sep}*undefined_zz\nc: \"\"\n");
+        if libyaml_sees_alias(&alias) {
+            proptest::prop_assert!(contains_alias(&alias), "missed alias: {alias:?}");
+        }
+        Ok(())
+    }
+
+    const PARITY_ALPHABET: &[&str] = &[
+        "\"",
+        "'",
+        "''",
+        "#",
+        " #",
+        " ",
+        "\n",
+        "  ",
+        "|",
+        ">",
+        "|2",
+        ">-",
+        "-",
+        "- ",
+        "?",
+        "? ",
+        ":",
+        ": ",
+        "k: ",
+        "x",
+        "[",
+        "]",
+        "{",
+        "}",
+        ",",
+        "&a ",
+        "!t ",
+        "*a ",
+        "\\",
+        "\t",
+        "\u{85}",
+        "\r\n",
+        "---\n",
+        "a#b",
+        "k: |\n  ",
+        "- k: |\n    ",
+    ];
+    const PARITY_SEPS: &[&str] = &["\n", " ", "\n  ", ", ", "\nb: "];
+
     proptest::proptest! {
         /// Differential parity against the real parser: whatever adversarial
         /// prefix precedes a deep flow bomb, if libyaml nests it the scanner must
@@ -1007,29 +1106,28 @@ mod tests {
         #[test]
         fn scanner_never_misses_what_libyaml_sees(
             prefix in proptest::collection::vec(
-                proptest::sample::select(vec![
-                    "\"", "'", "''", "#", " #", " ", "\n", "  ", "|", ">", "|2", ">-",
-                    "-", "- ", "?", "? ", ":", ": ", "k: ", "x", "[", "]", "{", "}",
-                    ",", "&a ", "!t ", "*a ", "\\", "\t", "\u{85}", "\r\n", "---\n",
-                    "a#b", "k: |\n  ", "- k: |\n    ",
-                ]),
+                proptest::sample::select(PARITY_ALPHABET), 0..14,
+            ),
+            sep in proptest::sample::select(PARITY_SEPS),
+        ) {
+            check_parity(&prefix.concat(), sep)?;
+        }
+
+        /// The same parity behind one or two leading BOMs, with the document
+        /// markers and quotes that a line-1 column desync turns into hiding
+        /// places (a BOM can also follow a line break, so the alphabet has it).
+        #[test]
+        fn scanner_never_misses_what_libyaml_sees_with_bom(
+            boms in 1usize..3,
+            prefix in proptest::collection::vec(
+                proptest::sample::select(
+                    [PARITY_ALPHABET, &["---", "--- ", "--- '", "...", "\u{feff}", "%"]].concat()
+                ),
                 0..14,
             ),
-            sep in proptest::sample::select(vec!["\n", " ", "\n  ", ", ", "\nb: "]),
+            sep in proptest::sample::select(PARITY_SEPS),
         ) {
-            let prefix = prefix.concat();
-            let deep = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(300));
-            let shallow = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(1));
-            if libyaml_bomb_causes_deep_nesting(&deep, &shallow) {
-                proptest::prop_assert!(
-                    !flow_depth_within_limit_with(&deep, 200),
-                    "scanner missed a real flow bomb: {deep:?}"
-                );
-            }
-            let alias = format!("{prefix}{sep}*undefined_zz\nc: \"\"\n");
-            if libyaml_sees_alias(&alias) {
-                proptest::prop_assert!(contains_alias(&alias), "missed alias: {alias:?}");
-            }
+            check_parity(&format!("{}{}", "\u{feff}".repeat(boms), prefix.concat()), sep)?;
         }
     }
 
