@@ -28,18 +28,15 @@ jobs:
   # but a release must verify the whole tree regardless of the diff.
   #
   # Parity with ci.yml correctness jobs: fmt, msrv (+ dep-floors), clippy,
-  # test, build, docs, dogfood (+ demo-drift), examples, shell-tests, deny.
+  # test, build, docs, dogfood (+ demo-drift), examples, shell-tests, deny,
+  # audit.
   # The MSRV leg matters most here: every published crate advertises
   # `rust-version` from [workspace.package], so it must actually compile on
-  # that toolchain before publish-crates runs. deny.sh bootstraps
-  # cargo-deny on demand so the license / supply-chain gate works on
-  # ubuntu-latest too. Deliberately NOT here:
-  #   audit       — audit.sh is advisory-only by design (never fails
-  #                 the pipeline) and cargo-audit is absent on
-  #                 ubuntu-latest; ci.yml's dedicated Audit job
-  #                 (self-hosted) also runs on tag-push and still
-  #                 surfaces the advisory. (deny.sh runs its own
-  #                 advisory pass too, likewise non-blocking.)
+  # that toolchain before publish-crates runs. deny.sh and audit.sh
+  # bootstrap cargo-deny / cargo-audit on demand so the license,
+  # supply-chain and RustSec gates work on ubuntu-latest too; both FAIL on a
+  # vulnerability advisory (waivers: deny.toml [advisories].ignore), so a
+  # release cannot ship a known-vulnerable dependency. Deliberately NOT here:
   #   bench-smoke — a perf smoke check, not a correctness gate.
   # `cargo doc` warnings bypass cargo check/test/clippy, so the
   # rustdoc gate (docs.sh) must run in every release preflight.
@@ -102,8 +99,10 @@ jobs:
         run: ci/scripts/shell-tests.sh
       - name: packaging (install.sh / npm shim / Dockerfile / pre-commit hooks)
         run: ci/scripts/packaging-check.sh
-      - name: deny (licenses + bans + sources; advisories advisory)
+      - name: deny (licenses + bans + sources + advisories, blocking)
         run: ci/scripts/deny.sh
+      - name: audit (RustSec via cargo audit, blocking on vulnerabilities)
+        run: ci/scripts/audit.sh
       - name: workspace dependency floors (<= workspace.package.version)
         run: bash ci/scripts/check-workspace-dep-floors.sh
       - name: msrv (cargo check on [workspace.package].rust-version)

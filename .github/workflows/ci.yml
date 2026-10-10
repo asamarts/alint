@@ -194,12 +194,15 @@ jobs:
           key: ci-test
       - run: ci/scripts/test.sh
 
+  # Blocking on RustSec vulnerabilities, like Deny's advisories pass. Also on
+  # `supply_chain`: its waiver list is deny.toml [advisories].ignore, so a PR
+  # adding a waiver must run the gate that honours it.
   audit:
     name: Audit
     needs: [changes, fmt]
     if: >-
       !cancelled() && !failure()
-      && needs.changes.outputs.rust == 'true'
+      && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.supply_chain == 'true')
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -211,8 +214,9 @@ jobs:
           key: ci-audit
       - run: ci/scripts/audit.sh
 
-  # Also on `supply_chain`: deny.toml (the license / bans / sources policy)
-  # flips only supply_chain, so a PR loosening the policy must still run it.
+  # Also on `supply_chain`: deny.toml (the license / bans / sources / advisory
+  # policy) flips only supply_chain, so a PR loosening the policy must still
+  # run it.
   deny:
     name: Deny
     needs: [changes, fmt]

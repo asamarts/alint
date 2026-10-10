@@ -87,6 +87,8 @@ def job_if(name):
 errors = []
 if "needs.changes.outputs.supply_chain == 'true'" not in job_if('deny'):
     errors.append("Deny job must run on supply_chain changes (deny.toml)")
+if "needs.changes.outputs.supply_chain == 'true'" not in job_if('audit'):
+    errors.append("Audit job must run on supply_chain changes (its waivers live in deny.toml)")
 if "needs.changes.outputs.packaging == 'true'" not in job_if('packaging'):
     errors.append("Packaging job must gate on needs.changes.outputs.packaging")
 if 'ci/scripts/packaging-check.sh' not in ci:

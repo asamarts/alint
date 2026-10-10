@@ -169,7 +169,7 @@ checklist so the release-gated pieces land and nothing drifts:
 
 | Workflow | Triggered by | What it does | Time |
 |---|---|---|---|
-| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit, deny, build, bench-smoke, examples, shell-tests, editors, and the advisory perf-gate. Self-hosted Linux. | ~5 min |
+| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit + deny (both blocking on RustSec vulnerabilities), build, bench-smoke, examples, shell-tests, editors, and the advisory perf-gate. Self-hosted Linux. | ~5 min |
 | `release.yml` | tag push only | preflight gate → supply-chain (SBOM + license bundle) → cross-platform build matrix → GitHub Release (cosign-signed `SHA256SUMS` + build-provenance + SBOM attestations) → ghcr.io Docker (attested + cosign-signed by digest) → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
 | `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts alint.org's three install-pin sites reference the latest tag from this release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
@@ -259,6 +259,16 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   [`release-credentials.md`](docs/development/release-credentials.md)), then
   `gh run rerun <id> --failed`. (npm no longer carries a PAT: it publishes tokenlessly
   via OIDC Trusted Publishing, see [npm Trusted Publishing](#npm-trusted-publishing).)
+- **A RustSec advisory blocking the preflight.** `deny.sh` and `audit.sh` fail on
+  any vulnerability advisory (unmaintained / unsound / yanked only warn), so a
+  CVE published between merge and tag stops the release before anything
+  publishes (every publisher `needs:` the preflight). Prefer upgrading the
+  dependency; only if the advisory provably does not affect alint, waive it in
+  `deny.toml` `[advisories].ignore` as `{ id = "RUSTSEC-YYYY-NNNN", reason = "..." }`
+  (the one list both gates honour). Land the fix on `main`. Because nothing has
+  published, this is the one case where the tag may be moved: delete it
+  (`git push --delete origin vX.Y.Z && git tag -d vX.Y.Z`) and tag the fixed
+  commit; if anything did publish, cut the next patch instead.
 - **A build-matrix flake blocking crates.io** (`MP-M1`). `publish-crates` deliberately
   `needs: build` (a cross-platform compile gate before the irreversible publish), so a
   flaky windows or aarch64 leg can block it. Re-run once the leg heals with

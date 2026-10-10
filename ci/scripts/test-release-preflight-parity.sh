@@ -27,7 +27,6 @@ failures = []
 EXEMPT = {
     'ci/scripts/detect-changes.sh': 'PR change routing; a release verifies the whole tree',
     'ci/scripts/summary.sh': 'aggregate status bookkeeping',
-    'ci/scripts/audit.sh': 'advisory-only by design (never fails); ci.yml Audit runs on the tag too',
     'ci/scripts/bench-smoke.sh': 'perf smoke, not a correctness gate',
     'ci/scripts/det-perf-gate.sh': 'advisory PR-vs-merge-base perf gate (needs a base)',
     'ci/scripts/supply-chain-artifacts.sh': 'release.yml runs it in its own supply-chain job',
@@ -65,7 +64,7 @@ for script in sorted(set(EXEMPT) - ci_scripts):
     failures.append(f'stale exemption: ci.yml no longer runs {script}')
 
 for required in ('ci/scripts/msrv.sh', 'ci/scripts/check-workspace-dep-floors.sh',
-                 'ci/scripts/demo-drift.sh'):
+                 'ci/scripts/demo-drift.sh', 'ci/scripts/deny.sh', 'ci/scripts/audit.sh'):
     if required not in pre_scripts:
         failures.append(f'release.yml preflight must run {required}')
     if required not in ci_scripts:

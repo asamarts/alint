@@ -67,7 +67,7 @@ row() {
   row "MSRV"         "$MSRV_RESULT"        "$RUST_CHANGED"
   row "Clippy"       "$CLIPPY_RESULT"      "$RUST_CHANGED"
   row "Test"         "$TEST_RESULT"        "$RUST_CHANGED"
-  row "Audit"        "$AUDIT_RESULT"       "$RUST_CHANGED"
+  row "Audit"        "$AUDIT_RESULT"       "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Deny"         "$DENY_RESULT"        "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Supply chain" "$SUPPLY_CHAIN_RESULT" "$SUPPLY_CHAIN_CHANGED"
   row "Build"        "$BUILD_RESULT"       "$RUST_CHANGED"
