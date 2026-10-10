@@ -298,20 +298,27 @@ impl ManifestPredicate {
     /// [`FileIndex`]. An unparseable manifest / bad extract yields the empty set
     /// (the engine warns); the predicate then contributes nothing.
     ///
-    /// The result is in DECLARED order (first occurrence kept): a workspace
+    /// The result is in DECLARED order: a workspace
     /// entry prefixed `!` (`!packages/internal` in a pnpm / npm `workspaces`
     /// list) is an EXCLUDE, resolved like any other entry and returned with a
     /// leading `!` (e.g. `!packages/internal`). [`ManifestSet::from_paths`]
     /// evaluates the entries in order, last match wins. Before, the `!` entry
     /// was resolved as a literal path that matched nothing, so the excluded
     /// package silently stayed in scope (audit 2026-10 finding 8).
+    ///
+    /// A repeated entry keeps only its LAST occurrence. Under last-match-wins an
+    /// earlier copy can never decide (the later identical entry matches the
+    /// same files and comes after it), so dropping it is exact; keeping the
+    /// FIRST occurrence instead dropped a later re-include, and
+    /// `["packages/*", "!packages/internal", "packages/*"]` wrongly excluded
+    /// `packages/internal`.
     pub(crate) fn resolve_set(&self, text: &str) -> Vec<PathBuf> {
         let base = self.source.parent().unwrap_or_else(|| Path::new(""));
         let Ok(raw) = extract_values(&self.extract, text) else {
             return Vec::new();
         };
-        let mut seen: HashSet<PathBuf> = HashSet::new();
-        raw.into_iter()
+        let resolved: Vec<PathBuf> = raw
+            .into_iter()
             .filter(|e| !is_non_literal(e))
             .filter_map(|entry| {
                 let (negated, entry) = match entry.strip_prefix('!') {
@@ -345,8 +352,13 @@ impl ManifestPredicate {
                     resolved
                 })
             })
-            .filter(|p| seen.insert(p.clone()))
-            .collect()
+            .collect();
+        // Keep each entry's LAST occurrence (see above): walk backwards, then
+        // restore declared order.
+        let mut seen: HashSet<&PathBuf> = HashSet::new();
+        let mut keep: Vec<&PathBuf> = resolved.iter().rev().filter(|p| seen.insert(*p)).collect();
+        keep.reverse();
+        keep.into_iter().cloned().collect()
     }
 }
 
@@ -1464,16 +1476,47 @@ mod tests {
         let f = manifest_filter(
             "include_manifest_paths:\n  source: web/package.json\n  extract: { json: \"$.workspaces[*]\" }",
         );
-        let text = r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/*"] }"#;
+        let text = r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/app"] }"#;
         let set = f.manifest_predicates()[0].resolve_set(text);
         assert_eq!(
             set,
             vec![
                 PathBuf::from("web/packages/*"),
                 PathBuf::from("!web/packages/internal"),
+                PathBuf::from("web/packages/app"),
             ],
-            "declared order, `!` kept, duplicate dropped"
+            "declared order, `!` kept"
         );
+    }
+
+    #[test]
+    fn resolve_set_dedup_keeps_the_last_occurrence_so_a_re_include_wins() {
+        // A repeated positive entry after a negation is a re-include under
+        // last-match-wins, exactly like a distinct one (`packages/int*`). The
+        // first-occurrence dedup dropped it and excluded `internal`.
+        let f = manifest_filter(
+            "include_manifest_paths:\n  source: package.json\n  extract: { json: \"$.workspaces[*]\" }",
+        );
+        let resolve = |text: &str| {
+            let set = f.manifest_predicates()[0].resolve_set(text);
+            ManifestSet::from_paths(set)
+        };
+        let dup =
+            resolve(r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/*"] }"#);
+        let distinct =
+            resolve(r#"{ "workspaces": ["packages/*", "!packages/internal", "packages/int*"] }"#);
+        for set in [&dup, &distinct] {
+            assert!(set.contains_file(Path::new("packages/internal/a.txt")));
+            assert!(set.contains_file(Path::new("packages/app/a.txt")));
+        }
+        // A plain duplicate collapses to its last position.
+        let set =
+            f.manifest_predicates()[0].resolve_set(r#"{ "workspaces": ["a", "!b", "a", "!b"] }"#);
+        assert_eq!(set, vec![PathBuf::from("a"), PathBuf::from("!b")]);
+        // ...and the exclusion still holds when nothing re-includes it.
+        let set =
+            resolve(r#"{ "workspaces": ["packages/*", "packages/*", "!packages/internal"] }"#);
+        assert!(!set.contains_file(Path::new("packages/internal/a.txt")));
     }
 
     #[test]
