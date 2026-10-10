@@ -387,6 +387,29 @@ const _: () = assert!(
 /// one ordinary per-file parse-error violation.
 const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
 
+/// Maximum DISTINCT namespace prefixes (incl. the default namespace) in scope at
+/// any element. roxmltree 0.20 resolves namespaces per element that declares
+/// any `xmlns`: it copies each of the parent's in-scope bindings after a linear
+/// "already redeclared?" scan, so one such element costs O(P^2) in the P
+/// bindings in scope, and every prefixed name lookup costs O(P). Unbounded, the
+/// depth x attribute caps still allow P = 128 x 256: 100 nested elements each
+/// declaring 256 prefixes, then ten `<x xmlns:z="u"/>` leaves (448 KB) took
+/// 32-40 s to parse. Real documents bind far fewer -- a Word `document.xml` root
+/// declares ~30-40, SVG / XAML / SOAP / `pom.xml` / `.csproj` a handful -- so 128
+/// is ~3x the heaviest real case.
+const MAX_XML_NAMESPACES_IN_SCOPE: usize = 128;
+
+/// Budget for roxmltree's whole-document namespace-resolution work, in units of
+/// its inner-loop steps (each declaring element with P bindings inherited and D
+/// of its own costs ~(P + 1) x (P + D)). The in-scope cap bounds ONE element, but
+/// a max-size file can repeat the declaring element ~1.5M times: a root binding
+/// 64 prefixes over 1.5M `<x xmlns:z="u"/>` children took 9.4 s (vs 0.4 s
+/// without the `xmlns`). Measured ~1.5 ns per unit, so 512M units bounds the
+/// overhead to ~0.75 s, while a large generated SOAP / .NET-serializer document
+/// (an `xmlns` on every element, a few bindings in scope: ~30 units each) stays
+/// orders of magnitude below it.
+const MAX_XML_NAMESPACE_WORK: usize = 512 * 1024 * 1024;
+
 /// Conservatively bound the raw XML's element-nesting DEPTH and per-element
 /// attribute WIDTH BEFORE `roxmltree::Document::parse` sees it, in one linear scan.
 /// `Document::parse` descends recursively per element and overflows the stack —
@@ -394,7 +417,9 @@ const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
 /// levels); the `element_to_value` [`MAX_XML_DEPTH`] guard is post-parse, so it
 /// only catches depths the parser already survived. It also validates attribute
 /// uniqueness in O(n^2) per element (see [`MAX_XML_ATTRS_PER_ELEMENT`]), a separate
-/// wall-clock `DoS`. A cheap linear pre-scan rejects an over-deep OR over-wide
+/// wall-clock `DoS`, and resolves namespaces in O(P^2) per declaring element (see
+/// [`MAX_XML_NAMESPACES_IN_SCOPE`] / [`MAX_XML_NAMESPACE_WORK`]), a third. A
+/// cheap linear pre-scan rejects an over-deep, over-wide or namespace-heavy
 /// document here (as one ordinary per-file parse-error violation) so a crafted or
 /// accidental `<a><a>…` / `<r a0.. a1..>` file can never abort or hang the run.
 /// Comment / CDATA / PI regions are skipped so their contents don't count toward
@@ -416,12 +441,17 @@ const MAX_XML_ATTRS_PER_ELEMENT: usize = 256;
 /// the markup that follows. Hidden-close fixtures are probed against the real
 /// parser in the tests.
 fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
-    xml_within_limits(text, MAX_XML_DEPTH)
+    xml_within_limits(text, MAX_XML_DEPTH, MAX_XML_NAMESPACES_IN_SCOPE)
 }
 
-/// [`xml_within_parse_limits`] with an explicit depth ceiling, so the parity
-/// property test can probe the scan at the REAL parser's depth.
-fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), String> {
+/// [`xml_within_parse_limits`] with explicit depth and in-scope-namespace
+/// ceilings, so the parity property tests can probe the scan at the REAL
+/// parser's depth / namespace count.
+fn xml_within_limits(
+    text: &str,
+    max_depth: usize,
+    max_namespaces: usize,
+) -> std::result::Result<(), String> {
     /// Byte offset just past the first `needle` at or after `from`, or EOF.
     fn skip_past(text: &str, from: usize, needle: &str) -> usize {
         text.get(from..)
@@ -459,6 +489,11 @@ fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), St
         pos = i;
     }
     let mut depth = 0usize;
+    let mut ns = NamespaceScope {
+        max_in_scope: max_namespaces,
+        ..NamespaceScope::default()
+    };
+    let mut decls: Vec<&[u8]> = Vec::new();
     while pos < bytes.len() {
         if bytes[pos] != b'<' {
             pos += 1;
@@ -467,6 +502,7 @@ fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), St
         let rest = &bytes[pos..];
         if rest.starts_with(b"</") {
             depth = depth.saturating_sub(1);
+            ns.close();
             pos += 2;
         } else if rest.starts_with(b"<!--") {
             pos = skip_past(text, pos + 4, "-->");
@@ -480,54 +516,15 @@ fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), St
             // after it is hidden from the scan.
             pos += 2;
         } else {
-            // `<tag …>` or `<tag/>`: find the closing `>` respecting quoted
-            // attribute values (a `>` inside `"…"`/`'…'` isn't the tag end).
-            // Count attributes by the `=` signs OUTSIDE quotes: XML requires
-            // quoted values, so each attribute contributes exactly one unquoted
-            // `=`, and a `=` inside a value is skipped with the quote run. A `<`
-            // ends the scan even inside quotes (roxmltree rejects it there), so
-            // a runaway quote cannot hide the elements after it.
             let tag = rest;
-            let mut end = 1usize;
-            let mut quote: Option<u8> = None;
-            let mut attrs = 0usize;
-            let mut closed = false;
-            while end < tag.len() {
-                let ch = tag[end];
-                if ch == b'<' {
-                    break;
-                }
-                if let Some(q) = quote {
-                    if ch == q {
-                        quote = None;
-                    }
-                } else if ch == b'"' || ch == b'\'' {
-                    quote = Some(ch);
-                } else if ch == b'=' {
-                    attrs += 1;
-                    // Bail the instant the cap is exceeded, so a pathological
-                    // single tag (up to `MAX_ANALYZE_BYTES`) can't even make the
-                    // pre-scan read to its end -- work stays bounded by the cap,
-                    // not the tag size.
-                    if attrs > MAX_XML_ATTRS_PER_ELEMENT {
-                        break;
-                    }
-                } else if ch == b'>' {
-                    closed = true;
-                    break;
-                }
-                end += 1;
-            }
-            if attrs > MAX_XML_ATTRS_PER_ELEMENT {
-                return Err(format!(
-                    "an XML element has more than the maximum supported number of \
-                     attributes ({MAX_XML_ATTRS_PER_ELEMENT})"
-                ));
-            }
+            let (end, closed) = scan_start_tag(tag, &mut decls)?;
             // Self-closing `<tag/>` opens and closes, so it adds no depth. An
             // unterminated tag conservatively counts as an open.
             let self_closing = closed && end >= 2 && tag[end - 1] == b'/';
-            if !self_closing {
+            ns.open(&decls)?;
+            if self_closing {
+                ns.close();
+            } else {
                 depth += 1;
                 if depth > max_depth {
                     return Err(format!(
@@ -542,13 +539,152 @@ fn xml_within_limits(text: &str, max_depth: usize) -> std::result::Result<(), St
     Ok(())
 }
 
+/// Scan a start tag (`tag` begins at its `<`) for [`xml_within_limits`]: returns
+/// the offset where the scan stopped and whether that is the closing `>`, and
+/// fills `decls` with the tag's namespace declarations.
+///
+/// Finds the closing `>` respecting quoted attribute values (a `>` inside
+/// `"…"`/`'…'` isn't the tag end). Counts attributes by the `=` signs OUTSIDE
+/// quotes: XML requires quoted values, so each attribute contributes exactly one
+/// unquoted `=`, and a `=` inside a value is skipped with the quote run. A `<`
+/// ends the scan even inside quotes (roxmltree rejects it there), so a runaway
+/// quote cannot hide the elements after it. Namespace declarations are the
+/// attributes NAMED `xmlns` / `xmlns:prefix`: the name is read back from each
+/// unquoted `=` (XML allows blanks around it).
+fn scan_start_tag<'a>(
+    tag: &'a [u8],
+    decls: &mut Vec<&'a [u8]>,
+) -> std::result::Result<(usize, bool), String> {
+    let mut end = 1usize;
+    let mut quote: Option<u8> = None;
+    let mut attrs = 0usize;
+    decls.clear();
+    while end < tag.len() {
+        let ch = tag[end];
+        if ch == b'<' {
+            break;
+        }
+        if let Some(q) = quote {
+            if ch == q {
+                quote = None;
+            }
+        } else if ch == b'"' || ch == b'\'' {
+            quote = Some(ch);
+        } else if ch == b'=' {
+            attrs += 1;
+            // Bail the instant the cap is exceeded, so a pathological single
+            // tag (up to `MAX_ANALYZE_BYTES`) can't even make the pre-scan read
+            // to its end -- work stays bounded by the cap, not the tag size.
+            if attrs > MAX_XML_ATTRS_PER_ELEMENT {
+                return Err(format!(
+                    "an XML element has more than the maximum supported number of \
+                     attributes ({MAX_XML_ATTRS_PER_ELEMENT})"
+                ));
+            }
+            if let Some(prefix) = xmlns_prefix(&tag[..end]) {
+                decls.push(prefix);
+            }
+        } else if ch == b'>' {
+            return Ok((end, true));
+        }
+        end += 1;
+    }
+    Ok((end, false))
+}
+
+/// The namespace prefix (`b""` for the default namespace) when the attribute
+/// whose `=` ends `tag_to_eq` is a namespace declaration (`xmlns` /
+/// `xmlns:prefix`), read back over optional blanks and the name.
+fn xmlns_prefix(tag_to_eq: &[u8]) -> Option<&[u8]> {
+    let is_blank = |c: u8| matches!(c, b' ' | b'\t' | b'\r' | b'\n');
+    let name_end = tag_to_eq.iter().rposition(|&c| !is_blank(c))? + 1;
+    let name_start = tag_to_eq[..name_end]
+        .iter()
+        .rposition(|&c| is_blank(c) || matches!(c, b'"' | b'\'' | b'<' | b'/' | b'='))
+        .map_or(0, |i| i + 1);
+    let name = &tag_to_eq[name_start..name_end];
+    if name == b"xmlns" {
+        Some(b"")
+    } else {
+        name.strip_prefix(b"xmlns:")
+    }
+}
+
+/// The namespace bindings in scope during [`xml_within_limits`]'s scan, mirroring
+/// what roxmltree 0.20 keeps per element: the DISTINCT prefixes bound by the open
+/// elements (a redeclared prefix shadows, it doesn't add), and the cumulative
+/// cost of its per-declaring-element resolution (see
+/// [`MAX_XML_NAMESPACE_WORK`]).
+#[derive(Default)]
+struct NamespaceScope<'a> {
+    /// Open-element bindings per prefix (a redeclaration nests).
+    bound: std::collections::HashMap<&'a [u8], u32>,
+    /// Every declaration of every open element, in document order.
+    decls: Vec<&'a [u8]>,
+    /// Per open element, how many entries of `decls` it pushed.
+    open: Vec<usize>,
+    work: usize,
+    /// [`MAX_XML_NAMESPACES_IN_SCOPE`] in production.
+    max_in_scope: usize,
+}
+
+impl<'a> NamespaceScope<'a> {
+    /// An element opens with `own` declarations: bind them and charge roxmltree's
+    /// resolution (each inherited binding copied after a scan of the element's
+    /// own range), failing past either cap.
+    fn open(&mut self, own: &[&'a [u8]]) -> std::result::Result<(), String> {
+        self.open.push(own.len());
+        if own.is_empty() {
+            return Ok(());
+        }
+        let inherited = self.bound.len();
+        for &prefix in own {
+            *self.bound.entry(prefix).or_insert(0) += 1;
+            self.decls.push(prefix);
+        }
+        if self.bound.len() > self.max_in_scope {
+            return Err(format!(
+                "an XML element has more than the maximum supported number of \
+                 namespace bindings in scope ({})",
+                self.max_in_scope
+            ));
+        }
+        self.work += (inherited + 1) * (inherited + own.len());
+        if self.work > MAX_XML_NAMESPACE_WORK {
+            return Err(
+                "the XML document declares namespaces on too many elements to \
+                 resolve within the supported cost"
+                    .to_string(),
+            );
+        }
+        Ok(())
+    }
+
+    /// The innermost open element closes: unbind its declarations. (A stray
+    /// close with nothing open is a no-op, like the depth count's.)
+    fn close(&mut self) {
+        let Some(n) = self.open.pop() else {
+            return;
+        };
+        for prefix in self.decls.drain(self.decls.len() - n..) {
+            if let Some(count) = self.bound.get_mut(prefix) {
+                *count -= 1;
+                if *count == 0 {
+                    self.bound.remove(prefix);
+                }
+            }
+        }
+    }
+}
+
 /// Parse XML into the same `serde_json::Value` tree the rest of
 /// the family queries. The document maps to
 /// `{ <root-element-name>: <root value> }` so the root element is
 /// the first `JSONPath` segment (`$.Project…`, `$.project…`).
 fn xml_to_value(text: &str) -> std::result::Result<Value, String> {
-    // Reject over-deep OR over-wide XML before `Document::parse` can overflow the
-    // stack (depth) or hang in O(n^2) attribute validation (width).
+    // Reject over-deep, over-wide or namespace-heavy XML before `Document::parse`
+    // can overflow the stack (depth) or hang in O(n^2) attribute validation
+    // (width) or namespace resolution.
     xml_within_parse_limits(text)?;
     let doc = roxmltree::Document::parse(text).map_err(|e| {
         let msg = e.to_string();
