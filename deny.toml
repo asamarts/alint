@@ -5,13 +5,14 @@
 # licenses and reject even the project's own `Apache-2.0 OR MIT` and
 # every permissive dependency. Run via ci/scripts/deny.sh.
 #
-# Enforcement split (see ci/scripts/deny.sh):
-#   - licenses / bans / sources : BLOCKING — license compliance is
+# Enforcement (see ci/scripts/deny.sh):
+#   - licenses / bans / sources : BLOCKING. License compliance is
 #     the gap the audit flagged; bans + sources are cheap
 #     supply-chain gates.
-#   - advisories                : ADVISORY only, run separately, to
-#     mirror ci/scripts/audit.sh's existing non-blocking RustSec
-#     stance and avoid a duplicate hard gate over the same database.
+#   - advisories                : BLOCKING on vulnerabilities;
+#     unmaintained / unsound advisories and yanked crates warn.
+#     ci/scripts/audit.sh (cargo audit) enforces the same policy with
+#     the same waivers (the `ignore` list below).
 #
 # The allow-list is the EXACT set of permissive licenses present in
 # the dependency graph (enumerate with `cargo deny list`), not a
@@ -72,8 +73,16 @@ unknown-git = "deny"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 
 [advisories]
-# Advisory enforcement is intentionally NOT made blocking here —
-# ci/scripts/deny.sh runs `cargo deny check advisories` in advisory
-# mode, matching ci/scripts/audit.sh. `cargo audit` remains the
-# primary RustSec surface. Yanked crates are still worth a warning.
+# A RustSec VULNERABILITY advisory against any crate in the graph fails
+# ci/scripts/deny.sh (and ci/scripts/audit.sh) in CI and in the release
+# preflight. `unmaintained` / `unsound` informational advisories are
+# reported as warnings (deny.sh passes `-W unmaintained -W unsound`;
+# cargo-deny 0.19 has no config-file level for them). Yanked crates warn.
 yanked = "warn"
+# Waivers: the ONE list both advisory gates honour (cargo-deny natively,
+# audit.sh turns each id into `cargo audit --ignore <id>`). Waive by
+# advisory id, always with a reason, and remove the entry once fixed:
+#   ignore = [
+#     { id = "RUSTSEC-YYYY-NNNN", reason = "not reachable from alint: <why>; tracking <issue>" },
+#   ]
+ignore = []

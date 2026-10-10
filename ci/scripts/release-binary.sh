@@ -39,7 +39,7 @@ if [[ "$USE_CROSS" == "true" ]]; then
   BUILD_CMD="cross"
 fi
 
-echo "==> Building ${BIN_NAME} for ${TARGET} (via ${BUILD_CMD})"
+echo "==> Building ${BIN_NAME} for ${TARGET} (via ${BUILD_CMD}) with $(rustc --version)"
 rustup target add "$TARGET" 2>/dev/null || true
 $BUILD_CMD build --release --locked --target "$TARGET" -p alint
 

@@ -107,7 +107,16 @@ main() {
 
   REPO="${ALINT_REPO:-asamarts/alint}"
   VERSION="${ALINT_VERSION:-latest}"
-  INSTALL_DIR="${INSTALL_DIR:-${HOME}/.local/bin}"
+  # `set -u` would abort on a bare ${HOME} with an opaque "unbound variable"
+  # when neither is set (minimal containers, `env -i`); say what to do instead.
+  if [[ -z "${INSTALL_DIR:-}" ]]; then
+    if [[ -z "${HOME:-}" ]]; then
+      echo "error: neither INSTALL_DIR nor HOME is set; set INSTALL_DIR to the" >&2
+      echo "       directory alint should be installed into (e.g. INSTALL_DIR=/usr/local/bin)." >&2
+      exit 1
+    fi
+    INSTALL_DIR="${HOME}/.local/bin"
+  fi
   BINARY="alint"
 
   # ── Platform detection ───────────────────────────────────────────────

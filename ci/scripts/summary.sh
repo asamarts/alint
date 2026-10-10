@@ -57,6 +57,7 @@ row() {
   echo "| Editors               | ${EDITORS_CHANGED} |"
   echo "| Supply chain          | ${SUPPLY_CHAIN_CHANGED} |"
   echo "| Packaging             | ${PACKAGING_CHANGED:-false} |"
+  echo "| Shell harnesses       | ${SHELL_CHANGED:-false} |"
   echo ""
 
   echo "### Rust Pipeline"
@@ -66,13 +67,15 @@ row() {
   row "MSRV"         "$MSRV_RESULT"        "$RUST_CHANGED"
   row "Clippy"       "$CLIPPY_RESULT"      "$RUST_CHANGED"
   row "Test"         "$TEST_RESULT"        "$RUST_CHANGED"
-  row "Audit"        "$AUDIT_RESULT"       "$RUST_CHANGED"
+  row "Audit"        "$AUDIT_RESULT"       "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Deny"         "$DENY_RESULT"        "$( [[ "$RUST_CHANGED" == true || "$SUPPLY_CHAIN_CHANGED" == true ]] && echo true || echo false )"
   row "Supply chain" "$SUPPLY_CHAIN_RESULT" "$SUPPLY_CHAIN_CHANGED"
   row "Build"        "$BUILD_RESULT"       "$RUST_CHANGED"
   row "Docs"         "$DOCS_JOB_RESULT"    "$RUST_CHANGED"
   row "Dogfood"      "$DOGFOOD_RESULT"     "$RUST_CHANGED"
-  row "Shell tests"  "$SHELL_TESTS_RESULT" "$RUST_CHANGED"
+  # Shell tests route on their own `shell` flag (detect-changes.sh), which
+  # also fires for packaging / docs / supply-chain / repo-config paths.
+  row "Shell tests"  "$SHELL_TESTS_RESULT" "${SHELL_CHANGED:-false}"
   row "Secrets inventory" "$SECRETS_INVENTORY_RESULT" "true"
   echo ""
 

@@ -51,6 +51,7 @@ jobs:
       editors: ${{ steps.detect.outputs.editors }}
       supply_chain: ${{ steps.detect.outputs.supply_chain }}
       packaging: ${{ steps.detect.outputs.packaging }}
+      shell: ${{ steps.detect.outputs.shell }}
       runner: ${{ steps.route.outputs.runner }}
       hosted: ${{ steps.route.outputs.hosted }}
     steps:
@@ -193,12 +194,15 @@ jobs:
           key: ci-test
       - run: ci/scripts/test.sh
 
+  # Blocking on RustSec vulnerabilities, like Deny's advisories pass. Also on
+  # `supply_chain`: its waiver list is deny.toml [advisories].ignore, so a PR
+  # adding a waiver must run the gate that honours it.
   audit:
     name: Audit
     needs: [changes, fmt]
     if: >-
       !cancelled() && !failure()
-      && needs.changes.outputs.rust == 'true'
+      && (needs.changes.outputs.rust == 'true' || needs.changes.outputs.supply_chain == 'true')
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -210,8 +214,9 @@ jobs:
           key: ci-audit
       - run: ci/scripts/audit.sh
 
-  # Also on `supply_chain`: deny.toml (the license / bans / sources policy)
-  # flips only supply_chain, so a PR loosening the policy must still run it.
+  # Also on `supply_chain`: deny.toml (the license / bans / sources / advisory
+  # policy) flips only supply_chain, so a PR loosening the policy must still
+  # run it.
   deny:
     name: Deny
     needs: [changes, fmt]
@@ -416,13 +421,16 @@ jobs:
   # ── Shell tests ───────────────────────────────────────────────────
   # Run shell-script test harnesses (test-*.sh under ci/scripts/) in
   # their own job. Split out from the Rust `Test` job so a homebrew-
-  # formula golden drift doesn't blame the Rust test suite.
+  # formula golden drift doesn't blame the Rust test suite. Gated on the
+  # `shell` flag, which detect-changes.sh raises for every path a harness
+  # guards (install.sh, Dockerfile, npm/, .github/dependabot.yml, the Gradle
+  # wrapper, docs, deny.toml, ...), not only for Rust changes.
   shell-tests:
     name: Shell Tests
     needs: changes
     if: >-
       !cancelled() && !failure()
-      && needs.changes.outputs.rust == 'true'
+      && needs.changes.outputs.shell == 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -522,6 +530,7 @@ jobs:
           EDITORS_CHANGED: ${{ needs.changes.outputs.editors }}
           SUPPLY_CHAIN_CHANGED: ${{ needs.changes.outputs.supply_chain }}
           PACKAGING_CHANGED: ${{ needs.changes.outputs.packaging }}
+          SHELL_CHANGED: ${{ needs.changes.outputs.shell }}
           SECRETS_INVENTORY_RESULT: ${{ needs.secrets-inventory.result }}
           FMT_RESULT: ${{ needs.fmt.result }}
           MSRV_RESULT: ${{ needs.msrv.result }}

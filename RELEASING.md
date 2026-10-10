@@ -169,7 +169,7 @@ checklist so the release-gated pieces land and nothing drifts:
 
 | Workflow | Triggered by | What it does | Time |
 |---|---|---|---|
-| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit, deny, build, bench-smoke, examples, shell-tests, editors, and the advisory perf-gate. Self-hosted Linux. | ~5 min |
+| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit + deny (both blocking on RustSec vulnerabilities), build, bench-smoke, examples, shell-tests, editors, and the advisory perf-gate. Self-hosted Linux. | ~5 min |
 | `release.yml` | tag push only | preflight gate → supply-chain (SBOM + license bundle) → cross-platform build matrix → GitHub Release (cosign-signed `SHA256SUMS` + build-provenance + SBOM attestations) → ghcr.io Docker (attested + cosign-signed by digest) → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
 | `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts alint.org's three install-pin sites reference the latest tag from this release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
@@ -245,7 +245,11 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   existing Release and re-uploads the same asset set with
   `gh release upload --clobber` (then asserts the published asset set matches)
   instead of dying on `gh release create`, so the `needs: release` publishers
-  (npm, PyPI, Homebrew, VS Code, JetBrains) still run. The docs-bundle dispatch is
+  (npm, PyPI, Homebrew, VS Code, JetBrains) still run. If the surviving Release
+  is a **draft** (made by hand, or left by an interrupted attempt), the step
+  publishes it (`gh release edit --draft=false`) once the asset set is verified;
+  a draft would otherwise stay invisible to `install.sh`, `releases/latest` and
+  the npm postinstall download. The docs-bundle dispatch is
   non-fatal: if it fails the job emits a `::warning::` and you run
   `gh workflow run docs-bundle.yml --ref main` by hand.
 - **Expiring credentials** (`MP-M2`). Three channels carry secrets that can expire: VS
@@ -255,11 +259,89 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   [`release-credentials.md`](docs/development/release-credentials.md)), then
   `gh run rerun <id> --failed`. (npm no longer carries a PAT: it publishes tokenlessly
   via OIDC Trusted Publishing, see [npm Trusted Publishing](#npm-trusted-publishing).)
+- **A RustSec advisory blocking the preflight.** `deny.sh` and `audit.sh` fail on
+  any vulnerability advisory (unmaintained / unsound / yanked only warn), so a
+  CVE published between merge and tag stops the release before anything
+  publishes (every publisher `needs:` the preflight). Prefer upgrading the
+  dependency; only if the advisory provably does not affect alint, waive it in
+  `deny.toml` `[advisories].ignore` as `{ id = "RUSTSEC-YYYY-NNNN", reason = "..." }`
+  (the one list both gates honour). Land the fix on `main`. Because nothing has
+  published, this is the one case where the tag may be moved: delete it
+  (`git push --delete origin vX.Y.Z && git tag -d vX.Y.Z`) and tag the fixed
+  commit; if anything did publish, cut the next patch instead.
 - **A build-matrix flake blocking crates.io** (`MP-M1`). `publish-crates` deliberately
   `needs: build` (a cross-platform compile gate before the irreversible publish), so a
   flaky windows or aarch64 leg can block it. Re-run once the leg heals with
   `gh run rerun <id> --failed`; the publish script is idempotent, so already-published
   crates are skipped.
+
+## Release toolchain
+
+Releases build, test and publish with ONE pinned Rust toolchain, the exact
+`RELEASE_RUST` in `.github/workflows/release.yml`'s workflow-level `env:`. Dev
+and `ci.yml` keep `rust-toolchain.toml`'s floating `stable`, so CI keeps
+tracking new stables while a release stays reproducible. Every Rust-building
+release job installs `${{ env.RELEASE_RUST }}` and then runs
+`ci/scripts/pin-release-toolchain.sh`, which exports `RUSTUP_TOOLCHAIN` (that,
+unlike the `rustup default` the install action sets, beats
+`rust-toolchain.toml`) and fails the job unless `rustc --version` is the pin;
+`release-binary.sh` logs the `rustc --version` each tarball was built with. The
+MSRV leg is unaffected: `msrv.sh` builds with `cargo +<msrv>`, which beats
+`RUSTUP_TOOLCHAIN`. `ci/scripts/test-release-toolchain-pin.sh` fails on a
+floating `stable`, a different version, or a job that skips the pin step.
+
+Bump procedure (do it in its own PR, not in the release-cut PR):
+
+1. Pick the newest stable that is at least about two weeks old (check
+   <https://static.rust-lang.org/dist/channel-rust-stable.toml> and the Rust
+   blog), taking its latest patch (`1.98.1`, not `1.98.0`).
+2. Edit `RELEASE_RUST` in `release.yml` (the only place it is set).
+3. Prove the tree is clean on it locally:
+   `RUSTUP_TOOLCHAIN=<ver> ci/scripts/fmt.sh && RUSTUP_TOOLCHAIN=<ver> ci/scripts/clippy.sh && RUSTUP_TOOLCHAIN=<ver> ci/scripts/test.sh && RUSTUP_TOOLCHAIN=<ver> ci/scripts/docs.sh`
+   (a new stable's clippy lints are the usual surprise), then
+   `ci/scripts/test-release-toolchain-pin.sh` (with the toolchain installed it
+   also proves the override against `rust-toolchain.toml`).
+4. A toolchain bump changes the shipped binaries, so it needs a normal release
+   to take effect; `bench-record.yml` pins its own toolchain separately.
+
+## Backport releases and re-running an old tag
+
+`release.yml` publishes two kinds of things. **Immutable** publishes (crates.io,
+PyPI, the npm version itself, the GitHub Release and its assets, Docker
+`:vX.Y.Z` / `:X.Y.Z`) are always safe to (re-)run for any tag. **Floating
+pointers** are not: the major tag (`v0`), the GitHub "Latest" release (which
+`install.sh` and the Action resolve by default), Docker `:latest` and `:X.Y`, the
+Homebrew formula (the tap serves one version) and npm's `latest` dist-tag.
+
+Every step that moves a floating pointer is gated by
+`ci/scripts/release-pointer-guard.sh`, which compares the tag against every
+published `vX.Y.Z` tag (pre-releases and the `v0` pointer are ignored; a
+pre-release tag never moves anything):
+
+| Pointer | Moves only when the tag is ... |
+|---|---|
+| `v0` major tag, GitHub "Latest", Docker `:latest`, Homebrew formula, npm `latest` | the highest release overall (equal counts, so re-running the newest release is fine) |
+| Docker `:X.Y` | the highest release in its `X.Y` line |
+
+Otherwise the step logs a `::notice::` and leaves the pointer where it is (npm
+publishes the backport under a `release-X.Y` dist-tag instead of `latest`).
+`ci/scripts/test-release-pointer-guard.sh` pins the comparison and that each of
+those steps honours it.
+
+So, to ship a **backport** (say `v0.16.2` after `v0.17.0`): branch from the
+`v0.16.x` tag, cherry-pick the fix, bump with `ci/scripts/bump-version.sh`, and
+push the `v0.16.2` tag as usual. Every channel publishes `0.16.2`; `v0`,
+"Latest", `:latest`, Homebrew and npm `latest` stay on `v0.17.0`, and `:0.16`
+moves to `0.16.2`. Users on the newest line are unaffected; a `0.16` user pins
+`0.16.2` explicitly (`ALINT_VERSION=v0.16.2`, `@asamarts/alint@0.16.2`,
+`ghcr.io/asamarts/alint:0.16`).
+
+**Re-running an old tag's job** (`gh run rerun <id> --failed` on, say, the
+`v0.16.1` run after `v0.17.0` shipped) is likewise safe: the immutable publishes
+are idempotent (see above) and the floating pointers are skipped, so nothing
+moves backwards. To deliberately move a pointer to an older release (for
+example, after yanking the newest one), do it by hand, not by re-running a
+release job.
 
 ## Editor extensions / IDE plugins
 

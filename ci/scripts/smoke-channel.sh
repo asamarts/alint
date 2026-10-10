@@ -73,26 +73,57 @@ check_floating() {
   echo "  [smoke] OK: ${CHANNEL} latest pointer -> ${VER}"
 }
 
+# Releases are cosign-signed (SHA256SUMS.cosign.bundle) from v0.15.1 on; older
+# tags (e.g. v0.15.0) predate signing and have no bundle, so install.sh cannot
+# verify them. For every signed release the smoke is STRICT: install.sh runs
+# with ALINT_REQUIRE_VERIFY=1 and must print "Signature OK". For an older tag it
+# still checks the per-file SHA-256 but does not require a signature. Keyed on
+# the version (not a probe for the bundle), so a missing or unreachable bundle
+# on a new release fails the leg instead of silently downgrading it.
+FIRST_SIGNED_RELEASE="0.15.1"
+# version_ge A B: numeric vX.Y.Z comparison, A >= B.
+version_ge() {
+  local IFS=.
+  # shellcheck disable=SC2206  # deliberate split on the dots
+  local a=($1) b=($2) i
+  for i in 0 1 2; do
+    if (( 10#${a[i]} != 10#${b[i]} )); then
+      (( 10#${a[i]} > 10#${b[i]} ))
+      return
+    fi
+  done
+  return 0
+}
+REQUIRE_VERIFY=0
+if version_ge "$VER" "$FIRST_SIGNED_RELEASE"; then
+  REQUIRE_VERIFY=1
+fi
+
 # The documented one-liner, as a function so TAG travels as data (env), never
-# spliced into a `bash -c` source string. ALINT_REQUIRE_VERIFY=1 makes
-# install.sh fail closed unless the cosign signature actually verified (the
-# workflow installs cosign v3 for this leg), and the log is kept so the caller
-# can prove the verification ran instead of being silently skipped.
+# spliced into a `bash -c` source string. For a signed release
+# ALINT_REQUIRE_VERIFY=1 makes install.sh fail closed unless the cosign
+# signature actually verified (the workflow installs cosign v3 for this leg),
+# and the log is kept so the caller can prove the verification ran instead of
+# being silently skipped.
 INSTALL_LOG="$(mktemp)"
 install_via_script() {
   curl -fsSL https://alint.org/install.sh \
-    | ALINT_VERSION="$TAG" ALINT_REQUIRE_VERIFY=1 bash 2>&1 | tee "$INSTALL_LOG"
+    | ALINT_VERSION="$TAG" ALINT_REQUIRE_VERIFY="$REQUIRE_VERIFY" bash 2>&1 | tee "$INSTALL_LOG"
 }
 
 echo "==> smoke: channel=${CHANNEL} tag=${TAG} ver=${VER} floating=${SMOKE_FLOATING:-0}"
 case "$CHANNEL" in
   install.sh)
     retry install_via_script
-    if ! grep -q '^==> Signature OK' "$INSTALL_LOG"; then
-      echo "  [smoke] FAIL: install.sh did not report a verified cosign signature" >&2
-      exit 1
+    if [[ "$REQUIRE_VERIFY" == "1" ]]; then
+      if ! grep -q '^==> Signature OK' "$INSTALL_LOG"; then
+        echo "  [smoke] FAIL: install.sh did not report a verified cosign signature" >&2
+        exit 1
+      fi
+      echo "  [smoke] OK: install.sh verified the release signature"
+    else
+      echo "  [smoke] note: ${TAG} predates release signing (first signed: v${FIRST_SIGNED_RELEASE}); SHA-256 checked, signature not required"
     fi
-    echo "  [smoke] OK: install.sh verified the release signature"
     export PATH="${HOME}/.local/bin:${PATH}"       # install.sh's default INSTALL_DIR
     assert_version alint --version
     ;;

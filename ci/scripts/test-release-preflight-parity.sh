@@ -27,7 +27,6 @@ failures = []
 EXEMPT = {
     'ci/scripts/detect-changes.sh': 'PR change routing; a release verifies the whole tree',
     'ci/scripts/summary.sh': 'aggregate status bookkeeping',
-    'ci/scripts/audit.sh': 'advisory-only by design (never fails); ci.yml Audit runs on the tag too',
     'ci/scripts/bench-smoke.sh': 'perf smoke, not a correctness gate',
     'ci/scripts/det-perf-gate.sh': 'advisory PR-vs-merge-base perf gate (needs a base)',
     'ci/scripts/supply-chain-artifacts.sh': 'release.yml runs it in its own supply-chain job',
@@ -65,7 +64,7 @@ for script in sorted(set(EXEMPT) - ci_scripts):
     failures.append(f'stale exemption: ci.yml no longer runs {script}')
 
 for required in ('ci/scripts/msrv.sh', 'ci/scripts/check-workspace-dep-floors.sh',
-                 'ci/scripts/demo-drift.sh'):
+                 'ci/scripts/demo-drift.sh', 'ci/scripts/deny.sh', 'ci/scripts/audit.sh'):
     if required not in pre_scripts:
         failures.append(f'release.yml preflight must run {required}')
     if required not in ci_scripts:
@@ -86,6 +85,16 @@ for wf in sorted(Path('.github/workflows').glob('*.yml')):
 msrv_job = job(ci, 'msrv')
 if '${{ steps.msrv.outputs.toolchain }}' not in msrv_job or 'ci/scripts/msrv.sh --print' not in msrv_job:
     failures.append('ci.yml msrv job must install the toolchain msrv.sh --print derives')
+
+# A gate that cannot fail is no gate: `continue-on-error` (on the job or on
+# any step) or an `|| true` / `|| :` swallow would keep the job green while
+# the MSRV / preflight check is red.
+for where, body in (('ci.yml msrv job', msrv_job), ('release.yml preflight job', preflight)):
+    if re.search(r'^\s+continue-on-error:', body, re.MULTILINE):
+        failures.append(f'{where}: continue-on-error makes its gates non-blocking')
+    for line in body.splitlines():
+        if 'ci/scripts/' in line and re.search(r'\|\|\s*(true|:)(\s|$)|;\s*(true|exit 0)(\s|$)', line):
+            failures.append(f'{where}: a gate result is swallowed: {line.strip()!r}')
 
 if failures:
     for f in failures:

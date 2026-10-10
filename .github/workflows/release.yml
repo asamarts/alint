@@ -13,6 +13,18 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # The ONE pinned Rust toolchain every release job builds, tests and publishes
+  # with (exact x.y.z, never `stable`), so a release is reproducible and a new
+  # stable cannot change the shipped binaries between `main` going green and the
+  # tag. Dev and ci.yml keep rust-toolchain.toml's floating `stable`. Each job
+  # installs it via dtolnay/rust-toolchain and then runs
+  # ci/scripts/pin-release-toolchain.sh, which exports RUSTUP_TOOLCHAIN (that
+  # beats rust-toolchain.toml) and fails unless rustc really is this version.
+  # test-release-toolchain-pin.sh enforces the wiring. Bump procedure:
+  # RELEASING.md "Release toolchain".
+  RELEASE_RUST: "1.98.1"
+
 jobs:
   # ── Preflight gate ──────────────────────────────────────────────
   # Self-contained re-verification that the tagged commit passes the
@@ -28,18 +40,15 @@ jobs:
   # but a release must verify the whole tree regardless of the diff.
   #
   # Parity with ci.yml correctness jobs: fmt, msrv (+ dep-floors), clippy,
-  # test, build, docs, dogfood (+ demo-drift), examples, shell-tests, deny.
+  # test, build, docs, dogfood (+ demo-drift), examples, shell-tests, deny,
+  # audit.
   # The MSRV leg matters most here: every published crate advertises
   # `rust-version` from [workspace.package], so it must actually compile on
-  # that toolchain before publish-crates runs. deny.sh bootstraps
-  # cargo-deny on demand so the license / supply-chain gate works on
-  # ubuntu-latest too. Deliberately NOT here:
-  #   audit       — audit.sh is advisory-only by design (never fails
-  #                 the pipeline) and cargo-audit is absent on
-  #                 ubuntu-latest; ci.yml's dedicated Audit job
-  #                 (self-hosted) also runs on tag-push and still
-  #                 surfaces the advisory. (deny.sh runs its own
-  #                 advisory pass too, likewise non-blocking.)
+  # that toolchain before publish-crates runs. deny.sh and audit.sh
+  # bootstrap cargo-deny / cargo-audit on demand so the license,
+  # supply-chain and RustSec gates work on ubuntu-latest too; both FAIL on a
+  # vulnerability advisory (waivers: deny.toml [advisories].ignore), so a
+  # release cannot ship a known-vulnerable dependency. Deliberately NOT here:
   #   bench-smoke — a perf smoke check, not a correctness gate.
   # `cargo doc` warnings bypass cargo check/test/clippy, so the
   # rustdoc gate (docs.sh) must run in every release preflight.
@@ -73,8 +82,11 @@ jobs:
         run: bash ci/scripts/check-release-version.sh "$GITHUB_REF_NAME"
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
           components: rustfmt,clippy
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: release-preflight
@@ -102,8 +114,10 @@ jobs:
         run: ci/scripts/shell-tests.sh
       - name: packaging (install.sh / npm shim / Dockerfile / pre-commit hooks)
         run: ci/scripts/packaging-check.sh
-      - name: deny (licenses + bans + sources; advisories advisory)
+      - name: deny (licenses + bans + sources + advisories, blocking)
         run: ci/scripts/deny.sh
+      - name: audit (RustSec via cargo audit, blocking on vulnerabilities)
+        run: ci/scripts/audit.sh
       - name: workspace dependency floors (<= workspace.package.version)
         run: bash ci/scripts/check-workspace-dep-floors.sh
       - name: msrv (cargo check on [workspace.package].rust-version)
@@ -148,7 +162,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: release-${{ matrix.target }}
@@ -205,7 +222,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: release-supply-chain
@@ -231,6 +251,16 @@ jobs:
       attestations: write   # write the build-provenance + SBOM attestations
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # Rollback guard: a backport (v0.16.2 after v0.17.0) or a re-run of an old
+      # tag must not move the floating pointers backwards. Decided once, here,
+      # from every published tag; the GitHub "Latest" badge and the major tag
+      # below only move when this tag is the highest release overall.
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
 
       - name: download all artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
@@ -301,6 +331,9 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ github.ref_name }}
           REPO: ${{ github.repository }}
+          # "Latest" drives install.sh's and the Action's default version, so a
+          # backport must not take it (rollback guard, see `pointers`).
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         shell: bash
         run: |
           set -euo pipefail
@@ -312,6 +345,8 @@ jobs:
           assets=(install.sh SHA256SUMS SHA256SUMS.cosign.bundle
                   THIRD-PARTY-LICENSES.html alint.cdx.json
                   alint-*.tar.gz alint-*.tar.gz.sha256)
+          latest=false
+          if [[ "$HIGHEST_OVERALL" == "true" ]]; then latest=true; fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "::notice::Release ${TAG} already exists (job re-run); refreshing its assets with --clobber"
             gh release upload "$TAG" --repo "$REPO" --clobber "${assets[@]}"
@@ -320,6 +355,7 @@ jobs:
               --repo "$REPO" \
               --title "alint $TAG" \
               --generate-notes \
+              --latest="$latest" \
               "${assets[@]}"
           fi
           expected="$(printf '%s\n' "${assets[@]}" | sort)"
@@ -330,6 +366,19 @@ jobs:
             exit 1
           fi
           echo "Release ${TAG} carries exactly the $(echo "$expected" | wc -l) expected assets."
+          # `gh release view` above also succeeds for a DRAFT (a hand-made or
+          # interrupted Release), and a draft stays a draft through
+          # `upload --clobber`: invisible to install.sh, `releases/latest` and
+          # the npm postinstall download (they 404). Publish it now that its
+          # asset set is verified complete.
+          is_draft="$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft')"
+          if [[ "$is_draft" == "true" ]]; then
+            echo "::notice::Release ${TAG} was a draft; publishing it now that its assets are complete"
+            gh release edit "$TAG" --repo "$REPO" --draft=false --latest="$latest"
+          elif [[ "$is_draft" != "false" ]]; then
+            echo "::error::could not read the draft state of Release ${TAG} (got '${is_draft}')"
+            exit 1
+          fi
 
       - name: attest build provenance for every asset in SHA256SUMS
         id: attest_provenance
@@ -387,6 +436,7 @@ jobs:
       - name: move the major tag (e.g. v0) to this release
         env:
           GH_TOKEN: ${{ github.token }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         run: |
           set -euo pipefail
           # Consumers pin `asamarts/alint@v<major>` (e.g. @v0) to always track the
@@ -396,6 +446,11 @@ jobs:
           # with GITHUB_TOKEN, so it does NOT re-trigger this workflow
           # (anti-recursion); the `v*.*.*` filter above also excludes bare major tags.
           MAJOR="${GITHUB_REF_NAME%%.*}"   # v0.14.1 -> v0
+          # Rollback guard: only the highest release overall moves the pointer.
+          if [[ "$HIGHEST_OVERALL" != "true" ]]; then
+            echo "::notice::${GITHUB_REF_NAME} is not the highest release (backport or old-tag re-run); leaving ${MAJOR} where it is."
+            exit 0
+          fi
           echo "Moving major tag ${MAJOR} -> ${GITHUB_SHA} (from ${GITHUB_REF_NAME})"
           git tag -f "$MAJOR" "$GITHUB_SHA"
           git push -f origin "refs/tags/${MAJOR}"
@@ -467,12 +522,20 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
+
       - name: derive image tags
         id: tags
         shell: bash
         env:
           TAG: ${{ github.ref_name }}
           OWNER: ${{ github.repository_owner }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
+          HIGHEST_IN_MINOR: ${{ steps.pointers.outputs.highest_in_minor }}
         run: |
           set -euo pipefail
           # Lowercase the owner for the image reference (OCI requires
@@ -482,12 +545,25 @@ jobs:
           image="ghcr.io/${owner_lc}/alint"
           # Strip the leading `v` for semver-style tags: v0.4.7 →
           # 0.4.7 + 0.4 + latest. Keep the v-prefixed tag too for
-          # users who pin to the exact git tag.
+          # users who pin to the exact git tag. The exact-version tags are
+          # immutable; the floating :X.Y and :latest move only when this is
+          # the highest release in its minor line / overall (rollback guard).
           ver="${TAG#v}"
           minor="${ver%.*}"
+          tags="${image}:${TAG},${image}:${ver}"
+          if [[ "$HIGHEST_IN_MINOR" == "true" ]]; then
+            tags="${tags},${image}:${minor}"
+          else
+            echo "::notice::${TAG} is not the highest ${minor}.x release; not moving :${minor}."
+          fi
+          if [[ "$HIGHEST_OVERALL" == "true" ]]; then
+            tags="${tags},${image}:latest"
+          else
+            echo "::notice::${TAG} is not the highest release; not moving :latest."
+          fi
           {
             echo "image=${image}"
-            echo "tags=${image}:${TAG},${image}:${ver},${image}:${minor},${image}:latest"
+            echo "tags=${tags}"
           } >> "$GITHUB_OUTPUT"
 
       - name: build + push multi-arch image
@@ -557,7 +633,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: publish-crates
@@ -590,6 +669,14 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: use an OIDC-capable npm (Trusted Publishing needs npm >= 11.5.1; pin the latest 11.x)
         run: npm install -g npm@11.19.0   # not 12.x: it may drop Node 22 support
+      # The version itself is immutable, but npm's `latest` dist-tag is a moving
+      # pointer (and npm refuses to implicitly move it below the current one), so
+      # a backport publishes under a per-minor dist-tag instead (rollback guard).
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
       - name: stamp package version from tag + publish
         env:
           # Tokenless publish via npm Trusted Publishing (OIDC): no NPM_TOKEN, so
@@ -602,6 +689,7 @@ jobs:
           # build-provenance. The optionalDependencies migration (ADR-0015 / P2) will
           # ship native bytes so the same provenance covers real payload.
           TAG: ${{ github.ref_name }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         shell: bash
         run: |
           set -euo pipefail
@@ -626,9 +714,16 @@ jobs:
             echo "::notice::@asamarts/alint@${ver} is already on npm; skipping publish (re-run)."
             exit 0
           fi
+          # Only the highest release moves the `latest` dist-tag; a backport
+          # lands on `release-<major>.<minor>` (rollback guard).
+          dist_tag=latest
+          if [[ "$HIGHEST_OVERALL" != "true" ]]; then
+            dist_tag="release-${ver%.*}"
+            echo "::notice::${TAG} is not the highest release; publishing under dist-tag ${dist_tag}, leaving 'latest' alone."
+          fi
           # --provenance rides the OIDC id-token; with Trusted Publishing npm also
           # generates provenance automatically, so this is explicit-and-belt.
-          npm publish --access public --provenance
+          npm publish --access public --provenance --tag "$dist_tag"
 
   publish-pypi:
     name: publish alint to PyPI
@@ -702,6 +797,14 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
+      # The tap serves ONE formula (the latest); a backport or an old-tag re-run
+      # must not overwrite it with an older version (rollback guard).
+      - name: decide floating-pointer moves (rollback guard)
+        id: pointers
+        env:
+          TAG: ${{ github.ref_name }}
+        run: ci/scripts/release-pointer-guard.sh "$TAG"
+
       - name: download SHA256SUMS from this release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -747,8 +850,13 @@ jobs:
       - name: commit + push
         env:
           TAG: ${{ github.ref_name }}
+          HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         run: |
           set -euo pipefail
+          if [[ "$HIGHEST_OVERALL" != "true" ]]; then
+            echo "::notice::${TAG} is not the highest release (backport or old-tag re-run); leaving the Homebrew formula alone."
+            exit 0
+          fi
           cd tap
           git config user.name "alint release bot"
           git config user.email "asamarts@alint.org"

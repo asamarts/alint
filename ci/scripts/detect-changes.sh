@@ -4,7 +4,7 @@ set -euo pipefail
 # Detect which components changed to enable conditional CI pipelines.
 # Outputs: rust=true/false, docs=true/false, bench=true/false,
 #          examples=true/false, editors=true/false, supply_chain=true/false,
-#          packaging=true/false
+#          packaging=true/false, shell=true/false
 #
 # Environment variables (set by the workflow):
 #   GH_EVENT         - github.event_name (push | pull_request)
@@ -49,6 +49,7 @@ EXAMPLES=false
 EDITORS=false
 SUPPLY_CHAIN=false
 PACKAGING=false
+SHELL_TESTS=false
 
 # CI infrastructure or workspace manifest changes trigger all pipelines.
 if echo "$CHANGED" | grep -qE '^(\.github/workflows/|ci/|Cargo\.toml$|Cargo\.lock$|rust-toolchain\.toml$)'; then
@@ -60,6 +61,7 @@ if echo "$CHANGED" | grep -qE '^(\.github/workflows/|ci/|Cargo\.toml$|Cargo\.loc
   EDITORS=true
   SUPPLY_CHAIN=true
   PACKAGING=true
+  SHELL_TESTS=true
 fi
 
 # Supply-chain artifacts (SBOM + third-party license bundle) depend on the
@@ -135,8 +137,22 @@ if echo "$CHANGED" | grep -qE '^(examples/|schemas/|crates/alint-rules/|crates/a
   EXAMPLES=true
 fi
 
+# The shell-test harnesses (ci/scripts/test-*.sh, run by the `shell-tests`
+# job) guard files well outside crates/: the curl-able installer's shape and
+# docs one-liners (test-install-sh), the Dockerfile digest pin, the Gradle
+# wrapper checksum and Dependabot coverage (test-supply-chain-pins), the npm
+# shim table, the action resolver, RELEASING.md's recovery contract, the
+# license policy and the docs counts. So every pipeline whose files a harness
+# reads also routes there, plus the repo-config / wrapper paths that no other
+# pipeline claims (`.github/` beyond workflows, the Gradle wrapper). A PR
+# touching only one of those files must still run the harness guarding it.
+if [[ "$RUST" == true || "$DOCS" == true || "$PACKAGING" == true || "$SUPPLY_CHAIN" == true ]] ||
+   echo "$CHANGED" | grep -qE '^(\.github/|editors/jetbrains/gradle/wrapper/)'; then
+  SHELL_TESTS=true
+fi
+
 echo ""
-echo "==> rust=${RUST}  docs=${DOCS}  bench=${BENCH}  examples=${EXAMPLES}  editors=${EDITORS}  supply_chain=${SUPPLY_CHAIN}  packaging=${PACKAGING}"
+echo "==> rust=${RUST}  docs=${DOCS}  bench=${BENCH}  examples=${EXAMPLES}  editors=${EDITORS}  supply_chain=${SUPPLY_CHAIN}  packaging=${PACKAGING}  shell=${SHELL_TESTS}"
 
 # ── Write GitHub Actions outputs ─────────────────────────────────────
 
@@ -149,5 +165,6 @@ if [[ -n "${GITHUB_OUTPUT:-}" ]]; then
     echo "editors=${EDITORS}"
     echo "supply_chain=${SUPPLY_CHAIN}"
     echo "packaging=${PACKAGING}"
+    echo "shell=${SHELL_TESTS}"
   } >> "$GITHUB_OUTPUT"
 fi
