@@ -13,7 +13,7 @@
     },
     "dry_run": {
       "type": "boolean",
-      "description": "True for `alint fix --dry-run`: nothing was written, and each `applied` item is a fix that would be applied."
+      "description": "True for `alint fix --dry-run`: nothing was written, and each `applied` item is a fix the first pass would apply. A dry run is a single pass: it predicts a create the real run cannot make stick (an ignored or out-of-scope path, reported `skipped` with `skip_kind: unresolved`), but a fix whose failure only the real run's re-check reveals can still be `applied` here."
     },
     "summary": {
       "type": "object",
@@ -70,6 +70,11 @@
         "detail": {
           "type": "string",
           "description": "Free-form human-readable explanation paired with `status`."
+        },
+        "skip_kind": {
+          "type": "string",
+          "enum": ["declined", "errored", "baselined", "unresolved"],
+          "description": "Present when `status` is `skipped`: why the violation was not fixed. `declined` = the fixer declined (nothing to do, size limit, isolation conflict); `errored` = the fix was attempted and hit an I/O error; `baselined` = grandfathered by `fix --baseline` (benign); `unresolved` = the fix ran (or, under `--dry-run`, would run) but the rule still reports the violation, e.g. a created file the walk ignores or one outside the rule's `paths:`."
         }
       }
     }

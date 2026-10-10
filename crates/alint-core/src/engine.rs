@@ -1028,17 +1028,17 @@ impl Engine {
             // Single-pass preview: a dry run writes nothing, so there is no
             // changed tree to re-walk. It shows the first pass; a real `fix` may
             // do more (docs/design/v0.17/fixpoint.md 2). No stage sink.
-            return self
-                .fix_run(
-                    root,
-                    index,
-                    &std::collections::HashSet::new(),
-                    true,
-                    threshold,
-                    None,
-                    None,
-                )
-                .map(|(report, _staged)| report);
+            let (mut report, _) = self.fix_run(
+                root,
+                index,
+                &std::collections::HashSet::new(),
+                true,
+                threshold,
+                None,
+                None,
+            )?;
+            self.predict_unresolved_creates(root, index, walk_opts, &mut report);
+            return Ok(report);
         }
         // Byte-level fixpoint (docs/design/v0.17/fixpoint.md): re-walk and re-fix
         // until a pass applies nothing (`applied() == 0`), bounded by MAX_PASSES.
@@ -1269,7 +1269,7 @@ impl Engine {
                     if let FixStatus::Applied(summary) = &it.status
                         && final_keys.contains(&Self::violation_key(&rr.rule_id, &it.violation))
                     {
-                        it.status = FixStatus::declined(format!(
+                        it.status = FixStatus::unresolved(format!(
                             "fix ran ({summary}) but the violation still stands on re-check \
                              (is the written path ignored, outside the rule's scope, or \
                              different from the path the rule checks?)"
@@ -1424,6 +1424,63 @@ impl Engine {
         // push-ordered, so re-sort the union by the presented path.
         staged.sort_by(|a, b| a.path.cmp(&b.path));
         Ok((report, staged))
+    }
+
+    /// `--dry-run` has no re-walk to discover that a fix will not stick, so
+    /// predict the known cases the real `fix` demotes after its re-check: a
+    /// would-be-`Applied` create (`file_create`) whose target the walk would
+    /// not index (gitignored, `ignore:`d) or that lies outside the rule's
+    /// `paths:`. Those become the same unresolved skip the real run reports.
+    /// Other ways a fix can fail its re-check (a cascade through another
+    /// rule, content a fixer writes that the rule still rejects) are only
+    /// found by running it; `docs/site/cli/fix.md` documents the limit.
+    fn predict_unresolved_creates(
+        &self,
+        root: &Path,
+        index: &FileIndex,
+        walk_opts: &crate::WalkOptions,
+        report: &mut FixReport,
+    ) {
+        for rr in &mut report.results {
+            let Some(entry) = self.entries.iter().find(|e| e.rule.id() == &*rr.rule_id) else {
+                continue;
+            };
+            let Some(fixer) = entry.rule.fixer() else {
+                continue;
+            };
+            for it in &mut rr.items {
+                let FixStatus::Applied(summary) = &it.status else {
+                    continue;
+                };
+                let Some(FixEdit::CreateFile { path, .. }) =
+                    fixer.fix_edit(&it.violation, &[], root)
+                else {
+                    continue;
+                };
+                let target: PathBuf = path
+                    .components()
+                    .filter(|c| !matches!(c, std::path::Component::CurDir))
+                    .collect();
+                let why = if crate::walker::would_walk_skip(root, walk_opts, &target, false) {
+                    format!(
+                        "{} is excluded from the walk (.gitignore / `ignore:`), so the rule \
+                         would never see it",
+                        target.display()
+                    )
+                } else if entry
+                    .rule
+                    .path_scope()
+                    .is_some_and(|scope| !scope.matches(&target, index))
+                {
+                    format!("{} is outside the rule's `paths:`", target.display())
+                } else {
+                    continue;
+                };
+                it.status = FixStatus::unresolved(format!(
+                    "fix would run ({summary}) but would not resolve the violation: {why}"
+                ));
+            }
+        }
     }
 
     /// Identity key for grouping a violation's report items ACROSS fixpoint

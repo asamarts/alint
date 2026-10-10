@@ -182,3 +182,64 @@ fn json_fix_report_marks_dry_runs() {
     let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
     assert_eq!(v["dry_run"], false, "{v}");
 }
+
+/// A `file_exists` rule on `checked` whose `file_create` writes `created`.
+fn create_config(checked: &str, created: &str) -> String {
+    format!(
+        "version: 1\nrules:\n  - id: env\n    kind: file_exists\n    paths: \"{checked}\"\n    \
+         level: error\n    fix:\n      file_create:\n        path: \"{created}\"\n        \
+         content: \"X=1\\n\"\n"
+    )
+}
+
+fn only_item(o: &Output) -> serde_json::Value {
+    let v: serde_json::Value = serde_json::from_slice(&o.stdout).unwrap();
+    v["results"][0]["items"][0].clone()
+}
+
+#[test]
+fn dry_run_agrees_with_fix_when_a_create_would_not_stick() {
+    // A `file_create` into a gitignored path: the real `fix` creates it, the
+    // walk never indexes it, and the re-check reports it unresolved (exit 1).
+    // `--dry-run` used to say "1 applied", exit 0.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".gitignore"), ".env\n").unwrap();
+    std::fs::write(root.join(".alint.yml"), create_config(".env", ".env")).unwrap();
+
+    let dry = run(root, &["fix", "--dry-run", "--format", "json"]);
+    assert!(!root.join(".env").exists(), "a dry run writes nothing");
+    let item = only_item(&dry);
+    assert_eq!(item["status"], "skipped", "{item}");
+    assert_eq!(item["skip_kind"], "unresolved", "{item}");
+    assert_eq!(dry.status.code(), Some(1));
+
+    let real = run(root, &["fix", "--format", "json"]);
+    let item = only_item(&real);
+    assert_eq!(item["status"], "skipped", "{item}");
+    assert_eq!(item["skip_kind"], "unresolved", "{item}");
+    assert_eq!(real.status.code(), Some(1));
+}
+
+#[test]
+fn dry_run_flags_a_create_outside_the_rules_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), create_config("a.txt", "b.txt")).unwrap();
+    let dry = run(root, &["fix", "--dry-run", "--format", "json"]);
+    let item = only_item(&dry);
+    assert_eq!(item["skip_kind"], "unresolved", "{item}");
+    assert!(
+        item["detail"]
+            .as_str()
+            .unwrap()
+            .contains("outside the rule's `paths:`"),
+        "{item}"
+    );
+    assert_eq!(dry.status.code(), Some(1));
+    // Control: a create that does land is still previewed as applied.
+    std::fs::write(root.join(".alint.yml"), create_config("a.txt", "a.txt")).unwrap();
+    let dry = run(root, &["fix", "--dry-run", "--format", "json"]);
+    assert_eq!(only_item(&dry)["status"], "applied");
+    assert_eq!(dry.status.code(), Some(0));
+}

@@ -233,6 +233,12 @@ struct JsonFixItem<'a> {
     status: &'static str,
     #[serde(skip_serializing_if = "Option::is_none")]
     detail: Option<&'a str>,
+    /// For a `skipped` item, WHY it was not fixed: `declined` (the fixer
+    /// declined), `errored` (an I/O error), `baselined` (grandfathered by
+    /// `fix --baseline`), or `unresolved` (the fix ran, or would run, but the
+    /// rule still reports the violation). Absent for other statuses.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    skip_kind: Option<&'static str>,
 }
 
 pub fn write_fix_json(report: &FixReport, w: &mut dyn Write) -> std::io::Result<()> {
@@ -257,13 +263,15 @@ pub fn write_fix_json_with_mode(
                 .items
                 .iter()
                 .map(|it| {
-                    let (status, detail) = match &it.status {
-                        FixStatus::Applied(s) => ("applied", Some(s.as_str())),
-                        FixStatus::Skipped { reason: s, .. } => ("skipped", Some(s.as_str())),
-                        FixStatus::Suggested { summary, .. } => {
-                            ("suggested", Some(summary.as_str()))
+                    let (status, detail, skip_kind) = match &it.status {
+                        FixStatus::Applied(s) => ("applied", Some(s.as_str()), None),
+                        FixStatus::Skipped { reason: s, kind } => {
+                            ("skipped", Some(s.as_str()), Some(kind.as_str()))
                         }
-                        FixStatus::Unfixable => ("unfixable", None),
+                        FixStatus::Suggested { summary, .. } => {
+                            ("suggested", Some(summary.as_str()), None)
+                        }
+                        FixStatus::Unfixable => ("unfixable", None, None),
                     };
                     JsonFixItem {
                         path: lossy_path(it.violation.path.as_deref()),
@@ -272,6 +280,7 @@ pub fn write_fix_json_with_mode(
                         column: it.violation.column,
                         status,
                         detail,
+                        skip_kind,
                     }
                 })
                 .collect(),
