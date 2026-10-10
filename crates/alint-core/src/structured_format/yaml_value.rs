@@ -10,8 +10,10 @@ use serde_json::Value;
 ///   merged mapping's keys join the enclosing mapping, explicit keys win, and in
 ///   a sequence of merges earlier mappings take precedence (yaml.org/type/merge).
 ///   Left literal, `<<` hid every merged key from a query -- a `yaml_path_equals`
-///   false positive and a `yaml_path_absent` bypass. A `<<` whose value is not a
-///   mapping (or a sequence of them) stays an ordinary key.
+///   false positive and a `yaml_path_absent` bypass. Only a PLAIN `<<` merges
+///   (YAML 1.1 resolves the merge type from the plain scalar alone): a quoted
+///   `"<<"` / `'<<'` key, or a `<<` whose value is not a mapping (or a sequence
+///   of them), stays an ordinary key.
 /// - **Custom tags** (AWS `CloudFormation` `!Ref` / `!GetAtt` / `!Sub`, GitLab CI
 ///   `!reference`, ...) are DROPPED and the tagged value kept, so `!Ref Bucket`
 ///   queries as `"Bucket"` and `!GetAtt [B, Arn]` as `["B", "Arn"]`. (`serde_json`
@@ -23,44 +25,82 @@ use serde_json::Value;
 /// duplicate key keeps its last value -- which a test pins on untagged documents.
 pub(super) fn yaml_to_value(text: &str) -> std::result::Result<Value, String> {
     use serde::de::DeserializeSeed as _;
-    YamlJson
+    YamlJson { src: text }
         .deserialize(serde_yaml_ng::Deserializer::from_str(text))
         .map_err(|e| e.to_string())
 }
 
 /// The [`yaml_to_value`] seed / visitor: builds a `serde_json::Value`, applying
 /// merge keys and stripping custom tags (which `serde_yaml_ng` surfaces as an
-/// enum: variant = tag, newtype payload = the tagged node).
+/// enum: variant = tag, newtype payload = the tagged node). Carries the source
+/// text so a key can tell a PLAIN `<<` (a merge key) from a quoted `"<<"` / `'<<'`
+/// (an ordinary string key, per YAML 1.1: the merge type is resolved only from
+/// the plain scalar).
 #[derive(Clone, Copy)]
-struct YamlJson;
+struct YamlJson<'t> {
+    src: &'t str,
+}
 
-impl<'de> serde::de::DeserializeSeed<'de> for YamlJson {
+impl<'de> serde::de::DeserializeSeed<'de> for YamlJson<'_> {
     type Value = Value;
     fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<Value, D::Error> {
         d.deserialize_any(self)
     }
 }
 
-/// A mapping key, read exactly as `serde_json::Value` reads one (`deserialize_str`).
-struct YamlKey;
+/// A mapping key, read exactly as `serde_json::Value` reads one (`deserialize_str`),
+/// plus whether it is a merge key.
+struct YamlKey<'t> {
+    src: &'t str,
+}
 
-impl<'de> serde::de::DeserializeSeed<'de> for YamlKey {
-    type Value = String;
-    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<String, D::Error> {
+/// A key's text and whether it is a merge key (a PLAIN `<<`).
+struct Key {
+    text: String,
+    merge: bool,
+}
+
+impl<'de> serde::de::DeserializeSeed<'de> for YamlKey<'_> {
+    type Value = Key;
+    fn deserialize<D: serde::Deserializer<'de>>(self, d: D) -> Result<Key, D::Error> {
         d.deserialize_str(self)
     }
 }
 
-impl serde::de::Visitor<'_> for YamlKey {
-    type Value = String;
+impl<'de> serde::de::Visitor<'de> for YamlKey<'_> {
+    type Value = Key;
     fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str("a string key")
     }
-    fn visit_str<E>(self, v: &str) -> Result<String, E> {
-        Ok(v.to_owned())
+    /// `serde_yaml_ng` lends a scalar straight out of the source text whenever its
+    /// value equals its source span -- always for a single-line plain scalar, and
+    /// for a quoted one minus its quotes. So a borrowed `<<` NOT preceded by a
+    /// quote is the plain merge key; anything else (quoted, escaped, block
+    /// scalar -- the owned-string paths below) is an ordinary `"<<"` key.
+    fn visit_borrowed_str<E>(self, v: &'de str) -> Result<Key, E> {
+        let merge = v == "<<" && {
+            let src = self.src.as_bytes();
+            (v.as_ptr() as usize)
+                .checked_sub(src.as_ptr() as usize)
+                .filter(|&off| off + v.len() <= src.len())
+                .is_some_and(|off| off == 0 || !matches!(src[off - 1], b'"' | b'\''))
+        };
+        Ok(Key {
+            text: v.to_owned(),
+            merge,
+        })
     }
-    fn visit_string<E>(self, v: String) -> Result<String, E> {
-        Ok(v)
+    fn visit_str<E>(self, v: &str) -> Result<Key, E> {
+        Ok(Key {
+            text: v.to_owned(),
+            merge: false,
+        })
+    }
+    fn visit_string<E>(self, v: String) -> Result<Key, E> {
+        Ok(Key {
+            text: v,
+            merge: false,
+        })
     }
 }
 
@@ -74,7 +114,7 @@ macro_rules! yaml_json_scalar {
     )*};
 }
 
-impl<'de> serde::de::Visitor<'de> for YamlJson {
+impl<'de> serde::de::Visitor<'de> for YamlJson<'_> {
     type Value = Value;
     fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         f.write_str("any YAML value")
@@ -114,18 +154,26 @@ impl<'de> serde::de::Visitor<'de> for YamlJson {
     }
     fn visit_map<A: serde::de::MapAccess<'de>>(self, mut map: A) -> Result<Value, A::Error> {
         let mut out = serde_json::Map::new();
-        while let Some(key) = map.next_key_seed(YamlKey)? {
+        // The value of a PLAIN `<<` key whose value is a mapping (or a sequence
+        // of them), applied after the explicit keys. A quoted `"<<"` key, or a
+        // `<<` whose value is anything else, stays an ordinary key.
+        let mut merge = None;
+        while let Some(key) = map.next_key_seed(YamlKey { src: self.src })? {
             let value = map.next_value_seed(self)?;
-            out.insert(key, value);
+            let mergeable = match &value {
+                Value::Object(_) => true,
+                Value::Array(items) => items.iter().all(Value::is_object),
+                _ => false,
+            };
+            if key.merge && mergeable {
+                merge = Some(value);
+            } else {
+                out.insert(key.text, value);
+            }
         }
-        // Apply a merge key. The merged values were built by this same visitor,
+        // Apply the merge key. The merged values were built by this same visitor,
         // so their own merges are already resolved (nested merges compose).
-        let mergeable = match out.get("<<") {
-            Some(Value::Object(_)) => true,
-            Some(Value::Array(items)) => items.iter().all(Value::is_object),
-            _ => false,
-        };
-        if mergeable && let Some(merge) = out.remove("<<") {
+        if let Some(merge) = merge {
             let sources = match merge {
                 Value::Array(items) => items,
                 single => vec![single],
@@ -177,6 +225,53 @@ mod tests {
         // A `<<` whose value is not a mapping is kept as an ordinary key.
         let v = Format::Yaml.parse("a:\n  <<: plain\n").unwrap();
         assert_eq!(v["a"]["<<"], json!("plain"));
+    }
+
+    #[test]
+    fn yaml_quoted_merge_key_is_an_ordinary_key() {
+        // Regression: a QUOTED `"<<"` key was applied as a merge key. YAML 1.1
+        // resolves the merge type only from the PLAIN `<<` scalar; quoted (or
+        // escaped, or block-scalar) `<<` is just a string key.
+        let base = "base: &b {x: 1}\n";
+        for key in ["\"<<\"", "'<<'", "\"\\x3c<\"", "\"\\u003C<\""] {
+            for doc in [
+                format!("{base}d:\n  {key}: *b\n  y: 2\n"),
+                format!("{base}d: {{{key}: *b, y: 2}}\n"),
+            ] {
+                let v = Format::Yaml.parse(&doc).unwrap();
+                assert_eq!(v["d"], json!({"<<": {"x": 1}, "y": 2}), "{doc:?}");
+            }
+        }
+        let v = Format::Yaml
+            .parse(&format!("{base}d:\n  ? >-\n    <<\n  : *b\n"))
+            .unwrap();
+        assert_eq!(v["d"], json!({"<<": {"x": 1}}));
+        // An alias to a quoted `"<<"` scalar is still that quoted scalar.
+        let v = Format::Yaml
+            .parse(&format!("{base}q: &q \"<<\"\nd: {{*q : *b}}\n"))
+            .unwrap();
+        assert_eq!(v["d"], json!({"<<": {"x": 1}}));
+        // The PLAIN merge key still merges -- block, flow, anchored, after a
+        // quoted literal `"<<"` in the same mapping, and as an alias to a plain
+        // `<<` scalar.
+        for doc in [
+            format!("{base}d:\n  <<: *b\n"),
+            format!("{base}d: {{<<: *b}}\n"),
+            format!("{base}d: {{ <<: *b}}\n"),
+            format!("{base}d:\n  &k <<: *b\n"),
+            format!("{base}d:\n  ? <<\n  : *b\n"),
+        ] {
+            let v = Format::Yaml.parse(&doc).unwrap();
+            assert_eq!(v["d"], json!({"x": 1}), "{doc:?}");
+        }
+        let v = Format::Yaml
+            .parse(&format!("{base}d:\n  \"<<\": lit\n  <<: *b\n"))
+            .unwrap();
+        assert_eq!(v["d"], json!({"<<": "lit", "x": 1}));
+        let v = Format::Yaml
+            .parse(&format!("{base}m: {{&k <<: *b}}\nd: {{*k : *b}}\n"))
+            .unwrap();
+        assert_eq!(v["d"], json!({"x": 1}));
     }
 
     #[test]
