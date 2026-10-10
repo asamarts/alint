@@ -91,7 +91,7 @@ pub const MAX_YAML_EXPANSION_BYTES: usize = 256 * 1024 * 1024;
 /// its scalar text. An upper estimate of the per-node tree cost: measured ~235
 /// B/node for a map-heavy tree (each `{k: v}` is a map + key + value), ~70 B for
 /// a flat integer sequence.
-const YAML_NODE_COST: usize = 256;
+pub const YAML_NODE_COST: usize = 256;
 
 /// Budget bytes allowed per byte of input, on top of [`MAX_YAML_EXPANSION_BYTES`].
 /// A LARGE alias-bearing document is not an amplification attack just because
@@ -99,7 +99,7 @@ const YAML_NODE_COST: usize = 256;
 /// is bounded only by the structured-parse byte cap. So the budget grows with
 /// the input at one node's cost per 16 input bytes (real YAML runs ~20-30 bytes
 /// per node), and only the AMPLIFIED part is capped by the fixed allowance.
-const YAML_EXPANSION_BYTES_PER_INPUT_BYTE: usize = YAML_NODE_COST / 16;
+pub const YAML_EXPANSION_BYTES_PER_INPUT_BYTE: usize = YAML_NODE_COST / 16;
 
 /// Upper bounds on the budget constants, enforced at compile time: set them
 /// absurdly high (or `usize::MAX`) and the guard would never fire, silently
@@ -117,7 +117,8 @@ const _: () = assert!(
 /// proportional to the input (see [`YAML_EXPANSION_BYTES_PER_INPUT_BYTE`]),
 /// counted up to the structured-parse byte cap so padding a config body (which
 /// has no such cap) cannot buy more: the budget never exceeds ~768 MiB.
-fn expansion_budget(len: usize) -> usize {
+#[must_use]
+pub fn expansion_budget(len: usize) -> usize {
     let len = len.min(crate::structured_format::MAX_STRUCTURED_BYTES);
     MAX_YAML_EXPANSION_BYTES + len * YAML_EXPANSION_BYTES_PER_INPUT_BYTE
 }
