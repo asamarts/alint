@@ -158,3 +158,14 @@ fn dry_run_report_carries_the_flag_and_validates() {
     let json: serde_json::Value = serde_json::from_str(&text).unwrap();
     assert_eq!(json["dry_run"], true);
 }
+
+#[test]
+fn report_without_dry_run_still_validates() {
+    // `dry_run` was added within schema_version 1, so it is optional: a fix
+    // report from an older alint (which never emitted it) must still
+    // validate against the published schema.
+    let mut json: serde_json::Value =
+        serde_json::from_str(&render_json(&canonical_fix_report())).unwrap();
+    json.as_object_mut().unwrap().remove("dry_run");
+    validate(&json.to_string());
+}
