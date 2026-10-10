@@ -26,10 +26,16 @@
 //! A differential property test pins the parity against the real parser.
 
 /// Real config/manifest YAML nests a handful of flow levels; anything past this
-/// is a bomb. Chosen far above any legitimate document yet far below the depth
-/// where libyaml starts to slow (~tens of thousands), so the margin is huge in
-/// both directions.
-pub const MAX_YAML_FLOW_DEPTH: usize = 1024;
+/// is a bomb. Pinned to `serde_yaml_ng`'s own recursion limit: its deserializer
+/// allows 128 nested collections (block or flow) and fails the 129th, so a
+/// document whose flow nesting alone exceeds 128 can never deserialize into a
+/// value anyway -- rejecting it here introduces no new false reject, only skips
+/// the libyaml tokenizing (whose per-token simple-key bookkeeping grows with the
+/// flow depth) that would end in that same error. (The one exception is a
+/// subtree serde IGNORES -- `IgnoredAny` skips events without a depth check --
+/// which no alint path relies on: configs are `deny_unknown_fields`, and every
+/// structured query builds the whole tree.)
+pub const MAX_YAML_FLOW_DEPTH: usize = 128;
 
 /// `true` when the YAML text's flow-collection nesting stays within
 /// [`MAX_YAML_FLOW_DEPTH`]. A cheap single-pass scan with libyaml's own lexical
@@ -760,6 +766,31 @@ mod tests {
         // Curly flow maps too.
         let bomb3 = format!("x: {}1{}", "{a: ".repeat(2000), "}".repeat(2000));
         assert!(!flow_depth_within_limit(&bomb3));
+    }
+
+    #[test]
+    fn flow_depth_limit_matches_serde_yaml_ngs_recursion_limit() {
+        // The ceiling sits exactly at serde_yaml_ng's recursion limit: the
+        // deepest flow document it can deserialize passes the guard and parses
+        // to the same value as without the guard, and one level deeper is a
+        // document serde_yaml_ng could never deserialize (so the guard adds no
+        // new false reject). A regression to a looser ceiling (1024 before) fails
+        // the second half.
+        let at = MAX_YAML_FLOW_DEPTH;
+        let ok = bomb(at);
+        assert!(flow_depth_within_limit(&ok));
+        let parsed = serde_yaml_ng::from_str::<serde_json::Value>(&ok).unwrap();
+        assert_eq!(crate::Format::Yaml.parse(&ok).unwrap(), parsed);
+        let over = bomb(at + 1);
+        assert!(serde_yaml_ng::from_str::<serde_json::Value>(&over).is_err());
+        assert!(serde_yaml_ng::from_str::<serde_yaml_ng::Value>(&over).is_err());
+        assert!(!flow_depth_within_limit(&over));
+        // Curly flow maps count the same way.
+        let maps = |n: usize| format!("{}1{}", "{a: ".repeat(n), "}".repeat(n));
+        assert!(serde_yaml_ng::from_str::<serde_json::Value>(&maps(at)).is_ok());
+        assert!(flow_depth_within_limit(&maps(at)));
+        assert!(serde_yaml_ng::from_str::<serde_json::Value>(&maps(at + 1)).is_err());
+        assert!(!flow_depth_within_limit(&maps(at + 1)));
     }
 
     #[test]
