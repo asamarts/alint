@@ -12,8 +12,8 @@ import java.util.zip.ZipEntry
 import java.util.zip.ZipFile
 
 plugins {
-    kotlin("jvm") version "2.0.21"
-    id("org.jetbrains.intellij.platform") version "2.1.0"
+    kotlin("jvm") version "2.4.20"
+    id("org.jetbrains.intellij.platform") version "2.19.0"
 }
 
 group = "org.alint"
@@ -43,7 +43,7 @@ dependencies {
         testFramework(org.jetbrains.intellij.platform.gradle.TestFrameworkType.Platform)
     }
     // Used by the managed-download path to extract the release .tar.gz.
-    implementation("org.apache.commons:commons-compress:1.27.1")
+    implementation("org.apache.commons:commons-compress:1.28.0")
     testImplementation("junit:junit:4.13.2")
     // The platform test fixtures (UsefulTestCase) reference opentest4j,
     // which isn't pulled onto the gradle test classpath transitively.
@@ -79,8 +79,8 @@ intellijPlatform {
         // editors CI job so Marketplace-compat regressions surface
         // pre-tag.
         ides {
-            ide(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2024.2")
-            ide(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2024.3")
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2024.2")
+            create(org.jetbrains.intellij.platform.gradle.IntelliJPlatformType.IntellijIdeaCommunity, "2024.3")
         }
         // Fail the build on the same problem classes JetBrains Marketplace
         // moderation rejects. The verifier defaults to compatibility-only
@@ -113,19 +113,21 @@ intellijPlatform {
     }
 }
 
-// Target Java 17 (the IntelliJ 2024.2+ baseline) using the JDK that
-// runs Gradle. Deliberately NOT `jvmToolchain(17)`, which makes Gradle
-// try to *provision* a toolchain and fails on boxes without toolchain
-// auto-detection or a download repo configured — build with a JDK 17+.
+// Target Java 21 (the IntelliJ 2024.2+ runtime baseline; IntelliJ Platform
+// Gradle Plugin 2.12+ also pins the Java toolchain to the platform's, so a
+// JDK 17 build fails to find a 21 toolchain). Deliberately NOT
+// `jvmToolchain(21)`, which makes Gradle try to *provision* a toolchain and
+// fails on boxes without toolchain auto-detection or a download repo
+// configured — build with a JDK 21+.
 kotlin {
     compilerOptions {
-        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+        jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_21
     }
 }
 
 java {
-    sourceCompatibility = JavaVersion.VERSION_17
-    targetCompatibility = JavaVersion.VERSION_17
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
 }
 
 // --- Generated version resource -------------------------------------------

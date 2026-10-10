@@ -216,6 +216,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `json_schema_passes` uses `jsonschema` 0.58.
 
+- Building the JetBrains plugin now needs JDK 21 (Gradle 9.8, IntelliJ
+  Platform Gradle Plugin 2.19, Kotlin 2.4). The plugin itself still supports
+  IntelliJ 2024.2+, and the Marketplace verifier now checks it against
+  2024.2 as well as 2024.3 (it previously checked only 2024.3).
+
 - The release job and every downstream publisher (npm, PyPI, VS Code, Open
   VSX, JetBrains) can be re-run after a partial failure without failing on an
   already-published version, and a re-run publishes a release left as a

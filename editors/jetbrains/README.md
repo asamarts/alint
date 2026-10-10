@@ -22,7 +22,7 @@ lets the IDE render the results. All linting logic lives in alint.
 ## Building locally
 
 The plugin builds cleanly with the committed Gradle wrapper and a
-**full JDK 17** (not a JRE — code compilation needs `javac`):
+**full JDK 21** (not a JRE — code compilation needs `javac`):
 
 ```sh
 cd editors/jetbrains
