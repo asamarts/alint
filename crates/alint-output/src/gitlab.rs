@@ -532,6 +532,13 @@ mod tests {
         let parsed: Value = serde_json::from_str(&out).unwrap();
         let issue = &parsed[0];
         assert_eq!(issue["check_name"], "r/special");
-        assert_eq!(issue["location"]["path"], r#"a"b\c.rs"#);
+        // `\` is a separator on Windows (normalized to `/`) but an ordinary
+        // filename byte on Unix (kept, and JSON-escaped).
+        let expected = if cfg!(windows) {
+            r#"a"b/c.rs"#
+        } else {
+            r#"a"b\c.rs"#
+        };
+        assert_eq!(issue["location"]["path"], expected);
     }
 }
