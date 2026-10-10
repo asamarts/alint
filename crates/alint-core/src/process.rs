@@ -2,7 +2,7 @@
 //! facts, the `command` rule, `generated_file_fresh`, `command_idempotent`,
 //! the `command` fix op).
 //!
-//! Three properties, each a past bug class (audit 2026-10):
+//! Properties, each a past bug class (audit 2026-10):
 //!
 //! 1. **Concurrent drain.** stdout/stderr are read on their own threads while
 //!    the child runs. Reading only after exit deadlocks a child that writes more
@@ -19,6 +19,8 @@
 //!    descendant (`sh -c "sleep 6 & echo hi"`). The output read so far is
 //!    returned and the reader is abandoned (it ends when that descendant closes
 //!    the pipe), instead of stalling the run for the descendant's lifetime.
+//! 4. **No deadline overflow.** A `timeout` too large to add to `Instant::now()`
+//!    (`timeout: 18446744073709551615`) means "no deadline", not a panic.
 //!
 //! On Windows there is no process group here (a job object needs `unsafe`
 //! FFI, which the workspace forbids): the direct child is killed and property
@@ -84,7 +86,8 @@ pub fn run_bounded(
     let out = Reader::start(child.stdout.take(), cap);
     let err = Reader::start(child.stderr.take(), cap);
 
-    let deadline = Instant::now() + timeout;
+    // `None`: the timeout is too large to represent, i.e. no deadline.
+    let deadline = Instant::now().checked_add(timeout);
     loop {
         match child.try_wait() {
             Ok(Some(status)) => {
@@ -96,7 +99,7 @@ pub fn run_bounded(
                 };
             }
             Ok(None) => {
-                if Instant::now() >= deadline {
+                if deadline.is_some_and(|d| Instant::now() >= d) {
                     kill_tree(&mut child);
                     let grace = Instant::now() + READER_GRACE;
                     let _ = out.finish(grace);
@@ -282,5 +285,16 @@ mod tests {
         };
         assert_eq!(stdout, b"out\n");
         assert_eq!(stderr, b"");
+    }
+
+    #[test]
+    fn huge_timeout_means_no_deadline_not_a_panic() {
+        // `timeout: 18446744073709551615` overflowed `Instant + Duration`.
+        let out = run_bounded(sh("echo ok"), Duration::MAX, 1024, true);
+        let RunOutcome::Exited { status, stdout, .. } = out else {
+            panic!("expected exit, got {out:?}");
+        };
+        assert!(status.success());
+        assert_eq!(stdout, b"ok\n");
     }
 }
