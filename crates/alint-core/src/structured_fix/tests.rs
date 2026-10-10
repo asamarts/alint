@@ -1076,6 +1076,43 @@ fn json_value_span_preserves_jsonc_and_declines_bad_input() {
 }
 
 #[test]
+fn json_fix_side_accepts_exactly_what_the_check_side_accepts() {
+    // A UTF-16 surrogate-pair escape is standard JSON (serde_json accepts it, so
+    // the rule fires). jsonc-parser 0.26 rejected it, so such a file was advertised
+    // fixable yet always skipped; 0.27.1+ parses it.
+    let emoji = "{\"e\": \"\\ud83d\\ude00\", \"port\": 1}";
+    assert!(Format::Json.parse(emoji).is_ok());
+    assert_eq!(&emoji[json_value(emoji, &[key("port")])], "1");
+    assert_eq!(
+        document_remove(Format::Json, emoji.as_bytes(), &[vec![key("port")]]).unwrap(),
+        b"{\"e\": \"\\ud83d\\ude00\"}"
+    );
+    // JSON5 / loose syntax the check side rejects must not resolve on the fix side
+    // either (jsonc-parser 0.30+ enables these by default; we pin them off).
+    for bad in [
+        "{'s': 1, \"port\": 1}",
+        "{\"a\": [1 2], \"port\": 1}",
+        "{\"a\": 1 \"port\": 1}",
+        "{\"a\": 0x1F, \"port\": 1}",
+        "{\"a\": +1, \"port\": 1}",
+        "{\"a\": .5, \"port\": 1}",
+        "{\"a\": NaN, \"port\": 1}",
+        "{\"a\": \"\\x41\", \"port\": 1}",
+        "{a: 1, \"port\": 1}",
+    ] {
+        assert!(Format::Json.parse(bad).is_err(), "check side rejects {bad}");
+        assert!(
+            resolve_value_span(Format::Json, bad.as_bytes(), &[key("port")]).is_none(),
+            "fix side must decline {bad}"
+        );
+        assert!(
+            document_remove(Format::Json, bad.as_bytes(), &[vec![key("port")]]).is_none(),
+            "fix side must decline removal in {bad}"
+        );
+    }
+}
+
+#[test]
 fn json_value_span_offsets_past_a_leading_bom() {
     // Regression (JSON audit): the check side strips a leading BOM (`Format::parse`)
     // so a BOM-prefixed file fires + advertises a fix, but `jsonc-parser` rejects a

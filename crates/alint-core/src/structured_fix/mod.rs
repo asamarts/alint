@@ -1472,6 +1472,29 @@ mod json_ {
     use jsonc_parser::{CollectOptions, CommentCollectionStrategy, ParseOptions, parse_to_ast};
     use std::ops::Range;
 
+    /// The JSON dialect the fix side parses: comments + trailing commas (JSONC),
+    /// nothing else -- exactly what the check side (`serde_json` + `strip_jsonc`)
+    /// accepts. jsonc-parser's JSON5-ish extensions (single quotes, missing commas,
+    /// hex / `+` / bare-decimal / non-finite numbers, `\x` escapes; 0.26 accepted
+    /// the first two unconditionally) became toggles in 0.28-0.34 that all DEFAULT
+    /// ON, so every field is spelled out (no
+    /// `..Default::default()`): a future option is then a compile error here, not a
+    /// silent dialect widening.
+    fn parse_options() -> ParseOptions {
+        ParseOptions {
+            allow_comments: true,
+            allow_trailing_commas: true,
+            allow_loose_object_property_names: false,
+            allow_missing_commas: false,
+            allow_single_quoted_strings: false,
+            allow_hexadecimal_numbers: false,
+            allow_unary_plus_numbers: false,
+            allow_bare_decimal_point_numbers: false,
+            allow_non_finite_numbers: false,
+            allow_extended_string_escapes: false,
+        }
+    }
+
     /// The byte range of the value at `path` (what `set_value` overwrites). `None`
     /// if the source does not parse or the path does not resolve to a node.
     pub(super) fn json_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
@@ -1493,11 +1516,7 @@ mod json_ {
                 comments: CommentCollectionStrategy::Off,
                 tokens: false,
             },
-            &ParseOptions {
-                allow_comments: true,
-                allow_trailing_commas: true,
-                allow_loose_object_property_names: false,
-            },
+            &parse_options(),
         )
         .ok()?;
         let mut node = ast.value.as_ref()?;
@@ -1537,15 +1556,7 @@ mod json_ {
         // rejects it) and re-prepend it to the reserialized output.
         let stripped = text.trim_start_matches('\u{feff}');
         let bom = &text[..text.len() - stripped.len()];
-        let root = CstRootNode::parse(
-            stripped,
-            &ParseOptions {
-                allow_comments: true,
-                allow_trailing_commas: true,
-                allow_loose_object_property_names: false,
-            },
-        )
-        .ok()?;
+        let root = CstRootNode::parse(stripped, &parse_options()).ok()?;
         // Resolve ALL target handles FIRST, then remove -- removing by handle (not
         // by re-navigating) is index-shift-safe for array elements and order-free
         // for object members. But DROP any path that is a strict DESCENDANT of
