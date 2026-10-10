@@ -245,7 +245,11 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   existing Release and re-uploads the same asset set with
   `gh release upload --clobber` (then asserts the published asset set matches)
   instead of dying on `gh release create`, so the `needs: release` publishers
-  (npm, PyPI, Homebrew, VS Code, JetBrains) still run. The docs-bundle dispatch is
+  (npm, PyPI, Homebrew, VS Code, JetBrains) still run. If the surviving Release
+  is a **draft** (made by hand, or left by an interrupted attempt), the step
+  publishes it (`gh release edit --draft=false`) once the asset set is verified;
+  a draft would otherwise stay invisible to `install.sh`, `releases/latest` and
+  the npm postinstall download. The docs-bundle dispatch is
   non-fatal: if it fails the job emits a `::warning::` and you run
   `gh workflow run docs-bundle.yml --ref main` by hand.
 - **Expiring credentials** (`MP-M2`). Three channels carry secrets that can expire: VS

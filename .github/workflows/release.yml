@@ -325,12 +325,12 @@ jobs:
           assets=(install.sh SHA256SUMS SHA256SUMS.cosign.bundle
                   THIRD-PARTY-LICENSES.html alint.cdx.json
                   alint-*.tar.gz alint-*.tar.gz.sha256)
+          latest=false
+          if [[ "$HIGHEST_OVERALL" == "true" ]]; then latest=true; fi
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
             echo "::notice::Release ${TAG} already exists (job re-run); refreshing its assets with --clobber"
             gh release upload "$TAG" --repo "$REPO" --clobber "${assets[@]}"
           else
-            latest=false
-            if [[ "$HIGHEST_OVERALL" == "true" ]]; then latest=true; fi
             gh release create "$TAG" \
               --repo "$REPO" \
               --title "alint $TAG" \
@@ -346,6 +346,19 @@ jobs:
             exit 1
           fi
           echo "Release ${TAG} carries exactly the $(echo "$expected" | wc -l) expected assets."
+          # `gh release view` above also succeeds for a DRAFT (a hand-made or
+          # interrupted Release), and a draft stays a draft through
+          # `upload --clobber`: invisible to install.sh, `releases/latest` and
+          # the npm postinstall download (they 404). Publish it now that its
+          # asset set is verified complete.
+          is_draft="$(gh release view "$TAG" --repo "$REPO" --json isDraft --jq '.isDraft')"
+          if [[ "$is_draft" == "true" ]]; then
+            echo "::notice::Release ${TAG} was a draft; publishing it now that its assets are complete"
+            gh release edit "$TAG" --repo "$REPO" --draft=false --latest="$latest"
+          elif [[ "$is_draft" != "false" ]]; then
+            echo "::error::could not read the draft state of Release ${TAG} (got '${is_draft}')"
+            exit 1
+          fi
 
       - name: attest build provenance for every asset in SHA256SUMS
         id: attest_provenance

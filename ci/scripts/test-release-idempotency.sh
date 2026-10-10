@@ -40,7 +40,7 @@ stub gh '
 if [[ "$1 $2" == "release view" ]]; then
   case " $* " in
     *" --json assets "*) ls -1 "${GH_ASSET_DIR:?}" | grep -v "^${GH_DROP_ASSET:-<none>}\$" | sort; exit 0 ;;
-    *" --json isDraft "*) echo "${GH_IS_DRAFT:-false}"; exit 0 ;;
+    *" --json isDraft "*) echo "${GH_IS_DRAFT-false}"; exit 0 ;;
   esac
   [[ "${GH_RELEASE_EXISTS:-0}" == 1 ]] && exit 0 || exit 1
 fi
@@ -94,6 +94,20 @@ expect "release: re-run refreshes assets with --clobber, never re-creates" 0 \
   '^gh release upload v1\.2\.3 .*--clobber( |$)' '^gh release create'
 run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=1 GH_DROP_ASSET=SHA256SUMS
 expect "release: a drifted asset set fails the step" nonzero '' ''
+# A surviving DRAFT (hand-made, or an interrupted earlier attempt) must be
+# published once its assets are verified, or install.sh / npm postinstall 404.
+run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=1 GH_IS_DRAFT=true
+expect "release: a surviving draft is published after its assets are verified" 0 \
+  '^gh release edit v1\.2\.3 .*--draft=false' '^gh release create'
+if [[ "$rc" -eq 0 ]] && ! awk '/--json assets/ { a = NR } /^gh release edit/ { e = NR } END { exit !(a && e > a) }' "$sandbox/log"; then
+  bad "release: the draft is published only AFTER the asset set is verified"
+fi
+run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=1 GH_IS_DRAFT=false
+expect "release: an already-public Release is not edited" 0 '--json isDraft' '^gh release edit'
+run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=1 GH_IS_DRAFT=true GH_DROP_ASSET=SHA256SUMS
+expect "release: an incomplete draft is NOT published" nonzero '' '^gh release edit'
+run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=1 GH_IS_DRAFT=
+expect "release: an unreadable draft state fails closed" nonzero '' '^gh release edit'
 
 # ── 2. npm: skip a version the registry already serves ────────────────
 NPM_STEP='stamp package version from tag + publish'
