@@ -87,6 +87,16 @@ msrv_job = job(ci, 'msrv')
 if '${{ steps.msrv.outputs.toolchain }}' not in msrv_job or 'ci/scripts/msrv.sh --print' not in msrv_job:
     failures.append('ci.yml msrv job must install the toolchain msrv.sh --print derives')
 
+# A gate that cannot fail is no gate: `continue-on-error` (on the job or on
+# any step) or an `|| true` / `|| :` swallow would keep the job green while
+# the MSRV / preflight check is red.
+for where, body in (('ci.yml msrv job', msrv_job), ('release.yml preflight job', preflight)):
+    if re.search(r'^\s+continue-on-error:', body, re.MULTILINE):
+        failures.append(f'{where}: continue-on-error makes its gates non-blocking')
+    for line in body.splitlines():
+        if 'ci/scripts/' in line and re.search(r'\|\|\s*(true|:)(\s|$)|;\s*(true|exit 0)(\s|$)', line):
+            failures.append(f'{where}: a gate result is swallowed: {line.strip()!r}')
+
 if failures:
     for f in failures:
         print(f'[release-preflight-parity] {f}', file=sys.stderr)

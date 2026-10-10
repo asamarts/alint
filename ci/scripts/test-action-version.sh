@@ -5,7 +5,10 @@ set -euo pipefail
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$REPO_ROOT"
 
-# shellcheck source=action/resolve-version.sh
+# Resolve the sourced helper from this script's location so `shellcheck -x`
+# follows it from any cwd; SC1091 (info: "not specified as input") only fires
+# for a plain `shellcheck` run that was not asked to follow sources.
+# shellcheck source-path=SCRIPTDIR/../.. source=action/resolve-version.sh disable=SC1091
 source action/resolve-version.sh
 
 workspace_version=$(awk -F'"' '
