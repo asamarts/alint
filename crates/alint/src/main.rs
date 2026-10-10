@@ -89,6 +89,16 @@ fn tolerate_broken_pipe(res: io::Result<()>) -> io::Result<()> {
     }
 }
 
+/// Write `text` plus a newline to stdout (locked, then flushed). A closed
+/// stdout (EPIPE) is tolerated like a consumed write, so the command keeps
+/// the exit code it would have had; `println!` would panic instead.
+fn print_stdout_line(text: &str) -> Result<()> {
+    use std::io::Write as _;
+    let mut out = io::stdout().lock();
+    tolerate_broken_pipe(writeln!(out, "{text}").and_then(|()| out.flush()))
+        .context("writing output")
+}
+
 /// Install a custom panic hook that prints a pre-filled GitHub-issue
 /// URL for the bug report. Skipped when `RUST_BACKTRACE` is set so
 /// developers running with `RUST_BACKTRACE=1` keep the standard
@@ -443,17 +453,18 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
 
     let summary = init::render_summary(&detection);
     if summary.is_empty() {
-        println!(
-            "Wrote {} - extends `oss-baseline@v1` only.",
+        print_stdout_line(&format!(
+            "Wrote {} - extends `oss-baseline@v1` only.\n  \
+             No language manifests detected. Add an `extends:` line for your stack \
+             (`alint://bundled/rust@v1`, `node@v1`, …) when ready.",
             target.display()
-        );
-        println!(
-            "  No language manifests detected. Add an `extends:` line for your stack \
-             (`alint://bundled/rust@v1`, `node@v1`, …) when ready."
-        );
+        ))?;
     } else {
-        println!("Wrote {} - detected: {}.", target.display(), summary);
-        println!("  Run `alint check` to lint against the generated config.");
+        print_stdout_line(&format!(
+            "Wrote {} - detected: {}.\n  Run `alint check` to lint against the generated config.",
+            target.display(),
+            summary
+        ))?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -2044,13 +2055,13 @@ fn emit_validate_success(rule_count: usize, config_path: &Path, format: &str) ->
             "config_path": config_path.display().to_string(),
             "error": serde_json::Value::Null,
         });
-        println!("{}", serde_json::to_string(&envelope)?);
+        print_stdout_line(&serde_json::to_string(&envelope)?)?;
     } else {
         // human format
-        println!(
+        print_stdout_line(&format!(
             "✓ Config valid: {rule_count} rule(s) loaded from {}",
             config_path.display()
-        );
+        ))?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -2070,13 +2081,13 @@ fn emit_validate_failure(
             "config_path": config_path.map(|p| p.display().to_string()),
             "error": chain,
         });
-        println!("{}", serde_json::to_string(&envelope)?);
+        print_stdout_line(&serde_json::to_string(&envelope)?)?;
     } else {
         // Human format prints to stderr to stay out of the way of
         // stdout consumers, then a one-line summary on stdout so
         // terminals show something either way.
         eprintln!("alint: {err:#}");
-        println!("✗ Config invalid");
+        print_stdout_line("✗ Config invalid")?;
     }
     // An internal error (an alint bug — e.g. a shipped bundled ruleset that
     // fails to parse) is not the user's config being "invalid"; surface it as
