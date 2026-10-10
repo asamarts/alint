@@ -256,6 +256,10 @@ pub(crate) fn load_recursive(
         // field-merge has blurred where each field came from.
         crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Extended, url);
         crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Extended, url);
+        if url.starts_with("https://") {
+            crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Remote, url);
+            crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Remote, url);
+        }
         parent.drop_top_level_settings(url);
         parent.rules = apply_rule_filter(parent.rules, entry)?;
         // W2 content-fixer trust (auto-fix.md 5.5): a REMOTE `extends:` the user has

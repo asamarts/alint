@@ -3221,3 +3221,43 @@ fn extended_source_cannot_field_merge_into_a_spawning_rule() {
         alint_core::Level::Warning
     );
 }
+
+#[test]
+fn remote_template_vars_cannot_assemble_an_env_ref_in_since() {
+    // Audit R2 (HIGH): the per-source gate looked for `${` in each raw value, so a
+    // remote instance splitting it across two vars (`$` + `{SECRET}`) expanded
+    // into `since: "${SECRET}"` through the user's own template.
+    let top = "templates:\n  - id: user_cm\n    kind: git_commit_message\n    \
+        since: \"{{vars.a}}{{vars.b}}\"\n    subject_max_length: 72\n    level: warning\n\
+        rules: []\n";
+    let remote = "version: 1\nrules:\n  - id: cm\n    extends_template: user_cm\n    \
+        vars: {a: \"$\", b: \"{FAKE_SECRET_TOKEN}\"}\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("`since`"), "{err}");
+    assert!(err.contains("example.invalid"), "{err}");
+
+    // ...including inside a nested `require:` rule, and when the remote only
+    // contributes the `vars:` to the user's own instance by sharing its id.
+    let top = "templates:\n  - id: t\n    kind: for_each_dir\n    select: \"*\"\n    \
+        level: warning\n    require:\n      - kind: git_commit_message\n        \
+        since: \"{{vars.a}}{{vars.b}}\"\n        subject_max_length: 72\n\
+        rules:\n  - id: cm\n    extends_template: t\n";
+    let remote = "version: 1\nrules:\n  - id: cm\n    \
+        vars: {a: \"$\", b: \"{FAKE_SECRET_TOKEN}\"}\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("require[0].since"), "{err}");
+
+    // Unaffected: the user's own instance assembling the same value, and a remote
+    // instance of a template whose `${...}` the user wrote literally.
+    let top = "templates:\n  - id: user_cm\n    kind: git_commit_message\n    \
+        since: \"{{vars.a}}{{vars.b}}\"\n    subject_max_length: 72\n    level: warning\n\
+        rules:\n  - id: mine\n    extends_template: user_cm\n    \
+        vars: {a: \"$\", b: \"{ALINT_BASE_SHA}\"}\n";
+    let cfg = try_load_extending("version: 1\nrules: []\n", top).unwrap();
+    assert_eq!(cfg.rules[0].extra["since"], "${ALINT_BASE_SHA}");
+    let top = "templates:\n  - id: user_cm\n    kind: git_commit_message\n    \
+        since: \"${ALINT_BASE_SHA}\"\n    subject_max_length: 72\n    level: warning\n\
+        rules: []\n";
+    let remote = "version: 1\nrules:\n  - id: cm\n    extends_template: user_cm\n";
+    assert!(try_load_extending(remote, top).is_ok());
+}

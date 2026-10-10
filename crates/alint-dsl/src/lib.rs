@@ -63,12 +63,15 @@ const PROVENANCE_MARKER: &str = "__alint_internal_provenance";
 pub(crate) enum SourceClass {
     /// Any config reached through `extends:` (local, remote, or bundled).
     Extended,
+    /// An `https://` `extends:` entry, allowlisted in `trusted_extends:` or not.
+    Remote,
 }
 
 impl SourceClass {
     fn key(self) -> &'static str {
         match self {
             Self::Extended => "extended",
+            Self::Remote => "remote",
         }
     }
 }
@@ -77,6 +80,7 @@ impl SourceClass {
 #[derive(Debug, Default)]
 struct Provenance {
     extended: Option<String>,
+    remote: Option<String>,
 }
 
 impl Provenance {
@@ -91,6 +95,7 @@ impl Provenance {
         };
         Self {
             extended: source(SourceClass::Extended),
+            remote: source(SourceClass::Remote),
         }
     }
 }
@@ -475,6 +480,7 @@ impl RawConfig {
                 .get("id")
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
+            reject_remote_assembled_env_refs(m, &templates_by_id, &id_hint)?;
             let mut expanded = expand_template(m, &templates_by_id)?;
             // A source-local cap is not enough: an untrusted rule can instantiate
             // a fixer-bearing trusted template, and a trusted rule can instantiate
@@ -584,26 +590,7 @@ fn expand_template(
         ));
     }
 
-    let vars: std::collections::HashMap<String, String> = rule
-        .get("vars")
-        .and_then(|v| v.as_mapping())
-        .map(|m| {
-            m.iter()
-                .filter_map(|(k, v)| match (k.as_str(), v) {
-                    (Some(key), serde_yaml_ng::Value::String(s)) => {
-                        Some((key.to_string(), s.clone()))
-                    }
-                    (Some(key), serde_yaml_ng::Value::Number(n)) => {
-                        Some((key.to_string(), n.to_string()))
-                    }
-                    (Some(key), serde_yaml_ng::Value::Bool(b)) => {
-                        Some((key.to_string(), b.to_string()))
-                    }
-                    _ => None,
-                })
-                .collect()
-        })
-        .unwrap_or_default();
+    let vars = instance_vars(rule);
 
     let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
     let mut expanded = (*template).clone();
@@ -637,6 +624,120 @@ fn expand_template(
     Ok(expanded)
 }
 
+/// A template instance's `vars:` map, as strings (numbers and bools stringify).
+fn instance_vars(rule: &Mapping) -> std::collections::HashMap<String, String> {
+    rule.get("vars")
+        .and_then(|v| v.as_mapping())
+        .map(|m| {
+            m.iter()
+                .filter_map(|(k, v)| match (k.as_str(), v) {
+                    (Some(key), serde_yaml_ng::Value::String(s)) => {
+                        Some((key.to_string(), s.clone()))
+                    }
+                    (Some(key), serde_yaml_ng::Value::Number(n)) => {
+                        Some((key.to_string(), n.to_string()))
+                    }
+                    (Some(key), serde_yaml_ng::Value::Bool(b)) => {
+                        Some((key.to_string(), b.to_string()))
+                    }
+                    _ => None,
+                })
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Refuse a template instance that a REMOTE ruleset helped shape (its `vars:`,
+/// its `extends_template:`, or any other field) when substituting its vars into
+/// the template turns a `since:` into a legacy `${VAR}` environment reference.
+/// The per-source gate ([`reject_env_expansion_in`]) sees only each raw value,
+/// so `since: "{{vars.a}}{{vars.b}}"` with remote `vars: {a: "$", b: "{SECRET}"}`
+/// (or a template `since: "${{{vars.name}}}"` with a remote-chosen name) passes
+/// it and then expands into `${SECRET}`. Only a `since:` that both carries a
+/// placeholder and renders into a `${` is refused: a literal `${ALINT_BASE_SHA}`
+/// the user's own template wrote is not assembled by the remote.
+fn reject_remote_assembled_env_refs(
+    rule: &Mapping,
+    templates_by_id: &std::collections::HashMap<String, &Mapping>,
+    id: &str,
+) -> Result<()> {
+    let Some(source) = Provenance::read(rule).remote else {
+        return Ok(());
+    };
+    let Some(template) = rule
+        .get("extends_template")
+        .and_then(|v| v.as_str())
+        .and_then(|t| templates_by_id.get(t))
+    else {
+        return Ok(());
+    };
+    let vars = instance_vars(rule);
+    if let Some(field) = find_assembled_env_ref(template, &vars, "since") {
+        return Err(Error::rule_config(
+            id,
+            format!(
+                "`{field}` expands into an environment variable reference (`${{...}}`) \
+                 built from template variables that a remote ruleset ({source}) supplies; \
+                 a remote ruleset may not read the environment. Set the value in your \
+                 own top-level config instead"
+            ),
+        ));
+    }
+    Ok(())
+}
+
+/// The path of the first `key:` string in `m` (at any depth) whose value holds a
+/// `{{` placeholder and renders, with `vars`, into a `${` env reference.
+fn find_assembled_env_ref(
+    m: &Mapping,
+    vars: &std::collections::HashMap<String, String>,
+    key: &str,
+) -> Option<String> {
+    fn walk(
+        v: &serde_yaml_ng::Value,
+        vars: &std::collections::HashMap<String, String>,
+        key: &str,
+        path: &str,
+    ) -> Option<String> {
+        match v {
+            serde_yaml_ng::Value::Mapping(m) => m.iter().find_map(|(k, v)| {
+                let name = k.as_str().unwrap_or_default();
+                let child = if path.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{path}.{name}")
+                };
+                if name == key
+                    && let Some(raw) = v.as_str()
+                    && raw.contains("{{")
+                    && render_template_vars(raw, vars).contains("${")
+                {
+                    return Some(child);
+                }
+                walk(v, vars, key, &child)
+            }),
+            serde_yaml_ng::Value::Sequence(seq) => seq
+                .iter()
+                .enumerate()
+                .find_map(|(i, v)| walk(v, vars, key, &format!("{path}[{i}]"))),
+            _ => None,
+        }
+    }
+    walk(&serde_yaml_ng::Value::Mapping(m.clone()), vars, key, "")
+}
+
+/// Render the `{{vars.<name>}}` placeholders of one string (other namespaces
+/// and unknown names stay literal), exactly as template expansion does.
+fn render_template_vars(s: &str, vars: &std::collections::HashMap<String, String>) -> String {
+    alint_core::template::render_message(s, |ns, key| {
+        if ns == "vars" {
+            vars.get(key).cloned()
+        } else {
+            None
+        }
+    })
+}
+
 /// Recursively walk a YAML mapping and substitute
 /// `{{vars.<name>}}` placeholders in every string value with
 /// the corresponding entry from `vars`. Unknown placeholders
@@ -659,16 +760,7 @@ fn substitute_template_vars_value(
 ) -> serde_yaml_ng::Value {
     use serde_yaml_ng::Value;
     match value {
-        Value::String(s) => {
-            let rendered = alint_core::template::render_message(&s, |ns, key| {
-                if ns == "vars" {
-                    vars.get(key).cloned()
-                } else {
-                    None
-                }
-            });
-            Value::String(rendered)
-        }
+        Value::String(s) => Value::String(render_template_vars(&s, vars)),
         Value::Sequence(seq) => Value::Sequence(
             seq.into_iter()
                 .map(|v| substitute_template_vars_value(v, vars))
@@ -1332,7 +1424,9 @@ pub fn reject_trusted_extends_in(trusted_extends: &[String], source: &str) -> Re
 /// range" error -- an exfiltration channel into CI logs and SARIF. Scans every
 /// `since:` (including one a remote contributes to a user rule by field-merge,
 /// with no `kind`) and every `vars:` value (which a template could substitute
-/// into `since:`), at every `require:` depth.
+/// into `since:`), at every `require:` depth. A `${` ASSEMBLED from several
+/// vars only exists after expansion, so `finalize` re-checks it there
+/// ([`reject_remote_assembled_env_refs`]).
 pub(crate) fn reject_env_expansion_in(
     rules: &[Mapping],
     templates: &[Mapping],
