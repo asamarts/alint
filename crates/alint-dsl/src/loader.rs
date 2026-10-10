@@ -112,14 +112,16 @@ fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawC
             alint_core::yaml_depth::MAX_YAML_EXPANSION_NODES
         )));
     }
-    if contents.contains("{{") {
+    let config: RawConfig = if contents.contains("{{") {
         let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(contents)?;
         crate::interp::interpolate_value(&mut value, &|n| std::env::var(n).ok())
             .map_err(|e| Error::Other(format!("{}: interpolation error: {e}", source.display())))?;
-        Ok(serde_yaml_ng::from_value(value)?)
+        serde_yaml_ng::from_value(value)?
     } else {
-        Ok(serde_yaml_ng::from_str(contents)?)
-    }
+        serde_yaml_ng::from_str(contents)?
+    };
+    crate::reject_ambiguous_yaml_in(&config, &display_path(source))?;
+    Ok(config)
 }
 
 /// Recursively load `path`, resolving its `extends:` chain
@@ -339,6 +341,7 @@ fn load_remote(
     }
     let config: RawConfig = serde_yaml_ng::from_str(body_str)
         .map_err(|e| Error::Other(format!("remote config at {url}: YAML parse error: {e}")))?;
+    crate::reject_ambiguous_yaml_in(&config, url.as_str())?;
     if !config.extends.is_empty() {
         return Err(Error::Other(format!(
             "remote config at {url} contains its own `extends:`; \
@@ -417,6 +420,8 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
         // bug, not the user's config — Internal → CLI exit 3 (M11).
         Error::internal(format!("built-in ruleset '{spec}' failed to parse: {e}"))
     })?;
+    crate::reject_ambiguous_yaml_in(&config, &format!("alint://bundled/{spec}"))
+        .map_err(|e| Error::internal(e.to_string()))?;
     if !config.extends.is_empty() {
         return Err(Error::internal(format!(
             "bundled ruleset '{spec}' declares its own `extends:`"

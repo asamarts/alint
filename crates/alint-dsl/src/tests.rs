@@ -3031,3 +3031,106 @@ fn parse_error_in_an_extended_config_names_that_file() {
     // The serde message appears once (it used to repeat as the error's source).
     assert_eq!(err.matches("unknown field").count(), 1, "{err}");
 }
+
+#[test]
+fn remote_yaml_tags_cannot_hide_fields_from_the_trust_gates() {
+    // Audit R2 (CRITICAL): the gates read raw mappings with `get("kind")` /
+    // `as_str()`, which miss a tagged KEY (`!x kind:`) or a tagged VALUE
+    // (`kind: !x command`), while serde strips the tag and builds the real field.
+    // Each of these loaded and then spawned / auto-deleted / read the env.
+    let cases = [
+        (
+            "!x kind: command\n    command: [\"sh\", \"-c\", \"touch pwned\"]\n    \
+             paths: \"*.txt\"",
+            "rules[0]",
+        ),
+        (
+            "kind: !x command\n    command: [\"sh\", \"-c\", \"touch pwned\"]\n    \
+             paths: \"*.txt\"",
+            "rules[0].kind",
+        ),
+        (
+            "kind: file_absent\n    paths: \"*.txt\"\n    \
+             !x fix: {file_remove: {applicability: safe}}",
+            "rules[0]",
+        ),
+        (
+            "kind: file_absent\n    paths: \"*.txt\"\n    \
+             fix: {file_remove: {applicability: !x safe}}",
+            "rules[0].fix.file_remove.applicability",
+        ),
+        (
+            "kind: git_commit_message\n    subject_max_length: 72\n    \
+             !x since: \"${FAKE_SECRET_TOKEN}\"",
+            "rules[0]",
+        ),
+        (
+            "kind: file_exists\n    paths: README.md\n    <<: {kind: command}",
+            "merge key",
+        ),
+        (
+            "kind: file_exists\n    paths: README.md\n    1: x",
+            "non-string key",
+        ),
+    ];
+    for (fields, needle) in cases {
+        let remote = format!("version: 1\nrules:\n  - id: r\n    level: error\n    {fields}\n");
+        let err = try_load_extending(&remote, "rules: []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("example.invalid"), "{fields}: {err}");
+        assert!(err.contains(needle), "{fields}: {err}");
+    }
+    // A tagged key inside a template is refused the same way.
+    let remote = "version: 1\ntemplates:\n  - id: t\n    !x kind: command\n    \
+        command: [\"true\"]\n    level: error\nrules: []\n";
+    let err = try_load_extending(remote, "rules: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("templates[0]"), "{err}");
+}
+
+#[test]
+fn yaml_tags_are_refused_in_local_and_nested_configs() {
+    // Every entry point shares the check: the top-level config (both the
+    // interpolating and the fast parse path), a local `extends:` target, and a
+    // nested config (whose `!x paths:` would otherwise skip subtree scoping).
+    let tag = "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    \
+        !x paths: README.md\n    level: error\n";
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&cfg, tag).unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("YAML tag `!x`"), "{err}");
+    std::fs::write(
+        &cfg,
+        format!("{tag}    message: \"{{{{env.HOME | default('x')}}}}\"\n"),
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("YAML tag `!x`"), "{err}");
+
+    let err = load_local_extends(tag).unwrap_err().to_string();
+    assert!(err.contains("base.yml"), "{err}");
+
+    std::fs::write(&cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(
+        pkg.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: n\n    kind: file_exists\n    \
+         !x paths: ../../README.md\n    level: error\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("YAML tag `!x`"), "{err}");
+
+    // The core `!!str` tag is resolved by the parser and stays accepted.
+    std::fs::write(
+        &cfg,
+        "version: 1\nrules:\n  - id: r\n    !!str kind: file_exists\n    \
+         paths: README.md\n    level: error\n",
+    )
+    .unwrap();
+    assert_eq!(load(&cfg).unwrap().rules[0].kind, "file_exists");
+}

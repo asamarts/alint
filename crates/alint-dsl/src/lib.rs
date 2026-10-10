@@ -1246,6 +1246,77 @@ pub(crate) fn reject_env_expansion_in(
     Ok(())
 }
 
+/// Reject YAML constructs in `rules:` / `templates:` that the trust gates and
+/// the typed deserializer would read differently. Those entries are kept as raw
+/// [`Mapping`]s so composition can field-merge them, and every gate inspects
+/// them with `Mapping::get("kind")` and friends. But serde strips a custom tag
+/// when it resolves a field, so `!x kind: command` (a tagged KEY) is invisible
+/// to `get("kind")` yet becomes `kind: command` in the [`alint_core::RuleSpec`],
+/// and `kind: !x command` (a tagged VALUE) defeats `as_str()` the same way. A
+/// non-string key and a `<<` merge key have no meaning in the DSL either (merge
+/// keys are NOT applied to config), so all of them are refused here, for every
+/// source, before any gate runs: the gates and serde then see one shape.
+///
+/// The other top-level fields deserialize straight into typed structs, which
+/// the gates read after serde has resolved them, so only these two raw lists
+/// need the check.
+pub(crate) fn reject_ambiguous_yaml_in(raw: &RawConfig, source: &str) -> Result<()> {
+    for (section, list) in [("rules", &raw.rules), ("templates", &raw.templates)] {
+        for (i, m) in list.iter().enumerate() {
+            let mut path = format!("{section}[{i}]");
+            if let Some(problem) = find_ambiguous_yaml_in_mapping(m, &mut path) {
+                return Err(Error::Other(format!(
+                    "{source}: {problem}; YAML tags, non-string keys and `<<` merge \
+                     keys are not supported in alint rules or templates"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn find_ambiguous_yaml_in_mapping(m: &Mapping, path: &mut String) -> Option<String> {
+    use serde_yaml_ng::Value;
+    for (k, v) in m {
+        let key = match k {
+            Value::String(s) if s == "<<" => {
+                return Some(format!("`{path}` uses a `<<` merge key"));
+            }
+            Value::String(s) => s.as_str(),
+            Value::Tagged(t) => {
+                return Some(format!("`{path}` has a key with the YAML tag `{}`", t.tag));
+            }
+            _ => return Some(format!("`{path}` has a non-string key")),
+        };
+        let len = path.len();
+        path.push('.');
+        path.push_str(key);
+        let found = find_ambiguous_yaml_in_value(v, path);
+        path.truncate(len);
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+fn find_ambiguous_yaml_in_value(v: &serde_yaml_ng::Value, path: &mut String) -> Option<String> {
+    use serde_yaml_ng::Value;
+    use std::fmt::Write as _;
+    match v {
+        Value::Tagged(t) => Some(format!("`{path}` has the YAML tag `{}`", t.tag)),
+        Value::Mapping(m) => find_ambiguous_yaml_in_mapping(m, path),
+        Value::Sequence(seq) => seq.iter().enumerate().find_map(|(i, item)| {
+            let len = path.len();
+            let _ = write!(path, "[{i}]");
+            let found = find_ambiguous_yaml_in_value(item, path);
+            path.truncate(len);
+            found
+        }),
+        _ => None,
+    }
+}
+
 pub(crate) fn apply_rule_filter(
     rules: Vec<serde_yaml_ng::Mapping>,
     entry: &alint_core::ExtendsEntry,
