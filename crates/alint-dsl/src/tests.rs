@@ -3103,3 +3103,339 @@ fn nested_configs_enabled_matches_load() {
     assert!(nested_configs_enabled(&top).unwrap());
     assert!(load(&top).unwrap().nested_configs);
 }
+
+#[test]
+fn remote_yaml_tags_cannot_hide_fields_from_the_trust_gates() {
+    // Audit R2 (CRITICAL): the gates read raw mappings with `get("kind")` /
+    // `as_str()`, which miss a tagged KEY (`!x kind:`) or a tagged VALUE
+    // (`kind: !x command`), while serde strips the tag and builds the real field.
+    // Each of these loaded and then spawned / auto-deleted / read the env.
+    let cases = [
+        (
+            "!x kind: command\n    command: [\"sh\", \"-c\", \"touch pwned\"]\n    \
+             paths: \"*.txt\"",
+            "rules[0]",
+        ),
+        (
+            "kind: !x command\n    command: [\"sh\", \"-c\", \"touch pwned\"]\n    \
+             paths: \"*.txt\"",
+            "rules[0].kind",
+        ),
+        (
+            "kind: file_absent\n    paths: \"*.txt\"\n    \
+             !x fix: {file_remove: {applicability: safe}}",
+            "rules[0]",
+        ),
+        (
+            "kind: file_absent\n    paths: \"*.txt\"\n    \
+             fix: {file_remove: {applicability: !x safe}}",
+            "rules[0].fix.file_remove.applicability",
+        ),
+        (
+            "kind: git_commit_message\n    subject_max_length: 72\n    \
+             !x since: \"${FAKE_SECRET_TOKEN}\"",
+            "rules[0]",
+        ),
+        (
+            "kind: file_exists\n    paths: README.md\n    <<: {kind: command}",
+            "merge key",
+        ),
+        (
+            "kind: file_exists\n    paths: README.md\n    1: x",
+            "non-string key",
+        ),
+    ];
+    for (fields, needle) in cases {
+        let remote = format!("version: 1\nrules:\n  - id: r\n    level: error\n    {fields}\n");
+        let err = try_load_extending(&remote, "rules: []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("example.invalid"), "{fields}: {err}");
+        assert!(err.contains(needle), "{fields}: {err}");
+    }
+    // A tagged key inside a template is refused the same way.
+    let remote = "version: 1\ntemplates:\n  - id: t\n    !x kind: command\n    \
+        command: [\"true\"]\n    level: error\nrules: []\n";
+    let err = try_load_extending(remote, "rules: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(err.contains("templates[0]"), "{err}");
+}
+
+#[test]
+fn yaml_tags_are_refused_in_local_and_nested_configs() {
+    // Every entry point shares the check: the top-level config (both the
+    // interpolating and the fast parse path), a local `extends:` target, and a
+    // nested config (whose `!x paths:` would otherwise skip subtree scoping).
+    let tag = "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    \
+        !x paths: README.md\n    level: error\n";
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&cfg, tag).unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("YAML tag `!x`"), "{err}");
+    std::fs::write(
+        &cfg,
+        format!("{tag}    message: \"{{{{env.HOME | default('x')}}}}\"\n"),
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("YAML tag `!x`"), "{err}");
+
+    let err = load_local_extends(tag).unwrap_err().to_string();
+    assert!(err.contains("base.yml"), "{err}");
+
+    std::fs::write(&cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg).unwrap();
+    std::fs::write(
+        pkg.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: n\n    kind: file_exists\n    \
+         !x paths: ../../README.md\n    level: error\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("YAML tag `!x`"), "{err}");
+
+    // The core `!!str` tag is resolved by the parser and stays accepted.
+    std::fs::write(
+        &cfg,
+        "version: 1\nrules:\n  - id: r\n    !!str kind: file_exists\n    \
+         paths: README.md\n    level: error\n",
+    )
+    .unwrap();
+    assert_eq!(load(&cfg).unwrap().rules[0].kind, "file_exists");
+}
+
+#[test]
+fn extended_source_cannot_field_merge_into_a_spawning_rule() {
+    // Audit R2 (HIGH): a remote `{id: gen-fresh, workdir: vendor/evilpkg}` has no
+    // `kind`, so it passed every per-source gate, then field-merged into the
+    // user's own `generated_file_fresh` rule, which ran `vendor/evilpkg/gen.sh`.
+    let top = "rules:\n  - id: gen-fresh\n    kind: generated_file_fresh\n    \
+        file: out.txt\n    command: [\"./gen.sh\"]\n    level: error\n";
+    let remote = "version: 1\nrules:\n  - id: gen-fresh\n    workdir: vendor/evilpkg\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("generated_file_fresh"), "{err}");
+    assert!(err.contains("example.invalid"), "{err}");
+
+    // The converse: the user's spawning rule shares the id of a remote rule, so
+    // the remote's `paths:` would choose what the command runs on.
+    let remote = "version: 1\nrules:\n  - id: lint\n    kind: file_exists\n    \
+        paths: \"vendor/**\"\n    level: error\n";
+    let top = "rules:\n  - id: lint\n    kind: command\n    \
+        command: [\"true\"]\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("`kind: command`"), "{err}");
+
+    // ...or the spawning rule instantiates a template an extended config defines.
+    let remote = "version: 1\ntemplates:\n  - id: t\n    paths: \"vendor/**\"\n    \
+        level: error\nrules: []\n";
+    let top = "rules:\n  - id: mine\n    extends_template: t\n    kind: command\n    \
+        command: [\"true\"]\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("template"), "{err}");
+
+    // ...including a spawning FIX op on an otherwise ordinary kind.
+    let remote = "version: 1\nrules:\n  - id: untrack\n    paths: \"**/*\"\n";
+    let top = "rules:\n  - id: untrack\n    kind: file_absent\n    paths: \"*.log\"\n    \
+        level: error\n    fix: { git_untrack: {} }\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("fix.git_untrack"), "{err}");
+
+    // A local `extends:` is an extended source too, and the mark survives a chain.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("leaf.yml"),
+        "version: 1\nrules:\n  - id: gen-fresh\n    workdir: vendor/evilpkg\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("mid.yml"),
+        "version: 1\nextends: [./leaf.yml]\nrules: []\n",
+    )
+    .unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nextends: [./mid.yml]\nrules:\n  - id: gen-fresh\n    \
+         kind: generated_file_fresh\n    file: out.txt\n    command: [\"./gen.sh\"]\n    \
+         level: error\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("leaf.yml"), "{err}");
+
+    // Unaffected: an extended config tuning an ordinary rule, and a spawning rule
+    // the user declares (and a drop-in tunes) without any extended contribution.
+    let remote = "version: 1\nrules:\n  - id: readme\n    level: warning\n";
+    let top = "rules:\n  - id: readme\n    kind: file_exists\n    paths: README.md\n    \
+        level: error\n  - id: gen-fresh\n    kind: generated_file_fresh\n    \
+        file: out.txt\n    command: [\"./gen.sh\"]\n    level: error\n";
+    let cfg = try_load_extending(remote, top).unwrap();
+    assert_eq!(cfg.rules.len(), 2);
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nrules:\n  - id: gen-fresh\n    kind: generated_file_fresh\n    \
+         file: out.txt\n    command: [\"./gen.sh\"]\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::create_dir(tmp.path().join(".alint.d")).unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.d/50-local.yml"),
+        "rules:\n  - id: gen-fresh\n    level: warning\n",
+    )
+    .unwrap();
+    assert_eq!(
+        load(&cfg).unwrap().rules[0].level,
+        alint_core::Level::Warning
+    );
+}
+
+#[test]
+fn remote_template_vars_cannot_assemble_an_env_ref_in_since() {
+    // Audit R2 (HIGH): the per-source gate looked for `${` in each raw value, so a
+    // remote instance splitting it across two vars (`$` + `{SECRET}`) expanded
+    // into `since: "${SECRET}"` through the user's own template.
+    let top = "templates:\n  - id: user_cm\n    kind: git_commit_message\n    \
+        since: \"{{vars.a}}{{vars.b}}\"\n    subject_max_length: 72\n    level: warning\n\
+        rules: []\n";
+    let remote = "version: 1\nrules:\n  - id: cm\n    extends_template: user_cm\n    \
+        vars: {a: \"$\", b: \"{FAKE_SECRET_TOKEN}\"}\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("`since`"), "{err}");
+    assert!(err.contains("example.invalid"), "{err}");
+
+    // ...including inside a nested `require:` rule, and when the remote only
+    // contributes the `vars:` to the user's own instance by sharing its id.
+    let top = "templates:\n  - id: t\n    kind: for_each_dir\n    select: \"*\"\n    \
+        level: warning\n    require:\n      - kind: git_commit_message\n        \
+        since: \"{{vars.a}}{{vars.b}}\"\n        subject_max_length: 72\n\
+        rules:\n  - id: cm\n    extends_template: t\n";
+    let remote = "version: 1\nrules:\n  - id: cm\n    \
+        vars: {a: \"$\", b: \"{FAKE_SECRET_TOKEN}\"}\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("require[0].since"), "{err}");
+
+    // Unaffected: the user's own instance assembling the same value, and a remote
+    // instance of a template whose `${...}` the user wrote literally.
+    let top = "templates:\n  - id: user_cm\n    kind: git_commit_message\n    \
+        since: \"{{vars.a}}{{vars.b}}\"\n    subject_max_length: 72\n    level: warning\n\
+        rules:\n  - id: mine\n    extends_template: user_cm\n    \
+        vars: {a: \"$\", b: \"{ALINT_BASE_SHA}\"}\n";
+    let cfg = try_load_extending("version: 1\nrules: []\n", top).unwrap();
+    assert_eq!(cfg.rules[0].extra["since"], "${ALINT_BASE_SHA}");
+    let top = "templates:\n  - id: user_cm\n    kind: git_commit_message\n    \
+        since: \"${ALINT_BASE_SHA}\"\n    subject_max_length: 72\n    level: warning\n\
+        rules: []\n";
+    let remote = "version: 1\nrules:\n  - id: cm\n    extends_template: user_cm\n";
+    assert!(try_load_extending(remote, top).is_ok());
+}
+
+#[test]
+fn untrusted_remote_when_cannot_read_the_environment() {
+    // Audit R2: an untrusted remote's `when: env.X matches "^g"|"^h"|"^i"` rules
+    // leaked a secret one character at a time through which rule fired.
+    let oracle = |c: char| {
+        format!(
+            "  - id: probe-{c}\n    kind: file_exists\n    paths: README.md\n    \
+             level: warning\n    when: env.FAKE_SECRET matches \"^{c}\"\n"
+        )
+    };
+    let remote = format!(
+        "version: 1\nrules:\n{}{}{}",
+        oracle('g'),
+        oracle('h'),
+        oracle('i')
+    );
+    let err = try_load_extending(&remote, "rules: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains(
+            "rule `probe-g`: `when:` reads `env.FAKE_SECRET`; an untrusted extends source"
+        ),
+        "{err}"
+    );
+    assert!(err.contains("example.invalid"), "{err}");
+    assert!(err.contains("trusted_extends:"), "{err}");
+
+    // An allowlisted remote keeps working as before.
+    let trusted = "trusted_extends: [\"https://example.invalid/remote.yml\"]\nrules: []\n";
+    assert_eq!(try_load_extending(&remote, trusted).unwrap().rules.len(), 3);
+
+    // Nested `require:` rules and a `when_iter:` filter are refused too.
+    for body in [
+        "  - id: each\n    kind: for_each_dir\n    select: \"*\"\n    level: warning\n    \
+         require:\n      - kind: file_exists\n        paths: \"{path}/x\"\n        \
+         when: (env.CI)\n",
+        "  - id: each\n    kind: for_each_dir\n    select: \"*\"\n    level: warning\n    \
+         when_iter: \"iter.has_file(env.CI)\"\n    require:\n      - kind: file_exists\n        \
+         paths: \"{path}/x\"\n",
+    ] {
+        let err = try_load_extending(&format!("version: 1\nrules:\n{body}"), "rules: []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("reads `env.CI`"), "{err}");
+    }
+
+    // A remote template may neither read the environment nor leave its `when`
+    // to an instance's variables.
+    for (when, needle) in [
+        ("env.CI", "reads `env.CI`"),
+        ("\"{{vars.cond}}\"", "placeholder"),
+    ] {
+        let remote = format!(
+            "version: 1\ntemplates:\n  - id: t\n    kind: file_exists\n    \
+             paths: README.md\n    level: warning\n    when: {when}\nrules: []\n"
+        );
+        let err = try_load_extending(&remote, "rules: []\n")
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("template `t`"), "{err}");
+        assert!(err.contains(needle), "{err}");
+    }
+
+    // An untrusted instance cannot fill a trusted template's `when` placeholder
+    // with an env read.
+    let top = "templates:\n  - id: gated\n    kind: file_exists\n    paths: README.md\n    \
+        level: warning\n    when: \"{{vars.cond}}\"\nrules: []\n";
+    let remote = "version: 1\nrules:\n  - id: probe\n    extends_template: gated\n    \
+        vars: {cond: \"env.FAKE_SECRET matches '^g'\"}\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("reads `env.FAKE_SECRET`"), "{err}");
+
+    // Unaffected: a remote `when` on facts, and a remote instance of a template
+    // whose env read the user wrote literally.
+    let remote = "version: 1\nrules:\n  - id: r\n    kind: file_exists\n    \
+        paths: README.md\n    level: warning\n    when: facts.is_rust\n";
+    assert!(try_load_extending(remote, "rules: []\n").is_ok());
+    let top = "templates:\n  - id: ci_only\n    kind: file_exists\n    paths: README.md\n    \
+        level: warning\n    when: env.CI\nrules: []\n";
+    let remote = "version: 1\nrules:\n  - id: r\n    extends_template: ci_only\n";
+    assert!(try_load_extending(remote, top).is_ok());
+}
+
+#[test]
+fn untrusted_remote_cannot_declare_ignore() {
+    // Audit R2: a remote `ignore: ["src/**"]` silently removed files from every
+    // rule, the user's own included.
+    let remote = "version: 1\nignore: [\"src/**\"]\nrules: []\n";
+    let err = try_load_extending(remote, "rules: []\n")
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("`ignore:` is not allowed from an untrusted extends source"),
+        "{err}"
+    );
+    assert!(err.contains("example.invalid"), "{err}");
+
+    // An allowlisted remote, and a local `extends:`, still contribute it.
+    let trusted = "trusted_extends: [\"https://example.invalid/remote.yml\"]\nrules: []\n";
+    let cfg = try_load_extending(remote, trusted).unwrap();
+    assert_eq!(cfg.ignore, vec!["src/**".to_string()]);
+    let cfg = load_local_extends(remote).unwrap();
+    assert_eq!(cfg.ignore, vec!["src/**".to_string()]);
+}

@@ -214,3 +214,31 @@ fn spawn_detection_is_dynamic_and_precise() {
         &helpers
     ));
 }
+
+#[test]
+fn every_registered_spelling_of_a_spawning_kind_is_gated() {
+    // The gate matches `kind:` exactly (the registry has no case folding), so an
+    // ALIAS of a spawning kind would build the spawning rule under a name the
+    // gate never sees. Every registered spelling that resolves to a spawning kind
+    // must itself be on the allow-list.
+    let registry = alint_rules::builtin_registry();
+    let mut ungated: Vec<&str> = registry
+        .known_kinds()
+        .filter(|k| alint_dsl::SPAWNING_RULE_KINDS.contains(&registry.canonical_kind(k)))
+        .filter(|k| !alint_dsl::SPAWNING_RULE_KINDS.contains(k))
+        .collect();
+    ungated.sort_unstable();
+    assert!(
+        ungated.is_empty(),
+        "alias(es) of a spawning kind missing from alint_dsl::SPAWNING_RULE_KINDS: \
+         {ungated:?}"
+    );
+    // ...and a case variant is not a second spelling.
+    for kind in alint_dsl::SPAWNING_RULE_KINDS {
+        let upper = kind.to_ascii_uppercase();
+        assert!(
+            !registry.known_kinds().any(|k| k == upper),
+            "{upper} is registered but not gated"
+        );
+    }
+}

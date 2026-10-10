@@ -332,6 +332,27 @@ impl WhenExpr {
         let v = eval(self, env)?;
         Ok(v.truthy())
     }
+
+    /// The name of the first `env.<NAME>` variable this expression reads, if
+    /// any, searching every branch (evaluation may short-circuit; this does not).
+    /// Lets a config loader refuse an environment read from a source it does
+    /// not trust without evaluating anything.
+    #[must_use]
+    pub fn first_env_ref(&self) -> Option<&str> {
+        match self {
+            Self::Literal(_) => None,
+            Self::Ident { ns, name } => (*ns == Namespace::Env).then_some(name.as_str()),
+            Self::Call { args: items, .. } | Self::List(items) => {
+                items.iter().find_map(Self::first_env_ref)
+            }
+            Self::Not(inner) | Self::Matches { left: inner, .. } => inner.first_env_ref(),
+            Self::And(l, r)
+            | Self::Or(l, r)
+            | Self::Cmp {
+                left: l, right: r, ..
+            } => l.first_env_ref().or_else(|| r.first_env_ref()),
+        }
+    }
 }
 
 mod eval;
@@ -909,5 +930,23 @@ mod tests {
             panic!("expected eval error");
         };
         assert!(msg.contains("must be a string"), "msg: {msg}");
+    }
+
+    #[test]
+    fn first_env_ref_finds_env_reads_in_every_branch() {
+        let env_ref = |src: &str| parse(src).unwrap().first_env_ref().map(str::to_owned);
+        assert_eq!(env_ref("env.CI"), Some("CI".into()));
+        assert_eq!(
+            env_ref("facts.is_rust or env.TOKEN matches \"^g\""),
+            Some("TOKEN".into())
+        );
+        assert_eq!(
+            env_ref("not (facts.a and env.X == \"1\")"),
+            Some("X".into())
+        );
+        assert_eq!(env_ref("\"a\" in [vars.org, env.Y]"), Some("Y".into()));
+        assert_eq!(env_ref("iter.has_file(env.F)"), Some("F".into()));
+        assert_eq!(env_ref("facts.is_rust and vars.org == \"env.X\""), None);
+        assert_eq!(env_ref("iter.has_file(\"Cargo.toml\")"), None);
     }
 }

@@ -111,14 +111,16 @@ fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawC
             source.display(),
         )));
     }
-    if contents.contains("{{") {
+    let config: RawConfig = if contents.contains("{{") {
         let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(contents)?;
         crate::interp::interpolate_value(&mut value, &|n| std::env::var(n).ok())
             .map_err(|e| Error::Other(format!("{}: interpolation error: {e}", source.display())))?;
-        Ok(serde_yaml_ng::from_value(value)?)
+        serde_yaml_ng::from_value(value)?
     } else {
-        Ok(serde_yaml_ng::from_str(contents)?)
-    }
+        serde_yaml_ng::from_str(contents)?
+    };
+    crate::reject_ambiguous_yaml_in(&config, &display_path(source))?;
+    Ok(config)
 }
 
 /// Recursively load `path`, resolving its `extends:` chain
@@ -248,35 +250,13 @@ pub(crate) fn load_recursive(
             load_recursive(&target, state, opts, confine, false, trusted)?
         };
         gate_extended_source(&parent, url)?;
+        mark_extended_provenance(&mut parent, url);
         parent.drop_top_level_settings(url);
         parent.rules = apply_rule_filter(parent.rules, entry)?;
-        // W2 content-fixer trust (auto-fix.md 5.5): a REMOTE `extends:` the user has
-        // NOT listed in `trusted_extends:` may PROPOSE a content edit but never
-        // auto-write one -- demote its content-injecting fixers to `suggestion`
-        // before the merge. Local / nested targets (the user's own tree) and bundled
-        // (first-party) sources are honored at their declared tier. A remote is a
-        // leaf (no nested `extends:`), so this caps exactly that source's own rules;
-        // the URL matches with or without its `#sha256-` integrity fragment.
-        //
-        // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
-        // spliced into its referencing rule at `finalize` (after this per-source
-        // gate), so a remote content fixer smuggled through a `templates:` entry
-        // would otherwise escape the cap (the template analogue of
-        // `reject_fix_promotion_templates_in`).
-        //
-        // The raw mappings also receive a monotonic provenance marker. It survives
-        // id-based field merges and template expansion, then `finalize` demotes the
-        // EFFECTIVE fixer. That closes both mixed-source directions: an untrusted
-        // rule instantiating a trusted template, and a trusted rule instantiating a
-        // template partly defined by an untrusted source.
         if url.starts_with("https://") {
             let base = url.split('#').next().unwrap_or(url);
-            let trusted_remote = trusted.iter().any(|t| t == base || t == url);
-            if !trusted_remote {
-                crate::demote_content_fixers_in(&mut parent.rules);
-                crate::demote_content_fixers_in(&mut parent.templates);
-                crate::mark_untrusted_fix_sources_in(&mut parent.rules);
-                crate::mark_untrusted_fix_sources_in(&mut parent.templates);
+            if !trusted.iter().any(|t| t == base || t == url) {
+                cap_untrusted_remote(&mut parent, url)?;
             }
         }
         merged = merge(merged, parent);
@@ -287,6 +267,54 @@ pub(crate) fn load_recursive(
         state.memo.insert(key, merged.clone());
     }
     Ok(merged)
+}
+
+/// Record that the `extends:` source `url` shaped `parent`'s rules / templates,
+/// so `finalize` can judge the EFFECTIVE rule after the id-based field-merge has
+/// blurred where each field came from (e.g. refuse any contribution to a
+/// spawning rule, or a remote-assembled `${` env reference).
+fn mark_extended_provenance(parent: &mut RawConfig, url: &str) {
+    crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Extended, url);
+    crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Extended, url);
+    if url.starts_with("https://") {
+        crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Remote, url);
+        crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Remote, url);
+    }
+}
+
+/// Apply the restrictions on a remote `extends:` the user has NOT listed in
+/// `trusted_extends:` (the URL matches with or without its `#sha256-` fragment).
+fn cap_untrusted_remote(parent: &mut RawConfig, url: &str) -> Result<()> {
+    // It may not read the consumer's environment through a `when:` (a boolean
+    // oracle on each variable), including one an instance it shapes assembles
+    // from a template at finalize (hence the provenance mark).
+    crate::reject_env_reads_in_when(&parent.rules, &parent.templates, url)?;
+    crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::UntrustedRemote, url);
+    // It may not hide files from every rule (yours included) with `ignore:`.
+    crate::reject_untrusted_ignore_in(&parent.ignore, url)?;
+    // W2 content-fixer trust (auto-fix.md 5.5): an untrusted remote may PROPOSE a
+    // content edit but never auto-write one -- demote its content-injecting fixers
+    // to `suggestion` before the merge. Local / nested targets (the user's own
+    // tree) and bundled (first-party) sources are honored at their declared tier.
+    // A remote is a leaf (no nested `extends:`), so this caps exactly that
+    // source's own rules.
+    //
+    // BOTH `rules` AND `templates` are demoted: a template's `fix:` block is
+    // spliced into its referencing rule at `finalize` (after this per-source
+    // gate), so a remote content fixer smuggled through a `templates:` entry
+    // would otherwise escape the cap (the template analogue of
+    // `reject_fix_promotion_templates_in`).
+    //
+    // The raw mappings also receive a monotonic provenance marker. It survives
+    // id-based field merges and template expansion, then `finalize` demotes the
+    // EFFECTIVE fixer. That closes both mixed-source directions: an untrusted
+    // rule instantiating a trusted template, and a trusted rule instantiating a
+    // template partly defined by an untrusted source.
+    crate::demote_content_fixers_in(&mut parent.rules);
+    crate::demote_content_fixers_in(&mut parent.templates);
+    crate::mark_untrusted_fix_sources_in(&mut parent.rules);
+    crate::mark_untrusted_fix_sources_in(&mut parent.templates);
+    Ok(())
 }
 
 fn load_remote(
@@ -337,6 +365,7 @@ fn load_remote(
     }
     let config: RawConfig = serde_yaml_ng::from_str(body_str)
         .map_err(|e| Error::Other(format!("remote config at {url}: YAML parse error: {e}")))?;
+    crate::reject_ambiguous_yaml_in(&config, url.as_str())?;
     if !config.extends.is_empty() {
         return Err(Error::Other(format!(
             "remote config at {url} contains its own `extends:`; \
@@ -415,6 +444,8 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
         // bug, not the user's config — Internal → CLI exit 3 (M11).
         Error::internal(format!("built-in ruleset '{spec}' failed to parse: {e}"))
     })?;
+    crate::reject_ambiguous_yaml_in(&config, &format!("alint://bundled/{spec}"))
+        .map_err(|e| Error::internal(e.to_string()))?;
     if !config.extends.is_empty() {
         return Err(Error::internal(format!(
             "bundled ruleset '{spec}' declares its own `extends:`"

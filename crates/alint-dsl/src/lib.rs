@@ -48,6 +48,101 @@ use serde_yaml_ng::Mapping;
 /// or nested source helped define the effective rule/template.
 const UNTRUSTED_FIX_SOURCE_MARKER: &str = "__alint_internal_untrusted_fix_source";
 
+/// Internal raw-mapping marker recording which kinds of `extends:` source
+/// contributed to a rule or template: a mapping from a [`SourceClass`] key to
+/// the first such source's name (for the error message). Like
+/// [`UNTRUSTED_FIX_SOURCE_MARKER`] it is monotonic across [`merge`] and template
+/// expansion, and [`RawConfig::finalize`] removes it before deserializing the
+/// effective rule. It lets the finalize-time checks ask "did an extended / a
+/// remote / an untrusted remote source shape this EFFECTIVE rule?" after
+/// id-based field-merging has hidden where each field came from.
+const PROVENANCE_MARKER: &str = "__alint_internal_provenance";
+
+/// A class of `extends:` source recorded in [`PROVENANCE_MARKER`].
+#[derive(Clone, Copy)]
+pub(crate) enum SourceClass {
+    /// Any config reached through `extends:` (local, remote, or bundled).
+    Extended,
+    /// An `https://` `extends:` entry, allowlisted in `trusted_extends:` or not.
+    Remote,
+    /// An `https://` `extends:` entry NOT allowlisted in `trusted_extends:`.
+    UntrustedRemote,
+}
+
+impl SourceClass {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Extended => "extended",
+            Self::Remote => "remote",
+            Self::UntrustedRemote => "untrusted_remote",
+        }
+    }
+}
+
+/// The [`PROVENANCE_MARKER`] contents of one rule, read back as source names.
+#[derive(Debug, Default)]
+struct Provenance {
+    extended: Option<String>,
+    remote: Option<String>,
+    untrusted_remote: Option<String>,
+}
+
+impl Provenance {
+    fn read(mapping: &Mapping) -> Self {
+        let marker = mapping
+            .get(PROVENANCE_MARKER)
+            .and_then(serde_yaml_ng::Value::as_mapping);
+        let source = |class: SourceClass| {
+            marker
+                .and_then(|m| m.get(class.key()))
+                .map(|v| v.as_str().unwrap_or("an extended config").to_string())
+        };
+        Self {
+            extended: source(SourceClass::Extended),
+            remote: source(SourceClass::Remote),
+            untrusted_remote: source(SourceClass::UntrustedRemote),
+        }
+    }
+}
+
+/// Record that `source` (of class `class`) contributed every mapping in
+/// `mappings`. An earlier record of the same class is kept: the first source
+/// named is as good as any for the error, and keeping it makes the mark
+/// idempotent across a re-merge.
+pub(crate) fn mark_provenance_in(mappings: &mut [Mapping], class: SourceClass, source: &str) {
+    for mapping in mappings {
+        let mut marker = match mapping.remove(PROVENANCE_MARKER) {
+            Some(serde_yaml_ng::Value::Mapping(m)) => m,
+            _ => Mapping::new(),
+        };
+        if !marker.contains_key(class.key()) {
+            marker.insert(class.key().into(), source.into());
+        }
+        mapping.insert(PROVENANCE_MARKER.into(), marker.into());
+    }
+}
+
+/// Union `incoming`'s [`PROVENANCE_MARKER`] into `existing`'s, keeping
+/// `existing`'s source for a class both carry.
+fn union_provenance(existing: &mut Mapping, incoming: &Mapping) {
+    let Some(theirs) = incoming
+        .get(PROVENANCE_MARKER)
+        .and_then(serde_yaml_ng::Value::as_mapping)
+    else {
+        return;
+    };
+    let mut ours = match existing.remove(PROVENANCE_MARKER) {
+        Some(serde_yaml_ng::Value::Mapping(m)) => m,
+        _ => Mapping::new(),
+    };
+    for (class, source) in theirs {
+        if !ours.contains_key(class) {
+            ours.insert(class.clone(), source.clone());
+        }
+    }
+    existing.insert(PROVENANCE_MARKER.into(), ours.into());
+}
+
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
 /// files. Embedded at build time from the in-crate copy at
 /// `crates/alint-dsl/schemas/v1/config.json`, which is kept byte-identical
@@ -406,6 +501,8 @@ impl RawConfig {
                 .get("id")
                 .and_then(|v| v.as_str())
                 .map_or_else(|| "<anonymous>".to_string(), str::to_string);
+            reject_remote_assembled_env_refs(m, &templates_by_id, &id_hint)?;
+            reject_untrusted_assembled_when(m, &templates_by_id, &id_hint)?;
             let mut expanded = expand_template(m, &templates_by_id)?;
             // A source-local cap is not enough: an untrusted rule can instantiate
             // a fixer-bearing trusted template, and a trusted rule can instantiate
@@ -414,6 +511,33 @@ impl RawConfig {
             // Remove the private marker before RuleSpec deserialization so it never
             // leaks into the public DSL or runtime model.
             let untrusted_fix_source = take_untrusted_fix_source(&mut expanded);
+            let provenance = Provenance::read(&expanded);
+            expanded.remove(PROVENANCE_MARKER);
+            // A spawning rule runs whatever its fields say, so ALL of them must
+            // come from the user's own config. An extended source cannot declare
+            // a spawning kind or fix op (the per-source gates), but it could share
+            // the id of the user's spawning rule (or define the template it
+            // instantiates) and field-merge a `workdir:` / `paths:` / `command:` /
+            // `require:` into it -- the kind-less contribution passes every
+            // per-source gate. Refuse any such contribution to a rule whose
+            // EFFECTIVE kind or fix spawns (audit R2).
+            if let Some(source) = &provenance.extended {
+                let spawns = find_spawning_kind(&expanded)
+                    .map(|k| format!("`kind: {k}`"))
+                    .or_else(|| find_spawning_fix_op(&expanded).map(|op| format!("`fix.{op}`")));
+                if let Some(what) = spawns {
+                    return Err(Error::rule_config(
+                        &id_hint,
+                        format!(
+                            "{what} spawns a process, but an extended config ({source}) \
+                             contributes fields to this rule (it shares the rule's id, or \
+                             defines the template the rule instantiates). A spawning rule \
+                             must be declared entirely in your own top-level config; give \
+                             it an id no extended config uses."
+                        ),
+                    ));
+                }
+            }
             if untrusted_fix_source {
                 demote_content_fixers_in_rule(&mut expanded);
                 // An untrusted rule may instantiate a TRUSTED template that promotes
@@ -488,8 +612,43 @@ fn expand_template(
         ));
     }
 
-    let vars: std::collections::HashMap<String, String> = rule
-        .get("vars")
+    let vars = instance_vars(rule);
+
+    let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
+    let mut expanded = (*template).clone();
+    let template_provenance = expanded.remove(PROVENANCE_MARKER);
+    expanded = substitute_template_vars(expanded, &vars);
+    expanded.remove("id");
+
+    for (k, v) in rule {
+        let key = k.as_str().unwrap_or_default();
+        if matches!(
+            key,
+            "extends_template" | "vars" | UNTRUSTED_FIX_SOURCE_MARKER | PROVENANCE_MARKER
+        ) {
+            continue;
+        }
+        expanded.insert(k.clone(), v.clone());
+    }
+    // The effective rule was shaped by both the instance and the template.
+    union_provenance(&mut expanded, rule);
+    if let Some(marker) = template_provenance {
+        let mut from_template = Mapping::new();
+        from_template.insert(PROVENANCE_MARKER.into(), marker);
+        union_provenance(&mut expanded, &from_template);
+    }
+    if untrusted_fix_source {
+        expanded.insert(
+            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            serde_yaml_ng::Value::Bool(true),
+        );
+    }
+    Ok(expanded)
+}
+
+/// A template instance's `vars:` map, as strings (numbers and bools stringify).
+fn instance_vars(rule: &Mapping) -> std::collections::HashMap<String, String> {
+    rule.get("vars")
         .and_then(|v| v.as_mapping())
         .map(|m| {
             m.iter()
@@ -507,30 +666,268 @@ fn expand_template(
                 })
                 .collect()
         })
-        .unwrap_or_default();
+        .unwrap_or_default()
+}
 
-    let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
-    let mut expanded = (*template).clone();
-    expanded = substitute_template_vars(expanded, &vars);
-    expanded.remove("id");
+/// Refuse a template instance that a REMOTE ruleset helped shape (its `vars:`,
+/// its `extends_template:`, or any other field) when substituting its vars into
+/// the template turns a `since:` into a legacy `${VAR}` environment reference.
+/// The per-source gate ([`reject_env_expansion_in`]) sees only each raw value,
+/// so `since: "{{vars.a}}{{vars.b}}"` with remote `vars: {a: "$", b: "{SECRET}"}`
+/// (or a template `since: "${{{vars.name}}}"` with a remote-chosen name) passes
+/// it and then expands into `${SECRET}`. Only a `since:` that both carries a
+/// placeholder and renders into a `${` is refused: a literal `${ALINT_BASE_SHA}`
+/// the user's own template wrote is not assembled by the remote.
+fn reject_remote_assembled_env_refs(
+    rule: &Mapping,
+    templates_by_id: &std::collections::HashMap<String, &Mapping>,
+    id: &str,
+) -> Result<()> {
+    let Some(source) = Provenance::read(rule).remote else {
+        return Ok(());
+    };
+    let Some(template) = rule
+        .get("extends_template")
+        .and_then(|v| v.as_str())
+        .and_then(|t| templates_by_id.get(t))
+    else {
+        return Ok(());
+    };
+    let vars = instance_vars(rule);
+    if let Some(field) = find_assembled_env_ref(template, &vars, "since") {
+        return Err(Error::rule_config(
+            id,
+            format!(
+                "`{field}` expands into an environment variable reference (`${{...}}`) \
+                 built from template variables that a remote ruleset ({source}) supplies; \
+                 a remote ruleset may not read the environment. Set the value in your \
+                 own top-level config instead"
+            ),
+        ));
+    }
+    Ok(())
+}
 
-    for (k, v) in rule {
-        let key = k.as_str().unwrap_or_default();
-        if matches!(
-            key,
-            "extends_template" | "vars" | UNTRUSTED_FIX_SOURCE_MARKER
-        ) {
-            continue;
+/// Rule fields holding a `when` expression: the rule gate itself and the
+/// per-iteration filter of the `for_each_*` / `every_matching_has` kinds.
+const WHEN_FIELDS: &[&str] = &["when", "when_iter"];
+
+/// Why a rule's `when` expression is refused from an untrusted source.
+enum WhenRefusal {
+    /// The expression reads `env.<NAME>`.
+    ReadsEnv { field: String, name: String },
+    /// The expression carries a `{{...}}` placeholder, so what it reads is only
+    /// known after template expansion (checked again there).
+    Placeholder { field: String },
+}
+
+/// The first `when` / `when_iter` in `rule` (or any nested `require:` rule) that
+/// reads the environment, or that holds a placeholder when `allow_placeholders`
+/// is false. An expression that does not parse is left to the rule builder,
+/// which reports the parse error with the rule's id.
+fn find_when_refusal(rule: &Mapping, allow_placeholders: bool) -> Option<WhenRefusal> {
+    fn walk(rule: &Mapping, allow_placeholders: bool, prefix: &str) -> Option<WhenRefusal> {
+        for field in WHEN_FIELDS {
+            let Some(src) = rule.get(*field).and_then(|v| v.as_str()) else {
+                continue;
+            };
+            let field = format!("{prefix}{field}");
+            if src.contains("{{") && !allow_placeholders {
+                return Some(WhenRefusal::Placeholder { field });
+            }
+            if let Ok(expr) = alint_core::when::parse(src)
+                && let Some(name) = expr.first_env_ref()
+            {
+                return Some(WhenRefusal::ReadsEnv {
+                    field,
+                    name: name.to_string(),
+                });
+            }
         }
-        expanded.insert(k.clone(), v.clone());
+        rule.get("require")
+            .and_then(|v| v.as_sequence())
+            .into_iter()
+            .flatten()
+            .enumerate()
+            .find_map(|(i, nested)| {
+                let nested = nested.as_mapping()?;
+                walk(
+                    nested,
+                    allow_placeholders,
+                    &format!("{prefix}require[{i}]."),
+                )
+            })
     }
-    if untrusted_fix_source {
-        expanded.insert(
-            serde_yaml_ng::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
-            serde_yaml_ng::Value::Bool(true),
-        );
+    walk(rule, allow_placeholders, "")
+}
+
+fn when_refusal_error(what: &str, id: &str, refusal: &WhenRefusal, source: &str) -> Error {
+    match refusal {
+        WhenRefusal::ReadsEnv { field, name } => Error::Other(format!(
+            "{source}: {what} `{id}`: `{field}:` reads `env.{name}`; an untrusted extends \
+             source may not read the environment. Add the URL to `trusted_extends:` to \
+             allow it"
+        )),
+        WhenRefusal::Placeholder { field } => Error::Other(format!(
+            "{source}: {what} `{id}`: `{field}:` contains a `{{{{...}}}}` placeholder; an \
+             untrusted extends source may not build a `when` expression from template \
+             variables, because it could read the environment. Add the URL to \
+             `trusted_extends:` to allow it"
+        )),
     }
-    Ok(expanded)
+}
+
+/// Refuse an `env.*` read in a `when:` / `when_iter:` declared by an untrusted
+/// remote (an `https://` source not in `trusted_extends:`). Each `when` is a
+/// boolean oracle on the consumer's environment: three rules gated on
+/// `env.TOKEN matches "^g"` / `"^h"` / `"^i"` leak a secret one character at
+/// a time through which of them fires. Checked on the PARSED expression (so
+/// spacing and parentheses cannot hide a read), in rules and templates, at every
+/// `require:` depth. A template's `when` may not carry a placeholder at all: its
+/// variables are supplied later, by whichever instance expands it. An instance
+/// that an untrusted remote shaped is re-checked after expansion
+/// ([`reject_untrusted_assembled_when`]).
+pub(crate) fn reject_env_reads_in_when(
+    rules: &[Mapping],
+    templates: &[Mapping],
+    source: &str,
+) -> Result<()> {
+    let id_of = |m: &Mapping| {
+        m.get("id")
+            .and_then(|v| v.as_str())
+            .unwrap_or("(unknown)")
+            .to_string()
+    };
+    for rule in rules {
+        // A rule's own fields are never substituted, so a placeholder there is
+        // inert text the `when` parser rejects at build; only env reads matter.
+        if let Some(refusal) = find_when_refusal(rule, true) {
+            return Err(when_refusal_error("rule", &id_of(rule), &refusal, source));
+        }
+    }
+    for template in templates {
+        if let Some(refusal) = find_when_refusal(template, false) {
+            return Err(when_refusal_error(
+                "template",
+                &id_of(template),
+                &refusal,
+                source,
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// The post-expansion half of [`reject_env_reads_in_when`]: an instance that an
+/// untrusted remote shaped (its `vars:`, its `extends_template:`, ...) may fill a
+/// TRUSTED template's `when: "{{vars.cond}}"` with `env.TOKEN matches "^g"`.
+/// Re-check every `when` the expansion produced from a placeholder. A `when`
+/// the template wrote literally is the template author's choice, not the
+/// remote's, and stays allowed.
+fn reject_untrusted_assembled_when(
+    rule: &Mapping,
+    templates_by_id: &std::collections::HashMap<String, &Mapping>,
+    id: &str,
+) -> Result<()> {
+    let Some(source) = Provenance::read(rule).untrusted_remote else {
+        return Ok(());
+    };
+    let Some(template) = rule
+        .get("extends_template")
+        .and_then(|v| v.as_str())
+        .and_then(|t| templates_by_id.get(t))
+    else {
+        return Ok(());
+    };
+    let vars = instance_vars(rule);
+    // Keep only the `when` fields that held a placeholder, rendered; the rest of
+    // the template is irrelevant to what the remote could assemble.
+    let rendered = render_placeholder_whens(template, &vars);
+    if let Some(refusal) = find_when_refusal(&rendered, true) {
+        return Err(when_refusal_error("rule", id, &refusal, &source));
+    }
+    Ok(())
+}
+
+/// A copy of `rule` keeping only the `when` / `when_iter` fields that contain a
+/// `{{` placeholder (rendered with `vars`) and the `require:` structure leading
+/// to them, so field paths in an error still line up with the template.
+fn render_placeholder_whens(
+    rule: &Mapping,
+    vars: &std::collections::HashMap<String, String>,
+) -> Mapping {
+    let mut out = Mapping::new();
+    for field in WHEN_FIELDS {
+        if let Some(src) = rule.get(*field).and_then(|v| v.as_str())
+            && src.contains("{{")
+        {
+            out.insert((*field).into(), render_template_vars(src, vars).into());
+        }
+    }
+    if let Some(require) = rule.get("require").and_then(|v| v.as_sequence()) {
+        let nested: Vec<serde_yaml_ng::Value> = require
+            .iter()
+            .map(|n| {
+                n.as_mapping().map_or(serde_yaml_ng::Value::Null, |m| {
+                    render_placeholder_whens(m, vars).into()
+                })
+            })
+            .collect();
+        out.insert("require".into(), nested.into());
+    }
+    out
+}
+
+/// The path of the first `key:` string in `m` (at any depth) whose value holds a
+/// `{{` placeholder and renders, with `vars`, into a `${` env reference.
+fn find_assembled_env_ref(
+    m: &Mapping,
+    vars: &std::collections::HashMap<String, String>,
+    key: &str,
+) -> Option<String> {
+    fn walk(
+        v: &serde_yaml_ng::Value,
+        vars: &std::collections::HashMap<String, String>,
+        key: &str,
+        path: &str,
+    ) -> Option<String> {
+        match v {
+            serde_yaml_ng::Value::Mapping(m) => m.iter().find_map(|(k, v)| {
+                let name = k.as_str().unwrap_or_default();
+                let child = if path.is_empty() {
+                    name.to_string()
+                } else {
+                    format!("{path}.{name}")
+                };
+                if name == key
+                    && let Some(raw) = v.as_str()
+                    && raw.contains("{{")
+                    && render_template_vars(raw, vars).contains("${")
+                {
+                    return Some(child);
+                }
+                walk(v, vars, key, &child)
+            }),
+            serde_yaml_ng::Value::Sequence(seq) => seq
+                .iter()
+                .enumerate()
+                .find_map(|(i, v)| walk(v, vars, key, &format!("{path}[{i}]"))),
+            _ => None,
+        }
+    }
+    walk(&serde_yaml_ng::Value::Mapping(m.clone()), vars, key, "")
+}
+
+/// Render the `{{vars.<name>}}` placeholders of one string (other namespaces
+/// and unknown names stay literal), exactly as template expansion does.
+fn render_template_vars(s: &str, vars: &std::collections::HashMap<String, String>) -> String {
+    alint_core::template::render_message(s, |ns, key| {
+        if ns == "vars" {
+            vars.get(key).cloned()
+        } else {
+            None
+        }
+    })
 }
 
 /// Recursively walk a YAML mapping and substitute
@@ -555,16 +952,7 @@ fn substitute_template_vars_value(
 ) -> serde_yaml_ng::Value {
     use serde_yaml_ng::Value;
     match value {
-        Value::String(s) => {
-            let rendered = alint_core::template::render_message(&s, |ns, key| {
-                if ns == "vars" {
-                    vars.get(key).cloned()
-                } else {
-                    None
-                }
-            });
-            Value::String(rendered)
-        }
+        Value::String(s) => Value::String(render_template_vars(&s, vars)),
         Value::Sequence(seq) => Value::Sequence(
             seq.into_iter()
                 .map(|v| substitute_template_vars_value(v, vars))
@@ -871,8 +1259,12 @@ fn take_untrusted_fix_source(mapping: &mut Mapping) -> bool {
 fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
     let untrusted_fix_source =
         has_untrusted_fix_source(existing) || has_untrusted_fix_source(&incoming);
+    union_provenance(existing, &incoming);
     for (key, value) in incoming {
-        if key.as_str() != Some(UNTRUSTED_FIX_SOURCE_MARKER) {
+        if !matches!(
+            key.as_str(),
+            Some(UNTRUSTED_FIX_SOURCE_MARKER | PROVENANCE_MARKER)
+        ) {
             existing.insert(key, value);
         }
     }
@@ -1198,6 +1590,23 @@ pub fn reject_baseline_in(baseline: &Option<std::path::PathBuf>, source: &str) -
     Ok(())
 }
 
+/// Reject a top-level `ignore:` from an untrusted remote (an `https://` source
+/// not in `trusted_extends:`). `ignore:` removes paths from the walk for EVERY
+/// rule, the user's own included, so a remote ruleset declaring `ignore:
+/// ["src/**"]` would silently switch off checks it never wrote, the same "choose
+/// which findings disappear" power [`reject_baseline_in`] withholds from every
+/// extended source. Local and bundled sources, and allowlisted remotes, keep
+/// contributing `ignore:` entries. `source` names the offending config.
+pub fn reject_untrusted_ignore_in(ignore: &[String], source: &str) -> Result<()> {
+    if !ignore.is_empty() {
+        return Err(Error::Other(format!(
+            "{source}: `ignore:` is not allowed from an untrusted extends source (it can \
+             hide files from every rule); add the URL to `trusted_extends:` to allow it"
+        )));
+    }
+    Ok(())
+}
+
 /// Reject a `trusted_extends:` in an inherited ruleset. The allowlist grants a
 /// remote's content-injecting fixers auto-apply rights, so a remote (or any
 /// non-top-level config) that could set it would allowlist ITSELF, defeating the
@@ -1223,7 +1632,9 @@ pub fn reject_trusted_extends_in(trusted_extends: &[String], source: &str) -> Re
 /// range" error -- an exfiltration channel into CI logs and SARIF. Scans every
 /// `since:` (including one a remote contributes to a user rule by field-merge,
 /// with no `kind`) and every `vars:` value (which a template could substitute
-/// into `since:`), at every `require:` depth.
+/// into `since:`), at every `require:` depth. A `${` ASSEMBLED from several
+/// vars only exists after expansion, so `finalize` re-checks it there
+/// ([`reject_remote_assembled_env_refs`]).
 pub(crate) fn reject_env_expansion_in(
     rules: &[Mapping],
     templates: &[Mapping],
@@ -1259,6 +1670,77 @@ pub(crate) fn reject_env_expansion_in(
         }
     }
     Ok(())
+}
+
+/// Reject YAML constructs in `rules:` / `templates:` that the trust gates and
+/// the typed deserializer would read differently. Those entries are kept as raw
+/// [`Mapping`]s so composition can field-merge them, and every gate inspects
+/// them with `Mapping::get("kind")` and friends. But serde strips a custom tag
+/// when it resolves a field, so `!x kind: command` (a tagged KEY) is invisible
+/// to `get("kind")` yet becomes `kind: command` in the [`alint_core::RuleSpec`],
+/// and `kind: !x command` (a tagged VALUE) defeats `as_str()` the same way. A
+/// non-string key and a `<<` merge key have no meaning in the DSL either (merge
+/// keys are NOT applied to config), so all of them are refused here, for every
+/// source, before any gate runs: the gates and serde then see one shape.
+///
+/// The other top-level fields deserialize straight into typed structs, which
+/// the gates read after serde has resolved them, so only these two raw lists
+/// need the check.
+pub(crate) fn reject_ambiguous_yaml_in(raw: &RawConfig, source: &str) -> Result<()> {
+    for (section, list) in [("rules", &raw.rules), ("templates", &raw.templates)] {
+        for (i, m) in list.iter().enumerate() {
+            let mut path = format!("{section}[{i}]");
+            if let Some(problem) = find_ambiguous_yaml_in_mapping(m, &mut path) {
+                return Err(Error::Other(format!(
+                    "{source}: {problem}; YAML tags, non-string keys and `<<` merge \
+                     keys are not supported in alint rules or templates"
+                )));
+            }
+        }
+    }
+    Ok(())
+}
+
+fn find_ambiguous_yaml_in_mapping(m: &Mapping, path: &mut String) -> Option<String> {
+    use serde_yaml_ng::Value;
+    for (k, v) in m {
+        let key = match k {
+            Value::String(s) if s == "<<" => {
+                return Some(format!("`{path}` uses a `<<` merge key"));
+            }
+            Value::String(s) => s.as_str(),
+            Value::Tagged(t) => {
+                return Some(format!("`{path}` has a key with the YAML tag `{}`", t.tag));
+            }
+            _ => return Some(format!("`{path}` has a non-string key")),
+        };
+        let len = path.len();
+        path.push('.');
+        path.push_str(key);
+        let found = find_ambiguous_yaml_in_value(v, path);
+        path.truncate(len);
+        if found.is_some() {
+            return found;
+        }
+    }
+    None
+}
+
+fn find_ambiguous_yaml_in_value(v: &serde_yaml_ng::Value, path: &mut String) -> Option<String> {
+    use serde_yaml_ng::Value;
+    use std::fmt::Write as _;
+    match v {
+        Value::Tagged(t) => Some(format!("`{path}` has the YAML tag `{}`", t.tag)),
+        Value::Mapping(m) => find_ambiguous_yaml_in_mapping(m, path),
+        Value::Sequence(seq) => seq.iter().enumerate().find_map(|(i, item)| {
+            let len = path.len();
+            let _ = write!(path, "[{i}]");
+            let found = find_ambiguous_yaml_in_value(item, path);
+            path.truncate(len);
+            found
+        }),
+        _ => None,
+    }
 }
 
 pub(crate) fn apply_rule_filter(
