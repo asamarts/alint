@@ -8,7 +8,7 @@
 
 import { execFile, spawn } from "node:child_process";
 
-import { type ExtensionContext, type OutputChannel, Uri, commands, window, workspace } from "vscode";
+import { type ExtensionContext, type LogOutputChannel, Uri, commands, window, workspace } from "vscode";
 import {
   LanguageClient,
   type LanguageClientOptions,
@@ -19,10 +19,10 @@ import {
 import { resolveAlintBinary } from "./binary";
 
 let client: LanguageClient | undefined;
-let channel: OutputChannel | undefined;
+let channel: LogOutputChannel | undefined;
 
 export async function activate(context: ExtensionContext): Promise<void> {
-  channel = window.createOutputChannel("alint");
+  channel = window.createOutputChannel("alint", { log: true });
   context.subscriptions.push(channel);
   context.subscriptions.push(
     commands.registerCommand("alint.restartServer", () => restart(context)),

@@ -216,6 +216,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `json_schema_passes` uses `jsonschema` 0.58.
 
+- The VS Code extension requires VS Code 1.91 or newer (was 1.85); older
+  editors keep the last compatible extension release. It uses
+  `vscode-languageclient` 10, so `alint.trace.server` now takes effect only
+  while the `alint` output channel's log level is Trace.
+
 - Building the JetBrains plugin now needs JDK 21 (Gradle 9.8, IntelliJ
   Platform Gradle Plugin 2.19, Kotlin 2.4). The plugin itself still supports
   IntelliJ 2024.2+, and the Marketplace verifier now checks it against

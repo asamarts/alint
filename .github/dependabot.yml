@@ -82,7 +82,7 @@ updates:
           - patch
           - minor
     ignore:
-      # @types/vscode must not exceed engines.vscode (^1.85.0) or vsce
+      # @types/vscode must not exceed engines.vscode (^1.91.0) or vsce
       # refuses to package; bump it together with the engine floor, by hand.
       - dependency-name: "@types/vscode"
       # @types/node tracks the Node runtime VS Code's extension host ships.

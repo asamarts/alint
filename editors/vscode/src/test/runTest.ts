@@ -52,7 +52,7 @@ async function main(): Promise<void> {
     await runTests({
       // Pin a known-stable VS Code (the extension's min engine) for
       // reproducible CI rather than chasing `stable`/latest.
-      version: '1.85.0',
+      version: '1.91.0',
       extensionDevelopmentPath,
       extensionTestsPath,
       launchArgs: [
