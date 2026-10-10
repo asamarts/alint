@@ -27,6 +27,11 @@ const fn is_intentional(c: char) -> bool {
 /// terminal shows: the bidirectional overrides / isolates / marks that reorder
 /// displayed text ("Trojan Source"), and the zero-width characters that hide
 /// content or make two different strings look identical.
+///
+/// Deliberately a fixed list, not every `Cf` code point: other invisible
+/// characters (tag characters U+E0000-U+E007F, SOFT HYPHEN U+00AD, the
+/// invisible math operators U+2061-U+2064) and the line / paragraph
+/// separators U+2028 / U+2029 currently pass through unchanged.
 const fn is_invisible_format(c: char) -> bool {
     matches!(
         c,

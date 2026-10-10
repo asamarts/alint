@@ -457,12 +457,12 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
             "Wrote {} - extends `oss-baseline@v1` only.\n  \
              No language manifests detected. Add an `extends:` line for your stack \
              (`alint://bundled/rust@v1`, `node@v1`, …) when ready.",
-            target.display()
+            term(&target.display().to_string())
         ))?;
     } else {
         print_stdout_line(&format!(
             "Wrote {} - detected: {}.\n  Run `alint check` to lint against the generated config.",
-            target.display(),
+            term(&target.display().to_string()),
             summary
         ))?;
     }
@@ -1056,7 +1056,7 @@ fn cmd_baseline(
         let total = new_baseline.total();
         eprintln!(
             "alint: wrote {} ({n} entr{}, {total} occurrence{})",
-            out_path.display(),
+            term(&out_path.display().to_string()),
             if n == 1 { "y" } else { "ies" },
             if total == 1 { "" } else { "s" },
         );
@@ -1526,8 +1526,10 @@ fn render_facts_human(
         let kind_pad = " ".repeat(kind_width.saturating_sub(kind_name.len()));
         writeln!(
             out,
-            "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{value_str}{value_style:#}",
+            "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{}{value_style:#}",
             term(&spec.id),
+            // A fact value can come from repo content or a `custom:` command.
+            term(&value_str),
         )?;
     }
     Ok(())
@@ -1592,10 +1594,10 @@ fn write_scope_filter_explain(
     if let Some(sf) = entry.scope_filter() {
         writeln!(out, "{dim}scope_filter:{dim:#}")?;
         if let Some(ha) = &sf.has_ancestor {
-            writeln!(out, "  {dim}has_ancestor: {dim:#} {}", ha.join(", "))?;
+            writeln!(out, "  {dim}has_ancestor: {dim:#} {}", term(&ha.join(", ")))?;
         }
         if let Some(cs) = &sf.changed_since {
-            writeln!(out, "  {dim}changed_since:{dim:#} {cs}")?;
+            writeln!(out, "  {dim}changed_since:{dim:#} {}", term(cs))?;
         }
         if (sf.include_manifest_paths.is_some() || sf.exclude_manifest_paths.is_some())
             && let Ok(filter) = alint_core::ScopeFilter::from_spec(entry.rule.id(), sf.clone())
@@ -1618,10 +1620,13 @@ fn write_scope_filter_explain(
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
+                // Both the manifest's own path and the paths it lists (read
+                // from repo content, e.g. package.json) are untrusted.
                 writeln!(
                     out,
-                    "  {dim}{key}:{dim:#} {} -> {paths}",
-                    res.source.display().to_string().replace('\\', "/")
+                    "  {dim}{key}:{dim:#} {} -> {}",
+                    term(&res.source.display().to_string().replace('\\', "/")),
+                    term(&paths)
                 )?;
             }
         }
@@ -2060,7 +2065,7 @@ fn emit_validate_success(rule_count: usize, config_path: &Path, format: &str) ->
         // human format
         print_stdout_line(&format!(
             "✓ Config valid: {rule_count} rule(s) loaded from {}",
-            config_path.display()
+            term(&config_path.display().to_string())
         ))?;
     }
     Ok(ExitCode::SUCCESS)
@@ -2086,7 +2091,7 @@ fn emit_validate_failure(
         // Human format prints to stderr to stay out of the way of
         // stdout consumers, then a one-line summary on stdout so
         // terminals show something either way.
-        eprintln!("alint: {err:#}");
+        eprintln!("alint: {}", term(&format!("{err:#}")));
         print_stdout_line("✗ Config invalid")?;
     }
     // An internal error (an alint bug — e.g. a shipped bundled ruleset that

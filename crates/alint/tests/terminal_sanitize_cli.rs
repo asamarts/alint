@@ -125,3 +125,87 @@ fn show_baselined_sanitizes_paths() {
     assert!(stderr.contains("baselined:"), "{stderr}");
     assert_clean("show-baselined", &o.stderr);
 }
+
+/// `validate-config` (human) prints the config error on stderr: an ESC /
+/// bidi char in the offending config text must not reach the terminal raw.
+#[test]
+fn validate_config_human_error_is_sanitized() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\n\"bad\\e[2Jkey\\u202E\": 1\nrules: []\n",
+    )
+    .unwrap();
+    let o = run(tmp.path(), &["validate-config"]);
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    assert!(stderr.contains("\\x1b[2J"), "rendered visibly: {stderr}");
+    assert_clean("validate-config stderr", &o.stderr);
+    assert_clean("validate-config stdout", &o.stdout);
+}
+
+/// `explain` prints the `scope_filter:` gates: `has_ancestor`,
+/// `changed_since` and the manifest predicate's source + resolved paths
+/// (the latter read from repo content, here `package.json`).
+#[test]
+fn explain_sanitizes_scope_filter() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: r\n    kind: file_max_size\n    paths: \"**\"\n    \
+         max_bytes: 10\n    level: error\n    scope_filter:\n      \
+         has_ancestor: \"pkg\\e7x\\u202E\"\n      changed_since: \"main\\e7x\\u202E\"\n  \
+         - id: m\n    kind: file_max_size\n    paths: \"**\"\n    max_bytes: 10\n    \
+         level: error\n    scope_filter:\n      include_manifest_paths:\n        \
+         source: package.json\n        extract: { json: \"$.workspaces[*]\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("package.json"),
+        "{\"workspaces\": [\"pkg/a\\u001b7x\\u202e\"]}\n",
+    )
+    .unwrap();
+    // `--color never`: alint emits no ESC of its own, so ANY raw ESC is
+    // injected. (`[` is a glob metachar `has_ancestor` rejects, so the
+    // payload is `ESC 7`, save-cursor.)
+    for id in ["r", "m"] {
+        let o = run(tmp.path(), &["explain", id, "--color", "never"]);
+        assert!(o.status.success(), "{o:?}");
+        let out = String::from_utf8_lossy(&o.stdout);
+        assert!(out.contains("\\x1b7x"), "{id}: rendered visibly: {out}");
+        assert!(!out.contains('\u{1b}'), "{id}: raw ESC leaked: {out:?}");
+        assert!(!out.contains(RLO), "{id}: raw U+202E leaked: {out:?}");
+    }
+}
+
+/// `alint baseline` reports the file it wrote; the `baseline:` key (repo
+/// config) names it.
+#[cfg(unix)]
+#[test]
+fn baseline_wrote_line_is_sanitized() {
+    let tmp = fixture();
+    let cfg = std::fs::read_to_string(tmp.path().join(".alint.yml")).unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        format!("{cfg}baseline: \"b\\e[2J\\u202E.json\"\n"),
+    )
+    .unwrap();
+    let o = run(tmp.path(), &["baseline"]);
+    assert!(o.status.success(), "{o:?}");
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    assert!(stderr.contains("wrote"), "{stderr}");
+    assert_clean("baseline", &o.stderr);
+}
+
+/// `suggest --explain` lists repo file names as evidence.
+#[cfg(unix)]
+#[test]
+fn suggest_explain_sanitizes_evidence_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join(format!("x{CLEAR}{RLO}.bak")), "old\n").unwrap();
+    let o = run(tmp.path(), &["suggest", "--explain", "--color", "always"]);
+    assert!(o.status.success(), "{o:?}");
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.contains(".bak"), "evidence lists the file: {out}");
+    assert_clean("suggest", &o.stdout);
+}
