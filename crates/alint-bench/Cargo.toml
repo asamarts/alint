@@ -99,7 +99,7 @@ tempfile.workspace = true
 criterion.workspace = true
 regex.workspace = true
 globset.workspace = true
-gungraun = "0.19.1"
+gungraun = "0.20.0"
 
 [lints]
 workspace = true
