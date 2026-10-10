@@ -171,7 +171,7 @@ jobs:
           key: release-${{ matrix.target }}
 
       - name: download supply-chain bundle (staged into each tarball)
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: supply-chain
           path: supply-chain
@@ -197,7 +197,7 @@ jobs:
         run: ci/scripts/release-binary.sh
 
       - name: upload artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: alint-${{ matrix.target }}
           path: |
@@ -232,7 +232,7 @@ jobs:
       - name: generate SBOM + third-party license bundle
         run: ci/scripts/supply-chain-artifacts.sh sc-out
       - name: upload supply-chain bundle
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: supply-chain
           path: |
@@ -263,7 +263,7 @@ jobs:
         run: ci/scripts/release-pointer-guard.sh "$TAG"
 
       - name: download all artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: release-artifacts
           merge-multiple: true
@@ -470,7 +470,7 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: download linux artifacts
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           path: release-artifacts
           pattern: alint-*-unknown-linux-musl
@@ -503,7 +503,7 @@ jobs:
         # THIRD-PARTY-LICENSES.html lands at the build-context root so the
         # Dockerfile COPY (un-ignored in .dockerignore) picks it up. alint.cdx.json
         # rides along unused and stays ignored.
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8
         with:
           name: supply-chain
           path: .
@@ -663,7 +663,7 @@ jobs:
       contents: read    # checkout only; no writes needed here
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"   # Trusted Publishing needs Node >= 22.14
           registry-url: "https://registry.npmjs.org"
@@ -880,7 +880,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "20"
       - name: stamp version from tag + publish to both registries
