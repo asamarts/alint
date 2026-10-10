@@ -23,8 +23,8 @@
 use std::path::{Path, PathBuf};
 
 use gungraun::{
-    BinaryBenchmarkConfig, Callgrind, Command, EventKind, binary_benchmark, binary_benchmark_group,
-    main,
+    BinaryBenchmarkConfig, Callgrind, Command, EventKind, ExitWith, binary_benchmark,
+    binary_benchmark_group, main,
 };
 
 /// 0xA11E47 — the canonical bench seed (byte-identical trees across runs).
@@ -192,6 +192,13 @@ fn fix(scenario: &str, config: &str, n: usize) -> Command {
         .arg("--unsafe-fixes")
         .arg("--dry-run")
         .arg(tree_path(scenario, n))
+        // `sfix_all.yml`'s `sfix/`-scoped error-level rules (create / sync_from /
+        // create_and_register) cannot be satisfied on this plain tree (no `sfix/`
+        // overlay), so `fix --dry-run` DETERMINISTICALLY exits 1. gungraun expects
+        // exit 0 by default, which failed this cell and aborted the whole det_check
+        // run (the gate then logged "tooling failure, NOT gating" on every PR).
+        // Pin the exact code so a crash / exit-2 oscillation still fails loudly.
+        .exit_with(ExitWith::Code(1))
         .build()
 }
 
