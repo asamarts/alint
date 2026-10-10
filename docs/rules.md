@@ -314,6 +314,10 @@ Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single fi
 
 Cap line length in characters (not bytes — code points). Optional `tab_width` for tab expansion.
 
+<!-- alint:since=0.18.0 -->
+A text file with stray invalid UTF-8 is measured (each invalid byte counts as one column) rather than skipped; binary-looking files are skipped.
+<!-- /alint:since -->
+
 ### `indent_style`
 
 **Categories:** Text hygiene
@@ -339,6 +343,10 @@ Checks for problems that slip past code review: content that reads one way to a 
 **Categories:** Security / Unicode sanity, Text hygiene
 
 Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a line — almost always left over from an unresolved merge. The anchor markers carry a trailing ref (`<<<<<<< HEAD`), so they never collide with prose; a bare `=======` is reported only when the file also contains one of those anchors, because on its own a seven-character `=======` is indistinguishable from a reST/Markdown setext heading underline (so docs trees no longer need to be excluded).
+
+<!-- alint:since=0.18.0 -->
+A text file with stray invalid UTF-8 is still scanned rather than skipped; a binary-looking file that is not valid UTF-8 (an image, an archive) is skipped.
+<!-- /alint:since -->
 
 ### `no_bidi_controls`
 

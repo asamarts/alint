@@ -59,6 +59,12 @@ impl PerFileRule for LineMaxWidthRule {
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
+        // Skip binary content (like max_consecutive_blank_lines): an image or
+        // archive has no meaningful "lines", and measuring one lossily flagged
+        // every binary in scope.
+        if crate::io::looks_binary(bytes) {
+            return Ok(Vec::new());
+        }
         // Line widths count Unicode scalars, not bytes. Decode lossily so a
         // non-UTF-8 file is still measured rather than silently skipped: each
         // invalid byte decodes to one U+FFFD and so counts as one column.
@@ -182,5 +188,19 @@ mod non_utf8_tests {
         let ok: &[u8] = b"0123456789\xe9\n";
         let (tmp, idx) = tempdir_with_files(&[("b.txt", ok)]);
         assert_eq!(rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().len(), 1);
+    }
+
+    #[test]
+    fn binary_files_are_skipped() {
+        // Regression: the lossy decode measured binaries too, so every image /
+        // archive in scope was flagged as one overlong "line".
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: line_max_width\npaths: \"**/*\"\nmax_width: 10\nlevel: error\n",
+        ))
+        .unwrap();
+        let mut png = b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR".to_vec();
+        png.extend(std::iter::repeat_n(0xA5u8, 200));
+        let (tmp, idx) = tempdir_with_files(&[("img.png", png.as_slice())]);
+        assert!(rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().is_empty());
     }
 }
