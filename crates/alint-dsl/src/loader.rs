@@ -7,6 +7,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use alint_core::{AllowOutOfRoot, Error, Result};
+use serde_yaml_ng::Mapping;
 
 use crate::extends;
 use crate::{
@@ -113,14 +114,56 @@ fn parse_config_interpolated_inner(contents: &str, source: &Path) -> Result<RawC
     }
     let config: RawConfig = if contents.contains("{{") {
         let mut value: serde_yaml_ng::Value = serde_yaml_ng::from_str(contents)?;
+        // Which vars take their value from the environment, read off the RAW
+        // text before interpolation erases the difference.
+        let env_vars = env_derived_vars(value.get("vars"));
+        let rule_env_vars: Vec<Mapping> = value
+            .get("rules")
+            .and_then(serde_yaml_ng::Value::as_sequence)
+            .map(|rules| {
+                rules
+                    .iter()
+                    .map(|r| {
+                        env_derived_vars(r.get("vars"))
+                            .into_iter()
+                            .map(|(k, v)| (k.into(), v.into()))
+                            .collect()
+                    })
+                    .collect()
+            })
+            .unwrap_or_default();
         crate::interp::interpolate_value(&mut value, &|n| std::env::var(n).ok())
             .map_err(|e| Error::Other(format!("{}: interpolation error: {e}", source.display())))?;
-        serde_yaml_ng::from_value(value)?
+        let mut config: RawConfig = serde_yaml_ng::from_value(value)?;
+        config.env_vars = env_vars;
+        for (rule, marks) in config.rules.iter_mut().zip(rule_env_vars) {
+            if !marks.is_empty() {
+                rule.insert(crate::ENV_VARS_MARKER.into(), marks.into());
+            }
+        }
+        config
     } else {
         serde_yaml_ng::from_str(contents)?
     };
     crate::reject_ambiguous_yaml_in(&config, &display_path(source))?;
     Ok(config)
+}
+
+/// The entries of a raw (pre-interpolation) `vars:` mapping whose value reads
+/// the environment (`{{env.X}}`, any spacing, with or without a default),
+/// mapped to that raw text. Only these become secret: a `{{vars.X}}` span in a
+/// var value is never resolved against other vars, so it cannot launder one.
+fn env_derived_vars(
+    vars: Option<&serde_yaml_ng::Value>,
+) -> std::collections::HashMap<String, String> {
+    vars.and_then(serde_yaml_ng::Value::as_mapping)
+        .into_iter()
+        .flatten()
+        .filter_map(|(k, v)| {
+            let (name, raw) = (k.as_str()?, v.as_str()?);
+            crate::interp::reads_env(raw).then(|| (name.to_string(), raw.to_string()))
+        })
+        .collect()
 }
 
 /// Recursively load `path`, resolving its `extends:` chain
@@ -288,8 +331,19 @@ fn cap_untrusted_remote(parent: &mut RawConfig, url: &str) -> Result<()> {
     // It may not read the consumer's environment through a `when:` (a boolean
     // oracle on each variable), including one an instance it shapes assembles
     // from a template at finalize (hence the provenance mark).
-    crate::reject_env_reads_in_when(&parent.rules, &parent.templates, url)?;
+    // A `vars.*` read is recorded here and refused at finalize when the var's
+    // effective value came from the environment (only known once every local
+    // config has merged).
+    parent.untrusted_when_var_reads =
+        crate::reject_env_reads_in_when(&parent.rules, &parent.templates, url)?;
     crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::UntrustedRemote, url);
+    // ...and a template it shapes may not splice an env-derived instance var
+    // (`{{vars.token}}`) into the rule a user's instance expands it into.
+    crate::mark_provenance_in(
+        &mut parent.templates,
+        crate::SourceClass::UntrustedRemote,
+        url,
+    );
     // It may not hide files from every rule (yours included) with `ignore:`.
     crate::reject_untrusted_ignore_in(&parent.ignore, url)?;
     // W2 content-fixer trust (auto-fix.md 5.5): an untrusted remote may PROPOSE a

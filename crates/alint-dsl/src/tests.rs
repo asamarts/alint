@@ -3439,3 +3439,205 @@ fn untrusted_remote_cannot_declare_ignore() {
     let cfg = load_local_extends(remote).unwrap();
     assert_eq!(cfg.ignore, vec!["src/**".to_string()]);
 }
+
+/// Like [`try_load_extending`], plus extra local files (`.alint.d/` drop-ins,
+/// local `extends:` targets) written next to the top-level config first. The
+/// `{remote}` token in `top_extends` is replaced by the remote's URL.
+fn try_load_with_files(
+    remote_body: &str,
+    top_extends: &str,
+    top_extra: &str,
+    files: &[(&str, &str)],
+) -> Result<alint_core::Config> {
+    let tmp = tempfile::tempdir().unwrap();
+    let cache = extends::Cache::at(tmp.path().join("cache"));
+    let url = seed_remote(&cache, remote_body);
+    for (rel, body) in files {
+        let path = tmp.path().join(rel);
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(path, body).unwrap();
+    }
+    let config_path = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config_path,
+        format!(
+            "version: 1\nextends: [{}]\n{top_extra}",
+            top_extends.replace("{remote}", &url)
+        ),
+    )
+    .unwrap();
+    load_with(&config_path, &LoadOptions::with_cache(cache))
+}
+
+#[test]
+fn untrusted_remote_when_cannot_read_an_env_derived_var() {
+    // Audit R2 follow-up: `vars: {token: "{{env.NPM_TOKEN}}"}` turned the
+    // environment-read refusal into a `vars.token matches "^g"` oracle. The
+    // `| default(...)` keeps the test independent of the real environment; the
+    // value is still env-derived.
+    let raw = "{{env.ALINT_TEST_UNSET_TOKEN | default('ghp_x')}}";
+    let top = format!("vars:\n  token: \"{raw}\"\n  org: acme\nrules: []\n");
+    let oracle = |c: char| {
+        format!(
+            "  - id: probe-{c}\n    kind: file_exists\n    paths: README.md\n    \
+             level: warning\n    when: vars.token matches \"^{c}\"\n"
+        )
+    };
+    let remote = format!("version: 1\nrules:\n{}{}", oracle('g'), oracle('h'));
+    let err = try_load_extending(&remote, &top).unwrap_err().to_string();
+    assert!(
+        err.contains(&format!(
+            "rule `probe-g`: `when:` reads `vars.token`, whose value comes from the \
+             environment (`{raw}`); an untrusted extends source may not read the environment"
+        )),
+        "{err}"
+    );
+    assert!(err.contains("example.invalid"), "{err}");
+    assert!(err.contains("trusted_extends:"), "{err}");
+
+    // Whitespace inside the span changes nothing.
+    let spaced =
+        "vars:\n  token: \"{{ env . ALINT_TEST_UNSET_TOKEN | default('g') }}\"\nrules: []\n";
+    let err = try_load_extending(&remote, spaced).unwrap_err().to_string();
+    assert!(err.contains("reads `vars.token`, whose value"), "{err}");
+
+    // An allowlisted remote keeps working, and so does an ordinary var.
+    let trusted = format!("trusted_extends: [\"https://example.invalid/remote.yml\"]\n{top}");
+    assert_eq!(
+        try_load_extending(&remote, &trusted).unwrap().rules.len(),
+        2
+    );
+    let ordinary = "version: 1\nrules:\n  - id: org\n    kind: file_exists\n    \
+        paths: README.md\n    level: warning\n    when: vars.org == \"acme\"\n";
+    assert!(try_load_extending(ordinary, &top).is_ok());
+
+    // Nested `require:` / `when_iter:` reads, and a remote template's read.
+    for body in [
+        "rules:\n  - id: each\n    kind: for_each_dir\n    select: \"*\"\n    level: warning\n    \
+         require:\n      - kind: file_exists\n        paths: \"{path}/x\"\n        \
+         when: (vars.token == \"x\")\n",
+        "rules:\n  - id: each\n    kind: for_each_dir\n    select: \"*\"\n    level: warning\n    \
+         when_iter: \"iter.has_file(vars.token)\"\n    require:\n      - kind: file_exists\n        \
+         paths: \"{path}/x\"\n",
+        "templates:\n  - id: t\n    kind: file_exists\n    paths: README.md\n    \
+         level: warning\n    when: vars.token == \"x\"\nrules: []\n",
+    ] {
+        let err = try_load_extending(&format!("version: 1\n{body}"), &top)
+            .unwrap_err()
+            .to_string();
+        assert!(err.contains("reads `vars.token`, whose value"), "{err}");
+    }
+
+    // An untrusted instance cannot fill a trusted template's `when` placeholder
+    // with a read of the env-derived var either.
+    let top_tpl = format!(
+        "{top}templates:\n  - id: gated\n    kind: file_exists\n    paths: README.md\n    \
+         level: warning\n    when: \"{{{{vars.cond}}}}\"\n"
+    );
+    let remote = "version: 1\nrules:\n  - id: probe\n    extends_template: gated\n    \
+        vars: {cond: \"vars.token matches '^g'\"}\n";
+    let err = try_load_extending(remote, &top_tpl)
+        .unwrap_err()
+        .to_string();
+    assert!(
+        err.contains("rule `probe`: `when:` reads `vars.token`"),
+        "{err}"
+    );
+}
+
+#[test]
+fn env_derived_var_mark_follows_the_effective_value_across_sources() {
+    let remote = "version: 1\nrules:\n  - id: probe\n    kind: file_exists\n    \
+        paths: README.md\n    level: warning\n    when: vars.token == \"x\"\n";
+    let env = "vars:\n  token: \"{{env.ALINT_TEST_UNSET_TOKEN | default('s')}}\"\n";
+    let literal = "vars:\n  token: plain\n";
+    let refused = |r: Result<alint_core::Config>| {
+        r.unwrap_err()
+            .to_string()
+            .contains("reads `vars.token`, whose value")
+    };
+    let only_remote = "\"{remote}\"";
+
+    // Declared in a `.alint.d/` drop-in (merged after the remote has loaded).
+    assert!(refused(try_load_with_files(
+        remote,
+        only_remote,
+        "rules: []\n",
+        &[(".alint.d/10-secret.yml", env)],
+    )));
+    // A later literal value clears the mark...
+    assert!(
+        try_load_with_files(
+            remote,
+            only_remote,
+            &format!("{env}rules: []\n"),
+            &[(".alint.d/10-plain.yml", literal)],
+        )
+        .is_ok()
+    );
+    // ...and a later env-derived value sets it again.
+    assert!(refused(try_load_with_files(
+        remote,
+        only_remote,
+        &format!("{literal}rules: []\n"),
+        &[(".alint.d/10-secret.yml", env)],
+    )));
+    // Declared in a LOCAL `extends:` target; the top level may override it.
+    let base = format!("version: 1\n{env}");
+    let both = "\"./base.yml\", \"{remote}\"";
+    assert!(refused(try_load_with_files(
+        remote,
+        both,
+        "rules: []\n",
+        &[("base.yml", &base)],
+    )));
+    assert!(
+        try_load_with_files(
+            remote,
+            both,
+            &format!("{literal}rules: []\n"),
+            &[("base.yml", &base)],
+        )
+        .is_ok()
+    );
+}
+
+#[test]
+fn untrusted_remote_template_cannot_splice_an_env_derived_instance_var() {
+    // The user's own instance passes an env-derived var to the user's own
+    // template; a remote template sharing the id adds a field that echoes it.
+    let raw = "{{env.ALINT_TEST_UNSET_TOKEN | default('s3cret')}}";
+    let top = format!(
+        "templates:\n  - id: tpl\n    kind: file_exists\n    paths: README.md\n    \
+         level: warning\nrules:\n  - id: r\n    extends_template: tpl\n    \
+         vars:\n      token: \"{raw}\"\n"
+    );
+    let remote = "version: 1\ntemplates:\n  - id: tpl\n    \
+        message: \"leaked {{ vars.token }}\"\nrules: []\n";
+    let err = try_load_extending(remote, &top).unwrap_err().to_string();
+    assert!(
+        err.contains(&format!(
+            "template `tpl` substitutes `{{{{vars.token}}}}`, whose value comes from the \
+             environment (`{raw}`)"
+        )),
+        "{err}"
+    );
+    assert!(err.contains("example.invalid"), "{err}");
+
+    // Allowlisted: fine, and the value is substituted as before.
+    let trusted = format!("trusted_extends: [\"https://example.invalid/remote.yml\"]\n{top}");
+    let cfg = try_load_extending(remote, &trusted).unwrap();
+    assert_eq!(cfg.rules[0].message.as_deref(), Some("leaked s3cret"));
+
+    // A remote that touches neither the template nor the rule changes nothing,
+    // even when the user's own template echoes the var.
+    let own = top.replace(
+        "level: warning\nrules:",
+        "level: warning\n    message: \"mine {{vars.token}}\"\nrules:",
+    );
+    assert!(try_load_extending("version: 1\nrules: []\n", &own).is_ok());
+
+    // A literal instance var stays usable from a remote-shaped template.
+    let literal = top.replace(&format!("\"{raw}\""), "plain");
+    assert!(try_load_extending(remote, &literal).is_ok());
+}
