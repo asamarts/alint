@@ -214,27 +214,25 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
         // backticks. Per CommonMark, longer runs nest the span so
         // it can contain shorter backtick sequences. Most paths
         // use single backticks, which is what we optimise for.
+        //
+        // Linear in the line length: every backtick run is indexed once, and
+        // each run is linked to the next run of the SAME length (its only
+        // possible closer). Re-searching the rest of the line for every
+        // unmatched run was O(n^1.5) on a line of many distinct run lengths.
         let bytes = line.as_bytes();
-        let mut i = 0;
-        while i < bytes.len() {
-            if bytes[i] != b'`' {
-                i += 1;
-                continue;
-            }
-            let run_start = i;
-            while i < bytes.len() && bytes[i] == b'`' {
-                i += 1;
-            }
-            let run_len = i - run_start;
-            // Find the matching closing run.
-            let close_start = find_closing_run(&bytes[i..], run_len).map(|p| i + p);
-            let Some(close) = close_start else {
-                // Unmatched run → per CommonMark it is literal text, not a
+        let runs = backtick_runs(bytes);
+        let next_same = next_same_len_run(&runs);
+        let mut k = 0;
+        while k < runs.len() {
+            let (run_start, run_len) = runs[k];
+            let Some(j) = next_same[k] else {
+                // Unmatched run -> per CommonMark it is literal text, not a
                 // span; keep scanning after it (a later span on the line is
                 // still a candidate).
+                k += 1;
                 continue;
             };
-            let token_bytes = &bytes[i..close];
+            let token_bytes = &bytes[run_start + run_len..runs[j].0];
             // Inline-code spans wrap their content with one space
             // padding when the content starts/ends with a backtick;
             // CommonMark trims one leading + one trailing space.
@@ -246,10 +244,40 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
                     column: run_start + 1, // 1-indexed; points at opening backtick
                 });
             }
-            i = close + run_len;
+            // Resume after the closing run.
+            k = j + 1;
         }
     }
     out
+}
+
+/// Every maximal run of backticks in `bytes`, as `(start, len)`, in order.
+fn backtick_runs(bytes: &[u8]) -> Vec<(usize, usize)> {
+    let mut runs = Vec::new();
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] != b'`' {
+            i += 1;
+            continue;
+        }
+        let start = i;
+        while i < bytes.len() && bytes[i] == b'`' {
+            i += 1;
+        }
+        runs.push((start, i - start));
+    }
+    runs
+}
+
+/// For each run, the index of the next run with exactly the same length (the
+/// only run that can close it), or `None`. One backward pass.
+fn next_same_len_run(runs: &[(usize, usize)]) -> Vec<Option<usize>> {
+    let mut next = vec![None; runs.len()];
+    let mut last_seen: std::collections::HashMap<usize, usize> = std::collections::HashMap::new();
+    for (k, &(_, len)) in runs.iter().enumerate().rev() {
+        next[k] = last_seen.insert(len, k);
+    }
+    next
 }
 
 /// Strip up to `max_depth` leading blockquote markers (`>` after at most 3
@@ -290,27 +318,6 @@ fn detect_fence(s: &str) -> Option<(char, usize)> {
 /// closing fence cannot have an info string after the markers.
 fn only_fence(s: &str, ch: char) -> bool {
     s.trim_end().chars().all(|c| c == ch)
-}
-
-/// Find the position (relative to `bytes` start) of the next run
-/// of exactly `len` backticks. Returns None if not found in
-/// `bytes`.
-fn find_closing_run(bytes: &[u8], len: usize) -> Option<usize> {
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] != b'`' {
-            i += 1;
-            continue;
-        }
-        let start = i;
-        while i < bytes.len() && bytes[i] == b'`' {
-            i += 1;
-        }
-        if i - start == len {
-            return Some(start);
-        }
-    }
-    None
 }
 
 /// A token is a candidate when it starts with a prefix -- directly, or after a
@@ -612,6 +619,38 @@ mod tests {
         let cands = scan_markdown_paths(md, &pf);
         assert_eq!(cands.len(), 1, "{cands:?}");
         assert_eq!(cands[0].token, "src/real.ts");
+    }
+
+    #[test]
+    fn many_distinct_unmatched_runs_scan_in_linear_time() {
+        // Perf regression: each unmatched run re-searched the rest of the line
+        // for a closer, so a long line of runs of lengths 1..N (all unmatched)
+        // took O(n^1.5) -- tens of seconds on a few MB. Linked by length, the
+        // scan is linear; this ~2 MB line must finish near-instantly.
+        let pf = prefixes(&["src/"]);
+        let mut line = String::new();
+        for n in 2..=2000 {
+            line.push_str(&"`".repeat(n));
+            line.push('x');
+        }
+        line.push_str(" `src/real.ts`");
+        let t = std::time::Instant::now();
+        let cands = scan_markdown_paths(&line, &pf);
+        assert!(
+            t.elapsed() < std::time::Duration::from_secs(2),
+            "took {:?}",
+            t.elapsed()
+        );
+        // Every run of length >= 2 is unique (unmatched, literal); the trailing
+        // single-backtick span is still found, at its byte position.
+        assert_eq!(cands.len(), 1, "{cands:?}");
+        assert_eq!(cands[0].token, "src/real.ts");
+        // Pairing is by exact length, in order: `a``b`c`` -> run 0 closes at run
+        // 2, run 1 at run 3.
+        assert_eq!(
+            next_same_len_run(&backtick_runs(b"`a``b`c``")),
+            vec![Some(2), Some(3), None, None]
+        );
     }
 
     #[test]
