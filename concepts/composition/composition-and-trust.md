@@ -60,6 +60,7 @@ Sources are not equally trusted, and the boundary is drawn at `extends:`. Your o
 - **read outside the repo** (`allow_out_of_root:` is a top-level-only grant), or
 - **choose which findings are suppressed** (`baseline:` is a top-level-only input).
 
+
 For `https://` entries, a **SHA-256 subresource-integrity hash** (`#sha256-...`) pins exactly which bytes are trusted; an `https://` entry that omits the pin is refused outright, a plain `http://` URL is rejected, and a fetched body that does not match its hash is refused. Bundled rulesets ship inside the binary and are resolved offline, so there is nothing to fetch or pin. The hash pins *which* bytes load, and the trust boundary governs *what those bytes may do*.
 
 ## In practice

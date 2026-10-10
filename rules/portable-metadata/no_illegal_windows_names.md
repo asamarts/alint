@@ -14,6 +14,7 @@ The rejected forms are:
 - Trailing dots (`foo.`) or trailing spaces (`foo `) — Windows silently strips these on checkout.
 - Reserved chars: `<`, `>`, `:`, `"`, `|`, `?`, `*`.
 
+
 ---
 
 ## Options

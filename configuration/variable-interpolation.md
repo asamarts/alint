@@ -69,6 +69,7 @@ Unlike string interpolation (load-time), `when: env.X` resolves at **evaluation 
 
 **env values are always strings.** Compare against string literals: `when: env.PORT == "8080"`, not `== 8080`. A bare-integer comparison is a type mismatch that evaluates silently to `false` (the rule then never applies), so quote the right-hand side.
 
+
 ## `{{...}}` is shared: foreign templates pass through
 
 alint does not own the `{{...}}` namespace. Go templates (`{{json .}}`, `{{end}}`), cookiecutter (`{{cookiecutter.slug}}`), Jinja, and others appear legitimately in `command:` args and `pattern:` regexes. alint only acts on spans it is confident are its own: `env.`, `vars.`, `ctx.` (and close typos of `env`/`vars`, which it flags). Everything else passes through verbatim:

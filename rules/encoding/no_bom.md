@@ -8,6 +8,7 @@ categories: ['encoding', 'text-hygiene']
 
 Flag a leading UTF-8 / UTF-16 LE/BE / UTF-32 LE/BE byte-order mark. The fixer strips whichever BOM is detected.
 
+
 ---
 
 ## Options

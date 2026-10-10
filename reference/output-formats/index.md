@@ -31,6 +31,7 @@ A machine format is the *only* thing written to **stdout** — so `alint check -
 
 ## Stable fingerprints
 
+
 `sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to **every** run — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitHub Code Scanning uses the SARIF fingerprint to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
 
 ## Baseline suppression
