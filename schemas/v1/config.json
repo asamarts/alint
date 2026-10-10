@@ -1023,7 +1023,7 @@
           "properties": {
             "file_strip_bom": {
               "additionalProperties": false,
-              "description": "Remove a leading UTF-8 / UTF-16 / UTF-32 BOM from the file. No-op when no BOM is present.",
+              "description": "Remove a leading UTF-8 BOM (a stacked run of them) from the file. A UTF-16 / UTF-32 BOM is reported but left in place, since removing it without transcoding would corrupt the file. No-op when no BOM is present.",
               "properties": {
                 "applicability": {
                   "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
@@ -4012,7 +4012,7 @@
       "type": "object"
     },
     "rule_no_bom": {
-      "description": "Flag files that start with a UTF-8 / UTF-16 / UTF-32 BOM. Fixable via `file_strip_bom`.",
+      "description": "Flag files that start with a UTF-8 / UTF-16 / UTF-32 BOM. A UTF-8 BOM is fixable via `file_strip_bom`; a UTF-16 / UTF-32 BOM is reported only.",
       "properties": {
         "kind": {
           "const": "no_bom"
