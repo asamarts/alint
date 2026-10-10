@@ -857,6 +857,29 @@ mod tests {
             .is_some_and(|e| e.to_string().contains("recursion limit"))
     }
 
+    /// `true` when the bracket run itself is what pushes the real parser past its
+    /// recursion limit: `deep` trips it and the same document with a one-level
+    /// `shallow` bomb does not. A self-referencing alias (`&a` anchoring a node
+    /// that contains `*a`) trips the limit with no nesting at all, so the bare
+    /// [`libyaml_sees_deep_nesting`] verdict is not proof of a flow bomb.
+    fn libyaml_bomb_causes_deep_nesting(deep: &str, shallow: &str) -> bool {
+        libyaml_sees_deep_nesting(deep) && !libyaml_sees_deep_nesting(shallow)
+    }
+
+    #[test]
+    fn self_referencing_alias_is_not_mistaken_for_a_flow_bomb() {
+        // Proptest counterexample (windows CI): `&a` anchors a mapping holding
+        // `*a`, so libyaml reports "recursion limit" at any bracket depth. The
+        // brackets sit inside a double-quoted scalar, which the scanner rightly
+        // skips; the oracle must not blame it for the alias recursion.
+        let doc = |b: &str| format!("&a \n*a : \"\n{b}\nc: \"\"\n");
+        let (deep, shallow) = (doc(&bomb(300)), doc(&bomb(1)));
+        assert!(libyaml_sees_deep_nesting(&deep));
+        assert!(libyaml_sees_deep_nesting(&shallow));
+        assert!(!libyaml_bomb_causes_deep_nesting(&deep, &shallow));
+        assert!(flow_depth_within_limit_with(&deep, 200));
+    }
+
     /// `true` when the REAL parser sees a genuine alias token (an undefined
     /// `*undefined_zz` reference is reported as an unknown anchor).
     fn libyaml_sees_alias(doc: &str) -> bool {
@@ -996,7 +1019,8 @@ mod tests {
         ) {
             let prefix = prefix.concat();
             let deep = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(300));
-            if libyaml_sees_deep_nesting(&deep) {
+            let shallow = format!("{prefix}{sep}{}\nc: \"\"\n", bomb(1));
+            if libyaml_bomb_causes_deep_nesting(&deep, &shallow) {
                 proptest::prop_assert!(
                     !flow_depth_within_limit_with(&deep, 200),
                     "scanner missed a real flow bomb: {deep:?}"
