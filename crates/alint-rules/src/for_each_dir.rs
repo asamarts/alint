@@ -323,6 +323,7 @@ pub(crate) fn evaluate_for_each(
         }
 
         let tokens = PathTokens::from_path(&entry.path);
+        let entry_start = violations.len();
         for (i, nested) in require.iter().enumerate() {
             // v0.9.12: nested `when:` is pre-compiled at rule-
             // build time (`CompiledNestedSpec`) — gate on the
@@ -434,6 +435,15 @@ pub(crate) fn evaluate_for_each(
                 violations.push(v);
             }
         }
+        // Nested `paths:` / glob options were built with this entry's token
+        // values glob-escaped; show the reader the real path in messages.
+        if parent_message.is_none() {
+            for v in &mut violations[entry_start..] {
+                if let Some(m) = alint_core::template::unescape_token_values(&v.message, &tokens) {
+                    v.message = m.into();
+                }
+            }
+        }
     }
     Ok(violations)
 }
@@ -446,12 +456,12 @@ pub(crate) fn evaluate_for_each(
 /// in-index entry instead of going through the rule's own
 /// O(N) full-index scan.
 ///
-/// Conservative: returns `None` for any pattern containing a
-/// glob metacharacter, even when the metacharacter is escaped -
-/// the bench cliff this exists to fix is the canonical
-/// `paths: "{path}/<basename>"` shape, which always resolves to
-/// a literal post-template-expansion. False positives here
-/// would silently bypass the rule's own glob handling.
+/// Returns `None` for any pattern with real glob syntax. A pattern
+/// whose only metacharacters are escapes (a `{path}` token holding
+/// `app/[slug]`) is decoded exactly by `glob_literal`, so the
+/// canonical `paths: "{path}/<basename>"` shape keeps the fast path.
+/// False positives here would silently bypass the rule's own glob
+/// handling.
 fn nested_spec_single_literal(spec: &alint_core::RuleSpec) -> Option<std::path::PathBuf> {
     use alint_core::PathsSpec;
     let paths = spec.paths.as_ref()?;
@@ -463,13 +473,9 @@ fn nested_spec_single_literal(spec: &alint_core::RuleSpec) -> Option<std::path::
     if single.is_empty() || single.starts_with('!') {
         return None;
     }
-    if single
-        .chars()
-        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
-    {
-        return None;
-    }
-    Some(std::path::PathBuf::from(single))
+    // A token value with glob metacharacters (`app/[slug]`) is rendered
+    // escaped (`app/[[]slug[]]/page.tsx`); that is still one literal path.
+    alint_core::template::glob_literal(single).map(std::path::PathBuf::from)
 }
 
 /// Read the in-index file at `literal` once, dispatch to the
@@ -681,6 +687,41 @@ mod tests {
         assert!(
             v[0].message.contains("README"),
             "expected README in message; got {:?}",
+            v[0].message
+        );
+    }
+
+    #[test]
+    fn glob_options_of_nested_rules_escape_the_iterated_path() {
+        // `app/[slug]` (Next.js) reached a nested `dir_contains` `select:
+        // "{path}"` unescaped, compiled as a character class matching `app/s`:
+        // `app/[slug]` (no .tsx) was never checked (false negative) and `app/s`
+        // was checked twice. Only `paths:` was escaped.
+        let nested: NestedRuleSpec = serde_yaml_ng::from_str(
+            "kind: dir_contains\nselect: \"{path}\"\nrequire: [\"*.tsx\"]\n",
+        )
+        .unwrap();
+        let files = [
+            ("app", true),
+            ("app/[slug]", true),
+            ("app/[slug]/page.ts", false),
+            ("app/s", true),
+            ("app/s/page.tsx", false),
+        ];
+        let v = eval_with(&rule("app/*", vec![nested]), &files);
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert_eq!(v[0].path.as_deref(), Some(Path::new("app/[slug]")));
+
+        // A nested `paths:` finding names the real directory, not the escaped
+        // glob it was built from.
+        let v = eval_with(
+            &rule("app/*", vec![require_file_exists("{path}/*.tsx")]),
+            &files,
+        );
+        assert_eq!(v.len(), 1, "{v:?}");
+        assert!(
+            v[0].message.contains("app/[slug]/*.tsx") && !v[0].message.contains("[[]"),
+            "{}",
             v[0].message
         );
     }

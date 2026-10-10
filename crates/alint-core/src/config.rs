@@ -1325,7 +1325,7 @@ impl NestedRuleSpec {
                     "git_tracked_only",
                     "respect_gitignore",
                 ];
-                crate::template::render_mapping(self.extra.clone(), tokens)
+                crate::template::render_nested_options(&self.kind, self.extra.clone(), tokens)
                     .into_iter()
                     .filter(|(k, _)| k.as_str().is_none_or(|s| !PARENT_FIELDS.contains(&s)))
                     .collect()
