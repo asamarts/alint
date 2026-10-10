@@ -1146,19 +1146,14 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
-    // Refuse to replace a read-only file. A temp+rename only needs write access
-    // to the DIRECTORY, so without this check a `chmod 444` file (or a Perforce
-    // checkout not yet opened for edit) would be silently rewritten -- unlike a
-    // plain in-place write, which fails with EACCES. The caller reports the
-    // error (the engine downgrades the item to a fix error), so the violation
-    // stands visibly instead.
-    if let Ok(meta) = std::fs::metadata(path)
-        && meta.permissions().readonly()
-    {
-        return Err(std::io::Error::new(
-            std::io::ErrorKind::PermissionDenied,
-            format!("refusing to overwrite read-only file {}", path.display()),
-        ));
+    // Refuse to replace a file we could not write in place. A temp+rename only
+    // needs write access to the DIRECTORY, so without this check a `chmod 444`
+    // file (or a Perforce checkout not yet opened for edit) would be silently
+    // rewritten -- unlike a plain in-place write, which fails with EACCES. The
+    // caller reports the error (the engine downgrades the item to a fix error),
+    // so the violation stands visibly instead.
+    if let Ok(meta) = std::fs::metadata(path) {
+        refuse_unwritable(path, &meta)?;
     }
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     // A short, fixed-shape name: the target's own name is NOT embedded, so a
@@ -1188,6 +1183,45 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// `Err(PermissionDenied)` when the existing file at `path` is not writable in
+/// place by this process.
+///
+/// `Permissions::readonly()` alone is not enough: on unix it is true only when
+/// EVERY write bit is clear, so a `0464` file (owner may not write, group may)
+/// or a `0644` file owned by another user passed. The authoritative check is
+/// the kernel's own: open the file for writing (append mode, no truncation, no
+/// bytes written; mtime is untouched). `readonly()` is kept as well so a
+/// `chmod 444` file stays refused even for root, whose open would succeed.
+/// Only a regular file is probed (opening a FIFO for writing could block).
+fn refuse_unwritable(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
+    let refuse = |msg: String| {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            msg,
+        ))
+    };
+    if meta.permissions().readonly() {
+        return refuse(format!(
+            "refusing to overwrite read-only file {}",
+            path.display()
+        ));
+    }
+    if meta.is_file() {
+        match std::fs::OpenOptions::new().append(true).open(path) {
+            Ok(_) => {}
+            // Vanished since `metadata`: nothing to protect; the write creates it.
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(e) => {
+                return refuse(format!(
+                    "refusing to overwrite {}: not writable in place ({e})",
+                    path.display()
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1211,6 +1245,31 @@ mod tests {
         assert_eq!(std::fs::read(&p).unwrap(), b"new");
         let leftovers = std::fs::read_dir(dir.path()).unwrap().count();
         assert_eq!(leftovers, 1, "no temp file left behind");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn write_atomic_refuses_a_file_the_owner_cannot_write() {
+        // `readonly()` is true only when ALL write bits are clear, so a 0464
+        // file (owner may not write; group may) was silently replaced via
+        // temp+rename although an in-place write fails with EACCES.
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("ro464.txt");
+        std::fs::write(&p, b"old").unwrap();
+        std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o464)).unwrap();
+        if std::fs::OpenOptions::new().append(true).open(&p).is_ok() {
+            // Running as root (DAC override): an in-place write would succeed
+            // too, so there is nothing to refuse. Not the case under test.
+            return;
+        }
+        let err = write_atomic(&p, b"new").unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::PermissionDenied);
+        assert!(err.to_string().contains("not writable in place"), "{err}");
+        assert_eq!(std::fs::read(&p).unwrap(), b"old");
+        let mode = std::fs::metadata(&p).unwrap().permissions().mode() & 0o777;
+        assert_eq!(mode, 0o464);
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 
     #[test]
