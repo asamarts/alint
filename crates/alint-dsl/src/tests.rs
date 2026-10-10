@@ -3031,3 +3031,30 @@ fn parse_error_in_an_extended_config_names_that_file() {
     // The serde message appears once (it used to repeat as the error's source).
     assert_eq!(err.matches("unknown field").count(), 1, "{err}");
 }
+
+#[test]
+fn nested_configs_enabled_matches_load() {
+    // Same resolution as `load`: a `.alint.d/` drop-in may enable it, an
+    // `extends:`'d ruleset's top-level settings are dropped.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("base.yml"),
+        "version: 1\nnested_configs: true\nrules: []\n",
+    )
+    .unwrap();
+    let top = tmp.path().join(".alint.yml");
+    std::fs::write(&top, "version: 1\nextends: [./base.yml]\nrules: []\n").unwrap();
+    assert_eq!(
+        nested_configs_enabled(&top).unwrap(),
+        load(&top).unwrap().nested_configs
+    );
+    assert!(!nested_configs_enabled(&top).unwrap());
+    std::fs::create_dir(tmp.path().join(".alint.d")).unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.d/10.yml"),
+        "version: 1\nnested_configs: true\nrules: []\n",
+    )
+    .unwrap();
+    assert!(nested_configs_enabled(&top).unwrap());
+    assert!(load(&top).unwrap().nested_configs);
+}

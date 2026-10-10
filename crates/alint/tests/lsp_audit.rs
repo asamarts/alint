@@ -221,6 +221,56 @@ fn lsp_uses_nearest_config_per_document() {
     shutdown(&mut server);
 }
 
+/// (4a') `nested_configs: true` on the workspace config: like the CLI,
+/// a file under `pkg/` gets the root's rules AND `pkg/.alint.yml`'s.
+#[test]
+fn lsp_honors_nested_configs_like_the_cli() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nnested_configs: true\nrules:\n  - id: root-no-todo\n    \
+         kind: file_content_forbidden\n    paths: \"**/*.txt\"\n    pattern: 'TODO'\n    \
+         level: error\n",
+    )
+    .unwrap();
+    std::fs::create_dir(root.join("pkg")).unwrap();
+    std::fs::write(
+        root.join("pkg/.alint.yml"),
+        "version: 1\nrules:\n  - id: pkg-no-fixme\n    kind: file_content_forbidden\n    \
+         paths: \"*.txt\"\n    pattern: 'FIXME'\n    level: error\n",
+    )
+    .unwrap();
+    let text = "TODO and FIXME\n";
+    std::fs::write(root.join("pkg/a.txt"), text).unwrap();
+    let file_uri = uri_of(&root.join("pkg/a.txt"));
+
+    let cli = Command::new(env!("CARGO_BIN_EXE_alint"))
+        .args(["check", "--format", "json"])
+        .current_dir(root)
+        .output()
+        .unwrap();
+    let cli_out = String::from_utf8_lossy(&cli.stdout);
+    assert!(
+        cli_out.contains("root-no-todo") && cli_out.contains("pkg-no-fixme"),
+        "{cli_out}"
+    );
+
+    let mut server = start(root);
+    open(&mut server, &file_uri, text);
+    let last = settle(&server.rx, QUIET);
+    let mut got = codes(last.get(&file_uri).expect("pkg/a.txt is published"));
+    got.sort();
+    assert_eq!(got, vec!["pkg-no-fixme", "root-no-todo"], "{last:?}");
+
+    // The per-keystroke path uses the same governing config.
+    change(&mut server, &file_uri, 2, "TODO FIXME again\n");
+    let mut got = codes(&wait_for_diagnostics(&server.rx, &file_uri));
+    got.sort();
+    assert_eq!(got, vec!["pkg-no-fixme", "root-no-todo"]);
+    shutdown(&mut server);
+}
+
 /// (4b) Once the config becomes invalid, the stale engine must not keep
 /// producing per-keystroke diagnostics: the document is cleared and only
 /// the config error (on the config file) remains.
