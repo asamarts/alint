@@ -79,7 +79,9 @@ diagnostics:
   launch the server as `alint lsp --show-notes` to list them all.
 - **Auto-discovery.** Each open file is linted by the nearest
   `.alint.yml` found walking up from its directory, so it works in
-  monorepos and nested package roots without configuration. Every
+  monorepos and nested package roots without configuration. Under a
+  config with `nested_configs: true`, files get that config's rules plus
+  the nested ones, as `alint check` from the workspace root does. Every
   workspace folder of a multi-root workspace is linted; files outside
   all workspace folders are not.
 

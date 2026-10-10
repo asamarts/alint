@@ -52,7 +52,7 @@ pub fn splice_inline(path: &Path, body: &str) -> Result<()> {
             "alint: appended new alint-managed section to {} \
              (no `{START_MARKER}` markers were found). \
              Subsequent --inline runs will splice in place.",
-            path.display(),
+            alint_output::sanitize_terminal(&path.display().to_string()),
         );
     }
     Ok(())

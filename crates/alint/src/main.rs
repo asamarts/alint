@@ -89,6 +89,16 @@ fn tolerate_broken_pipe(res: io::Result<()>) -> io::Result<()> {
     }
 }
 
+/// Write `text` plus a newline to stdout (locked, then flushed). A closed
+/// stdout (EPIPE) is tolerated like a consumed write, so the command keeps
+/// the exit code it would have had; `println!` would panic instead.
+fn print_stdout_line(text: &str) -> Result<()> {
+    use std::io::Write as _;
+    let mut out = io::stdout().lock();
+    tolerate_broken_pipe(writeln!(out, "{text}").and_then(|()| out.flush()))
+        .context("writing output")
+}
+
 /// Install a custom panic hook that prints a pre-filled GitHub-issue
 /// URL for the bug report. Skipped when `RUST_BACKTRACE` is set so
 /// developers running with `RUST_BACKTRACE=1` keep the standard
@@ -443,17 +453,18 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
 
     let summary = init::render_summary(&detection);
     if summary.is_empty() {
-        println!(
-            "Wrote {} - extends `oss-baseline@v1` only.",
-            target.display()
-        );
-        println!(
-            "  No language manifests detected. Add an `extends:` line for your stack \
-             (`alint://bundled/rust@v1`, `node@v1`, …) when ready."
-        );
+        print_stdout_line(&format!(
+            "Wrote {} - extends `oss-baseline@v1` only.\n  \
+             No language manifests detected. Add an `extends:` line for your stack \
+             (`alint://bundled/rust@v1`, `node@v1`, …) when ready.",
+            term(&target.display().to_string())
+        ))?;
     } else {
-        println!("Wrote {} - detected: {}.", target.display(), summary);
-        println!("  Run `alint check` to lint against the generated config.");
+        print_stdout_line(&format!(
+            "Wrote {} - detected: {}.\n  Run `alint check` to lint against the generated config.",
+            term(&target.display().to_string()),
+            summary
+        ))?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -1045,7 +1056,7 @@ fn cmd_baseline(
         let total = new_baseline.total();
         eprintln!(
             "alint: wrote {} ({n} entr{}, {total} occurrence{})",
-            out_path.display(),
+            term(&out_path.display().to_string()),
             if n == 1 { "y" } else { "ies" },
             if total == 1 { "" } else { "s" },
         );
@@ -1515,8 +1526,10 @@ fn render_facts_human(
         let kind_pad = " ".repeat(kind_width.saturating_sub(kind_name.len()));
         writeln!(
             out,
-            "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{value_str}{value_style:#}",
+            "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{}{value_style:#}",
             term(&spec.id),
+            // A fact value can come from repo content or a `custom:` command.
+            term(&value_str),
         )?;
     }
     Ok(())
@@ -1581,10 +1594,10 @@ fn write_scope_filter_explain(
     if let Some(sf) = entry.scope_filter() {
         writeln!(out, "{dim}scope_filter:{dim:#}")?;
         if let Some(ha) = &sf.has_ancestor {
-            writeln!(out, "  {dim}has_ancestor: {dim:#} {}", ha.join(", "))?;
+            writeln!(out, "  {dim}has_ancestor: {dim:#} {}", term(&ha.join(", ")))?;
         }
         if let Some(cs) = &sf.changed_since {
-            writeln!(out, "  {dim}changed_since:{dim:#} {cs}")?;
+            writeln!(out, "  {dim}changed_since:{dim:#} {}", term(cs))?;
         }
         if (sf.include_manifest_paths.is_some() || sf.exclude_manifest_paths.is_some())
             && let Ok(filter) = alint_core::ScopeFilter::from_spec(entry.rule.id(), sf.clone())
@@ -1607,10 +1620,13 @@ fn write_scope_filter_explain(
                         .collect::<Vec<_>>()
                         .join(", ")
                 };
+                // Both the manifest's own path and the paths it lists (read
+                // from repo content, e.g. package.json) are untrusted.
                 writeln!(
                     out,
-                    "  {dim}{key}:{dim:#} {} -> {paths}",
-                    res.source.display().to_string().replace('\\', "/")
+                    "  {dim}{key}:{dim:#} {} -> {}",
+                    term(&res.source.display().to_string().replace('\\', "/")),
+                    term(&paths)
                 )?;
             }
         }
@@ -2044,13 +2060,13 @@ fn emit_validate_success(rule_count: usize, config_path: &Path, format: &str) ->
             "config_path": config_path.display().to_string(),
             "error": serde_json::Value::Null,
         });
-        println!("{}", serde_json::to_string(&envelope)?);
+        print_stdout_line(&serde_json::to_string(&envelope)?)?;
     } else {
         // human format
-        println!(
+        print_stdout_line(&format!(
             "✓ Config valid: {rule_count} rule(s) loaded from {}",
-            config_path.display()
-        );
+            term(&config_path.display().to_string())
+        ))?;
     }
     Ok(ExitCode::SUCCESS)
 }
@@ -2070,13 +2086,13 @@ fn emit_validate_failure(
             "config_path": config_path.map(|p| p.display().to_string()),
             "error": chain,
         });
-        println!("{}", serde_json::to_string(&envelope)?);
+        print_stdout_line(&serde_json::to_string(&envelope)?)?;
     } else {
         // Human format prints to stderr to stay out of the way of
         // stdout consumers, then a one-line summary on stdout so
         // terminals show something either way.
-        eprintln!("alint: {err:#}");
-        println!("✗ Config invalid");
+        eprintln!("alint: {}", term(&format!("{err:#}")));
+        print_stdout_line("✗ Config invalid")?;
     }
     // An internal error (an alint bug — e.g. a shipped bundled ruleset that
     // fails to parse) is not the user's config being "invalid"; surface it as

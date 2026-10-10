@@ -18,7 +18,8 @@ alint fix --dry-run
 
 With `--format json`, the report's top-level `dry_run` field is `true` for a
 preview (each `applied` item is a fix that would be applied) and `false` for a
-real run.
+real run. Reports from older alint releases omit the field; treat that as
+`false`.
 
 Apply every available fix:
 

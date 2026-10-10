@@ -64,12 +64,69 @@ fn explain_sanitizes_message_and_policy_url() {
     assert_clean("explain", &o.stdout);
 }
 
+/// Redirected stdout (`> AGENTS.md`) is a file, not a terminal: it must be
+/// byte-identical to `--output`, so an emoji ZWJ sequence survives instead
+/// of becoming a literal `\u{200d}`.
 #[test]
-fn export_agents_md_sanitizes_stdout() {
-    let tmp = fixture();
+fn export_agents_md_piped_stdout_matches_output_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: fam\n    kind: file_exists\n    paths: README.md\n    \
+         level: error\n    message: \"family \u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}\"\n",
+    )
+    .unwrap();
     let o = run(tmp.path(), &["export-agents-md"]);
     assert!(o.status.success(), "{o:?}");
-    assert_clean("export-agents-md", &o.stdout);
+    let piped = String::from_utf8(o.stdout).unwrap();
+    assert!(piped.contains('\u{200D}'), "ZWJ kept: {piped}");
+    assert!(!piped.contains("\\u{200d}"), "{piped}");
+    let o = run(tmp.path(), &["export-agents-md", "--output", "OUT.md"]);
+    assert!(o.status.success(), "{o:?}");
+    let file = std::fs::read_to_string(tmp.path().join("OUT.md")).unwrap();
+    assert_eq!(piped, file);
+}
+
+/// On a terminal, export-agents-md still neutralizes injected escapes.
+#[cfg(unix)]
+#[test]
+fn export_agents_md_sanitizes_a_terminal_stdout() {
+    use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+    use std::io::Read as _;
+
+    let Ok(pair) = NativePtySystem::default().openpty(PtySize {
+        rows: 24,
+        cols: 200,
+        pixel_width: 0,
+        pixel_height: 0,
+    }) else {
+        eprintln!("pty unavailable on this runner; skipping");
+        return;
+    };
+    let tmp = fixture();
+    let mut cmd = CommandBuilder::new(env!("CARGO_BIN_EXE_alint"));
+    cmd.args(["export-agents-md", "--color", "never"]);
+    cmd.cwd(tmp.path());
+    let mut child = pair.slave.spawn_command(cmd).expect("spawn in pty");
+    let mut reader = pair.master.try_clone_reader().unwrap();
+    let join = std::thread::spawn(move || {
+        let mut out = Vec::new();
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => out.extend_from_slice(&buf[..n]),
+            }
+        }
+        out
+    });
+    drop(pair.slave);
+    child.wait().unwrap();
+    drop(pair.master);
+    let out = join.join().unwrap();
+    let text = String::from_utf8_lossy(&out);
+    assert!(text.contains("evil"), "{text}");
+    assert_clean("export-agents-md (tty)", &out);
 }
 
 #[test]
@@ -124,4 +181,88 @@ fn show_baselined_sanitizes_paths() {
     let stderr = String::from_utf8_lossy(&o.stderr);
     assert!(stderr.contains("baselined:"), "{stderr}");
     assert_clean("show-baselined", &o.stderr);
+}
+
+/// `validate-config` (human) prints the config error on stderr: an ESC /
+/// bidi char in the offending config text must not reach the terminal raw.
+#[test]
+fn validate_config_human_error_is_sanitized() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\n\"bad\\e[2Jkey\\u202E\": 1\nrules: []\n",
+    )
+    .unwrap();
+    let o = run(tmp.path(), &["validate-config"]);
+    assert_eq!(o.status.code(), Some(1), "{o:?}");
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    assert!(stderr.contains("\\x1b[2J"), "rendered visibly: {stderr}");
+    assert_clean("validate-config stderr", &o.stderr);
+    assert_clean("validate-config stdout", &o.stdout);
+}
+
+/// `explain` prints the `scope_filter:` gates: `has_ancestor`,
+/// `changed_since` and the manifest predicate's source + resolved paths
+/// (the latter read from repo content, here `package.json`).
+#[test]
+fn explain_sanitizes_scope_filter() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: r\n    kind: file_max_size\n    paths: \"**\"\n    \
+         max_bytes: 10\n    level: error\n    scope_filter:\n      \
+         has_ancestor: \"pkg\\e7x\\u202E\"\n      changed_since: \"main\\e7x\\u202E\"\n  \
+         - id: m\n    kind: file_max_size\n    paths: \"**\"\n    max_bytes: 10\n    \
+         level: error\n    scope_filter:\n      include_manifest_paths:\n        \
+         source: package.json\n        extract: { json: \"$.workspaces[*]\" }\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("package.json"),
+        "{\"workspaces\": [\"pkg/a\\u001b7x\\u202e\"]}\n",
+    )
+    .unwrap();
+    // `--color never`: alint emits no ESC of its own, so ANY raw ESC is
+    // injected. (`[` is a glob metachar `has_ancestor` rejects, so the
+    // payload is `ESC 7`, save-cursor.)
+    for id in ["r", "m"] {
+        let o = run(tmp.path(), &["explain", id, "--color", "never"]);
+        assert!(o.status.success(), "{o:?}");
+        let out = String::from_utf8_lossy(&o.stdout);
+        assert!(out.contains("\\x1b7x"), "{id}: rendered visibly: {out}");
+        assert!(!out.contains('\u{1b}'), "{id}: raw ESC leaked: {out:?}");
+        assert!(!out.contains(RLO), "{id}: raw U+202E leaked: {out:?}");
+    }
+}
+
+/// `alint baseline` reports the file it wrote; the `baseline:` key (repo
+/// config) names it.
+#[cfg(unix)]
+#[test]
+fn baseline_wrote_line_is_sanitized() {
+    let tmp = fixture();
+    let cfg = std::fs::read_to_string(tmp.path().join(".alint.yml")).unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        format!("{cfg}baseline: \"b\\e[2J\\u202E.json\"\n"),
+    )
+    .unwrap();
+    let o = run(tmp.path(), &["baseline"]);
+    assert!(o.status.success(), "{o:?}");
+    let stderr = String::from_utf8_lossy(&o.stderr);
+    assert!(stderr.contains("wrote"), "{stderr}");
+    assert_clean("baseline", &o.stderr);
+}
+
+/// `suggest --explain` lists repo file names as evidence.
+#[cfg(unix)]
+#[test]
+fn suggest_explain_sanitizes_evidence_paths() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join(format!("x{CLEAR}{RLO}.bak")), "old\n").unwrap();
+    let o = run(tmp.path(), &["suggest", "--explain", "--color", "always"]);
+    assert!(o.status.success(), "{o:?}");
+    let out = String::from_utf8_lossy(&o.stdout);
+    assert!(out.contains(".bak"), "evidence lists the file: {out}");
+    assert_clean("suggest", &o.stdout);
 }

@@ -93,6 +93,42 @@ pub fn load(path: &Path) -> Result<Config> {
 /// directory, and for embeddings that want to plug in a custom
 /// fetcher.
 pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
+    let mut raw = load_top_level_raw(path, opts)?;
+
+    // Nested `.alint.yml` discovery (opt-in via `nested_configs:
+    // true` on the root config). Walks from the root config's
+    // directory, finds any sub-directory configs, scopes their
+    // rules to their directory, and appends them to the root's
+    // rule list.
+    if raw.nested_configs == Some(true) {
+        let root_dir = path
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
+        let canonical_root_cfg = path.canonicalize().map_err(|source| Error::Io {
+            path: path.to_path_buf(),
+            source,
+        })?;
+        let discovered = nested::discover_nested(&root_dir, &canonical_root_cfg, &raw)?;
+        raw.rules.extend(discovered);
+    }
+
+    let merged = raw.finalize()?;
+    validate(&merged)?;
+    Ok(merged)
+}
+
+/// Whether the config at `path` (with its `extends:` chain and
+/// `.alint.d/` drop-ins, exactly as [`load`] resolves them) turns on
+/// `nested_configs:`. Skips the nested-config walk itself, so it is cheap
+/// enough for an embedder (the LSP) to ask which ancestor config governs
+/// a file.
+pub fn nested_configs_enabled(path: &Path) -> Result<bool> {
+    Ok(load_top_level_raw(path, &LoadOptions::default())?.nested_configs == Some(true))
+}
+
+/// The top-level config plus its `extends:` chain and `.alint.d/`
+/// drop-ins, merged but not yet finalised (and without nested configs).
+fn load_top_level_raw(path: &Path, opts: &LoadOptions) -> Result<RawConfig> {
     let mut state = loader::LoadState::default();
     // Confinement boundary for local `extends:` targets — the top-level
     // config's directory. A local extends chain (e.g. a shared ruleset
@@ -145,27 +181,7 @@ pub fn load_with(path: &Path, opts: &LoadOptions) -> Result<Config> {
         )?;
         raw = merge(raw, drop_in);
     }
-
-    // Nested `.alint.yml` discovery (opt-in via `nested_configs:
-    // true` on the root config). Walks from the root config's
-    // directory, finds any sub-directory configs, scopes their
-    // rules to their directory, and appends them to the root's
-    // rule list.
-    if raw.nested_configs == Some(true) {
-        let root_dir = path
-            .parent()
-            .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-        let canonical_root_cfg = path.canonicalize().map_err(|source| Error::Io {
-            path: path.to_path_buf(),
-            source,
-        })?;
-        let discovered = nested::discover_nested(&root_dir, &canonical_root_cfg, &raw)?;
-        raw.rules.extend(discovered);
-    }
-
-    let merged = raw.finalize()?;
-    validate(&merged)?;
-    Ok(merged)
+    Ok(raw)
 }
 
 /// List `.alint.d/*.{yml,yaml}` files alphabetically. Returns

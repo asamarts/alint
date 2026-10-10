@@ -4,7 +4,7 @@
   "title": "alint fix report (v1)",
   "description": "Output schema emitted by `alint fix --format json`. Locks the public contract for downstream tooling.",
   "type": "object",
-  "required": ["schema_version", "dry_run", "summary", "results"],
+  "required": ["schema_version", "summary", "results"],
   "additionalProperties": false,
   "properties": {
     "schema_version": {
@@ -13,7 +13,7 @@
     },
     "dry_run": {
       "type": "boolean",
-      "description": "True for `alint fix --dry-run`: nothing was written, and each `applied` item is a fix that would be applied."
+      "description": "True for `alint fix --dry-run`: nothing was written, and each `applied` item is a fix that would be applied. Always emitted by current alint, but optional in the schema (an additive field within schema_version 1): reports from releases before it was added omit it, which means a real run."
     },
     "summary": {
       "type": "object",
