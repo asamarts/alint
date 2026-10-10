@@ -338,6 +338,71 @@ fn lsp_lints_every_workspace_folder() {
     shutdown(&mut server);
 }
 
+/// Wait for the next `publishDiagnostics` for `uri`, returning its
+/// version and diagnostics.
+fn next_publish(rx: &Receiver<Value>, uri: &str) -> (Option<i64>, Vec<Value>) {
+    loop {
+        let msg = rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("timed out waiting for publishDiagnostics");
+        if msg["method"] == "textDocument/publishDiagnostics" && msg["params"]["uri"] == uri {
+            return (
+                msg["params"]["version"].as_i64(),
+                msg["params"]["diagnostics"]
+                    .as_array()
+                    .cloned()
+                    .unwrap_or_default(),
+            );
+        }
+    }
+}
+
+/// (5) `didChange` handlers run concurrently: a slow evaluation of an
+/// older (large) buffer must not publish after the newer (small) one, or
+/// its stale diagnostics stick on screen.
+#[test]
+fn lsp_stale_reeval_result_is_dropped() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".alint.yml"), NO_TODO).unwrap();
+    std::fs::write(root.join("a.txt"), "clean\n").unwrap();
+    let a = uri_of(&root.join("a.txt"));
+    let big = format!("{}TODO\n", format!("{}\n", "x".repeat(200)).repeat(40_000));
+
+    let mut server = start(root);
+    open(&mut server, &a, "clean\n");
+    wait_for_diagnostics(&server.rx, &a);
+
+    // Calibrate: how long one evaluation of the big buffer takes.
+    let t0 = Instant::now();
+    change(&mut server, &a, 2, &big);
+    let (_, diags) = next_publish(&server.rx, &a);
+    assert_eq!(codes(&diags), vec!["no-todo"]);
+    let eval = t0.elapsed();
+    change(&mut server, &a, 3, "clean\n");
+    next_publish(&server.rx, &a);
+
+    // Race: the big buffer, immediately superseded by a clean one.
+    change(&mut server, &a, 4, &big);
+    change(&mut server, &a, 5, "clean again\n");
+    let quiet = (eval * 4).max(Duration::from_secs(2));
+    let mut last = None;
+    while let Ok(msg) = server.rx.recv_timeout(quiet) {
+        if msg["method"] == "textDocument/publishDiagnostics" && msg["params"]["uri"] == a {
+            assert_ne!(
+                msg["params"]["version"].as_i64(),
+                Some(4),
+                "the superseded buffer's diagnostics must be dropped: {msg}"
+            );
+            last = Some(msg);
+        }
+    }
+    let last = last.expect("the current buffer is published");
+    assert_eq!(last["params"]["version"].as_i64(), Some(5), "{last}");
+    assert_eq!(last["params"]["diagnostics"], json!([]), "{last}");
+    shutdown(&mut server);
+}
+
 /// Wait up to `limit` for the child to exit on its own (stdin stays open).
 fn wait_exit(server: &mut Server, limit: Duration) -> Option<i32> {
     let deadline = Instant::now() + limit;

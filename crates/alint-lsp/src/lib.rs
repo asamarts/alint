@@ -298,6 +298,11 @@ struct Backend {
     /// and infallible (map inserts/clones) to keep that window closed; the
     /// engine runs off-lock inside `spawn_blocking`.
     state: Mutex<State>,
+    /// Serialises the "is this result still current?" check with the
+    /// publish that follows it in [`Backend::reeval_file`], so an older
+    /// buffer's diagnostics can never reach the client after a newer
+    /// buffer's.
+    reeval_publish: tokio::sync::Mutex<()>,
 }
 
 /// A document to publish: URI, diagnostics, and the buffer version they
@@ -323,6 +328,7 @@ impl Backend {
             client,
             options,
             state: Mutex::new(State::default()),
+            reeval_publish: tokio::sync::Mutex::new(()),
         }
     }
 
@@ -417,10 +423,22 @@ impl Backend {
         let outcome =
             tokio::task::spawn_blocking(move || eval_buffer(&session, &abs, &rel, text)).await;
 
+        // tower-lsp runs `didChange` handlers concurrently, so a slow
+        // evaluation of an older buffer can finish after a newer one. Drop
+        // a result whose version is no longer the document's current one
+        // (or whose document closed): publishing or caching it would leave
+        // stale diagnostics on screen and in the state hover / code
+        // actions read.
+        let is_current = |state: &State| state.versions.get(&uri).copied() == Some(version);
+        let _publish_guard = self.reeval_publish.lock().await;
+
         match outcome {
             Ok(Ok(per_file)) => {
                 let diagnostics = {
                     let mut state = self.state.lock();
+                    if !is_current(&state) {
+                        return;
+                    }
                     // Keep cross-file findings from the last full run;
                     // replace the per-file ones with the fresh results.
                     let mut merged: Vec<Finding> = state
@@ -439,7 +457,13 @@ impl Backend {
             }
             Ok(Err(Error::FileNotInIndex { .. })) => {
                 // Excluded from linting (or not yet walked) — clear.
-                self.state.lock().diagnostics.remove(&uri);
+                {
+                    let mut state = self.state.lock();
+                    if !is_current(&state) {
+                        return;
+                    }
+                    state.diagnostics.remove(&uri);
+                }
                 self.client
                     .publish_diagnostics(uri, Vec::new(), Some(version))
                     .await;
