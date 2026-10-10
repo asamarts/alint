@@ -142,6 +142,64 @@ pub fn looks_binary(bytes: &[u8]) -> bool {
     classify_bytes(window) == Classification::Binary
 }
 
+/// How a security-posture character scan (`no_bidi_controls`,
+/// `no_zero_width_chars`) treats a file, decided from its bytes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CharScan {
+    /// Not binary-looking: scan (lossily; invalid bytes count as one U+FFFD).
+    Text,
+    /// Binary-looking (a NUL, a UTF-16/32 BOM, ...) but VALID UTF-8: scan it.
+    /// NUL is valid UTF-8, so a crafted source file cannot hide a control
+    /// behind one NUL byte. Findings are reported but not auto-fixed (the
+    /// byte-strip fixers refuse binary content).
+    BinaryUtf8,
+    /// Binary-looking AND invalid UTF-8 (a PNG, a font, a JPEG): skipped. A
+    /// lossy decode of random bytes manufactures controls out of noise
+    /// (`D8 9C` decodes to U+061C), so scanning these is all false positives.
+    Skip,
+}
+
+/// Classify `bytes` for a [`CharScan`].
+pub(crate) fn char_scan_mode(bytes: &[u8]) -> CharScan {
+    if !looks_binary(bytes) {
+        CharScan::Text
+    } else if std::str::from_utf8(bytes).is_ok() {
+        CharScan::BinaryUtf8
+    } else {
+        CharScan::Skip
+    }
+}
+
+/// Find the first char of `bytes` (decoded as UTF-8, lossily) for which
+/// `pred(char, is_first_char)` holds, returning `(1-based line, 1-based
+/// column in chars, char)`. Each maximal invalid byte sequence counts as ONE
+/// U+FFFD, exactly as `String::from_utf8_lossy` would decode it, but nothing is
+/// allocated -- a big file is walked in place.
+pub(crate) fn first_char_where(
+    bytes: &[u8],
+    mut pred: impl FnMut(char, bool) -> bool,
+) -> Option<(usize, usize, char)> {
+    let mut line = 1usize;
+    let mut col = 1usize;
+    let mut first = true;
+    for chunk in bytes.utf8_chunks() {
+        let invalid = (!chunk.invalid().is_empty()).then_some('\u{FFFD}');
+        for c in chunk.valid().chars().chain(invalid) {
+            if pred(c, first) {
+                return Some((line, col, c));
+            }
+            first = false;
+            if c == '\n' {
+                line += 1;
+                col = 1;
+            } else {
+                col += 1;
+            }
+        }
+    }
+    None
+}
+
 /// Atomic whole-file write, re-exported from `alint-core` so the fixers and the
 /// engine's compose flush share one implementation. See
 /// [`alint_core::write_atomic`].

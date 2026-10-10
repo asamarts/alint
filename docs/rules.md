@@ -347,7 +347,7 @@ Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a lin
 Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
 
 <!-- alint:since=0.18.0 -->
-Every in-scope file is scanned, including invalid-UTF-8 and binary-looking (NUL-bearing) ones, so neither a junk byte nor a NUL byte can hide a control. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
+A text file with stray invalid UTF-8 is still scanned, so a junk byte cannot hide a control. A binary-looking file (for example one with a NUL byte) is scanned when it is valid UTF-8, so a NUL byte cannot hide a control in a crafted source file either; a binary-looking file that is not valid UTF-8 (images, fonts, archives) is skipped, which keeps `paths: "**/*"` free of false positives from random binary bytes. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
 <!-- /alint:since -->
 
 ### `no_zero_width_chars`
@@ -359,7 +359,7 @@ Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leadin
 As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
 
 <!-- alint:since=0.18.0 -->
-Like `no_bidi_controls`, binary-looking (NUL-bearing) files are scanned too; such a finding is reported but not auto-fixed.
+Same binary policy as `no_bidi_controls`: a binary-looking file is scanned only when it is valid UTF-8 (so a NUL byte cannot hide a character), invalid-UTF-8 binaries are skipped, and a finding in a binary-looking file is reported but not auto-fixed.
 <!-- /alint:since -->
 
 ---
