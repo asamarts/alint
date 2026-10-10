@@ -88,6 +88,13 @@ updates:
       # @types/node tracks the Node runtime VS Code's extension host ships.
       - dependency-name: "@types/node"
         update-types: ["version-update:semver-major"]
+      # mocha 12 is ESM-only and requires Node ^20.19 || >=22.12, but the e2e
+      # suite runs inside the extension host of VS Code 1.91 (the engines floor:
+      # Electron 29.4, Node 20.9), where `require('mocha')` fails with
+      # ERR_REQUIRE_ESM (closed #308). Revisit once the floor reaches a Node 22
+      # build (VS Code >= 1.101, Electron 35, Node 22.15).
+      - dependency-name: "mocha"
+        versions: [">=12"]
     commit-message:
       prefix: "chore(deps)"
       include: scope
