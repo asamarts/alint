@@ -251,6 +251,11 @@ pub(crate) fn load_recursive(
             load_recursive(&target, state, opts, confine, false, trusted)?
         };
         gate_extended_source(&parent, url)?;
+        // Remember that this source shaped these rules / templates, so `finalize`
+        // can refuse it as a contributor to a spawning rule after the id-based
+        // field-merge has blurred where each field came from.
+        crate::mark_provenance_in(&mut parent.rules, crate::SourceClass::Extended, url);
+        crate::mark_provenance_in(&mut parent.templates, crate::SourceClass::Extended, url);
         parent.drop_top_level_settings(url);
         parent.rules = apply_rule_filter(parent.rules, entry)?;
         // W2 content-fixer trust (auto-fix.md 5.5): a REMOTE `extends:` the user has

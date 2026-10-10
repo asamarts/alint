@@ -48,6 +48,91 @@ use serde_yaml_ng::Mapping;
 /// or nested source helped define the effective rule/template.
 const UNTRUSTED_FIX_SOURCE_MARKER: &str = "__alint_internal_untrusted_fix_source";
 
+/// Internal raw-mapping marker recording which kinds of `extends:` source
+/// contributed to a rule or template: a mapping from a [`SourceClass`] key to
+/// the first such source's name (for the error message). Like
+/// [`UNTRUSTED_FIX_SOURCE_MARKER`] it is monotonic across [`merge`] and template
+/// expansion, and [`RawConfig::finalize`] removes it before deserializing the
+/// effective rule. It lets the finalize-time checks ask "did an extended / a
+/// remote / an untrusted remote source shape this EFFECTIVE rule?" after
+/// id-based field-merging has hidden where each field came from.
+const PROVENANCE_MARKER: &str = "__alint_internal_provenance";
+
+/// A class of `extends:` source recorded in [`PROVENANCE_MARKER`].
+#[derive(Clone, Copy)]
+pub(crate) enum SourceClass {
+    /// Any config reached through `extends:` (local, remote, or bundled).
+    Extended,
+}
+
+impl SourceClass {
+    fn key(self) -> &'static str {
+        match self {
+            Self::Extended => "extended",
+        }
+    }
+}
+
+/// The [`PROVENANCE_MARKER`] contents of one rule, read back as source names.
+#[derive(Debug, Default)]
+struct Provenance {
+    extended: Option<String>,
+}
+
+impl Provenance {
+    fn read(mapping: &Mapping) -> Self {
+        let marker = mapping
+            .get(PROVENANCE_MARKER)
+            .and_then(serde_yaml_ng::Value::as_mapping);
+        let source = |class: SourceClass| {
+            marker
+                .and_then(|m| m.get(class.key()))
+                .map(|v| v.as_str().unwrap_or("an extended config").to_string())
+        };
+        Self {
+            extended: source(SourceClass::Extended),
+        }
+    }
+}
+
+/// Record that `source` (of class `class`) contributed every mapping in
+/// `mappings`. An earlier record of the same class is kept: the first source
+/// named is as good as any for the error, and keeping it makes the mark
+/// idempotent across a re-merge.
+pub(crate) fn mark_provenance_in(mappings: &mut [Mapping], class: SourceClass, source: &str) {
+    for mapping in mappings {
+        let mut marker = match mapping.remove(PROVENANCE_MARKER) {
+            Some(serde_yaml_ng::Value::Mapping(m)) => m,
+            _ => Mapping::new(),
+        };
+        if !marker.contains_key(class.key()) {
+            marker.insert(class.key().into(), source.into());
+        }
+        mapping.insert(PROVENANCE_MARKER.into(), marker.into());
+    }
+}
+
+/// Union `incoming`'s [`PROVENANCE_MARKER`] into `existing`'s, keeping
+/// `existing`'s source for a class both carry.
+fn union_provenance(existing: &mut Mapping, incoming: &Mapping) {
+    let Some(theirs) = incoming
+        .get(PROVENANCE_MARKER)
+        .and_then(serde_yaml_ng::Value::as_mapping)
+    else {
+        return;
+    };
+    let mut ours = match existing.remove(PROVENANCE_MARKER) {
+        Some(serde_yaml_ng::Value::Mapping(m)) => m,
+        _ => Mapping::new(),
+    };
+    for (class, source) in theirs {
+        if !ours.contains_key(class) {
+            ours.insert(class.clone(), source.clone());
+        }
+    }
+    existing.insert(PROVENANCE_MARKER.into(), ours.into());
+}
+
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
 /// files. Embedded at build time from the in-crate copy at
 /// `crates/alint-dsl/schemas/v1/config.json`, which is kept byte-identical
@@ -398,6 +483,33 @@ impl RawConfig {
             // Remove the private marker before RuleSpec deserialization so it never
             // leaks into the public DSL or runtime model.
             let untrusted_fix_source = take_untrusted_fix_source(&mut expanded);
+            let provenance = Provenance::read(&expanded);
+            expanded.remove(PROVENANCE_MARKER);
+            // A spawning rule runs whatever its fields say, so ALL of them must
+            // come from the user's own config. An extended source cannot declare
+            // a spawning kind or fix op (the per-source gates), but it could share
+            // the id of the user's spawning rule (or define the template it
+            // instantiates) and field-merge a `workdir:` / `paths:` / `command:` /
+            // `require:` into it -- the kind-less contribution passes every
+            // per-source gate. Refuse any such contribution to a rule whose
+            // EFFECTIVE kind or fix spawns (audit R2).
+            if let Some(source) = &provenance.extended {
+                let spawns = find_spawning_kind(&expanded)
+                    .map(|k| format!("`kind: {k}`"))
+                    .or_else(|| find_spawning_fix_op(&expanded).map(|op| format!("`fix.{op}`")));
+                if let Some(what) = spawns {
+                    return Err(Error::rule_config(
+                        &id_hint,
+                        format!(
+                            "{what} spawns a process, but an extended config ({source}) \
+                             contributes fields to this rule (it shares the rule's id, or \
+                             defines the template the rule instantiates). A spawning rule \
+                             must be declared entirely in your own top-level config; give \
+                             it an id no extended config uses."
+                        ),
+                    ));
+                }
+            }
             if untrusted_fix_source {
                 demote_content_fixers_in_rule(&mut expanded);
                 // An untrusted rule may instantiate a TRUSTED template that promotes
@@ -495,6 +607,7 @@ fn expand_template(
 
     let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
     let mut expanded = (*template).clone();
+    let template_provenance = expanded.remove(PROVENANCE_MARKER);
     expanded = substitute_template_vars(expanded, &vars);
     expanded.remove("id");
 
@@ -502,11 +615,18 @@ fn expand_template(
         let key = k.as_str().unwrap_or_default();
         if matches!(
             key,
-            "extends_template" | "vars" | UNTRUSTED_FIX_SOURCE_MARKER
+            "extends_template" | "vars" | UNTRUSTED_FIX_SOURCE_MARKER | PROVENANCE_MARKER
         ) {
             continue;
         }
         expanded.insert(k.clone(), v.clone());
+    }
+    // The effective rule was shaped by both the instance and the template.
+    union_provenance(&mut expanded, rule);
+    if let Some(marker) = template_provenance {
+        let mut from_template = Mapping::new();
+        from_template.insert(PROVENANCE_MARKER.into(), marker);
+        union_provenance(&mut expanded, &from_template);
     }
     if untrusted_fix_source {
         expanded.insert(
@@ -856,8 +976,12 @@ fn take_untrusted_fix_source(mapping: &mut Mapping) -> bool {
 fn merge_mapping_fields(existing: &mut Mapping, incoming: Mapping) {
     let untrusted_fix_source =
         has_untrusted_fix_source(existing) || has_untrusted_fix_source(&incoming);
+    union_provenance(existing, &incoming);
     for (key, value) in incoming {
-        if key.as_str() != Some(UNTRUSTED_FIX_SOURCE_MARKER) {
+        if !matches!(
+            key.as_str(),
+            Some(UNTRUSTED_FIX_SOURCE_MARKER | PROVENANCE_MARKER)
+        ) {
             existing.insert(key, value);
         }
     }

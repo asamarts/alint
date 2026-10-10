@@ -3134,3 +3134,90 @@ fn yaml_tags_are_refused_in_local_and_nested_configs() {
     .unwrap();
     assert_eq!(load(&cfg).unwrap().rules[0].kind, "file_exists");
 }
+
+#[test]
+fn extended_source_cannot_field_merge_into_a_spawning_rule() {
+    // Audit R2 (HIGH): a remote `{id: gen-fresh, workdir: vendor/evilpkg}` has no
+    // `kind`, so it passed every per-source gate, then field-merged into the
+    // user's own `generated_file_fresh` rule, which ran `vendor/evilpkg/gen.sh`.
+    let top = "rules:\n  - id: gen-fresh\n    kind: generated_file_fresh\n    \
+        file: out.txt\n    command: [\"./gen.sh\"]\n    level: error\n";
+    let remote = "version: 1\nrules:\n  - id: gen-fresh\n    workdir: vendor/evilpkg\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("generated_file_fresh"), "{err}");
+    assert!(err.contains("example.invalid"), "{err}");
+
+    // The converse: the user's spawning rule shares the id of a remote rule, so
+    // the remote's `paths:` would choose what the command runs on.
+    let remote = "version: 1\nrules:\n  - id: lint\n    kind: file_exists\n    \
+        paths: \"vendor/**\"\n    level: error\n";
+    let top = "rules:\n  - id: lint\n    kind: command\n    \
+        command: [\"true\"]\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("`kind: command`"), "{err}");
+
+    // ...or the spawning rule instantiates a template an extended config defines.
+    let remote = "version: 1\ntemplates:\n  - id: t\n    paths: \"vendor/**\"\n    \
+        level: error\nrules: []\n";
+    let top = "rules:\n  - id: mine\n    extends_template: t\n    kind: command\n    \
+        command: [\"true\"]\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("template"), "{err}");
+
+    // ...including a spawning FIX op on an otherwise ordinary kind.
+    let remote = "version: 1\nrules:\n  - id: untrack\n    paths: \"**/*\"\n";
+    let top = "rules:\n  - id: untrack\n    kind: file_absent\n    paths: \"*.log\"\n    \
+        level: error\n    fix: { git_untrack: {} }\n";
+    let err = try_load_extending(remote, top).unwrap_err().to_string();
+    assert!(err.contains("fix.git_untrack"), "{err}");
+
+    // A local `extends:` is an extended source too, and the mark survives a chain.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(
+        tmp.path().join("leaf.yml"),
+        "version: 1\nrules:\n  - id: gen-fresh\n    workdir: vendor/evilpkg\n",
+    )
+    .unwrap();
+    std::fs::write(
+        tmp.path().join("mid.yml"),
+        "version: 1\nextends: [./leaf.yml]\nrules: []\n",
+    )
+    .unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nextends: [./mid.yml]\nrules:\n  - id: gen-fresh\n    \
+         kind: generated_file_fresh\n    file: out.txt\n    command: [\"./gen.sh\"]\n    \
+         level: error\n",
+    )
+    .unwrap();
+    let err = load(&cfg).unwrap_err().to_string();
+    assert!(err.contains("leaf.yml"), "{err}");
+
+    // Unaffected: an extended config tuning an ordinary rule, and a spawning rule
+    // the user declares (and a drop-in tunes) without any extended contribution.
+    let remote = "version: 1\nrules:\n  - id: readme\n    level: warning\n";
+    let top = "rules:\n  - id: readme\n    kind: file_exists\n    paths: README.md\n    \
+        level: error\n  - id: gen-fresh\n    kind: generated_file_fresh\n    \
+        file: out.txt\n    command: [\"./gen.sh\"]\n    level: error\n";
+    let cfg = try_load_extending(remote, top).unwrap();
+    assert_eq!(cfg.rules.len(), 2);
+    let tmp = tempfile::tempdir().unwrap();
+    let cfg = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &cfg,
+        "version: 1\nrules:\n  - id: gen-fresh\n    kind: generated_file_fresh\n    \
+         file: out.txt\n    command: [\"./gen.sh\"]\n    level: error\n",
+    )
+    .unwrap();
+    std::fs::create_dir(tmp.path().join(".alint.d")).unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.d/50-local.yml"),
+        "rules:\n  - id: gen-fresh\n    level: warning\n",
+    )
+    .unwrap();
+    assert_eq!(
+        load(&cfg).unwrap().rules[0].level,
+        alint_core::Level::Warning
+    );
+}
