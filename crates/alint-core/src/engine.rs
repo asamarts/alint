@@ -1035,7 +1035,7 @@ impl Engine {
                     &std::collections::HashSet::new(),
                     true,
                     threshold,
-                    false,
+                    None,
                     None,
                 )
                 .map(|(report, _staged)| report);
@@ -1082,9 +1082,20 @@ impl Engine {
             std::collections::HashSet::new()
         };
         let mut created: std::collections::HashSet<PathBuf> = std::collections::HashSet::new();
+        // Write targets whose failure was already reported: a persistent failure
+        // (a read-only file) re-fires on every pass, but is printed once.
+        let write_failures_reported = RefCell::new(HashSet::new());
         for _pass in 0..MAX_PASSES {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (report, _buf) = self.fix_run(root, cur, &created, false, threshold, true, None)?;
+            let (report, _buf) = self.fix_run(
+                root,
+                cur,
+                &created,
+                false,
+                threshold,
+                Some(&write_failures_reported),
+                None,
+            )?;
             // F4 tripwire (audit 2026-09-20): the cross-pass merge below keys items
             // by `violation_key`, which for a path-bearing, keyless violation
             // collapses to `(rule_id, path)` (line/column/message ignored). Every
@@ -1209,7 +1220,7 @@ impl Engine {
         // and stays non-convergent.
         if !converged {
             let cur = owned_index.as_ref().unwrap_or(index);
-            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, false, None)?;
+            let (confirm, _) = self.fix_run(root, cur, &created, true, threshold, None, None)?;
             if confirm.applied() == 0 {
                 converged = true;
                 final_keys = confirm
@@ -1331,7 +1342,7 @@ impl Engine {
             /* created */ &std::collections::HashSet::new(),
             /* dry_run */ false,
             threshold,
-            /* flush */ false,
+            /* flush */ None,
             Some(&stage_ops),
         )?;
 
@@ -1457,7 +1468,10 @@ impl Engine {
         created: &HashSet<PathBuf>,
         dry_run: bool,
         threshold: Applicability,
-        flush: bool,
+        // `Some` = write the compose buffer; the set holds the targets whose
+        // write failure this `fix` run already printed (reported once, not once
+        // per fixpoint pass). `None` for a preview (`--dry-run` / `--diff`).
+        flush: Option<&RefCell<HashSet<PathBuf>>>,
         stage_ops: Option<&RefCell<Vec<FixEdit>>>,
     ) -> Result<(FixReport, BTreeMap<PathBuf, Vec<u8>>)> {
         self.ensure_manifest_scope_resolvable()?;
@@ -2089,7 +2103,7 @@ impl Engine {
         // Flush the compose buffer: one atomic write per file any content fixer
         // touched, in deterministic (BTreeMap) order. Keys are the resolved
         // absolute write targets (a symlink and its in-tree target share one
-        // key), written directly. `flush` is false for a stage (`--diff`) so the
+        // key), written directly. `flush` is `None` for a stage (`--diff`) so the
         // buffer is left unwritten for `stage_fixes` to diff; `--dry-run` has no
         // buffer, so both are no-ops there.
         //
@@ -2102,11 +2116,15 @@ impl Engine {
         // A read-only target genuinely fails here: `write_atomic` refuses it
         // explicitly, since its temp+rename would otherwise succeed on directory
         // permissions alone and silently replace the file.
-        if flush && let Some(buf) = &compose_buf {
+        if let Some(reported) = flush
+            && let Some(buf) = &compose_buf
+        {
             let mut failed: Vec<PathBuf> = Vec::new();
             for (target, bytes) in buf.borrow().iter() {
                 if let Err(source) = write_atomic(target, bytes) {
-                    eprintln!("alint: could not write {}: {source}", target.display());
+                    if reported.borrow_mut().insert(target.clone()) {
+                        eprintln!("alint: could not write {}: {source}", target.display());
+                    }
                     failed.push(target.clone());
                 }
             }
