@@ -230,7 +230,7 @@ Query a structured document with a JSONPath expression and assert every match de
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
 - Unparseable files — one violation per file (not silently skipped).
 <!-- alint:since=0.18.0 -->
-- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
+- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. The comparison is exact: an integer equals a float only when the float is a whole number of exactly that value, so `9007199254740993` does not equal `9007199254740992.0` even though both round to the same 64-bit float. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
 <!-- /alint:since -->
 
 <a id="xml-mapping"></a>
