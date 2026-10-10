@@ -13,6 +13,18 @@ concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
 
+env:
+  # The ONE pinned Rust toolchain every release job builds, tests and publishes
+  # with (exact x.y.z, never `stable`), so a release is reproducible and a new
+  # stable cannot change the shipped binaries between `main` going green and the
+  # tag. Dev and ci.yml keep rust-toolchain.toml's floating `stable`. Each job
+  # installs it via dtolnay/rust-toolchain and then runs
+  # ci/scripts/pin-release-toolchain.sh, which exports RUSTUP_TOOLCHAIN (that
+  # beats rust-toolchain.toml) and fails unless rustc really is this version.
+  # test-release-toolchain-pin.sh enforces the wiring. Bump procedure:
+  # RELEASING.md "Release toolchain".
+  RELEASE_RUST: "1.98.1"
+
 jobs:
   # ── Preflight gate ──────────────────────────────────────────────
   # Self-contained re-verification that the tagged commit passes the
@@ -70,8 +82,11 @@ jobs:
         run: bash ci/scripts/check-release-version.sh "$GITHUB_REF_NAME"
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
           components: rustfmt,clippy
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: release-preflight
@@ -147,7 +162,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: release-${{ matrix.target }}
@@ -204,7 +222,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: release-supply-chain
@@ -612,7 +633,10 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
         with:
-          toolchain: stable
+          toolchain: ${{ env.RELEASE_RUST }}
+      - name: pin the release toolchain (overrides rust-toolchain.toml)
+        shell: bash
+        run: ci/scripts/pin-release-toolchain.sh
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: publish-crates

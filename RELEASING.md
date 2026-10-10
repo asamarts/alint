@@ -275,6 +275,35 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   `gh run rerun <id> --failed`; the publish script is idempotent, so already-published
   crates are skipped.
 
+## Release toolchain
+
+Releases build, test and publish with ONE pinned Rust toolchain, the exact
+`RELEASE_RUST` in `.github/workflows/release.yml`'s workflow-level `env:`. Dev
+and `ci.yml` keep `rust-toolchain.toml`'s floating `stable`, so CI keeps
+tracking new stables while a release stays reproducible. Every Rust-building
+release job installs `${{ env.RELEASE_RUST }}` and then runs
+`ci/scripts/pin-release-toolchain.sh`, which exports `RUSTUP_TOOLCHAIN` (that,
+unlike the `rustup default` the install action sets, beats
+`rust-toolchain.toml`) and fails the job unless `rustc --version` is the pin;
+`release-binary.sh` logs the `rustc --version` each tarball was built with. The
+MSRV leg is unaffected: `msrv.sh` builds with `cargo +<msrv>`, which beats
+`RUSTUP_TOOLCHAIN`. `ci/scripts/test-release-toolchain-pin.sh` fails on a
+floating `stable`, a different version, or a job that skips the pin step.
+
+Bump procedure (do it in its own PR, not in the release-cut PR):
+
+1. Pick the newest stable that is at least about two weeks old (check
+   <https://static.rust-lang.org/dist/channel-rust-stable.toml> and the Rust
+   blog), taking its latest patch (`1.98.1`, not `1.98.0`).
+2. Edit `RELEASE_RUST` in `release.yml` (the only place it is set).
+3. Prove the tree is clean on it locally:
+   `RUSTUP_TOOLCHAIN=<ver> ci/scripts/fmt.sh && RUSTUP_TOOLCHAIN=<ver> ci/scripts/clippy.sh && RUSTUP_TOOLCHAIN=<ver> ci/scripts/test.sh && RUSTUP_TOOLCHAIN=<ver> ci/scripts/docs.sh`
+   (a new stable's clippy lints are the usual surprise), then
+   `ci/scripts/test-release-toolchain-pin.sh` (with the toolchain installed it
+   also proves the override against `rust-toolchain.toml`).
+4. A toolchain bump changes the shipped binaries, so it needs a normal release
+   to take effect; `bench-record.yml` pins its own toolchain separately.
+
 ## Backport releases and re-running an old tag
 
 `release.yml` publishes two kinds of things. **Immutable** publishes (crates.io,
