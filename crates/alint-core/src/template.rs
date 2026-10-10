@@ -125,6 +125,43 @@ pub fn glob_escape(s: &str) -> String {
     }
 }
 
+/// The single literal path an alint glob `pattern` matches, with its escapes
+/// resolved -- or `None` when it has a real (unescaped) metacharacter (or a
+/// leading `!` exclude), i.e. it may match more than one path.
+///
+/// This is the inverse of [`glob_escape`], and the ONE literal test the
+/// O(1) "is this a literal path?" fast paths must use: a raw scan for
+/// `* ? [ ] { }` misses that on non-Windows `\` is globset's escape character,
+/// so a rendered `app/a\\b/page.tsx` (from a directory literally named `a\b`)
+/// was looked up verbatim -- with the escape still in it -- and never found.
+/// Recognized escapes: `\x` (non-Windows) and a one-character class `[x]`
+/// (what `globset::escape` emits for a metacharacter). Anything else glob-shaped
+/// returns `None`, so the caller falls back to real glob matching.
+#[must_use]
+pub fn literal_glob_path(pattern: &str) -> Option<String> {
+    if pattern.starts_with('!') {
+        return None;
+    }
+    let mut out = String::with_capacity(pattern.len());
+    let mut chars = pattern.chars().peekable();
+    while let Some(c) = chars.next() {
+        match c {
+            '\\' if !cfg!(windows) => out.push(chars.next()?),
+            '[' => {
+                // Only a single-char class `[x]` is literal (`[[]`, `[]]`, `[*]`).
+                let x = chars.next()?;
+                if matches!(x, '!' | '^') || chars.next()? != ']' {
+                    return None;
+                }
+                out.push(x);
+            }
+            '*' | '?' | ']' | '{' | '}' => return None,
+            c => out.push(c),
+        }
+    }
+    Some(out)
+}
+
 fn render_path_with(
     template: &str,
     t: &PathTokens,
@@ -279,6 +316,31 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn literal_glob_path_resolves_escapes_and_rejects_real_globs() {
+        // The inverse of glob_escape: an escaped metacharacter is literal.
+        for name in ["[slug]", "a*b", "{x}", "q?"] {
+            assert_eq!(
+                literal_glob_path(&format!("app/{}/p.tsx", glob_escape(name))).as_deref(),
+                Some(format!("app/{name}/p.tsx").as_str())
+            );
+        }
+        assert_eq!(literal_glob_path("a/b.txt").as_deref(), Some("a/b.txt"));
+        for glob in ["a/*.rs", "a/[ab].rs", "a/{x,y}", "!a.rs", "a/?", "a]"] {
+            assert_eq!(literal_glob_path(glob), None, "{glob}");
+        }
+        #[cfg(not(windows))]
+        {
+            // `\` escapes on non-Windows: a dir literally named `a\b` renders as
+            // `a\\b`, which must resolve back to `a\b` (a raw scan missed it).
+            assert_eq!(
+                literal_glob_path(&glob_escape("a\\b")).as_deref(),
+                Some("a\\b")
+            );
+            assert_eq!(literal_glob_path("a\\*b").as_deref(), Some("a*b"));
+        }
+    }
     use std::path::Path;
 
     #[test]

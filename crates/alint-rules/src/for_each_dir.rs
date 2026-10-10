@@ -460,16 +460,12 @@ fn nested_spec_single_literal(spec: &alint_core::RuleSpec) -> Option<std::path::
         PathsSpec::Many(v) if v.len() == 1 => &v[0],
         _ => return None,
     };
-    if single.is_empty() || single.starts_with('!') {
+    if single.is_empty() {
         return None;
     }
-    if single
-        .chars()
-        .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
-    {
-        return None;
-    }
-    Some(std::path::PathBuf::from(single))
+    // Resolve the escapes `render_path_glob` added (a directory literally named
+    // `a\b` renders as `a\\b`); `None` for a real glob or a `!` exclude.
+    alint_core::template::literal_glob_path(single).map(std::path::PathBuf::from)
 }
 
 /// Read the in-index file at `literal` once, dispatch to the
@@ -605,6 +601,63 @@ mod tests {
             ],
         );
         assert!(v.is_empty(), "unexpected: {v:?}");
+    }
+
+    // A `\` in a directory name is only legal off Windows (it is the separator
+    // there).
+    #[cfg(not(windows))]
+    #[test]
+    fn a_backslash_in_a_dir_name_does_not_break_the_literal_fast_paths() {
+        // Regression: `{path}` renders `app/a\b` as the glob `app/a\\b` (a `\` is
+        // globset's escape), but the literal fast paths only scanned for
+        // `* ? [ ] { }`, so they looked up `app/a\\b/page.tsx` verbatim: a
+        // false "missing" for file_exists, and a silent pass for a structured
+        // rule that never found the file to check.
+        let r = rule("app/*", vec![require_file_exists("{path}/page.tsx")]);
+        let v = eval_with(
+            &r,
+            &[
+                ("app", true),
+                ("app/a\\b", true),
+                ("app/a\\b/page.tsx", false),
+            ],
+        );
+        assert!(v.is_empty(), "unexpected: {v:?}");
+
+        let (tmp, idx) = crate::test_support::tempdir_with_files(&[(
+            "pkgs/a\\b/package.json",
+            br#"{"private": false}"#,
+        )]);
+        let mut entries: Vec<FileEntry> = idx.entries.clone();
+        entries.push(FileEntry {
+            path: Path::new("pkgs").into(),
+            is_dir: true,
+            size: 0,
+        });
+        entries.push(FileEntry {
+            path: Path::new("pkgs/a\\b").into(),
+            is_dir: true,
+            size: 0,
+        });
+        let idx = FileIndex::from_entries(entries);
+        let nested: NestedRuleSpec = serde_yaml_ng::from_str(
+            "kind: json_path_equals\npaths: \"{path}/package.json\"\n\
+             path: \"$.private\"\nequals: true\n",
+        )
+        .unwrap();
+        let r = rule("pkgs/*", vec![nested]);
+        let reg = registry();
+        let ctx = Context {
+            root: tmp.path(),
+            index: &idx,
+            registry: Some(&reg),
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+        };
+        let v = r.evaluate(&ctx).unwrap();
+        assert_eq!(v.len(), 1, "the wrong value must be reported: {v:?}");
     }
 
     #[test]

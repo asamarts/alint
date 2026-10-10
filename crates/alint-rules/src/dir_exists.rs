@@ -187,10 +187,9 @@ fn single_literal_dir(paths: &PathsSpec) -> Option<std::path::PathBuf> {
     let PathsSpec::Single(s) = paths else {
         return None;
     };
-    if s.contains(['*', '?', '[', ']', '{', '}']) {
-        return None;
-    }
-    let p = std::path::PathBuf::from(s);
+    // Escapes resolved (a `\` is a glob escape on non-Windows); `None` for a
+    // real glob.
+    let p = std::path::PathBuf::from(alint_core::template::literal_glob_path(s)?);
     if p.components()
         .any(|c| matches!(c, std::path::Component::ParentDir))
     {

@@ -71,17 +71,6 @@ use serde::Deserialize;
 use serde_json::Value;
 use serde_json_path::JsonPath;
 
-/// True when `pattern` is a plain relative-path literal - no
-/// glob metacharacters, no `!` exclude prefix. Mirrors
-/// `file_exists::is_literal_path`; kept local to dodge a
-/// crate-wide pub-helper module just for two rules.
-fn is_literal_path(pattern: &str) -> bool {
-    !pattern.starts_with('!')
-        && !pattern
-            .chars()
-            .any(|c| matches!(c, '*' | '?' | '[' | ']' | '{' | '}'))
-}
-
 /// Collect every literal pattern from `spec` IFF every entry is
 /// a literal AND the spec carries no excludes. Returns `None`
 /// when any pattern is a glob or there are excludes - the slow
@@ -95,11 +84,13 @@ fn extract_literal_paths(spec: &PathsSpec) -> Option<Vec<PathBuf>> {
         }
         PathsSpec::IncludeExclude { .. } => return None,
     };
-    if patterns.iter().all(|p| is_literal_path(p)) {
-        Some(patterns.iter().map(PathBuf::from).collect())
-    } else {
-        None
-    }
+    // `literal_glob_path` resolves escapes (a rendered `a\\b` names the
+    // directory `a\b`); a raw metacharacter scan looked such a path up verbatim
+    // and silently found nothing.
+    patterns
+        .iter()
+        .map(|p| alint_core::template::literal_glob_path(p).map(PathBuf::from))
+        .collect()
 }
 
 /// Comparison op - keeps the rule builders thin.
