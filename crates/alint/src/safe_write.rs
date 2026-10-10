@@ -6,13 +6,16 @@
 //! `alint baseline` overwrite a file outside the repository. Writes go
 //! through [`write_output`], which (for a repo-derived path)
 //!
-//! 1. rejects a target that lexically escapes `root` (`..`, absolute),
+//! 1. rejects a target with any `..` component or that lexically escapes
+//!    `root` (absolute),
 //! 2. rejects a target whose (existing) parent directory canonically
 //!    resolves outside `root` (a symlinked directory),
 //! 3. refuses to write through a symlink (dangling or not) or onto a
 //!    non-regular file, and
 //! 4. writes a temp file in the same directory and renames it into
-//!    place, so the final step never follows a link.
+//!    place, so the final step never follows a link. The write goes to
+//!    the canonical parent the check validated, and an existing file's
+//!    permissions carry over to its replacement.
 
 use std::io::Write as _;
 use std::path::{Component, Path, PathBuf};
@@ -40,10 +43,39 @@ fn lexical_normalize(path: &Path) -> PathBuf {
 /// Fail unless `target` stays inside `root` both lexically and after
 /// resolving symlinks in its parent directory, and is not itself a
 /// symlink or non-regular file. `what` names the file in errors.
-pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<()> {
+///
+/// Returns the path to actually write: the canonical (symlink-free)
+/// parent directory joined with the file name. Writing through that
+/// path, rather than re-resolving the raw `target`, means the check and
+/// the write agree on which directory is used. A `..` component in the
+/// repo-provided part of `target` is refused outright: `link/..` cancels
+/// lexically but the OS resolves it through the symlink, so a lexical
+/// check alone would validate one path and write another.
+///
+/// Residual race: a concurrent process that can swap a directory inside
+/// the repository for a symlink between the `canonicalize` here and the
+/// write could still redirect it. Closing that fully needs `openat`-style
+/// directory handles; the threat model here is committed repository
+/// content, which is static while alint runs.
+pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<PathBuf> {
     let root_abs = lexical_normalize(
         &std::path::absolute(root).with_context(|| format!("resolving {}", root.display()))?,
     );
+    // The repo-controlled part: the suffix after `root`, or the whole path
+    // when the config gave an absolute one.
+    let repo_part = target.strip_prefix(root).unwrap_or(target);
+    if repo_part
+        .components()
+        .any(|c| matches!(c, Component::ParentDir))
+    {
+        bail!(
+            "refusing to write {what} {}: `..` components are not allowed in a \
+             repository-provided path (they can resolve outside the repository root {}; \
+             pass an explicit `--output` path to write elsewhere)",
+            target.display(),
+            root.display()
+        );
+    }
     let target_abs = lexical_normalize(
         &std::path::absolute(target).with_context(|| format!("resolving {}", target.display()))?,
     );
@@ -55,10 +87,17 @@ pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<()>
             root.display()
         );
     }
-    let parent = target_abs
+    let name = target
+        .file_name()
+        .with_context(|| format!("{what} path {} has no file name", target.display()))?;
+    // Resolve the RAW parent (not the lexically normalised one) so the
+    // directory validated is the one the OS would use.
+    let raw_parent = std::path::absolute(target)
+        .with_context(|| format!("resolving {}", target.display()))?
         .parent()
+        .map(Path::to_path_buf)
         .with_context(|| format!("{what} path {} has no parent", target.display()))?;
-    let parent_real = parent
+    let parent_real = raw_parent
         .canonicalize()
         .with_context(|| format!("resolving the directory of {what} {}", target.display()))?;
     let root_real = root_abs
@@ -72,7 +111,9 @@ pub(crate) fn check_target(root: &Path, target: &Path, what: &str) -> Result<()>
             root.display()
         );
     }
-    refuse_symlink_or_special(target, what)
+    let resolved = parent_real.join(name);
+    refuse_symlink_or_special(&resolved, what)?;
+    Ok(resolved)
 }
 
 /// Refuse a `target` that is a symlink (even dangling) or exists but is
@@ -116,6 +157,16 @@ pub(crate) fn write_replacing(target: &Path, contents: &[u8], what: &str) -> Res
         file.write_all(contents)
             .with_context(|| format!("writing {}", tmp.display()))?;
         file.sync_all().ok();
+        drop(file);
+        // Keep the replaced file's permissions (e.g. a `chmod 600`
+        // baseline): the fresh temp file got the default umask mode.
+        #[cfg(unix)]
+        if let Ok(meta) = std::fs::symlink_metadata(target)
+            && meta.is_file()
+        {
+            std::fs::set_permissions(&tmp, meta.permissions())
+                .with_context(|| format!("setting permissions on {}", tmp.display()))?;
+        }
         std::fs::rename(&tmp, target)
             .with_context(|| format!("writing {what} {}", target.display()))
     })();
@@ -127,10 +178,17 @@ pub(crate) fn write_replacing(target: &Path, contents: &[u8], what: &str) -> Res
 
 /// Validate an output path: a repo-derived one (`explicit == false`) is
 /// confined to `root` ([`check_target`]); an explicit command-line path
-/// may point anywhere but still never at a symlink.
-pub(crate) fn check_output(root: &Path, target: &Path, explicit: bool, what: &str) -> Result<()> {
+/// may point anywhere but still never at a symlink. Returns the path to
+/// write (the resolved one for a repo-derived target).
+pub(crate) fn check_output(
+    root: &Path,
+    target: &Path,
+    explicit: bool,
+    what: &str,
+) -> Result<PathBuf> {
     if explicit {
-        refuse_symlink_or_special(target, what)
+        refuse_symlink_or_special(target, what)?;
+        Ok(target.to_path_buf())
     } else {
         check_target(root, target, what)
     }
@@ -144,8 +202,8 @@ pub(crate) fn write_output(
     explicit: bool,
     what: &str,
 ) -> Result<()> {
-    check_output(root, target, explicit, what)?;
-    write_replacing(target, contents, what)
+    let write_to = check_output(root, target, explicit, what)?;
+    write_replacing(&write_to, contents, what)
 }
 
 /// Create `target` only if nothing (not even a dangling symlink) exists
@@ -183,6 +241,24 @@ mod tests {
         let err = check_target(&root, &root.join("../out.json"), "baseline").unwrap_err();
         assert!(err.to_string().contains("outside the repository"), "{err}");
         check_target(&root, &root.join("ok.json"), "baseline").unwrap();
+    }
+
+    #[test]
+    fn check_target_rejects_dotdot_even_when_it_cancels_lexically() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let err = check_target(&root, &root.join("sub/../x.json"), "baseline").unwrap_err();
+        assert!(err.to_string().contains("`..`"), "{err}");
+    }
+
+    #[test]
+    fn check_target_returns_the_resolved_write_path() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        let got = check_target(&root, &root.join("sub/b.json"), "baseline").unwrap();
+        assert_eq!(got, root.canonicalize().unwrap().join("sub").join("b.json"));
     }
 
     #[test]

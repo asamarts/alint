@@ -138,3 +138,49 @@ fn init_refuses_a_dangling_config_symlink() {
         "init must not create a file outside the repo through the symlink"
     );
 }
+
+#[test]
+fn baseline_through_symlink_dotdot_is_refused() {
+    // `link/..` cancels lexically, but the OS resolves it through the
+    // symlink: `link -> ../out/deep` makes `link/../x` land in `out/`.
+    let (_tmp, repo, out) = layout();
+    std::fs::create_dir(out.join("deep")).unwrap();
+    symlink("../out/deep", repo.join("link")).unwrap();
+    std::fs::write(out.join("victim4.json"), "precious\n").unwrap();
+    std::fs::write(
+        repo.join(".alint.yml"),
+        format!("{CONFIG}baseline: link/../victim4.json\n"),
+    )
+    .unwrap();
+
+    let o = run(&repo, &["baseline", "--accept-new"]);
+    assert_eq!(o.status.code(), Some(2), "{o:?}");
+    assert_eq!(
+        std::fs::read_to_string(out.join("victim4.json")).unwrap(),
+        "precious\n"
+    );
+    std::fs::write(
+        repo.join(".alint.yml"),
+        format!("{CONFIG}baseline: link/../pwned.json\n"),
+    )
+    .unwrap();
+    let o = run(&repo, &["baseline"]);
+    assert_eq!(o.status.code(), Some(2), "{o:?}");
+    assert!(!out.join("pwned.json").exists());
+    assert!(!repo.join("pwned.json").exists());
+}
+
+#[test]
+fn baseline_regeneration_preserves_file_mode() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let (_tmp, repo, _out) = layout();
+    std::fs::write(repo.join(".alint.yml"), CONFIG).unwrap();
+    let b = repo.join(".alint-baseline.json");
+    let o = run(&repo, &["baseline"]);
+    assert!(o.status.success(), "{o:?}");
+    std::fs::set_permissions(&b, std::fs::Permissions::from_mode(0o600)).unwrap();
+    let o = run(&repo, &["baseline", "--accept-new"]);
+    assert!(o.status.success(), "{o:?}");
+    let mode = std::fs::metadata(&b).unwrap().permissions().mode() & 0o777;
+    assert_eq!(mode, 0o600, "mode {mode:o}");
+}
