@@ -12,7 +12,7 @@
 //!
 //! The `command` rule uses the same runner with a small per-file cap.
 
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 use std::process::{Command as StdCommand, ExitStatus, Stdio};
 use std::time::Duration;
 
@@ -36,6 +36,69 @@ pub(crate) enum SpawnOutcome {
     SpawnError(std::io::Error),
     /// Killed after exceeding the timeout.
     TimedOut { secs: u64 },
+}
+
+/// Lexically resolve a rule's `workdir:` to a root-relative path (empty = the
+/// root itself), refusing an absolute path or a `..` that climbs out of the
+/// repository. Run at build time (a config error) and again before spawning.
+pub(crate) fn lexical_workdir(workdir: &str) -> std::result::Result<PathBuf, String> {
+    let escapes = || {
+        format!(
+            "`workdir: {workdir}` escapes the repository root (an absolute path, or a \
+             `..` that climbs out of it); it must name a directory inside the repository"
+        )
+    };
+    let mut rel = PathBuf::new();
+    for comp in Path::new(workdir).components() {
+        match comp {
+            Component::CurDir => {}
+            Component::ParentDir => {
+                if !rel.pop() {
+                    return Err(escapes());
+                }
+            }
+            Component::Normal(c) => rel.push(c),
+            Component::RootDir | Component::Prefix(_) => return Err(escapes()),
+        }
+    }
+    Ok(rel)
+}
+
+/// The directory a spawning rule runs its child in: `root` joined with the
+/// lexically confined `workdir` ([`lexical_workdir`]), and -- when it exists --
+/// verified to still lie inside `root` after symlinks are resolved, so an
+/// in-repo symlink (`tools -> /`) cannot move the child's cwd out of the tree.
+pub(crate) fn confined_workdir(root: &Path, workdir: &str) -> std::result::Result<PathBuf, String> {
+    let dir = root.join(lexical_workdir(workdir)?);
+    if let (Ok(root_c), Ok(dir_c)) = (root.canonicalize(), dir.canonicalize())
+        && !dir_c.starts_with(&root_c)
+    {
+        return Err(format!(
+            "`workdir: {workdir}` resolves (through a symlink) to {}, outside the \
+             repository root; refusing to run the command there",
+            dir_c.display()
+        ));
+    }
+    Ok(dir)
+}
+
+/// [`run_capturing`] in the rule's `workdir`, confined to `root`
+/// ([`confined_workdir`]). An escaping workdir is never spawned in: it comes
+/// back as a [`SpawnOutcome::SpawnError`] carrying the reason.
+pub(crate) fn run_in_workdir(
+    argv: &[String],
+    root: &Path,
+    workdir: &str,
+    env: &[(&str, String)],
+    timeout: Duration,
+) -> SpawnOutcome {
+    match confined_workdir(root, workdir) {
+        Ok(cwd) => run_capturing(argv, &cwd, env, timeout),
+        Err(reason) => SpawnOutcome::SpawnError(std::io::Error::new(
+            std::io::ErrorKind::PermissionDenied,
+            reason,
+        )),
+    }
 }
 
 /// Spawn `argv` in `cwd` with stdin closed and `env` pairs set,
@@ -128,5 +191,58 @@ mod tests {
         };
         assert!(status.success());
         assert_eq!(stdout.len(), 300_000);
+    }
+}
+
+#[cfg(test)]
+mod workdir_tests {
+    use super::*;
+
+    #[test]
+    fn workdir_must_stay_inside_the_repository() {
+        // Defense in depth: a spawning rule's `workdir:` was joined to the root
+        // unchecked, so `..` / an absolute path ran the child outside the repo.
+        for ok in [".", "", "tools", "a/../b", "./a/./b"] {
+            assert!(lexical_workdir(ok).is_ok(), "{ok}");
+        }
+        assert_eq!(lexical_workdir("a/../b").unwrap(), PathBuf::from("b"));
+        let abs = if cfg!(windows) { "C:\\x" } else { "/etc" };
+        for bad in ["..", "../x", "a/../..", abs] {
+            let err = lexical_workdir(bad).unwrap_err();
+            assert!(err.contains("escapes the repository root"), "{bad}: {err}");
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        std::fs::create_dir(tmp.path().join("tools")).unwrap();
+        assert_eq!(
+            confined_workdir(tmp.path(), "tools").unwrap(),
+            tmp.path().join("tools")
+        );
+        assert!(confined_workdir(tmp.path(), "../").is_err());
+        let out = run_in_workdir(
+            &["true".to_string()],
+            tmp.path(),
+            "..",
+            &[],
+            Duration::from_secs(5),
+        );
+        assert!(
+            matches!(&out, SpawnOutcome::SpawnError(e) if e.to_string().contains("escapes")),
+            "an escaping workdir must never be spawned in"
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_symlinked_workdir_cannot_leave_the_repository() {
+        use std::os::unix::fs::symlink;
+        let outside = tempfile::tempdir().unwrap();
+        let repo = tempfile::tempdir().unwrap();
+        symlink(outside.path(), repo.path().join("out")).unwrap();
+        let err = confined_workdir(repo.path(), "out").unwrap_err();
+        assert!(err.contains("outside the"), "{err}");
+        // An in-repo symlink to an in-repo dir is fine.
+        std::fs::create_dir(repo.path().join("real")).unwrap();
+        symlink(repo.path().join("real"), repo.path().join("alias")).unwrap();
+        assert!(confined_workdir(repo.path(), "alias").is_ok());
     }
 }
