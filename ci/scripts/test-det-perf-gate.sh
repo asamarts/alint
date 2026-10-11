@@ -65,6 +65,14 @@ det_check::check_grp::check s5_1k:(materialize("s5", S5, 1_000)) -> crates/alint
 Gungraun result: Ok. 3 without regressions; 0 regressed; 3 benchmarks finished in 120s
 OUT
 printf 'error: could not compile `alint` (bin "alint")\n' > "$sandbox/build-error.txt"
+# The same comparison as gungraun prints it in CI, ANSI-coloured (format taken
+# from a hosted perf-gate run): the table must still parse.
+e=$'\e'
+{
+  printf '%s\n' "${e}[32mdet_check::check_grp::check${e}[0m ${e}[36ms2_10k${e}[0m:${e}[1;34m(materialize(\"s2\", S2, 10_000)) -> crates/alint-be...${e}[0m"
+  printf '%s\n' "${e}[90m  ${e}[0mInstructions:                 ${e}[1m1840489612${e}[0m|1839321150           (${e}[1;91m+0.06353%${e}[0m) [${e}[1;91m+1.00064x${e}[0m]"
+  printf '%s\n' "Gungraun result: ${e}[1;32mOk${e}[0m. 1 without regressions; 0 regressed; 1 benchmarks finished in 1s"
+} > "$sandbox/gungraun-color.txt"
 
 repo="$sandbox/repo"
 mkdir -p "$repo/ci/scripts"
@@ -111,6 +119,14 @@ if [[ $rc -eq 0 ]] && has out 'deterministic perf gate: PASS' \
   ok "a clean comparison passes and reports every bench"
 else
   bad "pass case (rc=$rc)"
+fi
+
+echo "==> ANSI-coloured gungraun output still yields the table"
+run_gate STUB_PR_OUTPUT="$sandbox/gungraun-color.txt"
+if [[ $rc -eq 0 ]] && has summary '| `det_check::check s2_10k` | 1839321150 | 1840489612 | +0.06353% |'; then
+  ok "coloured output parses"
+else
+  bad "coloured output (rc=$rc)"
 fi
 
 echo "==> advisory regression: exit 0 with a warning and the table"
