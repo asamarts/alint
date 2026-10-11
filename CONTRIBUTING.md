@@ -212,8 +212,9 @@ if it's a content rule that fans out over `**/*.rs`.
   - **Temporary security hold:** every PR currently runs the portable gate
     (fmt/msrv/clippy/test/build/audit/deny/docs/dogfood/examples/shell-tests) on
     ephemeral GitHub-hosted `ubuntu-latest` runners. The legacy fixed-label
-    listener is offline, so box-only `bench-smoke`, `perf-gate`, and `coverage`
-    are skipped for PRs. Exact admitted human PRs may return to local compute
+    listener is offline, so box-only `bench-smoke` and `coverage` are skipped
+    for PRs. The load-immune `perf-gate` is portable and runs on hosted
+    capacity. Exact admitted human PRs may return to local compute
     only after the disposable one-job executor passes its isolation canaries.
     See `docs/design/v0.14/ci-fork-pr-isolation.md`.
   - Every workflow declares its `GITHUB_TOKEN` permissions. Ordinary test and

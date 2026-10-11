@@ -116,7 +116,8 @@ this host through that label.
 |---|---|---|---|
 | `changes` (routing/change detection) | GitHub-hosted | GitHub-hosted | GitHub-hosted while capacity is held |
 | `fmt`, `clippy`, `test`, `audit`, `deny`, `supply-chain`, `build`, `docs`, `dogfood`, `examples`, `shell-tests`, `summary` | GitHub-hosted while capacity is held | GitHub-hosted | GitHub-hosted while capacity is held |
-| `bench-smoke`, `perf-gate` | skipped by `hosted` guard while capacity is held | skipped by `hosted` guard | skipped by `hosted` guard while capacity is held |
+| `perf-gate` (Valgrind counts: load-immune, secretless, PRs only) | GitHub-hosted while capacity is held | GitHub-hosted | not run (PR-only job) |
+| `bench-smoke` (wall clock) | skipped by `hosted` guard while capacity is held | skipped by `hosted` guard | skipped by `hosted` guard while capacity is held |
 | `editors` | GitHub-hosted | GitHub-hosted | GitHub-hosted |
 | `coverage` | skipped before assignment while capacity is held | skipped before assignment | GitHub-hosted |
 

@@ -363,20 +363,26 @@ jobs:
   # ── Deterministic perf gate ───────────────────────────────────────
   # Load-immune instruction / cache / branch counts (Valgrind) for the PR vs its
   # merge-base, built + benched in this same run. Unlike wall-clock bench-scale,
-  # it is NOT affected by the shared runner's co-tenant load, so it can gate
-  # every rust-touching PR deterministically. Advisory (DET_PERF_ADVISORY=1)
-  # during rollout — flip to "0" to enforce. Design:
-  # docs/design/deterministic-perf-gating.md.
+  # it is NOT affected by runner load, so it can gate every rust-touching PR
+  # deterministically. Advisory (DET_PERF_ADVISORY=1) during rollout — flip to
+  # "0" to enforce. Design: docs/design/deterministic-perf-gating.md.
+  #
+  # Portable, not box-only: Valgrind counts don't depend on the machine's load,
+  # and the job needs no secrets or local state, so it runs on whichever
+  # executor `changes` selects (GitHub-hosted while local PR capacity is held).
+  # It used to require `hosted != 'true'`, which silently skipped it on every PR
+  # once PRs moved to hosted capacity. A tooling failure fails this job (see the
+  # script); it is not in `summary.needs`, so it never blocks a merge.
   perf-gate:
     name: Perf Gate (deterministic)
     needs: [changes, build]
-    # `hosted != 'true'` keeps this box-only Valgrind job off hosted PRs.
     if: >-
       !cancelled() && !failure()
       && github.event_name == 'pull_request'
       && needs.changes.outputs.rust == 'true'
-      && needs.changes.outputs.hosted != 'true'
     runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
+    # Two release builds (merge base + PR) and the Valgrind benches.
+    timeout-minutes: 120
     env:
       # Advisory: a perf regression annotates but does not fail the job. When
       # flipping this to "0" (enforcing), also add `perf-gate` to the `summary`

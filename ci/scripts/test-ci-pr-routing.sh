@@ -202,4 +202,42 @@ if grep -Eq 'head\.repo\.(full_name|fork)' \
   exit 1
 fi
 
+# Per-job executor policy. Wall-clock `bench-smoke` is box-only: hosted timings
+# are noise, so it keeps the `hosted` guard. The Valgrind `perf-gate` is
+# load-immune and secretless, so it must run on hosted capacity too; a `hosted`
+# guard on it skipped it on every PR and let a regression merge unseen.
+python3 - <<'PY'
+import re
+import sys
+from pathlib import Path
+
+ci = Path('.github/workflows/ci.yml').read_text(encoding='utf-8')
+
+def job(name):
+    m = re.search(r'^  ' + re.escape(name) + r':\n(.*?)(?=^  [a-z][a-z0-9-]*:\n|\Z)',
+                  ci, re.MULTILINE | re.DOTALL)
+    if not m:
+        print(f'[ci-pr-routing] job {name} not found in ci.yml', file=sys.stderr)
+        sys.exit(1)
+    return m.group(1)
+
+def condition(body):
+    m = re.search(r'^    if: >-\n((?:      .*\n)+)', body, re.MULTILINE)
+    return m.group(1) if m else ''
+
+guard = "needs.changes.outputs.hosted != 'true'"
+if guard not in condition(job('bench-smoke')):
+    print('[ci-pr-routing] bench-smoke lost its hosted guard (box-only wall clock)',
+          file=sys.stderr)
+    sys.exit(1)
+perf = job('perf-gate')
+if 'outputs.hosted' in condition(perf):
+    print('[ci-pr-routing] perf-gate is portable; it must not be skipped on hosted capacity',
+          file=sys.stderr)
+    sys.exit(1)
+if "needs.changes.outputs.rust == 'true'" not in condition(perf):
+    print('[ci-pr-routing] perf-gate must run on every rust-touching PR', file=sys.stderr)
+    sys.exit(1)
+PY
+
 printf '[ci-pr-routing] OK — identity fixtures and workflow guards passed\n'

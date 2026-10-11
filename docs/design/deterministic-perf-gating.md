@@ -89,16 +89,24 @@ a tracked follow-up.
 
 ## Automation — load-immune per-PR CI gate
 
-`ci.yml` job `perf-gate` (gated on `changes.outputs.rust`, PRs only), on the
-**self-hosted runner** (`[self-hosted, linux, alint]`): the gate is itself
-load-immune, so co-tenant noise doesn't matter and no GitHub-hosted quiescence is
-needed. Install pinned valgrind → build + bench the **merge-base** and the PR head
+`ci.yml` job `perf-gate` (gated on `changes.outputs.rust`, PRs only), on
+whichever executor the `changes` job selects: GitHub-hosted while local PR
+capacity is held (see `docs/design/v0.14/ci-fork-pr-isolation.md`). The gate is
+itself load-immune, so runner noise doesn't matter and no quiescent machine is
+needed. (It used to be box-only, which skipped it on every PR once PRs moved to
+hosted capacity; `ci/scripts/test-ci-pr-routing.sh` now pins it as portable.)
+Install pinned valgrind → build + bench the **merge-base** and the PR head
 (`cargo bench --bench det_engine --bench det_check`) → gungraun compares the two
-**in-CI** (no committed baseline; the raw output is ~18 MB) → on an `Ir` /
-`EstimatedCycles` breach it emits a `::warning` and **exits 0** — advisory while
-`DET_PERF_ADVISORY=1`. Flip `DET_PERF_ADVISORY=0` to make a breach fail the PR
-once the `Ir` limit is calibrated against real PR noise. Each bench runs once ⇒
-fast; regressions surface at PR time, deterministically — not 5 h later in a
+**in-CI** (no committed baseline; the raw output is ~18 MB) → the per-bench `Ir`
+table goes to the job summary, and on an `Ir` / `EstimatedCycles` breach it
+emits a `::warning` and **exits 0** — advisory while `DET_PERF_ADVISORY=1`. Flip
+`DET_PERF_ADVISORY=0` to make a breach fail the PR once the `Ir` limit is
+calibrated against real PR noise. A gate that couldn't run (runner install,
+baseline build or bench, or a PR bench with no comparison) **fails the job** as
+a labelled tooling failure: during the v0.18 audit PR it exited 0 with "NOT
+gating" on every run and a +13.5% S2 `Ir` regression merged unseen.
+`ci/scripts/test-det-perf-gate.sh` pins these outcomes. Each bench runs once ⇒
+regressions surface at PR time, deterministically — not 5 h later in a
 contaminated tag bench.
 
 ## Drift control

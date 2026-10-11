@@ -260,8 +260,10 @@ The CI bench jobs (per PR, `ci.yml`) are **not** the wall-clock
 2. **`perf-gate`** — the deterministic gungraun gate
    (`ci/scripts/det-perf-gate.sh`): instruction-count `Ir` (+2%) and
    `EstimatedCycles` (+5%) vs the PR's merge-base, load-immune so it
-   runs on the self-hosted runner regardless of co-tenants. **Advisory
-   today** (`DET_PERF_ADVISORY=1` — it annotates, doesn't fail); see
+   runs on any runner (GitHub-hosted for PRs today) and posts its
+   per-bench table to the job summary. **Advisory today**
+   (`DET_PERF_ADVISORY=1` — a regression annotates, doesn't fail; a
+   gate that couldn't run fails the job as a tooling failure); see
    [`../design/deterministic-perf-gating.md`](../design/deterministic-perf-gating.md).
 
 `xtask bench-compare` (micro vs the v0.7.0 floor) is a **local** helper,
