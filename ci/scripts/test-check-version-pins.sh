@@ -25,6 +25,7 @@ WS_VERSION=$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' Cargo.toml | head -n
 [[ -n "$DOC_VERSION" && -n "$DOC_SHA" && -n "$WS_VERSION" ]] ||
   { echo "could not read ci/action-doc-pin.env or the workspace version" >&2; exit 1; }
 DOC_RE=${DOC_VERSION//./\\.}
+DOC_EXPLICIT=$(sed -n 's/^ACTION_DOC_REQUIRES_EXPLICIT_VERSION=//p' ci/action-doc-pin.env)
 
 pass=0
 fail=0
@@ -108,12 +109,23 @@ EOF
 expect_rejected "new user-facing Action snippets are discovered"
 restore
 
-sed -i "0,/^[[:space:]]*version: v${DOC_RE}\$/s//    path: ./" docs/site/integrations/github-actions.md
-expect_rejected "legacy Action snippet missing explicit binary version"
-restore
-
-sed -i 's/^ACTION_DOC_REQUIRES_EXPLICIT_VERSION=.*/ACTION_DOC_REQUIRES_EXPLICIT_VERSION=false/' \
-  ci/action-doc-pin.env
+# Snippet shape must agree with the metadata in both modes: a release that
+# predates the baked version needs one explicit `version:` per snippet, and a
+# release that bakes it must not repeat one.
+if [[ "$DOC_EXPLICIT" == "true" ]]; then
+  sed -i "0,/^[[:space:]]*version: v${DOC_RE}\$/s//    path: ./" docs/site/integrations/github-actions.md
+  expect_rejected "legacy Action snippet missing explicit binary version"
+  restore
+  sed -i 's/^ACTION_DOC_REQUIRES_EXPLICIT_VERSION=.*/ACTION_DOC_REQUIRES_EXPLICIT_VERSION=false/' \
+    ci/action-doc-pin.env
+else
+  sed -i "0,/^\(- uses: asamarts\/alint@[0-9a-f]\{40\} # v${DOC_RE}\)\$/s//\1\n  with:\n    version: v${DOC_VERSION}/" \
+    docs/site/integrations/github-actions.md
+  expect_rejected "baked Action snippet with a redundant binary version"
+  restore
+  sed -i 's/^ACTION_DOC_REQUIRES_EXPLICIT_VERSION=.*/ACTION_DOC_REQUIRES_EXPLICIT_VERSION=true/' \
+    ci/action-doc-pin.env
+fi
 expect_rejected "metadata disagrees with snippet shape"
 restore
 
