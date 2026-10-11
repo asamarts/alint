@@ -21,7 +21,7 @@ A manifest file enumerates path entries; each must resolve to an on-disk artefac
 | `orphans` | object { `space` } |  |  | Enable the reverse-completeness check. Findings use the rule's top-level `level`; omit this option to disable the check. |
 | `source` | string | yes |  | The manifest/registry file (path, or a glob to run once per matching manifest) that enumerates the path entries. |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

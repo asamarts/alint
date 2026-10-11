@@ -16,7 +16,7 @@ A text file with stray invalid UTF-8 is measured (each invalid byte counts as on
 |---|---|---|---|---|
 | `max_width` | integer (>= 1) | yes |  | Maximum number of Unicode scalar values (chars) allowed per line. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

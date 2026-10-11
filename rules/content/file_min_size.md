@@ -14,7 +14,7 @@ File must be at least `min_bytes` in size. Catches placeholder / stub files that
 |---|---|---|---|---|
 | `min_bytes` | integer (>= 0) | yes |  | Minimum allowed file size in bytes. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

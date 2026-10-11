@@ -18,7 +18,7 @@ If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least o
 | `since` | string | yes |  | Base ref for the `<since>...HEAD` diff. Use the canonical `{{env.X}}` interpolation, e.g. `since: "{{env.ALINT_BASE_SHA \| default('origin/main')}}"`. |
 | `then_changed` | string | yes |  | Glob; the obligation. At least one changed path must match it whenever `if_changed` fired. |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

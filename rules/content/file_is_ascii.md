@@ -16,7 +16,7 @@ Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in 
 |---|---|---|---|---|
 | `allow` | list of string |  | `[]` | Permitted non-ASCII codepoints - each a single character (e.g. "o-umlaut"), a `U+XXXX` codepoint, or a `U+XXXX-U+YYYY` inclusive range. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

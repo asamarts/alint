@@ -14,7 +14,7 @@ Note the fix only deletes `.gitmodules`; `git submodule deinit` and cleaning `.g
 
 _This rule takes no kind-specific options._
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

@@ -16,7 +16,7 @@ Fix: `file_append` — append declared content.
 |---|---|---|---|---|
 | `pattern` | string | yes |  | Rust regex. File contents must match. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

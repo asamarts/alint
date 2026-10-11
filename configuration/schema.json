@@ -116,6 +116,24 @@
       },
       "type": "object"
     },
+    "MarkdownLinksRootMapSpec": {
+      "additionalProperties": false,
+      "properties": {
+        "dir": {
+          "description": "Repository directory corresponding to `url_prefix` (for example `docs/site`, or `.` for the repository root). Extensionless routes also try `<route>.md` and `<route>/index.md`.",
+          "type": "string"
+        },
+        "url_prefix": {
+          "description": "Root-absolute URL prefix to validate, including leading and trailing slashes (for example `/docs/`). Other root-absolute URLs are ignored.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "url_prefix",
+        "dir"
+      ],
+      "type": "object"
+    },
     "Normalize": {
       "oneOf": [
         {
@@ -171,24 +189,6 @@
         }
       ]
     },
-    "OrphansSpec": {
-      "additionalProperties": false,
-      "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the \"new crate not wired into the workspace\" detector).",
-      "properties": {
-        "space": {
-          "description": "Glob of on-disk artefacts that should each be referenced.",
-          "type": "string"
-        },
-        "unreferenced": {
-          "$ref": "#/$defs/Severity",
-          "description": "Severity when an on-disk artefact is unreferenced: `warn` (default), `error`, or `off`."
-        }
-      },
-      "required": [
-        "space"
-      ],
-      "type": "object"
-    },
     "OutputsSpec": {
       "anyOf": [
         {
@@ -205,6 +205,20 @@
         }
       ],
       "description": "`outputs:` accepts a single glob or a list (a `Scope`)."
+    },
+    "RegistryOrphansSpec": {
+      "additionalProperties": false,
+      "description": "Enable the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references. Findings use the rule's top-level `level`; omit `orphans` to disable the reverse check.",
+      "properties": {
+        "space": {
+          "description": "Glob of on-disk artefacts that should each be referenced.",
+          "type": "string"
+        }
+      },
+      "required": [
+        "space"
+      ],
+      "type": "object"
     },
     "Relation": {
       "description": "The relation the source must hold to each target. `equals` is the 1:1 scalar case (the released `cross_file_value_equals`); the set relations compare extracted sets; `identical` compares whole files; `resolves` checks path existence on the filesystem.",
@@ -246,6 +260,20 @@
         }
       ]
     },
+    "RelativeMode": {
+      "oneOf": [
+        {
+          "const": "resolve",
+          "description": "Resolve relative destinations against the Markdown source file.",
+          "type": "string"
+        },
+        {
+          "const": "forbid",
+          "description": "Reject relative destinations (useful for trailing-slash documentation sites, where filesystem-relative links resolve against a different URL).",
+          "type": "string"
+        }
+      ]
+    },
     "RequireList": {
       "anyOf": [
         {
@@ -278,14 +306,6 @@
         }
       ],
       "description": "`select:` accepts a single glob (`\"src/*\"`) or a list with `!`-prefixed excludes (`[\"packages/*\", \"!packages/internal\"]`). A YAML string vs sequence are structurally distinct, so an untagged enum decodes them unambiguously. Shared by the select-family (`for_each_dir`, `for_each_file`, `every_matching_has`)."
-    },
-    "Severity": {
-      "enum": [
-        "warn",
-        "error",
-        "off"
-      ],
-      "type": "string"
     },
     "SourceSpec": {
       "additionalProperties": false,
@@ -873,8 +893,18 @@
           "properties": {
             "file_rename": {
               "additionalProperties": false,
-              "description": "Rename the violating file's stem to the parent rule's target convention (e.g. filename_case's `case:`). Extension is preserved; the file stays in the same directory. No parameters.",
-              "properties": {},
+              "description": "Rename the violating file's stem to the parent rule's target convention (e.g. filename_case's `case:`). Extension is preserved; the file stays in the same directory.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -889,7 +919,17 @@
             "file_trim_trailing_whitespace": {
               "additionalProperties": false,
               "description": "Read the violating file, strip trailing space/tab on every line, write back. Preserves LF or CRLF endings. Skipped on files larger than `fix_size_limit`.",
-              "properties": {},
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -904,7 +944,17 @@
             "file_append_final_newline": {
               "additionalProperties": false,
               "description": "Append a single `\\n` byte when the file has content but doesn't end with one. No-op on empty files.",
-              "properties": {},
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -919,7 +969,17 @@
             "file_normalize_line_endings": {
               "additionalProperties": false,
               "description": "Rewrite every line ending in the file to the parent rule's `target` (lf or crlf). Skipped on files larger than `fix_size_limit`.",
-              "properties": {},
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -963,8 +1023,18 @@
           "properties": {
             "file_strip_bom": {
               "additionalProperties": false,
-              "description": "Remove a leading UTF-8 / UTF-16 / UTF-32 BOM from the file. No-op when no BOM is present.",
-              "properties": {},
+              "description": "Remove a leading UTF-8 BOM (a stacked run of them) from the file. A UTF-16 / UTF-32 BOM is reported but left in place, since removing it without transcoding would corrupt the file. No-op when no BOM is present.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -979,7 +1049,17 @@
             "file_collapse_blank_lines": {
               "additionalProperties": false,
               "description": "Collapse runs of blank lines longer than the parent rule's `max` down to exactly `max` blank lines. Preserves the file's line endings (LF vs CRLF). Skipped on files larger than `fix_size_limit` or on non-UTF-8 content.",
-              "properties": {},
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
               "type": "object"
             }
           },
@@ -1073,19 +1153,316 @@
             "remove_value"
           ],
           "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "chmod": {
+              "additionalProperties": false,
+              "description": "`chmod`: set or clear the Unix executable bits (`0o111`) on the violating file, preserving every other permission bit. The host rule (`executable_bit`, `shebang_has_executable`) picks the direction. Unix-only; a no-op on platforms without an executable bit, where the host rule never fires. `Safe` by default: the rule explicitly requires the +x state, the change is reversible, and it touches only the executable bits.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "chmod"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "git_untrack": {
+              "additionalProperties": false,
+              "description": "`git_untrack`: remove the violating path from git's index (`git rm --cached`) while leaving it on disk, for the \"a committed artifact should be untracked\" hygiene case (host `file_absent` with `git_tracked_only: true`, so the rule converges once the path leaves the tracked set). A **spawning** fix op: it shells out to `git`, so it is refused from any non-top-level source (`extends:`/nested/bundled) exactly like a spawning rule kind (auto-fix.md 5.5), and it is **`Unsafe` by default** (irreversibly restructures the index on a bare `alint fix`; surfaced as a suggestion, applied only with `--unsafe-fixes`). A user may promote a specific rule to `Safe` in their OWN top-level config.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "git_untrack"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "command": {
+              "additionalProperties": false,
+              "description": "`command`: run a user-supplied fix command per violation on a `command` rule (e.g. check `eslint {path}`, fix `eslint --fix {path}`). A **spawning** fix op: it shells out, so it is refused from any non-top-level source (auto-fix.md 5.5, like the `command` rule kind itself) and is **`Unsafe` by default** (running an arbitrary command on a bare `alint fix` is opt-in). A user may promote a specific rule to `Safe` in their OWN top-level config.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
+                "run": {
+                  "description": "The fix command argv. The first token is the program; every token accepts the same `{path}` / `{dir}` / `{stem}` templates as the `command` rule's `command:`. Must be non-empty.",
+                  "items": {
+                    "type": "string"
+                  },
+                  "minItems": 1,
+                  "type": "array"
+                },
+                "timeout": {
+                  "description": "Per-invocation timeout in seconds (default 30).",
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "run"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "command"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "dir_create": {
+              "additionalProperties": false,
+              "description": "`dir_create`: create the (single, literal) directory the host `dir_exists` rule requires. A **fixed-behavior** op: it writes no ruleset bytes and does not spawn, so it is honored at its tier from any source. **`Safe` by default** (an empty directory is benign and easily removed). Only valid when the rule's `paths` is one literal directory (a glob or multiple patterns is ambiguous and rejected at load). Note: git does not track an empty directory, so this creates it for local tooling; pair with a `file_create` of a `.gitkeep` to persist it.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "dir_create"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sync_from": {
+              "additionalProperties": false,
+              "description": "`sync_from`: overwrite a drifted target with its canonical source, so a `cross_file` `relation: identical` rule converges. A **content-injecting** op: it writes another file's bytes wholesale, and the host rule's `source:` decides which file overwrites which, so a remote `extends:` the user has not trusted demotes it to `suggestion` (auto-fix.md 5.5). **`Unsafe` by default** (a whole-file overwrite can discard uncommitted target content). Only valid on `relation: identical` with `skip_header_lines: 0` (a header-preserving sync is a deferred follow-up) and a single-file `source:` (not a glob-union); other shapes are rejected at load. Takes its source from the host rule, not a new field.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "sync_from"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "relocate": {
+              "additionalProperties": false,
+              "description": "`relocate`: move a file the host `file_absent` rule flagged in a subdirectory back to the repository root, keeping its basename (a lockfile that drifted into a member directory belongs at the workspace root). A **fixed-behavior** op: it writes no ruleset bytes and does not spawn, so it is honored at its tier from any source. **`Unsafe` by default** (a rename is easy to review but moves a real file, and the destination is inferred), `Safe`-promotable. Only the unambiguous case is fixed: the flagged file is below the root and the root slot (`<basename>` at the repo root) is free. A file already at the root, a taken root slot, or an undeterminable basename is left for a human (reported, not fixed). Takes its source path from the violation, not a new field.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "relocate"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "create_and_register": {
+              "additionalProperties": false,
+              "description": "`create_and_register`: ensure a `cross_file` `relation: registered` member both exists and is listed in each target's manifest array, applying only the unmet repair. An existing-but-unregistered member is APPENDED to the list (a single-file structured edit); a MISSING NAMED member is CREATED from `content` / `content_from` below and then registered (two independent idempotent fixes the fixpoint applies in order -- no multi-file transaction). A **content-injecting** op (it writes a ruleset-chosen value into a manifest, and a ruleset-authored file), so an untrusted remote `extends:` demotes it to a suggestion (auto-fix.md 5.5). **`Unsafe` by default** (mutates a manifest / creates a file), `Safe`-promotable. Members + targets come from the host rule.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
+                "content": {
+                  "description": "Literal bytes to insert. Mutually exclusive with `content_from`.",
+                  "type": "string"
+                },
+                "content_from": {
+                  "description": "Path (relative to the lint root) of a file whose bytes are inserted. Mutually exclusive with `content`.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "create_and_register"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "sort": {
+              "additionalProperties": false,
+              "description": "The `sort` op (Phase 4): rewrite each of the host `ordered_block` rule's marked blocks with its entries sorted under the rule's `comparator` (and deduped when the rule sets `unique`), preserving non-entry lines (markers, blanks, `select`-excluded comments) in place. Behavior comes entirely from the host rule (`start`/`end`/`comparator`/`unique`/`select`); this spec adds only the optional tier override. **`Safe` by default**: a keep-sorted block's meaning is order-independent (and a `unique` block declared its duplicates redundant), so sorting is behavior-preserving.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "sort"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "indent_style": {
+              "additionalProperties": false,
+              "description": "The `indent_style` op (Phase 4): reindent the host `indent_style` rule's violating lines. Wired ONLY for `style: spaces` + a `width: N` (the spaces-per-tab): it rewrites a PURE-TAB leading run (K tabs) to K*N spaces, and leaves the genuinely ambiguous cases (a mixed tab+space lead, a pure-space width mismatch). Behavior comes from the host rule (`style` / `width`); this spec adds only the optional tier override. **`Unsafe` by default** (a mis-aimed reindent HARD-breaks an indent-significant file such as a `Makefile` recipe; audit round-3), so a bare `fix` suggests it and `--unsafe-fixes` applies it; **content-injecting** in the W2 partition (a remote can aim it at such a file).",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "indent_style"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "insert_line": {
+              "additionalProperties": false,
+              "description": "The `insert_line` op (Phase 4): insert a missing `require:` line of the host `ordered_block` rule at its SORTED position (using the rule's `comparator`). The required lines + comparator come from the host rule; this spec adds only the optional tier override. **`Unsafe` by default** (it adds ruleset-authored content at a COMPUTED position, load-bearing in the order-sensitive formats it targets); **content-injecting** in the W2 partition (the `require:` lines are ruleset-authored, so an untrusted remote demotes it).",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "insert_line"
+          ],
+          "type": "object"
+        },
+        {
+          "additionalProperties": false,
+          "properties": {
+            "insert_header": {
+              "additionalProperties": false,
+              "description": "The `insert_header` op (Phase 4): insert the host `file_header` rule's required header at the top of a violating file, AFTER any leading BOM, shebang (`#!...`), or XML declaration (`<?xml ...?>`) -- the differentiator over `file_prepend`, which prepends at BOF (after any BOM, but blind to a shebang / XML declaration) and would push a shebang off line 1. Content comes from `content` / `content_from` (as `file_prepend`). **`Safe` by default** (the insertion point is the one canonical header spot and the content is inert; at least as safe as the `Safe` `file_prepend` it refines, and safer on a file with a shebang / XML declaration, which `file_prepend` would displace); **content-injecting** in the W2 partition (the header bytes are ruleset-authored, so an untrusted remote demotes it). NOTE: because the header can land below line 1, the host rule's `pattern` must be able to match below the first line (use an unanchored pattern or `(?m)`); a `^`-anchored pattern that only matches line 1 cannot be satisfied once the header sits under a shebang.",
+              "properties": {
+                "applicability": {
+                  "description": "Per-rule tier override (`safe` / `unsafe` / `suggestion` / `never`). An inherited (`extends:`'d) config may only demote, never promote; a remote `extends:` not listed in `trusted_extends:` demotes content-changing ops to `suggestion`.",
+                  "enum": [
+                    "safe",
+                    "unsafe",
+                    "suggestion",
+                    "never"
+                  ]
+                },
+                "content": {
+                  "description": "Literal bytes to insert. Mutually exclusive with `content_from`.",
+                  "type": "string"
+                },
+                "content_from": {
+                  "description": "Path (relative to the lint root) of a file whose bytes are inserted. Mutually exclusive with `content`.",
+                  "type": "string"
+                }
+              },
+              "type": "object"
+            }
+          },
+          "required": [
+            "insert_header"
+          ],
+          "type": "object"
         }
       ],
       "type": "object"
-    },
-    "git_tracked_only": {
-      "default": false,
-      "description": "When true, restrict the rule to files / directories tracked in git's index. Outside a git repo the rule becomes a silent no-op for absence-style checks. Currently supported on `file_exists`, `file_absent`, `dir_exists`, `dir_absent`; any other rule kind rejects the field at load. See https://alint.org/docs/concepts/targeting/the-walker-and-git/ for the full semantics.",
-      "type": "boolean"
-    },
-    "if_present": {
-      "default": false,
-      "description": "When true, a JSONPath query returning zero matches is silently OK - only real matches that fail the op produce violations. Use for predicates conditional on a field's presence (e.g. \"every `uses:` must be SHA-pinned\" where a workflow without `uses:` steps shouldn't be flagged).",
-      "type": "boolean"
     },
     "level": {
       "description": "Severity. `off` disables a rule (useful when overriding inherited rules).",
@@ -1143,6 +1520,11 @@
     "nested_rule": {
       "description": "A nested rule inside `require:`. Unlike top-level rules, `id` and `level` are synthesized from the parent; the user supplies only `kind` plus kind-specific options.",
       "properties": {
+        "expect_matches": {
+          "default": false,
+          "description": "Require this nested rule's effective file scope to match at least one file for each active parent iteration. Checked after the nested `when:` gate. Unsupported for existence and selector rules.",
+          "type": "boolean"
+        },
         "kind": {
           "type": "string"
         },
@@ -1368,6 +1750,11 @@
     },
     "rule_common": {
       "properties": {
+        "expect_matches": {
+          "default": false,
+          "description": "Require the rule's effective file scope (`paths:` plus `scope_filter:`) to match at least one file. Checked after `when:` and against the full repository even under `--changed`. Unsupported for existence and selector rules, whose empty sets have kind-specific meaning.",
+          "type": "boolean"
+        },
         "fix": {
           "$ref": "#/$defs/fix"
         },
@@ -1382,7 +1769,7 @@
           "$ref": "#/$defs/level"
         },
         "message": {
-          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution.",
+          "description": "Override the default failure message. `{{vars.*}}` is substituted in template bodies; documented kind-specific `{{ctx.*}}` placeholders are rendered by those kinds. Other placeholders remain literal.",
           "type": "string"
         },
         "paths": {
@@ -2672,7 +3059,7 @@
         },
         "since": {
           "default": null,
-          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports POSIX `${VAR}` and `${VAR:-default}` env-var interpolation so CI can pass a SHA via an env var (e.g. `since: ${ALINT_BASE_SHA:-origin/main}` with `ALINT_BASE_SHA` exported in a workflow step from `github.event.pull_request.base.sha`). The GitHub Actions double-brace template syntax `${{ ... }}` is NOT interpolated by alint.",
+          "description": "Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports alint's template syntax, so CI can pass a SHA through an environment variable (for example, `since: \"{{env.ALINT_BASE_SHA | default('origin/main')}}\"`). The older POSIX `${VAR}` / `${VAR:-default}` form is deprecated and will be removed in v1.0.",
           "type": [
             "string",
             "null"
@@ -2880,7 +3267,7 @@
       "type": "object"
     },
     "rule_id": {
-      "description": "Unique kebab-case identifier for the rule.",
+      "description": "Stable identifier beginning with a lowercase ASCII letter, followed by lowercase ASCII letters, digits, underscores, or hyphens. Shared by rules, facts, and templates; effective rule ids must be unique after composition.",
       "pattern": "^[a-z][a-z0-9_-]*$",
       "type": "string"
     },
@@ -3273,6 +3660,9 @@
           "$ref": "#/$defs/rule_commented_out_code"
         },
         {
+          "$ref": "#/$defs/rule_markdown_links_resolve"
+        },
+        {
           "$ref": "#/$defs/rule_markdown_paths_resolve"
         },
         {
@@ -3478,6 +3868,37 @@
       ],
       "type": "object"
     },
+    "rule_markdown_links_resolve": {
+      "description": "Validate live Markdown links, images, and reference destinations against repository files and directories.",
+      "properties": {
+        "kind": {
+          "const": "markdown_links_resolve"
+        },
+        "paths": {
+          "$ref": "#/$defs/paths_spec"
+        },
+        "relative": {
+          "$ref": "#/$defs/RelativeMode",
+          "default": "resolve",
+          "description": "How to handle relative Markdown destinations: `resolve` (default) or `forbid`."
+        },
+        "root": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MarkdownLinksRootMapSpec"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Optional mapping from root-absolute rendered URLs to repository source files. This validates only URLs beneath the declared prefix."
+        }
+      },
+      "required": [
+        "paths"
+      ],
+      "type": "object"
+    },
     "rule_markdown_paths_resolve": {
       "description": "Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. Targets the AGENTS.md / CLAUDE.md / .cursorrules staleness problem: agent-context files reference paths in inline backticks, and those paths drift as the codebase evolves. Skips fenced and 4-space-indented code blocks (those contain code samples, not factual claims about the tree). Required `prefixes` field marks which path-shapes to validate (e.g. `[\"src/\", \"crates/\", \"docs/\"]`); backticked tokens not starting with a configured prefix are ignored, eliminating the FP class of `\\`npm\\`` / `\\`function\\`` / etc.",
       "properties": {
@@ -3589,7 +4010,7 @@
       "type": "object"
     },
     "rule_no_bom": {
-      "description": "Flag files that start with a UTF-8 / UTF-16 / UTF-32 BOM. Fixable via `file_strip_bom`.",
+      "description": "Flag files that start with a UTF-8 / UTF-16 / UTF-32 BOM. A UTF-8 BOM is fixable via `file_strip_bom`; a UTF-16 / UTF-32 BOM is reported only.",
       "properties": {
         "kind": {
           "const": "no_bom"
@@ -3990,13 +4411,13 @@
         "orphans": {
           "anyOf": [
             {
-              "$ref": "#/$defs/OrphansSpec"
+              "$ref": "#/$defs/RegistryOrphansSpec"
             },
             {
               "type": "null"
             }
           ],
-          "description": "Enable the reverse-completeness check (see `OrphansSpec`)."
+          "description": "Enable the reverse-completeness check. Findings use the rule's top-level `level`; omit this option to disable the check."
         },
         "source": {
           "description": "The manifest/registry file (path, or a glob to run once per matching manifest) that enumerates the path entries.",
@@ -4027,6 +4448,11 @@
     "rule_template_instance": {
       "description": "A rule entry that expands a `templates:` body. The instance's `id:` is required; `vars:` provides the substitutions for the template's `{{vars.<name>}}` placeholders. Any other field overrides the corresponding field in the expanded template.",
       "properties": {
+        "expect_matches": {
+          "default": false,
+          "description": "Override the expanded rule's empty-scope assertion.",
+          "type": "boolean"
+        },
         "extends_template": {
           "description": "Id of an entry in the top-level `templates:` block to instantiate.",
           "type": "string"
@@ -4038,7 +4464,7 @@
           "$ref": "#/$defs/level"
         },
         "message": {
-          "description": "Override the default failure message. Supports `{{vars.*}}` and `{{ctx.*}}` substitution.",
+          "description": "Override the default failure message. `{{vars.*}}` is substituted in template bodies; documented kind-specific `{{ctx.*}}` placeholders are rendered by those kinds. Other placeholders remain literal.",
           "type": "string"
         },
         "policy_url": {
@@ -4476,7 +4902,7 @@
       ]
     },
     "ignore": {
-      "description": "Additional glob patterns excluded on top of .gitignore.",
+      "description": "Additional glob patterns excluded on top of .gitignore. Refused from a remote `extends:` that is not listed in `trusted_extends:`, because it hides files from every rule.",
       "items": {
         "type": "string"
       },
@@ -4507,7 +4933,7 @@
       "type": "array"
     },
     "trusted_extends": {
-      "description": "Remote `extends:` URLs (matched with or without the `#sha256-` integrity fragment) whose content-injecting fixers (`replace`, `file_create`, `file_prepend`, `file_append`) are honored at their declared tier instead of demoted to a suggestion. By default a content fixer reached through a remote `extends:` may only PROPOSE an edit -- it never auto-writes third-party bytes into your files; listing the URL here opts it back into auto-applying. Honored only from the user's own top-level config (and `.alint.d/` drop-ins): a `trusted_extends:` from an `extends:`'d or nested config is refused, because a ruleset must not allowlist itself.",
+      "description": "Remote `extends:` URLs (matched with or without the `#sha256-` integrity fragment) whose content-injecting fixers (`replace`, `file_create`, `file_prepend`, `file_append`) are honored at their declared tier instead of demoted to a suggestion. By default a content fixer reached through a remote `extends:` may only PROPOSE an edit -- it never auto-writes third-party bytes into your files; listing the URL here opts it back into auto-applying. Honored only from the user's own top-level config (and `.alint.d/` drop-ins): a `trusted_extends:` from an `extends:`'d or nested config is refused, because a ruleset must not allowlist itself. A listed remote may also read `env.*` in a `when:` / `when_iter:` expression and declare `ignore:`, both refused from an untrusted remote.",
       "items": {
         "type": "string"
       },

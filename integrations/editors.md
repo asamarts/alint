@@ -22,10 +22,19 @@ so every channel ships the same release.
 |---|---|---|
 | **VS Code** | [Marketplace](https://marketplace.visualstudio.com/items?itemName=asamarts.alint) / [Open VSX](https://open-vsx.org/extension/asamarts/alint) | The extension auto-downloads a matching `alint` binary on first run if one isn't on `PATH`. |
 | **JetBrains** (IDEA, PyCharm, GoLand, WebStorm, RustRover, CLion, Rider, Android Studio) | [JetBrains Marketplace](https://plugins.jetbrains.com/plugin/31995-alint) | Built on [LSP4IJ](https://github.com/redhat-developer/lsp4ij); one plugin covers the whole JetBrains suite. |
-| **Zed** | `zed-industries/extensions` registry (search for `alint`) | The extension is a thin wasm wrapper around the LSP server. |
 
-These three are the **packaged-extension** tier: install through the
+These are the **packaged-extension** tier: install through the
 editor's normal marketplace UI, no extra configuration needed.
+
+## Zed — source extension
+
+The repository includes a tested Zed wasm extension under
+[`editors/zed`](https://github.com/asamarts/alint/tree/main/editors/zed). It is
+not yet listed in Zed's public extension registry, so install it as a dev
+extension from a local checkout: open the command palette, choose **zed:
+install dev extension**, and select the `editors/zed` directory. The extension
+launches `alint lsp`, preferring an explicitly configured binary, then `alint`
+on `PATH`, and finally a managed download of the latest GitHub release.
 
 ## Tier 2 — config snippet, generic LSP client
 
@@ -49,18 +58,32 @@ diagnostics:
 
 - **Diagnostics on save and on change.** Every `.alint.yml` violation in
   your active file lands as an editor diagnostic with the rule ID and
-  the canonical message.
+  the canonical message. A full check (on open and save) lints your
+  unsaved buffers, not the stale copy on disk. Findings that are not
+  tied to one file (for example a missing `LICENSE`) are shown on the
+  `.alint.yml` itself.
+- **Same results as `alint check`.** The config's `baseline:` file is
+  honored, so grandfathered findings stay hidden in the editor too.
+  If the config fails to load, the error is shown on `.alint.yml` and
+  the files it governs show no findings until it loads again.
 - **Hover-to-explain.** Hovering a diagnostic shows the rule's
-  description, fix availability, and a link to its rule-reference page.
+  description, fix availability, and a link to its rule-reference page
+  (plus the rule's `policy_url`, when it declares one).
 - **Apply-fix code actions.** For rules that ship an auto-fix
   (`final_newline`, `no_trailing_whitespace`, `line_endings`, etc.), the
-  editor offers a code action that runs the fix in-place.
+  editor offers a code action that runs the fix in-place. Files larger
+  than the config's `fix_size_limit` get no fix, as with `alint fix`.
 - **Informational notes.** Skipped non-literal entries (e.g. a registry
-  path containing `${MODULE}`) surface as one-line notes in the
-  server's stderr; pass `--show-notes` to expand them.
-- **Auto-discovery.** The server walks up from the open file to find
-  the nearest `.alint.yml`, so it works in monorepos and nested
-  package roots without configuration.
+  path containing `${MODULE}`) are reported after each full check as a
+  one-line count on the server's stderr (usually the editor's LSP log);
+  launch the server as `alint lsp --show-notes` to list them all.
+- **Auto-discovery.** Each open file is linted by the nearest
+  `.alint.yml` found walking up from its directory, so it works in
+  monorepos and nested package roots without configuration. Under a
+  config with `nested_configs: true`, files get that config's rules plus
+  the nested ones, as `alint check` from the workspace root does. Every
+  workspace folder of a multi-root workspace is linted; files outside
+  all workspace folders are not.
 
 ## Configuration
 
@@ -72,7 +95,8 @@ itself. The only editor-side settings are:
   `PATH`. Auto-resolved by the VS Code + JetBrains extensions on first
   run.
 - **`alint.args`** — extra args to pass to `alint lsp` on launch
-  (unused in normal operation; useful for `--show-notes`).
+  (unused in normal operation; useful for `--show-notes`, which lists
+  informational notes on the server's stderr).
 
 ## Authoring rules with editor support
 

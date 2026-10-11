@@ -1,15 +1,15 @@
 ---
 title: Kinds, families, and categories
-description: "alint ships 94 rule kinds plus 11 aliases, grouped by one-home families and by cross-cutting categories."
+description: "alint ships 95 rule kinds plus 11 aliases, grouped by one-home families and by cross-cutting categories."
 sidebar:
   order: 3
 ---
 
-Every rule names a `kind`: the built-in check it runs. alint ships **94 rule kinds** plus 11 aliases, and it organizes the canonical kinds two ways at once. Each kind has one home **family**, and each kind is tagged into one or more **categories**. Same thirteen names, two different relationships.
+Every rule names a `kind`: the built-in check it runs. alint ships **95 rule kinds** plus 11 aliases, and it organizes the canonical kinds two ways at once. Each kind has one home **family**, and each kind is tagged into one or more **categories**. Same thirteen names, two different relationships.
 
 <svg class="alint-kinds" viewBox="0 0 460 440" role="img" aria-labelledby="kfc-t kfc-d" xmlns="http://www.w3.org/2000/svg">
 <title id="kfc-t">Kinds, families, and categories</title>
-<desc id="kfc-d">Each of 94 rule kinds belongs to exactly one family (its colored home group) but can be tagged into several categories. 11 aliases provide alternate names. file_exists is in the Existence family and the existence category. no_bidi_controls is in the Security / Unicode sanity family, tagged security-unicode-sanity and encoding. dir_contains is in the Cross-file family, tagged cross-file and structure. filename_case is in the Naming family and the naming category.</desc>
+<desc id="kfc-d">Each of 95 rule kinds belongs to exactly one family (its colored home group) but can be tagged into several categories. 11 aliases provide alternate names. file_exists is in the Existence family and the existence category. no_bidi_controls is in the Security / Unicode sanity family, tagged security-unicode-sanity and encoding. dir_contains is in the Cross-file family, tagged cross-file and structure. filename_case is in the Naming family and the naming category.</desc>
 <style>
   .alint-kinds { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-kinds { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -25,7 +25,7 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 rule kin
   @media (prefers-reduced-motion:reduce){ .alint-kinds .extra { animation:none; } }
 </style>
 <text class="ui ac" x="18" y="15">one family, many categories</text>
-<text class="ui mut" x="18" y="33">94 kinds + 11 aliases &#183; 13 families &#183; 13 categories</text>
+<text class="ui mut" x="18" y="33">95 kinds + 11 aliases &#183; 13 families &#183; 13 categories</text>
 <rect class="card" x="20" y="46" width="420" height="62" rx="8"/><rect x="20" y="46" width="6" height="58" rx="2" fill="#3b82f6"/>
 <text class="mono tx" x="38" y="72" font-size="14">file_exists</text>
 <rect x="330" y="56" width="92" height="22" rx="11" fill="#3b82f6"/><text class="ui" x="376" y="71" text-anchor="middle" fill="#fff">Existence</text>
@@ -46,21 +46,21 @@ Every rule names a `kind`: the built-in check it runs. alint ships **94 rule kin
 <rect class="chip" x="38" y="292" width="62" height="18" rx="9"/><text class="tag" x="49" y="305">naming</text>
 <line x1="20" y1="336" x2="440" y2="336" stroke="var(--bd)" stroke-width="1" opacity=".5"/>
 <rect x="20" y="352" width="14" height="14" rx="3" fill="#7c3aed"/><text class="ui tx" x="42" y="363">colored band = the one family a kind belongs to</text>
-<rect class="chip" x="20" y="380" width="14" height="14" rx="7"/><text class="ui tx" x="42" y="391">chips = its categories; 32 kinds carry more than one,</text>
+<rect class="chip" x="20" y="380" width="14" height="14" rx="7"/><text class="ui tx" x="42" y="391">chips = its categories; 33 kinds carry more than one,</text>
 <text class="ui mut" x="42" y="410">so categories cross-cut the families</text>
 </svg>
 
 ## Kinds are the checks
 
-A `kind` is the built-in implementation a rule invokes: `file_exists`, `no_bidi_controls`, `filename_case`, `json_schema_passes`, and 90 more. Every rule declares exactly one, and the `kind` is what decides which extra fields the rule accepts (a `file_header` takes a `pattern`, a `file_max_size` takes a byte limit). 11 **aliases** provide alternate names for existing implementations; they are counted separately from the 94 kinds.
+A `kind` is the built-in implementation a rule invokes: `file_exists`, `no_bidi_controls`, `filename_case`, `json_schema_passes`, and 91 more. Every rule declares exactly one, and the `kind` is what decides which extra fields the rule accepts (a `file_header` takes a `pattern`, a `file_max_size` takes a byte limit). 11 **aliases** provide alternate names for existing implementations; they are counted separately from the 95 kinds.
 
 ## Families are the home group
 
-The 94 kinds are partitioned into **13 families** by mechanism: Existence, Content, Naming, Structure, Cross-file, Security / Unicode sanity, Text hygiene, Encoding, Portable metadata, Unix metadata, Git hygiene, Structured query, and Plugin (tier 1). Every kind belongs to **exactly one** family, so the families are a clean table of contents for the catalog. `alint rules list` prints the kinds grouped this way.
+The 95 kinds are partitioned into **13 families** by mechanism: Existence, Content, Naming, Structure, Cross-file, Security / Unicode sanity, Text hygiene, Encoding, Portable metadata, Unix metadata, Git hygiene, Structured query, and Plugin (tier 1). Every kind belongs to **exactly one** family, so the families are a clean table of contents for the catalog. `alint rules list` prints the kinds grouped this way.
 
 ## Categories are cross-cutting tags
 
-The **13 categories** carry the same thirteen names, but the relationship is many-to-many: a kind can be tagged with several. A kind's home family is always its primary category, and **32 kinds carry extra tags** on top. `no_bidi_controls` lives in the Security family but is also tagged `encoding`; `dir_contains` lives in Cross-file but is also tagged `structure`. That is the whole distinction: **family answers "where does this kind live?" (one answer), category answers "what concerns does it touch?" (often several).** Categories are what you filter on when you want every check that bears on, say, security, regardless of which family implements it.
+The **13 categories** carry the same thirteen names, but the relationship is many-to-many: a kind can be tagged with several. A kind's home family is always its primary category, and **33 kinds carry extra tags** on top. `no_bidi_controls` lives in the Security family but is also tagged `encoding`; `dir_contains` lives in Cross-file but is also tagged `structure`. That is the whole distinction: **family answers "where does this kind live?" (one answer), category answers "what concerns does it touch?" (often several).** Categories are what you filter on when you want every check that bears on, say, security, regardless of which family implements it.
 
 ## In practice
 

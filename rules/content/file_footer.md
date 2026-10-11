@@ -17,7 +17,7 @@ Fix: `file_append` — append a declared `content`. With no fix declared, violat
 | `lines` | integer (>= 1) |  | `20` | Number of trailing lines to consider. |
 | `pattern` | string | yes |  | Rust regex. The last `lines` lines of each file must match. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

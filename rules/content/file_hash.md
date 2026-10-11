@@ -14,7 +14,7 @@ Content SHA-256 must equal the expected digest. Rules-as-tripwire for generated 
 |---|---|---|---|---|
 | `sha256` | string | yes |  | Expected SHA-256 in lowercase hex (64 chars). Accepting uppercase and the `sha256:` prefix keeps the field forgiving. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

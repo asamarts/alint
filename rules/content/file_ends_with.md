@@ -20,7 +20,7 @@ Check-only: a fix would risk silently duplicating a near-matching prefix. Pair w
 |---|---|---|---|---|
 | `suffix` | string | yes |  | Required suffix, matched byte-for-byte. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

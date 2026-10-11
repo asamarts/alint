@@ -33,6 +33,11 @@ has any violation the file doesn't already hold, it writes nothing and exits 2
 unless you pass `--accept-new`, so a refresh can't quietly grandfather fresh
 violations.
 
+A baseline path that comes from the repository (the `baseline:` config key or
+the default `.alint-baseline.json`) must stay inside the repository, and alint
+refuses to write through a symlink; either case exits 2. Pass `--output` to
+write the file somewhere else on purpose.
+
 ## Reference
 
 ```

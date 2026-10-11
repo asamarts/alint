@@ -14,7 +14,7 @@ Tree depth from repo root may not exceed `max_depth`. A shallow depth stops deep
 |---|---|---|---|---|
 | `max_depth` | integer (>= 1) | yes |  | Maximum allowed path depth (number of `/`-separated components). |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

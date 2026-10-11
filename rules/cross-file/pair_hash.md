@@ -17,7 +17,7 @@ The `algorithm` digest (`sha256` default / `sha512`) of every file matching `sou
 | `source` | string | yes |  | Literal path or glob selecting the file(s) whose content is hashed (one check per match). |
 | `target` | string | yes |  | The single file that must carry the digest (a `.sum` / `SHA256SUMS` / a file with an embedded hash). |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

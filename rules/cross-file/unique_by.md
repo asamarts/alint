@@ -16,7 +16,7 @@ No two files matching `select` may share the value of `key` (a path template; to
 | `key` | string |  | `{basename}` | Path-template producing a key per matched file. Default: {basename}. |
 | `select` | string | yes |  | Glob selecting the files to deduplicate. |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

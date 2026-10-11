@@ -22,7 +22,7 @@ See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) 
 | `git_tracked_only` | boolean |  | `false` | Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`. |
 | `root_only` | boolean |  | `false` | If true, only a directory directly at the repository root is forbidden; a nested match with the same name is allowed. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, and `when` fields. This existence rule does not support `expect_matches`, because an empty match set is part of the rule's own semantics. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

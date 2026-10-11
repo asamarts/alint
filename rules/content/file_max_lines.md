@@ -18,7 +18,7 @@ File must have at most `max_lines` lines, using the same accounting as `file_min
 |---|---|---|---|---|
 | `max_lines` | integer (>= 0) | yes |  | Maximum allowed line count. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

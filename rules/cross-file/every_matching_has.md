@@ -18,7 +18,7 @@ For every file or directory matching `select:`, every nested rule under `require
 | `select` | select spec | yes |  | Glob(s) selecting the files/dirs to iterate: a single glob, or a list with `!`-prefixed excludes (e.g. `["packages/*", "!packages/internal"]`). |
 | `when_iter` | string |  | `null` | Per-iteration `when:` filter (same semantics as `for_each_dir`'s `when_iter`). |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

@@ -17,7 +17,7 @@ Forbid imports whose **extracted target** matches a `forbid` regex, within the `
 | `import_pattern` | string |  | `null` | Explicit import-line regex (capture group 1 = target). Overrides the `language` preset. |
 | `language` | one of `go` \| `python` \| `rust` \| `js` \| `scala` \| `java` \| `dart` \| `nix` \| `generic` |  |  | Built-in import-line pattern preset (capture group 1 = the imported target). Omit to require an explicit `import_pattern`. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

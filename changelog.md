@@ -9,7 +9,369 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-11
+
+A security and correctness release from a whole-repository audit and an
+adversarial re-review of its fixes. The config trust gates now judge the rule
+that actually runs (no YAML tags, merge keys or placeholder kinds can hide a
+field from them), untrusted remote rulesets can no longer declare `ignore:` or
+read the environment, crafted YAML and XML files are bounded in memory and CPU,
+and RustSec advisories now block CI and releases. It adds the
+`markdown_links_resolve` rule kind and per-rule `expect_matches:` scope
+assertions, and the LSP now resolves the nearest config per file. Breaking:
+three config tightenings (see Changed), MSRV 1.88, and the VS Code extension
+now requires VS Code 1.91.
+
+### Security
+
+- **Config trust gates no longer judge a different rule than the one that
+  runs.** An `extends:`'d ruleset could execute arbitrary commands through a
+  template whose `kind:` was a `{{vars.*}}` placeholder resolving to `command`,
+  or through a spawning kind nested in a template's `require:` block; could
+  promote `file_remove` to `safe` with a sequence-shaped `file_remove: [safe]`
+  or an `applicability: "{{vars.a}}"` placeholder; and a rule from a remote or
+  nested config could aim a trusted template's promoted fixer with its own
+  `paths:`. All are refused or capped at load.
+
+- **YAML tags and merge keys can no longer hide fields from the trust gates.**
+  A tagged key or value (`!x kind: command`, `kind: !x command`) was invisible
+  to the checks but still built the real field, so a remote ruleset could run
+  commands, promote `file_remove` to `safe`, or read the environment. Rules and
+  templates in every config now refuse YAML tags, non-string keys and `<<`
+  merge keys.
+
+- **An extended config can no longer reshape one of your process-spawning
+  rules.** A rule that shared the id of your `generated_file_fresh` /
+  `command_idempotent` rule (or a template it instantiates) field-merged a
+  `workdir:` or `paths:` into it and chose what ran. A spawning rule, or a rule
+  with a spawning fix op, now fails to load if any `extends:`'d config
+  contributed to it. `workdir:` is also confined to the repository, including
+  through symlinks.
+
+- **Untrusted remote rulesets** (an `https://` source not in
+  `trusted_extends:`) may no longer read the environment through `when:` /
+  `when_iter:` (`env.*` directly, a `{{...}}` placeholder in a template's
+  `when`, or a var whose value comes from `{{env.X}}`), may no longer splice
+  an env-derived template var into a rule field such as `message:`, and may
+  no longer declare top-level `ignore:`, which could hide every file from
+  every rule.
+  Each was a way to leak a secret through which rules fire, or to silence the
+  run. Allowlist the URL in `trusted_extends:` to restore the old behavior.
+
+- A remote ruleset can no longer route an environment variable into
+  `git_commit_message`'s `since:` (directly, by field-merge onto a user rule,
+  or through template `vars:`, including a `${` reference assembled from two
+  vars), where it was expanded and echoed in an error.
+
+- Fixer trust now follows the effective rule through field composition and
+  template expansion, so neither an untrusted rule instantiating a trusted
+  template nor the reverse can keep an untrusted content fixer at its declared
+  tier.
+
+- The XML nesting pre-scan now agrees with the XML parser at every skipped
+  region (processing instructions, comments, CDATA, the XML declaration) and
+  fails closed, so a crafted file can no longer abort alint with a stack
+  overflow. The YAML depth and alias guards, which also protect `.alint.yml`
+  and `extends:` loading, now follow libyaml's token rules, so comments, block
+  scalars, plain-scalar continuations and a leading BOM can no longer hide a
+  nesting or alias bomb.
+
+- **Crafted YAML and XML files can no longer exhaust memory or CPU.** The YAML
+  alias budget is charged in estimated bytes rather than nodes, so one large
+  anchored scalar referenced a few thousand times (a 1 MB file that used to
+  need 3.8 GB) or a map-heavy anchor is rejected up front. YAML flow nesting is
+  capped at 128 levels, the parser's own limit. XML files with more than 128
+  namespace bindings in scope, or with excessive namespace-declaration work,
+  are rejected before parsing (a 448 KB file used to take 40 s).
+
+- `no_bidi_controls` and `no_zero_width_chars` no longer skip a file because
+  it contains a NUL byte: a binary-looking file that is otherwise valid UTF-8
+  is scanned, and its findings are reported but not auto-fixed. Binary files
+  that are not valid UTF-8 (images, fonts, archives) are still skipped.
+
+- `file_graph` `require: fresh` no longer reads a target through an in-repo
+  symlink that points outside the repository.
+
+- `alint baseline` no longer writes outside the repository through a
+  `baseline:` path or a committed symlink (a repo-provided path containing
+  `..` is refused), and `alint init` no longer follows a dangling `.alint.yml`
+  symlink (both exit 2). A regenerated baseline keeps its file permissions.
+
+- Terminal output from `list`, `explain`, `suggest`, `facts`, `init`,
+  `baseline`, `validate-config`, `export-agents-md`, `--show-baselined`,
+  `--show-notes` and error messages is sanitized, and the sanitizer now also
+  escapes bidi and zero-width characters. `export-agents-md` sanitizes only
+  when stdout is a terminal, so `> AGENTS.md` writes the same text as
+  `--output`.
+
+- Rule and fact timeouts (`command`, `generated_file_fresh`,
+  `command_idempotent`, the `command` fix op, custom facts) no longer wait on a
+  background grandchild holding the output pipe. When stdin is not a terminal
+  (CI, the LSP, piped runs) on Unix, the child runs in its own process group:
+  a timeout kills the whole group, and descendants left holding the output
+  pipes after a normal exit are killed too. In an interactive terminal the
+  child stays in alint's process group, so Ctrl-C reaches it and password
+  prompts work; there a timeout kills only the direct child.
+
+- CI and release workflows no longer expand dispatch inputs or step outputs
+  inside shell scripts; the release Docker base image is pinned by digest,
+  the Gradle wrapper is checksum-verified, the Homebrew tap push trusts
+  GitHub's published SSH host keys instead of `ssh-keyscan`, and Dependabot
+  covers the npm, editor, Gradle and Docker dependencies. The script-injection
+  gate also catches bracket accessors, function calls and multi-line
+  expressions.
+
+- **RustSec vulnerability advisories now fail CI and the release preflight**
+  (`cargo deny` and `cargo audit`); unmaintained, unsound and yanked notices
+  stay warnings. Waivers go in one place, `deny.toml`
+  `[advisories].ignore`, each with an advisory id and a reason.
+
+### Added
+
+- New per-rule `expect_matches: true` scope assertion: after a rule's `when:`
+  gate is true, alint reports a violation when `paths:` plus `scope_filter:`
+  select no files. The assertion checks the full repository even in
+  `--changed` mode, works in nested `require:` rules, and is rejected for
+  existence and selector rules whose empty sets already have kind-specific
+  meaning.
+
+- New `markdown_links_resolve` rule kind validates Markdown links, images,
+  reference definitions, and explicit reference labels against repository
+  files and directories. Its CommonMark parser ignores code examples, front
+  matter, and HTML comments without misclassifying footnote definitions;
+  reports each bad link at its source location; supports a
+  `relative: forbid` mode for trailing-slash documentation sites; and can map
+  root-absolute URL prefixes back to source directories.
+
+- `alint fix --format json` reports a top-level `dry_run` flag, and skipped
+  items carry a `skip_kind` (both optional in the v1 fix-report schema).
+
+- The `when:` expression language accepts `not not x` and negative integer
+  literals (`facts.n > -1`). A chain of up to 64 `not x and ...` terms parses.
+
+- `alint lsp` resolves the nearest `.alint.yml` per file (or the outermost
+  one with `nested_configs: true`, matching `alint check`), lints every
+  workspace folder, honors `baseline:` and `fix_size_limit`, shows fix
+  availability and the rule-reference link on hover, and supports
+  `--show-notes`. Files outside the workspace folders are not linted.
+
+### Changed
+
+- **Breaking (config):** a template may no longer use a `{{vars.*}}`
+  placeholder in `kind:` or in a fix's `applicability:`, and a fix op's
+  options must be a mapping (`file_remove: {}`), never a sequence. Rules and
+  templates may not use YAML tags, non-string keys or `<<` merge keys.
+
+- **Breaking (config):** an `extends:`'d config may no longer contribute
+  fields to a process-spawning rule by sharing its id; rename the rule. An
+  untrusted remote ruleset may no longer declare `ignore:` or read the
+  environment in `when:` (see Security).
+
+- **Breaking (config):** `registry_paths_resolve` no longer accepts
+  `orphans.unreferenced`; orphan findings use the rule's own `level`, and
+  directories count as orphan candidates.
+
+- **MSRV raised to Rust 1.88** (from 1.85) for `cargo install alint` and the
+  library crates. CI and the release preflight now read the MSRV from
+  `Cargo.toml` and gate publishing on it.
+
+- A content rule that cannot read an in-scope file now reports `could not
+  read file: <error>` at the rule's level (which fails the run at `level:
+  error`) instead of silently passing it, in both `check` and `fix`.
+
+- `alint fix` refuses to replace a file it could not write in place (a
+  read-only file, a `0464` file, or one owned by another user), reported once
+  as a fix error, instead of silently replacing it through rename.
+
+- `alint fix` lists a finding that `check` does not tag fixable (a UTF-16 BOM,
+  a binary bidi finding, an ambiguous reindent) as `unfixable` instead of
+  `skipped`, without running its fixer.
+
+- `alint fix --dry-run` reports a `file_create` whose target is ignored or
+  outside the rule's `paths:` as unresolved (exit 1), as the real run does. A
+  dry run is still one pass; see `alint fix` docs for what only the real run
+  can detect.
+
+- **Baselines:** `file_graph` `acyclic` keys findings per strongly connected
+  component, and `no_case_conflicts` reports directory-level collisions, so
+  baselines covering those findings must be regenerated with `alint baseline`.
+
+- YAML structured rules apply plain `<<` merge keys (a quoted `"<<"` is an
+  ordinary key) and accept custom tags (`!Ref`, `!reference`, ...) by keeping
+  the tagged value.
+
+- `*_path_equals` compares numbers by value in every format (`1` equals
+  `1.0`, exactly, even above 2^53); a string never equals a number.
+
+- `.alint.d/` drop-ins no longer reset top-level settings they leave unset
+  (`respect_gitignore`, `fix_size_limit`, `nested_configs`, `version`). An
+  `extends:`'d config's values for those settings, which were always
+  replaced, are now ignored with a warning.
+
+- `include_manifest_paths` / `exclude_manifest_paths` honor negated
+  workspace entries (`!packages/internal`), applied in order with the last
+  match winning (as npm does), and large member lists are indexed (5k
+  packages over 100k files went from about 4 s to 0.6 s).
+
+- SARIF results without a path are anchored on line 1 of the config file
+  (GitHub Code Scanning drops location-less results), the run declares
+  `columnKind: "unicodeCodePoints"`, and `:` in artifact URIs is
+  percent-encoded.
+
+- `check --changed` without `--base` also includes staged files, and config
+  discovery from a relative start path walks every real ancestor directory.
+
+- A `for_each_dir` / `for_each_file` / `every_matching_has` parent's
+  `message:` now replaces its nested findings' messages.
+
+- The bundled `agent-context` ruleset's `agent-context-no-stale-paths` rule
+  now uses `markdown_paths_resolve`, which can change its findings.
+
+- The GitHub Action carries a baked default binary version and resolves
+  commit-SHA refs to it.
+
+- `json_schema_passes` uses `jsonschema` 0.58.
+
+- The VS Code extension requires VS Code 1.91 or newer (was 1.85); older
+  editors keep the last compatible extension release. It uses
+  `vscode-languageclient` 10, so `alint.trace.server` now takes effect only
+  while the `alint` output channel's log level is Trace.
+
+- Building the JetBrains plugin now needs JDK 21 (Gradle 9.8, IntelliJ
+  Platform Gradle Plugin 2.19, Kotlin 2.4). The plugin itself still supports
+  IntelliJ 2024.2+, and the Marketplace verifier now checks it against
+  2024.2 as well as 2024.3 (it previously checked only 2024.3).
+
+- The release job and every downstream publisher (npm, PyPI, VS Code, Open
+  VSX, JetBrains) can be re-run after a partial failure without failing on an
+  already-published version, and a re-run publishes a release left as a
+  draft. A backport release (or a re-run of an older tag) no longer moves
+  `v0`, the GitHub "Latest" release, Docker `:latest` / `:X.Y`, Homebrew or
+  npm `latest` backwards; an npm backport publishes under `release-X.Y`.
+  Release binaries build with a pinned Rust toolchain (1.98.1) instead of the
+  day's stable.
+
+- `install.sh` runs nothing if its download is truncated, fails clearly when
+  neither `HOME` nor `INSTALL_DIR` is set, and no longer aborts intermittently
+  with SIGPIPE while resolving the latest version. The documented one-liner
+  uses `curl -fsSL`. `npm install` on Windows on ARM installs the x64 binary
+  instead of failing.
+
+- **Rule-kind counts now distinguish implementations from aliases.**
+  `facts.json` format v3 reports 95 canonical rule kinds in
+  `counts.rule_kinds` and 11 alternative spellings in
+  `counts.rule_aliases`; its `rule_kinds` list retains all 106 accepted names
+  for compatibility. The generated docs `manifest.json` format is v4 and
+  carries the same split as `rule_kinds_total` / `rule_aliases_total`.
+
+### Fixed
+
+- `alint fix` no longer reports a fix as applied (exit 0) when the violation
+  still stands on re-check, such as a `file_create` into a gitignored path; it
+  is reported as unresolved and exits 1.
+
+- Glob characters in directory names (Next.js `app/[slug]`, a stray `{`, a
+  `\` on Unix) are matched literally in nested rules' glob options (`paths:`,
+  `select:`, `require:`, ...) and `iter.has_file`, and messages show the real
+  path. `{dir}` for a root-level file no longer renders a leading `/`. `pair`
+  normalizes `.` and `..` in the partner path and reports a partner that
+  resolves outside the repository.
+
+- `command` rules no longer report a false timeout when the tool prints more
+  than about 64 KiB.
+
+- The directory-children index builds in linear time (a 20k-directory tree
+  went from about 40s to milliseconds).
+
+- `file_content_forbidden` (and its `replace` fix), `no_merge_conflict_markers`,
+  `line_max_width` and `max_consecutive_blank_lines` no longer silently skip
+  text files that are not valid UTF-8 (Latin-1, for example). Binary files
+  are still skipped, and `replace` never edits one.
+
+- `file_graph` `acyclic` reports every file on a cycle, once per strongly
+  connected component.
+
+- Structured `set_value` / `remove_value` fixes now apply to JSON and JSONC
+  files containing escaped surrogate pairs (`"\ud83d\ude00"`); such files were
+  reported fixable but always skipped. The fix side still accepts exactly the
+  dialect the check side does (comments and trailing commas only).
+
+- `file_header` matches the header after a leading UTF-8 BOM, so its fixes
+  converge; `file_strip_bom` no longer corrupts UTF-16/UTF-32 files, which are
+  now reported but not fixed.
+
+- `markdown_paths_resolve` normalizes `./` and `..`, recognizes fences inside
+  blockquotes (without closing a fence on a quoted fence line inside it),
+  keeps scanning past an unmatched backtick in linear time, and reports
+  columns in code points; `markdown_links_resolve` reports `%2F...` targets
+  instead of skipping them.
+
+- `no_case_conflicts` detects file/directory and directory/directory case
+  collisions, alongside same-directory collisions beneath them;
+  `no_illegal_windows_names` follows Microsoft's naming rules
+  (control characters, `\`, `COM0`/`LPT0`, superscript ports, `CON .txt`).
+
+- An `extends:` chain that reaches the same file along many paths loads it
+  once (a diamond chain used to take exponential time).
+
+- An unknown key in an `extends:` entry (`excpet:`) or a fact with a second
+  kind key is a load error instead of being ignored.
+
+- Config parse errors name the file (or remote URL) they came from and no
+  longer print the parser message twice.
+
+- The published config schema covers all 26 fix ops, and the
+  `applicability` field of the 24 that take options.
+
+- Fixes to files with very long names no longer fail with `ENAMETOOLONG`;
+  baseline fingerprints no longer conflate `a\b.txt` with `a/b.txt` on Unix;
+  identical same-offset inserts are applied once.
+
+- LSP diagnostics use UTF-16 columns, findings on `.alint.yml` are no longer
+  wiped after a check, a full check no longer overwrites diagnostics for
+  unsaved buffers, a slow evaluation of an older buffer no longer replaces
+  newer results, a broken config clears stale diagnostics, and the server
+  exits on `exit` with the spec's exit code.
+
+- A very large `timeout:` no longer crashes alint or the LSP.
+
+- `ALINT_LOG` output follows `--color`, `NO_COLOR` and the stderr TTY; a
+  closed stdout (`| head`) exits quietly with the run's normal exit code in
+  every subcommand, including `validate-config` and `init`;
+  GitHub, GitLab and JUnit output use `/` separators on Windows.
+
+- CI: `cargo deny` runs on `deny.toml`-only changes, packaging files get a
+  pre-merge job, the shell harnesses run for every file they guard
+  (`install.sh`, the Dockerfile, npm, Dependabot, the Gradle wrapper), the
+  action self-test exercises the commit's own `install.sh`, and the CI summary
+  fails when change detection fails.
+
+- `markdown_paths_resolve` now recognizes backticked command invocations such
+  as `` `tools/run.ts --check` ``: when the complete span is not a path, the
+  rule accepts it if its command path resolves and the remainder is
+  argument-shaped. Complete spans are resolved first, so real paths containing
+  whitespace continue to work, while a missing command path still fails.
+
+- Docs-bundle publishing now keeps generated rule indexes pinned to the
+  released rule-page set, rejects dangling rule-index links before publishing,
+  serializes every trigger that writes the shared branch, and uses a
+  non-forced push so a stale writer cannot overwrite a newer bundle.
+
+- Cache-backed `scope_filter.changed_since` and manifest-derived predicates are
+  now resolved for nested `require:` rules as well as top-level rules. Deeply
+  nested rule trees are also validated recursively during config loading, so an
+  invalid descendant cannot remain hidden when its parent selector matches
+  nothing.
+
+- **Documentation audit follow-up.** Search descriptions are plain text and
+  capped at 158 characters by a regression test; malformed changelog code
+  spans, a stale runtime documentation URL, duplicate migration links, retired
+  benchmark routes, stale benchmark headlines, and mixed-era Kubernetes case
+  study claims are corrected.
+
 ## [0.17.0] - 2026-10-01
+
+This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.
 
 ### Added
 
@@ -853,7 +1215,7 @@ read hang.
   metacharacters, a control byte, and a non-UTF-8 byte through all eight
   formats. (E2E sweep)
 - **Markdown output no longer splits a heading on a newline-in-path.** A file
-  whose name contains a `\n`/`\r` (legal on Unix) broke out of the `## \`path\``
+  whose name contains a `\n`/`\r` (legal on Unix) broke out of the `` ## `path` ``
   inline-code heading, orphaning the rest onto a following line. `md_inline_code`
   now collapses those control chars to a space (inline code is single-line), and
   the weird-path matrix asserts every Markdown heading stays complete. (review
@@ -3041,7 +3403,7 @@ configs before they shipped to launch readers).
   enforces the LSP-magic-comment line on every example.
 - **`crates/alint-e2e/tests/coverage_audit_rules_md_drift.rs` —
   per-ruleset table drift audit.** Walks every YAML under
-  `crates/alint-dsl/rulesets/v1/`, parses every `### `alint://bundled/...@v1``
+  `crates/alint-dsl/rulesets/v1/`, parses every `` ### `alint://bundled/...@v1` ``
   section in `docs/rules.md`, asserts identical rule-id sets per
   ruleset. Caught the same drift class on 3 more rulesets the day
   it landed (ci/github-actions, agent-hygiene, agent-context); all
@@ -5974,8 +6336,8 @@ outputs byte-equivalent for full-tree runs.
 
 - **`alint check --changed [--base=<ref>]`** and the same
   flags on `alint fix`. With `--base`, the changed-set is
-  derived from `git diff --name-only --relative
-  <base>...HEAD` (three-dot — merge-base diff, the right
+  derived from `git diff --name-only --relative <base>...HEAD`
+  (three-dot — merge-base diff, the right
   shape for PR checks). Without `--base`, it's
   `git ls-files --modified --others --exclude-standard`
   (working-tree diff, the right shape for pre-commit). The
@@ -7065,7 +7427,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/asamarts/alint/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/asamarts/alint/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/asamarts/alint/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/asamarts/alint/compare/v0.15.2...v0.16.0

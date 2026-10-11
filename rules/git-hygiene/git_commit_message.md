@@ -70,7 +70,7 @@ jobs:
 | `since` | string |  | `null` | Git ref to use as the base of the commit range. When set, validates every commit in `<since>..HEAD` instead of just HEAD. Accepts anything `git rev-parse` does: SHA (full or abbreviated), branch (`origin/main`), tag (`v1.2.3`), or relative ref (`HEAD~5`). Supports alint's template syntax, so CI can pass a SHA through an environment variable (for example, `since: "{{env.ALINT_BASE_SHA \| default('origin/main')}}"`). The older POSIX `${VAR}` / `${VAR:-default}` form is deprecated and will be removed in v1.0. |
 | `subject_max_length` | integer (>= 1) |  | `null` | Maximum number of characters allowed in the subject line. Common values: 50 (Tim Pope's recommendation), 72 (GitHub PR-title cutoff). |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

@@ -16,7 +16,7 @@ Same shape as the `*_equals` variants, but the asserted value is a **regex** mat
 | `matches` | string | yes |  | Rust-regex pattern to match against the value at `path`. |
 | `path` | string | yes |  | `JSONPath` expression rooted at `$`. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

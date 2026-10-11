@@ -26,7 +26,7 @@ Outside a git repo, on untracked files, or when blame fails for any other reason
 | `max_age_days` | integer (>= 1) | yes |  | Minimum line age (in days) for a matching line to fire as a violation. Lines younger than this pass silently. Common values: 90 (one quarter), 180 (half a year), 365 (a full year of debt). |
 | `pattern` | string | yes |  | Rust-regex pattern applied to each blame line's content. Capture group 1 (when present) is exposed as `{{ctx.match}}` in the message template; without a capture group, `{{ctx.match}}` substitutes the full match. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

@@ -16,7 +16,7 @@ Cap runs of blank lines to `max`. A blank line is empty or whitespace-only.
 |---|---|---|---|---|
 | `max` | integer (>= 0) | yes |  | Maximum number of blank lines allowed in a row. `0` means no blank lines at all. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

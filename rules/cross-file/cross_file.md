@@ -31,7 +31,7 @@ A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, 
 | `source` | object { `extract`, `file`, `files` } | yes |  | The file whose extracted value(s) form the reference side of the relation: a single `{ file, extract }`, or (set relations only) `{ files: <glob>, extract }` whose matches are unioned into one set. |
 | `targets` | targets spec |  |  | The file(s) compared against the source, one relation check per target. Absent for `resolves` (the target is the filesystem). |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

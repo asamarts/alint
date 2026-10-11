@@ -1,6 +1,6 @@
 ---
 title: 'node@v1'
-description: 'Hygiene checks for Node.js / npm / pnpm / yarn projects. alint bundled ruleset node@v1.'
+description: 'node@v1 bundled alint ruleset: Hygiene checks for Node.js / npm / pnpm / yarn projects.'
 ---
 
 Hygiene checks for Node.js / npm / pnpm / yarn projects. Adopt
@@ -20,6 +20,23 @@ alongside Rust / Python / Go subdirectories. Override
 `has_node` with your own `facts:` block if you need a different
 heuristic (e.g. detect `deno.json` or `bun.lock`).
 
+## What it checks
+
+8 rules. Each links to its section below, which explains the check and shows its definition.
+
+| Rule | Reports |
+| --- | --- |
+| [node-package-json-exists](#node-package-json-exists)<br>`error` | Node project: package.json at the root is required. |
+| [node-has-lockfile](#node-has-lockfile)<br>`warning` | A lockfile should be committed (package-lock.json / pnpm-lock.yaml / yarn.lock / bun.lock). |
+| [node-no-tracked-node-modules](#node-no-tracked-node-modules)<br>`error` | `node_modules/` must not be committed; add it to .gitignore. |
+| [node-no-tracked-dist](#node-no-tracked-dist)<br>`info` | Build-output directories shouldn't be tracked. |
+| [node-engine-or-nvmrc](#node-engine-or-nvmrc)<br>`info` | Pin the Node.js version with `.nvmrc`, `.node-version`, or `.tool-versions` so local and CI installs match. |
+| [node-sources-final-newline](#node-sources-final-newline)<br>`info` | File must end with a single \n. |
+| [node-sources-no-trailing-whitespace](#node-sources-no-trailing-whitespace)<br>`info` | No line may end with space or tab. |
+| [node-sources-no-bidi](#node-sources-no-bidi)<br>`error` | Trojan Source (CVE-2021-42574): bidi override chars are rejected in JS/TS sources. |
+
+All 8 rules run only when `facts.has_node` holds, so the ruleset stays quiet in repositories it doesn't apply to.
+
 ## Rules
 
 ### `node-package-json-exists`
@@ -30,7 +47,19 @@ heuristic (e.g. detect `deno.json` or `bun.lock`).
 
 > Node project: package.json at the root is required.
 
+```yaml
+- id: node-package-json-exists
+  when: facts.has_node
+  kind: file_exists
+  paths: package.json
+  root_only: true
+  level: error
+  message: "Node project: package.json at the root is required."
+```
+
 ### `node-has-lockfile`
+
+Accept any of the four common lockfiles — npm, pnpm, yarn, bun. At least one should be committed for reproducible installs.
 
 - **kind**: [`file_exists`](/docs/rules/existence/file_exists/)
 - **level**: `warning`
@@ -38,6 +67,22 @@ heuristic (e.g. detect `deno.json` or `bun.lock`).
 - **policy**: <https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json>
 
 > A lockfile should be committed (package-lock.json / pnpm-lock.yaml / yarn.lock / bun.lock).
+
+```yaml
+- id: node-has-lockfile
+  when: facts.has_node
+  kind: file_exists
+  paths:
+    - "package-lock.json"
+    - "pnpm-lock.yaml"
+    - "yarn.lock"
+    - "bun.lock"
+    - "bun.lockb"
+  root_only: true
+  level: warning
+  message: "A lockfile should be committed (package-lock.json / pnpm-lock.yaml / yarn.lock / bun.lock)."
+  policy_url: "https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json"
+```
 
 ### `node-no-tracked-node-modules`
 
@@ -47,13 +92,39 @@ heuristic (e.g. detect `deno.json` or `bun.lock`).
 
 > `node_modules/` must not be committed; add it to .gitignore.
 
+```yaml
+- id: node-no-tracked-node-modules
+  when: facts.has_node
+  kind: dir_absent
+  paths: "**/node_modules"
+  level: error
+  message: "`node_modules/` must not be committed; add it to .gitignore."
+```
+
 ### `node-no-tracked-dist`
+
+Common build-output directory names. Users with legitimate reasons to ship a built `dist/` (e.g. a typed-package preview) can set this rule's `level: off`.
+
+Changed in v0.9.18: gated on `has_ancestor: package.json` to scope the check per-JS-package — without this gate the rule fires on every `dist/` repo-wide once any `package.json` exists, which causes false positives in polyglot monorepos (Rust crate source dirs named `dist/`, etc.).
 
 - **kind**: [`dir_absent`](/docs/rules/existence/dir_absent/)
 - **level**: `info`
 - **when**: `facts.has_node`
 
 > Build-output directories shouldn't be tracked. Set `level: off` if this one is intentionally shipped.
+
+```yaml
+- id: node-no-tracked-dist
+  when: facts.has_node
+  kind: dir_absent
+  paths: ["**/dist", "**/.next", "**/.nuxt", "**/coverage", "**/.turbo"]
+  scope_filter:
+    has_ancestor: package.json
+  level: info
+  message: >-
+    Build-output directories shouldn't be tracked. Set
+    `level: off` if this one is intentionally shipped.
+```
 
 ### `node-engine-or-nvmrc`
 
@@ -63,17 +134,55 @@ heuristic (e.g. detect `deno.json` or `bun.lock`).
 
 > Pin the Node.js version with `.nvmrc`, `.node-version`, or `.tool-versions` so local and CI installs match.
 
+```yaml
+- id: node-engine-or-nvmrc
+  when: facts.has_node
+  kind: file_exists
+  paths: [".nvmrc", ".node-version", ".tool-versions"]
+  root_only: true
+  level: info
+  message: >-
+    Pin the Node.js version with `.nvmrc`, `.node-version`,
+    or `.tool-versions` so local and CI installs match.
+```
+
 ### `node-sources-final-newline`
 
 - **kind**: [`final_newline`](/docs/rules/text-hygiene/final_newline/)
 - **level**: `info`
 - **when**: `facts.has_node`
+- **fix**: `file_append_final_newline` (applied by `alint fix`)
+
+```yaml
+- id: node-sources-final-newline
+  when: facts.has_node
+  kind: final_newline
+  paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+  scope_filter:
+    has_ancestor: package.json
+  level: info
+  fix:
+    file_append_final_newline: {}
+```
 
 ### `node-sources-no-trailing-whitespace`
 
 - **kind**: [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/)
 - **level**: `info`
 - **when**: `facts.has_node`
+- **fix**: `file_trim_trailing_whitespace` (applied by `alint fix`)
+
+```yaml
+- id: node-sources-no-trailing-whitespace
+  when: facts.has_node
+  kind: no_trailing_whitespace
+  paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+  scope_filter:
+    has_ancestor: package.json
+  level: info
+  fix:
+    file_trim_trailing_whitespace: {}
+```
 
 ### `node-sources-no-bidi`
 
@@ -84,127 +193,52 @@ heuristic (e.g. detect `deno.json` or `bun.lock`).
 
 > Trojan Source (CVE-2021-42574): bidi override chars are rejected in JS/TS sources.
 
-## Source
+```yaml
+- id: node-sources-no-bidi
+  when: facts.has_node
+  kind: no_bidi_controls
+  paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
+  scope_filter:
+    has_ancestor: package.json
+  level: error
+  message: "Trojan Source (CVE-2021-42574): bidi override chars are rejected in JS/TS sources."
+  policy_url: "https://trojansource.codes/"
+```
 
-The full ruleset definition is committed at [`crates/alint-dsl/rulesets/v1/node.yml`](https://github.com/asamarts/alint/blob/main/crates/alint-dsl/rulesets/v1/node.yml) in the alint repo (the snapshot below is generated verbatim from that file).
+## Facts
+
+The `when:` clauses above read these facts. Each is resolved once per run; [`alint facts`](/docs/cli/facts/) prints what they resolved to in your repository.
 
 ```yaml
-# alint://bundled/node@v1
-#
-# Hygiene checks for Node.js / npm / pnpm / yarn projects. Adopt
-# it with:
-#
-#     extends:
-#       - alint://bundled/node@v1
-#
-# Gated with `when: facts.has_node` (true if any `package.json`
-# exists anywhere in the tree) plus a per-rule
-# `scope_filter: { has_ancestor: package.json }` on per-file
-# content rules so they only apply to files inside a Node package
-# — useful in polyglot monorepos where Node packages sit
-# alongside Rust / Python / Go subdirectories. Override
-# `has_node` with your own `facts:` block if you need a different
-# heuristic (e.g. detect `deno.json` or `bun.lock`).
-
-version: 1
-
 facts:
   - id: has_node
     any_file_exists: [package.json, "**/package.json"]
-
-rules:
-  # --- Manifest + lockfiles -----------------------------------------
-  - id: node-package-json-exists
-    when: facts.has_node
-    kind: file_exists
-    paths: package.json
-    root_only: true
-    level: error
-    message: "Node project: package.json at the root is required."
-
-  - id: node-has-lockfile
-    when: facts.has_node
-    # Accept any of the four common lockfiles — npm, pnpm, yarn,
-    # bun. At least one should be committed for reproducible installs.
-    kind: file_exists
-    paths:
-      - "package-lock.json"
-      - "pnpm-lock.yaml"
-      - "yarn.lock"
-      - "bun.lock"
-      - "bun.lockb"
-    root_only: true
-    level: warning
-    message: "A lockfile should be committed (package-lock.json / pnpm-lock.yaml / yarn.lock / bun.lock)."
-    policy_url: "https://docs.npmjs.com/cli/v10/configuring-npm/package-lock-json"
-
-  # --- Build artefacts must not be tracked --------------------------
-  - id: node-no-tracked-node-modules
-    when: facts.has_node
-    kind: dir_absent
-    paths: "**/node_modules"
-    level: error
-    message: "`node_modules/` must not be committed; add it to .gitignore."
-
-  - id: node-no-tracked-dist
-    when: facts.has_node
-    # Common build-output directory names. Users with legitimate
-    # reasons to ship a built `dist/` (e.g. a typed-package
-    # preview) can set this rule's `level: off`.
-    #
-    # v0.9.18: gated on `has_ancestor: package.json` to scope the
-    # check per-JS-package — without this gate the rule fires on
-    # every `dist/` repo-wide once any `package.json` exists, which
-    # causes false positives in polyglot monorepos (Rust crate
-    # source dirs named `dist/`, etc.).
-    kind: dir_absent
-    paths: ["**/dist", "**/.next", "**/.nuxt", "**/coverage", "**/.turbo"]
-    scope_filter:
-      has_ancestor: package.json
-    level: info
-    message: >-
-      Build-output directories shouldn't be tracked. Set
-      `level: off` if this one is intentionally shipped.
-
-  # --- Node version pinning ----------------------------------------
-  - id: node-engine-or-nvmrc
-    when: facts.has_node
-    kind: file_exists
-    paths: [".nvmrc", ".node-version", ".tool-versions"]
-    root_only: true
-    level: info
-    message: >-
-      Pin the Node.js version with `.nvmrc`, `.node-version`,
-      or `.tool-versions` so local and CI installs match.
-
-  # --- Source-file hygiene on JS / TS sources -----------------------
-  - id: node-sources-final-newline
-    when: facts.has_node
-    kind: final_newline
-    paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
-    scope_filter:
-      has_ancestor: package.json
-    level: info
-    fix:
-      file_append_final_newline: {}
-
-  - id: node-sources-no-trailing-whitespace
-    when: facts.has_node
-    kind: no_trailing_whitespace
-    paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
-    scope_filter:
-      has_ancestor: package.json
-    level: info
-    fix:
-      file_trim_trailing_whitespace: {}
-
-  - id: node-sources-no-bidi
-    when: facts.has_node
-    kind: no_bidi_controls
-    paths: ["src/**/*.{js,jsx,ts,tsx,mjs,cjs}", "lib/**/*.{js,jsx,ts,tsx,mjs,cjs}"]
-    scope_filter:
-      has_ancestor: package.json
-    level: error
-    message: "Trojan Source (CVE-2021-42574): bidi override chars are rejected in JS/TS sources."
-    policy_url: "https://trojansource.codes/"
 ```
+
+## Customize
+
+Every rule here can be overridden by id from your own `.alint.yml`: change its `level`, or set `level: off` to drop it. An id that doesn't exist is an error at config load, so a typo can't silently pass.
+
+```yaml
+extends:
+  - alint://bundled/node@v1
+rules:
+  - id: node-package-json-exists
+    level: off
+  - id: node-has-lockfile
+    level: error
+```
+
+To take only part of the ruleset, filter it where you extend it with `only:` or `except:`:
+
+```yaml
+extends:
+  - url: alint://bundled/node@v1
+    except: [node-package-json-exists]
+```
+
+[Bundled rulesets](/docs/concepts/composition/bundled-rulesets/) covers versioning and how rulesets combine.
+
+## Source
+
+The full ruleset definition, comments included, is committed at [`crates/alint-dsl/rulesets/v1/node.yml`](https://github.com/asamarts/alint/blob/main/crates/alint-dsl/rulesets/v1/node.yml) in the alint repo.

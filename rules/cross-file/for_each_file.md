@@ -34,7 +34,7 @@ The `iter` namespace exposes:
 | `select` | string or list of string | yes |  | Glob(s) selecting the files to iterate - a single glob, or a list with `!`-prefixed excludes. |
 | `when_iter` | string |  |  | Per-iteration `when:` filter - see rule_for_each_dir.when_iter. `iter.has_file(...)` always evaluates to false on file iteration; useful predicates here include `iter.basename`, `iter.ext`, `iter.parent_name`. |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

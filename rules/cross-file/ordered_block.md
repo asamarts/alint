@@ -25,7 +25,7 @@ Fix: `insert_line` — splice a missing `require:` line at its SORTED position (
 | `start` | string |  | `null` | Marker line opening a block (matched on the trimmed line). Optional - omit to anchor the block at the start of the file. |
 | `unique` | boolean |  | `false` | When true, also forbid duplicate (equal) entries within a block. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

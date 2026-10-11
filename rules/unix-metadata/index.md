@@ -6,6 +6,8 @@ sidebar:
   label: 'Unix metadata'
 ---
 
+The rules that read the `+x` bit (`executable_bit`, `executable_has_shebang`, `shebang_has_executable`) are no-ops on Windows, which has no executable bit, so the same config runs unchanged on every platform. `no_symlinks` and `file_shebang` check every platform.
+
 Rule kinds in the **Unix metadata** family. Each rule below links to its own page with options, an example, and any auto-fix support.
 
 | Rule | Description |

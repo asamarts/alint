@@ -4,8 +4,8 @@
   "rows": [
     {
       "version": "v0.17.0",
-      "date": "?",
-      "headline": "—",
+      "date": "2026-10-01",
+      "headline": "This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.",
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4071.061841146666,

@@ -14,7 +14,7 @@ File must be at most `max_bytes` in size. Catches accidental large-blob commits.
 |---|---|---|---|---|
 | `max_bytes` | integer (>= 0) | yes |  | Maximum allowed file size in bytes. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

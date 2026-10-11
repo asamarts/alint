@@ -34,7 +34,7 @@ As with `generated_file_fresh`, the optional `workdir` (the child's working dire
 | `timeout` | integer (>= 1) |  | `null` | Checker timeout in seconds (default 120). On timeout the child is killed and one violation is emitted. |
 | `workdir` | string |  | `null` | Checker cwd, relative to the lint root (default: lint root). |
 
-Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths`. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

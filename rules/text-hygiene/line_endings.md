@@ -14,7 +14,7 @@ Every line ending matches `target`: `lf` or `crlf`. Mixed endings in a single fi
 |---|---|---|---|---|
 | `target` | one of `lf` \| `crlf` | yes |  | Required line ending style: `lf` or `crlf`. Mixed endings within a file also fail. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

@@ -23,7 +23,7 @@ Heuristic, with a non-zero false-positive surface — defaults are `warning`-lev
 | `skip_leading_lines` | integer (>= 0) |  | `30` | Skip blocks whose first line is at or before this line number. Default 30 - covers typical license headers without false-positive flagging them as commented-out code. |
 | `threshold` | number (0..1) |  | `0.5` | Density floor for code-shapedness. Higher = stricter. Default 0.5 sits at the midpoint between obvious-prose (0.0) and obvious-code (1.0); lower it to widen the catch (more FPs), raise it to narrow. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

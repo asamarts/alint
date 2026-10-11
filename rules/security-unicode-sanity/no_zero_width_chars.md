@@ -18,7 +18,7 @@ Same binary policy as `no_bidi_controls`: a binary-looking file is scanned only 
 
 _This rule takes no kind-specific options._
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

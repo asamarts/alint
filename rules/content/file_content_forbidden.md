@@ -16,7 +16,7 @@ The pattern is matched against the raw bytes, so a file that is not valid UTF-8 
 |---|---|---|---|---|
 | `pattern` | string | yes |  | Rust regex. File contents must NOT match. |
 
-Plus the common `paths`, `level`, `id`, and `when` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

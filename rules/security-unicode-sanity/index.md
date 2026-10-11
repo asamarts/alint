@@ -6,6 +6,8 @@ sidebar:
   label: 'Security / Unicode sanity'
 ---
 
+Checks for problems that slip past code review: content that reads one way to a reviewer and another way to a compiler, a terminal or git (invisible or direction-changing Unicode, non-ASCII bytes, leftover merge-conflict markers); content, imports, tracked paths or symlinks a project forbids; files that must match a pinned digest or the output of their generator; and commits that must be signed or come from an allowed author. A diff view tends to render the first group harmlessly, which is why a mechanical check is the reliable defence.
+
 Rule kinds in the **Security / Unicode sanity** family. Each rule below links to its own page with options, an example, and any auto-fix support.
 
 | Rule | Description |
@@ -14,7 +16,7 @@ Rule kinds in the **Security / Unicode sanity** family. Each rule below links to
 | [`file_hash`](/docs/rules/content/file_hash/) | Content SHA-256 must equal the expected digest. |
 | [`file_is_ascii`](/docs/rules/content/file_is_ascii/) | Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. |
 | [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/) | Flag `<<<<<<< `, `=======`, `>>>>>>> `, `\|\|\|\|\|\|\| ` markers at the start of a line, almost always left over from an unresolved merge. |
-| [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) | Flag Trojan-Source bidi override characters (U+202A,202E, U+2066,2069). |
+| [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) | Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). |
 | [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) | Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). |
 | [`no_symlinks`](/docs/rules/unix-metadata/no_symlinks/) | Flag tracked paths that are symbolic links. |
 | [`git_no_denied_paths`](/docs/rules/git-hygiene/git_no_denied_paths/) | Fire when any tracked file matches a configured glob denylist. |
