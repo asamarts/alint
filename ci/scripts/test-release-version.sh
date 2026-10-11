@@ -1,6 +1,11 @@
 #!/usr/bin/env bash
 # Regression tests for the release tag/workspace/Action version tripwire.
 set -euo pipefail
+# check-release-version.sh falls back to GITHUB_REF_NAME when no tag is passed.
+# On a tag-triggered run (the release preflight) that is the release tag, which
+# would make the "missing release tag" case pass; every case passes its tag
+# explicitly, so clear the fallback.
+unset GITHUB_REF_NAME
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 TMP_ROOT=$(mktemp -d)
