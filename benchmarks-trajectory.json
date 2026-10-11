@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.18.0",
+      "date": "2026-10-11",
+      "headline": "A security and correctness release from a whole-repository audit and an adversarial re-review of its fixes.",
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4032.020682213334,
+          "stddev_ms": 81.06525878040239,
+          "display": "4.03 s ± 0.08"
+        },
+        "s2_1m_full": {
+          "mean_ms": 19514.839420780005,
+          "stddev_ms": 68.43041987872476,
+          "display": "19.51 s ± 0.07"
+        },
+        "s3_1m_full": {
+          "mean_ms": 475123.19870572665,
+          "stddev_ms": 1667.5152873785696,
+          "display": "475.1 s ± 1.7"
+        },
+        "s4_1m_full": {
+          "mean_ms": 16596.008051173332,
+          "stddev_ms": 12.834049049156393,
+          "display": "16.60 s ± 0.01"
+        }
+      }
+    },
+    {
       "version": "v0.17.0",
       "date": "2026-10-01",
       "headline": "This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.",
