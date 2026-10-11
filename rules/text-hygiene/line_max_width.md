@@ -8,6 +8,8 @@ categories: ['text-hygiene']
 
 Cap line length in characters (not bytes — code points). Optional `tab_width` for tab expansion.
 
+A text file with stray invalid UTF-8 is measured (each invalid byte counts as one column) rather than skipped; binary-looking files are skipped.
+
 ## Options
 
 | Option | Type | Required | Default | Description |

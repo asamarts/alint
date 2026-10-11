@@ -24,6 +24,8 @@ The `iter` namespace exposes:
 
 `when_iter:` composes with the rule's outer `when:` (whole-rule gate, evaluated once) and with each nested rule's `when:` (which now also sees the same `iter.*` context). Same field is available on `for_each_file` and `every_matching_has`.
 
+**Token values are literal paths.** When a token expands into a nested option that alint compiles as a glob (`paths:`, and per kind options such as `dir_contains`'s `select` / `require`, `dir_only_contains`'s `select` / `allow`, `unique_by`'s `select`, `pair`'s `primary`, or a nested `for_each_*`'s own `select`), its value is glob-escaped, so a directory named `app/[slug]` or `pkgs/*` matches only itself rather than acting as a character class or wildcard. The template text around the token keeps its glob meaning (`"{path}/*.tsx"`). Options that are regexes (`for_each_match`'s `select`, `pattern`) or literal paths (`pair`'s `partner`) receive the value unescaped. Messages show the real path, not its escaped form.
+
 ## Options
 
 | Option | Type | Required | Default | Description |

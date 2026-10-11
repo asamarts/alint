@@ -22,6 +22,8 @@ never swallowed into a pass. Single-shot, opt-in. Trust-gated
 like `command` (see below): declarable only in your own
 top-level config.
 
+As with `generated_file_fresh`, the optional `workdir` (the child's working directory, relative to the lint root) must stay inside the repository: an absolute path or a `..` that climbs out is rejected when the config loads, and a `workdir` that resolves outside the repository through a symlink is refused at run time (reported as a spawn failure) instead of running the command there.
+
 ## Options
 
 | Option | Type | Required | Default | Description |

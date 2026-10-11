@@ -117,6 +117,7 @@ info [md-trim]:
 
 Each applied line names the file in its summary; skipped and unfixable lines carry it as a prefix. A file over `fix_size_limit`, or a `content_from:` source that is missing, shows on its rule as `(skipped: <reason>)` and lands in the `skipped` count instead.
 
+A finding that `check` does not tag as fixable even though its rule declares a fix (a UTF-16 BOM, a bidi control in a binary-looking file, an ambiguous reindent) is listed as unfixable without running the fixer, and lands in the `unfixable` count.
 
 ## Going deeper
 

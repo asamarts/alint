@@ -8,6 +8,8 @@ categories: ['security-unicode-sanity', 'encoding']
 
 Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). Defense against [CVE-2021-42574](https://trojansource.codes/).
 
+A text file with stray invalid UTF-8 is still scanned, so a junk byte cannot hide a control. A binary-looking file (for example one with a NUL byte) is scanned when it is valid UTF-8, so a NUL byte cannot hide a control in a crafted source file either; a binary-looking file that is not valid UTF-8 (images, fonts, archives) is skipped, which keeps `paths: "**/*"` free of false positives from random binary bytes. A finding in a binary-looking file is reported but not auto-fixed (`file_strip_bidi` refuses to edit binary content).
+
 ## Options
 
 _This rule takes no kind-specific options._

@@ -10,6 +10,7 @@ Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leadin
 
 As of v0.14 the detection set also covers U+2060 (word joiner) and U+180E (Mongolian vowel separator).
 
+Same binary policy as `no_bidi_controls`: a binary-looking file is scanned only when it is valid UTF-8 (so a NUL byte cannot hide a character), invalid-UTF-8 binaries are skipped, and a finding in a binary-looking file is reported but not auto-fixed.
 
 ---
 

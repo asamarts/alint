@@ -8,6 +8,8 @@ categories: ['security-unicode-sanity', 'text-hygiene']
 
 Flag `<<<<<<< `, `=======`, `>>>>>>> `, `||||||| ` markers at the start of a line — almost always left over from an unresolved merge. The anchor markers carry a trailing ref (`<<<<<<< HEAD`), so they never collide with prose; a bare `=======` is reported only when the file also contains one of those anchors, because on its own a seven-character `=======` is indistinguishable from a reST/Markdown setext heading underline (so docs trees no longer need to be excluded).
 
+A text file with stray invalid UTF-8 is still scanned rather than skipped; a binary-looking file that is not valid UTF-8 (an image, an archive) is skipped.
+
 ## Options
 
 _This rule takes no kind-specific options._

@@ -12,6 +12,7 @@ Query a structured document with a JSONPath expression and assert every match de
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
 - Unparseable files — one violation per file (not silently skipped).
+- Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. The comparison is exact: an integer equals a float only when the float is a whole number of exactly that value, so `9007199254740993` does not equal `9007199254740992.0` even though both round to the same 64-bit float. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
 
 <a id="xml-mapping"></a>
 **XML mapping** applies to every XML surface: `xml_path_*`, `json_schema_passes` `format: xml`, and the `xml:` extract used by `cross_file` / `file_graph` / `registry_paths_resolve`. XML is mapped to the queryable tree with the xmltodict-style convention so the JSONPath reads like the XML — the document is `{ <root-element>: … }` (`$.Project…`, `$.project…`); attributes are `@name` keys (`['@Version']`, in bracket notation, since `.@Version` is not valid JSONPath); a leaf element collapses to its text (`<TargetFramework>net8.0</TargetFramework>` → `"net8.0"`); namespaces flatten to the local name (Maven's default `pom.xml` namespace just works). Two properties of XML's data model to keep in mind:

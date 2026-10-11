@@ -8,6 +8,7 @@ categories: ['content']
 
 The first N lines must match a regex (line-oriented). For a byte-level prefix check, prefer `file_starts_with`.
 
+A leading UTF-8 BOM is not part of the header: the lines are read after it, which is where both fixes insert the header, so a `^`-anchored pattern matches a BOM file and the fix converges.
 
 Fix: `file_prepend` — inject declared content at the top, at BOF (after any UTF-8 BOM, which it preserves). Blind to a shebang / XML declaration (it would push either off line 1) -- use `insert_header` when that matters.
 

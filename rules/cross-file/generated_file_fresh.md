@@ -11,6 +11,8 @@ A committed artefact must equal what a declared `command` generator produces, in
 - **stdout mode** (`file:`) — the generator writes its single output to stdout; alint captures it and compares to the one committed `file`. Never writes the tree.
 - **mutating / in-place mode** (`outputs:`, a glob or list) — for the common `make gen && git diff --exit-code` pattern, where the generator rewrites files in place. alint **snapshots** the `outputs`, runs the generator, **diffs** (flagging each stale / newly-created / removed file), and **restores the snapshot** — so `alint check` leaves the working tree byte-identical (the restore is panic-safe). The generator must confine its writes to `outputs`.
 
+The optional `workdir` (the child's working directory, relative to the lint root) must stay inside the repository: an absolute path or a `..` that climbs out is rejected when the config loads, and a `workdir` that resolves outside the repository through a symlink is refused at run time (reported as a spawn failure) instead of running the command there.
+
 ## Options
 
 | Option | Type | Required | Default | Description |
