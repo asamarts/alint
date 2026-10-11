@@ -22,6 +22,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   concurrently,** recovering most of the ~1.8 ms v0.18.0 added per run
   (18.2 to 16.7 ms on a 1,000-file tree).
 
+### Fixed
+
+- **`install.sh` no longer fails with a bare 403 resolving the latest
+  release.** It looked the version up with one unauthenticated GitHub API
+  call, which shares a 60-requests-per-hour limit per IP address; on shared
+  CI runners that limit ran out and the install (and the GitHub Action's
+  default version) failed. It now follows github.com's `/releases/latest`
+  redirect, which isn't rate limited, falls back to the API, checks the tag's
+  format before using it, and retries transient download errors.
+
 ## [0.18.0] - 2026-10-11
 
 A security and correctness release from a whole-repository audit and an

@@ -129,5 +129,69 @@ smoke_case "pre-signing tag (no bundle)"         v0.15.0 0 pass 0
 smoke_case "numeric compare (0.9 < 0.15.1)"      v0.9.0  0 pass 0
 smoke_case "numeric compare (0.100 > 0.15.1)"    v0.100.0 0 fail 1
 
+# `latest` resolution: github.com's /releases/latest redirect first (not subject
+# to the REST API's per-IP limit, which 403'd installs on shared CI runners),
+# the REST API as fallback, each tag validated before it reaches a URL. Stubbed
+# curl: the redirect's final URL comes from $REDIRECT_URL (or exit 22 when
+# unset), the API body from $API_JSON (or exit 22), and every download fails so
+# a run stops right after resolution.
+mkdir -p "$sandbox/latestbin"
+cat > "$sandbox/latestbin/curl" <<'STUB'
+#!/usr/bin/env bash
+echo "curl $*" >> "$STUB_LOG"
+url="${*: -1}"
+case "$url" in
+  */releases/latest)
+    if [[ "$url" == https://api.github.com/* ]]; then
+      [[ -n "${API_JSON:-}" ]] || exit 22
+      printf '%s\n' "$API_JSON"
+    else
+      [[ -n "${REDIRECT_URL:-}" ]] || exit 22
+      printf '%s' "$REDIRECT_URL"
+    fi ;;
+  *) exit 22 ;;
+esac
+STUB
+cat > "$sandbox/latestbin/uname" <<'STUB'
+#!/bin/sh
+case "$1" in -s) echo Linux ;; -m) echo x86_64 ;; esac
+STUB
+chmod +x "$sandbox/latestbin/curl" "$sandbox/latestbin/uname"
+latest_case() { # latest_case <label> <want tag | FAIL> <want API called: 1|0> [VAR=value ...]
+  local label=$1 want=$2 want_api=$3
+  shift 3
+  : > "$sandbox/log"
+  env -i PATH="$sandbox/latestbin:/usr/bin:/bin" HOME="$sandbox" STUB_LOG="$sandbox/log" \
+    INSTALL_DIR="$sandbox/install" "$@" bash install.sh > "$sandbox/out" 2>&1 || true
+  local api=0 ok=1
+  grep -q 'api.github.com' "$sandbox/log" && api=1
+  if [[ "$want" == FAIL ]]; then
+    grep -q 'error: could not resolve the latest release tag' "$sandbox/out" || ok=0
+    grep -q 'releases/download' "$sandbox/log" && ok=0
+  else
+    grep -qx "==> Latest version: $want" "$sandbox/out" || ok=0
+    grep -q "releases/download/$want/" "$sandbox/log" || ok=0
+  fi
+  [[ "$api" == "$want_api" ]] || ok=0
+  grep -q -- '--retry 3' <(grep 'releases/latest' "$sandbox/log") || ok=0
+  if [[ "$ok" != 1 ]]; then
+    echo "[test-install-sh] latest resolution, $label: want $want (api=$want_api), got api=$api:" >&2
+    sed 's/^/    | /' "$sandbox/out" "$sandbox/log" >&2
+    fail=1
+  fi
+}
+gh=https://github.com/asamarts/alint/releases
+latest_case "redirect resolves, API untouched" v9.8.7 0 REDIRECT_URL="$gh/tag/v9.8.7"
+latest_case "pre-release suffix accepted" v1.2.3-rc.1 0 REDIRECT_URL="$gh/tag/v1.2.3-rc.1"
+latest_case "redirect fails, API fallback" v9.8.6 1 API_JSON='{"url":"x","tag_name":"v9.8.6"}'
+latest_case "pretty-printed API JSON" v9.8.3 1 \
+  API_JSON=$'{\n  "url": "https://api.github.com/x",\n  "tag_name": "v9.8.3",\n  "name": "v9.8.3"\n}'
+latest_case "no releases (redirect lands on /releases)" v9.8.5 1 \
+  REDIRECT_URL="$gh" API_JSON='{"tag_name":"v9.8.5"}'
+latest_case "malformed redirect tag rejected" v9.8.4 1 \
+  REDIRECT_URL="$gh/tag/v1.0.0;id" API_JSON='{"tag_name":"v9.8.4"}'
+latest_case "both fail" FAIL 1
+latest_case "both malformed" FAIL 1 REDIRECT_URL="$gh/tag/..%2F" API_JSON='{"tag_name":"../../etc"}'
+
 [[ "$fail" -eq 0 ]] && echo "[test-install-sh] OK - every truncated prefix of install.sh executes nothing"
 exit "$fail"

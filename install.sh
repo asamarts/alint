@@ -71,8 +71,8 @@ verify_signature() {
     _verify_skip_or_fail "cosign ${cver:-<unknown>}.x is too old for the new-format signature (need v3+)"
     return 0
   fi
-  if ! curl -fsSL -o SHA256SUMS "${BASE_URL}/SHA256SUMS" 2>/dev/null \
-     || ! curl -fsSL -o SHA256SUMS.cosign.bundle "${BASE_URL}/SHA256SUMS.cosign.bundle" 2>/dev/null; then
+  if ! curl -fsSL --retry 3 --retry-delay 2 -o SHA256SUMS "${BASE_URL}/SHA256SUMS" 2>/dev/null \
+     || ! curl -fsSL --retry 3 --retry-delay 2 -o SHA256SUMS.cosign.bundle "${BASE_URL}/SHA256SUMS.cosign.bundle" 2>/dev/null; then
     _verify_skip_or_fail "no cosign signature found for ${VERSION} (unsigned release, or it could not be downloaded)"
     return 0
   fi
@@ -101,6 +101,43 @@ verify_signature() {
     exit 1
   fi
   echo "==> Signature OK (SHA256SUMS signed by ${REPO}'s release workflow)"
+}
+
+# A release tag: vMAJOR.MINOR.PATCH with an optional pre-release/build suffix.
+# Checked before a resolved tag reaches any URL or path.
+_is_release_tag() {
+  [[ "$1" =~ ^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$ ]]
+}
+
+# Print the latest release's tag. First via github.com's /releases/latest
+# redirect (to .../releases/tag/<tag>), which is not subject to the REST API's
+# 60-requests-per-hour unauthenticated per-IP limit: shared CI egress IPs hit
+# that limit, and installs failed with a bare 403. The REST API stays as a
+# fallback. curl retries transient errors (timeouts, 429, 5xx) on both.
+_resolve_latest_tag() {
+  local url tag json
+  url=$(curl -fsSL --retry 3 --retry-delay 2 -o /dev/null -w '%{url_effective}' \
+    "https://github.com/${REPO}/releases/latest" 2>/dev/null) || url=""
+  tag="${url##*/}"
+  if _is_release_tag "${tag}"; then
+    printf '%s\n' "${tag}"
+    return 0
+  fi
+  # Fetch first, then feed awk from a here-string rather than a pipe: awk
+  # exits after the first match, and with `set -o pipefail` any writer still
+  # pushing the (often >64 KiB) release JSON into the pipe dies of SIGPIPE.
+  json=$(curl -fsSL --retry 3 --retry-delay 2 \
+    "https://api.github.com/repos/${REPO}/releases/latest") || json=""
+  # Match the field itself, so pretty-printed and compact JSON both parse.
+  tag=$(awk 'match($0, /"tag_name"[ \t]*:[ \t]*"[^"]*"/) {
+    s = substr($0, RSTART, RLENGTH); sub(/^"tag_name"[ \t]*:[ \t]*"/, "", s)
+    sub(/"$/, "", s); print s; exit
+  }' <<<"${json}")
+  if _is_release_tag "${tag}"; then
+    printf '%s\n' "${tag}"
+    return 0
+  fi
+  return 1
 }
 
 main() {
@@ -142,14 +179,9 @@ main() {
 
   if [[ "${VERSION}" == "latest" ]]; then
     echo "==> Resolving latest release tag"
-    # Fetch first, then feed awk from a here-string rather than a pipe: awk
-    # exits after the first match, and with `set -o pipefail` any writer still
-    # pushing the (often >64 KiB) release JSON into the pipe dies of SIGPIPE.
-    RELEASE_JSON=$(curl -fsSL "https://api.github.com/repos/${REPO}/releases/latest")
-    VERSION=$(awk -F'"' '/"tag_name":/ {print $4; exit}' <<<"${RELEASE_JSON}")
-    if [[ -z "${VERSION}" ]]; then
-      echo "error: could not resolve latest release tag from github api"
-      echo "       try specifying ALINT_VERSION=v0.1.0 explicitly."
+    if ! VERSION=$(_resolve_latest_tag); then
+      echo "error: could not resolve the latest release tag of ${REPO} from github.com"
+      echo "       or the GitHub API; set ALINT_VERSION (e.g. ALINT_VERSION=v0.18.0)."
       exit 1
     fi
     echo "==> Latest version: ${VERSION}"
@@ -166,8 +198,8 @@ main() {
   trap 'rm -rf "${TMPDIR}"' EXIT
 
   echo "==> Downloading ${ARCHIVE_URL}"
-  curl -fsSL -o "${TMPDIR}/${ARCHIVE}" "${ARCHIVE_URL}"
-  curl -fsSL -o "${TMPDIR}/${ARCHIVE}.sha256" "${SHA_URL}"
+  curl -fsSL --retry 3 --retry-delay 2 -o "${TMPDIR}/${ARCHIVE}" "${ARCHIVE_URL}"
+  curl -fsSL --retry 3 --retry-delay 2 -o "${TMPDIR}/${ARCHIVE}.sha256" "${SHA_URL}"
 
   echo "==> Verifying SHA-256"
   cd "${TMPDIR}"
