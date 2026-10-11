@@ -1523,8 +1523,7 @@
         "expect_matches": {
           "default": false,
           "description": "Require this nested rule's effective file scope to match at least one file for each active parent iteration. Checked after the nested `when:` gate. Unsupported for existence and selector rules.",
-          "type": "boolean",
-          "x-since": "0.18.0"
+          "type": "boolean"
         },
         "kind": {
           "type": "string"
@@ -1754,8 +1753,7 @@
         "expect_matches": {
           "default": false,
           "description": "Require the rule's effective file scope (`paths:` plus `scope_filter:`) to match at least one file. Checked after `when:` and against the full repository even under `--changed`. Unsupported for existence and selector rules, whose empty sets have kind-specific meaning.",
-          "type": "boolean",
-          "x-since": "0.18.0"
+          "type": "boolean"
         },
         "fix": {
           "$ref": "#/$defs/fix"
@@ -4453,8 +4451,7 @@
         "expect_matches": {
           "default": false,
           "description": "Override the expanded rule's empty-scope assertion.",
-          "type": "boolean",
-          "x-since": "0.18.0"
+          "type": "boolean"
         },
         "extends_template": {
           "description": "Id of an entry in the top-level `templates:` block to instantiate.",

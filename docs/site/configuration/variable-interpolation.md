@@ -69,11 +69,9 @@ Unlike string interpolation (load-time), `when: env.X` resolves at **evaluation 
 
 **env values are always strings.** Compare against string literals: `when: env.PORT == "8080"`, not `== 8080`. A bare-integer comparison is a type mismatch that evaluates silently to `false` (the rule then never applies), so quote the right-hand side.
 
-<!-- alint:since=0.18.0 -->
 A `when:` (or `when_iter:`) from an `https://` `extends:` entry that is not listed under `trusted_extends:` may not read `env.*`: which of its rules fire would reveal your environment one comparison at a time. Such a config fails to load with an error naming the URL, the rule, and the variable. The same applies when a rule from that source fills a `{{vars.*}}` placeholder in one of your templates' `when:`, and a template from that source may not put a placeholder in `when:` at all. Your own config, local `extends:` files, and bundled rulesets are unaffected.
 
 A var whose value you interpolate from the environment counts as the environment. With `vars: { token: "{{env.NPM_TOKEN}}" }` in your config, a drop-in, or a local `extends:` file (any spacing, with or without `| default(...)`), an untrusted remote's `when:` that reads `vars.token` is refused the same way, and the error shows the var's source text (`{{env.NPM_TOKEN}}`), never its value. The check uses the var's final value: overriding it later with a literal makes it readable again. Vars with literal values stay readable by every ruleset. Likewise, when a rule of yours passes an environment-derived value to a template through its own `vars:`, an untrusted remote that defines or adds to that template (or to the rule) may not have it substitute that `{{vars.*}}` anywhere, for example into a `message:`.
-<!-- /alint:since -->
 
 ## `{{...}}` is shared: foreign templates pass through
 

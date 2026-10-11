@@ -8,7 +8,7 @@ branding:
 inputs:
   version:
     description: |
-      alint version to install: a release tag like `v0.17.0`, or
+      alint version to install: a release tag like `v0.18.0`, or
       `latest`. An explicit value overrides the action ref. When unset,
       an exact release tag installs that tag, a commit SHA installs the
       release baked into that action commit, and a branch follows the
@@ -68,10 +68,10 @@ runs:
         # when the input is omitted, and only a full commit SHA selects the
         # release baked into that commit. bump-version.sh updates this before
         # the release commit is tagged; the release preflight verifies it.
-        ALINT_BAKED_VERSION: v0.17.0
+        ALINT_BAKED_VERSION: v0.18.0
         INSTALL_DIR: ${{ runner.temp }}/alint-bin
         # Pin install.sh to whichever ref the consumer pinned the
-        # action to (e.g. `asamarts/alint@v0.17.0`). Without this,
+        # action to (e.g. `asamarts/alint@v0.18.0`). Without this,
         # `main`'s install.sh would be fetched on every run — a
         # change to that script affects every action consumer
         # regardless of the version they pinned.
@@ -96,7 +96,7 @@ runs:
         set -euo pipefail
         if [[ -z "${ACTION_REF:-}" ]]; then
           if [[ "${SOURCE_REPO}" != "asamarts/alint" ]]; then
-            echo "::error::action_ref is empty but the action is running outside asamarts/alint (${SOURCE_REPO}). Pin the action to a tag, e.g. uses: asamarts/alint@v0.17.0" >&2
+            echo "::error::action_ref is empty but the action is running outside asamarts/alint (${SOURCE_REPO}). Pin the action to a tag, e.g. uses: asamarts/alint@v0.18.0" >&2
             exit 1
           fi
           ref=""

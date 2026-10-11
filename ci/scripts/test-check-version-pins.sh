@@ -16,6 +16,16 @@ cp "$REPO_ROOT/ci/scripts/check-version-pins.sh" "$TMP_ROOT/repo/ci/scripts/chec
 cp "$REPO_ROOT/action.yml" "$TMP_ROOT/repo/action.yml"
 cd "$TMP_ROOT/repo"
 
+# Read the documented Action pin and the workspace version instead of
+# hardcoding one release, so the fixtures survive version bumps (including the
+# window where the workspace is bumped but the doc pin still trails it).
+DOC_VERSION=$(sed -n 's/^ACTION_DOC_VERSION=//p' ci/action-doc-pin.env)
+DOC_SHA=$(sed -n 's/^ACTION_DOC_SHA=//p' ci/action-doc-pin.env)
+WS_VERSION=$(sed -n 's/^version = "\([0-9][0-9.]*\)"$/\1/p' Cargo.toml | head -n1)
+[[ -n "$DOC_VERSION" && -n "$DOC_SHA" && -n "$WS_VERSION" ]] ||
+  { echo "could not read ci/action-doc-pin.env or the workspace version" >&2; exit 1; }
+DOC_RE=${DOC_VERSION//./\\.}
+
 pass=0
 fail=0
 
@@ -53,21 +63,26 @@ expect_ok "canonical pins"
 # Build a hermetic stand-in for the first release that contains the baked
 # version. This tests the success path without relying on tags being present in
 # the caller's checkout (CI's shell-test job intentionally uses a shallow one).
+# Model the post-release state: the doc pin names the workspace version, whose
+# tagged action.yml bakes that same version.
 git add action.yml
 git -c user.name='alint tests' -c user.email='tests@alint.invalid' \
   commit --allow-empty -q -m 'fixture: bake action version'
 fixture_sha=$(git rev-parse HEAD)
-git tag -f v0.17.0 HEAD >/dev/null
+git tag -f "v$WS_VERSION" HEAD >/dev/null
+sed -i "s/^ACTION_DOC_VERSION=.*/ACTION_DOC_VERSION=$WS_VERSION/" ci/action-doc-pin.env
 sed -i "s/^ACTION_DOC_SHA=.*/ACTION_DOC_SHA=$fixture_sha/" ci/action-doc-pin.env
 sed -i 's/^ACTION_DOC_REQUIRES_EXPLICIT_VERSION=.*/ACTION_DOC_REQUIRES_EXPLICIT_VERSION=false/' \
   ci/action-doc-pin.env
 for f in docs/rules.md docs/site/integrations/github-actions.md; do
-  sed -i "s/d93c0283b19dd78afcd8a4b303f1556a7759ba81/$fixture_sha/g" "$f"
-  sed -i -E '/^[[:space:]]*version:[[:space:]]*v0\.17\.0([[:space:]]+#.*)?[[:space:]]*$/d' "$f"
+  sed -i "s/$DOC_SHA # v${DOC_RE}/$fixture_sha # v$WS_VERSION/g" "$f"
+  sed -i -E "/^[[:space:]]*version:[[:space:]]*v${DOC_RE}([[:space:]]+#.*)?[[:space:]]*\$/d" "$f"
 done
 expect_ok "verified release SHA and baked version" --verify-action-tag
 restore
-git tag -d v0.17.0 >/dev/null
+git tag -d "v$WS_VERSION" >/dev/null
+# The clone carries the real tags; drop the doc pin's tag so verify has none.
+git tag -d "v$DOC_VERSION" >/dev/null 2>&1 || true
 expect_rejected "verified mode requires the release tag" --verify-action-tag
 expect_ok "checkout-local mode does not require release tags"
 
@@ -93,7 +108,7 @@ EOF
 expect_rejected "new user-facing Action snippets are discovered"
 restore
 
-sed -i '0,/^[[:space:]]*version: v0\.17\.0$/s//    path: ./' docs/site/integrations/github-actions.md
+sed -i "0,/^[[:space:]]*version: v${DOC_RE}\$/s//    path: ./" docs/site/integrations/github-actions.md
 expect_rejected "legacy Action snippet missing explicit binary version"
 restore
 

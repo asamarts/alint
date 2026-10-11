@@ -10,7 +10,15 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.17.0** (2026-10-01): the auto-fix arc. `alint fix` now repairs
+**Latest release: v0.18.0** (2026-10-11): security and correctness hardening from a
+whole-repository audit and an adversarial re-review of its fixes. The config trust
+gates now judge the rule that actually runs (YAML tags, merge keys, and placeholder
+kinds can no longer hide a field from them), untrusted remote rulesets lose `ignore:`
+and environment access, crafted YAML and XML files are bounded in memory and CPU,
+and RustSec advisories block CI and releases. It adds the `markdown_links_resolve`
+rule kind and per-rule `expect_matches:` scope assertions, and the LSP resolves the
+nearest config per file. Breaking: three config tightenings, MSRV 1.88, and VS Code
+1.91 for the extension. The prior v0.17.0 (2026-10-01) was the auto-fix arc. `alint fix` now repairs
 violations across 26 fix ops (up from 12), spanning located `replace`, structured
 `set_value` / `remove_value`, metadata (`chmod`), VCS (`git_untrack`), plugin
 `command`, cross-file (`sync_from`, `relocate`, `create_and_register`), and ordering
@@ -1514,6 +1522,25 @@ minor. See [`auto-fix.md`](auto-fix.md),
 - Permission and VCS repair: `chmod`, executable-bit, and shebang fixers, plus
   the first repo-scale cross-file fixers.
 - Ordering, canonicalization, and header insertion.
+
+## v0.18: Audit hardening
+<!-- roadmap-public: blurb="A whole-repository security and correctness audit, then an adversarial re-review of its fixes: the config trust gates judge the rule that actually runs, untrusted remote rulesets lose ignore and environment access, crafted YAML and XML files are bounded, RustSec advisories block releases, and the new markdown_links_resolve kind and expect_matches scope assertions land alongside." -->
+
+A release built from the 2026-10 audit and its second, adversarial review round.
+See [`audit-2026-10.md`](audit-2026-10.md) for the findings, the maintainer
+decisions, and the known limits.
+
+- Config trust gates evaluate the effective rule: YAML tags, merge keys, and
+  `{{vars.*}}` placeholders in `kind:` or `applicability:` are refused, and an
+  `extends:`'d config can no longer reshape a process-spawning rule.
+- Untrusted remote rulesets may not declare `ignore:`, read the environment in
+  `when:`, or splice environment-derived values into messages.
+- YAML and XML pre-scan guards match their parsers at every boundary and bound
+  alias expansion, flow depth, and namespace work.
+- Release pipeline: blocking RustSec advisories, a pinned release toolchain,
+  release pointers that never move backwards, and a script-injection gate.
+- New: `markdown_links_resolve`, per-rule `expect_matches:`, and per-file config
+  resolution in the LSP.
 
 ## v1.0: Stability
 <!-- roadmap-public: blurb="A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site." -->

@@ -76,9 +76,7 @@ ignore:
 
 `ignore:` patterns apply regardless of `respect_gitignore`. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for what gets filtered by default and how absence-style rules interpret git state.
 
-<!-- alint:since=0.18.0 -->
 Because `ignore:` hides files from every rule, your own included, an `https://` `extends:` entry may declare it only when you list its URL under `trusted_extends:`; otherwise loading fails with an error naming the URL. Local files and bundled rulesets can still contribute `ignore:` entries.
-<!-- /alint:since -->
 
 ### `respect_gitignore`
 

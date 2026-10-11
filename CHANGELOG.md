@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-11
+
+A security and correctness release from a whole-repository audit and an
+adversarial re-review of its fixes. The config trust gates now judge the rule
+that actually runs (no YAML tags, merge keys or placeholder kinds can hide a
+field from them), untrusted remote rulesets can no longer declare `ignore:` or
+read the environment, crafted YAML and XML files are bounded in memory and CPU,
+and RustSec advisories now block CI and releases. It adds the
+`markdown_links_resolve` rule kind and per-rule `expect_matches:` scope
+assertions, and the LSP now resolves the nearest config per file. Breaking:
+three config tightenings (see Changed), MSRV 1.88, and the VS Code extension
+now requires VS Code 1.91.
+
 ### Security
 
 - **Config trust gates no longer judge a different rule than the one that
@@ -274,6 +287,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - `file_graph` `acyclic` reports every file on a cycle, once per strongly
   connected component.
+
+- Structured `set_value` / `remove_value` fixes now apply to JSON and JSONC
+  files containing escaped surrogate pairs (`"\ud83d\ude00"`); such files were
+  reported fixable but always skipped. The fix side still accepts exactly the
+  dialect the check side does (comments and trailing commas only).
 
 - `file_header` matches the header after a leading UTF-8 BOM, so its fixes
   converge; `file_strip_bom` no longer corrupts UTF-16/UTF-32 files, which are
@@ -7406,7 +7424,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/asamarts/alint/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/asamarts/alint/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/asamarts/alint/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/asamarts/alint/compare/v0.15.2...v0.16.0
