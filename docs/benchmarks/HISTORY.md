@@ -61,7 +61,7 @@ the walk-bound and per-file-content paths.
 | v0.10.1 | 2026-05-20 | 4.03 s ± 0.04 | 17.64 s ± 0.04 | n/a | 15.96 s ± 0.03 | Small post-release follow-up to v0.10.0. |
 | v0.10.0 | 2026-05-20 | 4.06 s ± 0.08 | 17.75 s ± 0.02 | n/a | 16.03 s ± 0.05 | The "case-study coverage push" minor. |
 
-Pre-consolidation history (the 14-scenario kbench series v0.10.0-v0.16.0, and
+Pre-consolidation history (the 14-scenario bench-host series v0.10.0-v0.16.0, and
 the retired 3900X series before it) lives in
 [`legacy/HISTORY.md`](legacy/HISTORY.md); its raw results remain under
 [`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/).

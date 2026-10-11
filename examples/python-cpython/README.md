@@ -560,7 +560,7 @@ checks that fit alint's grammar today. The deep tools
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/python-cpython/.alint.yml /tmp/cpython` (live run).
+Run: `alint check --config examples/python-cpython/.alint.yml /tmp/cpython` (live run).
 
 **Headline (v0.9.17-era):** alint surfaced **920 violations** across
 the live tree (5 errors + 857 warnings + 58 info; 28 rules pass; 24

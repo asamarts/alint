@@ -482,7 +482,7 @@ small homogeneous package directories — exactly pnpm's shape.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/pnpm-pnpm/.alint.yml /tmp/pnpm` (live run).
+Run: `alint check --config examples/pnpm-pnpm/.alint.yml /tmp/pnpm` (live run).
 
 **Headline:** alint surfaces **walk error: broken symlink** before
 any rule fires, due to two pnpm-specific test fixtures that ship

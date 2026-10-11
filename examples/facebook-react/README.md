@@ -360,7 +360,7 @@ classes of regression that the existing pipeline doesn't cover at all.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/facebook-react/.alint.yml /tmp/react` (live, JSON-format).
+Run: `alint check --config examples/facebook-react/.alint.yml /tmp/react` (live, JSON-format).
 **Counts in this section are v0.9.17-era;** v0.9.18's pre-launch fix
 wave (A1 hygiene-no-js-build-outputs sibling-package.json gate, A2
 ASF preamble bundle, A3 python@v1 default-excludes, A5 LICENSE

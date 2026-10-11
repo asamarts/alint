@@ -4,7 +4,7 @@ Subagent log for batch 3 (alphabetical: facebook-react, flutter-flutter,
 golang-go, helm-helm, istio-istio).
 
 Validation pass run with the v0.9.17 release binary at
-`/home/kaminsod/projects/alint/target/release/alint`. All 5 configs
+`target/release/alint`. All 5 configs
 load cleanly via `validate-config`. Per-case-study findings below.
 
 ---

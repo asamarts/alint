@@ -386,7 +386,7 @@ commands are documented for that future run.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/astral-sh-uv/.alint.yml /tmp/uv` (live run).
+Run: `alint check --config examples/astral-sh-uv/.alint.yml /tmp/uv` (live run).
 
 **Headline (v0.9.17-era; FP recount per the v0.9.18 B4 cross-cutting
 revalidation pass shows the count drops materially after A1/A4/A5

@@ -71,13 +71,13 @@ jobs:
                 format('{0}', github.event.repository.id) == '1214597864' &&
                 format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
                 format('{0}', github.event.pull_request.head.repo.id) == '1214597864' &&
-                contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.pull_request.user.id)) &&
-                contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.sender.id)) &&
-                contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))
+                contains(fromJSON('["11239806"]'), format('{0}', github.event.pull_request.user.id)) &&
+                contains(fromJSON('["11239806"]'), format('{0}', github.event.sender.id)) &&
+                contains(fromJSON('["11239806"]'), format('{0}', github.actor_id))
               )
             }}
           # PR capacity switch, not an authorization boundary. Keep false while
-          # the fixed-label listener is held; MN-167 may replace this only
+          # the fixed-label listener is held; a later change may replace this only
           # after base-controlled disposable admission passes its canaries.
           LOCAL_PR_CAPACITY_ENABLED: "false"
         run: |

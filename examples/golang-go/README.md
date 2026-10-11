@@ -467,7 +467,7 @@ discipline; alint makes it diff-reviewable in 83 ms.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/golang-go/.alint.yml /tmp/golang-go` (live, JSON-format).
+Run: `alint check --config examples/golang-go/.alint.yml /tmp/golang-go` (live, JSON-format).
 **Counts in this section are v0.9.17-era;** v0.9.18's pre-launch fix
 wave (A1 hygiene-no-js-build-outputs sibling-package.json gate) closed
 the 6 hygiene false-positives flagged below. The other findings

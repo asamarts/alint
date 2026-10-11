@@ -1,12 +1,12 @@
 name: bench-record
 
 # Tag-triggered "publish-grade" bench run for the canonical baseline
-# machine: self-hosted `kbench` (Intel i7-6700HQ laptop, 16 GB), which
+# machine: the self-hosted bench host (Intel i7-6700HQ laptop, 16 GB), which
 # replaced the 3900X dev box as the bench host on 2026-07-15 (quiet +
 # dedicated + fixed fingerprint). Its 16 GB RAM needs the drop_caches
 # fix (ALINT_BENCH_DROP_CACHES, set below); the trees live on /bench
-# (ext4 NVMe) because kbench's /tmp is a 7.8 GB tmpfs that overflows at
-# 1M. See project docs: the kbench canonical-host note + the
+# (ext4 NVMe) because the bench host's /tmp is a 7.8 GB tmpfs that overflows at
+# 1M. See project docs: the canonical bench-host note + the
 # 2026-07-1m-writeback-contention investigation.
 #
 # Two layers per run:
@@ -120,7 +120,7 @@ jobs:
     needs: guard
     if: needs.guard.outputs.should_bench == 'true'
     name: bench (linux-x86_64)
-    # The canonical baseline runner is kbench (label `bench`), NOT the
+    # The canonical baseline runner is the bench host (label `bench`), NOT the
     # `alint` CI runner (the 3900X dev box) — bench moved to a dedicated,
     # quiet, fixed-fingerprint host. ubuntu-latest on github-hosted would
     # run a different CPU, kernel, and FS, voiding cross-version
@@ -136,9 +136,9 @@ jobs:
           ref: ${{ github.event.inputs.ref || github.ref }}
           fetch-depth: 0
       # PINNED, unlike CI's @stable: rustc is part of the bench fingerprint, so
-      # the whole kbench corpus series must stay on one toolchain or numbers stop
+      # the whole bench-host corpus series must stay on one toolchain or numbers stop
       # being cross-version comparable. 1.97.0 matches the v0.10-v0.13 backfill
-      # that re-based the series onto kbench. Bump deliberately (and re-baseline)
+      # that re-based the series onto the bench host. Bump deliberately (and re-baseline)
       # when the fleet moves, never implicitly via `stable` drift.
       - uses: dtolnay/rust-toolchain@35a842e360814583e976785eeda0bd0655cb8e83 # 1.97.0
         with:
@@ -255,7 +255,7 @@ jobs:
       - name: graft drop-caches harness onto pre-fix refs
         run: |
           set -euo pipefail
-          # The ALINT_BENCH_DROP_CACHES quiescing (mandatory on kbench's 16 GB, or
+          # The ALINT_BENCH_DROP_CACHES quiescing (mandatory on the bench host's 16 GB, or
           # S2/1m/full blows the CV gate — see
           # docs/benchmarks/investigations/2026-07-1m-writeback-contention/) was
           # added to the bench driver AFTER v0.13. Re-benching a pre-fix ref
@@ -289,7 +289,7 @@ jobs:
       - name: macro bench-scale
         env:
           OUT_LABEL: ${{ steps.label.outputs.label }}
-          # kbench (16 GB) needs the page-cache-reclaim fix or S2/1m/full
+          # the bench host (16 GB) needs the page-cache-reclaim fix or S2/1m/full
           # spikes to 40-50% CV and fails bench-gate; and its trees must
           # live on the /bench ext4 NVMe, not the 7.8 GB /tmp tmpfs which
           # overflows at 1M. Both are no-ops/harmless on any large-RAM host.

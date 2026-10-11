@@ -1,7 +1,7 @@
 # Case-study revalidation — batch 4 (alphabetical: kubernetes-kubernetes through nodejs-node)
 
 Validation pass against alint v0.9.17 (built 2026-05-07).
-Engine binary: `/home/kaminsod/projects/alint/target/release/alint`.
+Engine binary: `target/release/alint`.
 Authoritative pitfall catalogue: 21 (CONFIG-AUTHORING.md).
 Pitfalls #18 + #19 fixed in engine v0.9.17 (per-rule
 `respect_gitignore: false`; literal-path runtime guard for

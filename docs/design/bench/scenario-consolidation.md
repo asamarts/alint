@@ -11,7 +11,7 @@ AFTER the new set is built, run, and verified. **Phase A (build) COMPLETE +
 independently gate-verified** (commits 43561695 / 831879a3 / 3d9570e3: 5 YAMLs,
 `Mode::Fix`, git+polyglot generator, the 24-op `sfix_all` fixture; fmt / workspace
 clippy / `cargo test --workspace` / release build / `gen-facts --check` all green +
-a local `bench-scale SFIX` fix smoke). **Phase B (kbench run: current + past
+a local `bench-scale SFIX` fix smoke). **Phase B (bench-host run: current + past
 versions) + Phase C (legacy migration) remain.** Date: 2026-09-28.
 
 ## Goal
@@ -258,7 +258,7 @@ compile breaks against old crates).
 
 **Backfill procedure, per past tag `vX`:**
 1. `git worktree add /tmp/at-vX vX && (cd /tmp/at-vX && cargo build --release -p alint)` -- build that tag's alint in isolation (rustc 1.97.0).
-2. From the CURRENT checkout, with the kbench pins (`ALINT_BENCH_DROP_CACHES=1
+2. From the CURRENT checkout, with the bench-host pins (`ALINT_BENCH_DROP_CACHES=1
    TMPDIR=/bench`):
    ```
    xtask bench-scale --alint-binary /tmp/at-vX/target/release/alint \
@@ -289,7 +289,7 @@ render-history keys on the `--out` dir name `vX`; a follow-up could shell
 - **`s3_relational`: v0.12.0+** (`file_graph`/`cross_file`/`for_each_match` land at
   v0.12; absent at v0.10/v0.11).
 - **`s2_content`: v0.10.0+** (`xml_path_*`/`ordered_block`/`import_gate` are v0.10).
-- **`s1_layout`: the whole kbench series** (v0.10.0+; the kinds are ancient).
+- **`s1_layout`: the whole bench-host series** (v0.10.0+; the kinds are ancient).
 - **`s4_workspace`: runs from ~v0.10 but is a CROSS-VERSION CONFOUND** -- `extends:`
   pulls the bundled rulesets shipped IN that binary, whose rule set evolved per
   release, so it measures a moving target. Flag it as such (or pin a fixed inline
@@ -297,9 +297,9 @@ render-history keys on the `--out` dir name `vX`; a follow-up could shell
 - An old tag whose alint lacks a declared kind/op `bail!`s at load; skip that (tag,
   scenario) cell -- it renders `n/a` via each id's `FIRST_VERSION` floor.
 
-**Universe:** the canonical kbench series starts at **v0.10.0** (pre-v0.10 is on the
+**Universe:** the canonical bench-host series starts at **v0.10.0** (pre-v0.10 is on the
 retired 3900X arch, not comparable); 11 published dirs (v0.10.0-.2, v0.11.0, v0.12.0,
-v0.13.0, v0.14.0-.2, v0.15.0, v0.16.0). Pins: host `kbench`, rustc **1.97.0**,
+v0.13.0, v0.14.0-.2, v0.15.0, v0.16.0). Pins: the bench host, rustc **1.97.0**,
 `ALINT_BENCH_DROP_CACHES=1`, `TMPDIR=/bench`. `bench gate` skips baseline-less cells
 (`gate.rs:161`), so a fresh backfilled series does not false-fail.
 
@@ -388,8 +388,8 @@ Author a
 11. Gate: `cargo test --workspace` + `cargo build --release -p alint -p xtask` green;
     `xtask gen-facts --check` clean.
 
-### Phase B -- run + verify on kbench (current + past)
-12. Smoke on kbench (`ALINT_BENCH_DROP_CACHES=1`, `TMPDIR=/bench`, rustc 1.97.0):
+### Phase B -- run + verify on the bench host (current + past)
+12. Smoke on the bench host (`ALINT_BENCH_DROP_CACHES=1`, `TMPDIR=/bench`, rustc 1.97.0):
     `xtask bench-scale --scenarios s1,s2,s3,s4,sfix_all --sizes 1k --modes
     full,changed,fix --json-only`. Confirm each scenario/mode makes sane rows +
     `bench gate` skips the baseline-less new cells.
@@ -408,11 +408,11 @@ Author a
 - **Decision (asamarts): FULL 1M, faithful to the legacy depth.** All scenarios at all
   ragged-applicable versions incl `s3@1m` (~12 h total: ~2.2 h builds + ~10 h benches).
   Chosen over "1M-except-s3 (~5 h, needs a merge tweak)" and "cap-at-100k (~3.5 h)".
-- **Execution shape:** one detached kbench driver, **resumable** (skips any version
+- **Execution shape:** one detached bench-host driver, **resumable** (skips any version
   whose `results.json` already has the expected cell count -- 32 for S1-S4 tags, 24 for
   S1/S2/S4 tags), **newest-first** (value priority; s3@1m trajectory lands first), and
   **serial** (build XOR bench at any instant -- a concurrent `cargo build` would steal
-  CPU from a live measurement and contaminate it). Stages at `/tmp/kbench-main-series/`
+  CPU from a live measurement and contaminate it). Stages at `/tmp/bench-main-series/`
   -> pulled to `docs/benchmarks/macro/results/next/linux-x86_64/vX/` (the `next/` prefix
   is invisible to the current tests, which read `results/linux-x86_64/v*`).
 - **Current-checkout nuance:** the working tree stamps `v0.16.1` (Cargo.toml) but

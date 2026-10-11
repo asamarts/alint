@@ -436,7 +436,7 @@ invocation.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/prettier-prettier/.alint.yml /tmp/prettier` (live run, human format).
+Run: `alint check --config examples/prettier-prettier/.alint.yml /tmp/prettier` (live run, human format).
 
 **Headline (v0.9.17-era):** alint surfaced **111 violations** across
 the live tree (23 errors + 13 warnings + 75 info; 31 passing; 17

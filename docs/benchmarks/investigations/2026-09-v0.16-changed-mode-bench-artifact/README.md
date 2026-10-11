@@ -22,12 +22,12 @@ cells against `docs/benchmarks/macro/results/linux-x86_64/v0.15.0/results.json`:
 | `changed` / 10k | +49.6% (run 1), +92.0% (run 2) |
 | `changed` / 1k | +40.1%, +43.3% |
 
-The re-run being *worse* while kbench was idle broke the first hypothesis (below).
+The re-run being *worse* while the bench host was idle broke the first hypothesis (below).
 
 ## Hypotheses tested
 
 1. **Runner contamination (WRONG).** First call: the release-day bench overlapped
-   CI + docs-bundle + bench-docker on the shared host. Refuted: `uptime` on kbench
+   CI + docs-bundle + bench-docker on the shared host. Refuted: `uptime` on the bench host
    showed load 0.03, no co-tenant processes; and a reproducible, same-signed +40-92%
    across two idle-box runs is the opposite of random contamination.
 2. **A `with_worker_pool` rayon regression (WRONG).** v0.16.0 (PR #223) replaced the
@@ -44,7 +44,7 @@ The re-run being *worse* while kbench was idle broke the first hypothesis (below
 ## The measurement that settled it
 
 `S1 10k changed`, `xtask bench-scale --runs 30`, both binaries built from their tags
-on kbench and measured back-to-back on the idle box:
+on the bench host and measured back-to-back on the idle box:
 
 | condition | min | median | mean | stddev | CV% |
 |---|--:|--:|--:|--:|--:|
@@ -60,7 +60,7 @@ v0.16.0 == v0.15.0 (within 0.1% at 8 threads, 1% at 1 thread). **No regression.*
 The same v0.15.0 binary, on the same i7-6700HQ, measures differently now than when the
 baseline was recorded:
 
-| S1 10k | committed v0.15.0 baseline | fresh v0.15.0 on kbench now |
+| S1 10k | committed v0.15.0 baseline | fresh v0.15.0 on the bench host now |
 |---|--:|--:|
 | `full` | 25.4 ms | 23.7 ms (flat) |
 | `changed` | **43.2 ms** | **109-117 ms** (2.5x) |
@@ -74,13 +74,13 @@ Two facts localize it:
 So the 43 -> 117 drift is entirely the **multi-core wakeup cost of the tiny
 changed-mode parallel burst**. `changed` mode spawns `git` (single-threaded) to find
 the changed subset, idling the other cores, then dispatches the rule `par_iter` over a
-*tiny* subset - which must wake 7 cores out of deep idle. On current kbench those cores
+*tiny* subset - which must wake 7 cores out of deep idle. On the current bench host those cores
 sit at 800 MHz in deep C-states (C6-C10) with turbo disabled (`no_turbo=1`), so the
 wake + ramp dominates a workload whose actual work is ~43 ms. Large `changed` cells
 (100k/1m) and all `full` cells keep the cores saturated, so they never pay a per-burst
 cold-wake and stay flat. The committed v0.15.0 baseline (43 ms) was captured when this
 cost was negligible - the small `changed` cell ran warm inside the full back-to-back
-matrix, and/or kbench's idle/C-state behavior differed from its current state (52-day
+matrix, and/or the bench host's idle/C-state behavior differed from its current state (52-day
 uptime; no historical power data to pin the exact trigger). The gate then compared
 fresh v0.16.0 against that stale-cheap number and reported the environment shift as a
 code regression.
@@ -97,7 +97,7 @@ verify either way with a same-host, same-conditions, tight-N A/B before concludi
   medians before asserting a delta on cells under ~50 ms.
 - **Reproduce on the ACTUAL bench host and power state.** An earlier A/B ran on a
   24-core contended box and found "flat"; it could not see an effect that only appears
-  when 7 of 8 kbench cores wake from deep C-states. Wrong core count *and* wrong power
+  when 7 of 8 bench-host cores wake from deep C-states. Wrong core count *and* wrong power
   state.
 - **Compare fresh-vs-fresh, not fresh-vs-committed-baseline, when the environment may
   have drifted.** The committed baseline is a point-in-time capture; a same-host
@@ -120,5 +120,5 @@ delta as `ADV` but no longer fail the gate, with `full`/10k and all 100k/1m cell
 gating). The load-immune deterministic gate
 ([`../../../design/deterministic-perf-gating.md`](../../../design/deterministic-perf-gating.md))
 remains the authoritative regression signal. With this change the v0.16.0 numbers pass
-the gate: those cells reflect current-kbench environment, not a regression, and the
+the gate: those cells reflect the current bench-host environment, not a regression, and the
 `full` and large-`changed` numbers are sound and comparable.

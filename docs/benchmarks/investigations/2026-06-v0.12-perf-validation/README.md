@@ -21,8 +21,8 @@
    `S2 100k/1m full` and `S12 100k/1m full`, plus quality-CV failures
    (`S14 100k full` CV 94%)? Competing hypotheses, to be decided by reproduction
    + profiling, **not** assumed:
-   - **(a) Co-tenant contamination** of the shared kbox runner (CI containers +
-     `jobz_*` services) during the ~4h45m run.
+   - **(a) Co-tenant contamination** of the shared dev-box runner (CI containers +
+     unrelated dev-stack services) during the ~4h45m run.
    - **(b) A real regression** — super-linear or otherwise pathological — that
      the canonical run's exact conditions (tree, sizes, ordering, 1M tail)
      triggered and a smaller local run did not.
@@ -51,7 +51,7 @@ Phase 1 proves the slow code does the same work when run clean.**
   near-clean **min** (32.7s vs ~28s local) but a huge **CV 94%** → *intermittent*
   spikes; `S2/100k` had a high **min** (7.5× even on the best run) → *sustained*
   difference. Different signatures ⇒ possibly different causes.
-- Live `ps` during/after the run showed co-tenants active (`jobz` ~4%,
+- Live `ps` during/after the run showed co-tenants active (a dev-stack service ~4%,
   `chrome-headless`, `fuse-overlayfs` CI, load ~3) — establishes contamination was
   *possible*, not that it *caused* the numbers.
 
@@ -274,7 +274,7 @@ Tonight's clean full-matrix run remains the end-to-end wall-clock confirmation
 
 **Implication for the bench corpus.** PR #46 is contaminated and not publishable;
 the real release-quality issue is **infrastructure** — the bench runner is shared
-with CI + `jobz_*`, so wall-clock benches contaminate chronically. The durable fix
+with CI + an unrelated dev stack, so wall-clock benches contaminate chronically. The durable fix
 is a dedicated/isolated runner or a cpuset-pinned bench window. Deterministic
 profiling (callgrind/strace) should be the *primary* regression signal going
 forward, with wall-clock as corroboration on a verified-quiet box.
@@ -282,8 +282,8 @@ forward, with wall-clock as corroboration on a verified-quiet box.
 ### Phase 1c — the clean full-matrix run + S12 "+16%": load-immune confirmation, investigation CLOSED (2026-06-08)
 
 The clean overnight run (`~/clean-bench-v0.12.0.sh`, S1–S14 × {1k,10k,100k,1M} ×
-{full,changed}) finally ran on a **verified-quiet** kbox (mid-run 1-min load
-**0.89**, after stopping the co-tenant CI runners + the openprovision `minikube`
+{full,changed}) finally ran on a **verified-quiet** dev box (mid-run 1-min load
+**0.89**, after stopping the co-tenant CI runners + an unrelated local Kubernetes
 cluster). It finished in 83 min, and `xtask bench-gate` flagged **3 cells, all
 S12** (`min_ms` +15.2% / +16.1% / +16.4% at 10k/100k/1M vs the v0.11.0 *published*
 baseline) — with the *passing* cells uniformly elevated too (S1 +8.0%, S4 +6.3%,

@@ -442,7 +442,7 @@ the bazel self-build): **~2.5 s warm**.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/bazelbuild-bazel/.alint.yml /tmp/bazel` (live run).
+Run: `alint check --config examples/bazelbuild-bazel/.alint.yml /tmp/bazel` (live run).
 
 **Headline (v0.9.17-era; not re-run against v0.9.20):** alint
 surfaced **910 violations** across the live tree at the v0.9.17

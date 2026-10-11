@@ -75,9 +75,9 @@ fi
 # still-valid registration token, so a restart in the first hour after setup
 # destroys the runner while a restart the next day appears to work.
 #
-# Found in the wubhub pilot of `aplan`, which copied this runner pattern: one
-# restart minutes after provisioning produced fifteen container restarts and
-# zero registered runners. Deregistration is an explicit teardown action
+# Found when another project copied this runner pattern: one restart minutes
+# after provisioning produced fifteen container restarts and zero registered
+# runners. Deregistration is an explicit teardown action
 # (`teardown.sh --purge`), never something a routine restart does by accident.
 cleanup() {
     echo "==> Caught signal, stopping the runner agent"

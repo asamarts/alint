@@ -501,7 +501,7 @@ the common-files marker, etc.).
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/istio-istio/.alint.yml /tmp/istio` (live, JSON-format).
+Run: `alint check --config examples/istio-istio/.alint.yml /tmp/istio` (live, JSON-format).
 **Counts in this section are v0.9.17-era;** v0.9.18's pre-launch fix
 wave (A1-A6) does not materially change istio's findings — istio's
 hygiene cosmetics (438 missing-final-newline + 222 trailing-whitespace)

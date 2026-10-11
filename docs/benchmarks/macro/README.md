@@ -155,13 +155,13 @@ git-aware rules (`git_no_denied_paths` / `git_tracked_only`) and
 
 ```
 results/
-├── linux-x86_64/                ← the consolidated 5-scenario series (kbench)
+├── linux-x86_64/                ← the consolidated 5-scenario series (the bench host)
 │   ├── v0.10.0/results.json
 │   ├── …
 │   └── v0.17.0/results.json     ← latest published
 ├── legacy/
 │   └── linux-x86_64/            ← the pre-v0.17 14-scenario results
-└── linux-x86_64-ryzen-3900x/    ← the older 3900X host, pre-kbench
+└── linux-x86_64-ryzen-3900x/    ← the older 3900X host, pre-migration
 ```
 
 Each per-version `results.json` is the output of one `xtask bench-scale`

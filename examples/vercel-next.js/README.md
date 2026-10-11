@@ -466,7 +466,7 @@ sees the whole tree.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/vercel-next.js/.alint.yml --format json /tmp/next.js/`
+Run: `alint check --config examples/vercel-next.js/.alint.yml --format json /tmp/next.js/`
 (live run, JSON-format).
 
 **Headline (v0.9.17-era counts; v0.9.18 fixes annotated):** alint
@@ -519,7 +519,7 @@ fixture tracking and the bundled defaults.
 
 **Pitfall #22 verification:** ZERO instances in `.alint.yml`.
 `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/vercel-next.js/.alint.yml`
+examples/vercel-next.js/.alint.yml`
 returns no matches. The 9 multi-line patterns in this config use
 single-quoted YAML scalars (e.g.
 `pattern: '(?m)^\s*-\s*''packages/\*'''` on line 116,
@@ -537,7 +537,7 @@ issue (pitfall #22).**
 
 **Verdict for `examples/vercel-next.js/.alint.yml`: ZERO instances.**
 `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/vercel-next.js/.alint.yml`
+examples/vercel-next.js/.alint.yml`
 returns no matches. The 9 multi-line patterns in this config use
 single-quoted YAML scalars; the per-rule `message:` text uses `>-`
 folded scalars (which strip trailing newlines and don't apply to

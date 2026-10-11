@@ -7,17 +7,16 @@ note.**
 ## TL;DR
 
 - Three bench-record runs against v0.10.0 (commit `ec7d7495`,
-  tag `v0.10.0`) on the canonical `kbox` host (AMD Ryzen 9 3900X
+  tag `v0.10.0`) on the canonical dev-box host (AMD Ryzen 9 3900X
   / Debian bookworm / `linux-x86_64`).
-- Runs 1 + 2 (host busy with the sister `openprovision-runner`
-  + the `jobz_*` dev stack actively consuming CPU during
+- Runs 1 + 2 (host busy with a sister CI runner
+  + an unrelated dev stack actively consuming CPU during
   measurement): **3 gating failures each, on different cells**
   — clean signature of host-side contention, not a v0.10 binary
   regression. Regression check (`min_ms` vs v0.9.23) PASSED both
   times with max +11% delta.
-- Run 3 (quiesced — `podman stop openprovision-runner
-  jobz_db_1 jobz_browser-service_1 jobz_backend_1 jobz_frontend_1`
-  before re-trigger): **1 gating failure, 0.1% over the gate
+- Run 3 (quiesced: the sister runner and the dev-stack containers
+  stopped before re-trigger): **1 gating failure, 0.1% over the gate
   ceiling**, on `S13 100k full` (CV 10.1%, mean 148 ms, stddev
   15 ms). Regression check PASSED with max +6.3% delta — the
   cleanest run produced.
@@ -39,8 +38,8 @@ note.**
 - Failed cells: `S2 1m changed` (CV 26.5 %, mean 5785 ms),
   `S12 100k changed` (CV 17.9 %), `S5 100k full` (CV 12.7 %).
 - Regression: PASS, max +11.0 % (`S5 1m full`).
-- Host state: `openprovision-runner` likely active on a
-  concurrent CI job + the `jobz_*` dev stack idle-but-running.
+- Host state: the sister runner likely active on a
+  concurrent CI job + the dev stack idle-but-running.
   Load average not captured at run time; subsequent inspection
   showed system load ~7-8 across the 15-min average.
 
@@ -61,7 +60,7 @@ note.**
   would fail. The shifting failure set is the unambiguous
   signature of random host-side contention.
 - Host state at run time (snapshot during run): 11 containers
-  running on `kbox`; `openprovision-runner` actively executing
+  running on the host; the sister runner actively executing
   a CI job (Runner.Listener at 100 % CPU snapshot, Runner.Worker
   at 28 %, MainThread at 77 %). System load 7.79 / 7.90 (15- /
   60-min).
@@ -72,9 +71,8 @@ note.**
   fired by `gh workflow run`, 2026-05-20T19:41:01Z. Same "PR
   already exists" workflow-failure at step 13 only; bench data
   force-pushed cleanly; gate run manually.
-- Pre-flight: stopped `openprovision-runner` +
-  `jobz_db_1` + `jobz_browser-service_1` + `jobz_backend_1` +
-  `jobz_frontend_1`. Load average dropped from 7.79 / 7.90 to
+- Pre-flight: stopped the sister runner and the
+  dev-stack containers. Load average dropped from 7.79 / 7.90 to
   2.07 / 2.68 within seconds.
 - Failed cells: **`S13 100k full` (CV 10.1 %, 0.1 % over the
   gate ceiling)** — single borderline cell.
@@ -115,7 +113,7 @@ scenarios" generally.
 The most plausible reading is **a transient noise spike during
 the 100k-full measurement window** for S13 — likely a brief
 background process the quiesce didn't catch (e.g. one of the
-remaining `baseidcloud_*` services doing an internal task, or a
+remaining idle services doing an internal task, or a
 kernel-side housekeeping moment). At 0.1 % over the binary
 threshold, the data is essentially equivalent to a clean pass.
 
@@ -127,22 +125,14 @@ Quiesce the canonical host before triggering. The minimal
 quiesce set that worked here:
 
 ```sh
-podman stop openprovision-runner \
-            jobz_db_1 \
-            jobz_browser-service_1 \
-            jobz_backend_1 \
-            jobz_frontend_1
+podman stop <sister-runner> <dev-stack containers...>
 gh workflow run bench-record.yml \
   --ref vX.Y.Z -f ref=vX.Y.Z -f label=vX.Y.Z
 # ... ~75 min wall time on the quiesced host ...
-podman start openprovision-runner \
-             jobz_db_1 \
-             jobz_browser-service_1 \
-             jobz_backend_1 \
-             jobz_frontend_1
+podman start <sister-runner> <dev-stack containers...>
 ```
 
-The `baseidcloud_*` and `opv-gateway-*` containers can stay up;
+The remaining idle service containers can stay up;
 they're idle services and don't measurably affect the bench.
 
 The original gate-design investigation

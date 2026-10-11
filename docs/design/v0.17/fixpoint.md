@@ -184,7 +184,7 @@ realistic configs, and `fix` is a deliberate mutating command, not the
 per-keystroke hot path the sub-second floor protects. Plan:
 
 - Add a fixpoint benchmark cell (a create-then-cascade + a converging content
-  fixpoint) to the det-perf / bench harness and record a baseline on `kbench`
+  fixpoint) to the det-perf / bench harness and record a baseline on the bench host
   (the canonical host; `ALINT_BENCH_DROP_CACHES=1`), both Valgrind-Ir (load-
   immune) and wall-clock.
 - Gate it so a future regression is caught.
@@ -365,7 +365,7 @@ structured signal of the distinct exit 2, since a capped run's items are mostly
 
   The ARCHITECTURE "walk once" invariant (principles 1 and 4, and the pipeline
   invariants block) is amended for the fix path (R-WALK). Follow-up (tracked, not
-  blocking 2a): a fixpoint **benchmark cell** on `kbench` (create-then-cascade + a
+  blocking 2a): a fixpoint **benchmark cell** on the bench host (create-then-cascade + a
   converging content fixpoint), recorded per the bench protocol.
 - **2b (done, 2026-09-14):** `--changed` confinement. A file THIS `fix` run created
   joins the changed set -- a `created` set is threaded through `fix_run` into

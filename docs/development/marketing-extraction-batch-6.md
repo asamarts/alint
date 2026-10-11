@@ -278,19 +278,19 @@ Batch scope (alphabetical batch 6 — the final batch, 5 case studies):
 Public READMEs (5 — engineering content preserved, positioning
 recast):
 
-- `/home/kaminsod/projects/alint/examples/rust-lang-rust/README.md`
-- `/home/kaminsod/projects/alint/examples/tensorflow-tensorflow/README.md`
-- `/home/kaminsod/projects/alint/examples/tokio-rs-tokio/README.md`
-- `/home/kaminsod/projects/alint/examples/vercel-next.js/README.md`
-- `/home/kaminsod/projects/alint/examples/vercel-turbo/README.md`
+- `examples/rust-lang-rust/README.md`
+- `examples/tensorflow-tensorflow/README.md`
+- `examples/tokio-rs-tokio/README.md`
+- `examples/vercel-next.js/README.md`
+- `examples/vercel-turbo/README.md`
 
 alint.org case studies (5 — new files):
 
-- `/home/kaminsod/projects/alint.org/src/content/case-studies/rust-lang-rust.md`
-- `/home/kaminsod/projects/alint.org/src/content/case-studies/tensorflow-tensorflow.md`
-- `/home/kaminsod/projects/alint.org/src/content/case-studies/tokio-rs-tokio.md`
-- `/home/kaminsod/projects/alint.org/src/content/case-studies/vercel-next.js.md`
-- `/home/kaminsod/projects/alint.org/src/content/case-studies/vercel-turbo.md`
+- `alint.org/src/content/case-studies/rust-lang-rust.md`
+- `alint.org/src/content/case-studies/tensorflow-tensorflow.md`
+- `alint.org/src/content/case-studies/tokio-rs-tokio.md`
+- `alint.org/src/content/case-studies/vercel-next.js.md`
+- `alint.org/src/content/case-studies/vercel-turbo.md`
 
 Net delta: -78 lines from public READMEs (positioning trimmed),
 +546 lines added on alint.org (case-study marketing pages).

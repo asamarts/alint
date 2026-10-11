@@ -17,7 +17,7 @@ of date with the published bench corpus.
 This renders the CONSOLIDATED 5-scenario series (S1 layout / S2
 content / S3 relational-graph / S4 workspace, plus the fix-mode
 SFIX scenario which has no published data until the v0.17 fix
-engine ships). The pre-consolidation 14-scenario kbench series is
+engine ships). The pre-consolidation 14-scenario bench-host series is
 FROZEN at `docs/benchmarks/legacy/` and rendered from
 `docs/benchmarks/macro/results/legacy/` with this script's
 git-history predecessor; it is not re-rendered.
@@ -219,7 +219,7 @@ SCENARIOS = [
 # Older versions render `n/a` (vs `—` which means "version exists but
 # wasn't measured at that size"). Extend when adding a scenario; no
 # need to enumerate every prior tag. The consolidated series starts at
-# v0.10.0 (the kbench corpus floor); S1/S2/S4 exist across all of it,
+# v0.10.0 (the bench-host corpus floor); S1/S2/S4 exist across all of it,
 # S3's graph kinds land at v0.12.0.
 FIRST_VERSION: Dict[str, str] = {
     "S3": "v0.12.0",
@@ -229,11 +229,11 @@ FIRST_VERSION: Dict[str, str] = {
 }
 
 # Manual pre-results.json cells belong only to the retired 3900X series
-# (`linux-x86_64-ryzen-3900x`); the canonical kbench series is measured.
+# (`linux-x86_64-ryzen-3900x`); the canonical bench-host series is measured.
 MANUAL: Dict[Cell, Stat] = {}
 
 # Host fingerprint per published arch series, for the HISTORY header line.
-# `linux-x86_64` is the canonical kbench series (2026-07 onward); the retired
+# `linux-x86_64` is the canonical bench-host series (2026-07 onward); the retired
 # 3900X dev-box series lives at `linux-x86_64-ryzen-3900x` in this repository.
 FINGERPRINT = {
     "linux-x86_64": "Intel Core i7-6700HQ 4-core / 15 GB / ext4 / rustc 1.97.0",
@@ -386,7 +386,7 @@ def render(
         out.append(f"| {marker}{v}{marker} | {date} | {' | '.join(cells)} | {headline} |")
     out += [
         "",
-        "Pre-consolidation history (the 14-scenario kbench series v0.10.0-v0.16.0, and",
+        "Pre-consolidation history (the 14-scenario bench-host series v0.10.0-v0.16.0, and",
         "the retired 3900X series before it) lives in",
         "[`legacy/HISTORY.md`](legacy/HISTORY.md); its raw results remain under",
         "[`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/).",

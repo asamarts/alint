@@ -2,7 +2,7 @@
 
 **Pass date:** 2026-05-07
 **alint version validated:** 0.9.17 (built 2026-05-07,
-`/home/kaminsod/projects/alint/target/release/alint`)
+`target/release/alint`)
 **Batch:** angular-angular, apache-airflow, apache-arrow,
 apache-spark, astral-sh-ruff (alphabetical batch 1 of the 30
 case-study revalidation pass)
@@ -307,11 +307,11 @@ versioned" rule without listing them by name.
 
 ## Files touched
 
-- `/home/kaminsod/projects/alint/examples/angular-angular/README.md`
-- `/home/kaminsod/projects/alint/examples/apache-airflow/README.md`
-- `/home/kaminsod/projects/alint/examples/apache-arrow/README.md`
-- `/home/kaminsod/projects/alint/examples/apache-spark/README.md`
-- `/home/kaminsod/projects/alint/examples/astral-sh-ruff/README.md`
+- `examples/angular-angular/README.md`
+- `examples/apache-airflow/README.md`
+- `examples/apache-arrow/README.md`
+- `examples/apache-spark/README.md`
+- `examples/astral-sh-ruff/README.md`
 
 5 README files modified. **0 `.alint.yml` files modified** (no
 config bugs surfaced; all 5 still validate-config-clean post-edit

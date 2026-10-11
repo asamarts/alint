@@ -6,11 +6,10 @@ set -euo pipefail
 
 readonly repo_id='1214597864'
 readonly asamarts_id='11239806'
-readonly kaminsod_id='12991611'
 
 is_approved_human() {
   case "$1" in
-    "$asamarts_id"|"$kaminsod_id") return 0 ;;
+    "$asamarts_id") return 0 ;;
     *) return 1 ;;
   esac
 }
@@ -52,22 +51,12 @@ expect_route push-held hosted push '' '' '' '' '' '' false
 expect_route asamarts-same-repo-held hosted pull_request \
   "$repo_id" "$repo_id" "$repo_id" \
   "$asamarts_id" "$asamarts_id" "$asamarts_id" false
-expect_route kaminsod-same-repo-held hosted pull_request \
-  "$repo_id" "$repo_id" "$repo_id" \
-  "$kaminsod_id" "$kaminsod_id" "$kaminsod_id" false
-# A login rename is intentionally absent from the inputs: stable IDs decide.
-expect_route renamed-login-stable-ids-held hosted pull_request \
-  "$repo_id" "$repo_id" "$repo_id" \
-  "$asamarts_id" "$kaminsod_id" "$kaminsod_id" false
 
 # Model the future capacity switch as well: only the exact admitted identities
-# become local if MN-167 replaces the held route with qualified capacity.
+# become local if a later change replaces the held route with qualified capacity.
 expect_route asamarts-qualified-capacity local pull_request \
   "$repo_id" "$repo_id" "$repo_id" \
   "$asamarts_id" "$asamarts_id" "$asamarts_id" true
-expect_route kaminsod-qualified-capacity local pull_request \
-  "$repo_id" "$repo_id" "$repo_id" \
-  "$kaminsod_id" "$kaminsod_id" "$kaminsod_id" true
 
 expect_route dependabot-same-repo hosted pull_request \
   "$repo_id" "$repo_id" "$repo_id" 49699333 49699333 49699333 true
@@ -98,11 +87,11 @@ for workflow in .github/workflows/ci.yml .github/workflows/coverage.yml; do
   assert_contains "$workflow" "format('{0}', github.event.pull_request.base.repo.id) == '$repo_id'"
   assert_contains "$workflow" "format('{0}', github.event.pull_request.head.repo.id) == '$repo_id'"
   assert_contains "$workflow" \
-    "contains(fromJSON('[\"$asamarts_id\",\"$kaminsod_id\"]'), format('{0}', github.event.pull_request.user.id))"
+    "contains(fromJSON('[\"$asamarts_id\"]'), format('{0}', github.event.pull_request.user.id))"
   assert_contains "$workflow" \
-    "contains(fromJSON('[\"$asamarts_id\",\"$kaminsod_id\"]'), format('{0}', github.event.sender.id))"
+    "contains(fromJSON('[\"$asamarts_id\"]'), format('{0}', github.event.sender.id))"
   assert_contains "$workflow" \
-    "contains(fromJSON('[\"$asamarts_id\",\"$kaminsod_id\"]'), format('{0}', github.actor_id))"
+    "contains(fromJSON('[\"$asamarts_id\"]'), format('{0}', github.actor_id))"
 done
 
 # Compare the complete normalized expressions, not merely their component
@@ -119,9 +108,9 @@ coverage = Path('.github/workflows/coverage.yml').read_text(encoding='utf-8')
 identity = r'''format('{0}', github.event.repository.id) == '1214597864' &&
 format('{0}', github.event.pull_request.base.repo.id) == '1214597864' &&
 format('{0}', github.event.pull_request.head.repo.id) == '1214597864' &&
-contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.pull_request.user.id)) &&
-contains(fromJSON('["11239806","12991611"]'), format('{0}', github.event.sender.id)) &&
-contains(fromJSON('["11239806","12991611"]'), format('{0}', github.actor_id))'''
+contains(fromJSON('["11239806"]'), format('{0}', github.event.pull_request.user.id)) &&
+contains(fromJSON('["11239806"]'), format('{0}', github.event.sender.id)) &&
+contains(fromJSON('["11239806"]'), format('{0}', github.actor_id))'''
 
 expected_ci = "${{ github.event_name == 'pull_request' && (" + identity + ") }}"
 expected_coverage = "${{ github.event_name != 'pull_request' || (false && " + identity + ") }}"

@@ -394,7 +394,7 @@ commands are documented for that future run.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/clap-rs-clap/.alint.yml /tmp/clap` (live run).
+Run: `alint check --config examples/clap-rs-clap/.alint.yml /tmp/clap` (live run).
 
 **Headline (v0.9.17-era; not re-run against v0.9.20):** alint
 surfaced **132 violations** across the live tree at the v0.9.17

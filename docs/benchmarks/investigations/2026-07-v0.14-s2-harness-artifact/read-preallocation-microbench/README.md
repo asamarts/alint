@@ -68,7 +68,7 @@ PY
 
 ## Notes
 
-- Numbers are a dev box, not the canonical bench host (kbench) — but the comparison
+- Numbers are a dev box, not the canonical bench host — but the comparison
   is same-box, back-to-back and interleaved, so it measures the *relative* cost of the
   read path with host load and contamination cancelled. The absolute on-host recovery
   is the v0.14.1 runner bench (parent `../../../HISTORY.md`).

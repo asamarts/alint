@@ -483,7 +483,7 @@ when its run completes. Review checklist:
 
 2. **Fingerprint check.** Open `results.json` and verify
    `fingerprint.alint_version` matches the tag, `fingerprint.cpu_model`
-   matches the canonical baseline (Intel Core i7-6700HQ, host `kbench`;
+   matches the canonical baseline (Intel Core i7-6700HQ bench host;
    the retired 3900X series is at `results/linux-x86_64-ryzen-3900x/`), and
    `fingerprint.os` is `linux`. A bench run on the wrong machine voids
    cross-version comparability.

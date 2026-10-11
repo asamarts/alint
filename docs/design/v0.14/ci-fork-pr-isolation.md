@@ -8,8 +8,7 @@ and the design incorrectly treated `pull_request` workflow YAML as immutable
 base-branch policy. The current workflow uses exact numeric identity checks,
 but the persistent `alint` listener must remain offline until a separately
 qualified base-controlled broker provisions a unique disposable one-job
-runner. Operational evidence is in
-`docs/development/ci-runner-isolation-worklog.md`.
+runner.
 
 Scope: `.github/workflows/ci.yml`, `.github/workflows/coverage.yml` and
 `ci/scripts/test-ci-pr-routing.sh`. Related: ADR-0004 (trust boundary),
@@ -30,7 +29,7 @@ insufficient. Dependabot PR 250 had the same base and head repository ID as the
 project, so the former `head.repo.full_name == github.repository` check routed
 its ordinary and coverage jobs locally. More generally, a bot, installed App,
 deploy key or other principal can update a same-repository branch without being
-one of the two approved human development authorities.
+the approved human development account.
 
 There is a deeper boundary: a `pull_request` run uses the PR merge ref and merge
 commit. GitHub selects workflow files from the event-associated ref/commit, so
@@ -47,8 +46,8 @@ For a PR, canonical local eligibility requires all of the following:
 
 - event repository ID, base repository ID and head repository ID are exactly
   `1214597864` (`asamarts/alint` at the recorded review);
-- PR author ID is one of `11239806` (`asamarts`) or `12991611` (`kaminsod`);
-- webhook event sender ID and `github.actor_id` are in the same human-ID set;
+- PR author ID is `11239806` (`asamarts`);
+- webhook event sender ID and `github.actor_id` are the same approved ID;
   and
 - every field exists and compares successfully. Missing/null/unknown values
   fail closed.
@@ -79,7 +78,7 @@ capacity. This avoids leaving main runs queued indefinitely and, because the
 workflow has `cancel-in-progress`, avoids an unavailable always-run summary
 holding the concurrency group while every newer run is cancelled behind it.
 For PRs, the exact identity predicate is retained but an explicit false capacity
-switch sends even admitted human PRs to hosted portable CI until MN-167
+switch sends even admitted human PRs to hosted portable CI until a later change
 qualifies the replacement. Push, tag, schedule and manual events need their own
 exact principal/ref contracts before local provisioning; “not a PR” is not
 sufficient admission for the future broker.
@@ -176,8 +175,7 @@ and rejects review-approval operations.
 
 `ci/scripts/test-ci-pr-routing.sh` models and checks:
 
-- approved same-repository events for each admitted human ID;
-- stable-ID behavior independent of renamed logins;
+- approved same-repository events for the admitted human ID;
 - same-repository Dependabot, external fork, wrong base/event repository,
   unknown author, unknown synchronizing actor and null head repository denial;
 - presence of every exact-ID term in both workflows;

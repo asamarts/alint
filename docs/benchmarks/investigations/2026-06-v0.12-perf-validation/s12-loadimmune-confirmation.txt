@@ -156,4 +156,4 @@ Gungraun result: Regressed. 6 without regressions; 4 regressed; 0 filtered; 10 b
 error: bench failed, to rerun pass `-p alint-bench --bench det_check`
 
 Caused by:
-  process didn't exit successfully: `/home/kaminsod/projects/alint/target/release/deps/det_check-b4eebeea43739f38 --baseline=v0110 --bench` (exit status: 3)
+  process didn't exit successfully: `target/release/deps/det_check-b4eebeea43739f38 --baseline=v0110 --bench` (exit status: 3)

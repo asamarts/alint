@@ -5,7 +5,7 @@ batch of 5 case studies. Aggregated by parent agent into the master
 log (`case-study-revalidation-log.md`).
 
 Validation environment:
-- alint binary: `/home/kaminsod/projects/alint/target/release/alint` (v0.9.17)
+- alint binary: `target/release/alint` (v0.9.17)
 - Date: 2026-05-07
 - Authoritative pitfall catalogue: 21 pitfalls (#18 + #19 fixed in v0.9.17 engine)
 - Authoritative rule-kind backlog: docs/development/launch-evidence.md

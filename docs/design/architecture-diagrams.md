@@ -214,7 +214,7 @@ diagram.
 
 ## 8. Open items
 
-- ~~Rebuild the kbox runner image with Node 22 to flip `likec4.sh`
+- ~~Rebuild the dev-box runner image with Node 22 to flip `likec4.sh`
   (`likec4 validate`) and `gen-mermaid --check` from skip to hard gate.~~ **Done
   (#90, 2026-06-23):** the runner ships Node 22 and both are live hard gates
   (`gen-mermaid` runs `--no-use-dot` to force the wasm layouter).

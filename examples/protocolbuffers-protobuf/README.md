@@ -491,7 +491,7 @@ correctness.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/protocolbuffers-protobuf/.alint.yml /tmp/protobuf` (live run).
+Run: `alint check --config examples/protocolbuffers-protobuf/.alint.yml /tmp/protobuf` (live run).
 
 **Headline (v0.9.17-era):** alint surfaced **150 violations across
 14 failing files** (2 errors + 127 warnings + 21 info; **72 rules

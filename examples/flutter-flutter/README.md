@@ -458,7 +458,7 @@ only knows the Dart tree).
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/flutter-flutter/.alint.yml /tmp/flutter` (live, JSON-format).
+Run: `alint check --config examples/flutter-flutter/.alint.yml /tmp/flutter` (live, JSON-format).
 **Counts in this section are v0.9.17-era;** v0.9.18's pre-launch fix
 wave (A1 hygiene-no-js-build-outputs sibling-package.json gate, A2 ASF
 preamble bundle, A5 oss-license-exists case-insensitivity) materially

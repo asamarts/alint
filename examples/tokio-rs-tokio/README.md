@@ -394,7 +394,7 @@ once the tooling is available.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/tokio-rs-tokio/.alint.yml --format json /tmp/tokio/`
+Run: `alint check --config examples/tokio-rs-tokio/.alint.yml --format json /tmp/tokio/`
 (live run, JSON-format).
 
 **Headline (v0.9.17-era counts; v0.9.18 bundled-rule fix wave
@@ -432,7 +432,7 @@ state is sane, alint asserts the assumptions, the assumptions are
 mostly held.
 
 **Pitfall #22 verification:** ZERO instances in `.alint.yml`.
-`grep -nE 'pattern:\s*[|>][-+]?$' /home/kaminsod/projects/alint/examples/tokio-rs-tokio/.alint.yml`
+`grep -nE 'pattern:\s*[|>][-+]?$' examples/tokio-rs-tokio/.alint.yml`
 returns no matches. The 2 multi-line patterns in this config
 (`tokio-crate-inherits-workspace-lints` line 299:
 `pattern: '(?ms)^\[lints\]\s*\nworkspace\s*=\s*true'`, and
@@ -454,7 +454,7 @@ issue (pitfall #22).**
 
 **Verdict for `examples/tokio-rs-tokio/.alint.yml`: ZERO instances.**
 `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/tokio-rs-tokio/.alint.yml`
+examples/tokio-rs-tokio/.alint.yml`
 returns no matches. The 2 multi-line patterns in this config use
 single-quoted scalars (`pattern: '(?ms)^\[lints\]\s*\nworkspace\s*=\s*true'`
 on line 299 and `pattern: '\A\d+\n'` on line 226). Both are correct

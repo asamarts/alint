@@ -85,7 +85,7 @@ strictly advisory: a stale or hostile size cannot force an over-read (locked in 
 lying hint). The microbench above nets −8.8 % vs v0.13 — the fix skips even the `fstat`
 `std::fs::read` does internally, since alint has the size for free. Shipped in v0.14.1.
 
-The v0.14.1 runner bench confirms the recovery on-host (same kbench harness, `min_ms`):
+The v0.14.1 runner bench confirms the recovery on-host (same bench-host harness, `min_ms`):
 **S2 returns to the v0.13 baseline — −0.7 % at 100k, −3.3 % at 1M vs v0.13 (i.e. −13.8 %
 / −14.1 % vs v0.14)** — S12 to +0.5…+2.1 % vs v0.13 (−9.7…−9.9 % vs v0.14), and the less
 read-dominated content scenarios (S3/S6/S9) to +2…+5 % vs v0.13 (within the ~3 % run CV),
@@ -126,7 +126,7 @@ estimated cycles for S2 are identical between v0.13.0 and v0.14.0** (−0.2% at
 environmental, not v0.14 code.
 
 The environmental difference is the harness: v0.14.0 is the first release benched
-through the newly-registered self-hosted runner (`kbench-bench`), while
+through the newly-registered self-hosted runner (label `bench`), while
 v0.10–v0.13 were backfilled by hand over SSH. A runner agent doing concurrent
 work (log streaming, job bookkeeping) adds a steady background load that inflates
 wall-clock most on the longer, CPU-heavier scenarios and barely touches the short
@@ -146,7 +146,7 @@ deterministic gate on any post-bump PR (see "Secondary finding").
 ## Symptom
 
 `xtask bench-gate --results <v0.14.0> --baseline <v0.13.0>` (both on
-`linux-x86_64` = kbench):
+`linux-x86_64` = the bench host):
 
 ```
 [regression] min_ms vs baseline (gate: ≥10k, +15%)
@@ -193,8 +193,8 @@ shape of a steady background cost, not a hot-path change.
 
 | # | Hypothesis | Verdict / killed by |
 |---|---|---|
-| 1 | Transient contamination on kbench during the run | Partly — but kbench was idle at diagnosis time (load 0.00), CV was low (0.6%), and the lift was reproducible in the committed numbers, so not a one-off blip. |
-| 2 | The kbench ACPI GPE storm (a known contamination source, ~1630 int/s burning a core) was firing during the bench | **Ruled out.** `gpe61` reads `enabled masked` and is frozen (0/s) — the kernel auto-masked it after an early-boot storm; it was not firing at bench time. |
+| 1 | Transient contamination on the bench host during the run | Partly — but the bench host was idle at diagnosis time (load 0.00), CV was low (0.6%), and the lift was reproducible in the committed numbers, so not a one-off blip. |
+| 2 | The bench host's ACPI GPE storm (a known contamination source, ~1630 int/s burning a core) was firing during the bench | **Ruled out.** `gpe61` reads `enabled masked` and is frozen (0/s) — the kernel auto-masked it after an early-boot storm; it was not firing at bench time. |
 | 3 | A real per-content-scan code regression from the W-series security cycle | **Killed by the deterministic gate (row 5).** Looked strong: the lift tracks content scanning, and a code scan found a read-path change (below). |
 | 4 | The subagent's "smoking gun": v0.14's `c845f7d3` (crash/FIFO hardening) switched every content read from `std::fs::read(&abs)` to `read_capped_or_skip` → `read_bounded`, which reads into a zero-capacity `Vec::new()` via `Take::read_to_end` — *looks* like it drops `std::fs::read`'s size preallocation | **ACTUALLY RIGHT — the "Wrong" verdict here WAS the misdiagnosis.** The refutation confused two std behaviours: `read_to_end` is specialized to fstat-and-preallocate for a bare `File`, but a `Take<File>` gets NO such specialization and falls back to grow-and-reread. The cost is extra `read()` **syscalls**, not reallocs/memcpys — so it barely moves Ir (row 5) yet is real wall-clock. See the Correction (microbench: +46%). |
 | 5 | **Harness / environment difference, not code** | **Partial — overturned as the SOLE cause.** `det_check` Ir/EstimatedCycles ARE flat ±0.4% (so no compute/cache regression, and a harness offset is genuinely present), but Ir is **I/O-blind**: it cannot see the extra `read()` syscalls. The runner-vs-runner re-baseline (still +12–15% S2) + the microbench proved a real ~13% wall-clock regression underneath the harness offset. See the Correction. |
@@ -241,10 +241,10 @@ runner-load story below explains at most the small S2 harness slice (+17.6 → +
 not the regression. It is kept because the reasoning ("broad content band ⟹ steady
 background load") is a plausible-but-wrong inference worth recognizing.
 
-The v0.10–v0.13 macro corpus was **backfilled by hand over SSH** on kbench (the
+The v0.10–v0.13 macro corpus was **backfilled by hand over SSH** on the bench host (the
 `$SCRATCH/laptop-*.sh` scripts), with nothing else running on the box. v0.14.0 is
 the **first release benched through the self-hosted GitHub Actions runner**
-(`kbench-bench`), registered as part of the same re-baseline. The runner's agent
+(label `bench`), registered as part of the same re-baseline. The runner's agent
 processes (`Runner.Listener` + the job's log/upload machinery) do steady
 concurrent work throughout the ~3.5 h run. On a 4-core box that steady load
 inflates wall-clock, and it inflates the **longer, more CPU-bound scenarios most**
@@ -332,7 +332,7 @@ across the bump.
 - Compute the *full* per-scenario delta before trusting a single flagged cell:
   `xtask bench-gate` prints only the failures, but the uniform-vs-targeted shape of
   the whole matrix is the fastest triage for code-vs-environment.
-- A kbench GPE storm **auto-masks** — the counter freezes, so a low current reading
+- A bench-host GPE storm **auto-masks** — the counter freezes, so a low current reading
   doesn't prove it was quiet earlier. Check `cat /sys/firmware/acpi/interrupts/gpe61`
   for the `masked` flag and whether the kernel cmdline (not just `/etc/default/grub`)
   carries `acpi_mask_gpe=0x61`; the mask only applies after a reboot.

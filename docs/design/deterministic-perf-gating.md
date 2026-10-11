@@ -9,7 +9,7 @@ deterministic profiling (instruction / cache / branch counts via Valgrind) is
 **load-immune**: it gave an airtight regression verdict in ~30 min on a *busy*
 shared box, where the wall-clock `bench-scale` needed a 5-hour quiet window and
 *still* got contaminated by co-tenants (v0.11.1 AND v0.12.0). Wall-clock benches
-on the shared kbox are chronically unreliable as a regression gate.
+on the shared dev box are chronically unreliable as a regression gate.
 
 **Goal:** make deterministic counts the **primary, automated, per-PR regression
 gate**, decoupled from the contaminated self-hosted runner, with minimal drift.

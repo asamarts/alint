@@ -85,7 +85,7 @@ threshold:
 
 ```sh
 # Compare against an earlier micro floor (local helper — no workflow runs this).
-# Use a same-host baseline: the canonical linux-x86_64 series is kbench (v0.10.0+).
+# Use a same-host baseline: the canonical linux-x86_64 series is the bench host (v0.10.0+).
 xtask bench-compare \
     --before docs/benchmarks/micro/results/linux-x86_64/v0.10.0/criterion \
     --after  target/criterion \

@@ -466,7 +466,7 @@ here:
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/pytorch-pytorch/.alint.yml /tmp/pytorch` (live run).
+Run: `alint check --config examples/pytorch-pytorch/.alint.yml /tmp/pytorch` (live run).
 
 **Headline (v0.9.17-era):** alint surfaced **23,113 violations**
 across the live tree (7 errors + 23,065 warnings + 41 info; **32

@@ -36,8 +36,8 @@ Symptom is a *measurement artifact*, not an alint regression: the
 same cell measured in isolation on the same box, same tag, same
 flags is clean (CV 0.1–0.5 %).
 
-Context: this arose while qualifying a second bench host (`kbench`,
-an i7-6700HQ laptop, 16 GB RAM) as a replacement for the contended
+Context: this arose while qualifying a second bench host (an
+i7-6700HQ laptop, 16 GB RAM) as a replacement for the contended
 3900X dev box. The 3900X (62 GB) does **not** show this. See
 [Host qualification](#host-qualification) for why that matters.
 
@@ -128,7 +128,7 @@ reads never touch the disk and therefore never contend with the
 writeback drain. **The harness bug is latent there, not absent.** The
 quiesce fix below is worth landing on its own merits.
 
-### 5. Kernel writeback configuration (kbench, stock)
+### 5. Kernel writeback configuration (the bench host, stock)
 
 ```
 vm.dirty_ratio             = 20     # ~3.2 GB dirty before writers throttle
@@ -203,7 +203,7 @@ T5 is the discriminating test: it separates "removed an artifact" from
 
 ## Host qualification
 
-`kbench` otherwise qualified cleanly and is a *better* measurement host
+the bench host otherwise qualified cleanly and is a *better* measurement host
 than the contended dev box:
 
 - 100k cells: **worst CV 2.6 %, median 0.5 %** (gate: 10 %).

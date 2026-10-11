@@ -2,7 +2,7 @@
 
 Criterion micro-bench snapshot for v0.12.0 (33 groups, matching prior versions).
 
-**Provenance.** Recorded on the shared kbox (self-hosted AMD Ryzen 9 3900X) under
+**Provenance.** Recorded on the shared dev box (self-hosted AMD Ryzen 9 3900X) under
 VARIABLE load: the run started at 1-min load ~1.9, and a co-tenant spike pushed it
 to ~26 over the ~17-minute run, so the late-running groups (alphabetically:
 `walker`, `structured_query`, `single_file_*`) saw more contention than the early

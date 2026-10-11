@@ -381,7 +381,7 @@ that the husky chain doesn't enforce at all.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/vercel-turbo/.alint.yml --format json /tmp/turborepo/`
+Run: `alint check --config examples/vercel-turbo/.alint.yml --format json /tmp/turborepo/`
 (live run, JSON-format).
 
 **Headline (v0.9.17-era counts; v0.9.18 fixes annotated):** alint
@@ -432,7 +432,7 @@ were since fixed. Verify with `ls /tmp/turborepo/examples/with-microfrontends`.
 
 **Pitfall #22 verification:** ZERO instances in `.alint.yml`.
 `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/vercel-turbo/.alint.yml`
+examples/vercel-turbo/.alint.yml`
 returns no matches. The 7 multi-line patterns in this config use
 single-quoted YAML scalars (e.g.
 `pattern: '(?ms)^\[lints\]\s*\nworkspace = true'` on line 74).
@@ -449,7 +449,7 @@ issue (pitfall #22).**
 
 **Verdict for `examples/vercel-turbo/.alint.yml`: ZERO instances.**
 `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/vercel-turbo/.alint.yml`
+examples/vercel-turbo/.alint.yml`
 returns no matches. The 7 multi-line patterns in this config use
 single-quoted YAML scalars; the per-message text uses `>-` folded
 scalars (which strip trailing newlines and don't apply to regex).

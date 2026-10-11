@@ -464,7 +464,7 @@ run on a CI-class image.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/kubernetes-kubernetes/.alint.yml /tmp/kubernetes` (live run, JSON-format; counts captured against alint v0.9.17 + the 2026-05-07 SHA — absolute counts drift with upstream tip).
+Run: `alint check --config examples/kubernetes-kubernetes/.alint.yml /tmp/kubernetes` (live run, JSON-format; counts captured against alint v0.9.17 + the 2026-05-07 SHA — absolute counts drift with upstream tip).
 
 **Headline (v0.9.17 walk, historical).** alint surfaced **34,696 violations**
 across the live tree; of those, **34,420 were false positives traceable to 3

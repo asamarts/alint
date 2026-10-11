@@ -391,7 +391,7 @@ removing the tidy binary).
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/rust-lang-rust/.alint.yml --format json /tmp/rust-lang-rust/`
+Run: `alint check --config examples/rust-lang-rust/.alint.yml --format json /tmp/rust-lang-rust/`
 (live run, JSON-format).
 
 **Headline (v0.9.17-era counts; v0.9.18 fixes annotated):** alint
@@ -447,7 +447,7 @@ remaining real findings (the line-length, TODO-marker, and
 GHA-SHA-pinning long tail) without this synthesised noise.
 
 **Pitfall #22 verification:** ZERO instances in `.alint.yml`.
-`grep -nE 'pattern:\s*[|>]' /home/kaminsod/projects/alint/examples/rust-lang-rust/.alint.yml`
+`grep -nE 'pattern:\s*[|>]' examples/rust-lang-rust/.alint.yml`
 returns no matches. All patterns are single-quoted YAML scalars
 (`pattern: '(?i)\b(TODO|XXX)\b'`, `pattern: '^//@ known-bug:'`,
 `pattern: '^\s*#\[(test|bench)\]'`). No multi-line license-header
@@ -465,7 +465,7 @@ issue (pitfall #22).**
 
 **Verdict for `examples/rust-lang-rust/.alint.yml`: ZERO instances.**
 `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/rust-lang-rust/.alint.yml`
+examples/rust-lang-rust/.alint.yml`
 returns no matches — all regex patterns in this config use
 single-quoted YAML scalars (e.g.
 `pattern: '(?i)\b(TODO|XXX)\b'`). The Apache-2 dual-license

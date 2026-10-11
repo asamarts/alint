@@ -510,7 +510,7 @@ the build/format/api-compat): **~9 s warm**.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/dotnet-runtime/.alint.yml /tmp/runtime` (live run).
+Run: `alint check --config examples/dotnet-runtime/.alint.yml /tmp/runtime` (live run).
 
 **Headline (v0.9.17-era; not re-run against v0.9.20):** alint
 surfaced **7,769 violations** across the live tree at the v0.9.17

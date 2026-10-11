@@ -1,6 +1,6 @@
 # Isolated vs full-matrix, 1M cells (raw)
 
-Same box (kbench), same tag (v0.13.0), same flags (--warmup 3 --runs 10;
+Same box (the bench host), same tag (v0.13.0), same flags (--warmup 3 --runs 10;
 1M auto-reduces to 3). The only difference is whether the cell was measured
 inside the full 112-cell matrix or in a short isolated invocation.
 

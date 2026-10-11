@@ -450,7 +450,7 @@ a hot cache.
 
 ## 6. Gap discovery — what alint surfaces against the live tree
 
-Run: `alint check --config /home/kaminsod/projects/alint/examples/tensorflow-tensorflow/.alint.yml --format json /tmp/tensorflow/`
+Run: `alint check --config examples/tensorflow-tensorflow/.alint.yml --format json /tmp/tensorflow/`
 (live run, JSON-format).
 
 **Headline (v0.9.17-era counts; v0.9.18 fixes annotated):** alint
@@ -509,7 +509,7 @@ this repo).
 
 **Pitfall #22 verification:** ZERO instances in `.alint.yml`.
 `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/tensorflow-tensorflow/.alint.yml`
+examples/tensorflow-tensorflow/.alint.yml`
 returns no matches. The multi-line patterns in this config use
 single-quoted YAML scalars (e.g.
 `pattern: '(?m)^path:\s*"tensorflow\.'` for the
@@ -526,7 +526,7 @@ gotcha. Single-quoted scalars are the canonical workaround.
 
 **Verdict for `examples/tensorflow-tensorflow/.alint.yml`: ZERO
 instances.** `grep -nE 'pattern:\s*[|>][-+]?$'
-/home/kaminsod/projects/alint/examples/tensorflow-tensorflow/.alint.yml`
+examples/tensorflow-tensorflow/.alint.yml`
 returns no matches. All multi-line patterns in this config use
 single-quoted YAML scalars; after the v0.9.18 B3 fix, the
 `tensorflow-bazel-files-have-apache-header` rule is now

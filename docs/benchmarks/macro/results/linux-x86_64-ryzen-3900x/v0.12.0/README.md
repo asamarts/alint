@@ -2,7 +2,7 @@
 
 These are **characterization** numbers: absolute throughput captured by
 `xtask bench-scale` (S1–S14 × {1k,10k,100k,1M} × {full,changed}, warmup 3 /
-10 runs) on the kbox (self-hosted AMD Ryzen 9 3900X), on a **verified-quiet**
+10 runs) on the dev box (self-hosted AMD Ryzen 9 3900X), on a **verified-quiet**
 runner (mid-run 1-min load 0.89). They are NOT the regression gate — the
 load-immune deterministic gate (`ci/scripts/det-perf-gate.sh`, design:
 `docs/design/deterministic-perf-gating.md`) is.

@@ -219,11 +219,11 @@ alint binary: 0.9.17 (1dbd9b218a0e, built 2026-05-07).
 
 ## READMEs touched
 
-- `/home/kaminsod/projects/alint/examples/rust-lang-rust/README.md`
-- `/home/kaminsod/projects/alint/examples/tensorflow-tensorflow/README.md`
-- `/home/kaminsod/projects/alint/examples/tokio-rs-tokio/README.md`
-- `/home/kaminsod/projects/alint/examples/vercel-next.js/README.md`
-- `/home/kaminsod/projects/alint/examples/vercel-turbo/README.md`
+- `examples/rust-lang-rust/README.md`
+- `examples/tensorflow-tensorflow/README.md`
+- `examples/tokio-rs-tokio/README.md`
+- `examples/vercel-next.js/README.md`
+- `examples/vercel-turbo/README.md`
 
 All 5 received: rule-kind candidate status sync, pitfall #18/#19
 notes, Future analysis section (≥2 ideas each), Validation status

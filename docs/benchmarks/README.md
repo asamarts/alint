@@ -4,8 +4,8 @@ How fast is alint, how do we measure it, and where do the numbers live.
 
 ## TL;DR — current published numbers
 
-`linux-x86_64` (Intel Core i7-6700HQ 4-core / 15 GB / ext4 / rustc 1.97.0, host
-`kbench`). Canonical since 2026-07-15; the retired 3900X dev-box series is
+`linux-x86_64` (Intel Core i7-6700HQ 4-core / 15 GB / ext4 / rustc 1.97.0, the
+bench host). Canonical since 2026-07-15; the retired 3900X dev-box series is
 retained at [`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/)
 and summarized in [`legacy/HISTORY.md`](legacy/HISTORY.md). Latest published release: **v0.17.0**
 (2026-10-01). Headline full-run wall-times at 1M files (sourced from

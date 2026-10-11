@@ -10,8 +10,8 @@ alphabetical batch of 5 case studies. Splits each public README into:
   "headline catch" framing, competitive language, launch-story wrappers.
 
 Repos involved:
-- alint (public): `/home/kaminsod/projects/alint`
-- alint.org (private): `/home/kaminsod/projects/alint.org`
+- alint: this repository
+- alint.org: the website repository
 - alint binary used for rule counts: `target/release/alint` (v0.9.17)
 
 Per-case-study rule counts (validated 2026-05-07):

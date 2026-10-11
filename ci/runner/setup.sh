@@ -40,18 +40,21 @@ podman volume create alint-runner-cargo-cache 2>/dev/null || true
 podman volume create alint-runner-cargo-target 2>/dev/null || true
 
 echo "==> Starting runner container: ${CONTAINER_NAME}"
-# Pin the resolver this container's DNS is forwarded to (2026-09-11).
+# Optionally pin the resolver this container's DNS is forwarded to.
 #
 # `pasta` reads the host's /etc/resolv.conf when a container starts and keeps it
-# for the container's life. dhcpcd and tailscaled both rewrite that file, and
-# when Tailscale DNS was switched off, 11 of 14 runner containers on this host
-# lost DNS at once while keeping full connectivity. Stored per container, so it
-# survives restarts; override with RUNNER_DNS_HOST on a host whose LAN differs.
-DNS_HOST="${RUNNER_DNS_HOST:-192.168.8.1}"
+# for the container's life. On a host where a network manager or VPN client
+# rewrites that file, a container can lose DNS while keeping full connectivity.
+# Set RUNNER_DNS_HOST in ci/.env to the resolver address to pin it; the pin is
+# stored per container, so it survives restarts. Unset keeps podman's default.
+NETWORK="pasta"
+if [[ -n "${RUNNER_DNS_HOST:-}" ]]; then
+    NETWORK="pasta:--dns-host,${RUNNER_DNS_HOST}"
+fi
 
 podman run -d \
     --name "${CONTAINER_NAME}" \
-    --network "pasta:--dns-host,${DNS_HOST}" \
+    --network "${NETWORK}" \
     --restart unless-stopped \
     `# PID ceiling — 8x podman's 2048 default, still a fork-bomb guard. See` \
     `# the PIDS_LIMIT definition above (matched pair with coverage.sh).` \
