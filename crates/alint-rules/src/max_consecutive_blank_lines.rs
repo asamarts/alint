@@ -109,15 +109,15 @@ fn first_over_limit(text: &[u8], max: u32) -> Option<usize> {
     let mut remaining = text;
     let mut line_no: usize = 0;
     loop {
-        let (body, has_ending, rest): (&[u8], bool, &[u8]) =
-            match remaining.iter().position(|&b| b == b'\n') {
-                Some(i) => {
-                    let before = &remaining[..i];
-                    let body = before.strip_suffix(b"\r").unwrap_or(before);
-                    (body, true, &remaining[i + 1..])
-                }
-                None => (remaining, false, b""),
-            };
+        let (body, has_ending, rest): (&[u8], bool, &[u8]) = match memchr::memchr(b'\n', remaining)
+        {
+            Some(i) => {
+                let before = &remaining[..i];
+                let body = before.strip_suffix(b"\r").unwrap_or(before);
+                (body, true, &remaining[i + 1..])
+            }
+            None => (remaining, false, b""),
+        };
         if !has_ending && body.is_empty() {
             // The tail after the last newline; not a real line.
             return None;

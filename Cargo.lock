@@ -187,6 +187,7 @@ dependencies = [
  "content_inspector",
  "globset",
  "jsonschema",
+ "memchr",
  "proptest",
  "pulldown-cmark",
  "regex",

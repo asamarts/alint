@@ -76,6 +76,11 @@ toml = "1.1"
 # Apache-2.0) and already in the tree -- the `toml` crate is built on it -- so
 # this promotes an existing transitive crate to a direct dep, adding none.
 toml_edit = "0.25"
+# SIMD byte search for the per-file content scanners (the lead-byte prefilter in
+# `no_zero_width_chars` / `no_bidi_controls`, line splitting in
+# `max_consecutive_blank_lines`). Already in the tree via `regex`, so this
+# promotes an existing transitive crate to a direct dep, adding none.
+memchr = "2"
 # Span-capable JSONC AST for the Phase-2 structured `set_value`/`remove_value`
 # fixers (alint-core `structured_fix`): `parse_to_ast` yields node byte ranges, so
 # JSON edits are span-splices (disjoint, one-pass) and JSONC comments / trailing

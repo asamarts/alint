@@ -115,9 +115,20 @@ impl PerFileRule for NoZeroWidthCharsRule {
     }
 }
 
+/// The UTF-8 lead bytes of every flagged char: 0xE1 (U+180E), 0xE2
+/// (U+200B..U+200D, U+2060) and 0xEF (U+FEFF). An invalid sequence decodes to
+/// U+FFFD, which is never flagged, so a file with none of these bytes has no
+/// finding. `lead_bytes_cover_every_flagged_char` holds this set to
+/// [`is_flagged_zero_width`].
+const LEAD_BYTES: [u8; 3] = [0xE1, 0xE2, 0xEF];
+
 fn first_zero_width(bytes: impl AsRef<[u8]>) -> Option<(usize, usize, u32)> {
+    // Skip the per-char decode for the (overwhelmingly common) clean file.
+    let bytes = bytes.as_ref();
+    let [a, b, c] = LEAD_BYTES;
+    memchr::memchr3(a, b, c, bytes)?;
     // A leading U+FEFF is a BOM (no_bom's job), not a zero-width char.
-    crate::io::first_char_where(bytes.as_ref(), |c, first| {
+    crate::io::first_char_where(bytes, |c, first| {
         !(first && c == '\u{FEFF}') && is_flagged_zero_width(c, false)
     })
     .map(|(l, c, ch)| (l, c, ch as u32))
@@ -153,6 +164,32 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn lead_bytes_cover_every_flagged_char() {
+        let mut buf = [0u8; 4];
+        for c in (0..=u32::from(char::MAX)).filter_map(char::from_u32) {
+            if is_flagged_zero_width(c, false) || is_flagged_zero_width(c, true) {
+                let lead = c.encode_utf8(&mut buf).as_bytes()[0];
+                assert!(
+                    LEAD_BYTES.contains(&lead),
+                    "U+{:04X} lead 0x{lead:02X}",
+                    c as u32
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn lead_byte_without_a_flagged_char_is_clean() {
+        // An em-dash shares the 0xE2 lead byte; invalid bytes decode to U+FFFD.
+        assert_eq!(first_zero_width("a \u{2014} b\n\u{2026}".as_bytes()), None);
+        assert_eq!(first_zero_width(b"\xE2\xE1\xEF\xFF x"), None);
+        assert_eq!(
+            first_zero_width("\u{2014}a\u{200B}".as_bytes()),
+            Some((1, 3, 0x200B))
+        );
+    }
 
     #[test]
     fn flags_zwsp() {
