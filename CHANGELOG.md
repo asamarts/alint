@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance
+
+- **Per-file content checks are back to v0.17 speed, and faster.** v0.18.0's
+  correctness fixes to `no_zero_width_chars`, `no_bidi_controls` and
+  `max_consecutive_blank_lines` (scan non-UTF-8 and NUL-bearing files too)
+  decoded every file char by char, costing the per-file content benchmark
+  (S2) about 3% wall time. Both character rules now skip files with none of
+  the UTF-8 lead bytes their characters use, with a SIMD byte search, and the
+  blank-line rule finds newlines the same way. Output is unchanged. On the
+  bench host, S2 is 6-7% faster than v0.18.0 at 10k and 100k files, and S4
+  (bundled rulesets) 3-4%; instruction counts drop 28% on S2 and 36% on the
+  auto-fix scenario.
+- **`alint check --changed` without a base runs its two git reads
+  concurrently,** recovering most of the ~1.8 ms v0.18.0 added per run
+  (18.2 to 16.7 ms on a 1,000-file tree).
+
 ## [0.18.0] - 2026-10-11
 
 A security and correctness release from a whole-repository audit and an
