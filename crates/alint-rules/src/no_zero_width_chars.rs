@@ -127,6 +127,11 @@ fn first_zero_width(bytes: impl AsRef<[u8]>) -> Option<(usize, usize, u32)> {
     let bytes = bytes.as_ref();
     let [a, b, c] = LEAD_BYTES;
     memchr::memchr3(a, b, c, bytes)?;
+    scan_zero_width(bytes)
+}
+
+/// The full per-char scan behind [`first_zero_width`]'s prefilter.
+fn scan_zero_width(bytes: &[u8]) -> Option<(usize, usize, u32)> {
     // A leading U+FEFF is a BOM (no_bom's job), not a zero-width char.
     crate::io::first_char_where(bytes, |c, first| {
         !(first && c == '\u{FEFF}') && is_flagged_zero_width(c, false)
@@ -177,6 +182,44 @@ mod tests {
                     c as u32
                 );
             }
+        }
+    }
+
+    /// Whole encodings of every flagged char, near-misses sharing their lead
+    /// bytes, truncated sequences, newlines, ASCII and arbitrary bytes.
+    fn atoms() -> impl proptest::strategy::Strategy<Value = Vec<u8>> {
+        use proptest::strategy::Strategy as _;
+        let mut fixed: Vec<Vec<u8>> = [
+            "\u{200B}", "\u{200C}", "\u{200D}", "\u{2060}", "\u{180E}", "\u{FEFF}", "\u{2014}",
+            "\u{2026}", "\u{1800}", "\u{FFFD}", "\u{FEFE}", "\n", "a",
+        ]
+        .iter()
+        .map(|s| s.as_bytes().to_vec())
+        .collect();
+        // Each flagged char's encoding cut short, so invalid runs border it.
+        for c in [
+            '\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{180E}', '\u{FEFF}',
+        ] {
+            let mut buf = [0u8; 4];
+            let enc = c.encode_utf8(&mut buf).as_bytes();
+            fixed.push(enc[..enc.len() - 1].to_vec());
+        }
+        proptest::prop_oneof![
+            proptest::sample::select(fixed),
+            proptest::prelude::any::<u8>().prop_map(|b| vec![b]),
+        ]
+    }
+
+    proptest::proptest! {
+        /// The prefilter never changes the answer: on any mix of the atoms,
+        /// the prefiltered scan equals the full scan, finding and line/column
+        /// alike.
+        #[test]
+        fn prefilter_matches_the_full_scan(
+            parts in proptest::collection::vec(atoms(), 0..48)
+        ) {
+            let bytes = parts.concat();
+            proptest::prop_assert_eq!(first_zero_width(&bytes), scan_zero_width(&bytes));
         }
     }
 

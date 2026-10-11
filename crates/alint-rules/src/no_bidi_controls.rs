@@ -148,6 +148,11 @@ fn first_bidi(bytes: impl AsRef<[u8]>) -> Option<(usize, usize, u32)> {
     let bytes = bytes.as_ref();
     let [a, b] = LEAD_BYTES;
     memchr::memchr2(a, b, bytes)?;
+    scan_bidi(bytes)
+}
+
+/// The full per-char scan behind [`first_bidi`]'s prefilter.
+fn scan_bidi(bytes: &[u8]) -> Option<(usize, usize, u32)> {
     crate::io::first_char_where(bytes, |c, _| is_bidi_control(c))
         .map(|(l, c, ch)| (l, c, ch as u32))
 }
@@ -196,6 +201,44 @@ mod tests {
                     c as u32
                 );
             }
+        }
+    }
+
+    /// Whole encodings of every flagged char, near-misses sharing their lead
+    /// bytes, truncated sequences, newlines, ASCII and arbitrary bytes.
+    fn atoms() -> impl proptest::strategy::Strategy<Value = Vec<u8>> {
+        use proptest::strategy::Strategy as _;
+        let mut fixed: Vec<Vec<u8>> = [
+            "\u{061C}", "\u{200E}", "\u{200F}", "\u{202A}", "\u{202E}", "\u{2066}", "\u{2069}",
+            "\u{0627}", "\u{061B}", "\u{2014}", "\u{2065}", "\u{206A}", "\n", "a",
+        ]
+        .iter()
+        .map(|s| s.as_bytes().to_vec())
+        .collect();
+        // Each flagged char's encoding cut short, so invalid runs border it.
+        for c in [
+            '\u{061C}', '\u{200E}', '\u{200F}', '\u{202A}', '\u{202E}', '\u{2066}', '\u{2069}',
+        ] {
+            let mut buf = [0u8; 4];
+            let enc = c.encode_utf8(&mut buf).as_bytes();
+            fixed.push(enc[..enc.len() - 1].to_vec());
+        }
+        proptest::prop_oneof![
+            proptest::sample::select(fixed),
+            proptest::prelude::any::<u8>().prop_map(|b| vec![b]),
+        ]
+    }
+
+    proptest::proptest! {
+        /// The prefilter never changes the answer: on any mix of the atoms,
+        /// the prefiltered scan equals the full scan, finding and line/column
+        /// alike.
+        #[test]
+        fn prefilter_matches_the_full_scan(
+            parts in proptest::collection::vec(atoms(), 0..48)
+        ) {
+            let bytes = parts.concat();
+            proptest::prop_assert_eq!(first_bidi(&bytes), scan_bidi(&bytes));
         }
     }
 
