@@ -17,7 +17,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -201,11 +201,20 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
         // the working-tree/untracked set; otherwise a pre-commit hook can
         // silently check zero files after the framework stashes unstaged
         // changes. `--cached` also works for an unborn HEAD.
+        //
+        // The two reads are independent, so the staged diff runs in the
+        // background while `ls-files` runs: one process's latency instead of
+        // two, on every `--changed` run. `wait_with_output` drains both pipes,
+        // so a large staged list can't wedge the child, and the child is
+        // always reaped, even when `ls-files` fails to spawn.
         let staged = Command::new("git")
             .arg("-C")
             .arg(root)
             .args(["diff", "--cached", "--name-only", "--relative", "-z"])
-            .output()
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
             .ok()?;
         let working = Command::new("git")
             .arg("-C")
@@ -217,9 +226,9 @@ pub fn collect_changed_paths(root: &Path, base: Option<&str>) -> Option<HashSet<
                 "--exclude-standard",
                 "-z",
             ])
-            .output()
-            .ok()?;
-        vec![staged, working]
+            .output();
+        let staged = staged.wait_with_output().ok()?;
+        vec![staged, working.ok()?]
     };
     if outputs.iter().any(|output| !output.status.success()) {
         return None;
