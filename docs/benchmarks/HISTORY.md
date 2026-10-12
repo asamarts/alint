@@ -48,7 +48,8 @@ the walk-bound and per-file-content paths.
 
 | Version | Date | 1M S1 full | 1M S2 full | 1M S3 full | 1M S4 full | Headline change |
 |---|---|---:|---:|---:|---:|---|
-| **v0.18.0** | 2026-10-11 | 4.03 s ± 0.08 | 19.51 s ± 0.07 | 475.1 s ± 1.7 | 16.60 s ± 0.01 | A security and correctness release from a whole-repository audit and an adversarial re-review of its fixes. |
+| **v0.18.1** | 2026-10-12 | 4.12 s ± 0.06 | 18.12 s ± 0.02 | 475.3 s ± 1.3 | 16.07 s ± 0.02 | A performance and installer patch. |
+| v0.18.0 | 2026-10-11 | 4.03 s ± 0.08 | 19.51 s ± 0.07 | 475.1 s ± 1.7 | 16.60 s ± 0.01 | A security and correctness release from a whole-repository audit and an adversarial re-review of its fixes. |
 | v0.17.0 | 2026-10-01 | 4.07 s ± 0.05 | 18.75 s ± 0.06 | 475.3 s ± 3.0 | 16.56 s ± 0.23 | This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations. |
 | v0.16.0 | 2026-09-02 | 4.05 s ± 0.07 | 18.33 s ± 0.03 | 474.7 s ± 0.8 | 16.46 s ± 0.17 | This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service. |
 | v0.15.0 | 2026-08-16 | 4.18 s ± 0.09 | 18.51 s ± 0.08 | 474.4 s ± 1.4 | 16.47 s ± 0.04 | v0.15 makes rules legible and monorepos first-class. |
@@ -77,7 +78,8 @@ Walker + `GlobSet` + path/metadata rules with little or no content read — the 
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 10 ms ± 1 | 44 ms ± 1 | 377 ms ± 6 | 4.03 s ± 0.08 |
+| **v0.18.1** | 10 ms ± 1 | 45 ms ± 2 | 403 ms ± 16 | 4.12 s ± 0.06 |
+| v0.18.0 | 10 ms ± 1 | 44 ms ± 1 | 377 ms ± 6 | 4.03 s ± 0.08 |
 | v0.17.0 | 10 ms ± 1 | 44 ms ± 2 | 391 ms ± 12 | 4.07 s ± 0.05 |
 | v0.16.0 | 10 ms ± 1 | 44 ms ± 2 | 384 ms ± 9 | 4.05 s ± 0.07 |
 | v0.15.0 | 11 ms ± 1 | 45 ms ± 2 | 394 ms ± 10 | 4.18 s ± 0.09 |
@@ -95,7 +97,8 @@ Walker + `GlobSet` + path/metadata rules with little or no content read — the 
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 14 ms ± 1 | 54 ms ± 1 | 447 ms ± 9 | 4.96 s ± 0.01 |
+| **v0.18.1** | 20 ms ± 1 | 51 ms ± 1 | 446 ms ± 8 | 4.92 s ± 0.01 |
+| v0.18.0 | 14 ms ± 1 | 54 ms ± 1 | 447 ms ± 9 | 4.96 s ± 0.01 |
 | v0.17.0 | 12 ms ± 1 | 51 ms ± 1 | 440 ms ± 6 | 4.90 s ± 0.01 |
 | v0.16.0 | 20 ms ± 1 | 52 ms ± 1 | 446 ms ± 11 | 4.90 s ± 0.01 |
 | v0.15.0 | 13 ms ± 1 | 52 ms ± 1 | 448 ms ± 11 | 4.97 s ± 0.07 |
@@ -117,7 +120,8 @@ Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whol
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 24 ms ± 1 | 184 ms ± 5 | 1.87 s ± 0.04 | 19.51 s ± 0.07 |
+| **v0.18.1** | 23 ms ± 1 | 167 ms ± 1 | 1.73 s ± 0.05 | 18.12 s ± 0.02 |
+| v0.18.0 | 24 ms ± 1 | 184 ms ± 5 | 1.87 s ± 0.04 | 19.51 s ± 0.07 |
 | v0.17.0 | 23 ms ± 1 | 173 ms ± 2 | 1.77 s ± 0.00 | 18.75 s ± 0.06 |
 | v0.16.0 | 23 ms ± 2 | 170 ms ± 3 | 1.74 s ± 0.01 | 18.33 s ± 0.03 |
 | v0.15.0 | 23 ms ± 1 | 172 ms ± 1 | 1.74 s ± 0.01 | 18.51 s ± 0.08 |
@@ -135,7 +139,8 @@ Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whol
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 16 ms ± 1 | 62 ms ± 2 | 521 ms ± 11 | 5.33 s ± 0.01 |
+| **v0.18.1** | 23 ms ± 2 | 58 ms ± 1 | 500 ms ± 8 | 5.14 s ± 0.01 |
+| v0.18.0 | 16 ms ± 1 | 62 ms ± 2 | 521 ms ± 11 | 5.33 s ± 0.01 |
 | v0.17.0 | 15 ms ± 1 | 58 ms ± 1 | 494 ms ± 2 | 5.20 s ± 0.01 |
 | v0.16.0 | 23 ms ± 1 | 59 ms ± 2 | 500 ms ± 10 | 5.17 s ± 0.01 |
 | v0.15.0 | 16 ms ± 1 | 58 ms ± 1 | 490 ms ± 1 | 5.18 s ± 0.00 |
@@ -157,7 +162,8 @@ Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 452 ms ± 13 | 4.72 s ± 0.17 | 46.93 s ± 0.30 | 475.1 s ± 1.7 |
+| **v0.18.1** | 456 ms ± 14 | 4.76 s ± 0.21 | 46.87 s ± 0.22 | 475.3 s ± 1.3 |
+| v0.18.0 | 452 ms ± 13 | 4.72 s ± 0.17 | 46.93 s ± 0.30 | 475.1 s ± 1.7 |
 | v0.17.0 | 447 ms ± 2 | 4.63 s ± 0.02 | 46.68 s ± 0.16 | 475.3 s ± 3.0 |
 | v0.16.0 | 451 ms ± 12 | 4.67 s ± 0.14 | 46.96 s ± 0.69 | 474.7 s ± 0.8 |
 | v0.15.0 | 447 ms ± 1 | 4.62 s ± 0.01 | 46.96 s ± 0.73 | 474.4 s ± 1.4 |
@@ -175,7 +181,8 @@ Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 452 ms ± 1 | 4.79 s ± 0.23 | 46.95 s ± 0.17 | 474.9 s ± 1.9 |
+| **v0.18.1** | 469 ms ± 17 | 4.74 s ± 0.18 | 47.11 s ± 0.33 | 474.4 s ± 0.7 |
+| v0.18.0 | 452 ms ± 1 | 4.79 s ± 0.23 | 46.95 s ± 0.17 | 474.9 s ± 1.9 |
 | v0.17.0 | 450 ms ± 2 | 4.64 s ± 0.01 | 46.79 s ± 0.21 | 475.3 s ± 0.4 |
 | v0.16.0 | 465 ms ± 16 | 4.64 s ± 0.02 | 46.64 s ± 0.16 | 474.4 s ± 0.5 |
 | v0.15.0 | 450 ms ± 1 | 4.63 s ± 0.02 | 46.70 s ± 0.17 | 476.1 s ± 0.6 |
@@ -197,7 +204,8 @@ The realistic mixed workload and the release anchor: `extends:` six bundled rule
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 32 ms ± 1 | 162 ms ± 4 | 1.49 s ± 0.01 | 16.60 s ± 0.01 |
+| **v0.18.1** | 32 ms ± 1 | 152 ms ± 2 | 1.43 s ± 0.01 | 16.07 s ± 0.02 |
+| v0.18.0 | 32 ms ± 1 | 162 ms ± 4 | 1.49 s ± 0.01 | 16.60 s ± 0.01 |
 | v0.17.0 | 30 ms ± 1 | 155 ms ± 2 | 1.47 s ± 0.01 | 16.56 s ± 0.23 |
 | v0.16.0 | 32 ms ± 1 | 156 ms ± 3 | 1.46 s ± 0.01 | 16.46 s ± 0.17 |
 | v0.15.0 | 31 ms ± 1 | 155 ms ± 3 | 1.46 s ± 0.01 | 16.47 s ± 0.04 |
@@ -215,7 +223,8 @@ The realistic mixed workload and the release anchor: `extends:` six bundled rule
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 30 ms ± 1 | 102 ms ± 2 | 833 ms ± 2 | 9.40 s ± 0.02 |
+| **v0.18.1** | 36 ms ± 1 | 98 ms ± 1 | 828 ms ± 6 | 9.36 s ± 0.03 |
+| v0.18.0 | 30 ms ± 1 | 102 ms ± 2 | 833 ms ± 2 | 9.40 s ± 0.02 |
 | v0.17.0 | 28 ms ± 2 | 98 ms ± 2 | 824 ms ± 5 | 9.35 s ± 0.03 |
 | v0.16.0 | 36 ms ± 2 | 102 ms ± 2 | 825 ms ± 3 | 9.30 s ± 0.03 |
 | v0.15.0 | 29 ms ± 1 | 99 ms ± 2 | 824 ms ± 4 | 9.33 s ± 0.02 |
@@ -237,7 +246,8 @@ The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `
 
 | Version | 1k | 10k | 100k | 1M |
 |---|---:|---:|---:|---:|
-| **v0.18.0** | 58 ms ± 1 | 572 ms ± 27 | 5.57 s ± 0.05 | 58.66 s ± 0.58 |
+| **v0.18.1** | 51 ms ± 1 | 487 ms ± 5 | 4.90 s ± 0.04 | 51.99 s ± 0.29 |
+| v0.18.0 | 58 ms ± 1 | 572 ms ± 27 | 5.57 s ± 0.05 | 58.66 s ± 0.58 |
 | v0.17.0 | 56 ms ± 1 | 533 ms ± 7 | 5.43 s ± 0.03 | 57.26 s ± 0.19 |
 | v0.16.0 | n/a | n/a | n/a | n/a |
 | v0.15.0 | n/a | n/a | n/a | n/a |
