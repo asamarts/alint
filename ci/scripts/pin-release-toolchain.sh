@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
 # Pin the Rust toolchain for the rest of a release.yml job, and prove it.
+# bench-record.yml's bench job uses it the same way, passing BENCH_RUST as
+# RELEASE_RUST.
 #
 # release.yml installs $RELEASE_RUST (an exact x.y.z, set once at workflow
 # level) via dtolnay/rust-toolchain, but that action only runs `rustup default`,
