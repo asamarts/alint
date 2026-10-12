@@ -13,7 +13,11 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.18.0** (2026-10-11): security and correctness hardening from a
+**Latest release: v0.18.1** (2026-10-12): a performance and installer patch.
+Per-file content checks (the zero-width, bidi and blank-line rules) skip clean files
+with a SIMD byte search and are now faster than in v0.17, `check --changed` runs its
+two git reads concurrently, and `install.sh` resolves the latest release without the
+rate-limited GitHub API. The prior v0.18.0 (2026-10-11) was security and correctness hardening from a
 whole-repository audit and an adversarial re-review of its fixes. The config trust
 gates now judge the rule that actually runs (YAML tags, merge keys, and placeholder
 kinds can no longer hide a field from them), untrusted remote rulesets lose `ignore:`
