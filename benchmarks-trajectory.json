@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.18.1",
+      "date": "2026-10-12",
+      "headline": "A performance and installer patch.",
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4119.736971573332,
+          "stddev_ms": 57.985672303545705,
+          "display": "4.12 s ± 0.06"
+        },
+        "s2_1m_full": {
+          "mean_ms": 18119.4733224,
+          "stddev_ms": 22.55277610674241,
+          "display": "18.12 s ± 0.02"
+        },
+        "s3_1m_full": {
+          "mean_ms": 475331.7329937333,
+          "stddev_ms": 1273.3806941282157,
+          "display": "475.3 s ± 1.3"
+        },
+        "s4_1m_full": {
+          "mean_ms": 16072.97719286667,
+          "stddev_ms": 22.82025898430566,
+          "display": "16.07 s ± 0.02"
+        }
+      }
+    },
+    {
       "version": "v0.18.0",
       "date": "2026-10-11",
       "headline": "A security and correctness release from a whole-repository audit and an adversarial re-review of its fixes.",
