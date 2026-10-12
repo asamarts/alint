@@ -9,6 +9,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.1] - 2026-10-12
+
+A performance and installer patch. v0.18.0's correctness fixes to the
+zero-width, bidi and blank-line content rules had made per-file content
+checks about 3% slower and added a git process to every `--changed` run;
+this release makes them faster than v0.17 with identical output. `install.sh`
+also stops failing with a bare 403 on shared CI runners when it resolves the
+latest release.
+
+### Performance
+
+- **Per-file content checks are back to v0.17 speed, and faster.** v0.18.0's
+  correctness fixes to `no_zero_width_chars`, `no_bidi_controls` and
+  `max_consecutive_blank_lines` (scan non-UTF-8 and NUL-bearing files too)
+  decoded every file char by char, costing the per-file content benchmark
+  (S2) about 3% wall time. Both character rules now skip files with none of
+  the UTF-8 lead bytes their characters use, with a SIMD byte search, and the
+  blank-line rule finds newlines the same way. Output is unchanged. On the
+  bench host, S2 is 6-7% faster than v0.18.0 at 10k and 100k files, and S4
+  (bundled rulesets) 3-4%; instruction counts drop 28% on S2 and 36% on the
+  auto-fix scenario.
+- **`alint check --changed` without a base runs its two git reads
+  concurrently,** recovering most of the ~1.8 ms v0.18.0 added per run
+  (18.2 to 16.7 ms on a 1,000-file tree).
+
+### Fixed
+
+- **`install.sh` no longer fails with a bare 403 resolving the latest
+  release.** It looked the version up with one unauthenticated GitHub API
+  call, which shares a 60-requests-per-hour limit per IP address; on shared
+  CI runners that limit ran out and the install (and the GitHub Action's
+  default version) failed. It now follows github.com's `/releases/latest`
+  redirect, which isn't rate limited, falls back to the API, checks the tag's
+  format before using it, and retries transient download errors.
+
 ## [0.18.0] - 2026-10-11
 
 A security and correctness release from a whole-repository audit and an
@@ -6916,8 +6951,8 @@ CLI flags (`--color`, `--ascii`, `--compact`) are new.
   immediately under the relevant violation.
 - **Per-severity summary** — `Summary (N violations): ✗ 2 errors
   ⚠ 1 warning  ℹ 5 info` + `X passing · Y failing · Z
-  auto-fixable` + a call-to-action line `→ run `alint fix` to
-  resolve N fixable violation(s).` when anything's auto-fixable.
+  auto-fixable` + a call-to-action line ``→ run `alint fix` to
+  resolve N fixable violation(s).`` when anything's auto-fixable.
   All-passed gets a concise green `✓ All N rule(s) passed.`.
 - **`--color <auto|always|never>` global flag.** Defaults to
   `auto` — honors `NO_COLOR`, `CLICOLOR_FORCE`, and TTY status
@@ -7427,7 +7462,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.1...HEAD
+[0.18.1]: https://github.com/asamarts/alint/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/asamarts/alint/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/asamarts/alint/compare/v0.16.1...v0.17.0
 [0.16.1]: https://github.com/asamarts/alint/compare/v0.16.0...v0.16.1
