@@ -20,8 +20,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (U+FE00-U+FE0F) and right-to-left text are left alone. Rule results are
   unchanged.
 
+### Changed
+
+- `.env` parsing now comes from [`adotenv`](https://github.com/asamarts/adotenv),
+  alint's dotenv parser extracted into its own dependency-free crate: literal
+  values, byte spans, and in-place edits. The `dotenv_path_*` rules and the
+  `set_value` / `remove_value` fixes read and edit `.env` files exactly as
+  before; `structured_fix`'s separate hand-mirrored span scan is gone.
+
 ### Fixed
 
+- `set_value` on a `.env` file: a new value starting with `#` was written bare,
+  so on a line like `KEY = old # note` it became a comment and read back
+  empty. The fix was never written (the edit is verified and was demoted to a
+  suggestion), but it silently did not apply. Such values are now quoted.
 - `no_bom`: a UTF-8 BOM on a file with a NUL byte past the first 16 bytes was
   marked fixable, but `file_strip_bom` refuses binary files, so `fix` always
   skipped it. Fixability now uses the fixer's own whole-file test (read only

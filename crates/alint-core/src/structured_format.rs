@@ -81,8 +81,8 @@ impl Format {
         // Strip any leading UTF-8 BOM(s) uniformly. Some libraries (serde_json,
         // hcl-rs) reject a `\u{feff}` prefix as a syntax error, so a BOM-prefixed
         // `package.json` / `config.hcl` (common from Windows editors) would
-        // false-fire the structured rules; the hand-rolled dotenv/ini/properties
-        // parsers already strip it. `trim_start_matches` (not `strip_prefix`) so
+        // false-fire the structured rules; the dotenv/ini/properties parsers
+        // already skip it. `trim_start_matches` (not `strip_prefix`) so
         // consecutive leading BOMs are all removed. Flagging a BOM is the `no_bom`
         // rule's job.
         let text = text.trim_start_matches('\u{feff}');

@@ -491,7 +491,7 @@ fn xml_set_preserves_surrounding_whitespace() {
     assert_eq!(&src[span], "1.0"); // the trimmed value, not "  1.0  "
 }
 
-// ---- dotenv (hand-rolled re-scan; flat KEY=value) ----
+// ---- dotenv (adotenv entry spans; flat KEY=value) ----
 
 fn denv_value(src: &str, k: &str) -> std::ops::Range<usize> {
     resolve_value_span(Format::Dotenv, src.as_bytes(), &[key(k)]).unwrap()
@@ -624,6 +624,23 @@ fn dotenv_serialize_round_trips_tricky_values() {
     ] {
         assert_eq!(denv_roundtrip(&v), v, "value did not round-trip: {v:?}");
     }
+}
+
+#[test]
+fn dotenv_set_of_a_leading_hash_value_survives_a_space_after_equals() {
+    // `A = old # note`: a bare `#x` spliced after `= ` would start a comment and
+    // read back empty (the verifier then demoted the fix). Quoted, it applies.
+    let src = "A = old # note\n";
+    let span = denv_value(src, "A");
+    let repl = serialize_scalar(Format::Dotenv, &json!("#x")).unwrap();
+    let out = format!(
+        "{}{}{}",
+        &src[..span.start],
+        std::str::from_utf8(&repl).unwrap(),
+        &src[span.end..]
+    );
+    assert_eq!(out, "A = \"#x\" # note\n");
+    assert_eq!(crate::dotenv::parse(&out).unwrap()["A"], json!("#x"));
 }
 
 #[test]

@@ -1,26 +1,19 @@
 //! Literal `.env` parsing for [`crate::structured_format::Format::Dotenv`].
 //!
-//! Deliberately hand-rolled and dependency-free. A linter needs the value
-//! exactly as written, but `dotenvy` expands `${VAR}` / `$VAR` unconditionally
-//! (there is no toggle; `apply_substitution` is always called), which is
-//! environment-dependent and wrong for static analysis. So this reads the raw
-//! pairs into a flat `{ KEY: "value" }` object of strings, with no expansion.
+//! A linter needs the value exactly as written, but `dotenvy` expands
+//! `${VAR}` / `$VAR`, which is environment-dependent and wrong for static
+//! analysis. The parser is the `adotenv` crate (extracted from alint into
+//! asamarts/adotenv): literal values, byte spans, and in-place edits, which
+//! `structured_fix` also uses. This module only maps its entries into the flat
+//! `{ KEY: "value" }` object of strings the structured-query rules read.
 //!
-//! Kept self-contained (no alint-specific types) so it can be lifted into its
-//! own crate later, and/or the no-substitution behavior contributed upstream to
-//! `dotenvy`. See docs/design/format-coverage.md, section 5.3.
-//!
-//! ## Supported subset
-//! - `KEY=VALUE`, one per line; the value is stringly-typed (never coerced).
-//! - `#` full-line comments (after optional leading whitespace) and ` #` inline
-//!   comments on *unquoted* values (a `#` with no leading space is part of the
-//!   value).
-//! - An optional `export ` prefix.
-//! - Single-quoted values are fully literal. Double-quoted values honor the
-//!   `\n \r \t \\ \"` escapes; every other backslash pair is kept verbatim.
-//!   Neither quote style expands variables.
-//! - Duplicate keys: last wins.
-//! - A leading UTF-8 BOM is tolerated (stripped before parsing).
+//! See the `adotenv` docs for the accepted syntax. In short: `KEY=VALUE` per
+//! line, `#` comments (inline only after a space on unquoted values), an
+//! optional `export ` prefix, single quotes fully literal, double quotes with
+//! the `\n \r \t \\ \"` escapes, no variable expansion, last-wins duplicates,
+//! and a leading BOM skipped. A line with no `=`, an empty or whitespace-
+//! containing key, or an unterminated quote is a parse error (one violation,
+//! like the other formats).
 //!
 //! ## Notes
 //! - Detection is filename-based and best-effort: `.env` and `.env.*` (so
@@ -31,91 +24,21 @@
 //!   interpolation-looking values (`${VAR}` / `$(...)`) via the shared
 //!   non-literal filter -- use a `dotenv_path_*` rule to compare a literal
 //!   `${VAR}` value.
-//!
-//! Out of scope (a linter surfaces a parse error, one violation, like the other
-//! formats): a line with no `=`, a key containing whitespace, and an
-//! unterminated quote (multiline values are not supported; lines split on
-//! LF / CRLF only, not a lone classic-Mac `\r`).
 
 use serde_json::{Map, Value};
 
 /// Parse `.env` `text` into a flat `Value::Object` of string values, with no
 /// variable expansion. Returns `Err(message)` on a malformed line.
 pub(crate) fn parse(text: &str) -> Result<Value, String> {
-    // Tolerate a leading UTF-8 BOM (some Windows editors add one). Without this
-    // the first key parses as `\u{feff}KEY` -- a silent mis-parse, since
-    // `str::trim_start` does NOT strip U+FEFF (it is not White_Space).
-    let text = text.strip_prefix('\u{feff}').unwrap_or(text);
+    let doc = adotenv::parse(text).map_err(|e| e.to_string())?;
     let mut map = Map::new();
-    for (i, raw) in text.lines().enumerate() {
-        let lineno = i + 1;
-        let line = raw.trim_start();
-        if line.is_empty() || line.starts_with('#') {
-            continue;
-        }
-        // Optional `export ` prefix (bash-style); `export=x` (key named
-        // `export`) is untouched because there is no following space.
-        let line = line.strip_prefix("export ").map_or(line, str::trim_start);
-
-        let Some(eq) = line.find('=') else {
-            return Err(format!(
-                "line {lineno}: expected `KEY=VALUE`, found `{}`",
-                line.trim_end()
-            ));
-        };
-        let key = line[..eq].trim_end();
-        if key.is_empty() {
-            return Err(format!("line {lineno}: empty key before `=`"));
-        }
-        if key.contains(char::is_whitespace) {
-            return Err(format!("line {lineno}: key `{key}` contains whitespace"));
-        }
-        let value = parse_value(&line[eq + 1..], lineno)?;
-        map.insert(key.to_string(), Value::String(value));
+    for entry in doc.entries() {
+        map.insert(
+            entry.key().to_string(),
+            Value::String(entry.value().to_string()),
+        );
     }
     Ok(Value::Object(map))
-}
-
-fn parse_value(raw: &str, lineno: usize) -> Result<String, String> {
-    let v = raw.trim_start();
-    if let Some(rest) = v.strip_prefix('\'') {
-        // Single-quoted: literal up to the next single quote. Anything after the
-        // closing quote (whitespace / a comment) is ignored.
-        rest.find('\'')
-            .map(|end| rest[..end].to_string())
-            .ok_or_else(|| format!("line {lineno}: unterminated single-quoted value"))
-    } else if let Some(rest) = v.strip_prefix('"') {
-        // Double-quoted: honor the common escapes, up to the next unescaped `"`.
-        let mut out = String::new();
-        let mut chars = rest.chars();
-        loop {
-            match chars.next() {
-                None => return Err(format!("line {lineno}: unterminated double-quoted value")),
-                Some('"') => return Ok(out),
-                Some('\\') => match chars.next() {
-                    Some('n') => out.push('\n'),
-                    Some('r') => out.push('\r'),
-                    Some('t') => out.push('\t'),
-                    Some('\\') => out.push('\\'),
-                    Some('"') => out.push('"'),
-                    // Unknown escape: keep both chars verbatim (no expansion).
-                    Some(other) => {
-                        out.push('\\');
-                        out.push(other);
-                    }
-                    None => return Err(format!("line {lineno}: trailing backslash in value")),
-                },
-                Some(c) => out.push(c),
-            }
-        }
-    } else {
-        // Unquoted: an inline comment starts at ` #` (space-hash); a `#` with no
-        // leading space is part of the value. Detect it on `raw`, NOT the
-        // left-trimmed `v`, so `KEY= # c` (an empty value + a comment) reads as
-        // "" rather than the value `# c`. Value whitespace is insignificant.
-        let end = raw.find(" #").unwrap_or(raw.len());
-        Ok(raw[..end].trim().to_string())
-    }
 }
 
 #[cfg(test)]
@@ -149,7 +72,7 @@ mod tests {
 
     #[test]
     fn no_variable_expansion() {
-        // The whole reason for the hand-rolled parser: values stay literal.
+        // The whole reason for a literal parser: values stay literal.
         let v = obj("HOME_REF=${HOME}/bin\n\
              DOLLAR=$USER\n\
              DQ=\"${HOME}/x\"\n\

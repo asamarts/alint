@@ -6,9 +6,9 @@
 //! range with our bytes; the engine then re-parses and re-runs the query
 //! ([`EditVerifier::Structured`](crate::rule::EditVerifier)) before committing.
 //!
-//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and dotenv + INI +
-//! properties (a hand-rolled re-scan of the raw text, since those parsers keep no
-//! spans) are span-capable today; TOML is document-rewrite (`toml_edit`). Every
+//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), dotenv (`adotenv`
+//! entry spans), and INI + properties (a hand-rolled re-scan of the raw text,
+//! since those parsers keep no spans) are span-capable today; TOML is document-rewrite (`toml_edit`). Every
 //! other [`Format`] returns `None`, so its
 //! `set_value` / `remove_value` declines cleanly (the violation is reported
 //! unfixed) until that format's resolver lands. This is a SAFE degradation: a
@@ -746,12 +746,8 @@ mod xml {
     }
 }
 
-/// dotenv (`.env`) span resolution + value serialization.
-///
-/// The [`crate::dotenv`] parser flattens a file to `{ KEY: "value" }` of strings
-/// and keeps NO byte offsets, so this re-scans the raw text to locate a key's
-/// value / line (the "hand-rolled" resolver, vs HCL/XML's spanned CSTs). dotenv
-/// is FLAT -- a resolved path is a SINGLE `Key` -- and each key owns exactly one
+/// dotenv span resolution + value serialization, delegated to `adotenv`, which
+/// keeps the byte span of every assignment. Every assignment occupies one
 /// physical line, so `remove_value` is a whole-line delete with NONE of the
 /// nested-structure over-deletion risk the HCL/XML resolvers must guard. A key
 /// that appears MORE THAN ONCE (the parser's last-wins duplicate) collapses to
@@ -762,190 +758,40 @@ mod dotenv {
     use super::PathSeg;
     use std::ops::Range;
 
-    /// A located key line.
-    struct Located {
-        /// The whole physical line INCLUDING its trailing newline (what
-        /// `remove_value` deletes).
-        full: Range<usize>,
-        /// The value region `set_value` overwrites.
-        value: Range<usize>,
-    }
-
     /// The byte range of the value at `path` (what `set_value` overwrites).
     pub(super) fn dotenv_value_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        locate(text, single_key(path)?).map(|l| l.value)
+        Some(unique(text, path)?.value_span())
     }
 
     /// The whole-line removal span at `path` (what `remove_value` deletes).
     pub(super) fn dotenv_removal_span(text: &str, path: &[PathSeg]) -> Option<Range<usize>> {
-        locate(text, single_key(path)?).map(|l| l.full)
+        Some(unique(text, path)?.line_span())
     }
 
-    /// A dotenv path is FLAT: exactly one `Key` segment, never nested or indexed.
-    fn single_key(path: &[PathSeg]) -> Option<&str> {
-        match path {
-            [PathSeg::Key(k)] => Some(k.as_str()),
-            _ => None,
-        }
-    }
-
-    /// Scan the raw text for the UNIQUE assignment line whose key is `name`,
-    /// mirroring [`crate::dotenv::parse`]'s key extraction (BOM strip, `export `
-    /// prefix, first `=`, trimmed key). `None` if the key is absent OR appears
-    /// more than once (ambiguous last-wins duplicate -- decline).
-    fn locate(text: &str, name: &str) -> Option<Located> {
-        // The parser strips a leading BOM before splitting into lines; mirror
-        // that and offset every span past it so ranges stay in ORIGINAL bytes.
-        let (body, base) = match text.strip_prefix('\u{feff}') {
-            Some(rest) => (rest, '\u{feff}'.len_utf8()),
-            None => (text, 0),
-        };
-        let mut found: Option<Located> = None;
-        let mut cursor = 0usize; // offset within `body`
-        for chunk in body.split_inclusive('\n') {
-            let line_start = base + cursor;
-            let full = line_start..line_start + chunk.len();
-            cursor += chunk.len();
-            // `str::lines()` content = the chunk minus its `\n` and a preceding `\r`.
-            let content = chunk
-                .strip_suffix('\n')
-                .map_or(chunk, |c| c.strip_suffix('\r').unwrap_or(c));
-            let Some(vspan) = value_span_in_line(content, name) else {
-                continue;
-            };
-            if found.is_some() {
-                return None; // a second match -> ambiguous, decline
-            }
-            found = Some(Located {
-                full,
-                value: line_start + vspan.start..line_start + vspan.end,
-            });
-        }
-        found
-    }
-
-    /// If `content` is an assignment line for key `name`, return the value region
-    /// as a range WITHIN `content`; else `None`.
-    fn value_span_in_line(content: &str, name: &str) -> Option<Range<usize>> {
-        let trimmed = content.trim_start();
-        if trimmed.is_empty() || trimmed.starts_with('#') {
+    /// The single assignment of a FLAT path (exactly one `Key` segment, never
+    /// nested or indexed); `None` if absent, duplicated, or unparsable.
+    fn unique(text: &str, path: &[PathSeg]) -> Option<adotenv::Entry> {
+        let [PathSeg::Key(key)] = path else {
             return None;
-        }
-        let lead = content.len() - trimmed.len();
-        // Optional `export ` prefix (only with a following space), then re-trim.
-        let (after, after_off) = match trimmed.strip_prefix("export ") {
-            Some(rest) => {
-                let r = rest.trim_start();
-                (r, "export ".len() + (rest.len() - r.len()))
-            }
-            None => (trimmed, 0),
         };
-        let after_start = lead + after_off;
-        let eq = after.find('=')?;
-        if after[..eq].trim_end() != name {
-            return None;
-        }
-        let value_raw_start = after_start + eq + 1;
-        let value_raw = &content[value_raw_start..];
-        let (vs, ve) = value_region(value_raw)?;
-        Some(value_raw_start + vs..value_raw_start + ve)
+        adotenv::parse(text).ok()?.unique(key).ok().cloned()
     }
 
-    /// The byte range (within `value_raw`, the text right after `=`) that
-    /// `set_value` overwrites, mirroring [`crate::dotenv::parse_value`]'s view of
-    /// the value: the whole quoted region for a quoted value, the trimmed token
-    /// for an unquoted one, a zero-width point for an empty value. Replacing the
-    /// WHOLE region (quotes included) lets the serializer re-decide the quoting
-    /// for the new value; a trailing comment after a quoted value is preserved.
-    fn value_region(value_raw: &str) -> Option<(usize, usize)> {
-        let v = value_raw.trim_start();
-        let vlead = value_raw.len() - v.len();
-        if let Some(rest) = v.strip_prefix('\'') {
-            // Single-quoted: literal to the next `'`. Region = the whole `'...'`.
-            let end = rest.find('\'')?;
-            Some((vlead, vlead + 1 + end + 1))
-        } else if let Some(inner) = v.strip_prefix('"') {
-            // Double-quoted: to the next UNESCAPED `"`. Region = the whole `"..."`.
-            let mut it = inner.char_indices();
-            let close = loop {
-                match it.next() {
-                    None => return None, // unterminated (declines; unreachable post-parse)
-                    Some((_, '\\')) => {
-                        it.next(); // skip the escaped char
-                    }
-                    Some((ci, '"')) => break ci,
-                    Some(_) => {}
-                }
-            };
-            Some((vlead, vlead + 1 + close + 1))
-        } else {
-            // Unquoted: an inline comment starts at ` #` (detected on the raw
-            // value, so `KEY= # c` is an empty value + a comment); the value is
-            // the trimmed token before it.
-            let cut = value_raw.find(" #").unwrap_or(value_raw.len());
-            let region = &value_raw[..cut];
-            let token = region.trim();
-            if token.is_empty() {
-                Some((0, 0)) // empty value: a zero-width insert right after `=`
-            } else {
-                let start = region.len() - region.trim_start().len();
-                Some((start, start + token.len()))
-            }
-        }
-    }
-
-    /// Serialize a scalar as a dotenv value: unquoted when it round-trips as-is,
-    /// else double-quoted with the `\n \r \t \\ \"` escapes. Declines a value
-    /// containing a control char dotenv cannot escape (only `\n \r \t` are
-    /// representable), so `set_value` degrades to a Suggestion rather than emit a
-    /// raw control byte.
+    /// Serialize a scalar as a dotenv value (`adotenv::encode_value`): bare
+    /// when that reads back unchanged wherever it lands after `=`, else
+    /// double-quoted with the `\n \r \t \\ \"` escapes. Declines a value
+    /// containing a control char dotenv cannot escape, and null / non-scalars,
+    /// so `set_value` degrades to a Suggestion rather than emit a raw control
+    /// byte.
     pub(super) fn dotenv_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
         use serde_json::Value;
         let s = match value {
             Value::String(s) => s.clone(),
             Value::Number(n) => n.to_string(),
             Value::Bool(b) => b.to_string(),
-            // Null has no natural dotenv literal; an object/array is not a scalar
-            // (the caller already declines it) -- decline all three.
             Value::Null | Value::Array(_) | Value::Object(_) => return None,
         };
-        if s.chars()
-            .any(|c| c.is_control() && !matches!(c, '\n' | '\r' | '\t'))
-        {
-            return None;
-        }
-        Some(if needs_double_quoting(&s) {
-            let mut out = String::with_capacity(s.len() + 2);
-            out.push('"');
-            for c in s.chars() {
-                match c {
-                    '\\' => out.push_str("\\\\"),
-                    '"' => out.push_str("\\\""),
-                    '\n' => out.push_str("\\n"),
-                    '\r' => out.push_str("\\r"),
-                    '\t' => out.push_str("\\t"),
-                    other => out.push(other),
-                }
-            }
-            out.push('"');
-            out.into_bytes()
-        } else {
-            s.into_bytes()
-        })
-    }
-
-    /// Whether `s` would NOT round-trip as a bare unquoted dotenv value (so it
-    /// must be double-quoted): leading/trailing whitespace (the parser trims it),
-    /// an inline-comment ` #`, a leading quote (would start a quoted value), or a
-    /// newline / CR / tab.
-    fn needs_double_quoting(s: &str) -> bool {
-        s != s.trim()
-            || s.contains(" #")
-            || s.starts_with('\'')
-            || s.starts_with('"')
-            || s.contains('\n')
-            || s.contains('\r')
-            || s.contains('\t')
+        adotenv::encode_value(&s).map(String::into_bytes)
     }
 }
 

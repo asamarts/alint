@@ -1,7 +1,7 @@
 //! Literal INI / `.cfg` parsing for [`crate::structured_format::Format::Ini`].
 //!
-//! Deliberately hand-rolled and dependency-free, like the sibling [`crate::dotenv`]
-//! parser. The maintained crate (`rust-ini`) is capable, but it drags in a
+//! Deliberately hand-rolled and dependency-free (the sibling dotenv parser began
+//! the same way before moving into the dependency-free `adotenv` crate). The maintained crate (`rust-ini`) is capable, but it drags in a
 //! six-crate transitive tree (`ordered-multimap` -> `dlv-list` -> `const-random`
 //! -> `tiny-keccak`, the last CC0-1.0 and outside alint's cargo-deny allow-list)
 //! purely to preserve key order -- a poor trade for a supply-chain-conscious

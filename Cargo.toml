@@ -81,6 +81,10 @@ toml_edit = "0.25"
 # `max_consecutive_blank_lines`). Already in the tree via `regex`, so this
 # promotes an existing transitive crate to a direct dep, adding none.
 memchr = "2"
+# Literal `.env` parsing, spans and edits for `Format::Dotenv` (alint-core
+# `dotenv`, `structured_fix`). Extracted from alint into its own repository
+# (asamarts/adotenv); no dependencies of its own.
+adotenv = "0.1"
 # Span-capable JSONC AST for the Phase-2 structured `set_value`/`remove_value`
 # fixers (alint-core `structured_fix`): `parse_to_ast` yields node byte ranges, so
 # JSON edits are span-splices (disjoint, one-pass) and JSONC comments / trailing
