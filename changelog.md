@@ -9,6 +9,58 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.2] - 2026-10-13
+
+A security and correctness patch: alint's terminal output now escapes every
+invisible character its own rules flag, `.env` parsing and editing moves to the
+new `adotenv` crate (fixing a `set_value` edit that silently never applied),
+and a leading BOM no longer shifts columns or widths.
+
+### Security
+
+- **Terminal output no longer prints invisible characters that alint itself
+  flags.** The sanitizer for the human, Markdown and GitHub-annotation output kept its own
+  list of bidi and zero-width characters, and it had drifted from the rules':
+  U+180E MONGOLIAN VOWEL SEPARATOR, which `no_zero_width_chars` flags, was
+  printed raw. Both now read one definition (`alint_core::invisible`), and the
+  sanitizer also escapes other characters that render as nothing or as a line
+  break: Unicode tag characters (U+E0000-U+E007F, used to smuggle hidden
+  text), U+2028/U+2029, soft hyphen, invisible math operators, Hangul fillers
+  and the variation selectors supplement. Emoji variation selectors
+  (U+FE00-U+FE0F) and right-to-left text are left alone. Rule results are
+  unchanged.
+
+### Changed
+
+- `.env` parsing now comes from [`adotenv`](https://github.com/asamarts/adotenv),
+  alint's dotenv parser extracted into its own dependency-free crate: literal
+  values, byte spans, and in-place edits. The `dotenv_path_*` rules and the
+  `set_value` / `remove_value` fixes read and edit `.env` files exactly as
+  before; `structured_fix`'s separate hand-mirrored span scan is gone.
+
+### Fixed
+
+- `set_value` on a `.env` file: a new value starting with `#` was written bare,
+  so on a line like `KEY = old # note` it became a comment and read back
+  empty. The fix was never written (the edit is verified and was demoted to a
+  suggestion), but it silently did not apply. Such values are now quoted.
+- `no_bom`: a UTF-8 BOM on a file with a NUL byte past the first 16 bytes was
+  marked fixable, but `file_strip_bom` refuses binary files, so `fix` always
+  skipped it. Fixability now uses the fixer's own whole-file test (read only
+  when a BOM is found). The message and baseline fingerprint are unchanged.
+- A leading BOM no longer counts as a column: `no_bidi_controls`,
+  `no_zero_width_chars`, `markdown_links_resolve` and `markdown_paths_resolve`
+  reported first-line columns one too high in files with a BOM, and
+  `line_max_width` counted the BOM toward the first line's width (a false
+  positive on a line exactly at the limit). Columns are not part of baseline
+  fingerprints.
+
+### Documentation
+
+- `file_starts_with` / `file_ends_with`: documented that binary files are
+  checked too (deliberately, for file signatures), with advice to scope
+  `paths`, since a paired `file_prepend` / `file_append` refuses binary files.
+
 ## [0.18.1] - 2026-10-12
 
 A performance and installer patch. v0.18.0's correctness fixes to the
@@ -7462,7 +7514,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.2...HEAD
+[0.18.2]: https://github.com/asamarts/alint/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/asamarts/alint/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/asamarts/alint/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/asamarts/alint/compare/v0.16.1...v0.17.0
