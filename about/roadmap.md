@@ -13,8 +13,12 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.18.1** (2026-10-12): a performance and installer patch.
-Per-file content checks (the zero-width, bidi and blank-line rules) skip clean files
+**Latest release: v0.18.2** (2026-10-13): a security and correctness patch.
+alint's terminal output escapes every invisible character its own bidi and
+zero-width rules flag (one shared definition), `.env` parsing and editing moved
+to the new dependency-free `adotenv` crate, and a leading BOM no longer shifts
+columns. The prior v0.18.1 (2026-10-12) was a performance and installer patch:
+per-file content checks (the zero-width, bidi and blank-line rules) skip clean files
 with a SIMD byte search and are now faster than in v0.17, `check --changed` runs its
 two git reads concurrently, and `install.sh` resolves the latest release without the
 rate-limited GitHub API. The prior v0.18.0 (2026-10-11) was security and correctness hardening from a
