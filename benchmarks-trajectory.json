@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.18.2",
+      "date": "2026-10-13",
+      "headline": "A security and correctness patch: alint's terminal output now escapes every invisible character its own rules flag, `.env` parsing and editing moves to the new `adotenv` crate (fixing a `set_value` edit that silently never applied), and a leading BOM no longer shifts columns or widths.",
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4015.646139466667,
+          "stddev_ms": 29.411698814958044,
+          "display": "4.02 s ± 0.03"
+        },
+        "s2_1m_full": {
+          "mean_ms": 18432.410389526667,
+          "stddev_ms": 42.372377181139775,
+          "display": "18.43 s ± 0.04"
+        },
+        "s3_1m_full": {
+          "mean_ms": 474817.40293146,
+          "stddev_ms": 1223.1002060633516,
+          "display": "474.8 s ± 1.2"
+        },
+        "s4_1m_full": {
+          "mean_ms": 16278.27228207333,
+          "stddev_ms": 98.71612461300563,
+          "display": "16.28 s ± 0.10"
+        }
+      }
+    },
+    {
       "version": "v0.18.1",
       "date": "2026-10-12",
       "headline": "A performance and installer patch.",
