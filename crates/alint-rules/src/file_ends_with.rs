@@ -202,4 +202,21 @@ mod tests {
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1);
     }
+
+    #[test]
+    fn binary_files_are_checked_byte_for_byte() {
+        // Deliberate (docs/rules.md): unlike the text rules these do not skip
+        // binary-looking files, so a file signature can be asserted on images.
+        let rule = build(&spec_yaml(
+            "id: t\nkind: file_ends_with\npaths: \"**/*\"\nsuffix: \"IEND\"\nlevel: error\n",
+        ))
+        .unwrap();
+        let (tmp, idx) = tempdir_with_files(&[
+            ("ok.png", b"\0\0\0\0IEND"),
+            ("bad.bin", b"IEND\0\0trailer\0"),
+        ]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        let flagged: Vec<_> = vs.iter().filter_map(|v| v.path.as_deref()).collect();
+        assert_eq!(flagged, [std::path::Path::new("bad.bin")], "{vs:?}");
+    }
 }

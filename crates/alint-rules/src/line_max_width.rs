@@ -92,7 +92,7 @@ impl PerFileRule for LineMaxWidthRule {
 }
 
 fn first_overlong_line(text: &str, max_width: usize) -> Option<(usize, usize)> {
-    for (idx, line) in text.split('\n').enumerate() {
+    for (idx, line) in crate::io::without_leading_bom(text).split('\n').enumerate() {
         let trimmed = line.strip_suffix('\r').unwrap_or(line);
         let width = trimmed.chars().count();
         if width > max_width {
@@ -202,5 +202,15 @@ mod non_utf8_tests {
         png.extend(std::iter::repeat_n(0xA5u8, 200));
         let (tmp, idx) = tempdir_with_files(&[("img.png", png.as_slice())]);
         assert!(rule.evaluate(&ctx(tmp.path(), &idx)).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_leading_bom_does_not_count_toward_width() {
+        // An editor shows this first line as exactly 10 columns.
+        assert_eq!(super::first_overlong_line("\u{FEFF}0123456789\n", 10), None);
+        assert_eq!(
+            super::first_overlong_line("\u{FEFF}0123456789X\n", 10),
+            Some((1, 11))
+        );
     }
 }

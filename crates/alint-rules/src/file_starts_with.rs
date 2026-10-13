@@ -213,4 +213,21 @@ mod tests {
         let v = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert_eq!(v.len(), 1);
     }
+
+    #[test]
+    fn binary_files_are_checked_byte_for_byte() {
+        // Deliberate (docs/rules.md): unlike the text rules these do not skip
+        // binary-looking files, so a file signature can be asserted on images.
+        let rule = build(&spec_yaml(
+            "id: t\nkind: file_starts_with\npaths: \"**/*\"\nprefix: \"GIF89a\"\nlevel: error\n",
+        ))
+        .unwrap();
+        let (tmp, idx) = tempdir_with_files(&[
+            ("ok.gif", b"GIF89a\x01\0\x01\0\x80\0\0"),
+            ("bad.bin", b"\0\0binary"),
+        ]);
+        let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
+        let flagged: Vec<_> = vs.iter().filter_map(|v| v.path.as_deref()).collect();
+        assert_eq!(flagged, [std::path::Path::new("bad.bin")], "{vs:?}");
+    }
 }

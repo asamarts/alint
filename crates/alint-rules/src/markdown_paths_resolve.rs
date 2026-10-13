@@ -158,7 +158,7 @@ fn scan_markdown_paths(text: &str, prefixes: &[String]) -> Vec<Candidate> {
     // Blockquote nesting (`>` count) the open fence lives in.
     let mut fence_depth: usize = 0;
 
-    for (line_idx, line) in text.lines().enumerate() {
+    for (line_idx, line) in crate::io::without_leading_bom(text).lines().enumerate() {
         let line_no = line_idx + 1;
         // Fences and indented code blocks can sit inside a `>` blockquote; judge
         // them on the content after the markers. A fence left open when its
@@ -679,5 +679,17 @@ mod tests {
         let cands = scan_markdown_paths(md, &pf);
         assert_eq!(cands.len(), 1);
         assert_eq!(cands[0].token, "src/foo.ts");
+    }
+
+    #[test]
+    fn a_leading_bom_takes_no_column() {
+        let pf = prefixes(&["src/"]);
+        let plain = scan_markdown_paths("see `src/a.rs`", &pf);
+        let bom = scan_markdown_paths("\u{FEFF}see `src/a.rs`", &pf);
+        assert_eq!(
+            (bom[0].line, bom[0].column),
+            (plain[0].line, plain[0].column)
+        );
+        assert_eq!(bom[0].column, 5);
     }
 }

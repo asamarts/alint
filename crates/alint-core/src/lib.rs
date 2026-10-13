@@ -14,6 +14,7 @@ mod extract;
 pub mod facts;
 pub mod git;
 mod ini;
+pub mod invisible;
 pub mod jsonpath_diagnostics;
 mod level;
 pub mod located_fix;

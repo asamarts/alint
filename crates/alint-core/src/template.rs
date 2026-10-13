@@ -761,6 +761,23 @@ mod tests {
         assert_eq!(unescape_token_values("anything", &plain), None);
     }
 
+    #[cfg(not(windows))]
+    #[test]
+    fn unescape_token_values_restores_a_backslash_in_a_name() {
+        // A directory literally named `a\b` is escaped to `a\\b` in the glob;
+        // the message shows the real name.
+        let t = PathTokens::from_path(Path::new("app/a\\b"));
+        let msg = format!(
+            "expected a file matching [{}]",
+            render_path_glob("{path}/page.tsx", &t)
+        );
+        assert_eq!(msg, "expected a file matching [app/a\\\\b/page.tsx]");
+        assert_eq!(
+            unescape_token_values(&msg, &t).as_deref(),
+            Some("expected a file matching [app/a\\b/page.tsx]")
+        );
+    }
+
     #[test]
     fn nested_glob_options_cover_the_schema() {
         // Drift guard: an option the config schema documents as a glob must be

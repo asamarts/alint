@@ -170,6 +170,12 @@ pub(crate) fn char_scan_mode(bytes: &[u8]) -> CharScan {
     }
 }
 
+/// `text` without a leading byte-order mark. Editors hide the BOM, so a
+/// column or width counted from the start of line 1 must not include it.
+pub(crate) fn without_leading_bom(text: &str) -> &str {
+    text.strip_prefix('\u{FEFF}').unwrap_or(text)
+}
+
 /// Find the first char of `bytes` (decoded as UTF-8, lossily) for which
 /// `pred(char, is_first_char)` holds, returning `(1-based line, 1-based
 /// column in chars, char)`. Each maximal invalid byte sequence counts as ONE
@@ -188,11 +194,13 @@ pub(crate) fn first_char_where(
             if pred(c, first) {
                 return Some((line, col, c));
             }
+            // A leading BOM is invisible in every editor, so it takes no column.
+            let leading_bom = first && c == '\u{FEFF}';
             first = false;
             if c == '\n' {
                 line += 1;
                 col = 1;
-            } else {
+            } else if !leading_bom {
                 col += 1;
             }
         }
@@ -463,5 +471,14 @@ mod tests {
             Err(ReadCapError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput),
             _ => panic!("read_capped_with must reject a directory as an Io error"),
         }
+    }
+
+    #[test]
+    fn a_leading_bom_takes_no_column() {
+        let find = |b: &[u8]| first_char_where(b, |c, _| c == 'x');
+        assert_eq!(find(b"\xEF\xBB\xBFabx"), find(b"abx"));
+        assert_eq!(find(b"\xEF\xBB\xBFabx"), Some((1, 3, 'x')));
+        // Only at the very start: a BOM mid-line is a real character.
+        assert_eq!(find(b"a\xEF\xBB\xBFx"), Some((1, 3, 'x')));
     }
 }

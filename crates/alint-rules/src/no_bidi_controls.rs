@@ -38,16 +38,9 @@ use alint_core::{
 
 use crate::fixers::FileStripBidiFixer;
 
-/// Returns true if `c` is one of the Unicode bidi control characters
-/// (the five explicit embeddings/overrides, the four isolates, and the
-/// three implicit directional marks ALM/LRM/RLM).
-pub fn is_bidi_control(c: char) -> bool {
-    matches!(c,
-        '\u{061C}'                  // ALM
-        | '\u{200E}' | '\u{200F}'   // LRM, RLM
-        | '\u{202A}'..='\u{202E}'   // LRE, RLE, PDF, LRO, RLO
-        | '\u{2066}'..='\u{2069}') // LRI, RLI, FSI, PDI
-}
+/// Re-exported from [`alint_core::invisible`], the single definition the
+/// terminal sanitizer also uses.
+pub use alint_core::invisible::is_bidi_control;
 
 #[derive(Debug)]
 pub struct NoBidiControlsRule {

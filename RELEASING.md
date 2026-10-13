@@ -390,6 +390,10 @@ retained here as the setup record):**
 
 1. Create the **VS Code Marketplace publisher** `asamarts` (Azure
    DevOps) and an **Open VSX** namespace; generate `VSCE_PAT` / `OVSX_PAT`.
+   The Open VSX namespace `asamarts` is verified (ownership claim
+   EclipseFdn/open-vsx.org#10714, approved 2026-05-29), so the extension
+   shows as published by a verified owner. A new namespace starts
+   unverified; claim it the same way.
 2. Create the **JetBrains Marketplace vendor**; generate the marketplace
    token + a plugin signing certificate/key.
 3. Add all of the above as repo **Actions secrets**.

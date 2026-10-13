@@ -6,6 +6,39 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **Terminal output no longer prints invisible characters that alint itself
+  flags.** The sanitizer for the human, Markdown and GitHub-annotation output kept its own
+  list of bidi and zero-width characters, and it had drifted from the rules':
+  U+180E MONGOLIAN VOWEL SEPARATOR, which `no_zero_width_chars` flags, was
+  printed raw. Both now read one definition (`alint_core::invisible`), and the
+  sanitizer also escapes other characters that render as nothing or as a line
+  break: Unicode tag characters (U+E0000-U+E007F, used to smuggle hidden
+  text), U+2028/U+2029, soft hyphen, invisible math operators, Hangul fillers
+  and the variation selectors supplement. Emoji variation selectors
+  (U+FE00-U+FE0F) and right-to-left text are left alone. Rule results are
+  unchanged.
+
+### Fixed
+
+- `no_bom`: a UTF-8 BOM on a file with a NUL byte past the first 16 bytes was
+  marked fixable, but `file_strip_bom` refuses binary files, so `fix` always
+  skipped it. Fixability now uses the fixer's own whole-file test (read only
+  when a BOM is found). The message and baseline fingerprint are unchanged.
+- A leading BOM no longer counts as a column: `no_bidi_controls`,
+  `no_zero_width_chars`, `markdown_links_resolve` and `markdown_paths_resolve`
+  reported first-line columns one too high in files with a BOM, and
+  `line_max_width` counted the BOM toward the first line's width (a false
+  positive on a line exactly at the limit). Columns are not part of baseline
+  fingerprints.
+
+### Documentation
+
+- `file_starts_with` / `file_ends_with`: documented that binary files are
+  checked too (deliberately, for file signatures), with advice to scope
+  `paths`, since a paired `file_prepend` / `file_append` refuses binary files.
+
 ## [0.18.1] - 2026-10-12
 
 A performance and installer patch. v0.18.0's correctness fixes to the

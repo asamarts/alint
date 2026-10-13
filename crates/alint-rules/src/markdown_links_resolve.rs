@@ -530,7 +530,13 @@ fn offset_location(text: &str, offset: usize) -> (usize, usize) {
     let before = &text[..offset.min(text.len())];
     let line = before.bytes().filter(|&byte| byte == b'\n').count() + 1;
     let line_start = before.rfind('\n').map_or(0, |idx| idx + 1);
-    let column = text[line_start..offset.min(text.len())].chars().count() + 1;
+    let line_text = &text[line_start..offset.min(text.len())];
+    let line_text = if line_start == 0 {
+        crate::io::without_leading_bom(line_text)
+    } else {
+        line_text
+    };
+    let column = line_text.chars().count() + 1;
     (line, column)
 }
 
@@ -786,5 +792,15 @@ mod tests {
         assert!(rule.path_scope().is_none());
         assert!(rule.supports_expect_matches());
         assert!(!rule.scope_matches_any(&index));
+    }
+
+    #[test]
+    fn a_leading_bom_takes_no_column() {
+        let plain = scan_markdown("ab [t](x.md)\n");
+        let bom = scan_markdown("\u{FEFF}ab [t](x.md)\n");
+        assert_eq!(
+            (bom.links[0].line, bom.links[0].column),
+            (plain.links[0].line, plain.links[0].column)
+        );
     }
 }

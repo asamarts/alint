@@ -29,16 +29,9 @@ use alint_core::{
 
 use crate::fixers::FileStripZeroWidthFixer;
 
-/// Returns true if `c` is a zero-width character that this rule
-/// flags. `is_leading_feff == true` means U+FEFF at byte 0 of
-/// the file (the BOM case) - that's deliberately NOT flagged.
-pub fn is_flagged_zero_width(c: char, is_leading_feff: bool) -> bool {
-    match c {
-        '\u{200B}' | '\u{200C}' | '\u{200D}' | '\u{2060}' | '\u{180E}' => true,
-        '\u{FEFF}' => !is_leading_feff,
-        _ => false,
-    }
-}
+/// Re-exported from [`alint_core::invisible`], the single definition the
+/// terminal sanitizer also uses.
+pub use alint_core::invisible::is_flagged_zero_width;
 
 #[derive(Debug)]
 pub struct NoZeroWidthCharsRule {

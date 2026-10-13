@@ -154,7 +154,7 @@ impl PerFileRule for NoBomRule {
 
     fn evaluate_file(
         &self,
-        _ctx: &Context<'_>,
+        ctx: &Context<'_>,
         path: &Path,
         bytes: &[u8],
     ) -> Result<Vec<Violation>> {
@@ -166,9 +166,10 @@ impl PerFileRule for NoBomRule {
         // BOM in front of a UTF-16 / UTF-32 mark would leave that mark behind.
         // Such a finding is reported but marked not fixable (a flag, so the
         // baseline fingerprint is unchanged).
-        let fixable = strippable_bom_run(bytes).is_some();
+        let strippable = strippable_bom_run(bytes).is_some();
+        let fixable = strippable && !payload_looks_binary(ctx, path, bytes);
         let msg = self.message.clone().unwrap_or_else(|| {
-            if fixable {
+            if strippable {
                 format!("file begins with a {} BOM", kind.name())
             } else {
                 format!(
@@ -193,6 +194,18 @@ impl PerFileRule for NoBomRule {
     fn max_bytes_needed(&self) -> Option<usize> {
         Some(BOM_PREFIX_LEN)
     }
+}
+
+/// Whether the strip fixer would refuse this file as binary. It tests the
+/// whole file (`looks_binary`: a NUL anywhere, or a binary-looking start), so a
+/// finding may only be marked fixable after the same test. `bytes` can be just
+/// the prefix this rule asked for; a BOM is rare, so read the rest only then.
+/// A file that can't be read is not promised a fix.
+fn payload_looks_binary(ctx: &Context<'_>, path: &Path, bytes: &[u8]) -> bool {
+    if bytes.len() < BOM_PREFIX_LEN {
+        return crate::io::looks_binary(bytes);
+    }
+    crate::io::read_capped(&ctx.root.join(path)).map_or(true, |full| crate::io::looks_binary(&full))
 }
 
 pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
@@ -329,6 +342,53 @@ mod utf16_tests {
         let (tmp, idx) = tempdir_with_files(&[("b.txt", b"\xEF\xBB\xBFhi\n")]);
         let vs = rule.evaluate(&ctx(tmp.path(), &idx)).unwrap();
         assert!(!vs[0].not_fixable);
+    }
+
+    #[test]
+    fn utf8_bom_on_a_file_with_a_late_nul_is_not_fixable() {
+        // The check reads only a 16-byte prefix, but the strip fixer refuses a
+        // file with a NUL anywhere. The finding must not promise that fix, and
+        // its message (part of the baseline fingerprint) stays the same.
+        let rule = super::build(&spec_yaml(
+            "id: t\nkind: no_bom\npaths: \"**/*\"\nlevel: warning\n\
+             fix:\n  file_strip_bom: {}\n",
+        ))
+        .unwrap();
+        let mut body = b"\xEF\xBB\xBFlooks like text for a while".to_vec();
+        body.extend_from_slice(b"\0binary tail");
+        let (tmp, idx) = tempdir_with_files(&[
+            ("a.bin", &body),
+            (
+                "b.txt",
+                b"\xEF\xBB\xBFtext only, longer than sixteen bytes\n",
+            ),
+        ]);
+        let c = ctx(tmp.path(), &idx);
+        let vs = rule.evaluate(&c).unwrap();
+        let by = |name: &str| {
+            vs.iter()
+                .find(|v| v.path.as_deref() == Some(std::path::Path::new(name)))
+                .unwrap()
+        };
+        assert!(
+            by("a.bin").not_fixable,
+            "late NUL: the fixer will refuse it"
+        );
+        assert_eq!(by("a.bin").message, "file begins with a UTF-8 BOM");
+        assert!(
+            !by("b.txt").not_fixable,
+            "plain text with a BOM stays fixable"
+        );
+        // File-major dispatch hands the rule only the prefix it asked for.
+        let prefix = &body[..super::BOM_PREFIX_LEN];
+        let per_file = rule.as_per_file().unwrap();
+        let vs = per_file
+            .evaluate_file(&c, std::path::Path::new("a.bin"), prefix)
+            .unwrap();
+        assert!(
+            vs[0].not_fixable,
+            "the prefix path must look at the whole file"
+        );
     }
 
     #[test]
