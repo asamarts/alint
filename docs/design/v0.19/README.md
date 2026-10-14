@@ -11,6 +11,20 @@ v0.19 is a minor release with deliberate behaviour changes (W2 and W3 turn some 
 failures, and W4 changes report text). Every behaviour change is listed in the changelog with
 its migration note.
 
+## Before v0.19: the v0.18.3 patch
+
+The W1 inventory ([`kind-inventory.md`](kind-inventory.md)) reproduced four bugs. Decision K2
+([`kind-meta.md`](kind-meta.md) section 7) ships all four as a v0.18.3 correctness patch, ahead of
+W1:
+
+1. a nested `git_blame_age` never fires unless a top-level rule also uses blame;
+2. structured `*_path_*` kinds with literal `paths:` skip `scope_filter` in the rule-by-rule path,
+   so `alint fix` can edit a file the filter excluded;
+3. nested configs re-root every `select` as a path glob, corrupting the regex `select` of
+   `for_each_match` and `ordered_block` and admitting kinds whose selectors are never re-rooted;
+4. under `--changed`, `no_case_conflicts`, `max_files_per_directory`, and `no_submodules` miss
+   violations.
+
 ## Work items
 
 | ID | Item | Decisions | Size | Depends on |
@@ -40,8 +54,16 @@ W8; W9 interleaved; W10 last.
 - Add a coverage audit: every scenario-built rule instance behaves within its declared
   `KindMeta` (for example, a kind that declares no spawn capability never spawns).
 
-Acceptance: `KindMeta` exists for all 95 kinds and 11 aliases; trust lists derive from it; the
-new audit and the facts gate pass; no change to any rule's behaviour.
+Design: [`kind-meta.md`](kind-meta.md) (accepted; decisions K1 to K5), with the per-kind
+snapshot in [`kind-inventory.md`](kind-inventory.md). W1 also covers: load-time rejection of every
+configured field a kind ignores (K1, a hard error), a `KindCatalog` injected into the DSL loader
+(K3), per-kind JSON Schema restrictions plus migrating the 20 hand-written kind schemas (K4), and
+a capabilities line in `alint rules show` and `explain` (K5).
+
+Acceptance: `KindMeta` exists for all 95 kinds and 11 aliases; trust and audit lists derive from it
+(the Git-required list grows from 3 to the correct 10); ignored fields are load errors in `check`
+and `validate-config`; the schema matches the loader; the instance-conformance audit and the
+facts gate pass.
 
 ### W2. Analysis failures become error findings (DEC-2)
 

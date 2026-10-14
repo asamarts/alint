@@ -1,8 +1,8 @@
 # Design doc: `KindMeta`, the per-kind capability inventory (W1)
 
-Status: Draft (2026-10-14). Decisions recorded inline in section 7 as they are taken.
-Decisions: [ADR-0019](../../adr/0019-general-linter-program-and-plugin-architecture.md) (Phase 0);
-this doc proposes no new ADR unless decision K3 below is taken as "metadata in alint-core".
+Status: Accepted design (2026-10-14); all five questions in section 7 are decided. Not yet implemented.
+Decisions: [ADR-0019](../../adr/0019-general-linter-program-and-plugin-architecture.md) (Phase 0)
+and K1 to K5 in section 7; no new ADR (the trust gates' source of truth changes, not their policy).
 Demand evidence: the inventory of all 95 kinds in [`kind-inventory.md`](kind-inventory.md), which
 found 9 hand-maintained per-kind lists (2 of them wrong or stale), 57 places where a configured
 field is silently ignored, and 4 reproducible bugs that per-kind metadata would have prevented.
@@ -26,7 +26,7 @@ builder functions, trait methods, and nine hand-maintained lists. The inventory 
   audit only sees `Command::new` in `alint-rules`, so the 10 kinds that run `git` through
   `alint_core::git` are invisible to it. A second alias table is generated from the docs and
   used by the CLI and LSP, in parallel to `register_alias`.
-- **Bugs** (reproduced at b6ba88f4; fixed in W3, section 6):
+- **Bugs** (reproduced at b6ba88f4; fixed in the v0.18.3 patch per decision K2, section 6):
   1. A nested `git_blame_age` never fires unless some top-level rule also uses blame: the engine
      decides whether to build the blame cache from top-level rules only.
   2. Structured `*_path_*` kinds with literal `paths:` skip `scope_filter` in the rule-by-rule
@@ -47,7 +47,7 @@ No new user-facing configuration. The visible changes are:
   `check` and `validate-config` with the kind and field named;
 - `facts.json` gains a `kind_meta` section;
 - the JSON Schema rejects those fields per kind (decision K4), so editors flag them;
-- `alint rules show <kind>` and `explain` can print the capability summary (optional, decision K5).
+- `alint rules show <kind>` and `explain` print a capability summary (decision K5).
 
 ## 3. Semantics
 
@@ -172,7 +172,7 @@ gate should show no change; the budget of DEC-13 applies.
 - A firing scenario per enforcement rule (ignored `paths`, `fix`, `scope_filter` predicate,
   nested `fix`, unsupported fix op) and a silent scenario per kind with a valid config (the
   existing silent scenarios).
-- Regression scenarios for the four bugs of section 1, landing with their W3 fixes:
+- Regression scenarios for the four bugs of section 1, landing with their v0.18.3 fixes:
   1. nested `git_blame_age` fires without a top-level blame rule (the engine decides blame-cache
      construction from all rules, nested included, through `KindMeta`'s `Git(blame)`);
   2. `alint fix` never edits a file that `scope_filter` excludes (the literal-paths fast path
@@ -188,8 +188,8 @@ Decided one at a time; each answer is recorded here with its date.
 
 | ID | Question | Recommendation | Decision |
 |---|---|---|---|
-| K1 | Ignored fields: hard error in v0.19, or a warning for one release then an error? | hard error in v0.19 (a pre-1.0 minor; every such field has no effect today), with a migration note listing the field and kind | open |
-| K2 | Ship the four bugs as a v0.18.3 patch first, or with v0.19? | patch bugs 2 and 4 in v0.18.3 (a fix that writes an excluded file, and changed-mode false negatives); bugs 1 and 3 with W1 and W3 | open |
-| K3 | Where records are declared and how the DSL sees them | next to each kind in `alint-rules`, registered with the builder, and a kind catalog passed into the DSL loader (works for plugin kinds) | open |
-| K4 | Generate per-kind JSON Schema restrictions in W1? | yes, so editors flag what the loader rejects | open |
-| K5 | Show capabilities in `alint rules show` and `explain`? | yes, a one-line capability summary; low cost | open |
+| K1 | Ignored fields: hard error in v0.19, or a warning for one release then an error? | hard error in v0.19 (a pre-1.0 minor; every such field has no effect today), with a migration note listing the field and kind | **2026-10-14: hard error in v0.19**, in both `check` and `validate-config`, naming the kind, the field, and the alternative; bundled rulesets and examples fixed in the same change |
+| K2 | Ship the four bugs as a v0.18.3 patch first, or with v0.19? | patch bugs 2 and 4 in v0.18.3 (a fix that writes an excluded file, and changed-mode false negatives); bugs 1 and 3 with W1 and W3 | **2026-10-14: all four in a v0.18.3 patch**, ahead of W1, without waiting for `KindMeta`; W1 then re-expresses the fixes for bugs 1 and 3 through the records (blame from `Git(blame)`, re-rooting from typed selectors) |
+| K3 | Where records are declared and how the DSL sees them | next to each kind in `alint-rules`, registered with the builder, and a kind catalog passed into the DSL loader (works for plugin kinds) | **2026-10-14: as recommended** (per-kind records, a `KindCatalog` injected into the DSL loader; DSL unit tests use a test catalog) |
+| K4 | Generate per-kind JSON Schema restrictions in W1? | yes, so editors flag what the loader rejects | **2026-10-14: yes, in W1**, including migrating the 20 kinds whose option schemas are still hand-written, with a schema/runtime parity gate |
+| K5 | Show capabilities in `alint rules show` and `explain`? | yes, a one-line capability summary; low cost | **2026-10-14: yes**, a capabilities line plus accepted selectors and fix ops, in human and JSON output (ADR-0009 envelope), under the ADR-0012 completeness gates |
