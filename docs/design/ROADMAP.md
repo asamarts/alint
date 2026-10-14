@@ -263,7 +263,7 @@ on it for adoption, they can lint without it.
   any language over protobuf frames on stdio, and sandboxed WASM
   components, all on one WIT-defined contract compiled by a separate
   open-source project. See [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
-  section 9.4.
+  section 9.4 and [`plugin-architecture.md`](https://github.com/asamarts/alint/blob/main/docs/design/plugin-architecture.md).
 
 - **v1.0, Stability.** DSL committed, plugin ABI committed,
   `alint-core` public API frozen, docs site committed.
@@ -1567,6 +1567,7 @@ decisions, and the known limits.
 <!-- roadmap-public: blurb="The first phase of the general-linter program: a generated per-kind capability inventory that drives the trust gates, rule-evaluation failures that can no longer pass silently or be baselined, values from secret-bearing files redacted in every report, findings that point at every related location, and an explicit as-of date for time-dependent rules." -->
 
 Phases 0 and 1a of [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) (section 11),
+broken into work items W1-W10 in [`v0.19/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.19/README.md),
 decided in [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md). Each item graduates to a
 `docs/design/v0.19/` design doc before its code lands.
 

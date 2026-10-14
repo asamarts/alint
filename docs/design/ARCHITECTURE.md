@@ -569,7 +569,8 @@ though the release pipeline publishes them as dependencies of `alint`.
 
 Today there is one tier, and a three-host model is decided
 ([ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md),
-[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 9.4):
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 9.4,
+detailed in [`plugin-architecture.md`](https://github.com/asamarts/alint/blob/main/docs/design/plugin-architecture.md)):
 
 - **`command` rule kind** (shipped). The rule spawns a configured argv per matched file; it does
   not implicitly invoke a shell. Exit code is the verdict; bounded stdout/stderr form the default

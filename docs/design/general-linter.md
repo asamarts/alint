@@ -1271,7 +1271,8 @@ snapshot.
 Decided 2026-10-14 (DEC-10 and DEC-14). Third parties can extend alint with format adapters,
 checkers, and fixers, written as Rust crates (the canonical way) or in any other language, and
 run either as native code or sandboxed. The research behind the choices below is summarized in
-section 9.4.7.
+section 9.4.7; the full design (type mapping, wire identity and evolution, protocol, trust,
+estimates, work breakdown, and open questions) is [`plugin-architecture.md`](plugin-architecture.md).
 
 #### 9.4.1 One contract, three roles
 
@@ -1527,6 +1528,9 @@ does not move, the program stops there. Phases 0 to 2 have standalone value eith
   and the source of the trust lists.
 
 ### 11.3 Phase 1a: fail-loud and finding foundations
+
+The v0.19 work breakdown, with acceptance criteria per item, is
+[`v0.19/README.md`](v0.19/README.md).
 
 - Separate analysis failure from violations, with the exit semantics chosen in decision DEC-2.
   Analysis failures are never baselinable and do not depend on `level`.
