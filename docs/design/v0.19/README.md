@@ -7,9 +7,9 @@ below gets its own design document in this directory (in the [`../TEMPLATE.md`](
 shape, including the false-positive section) before its code lands, and the item's open
 questions are decided there, one at a time.
 
-v0.19 is a minor release with deliberate behaviour changes (W2 and W3 turn some false passes into
-failures, and W4 changes report text). Every behaviour change is listed in the changelog with
-its migration note.
+v0.19 is a minor release with deliberate behaviour changes (W1 turns silently ignored fields into
+load errors, W2 and W3 turn some false passes into failures, and W4 changes report text). Every
+behaviour change is listed in the changelog with its migration note.
 
 ## Before v0.19: the v0.18.3 patch
 
@@ -22,14 +22,17 @@ W1:
    so `alint fix` can edit a file the filter excluded;
 3. nested configs re-root every `select` as a path glob, corrupting the regex `select` of
    `for_each_match` and `ordered_block` and admitting kinds whose selectors are never re-rooted;
-4. under `--changed`, `no_case_conflicts`, `max_files_per_directory`, and `no_submodules` miss
-   violations.
+4. under `--changed`, `no_case_conflicts` and `max_files_per_directory` miss violations caused by
+   a change (they now evaluate on the full index).
+
+Review of the patch found a fifth: a nested rule using `extends_template:` took its kind and
+selectors from a root template without confinement; confinement now runs on the expanded rule.
 
 ## Work items
 
 | ID | Item | Decisions | Size | Depends on |
 |---|---|---|---|---|
-| W1 | `KindMeta` capability inventory | Phase 0 | S | none |
+| W1 | `KindMeta` capability inventory | Phase 0, K1-K5 | L | none |
 | W2 | Analysis failures become error findings | DEC-2 | M | W1 (for the reject-at-load half of W3) |
 | W3 | Close the remaining fail-open sites | section 4.12 | M | W1, W2 |
 | W4 | Notes in every output format | section 8.1 | S | none |
@@ -45,7 +48,7 @@ W8; W9 interleaved; W10 last.
 
 ### W1. `KindMeta` capability inventory
 
-- Add a static `KindMeta` declared at registration for every kind: resource domain, dispatch
+- Add a static `KindMeta` declared at registration for every kind: dispatch
   class, accepted selectors (`paths`, `scope_filter`, `git_tracked_only`, change selectors),
   capabilities (spawn, Git, environment, time, host keyring), formats, and fix operations.
 - Emit it into `facts.json` (a new section; the facts gate covers it).
@@ -84,10 +87,8 @@ record the failure; scenarios cover each former "rule error" site; changelog ent
 
 From [`../general-linter.md`](../general-linter.md) section 4.12:
 
-- **`scope_filter` on kinds that ignore it** (the `git_commit_*` family, `git_no_denied_paths`,
-  `generated_file_fresh`, `command_idempotent`) is rejected at load and by `validate-config`,
-  driven by W1; `include_manifest_paths` on such a rule fails in `validate-config`, not only at
-  `check` time.
+- **`scope_filter` on kinds that ignore it**: done in W1 (K1), which rejects every ignored field at
+  load and in `validate-config`, including manifest predicates.
 - **Manifest-derived scope parse failure** becomes an analysis failure (W2) instead of an empty
   member set or a silent fallback to full scope.
 - **Git unavailable**: Git-aware kinds report an analysis failure when Git or the repository is

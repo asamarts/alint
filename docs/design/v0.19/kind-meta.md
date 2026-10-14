@@ -4,8 +4,10 @@ Status: Accepted design (2026-10-14); all five questions in section 7 are decide
 Decisions: [ADR-0019](../../adr/0019-general-linter-program-and-plugin-architecture.md) (Phase 0)
 and K1 to K5 in section 7; no new ADR (the trust gates' source of truth changes, not their policy).
 Demand evidence: the inventory of all 95 kinds in [`kind-inventory.md`](kind-inventory.md), which
-found 9 hand-maintained per-kind lists (2 of them wrong or stale), 57 places where a configured
-field is silently ignored, and 4 reproducible bugs that per-kind metadata would have prevented.
+found 19 hand-maintained per-kind lists (its last table; 10 of them derive from `KindMeta`, section
+3.2, and 3 are wrong or stale), 57 places where a configured field is silently ignored, and 4
+reproducible bugs that per-kind metadata would have prevented (a fifth suspected case,
+`no_submodules` under `--changed`, proved to be intended behaviour).
 
 > Part of [v0.19](README.md) (work item W1). It is the source the trust gates, the audits, the
 > fail-loud checks of W3, the plugin registry, and the general-linter migration map read from.
@@ -36,8 +38,12 @@ builder functions, trait methods, and nine hand-maintained lists. The inventory 
      never re-rooted (the Git kinds, `pair_hash` `source`, `cross_file`, `registry_paths_resolve`,
      `file_graph`) into a nested config with a dummy `paths:`.
   4. Under `--changed`, `no_case_conflicts` and `max_files_per_directory` make whole-tree
-     judgements without being full-index, and `no_submodules` misses an unchanged
-     `.gitmodules`, so changed-mode runs miss real violations.
+     judgements without being full-index, so changed-mode runs miss real violations.
+     (`no_submodules` also skips an unchanged `.gitmodules` under `--changed`, but that matches
+     `file_absent` and the `--changed` contract, so it is not a bug.)
+
+  v0.18.3 also found, in review, that a nested rule using `extends_template:` took its kind and
+  selectors from a root template unconfined; nested confinement now runs on the expanded rule.
 
 ## 2. Surface area
 
@@ -58,7 +64,7 @@ canonical kind's record. Proposed shape (names indicative):
 
 | Field | Values (from the inventory) |
 |---|---|
-| `dispatch` | `PerFile` (51 kinds), `FullIndex { path_scope: bool }` (18; only `file_exists` and `file_absent` expose a scope), `RuleMajorScoped` (16), `SingleShot` (10). No kind's dispatch depends on options. |
+| `dispatch` | `PerFile` (51 kinds), `FullIndex { path_scope: bool }` (20 since v0.18.3, was 18; `file_exists`, `file_absent`, `no_case_conflicts`, and `max_files_per_directory` expose a scope as their `--changed` skip predicate), `RuleMajorScoped` (14, was 16), `SingleShot` (10). No kind's dispatch depends on options. |
 | `paths` | `Required`, `Optional`, `Forbidden` |
 | `scope_filter` | `Full`, `AncestorOnly` (today's `dir_absent`), `Rejected { reason }` |
 | `git_tracked_only` | `None`, `FileOnly`, `DirAware`; plus `respect_gitignore` and `root_only` flags |
@@ -73,7 +79,16 @@ canonical kind's record. Proposed shape (names indicative):
 
 Option-dependent behaviour is recorded as conditional capabilities, not as different records:
 for example `file_exists` has `Git(tracked set)` conditional on `git_tracked_only`, and
-`git_commit_message` has `EnvRead` conditional on a legacy `${VAR}` in `since:`.
+`git_commit_message` has `EnvRead` conditional on a legacy `${VAR}` in `since:`. Conditions are
+not only boolean options, so the condition type needs variants: an option being set, an option's
+value matching a predicate (the legacy `${VAR}`), a fix op being configured (`file_absent`'s
+`git_untrack` spawns Git), and a common field (every kind that honours `scope_filter` gains Git
+through `changed_since`; that one is derived engine-wide rather than declared on 66 records).
+
+Records are `&'static` for built-in kinds and owned (`Arc<KindMeta>`) for plugin kinds discovered
+at runtime, and serializable for `facts.json` and the plugin handshake. The selector and option
+presence facts (`since`, `git_tracked_only`, `selectors`) duplicate each kind's option schema, so a
+parity gate checks the record against the schema (after K4 migrates the 20 hand-written schemas).
 
 Fix operations get their own small record (`FixOpMeta`): the trust class (`Spawning`,
 `ContentInjecting`, `FixedBehaviour`), from which `SPAWNING_FIX_OPS` and
@@ -83,9 +98,10 @@ Fix operations get their own small record (`FixOpMeta`): the trust class (`Spawn
 
 | Derived item | Today | After W1 |
 |---|---|---|
-| `SPAWNING_RULE_KINDS` (trust gate) | hand list of 3 | kinds with unconditional `SpawnUserCommand` |
+| `SPAWNING_RULE_KINDS` (trust gate) | hand list of 3 | kinds with any `SpawnUserCommand`, conditional or not (the gate runs on raw YAML before options resolve, so it gates by kind; deriving from unconditional spawning only would let a kind that spawns under an option escape the gate) |
 | Git-required kinds (audit) | hand list of 3, should be 10 | kinds with unconditional `Git` |
 | `SPAWNING_FIX_OPS`, `CONTENT_INJECTING_FIX_OPS` | hand lists | `FixOpMeta` trust class |
+| nested-config re-rooting (`REGEX_SELECT_KINDS`, `UNCONFINABLE_KINDS` in `alint-dsl/src/nested.rs`, added in v0.18.3) | two hand lists | a per-selector `rerootable` flag on `selectors` (selector types alone cannot reproduce the list: `pair_hash.source` and `pair_changed_together.if_changed` are glob-typed but cannot be confined) |
 | `FAIL_ONLY_KINDS` (docs export) | hand list | kinds with `HostKeyring` |
 | nested-rule kind lists (when_iter audit, template expansion) | two hand lists | `nested_rules` |
 | nested glob options (template expansion) | hand table | `selectors` typed `Glob`/`GlobList`/`DiffGlob` |
@@ -98,13 +114,20 @@ Fix operations get their own small record (`FixOpMeta`): the trust class (`Spawn
 
 The rule builder validates the configured spec against the record before building:
 
-- a field the kind does not honour (`paths`, `scope_filter` or one of its predicates, `fix`, an
-  unsupported fix op, `expect_matches`, `git_tracked_only`, `respect_gitignore`, `since`) is an
-  error naming the kind and the field, with the supported alternative where one exists;
+- a field the kind does not honour and that loads silently today (`paths`, `scope_filter` or one of
+  its predicates, `fix` or any fix op on a kind with no fixer) is an error naming the kind and
+  the field, with the supported alternative where one exists. (`expect_matches` and the kind
+  options `git_tracked_only`, `respect_gitignore`, and `since` are already rejected at top level;
+  `KindMeta` takes over those checks and extends them to nested rules.) Validation runs on the
+  template-expanded rule and names the template or `extends:` source the field came from; an
+  SRI-pinned remote ruleset that sets an ignored field becomes unloadable until its author fixes
+  it, which the changelog states;
 - `validate-config` runs the same validation, so manifest-predicate errors no longer wait for
   `check`;
-- nested rules are validated against their own kind's record, so a nested `fix:` is an error
-  rather than silently stripped.
+- nested rules are validated against their own kind's record, as the nested pipeline delivers
+  them: today `for_each_*` strips a nested `fix`, `git_tracked_only`, and `respect_gitignore`
+  (`PARENT_FIELDS` in `config.rs`), so each of those becomes an error in a nested rule rather
+  than being silently stripped. Nested specs are validated once at load, not per iteration.
 
 ### 3.4 Where the record lives (decision K3)
 
@@ -114,7 +137,15 @@ central table in `alint-core`; (b) declare records next to each kind in `alint-r
 generate a constant trust table into `alint-dsl` with an `xtask` generator and a `--check` gate;
 (c) declare records next to each kind, register them with the builder, and pass a kind catalog
 into the DSL loader. Option (c) is the only one that also works for plugin kinds, which are not
-known at compile time (DEC-14).
+known at compile time (DEC-14). **Decided: (c) (K3).**
+
+The catalog API, to be fixed in the implementation design: `meta(kind) -> Option<&KindMeta>`
+(resolving aliases), `canonical(kind)`, `kinds()`, and `fix_op(name) -> Option<&FixOpMeta>`,
+injected through the existing `LoadOptions`. It fails closed: loading without a catalog must not
+skip the trust gates, and a kind the catalog does not know in an `extends:` source is treated as
+spawning (denied), never as non-spawning. Call sites: the CLI (`check`, `fix`, `validate-config`),
+`init`, `suggest`, `export-agents-md`, the LSP, bundled rulesets loaded through `extends:`, and the
+bench harness. `FixOpMeta` can be a static table in `alint-core`, next to `FixSpec`.
 
 ## 4. False-positive surface
 
@@ -122,7 +153,7 @@ known at compile time (DEC-14).
 
 - **Configs that set an ignored field today.** Every such config currently has a field with no
   effect; after W1 it fails to load. This is the intended fail-loud change, but it is breaking:
-  decision K1 chooses error versus warning-first.
+  decision K1 makes it a hard error.
 - **Bundled rulesets and examples.** Any bundled ruleset or documented example that sets an
   ignored field must be corrected in the same change; a gate loads every bundled ruleset and
   every documented example.
@@ -142,19 +173,31 @@ declared is decision K3.
 
 ### 5.2 Migration order
 
-1. Add the types and `RuleRegistry::register` taking a `&'static KindMeta` (aliases inherit).
-2. Declare the 95 records, copying the inventory; a test compares every record to the snapshot.
-3. Derive the trust lists and audit lists; keep the old hand lists for one release as
-   cross-checks that must equal the derived ones, then delete them.
-4. Turn on load-time enforcement (section 3.3) with the K1 policy.
-5. Generate the per-kind schema restrictions (K4) and the `facts.json` section.
+1. Add the types and `RuleRegistry::register` taking a record (aliases inherit; the second alias
+   table generated from the docs is reconciled against the registry).
+2. Declare the 95 records from the inventory, corrected for the v0.18.3 changes; the
+   instance-conformance audit (section 5.3), not the markdown snapshot, checks them.
+3. Inject the `KindCatalog` (K3) into every loader call site, then derive the trust lists and audit
+   lists from it (including v0.18.3's two nested-config lists); keep the old hand lists for one
+   release as cross-checks that must equal the derived ones, then delete them.
+4. Fix any bundled ruleset, documented example, or scenario that sets an ignored field (a scan of
+   the 22 bundled rulesets found none at top level), then turn on load-time enforcement
+   (section 3.3) with the K1 policy, including context-aware nested validation.
+5. Migrate the 20 hand-written option schemas, generate the per-kind schema restrictions (K4) and
+   the `facts.json` section, and add the record/schema parity gate.
+6. Add the capabilities summary to `rules show` and `explain` (K5).
 
 ### 5.3 Gates
 
 - **Instance conformance.** For every rule instance built from the scenario corpus, the instance's
   trait answers (`as_per_file`, `requires_full_index`, `path_scope`, `git_tracked_mode`,
-  `wants_git_blame`, `supports_expect_matches`, `fixer`) agree with its record, including the
-  conditional capabilities in both option states.
+  `wants_git_blame`, `supports_expect_matches`, `fixer`) agree with its record, with each
+  conditional capability exercised in both states. Capabilities the trait cannot reveal
+  (`SpawnUserCommand`, `EnvRead`, `WallClock`, `OutOfRootRead`, `HostKeyring`) are checked through
+  instrumented chokepoints in `alint_core::process` and `alint_core::git`; the direct
+  `Command::new` calls in `command.rs` and `fixers/git_ops.rs` are routed through them first.
+  "Honours `paths` / `scope_filter`" is checked behaviourally, by per-kind probes generated from
+  the records (as the inventory did by hand), not by relying on the scenario corpus.
 - **Spawn and Git audits** extend from grepping `alint-rules` to also covering `alint_core::git`
   and `alint_core::process` call sites, and must agree with the records.
 - **Facts gate** covers the new `kind_meta` section; README counts stay derived.
@@ -173,14 +216,15 @@ gate should show no change; the budget of DEC-13 applies.
   nested `fix`, unsupported fix op) and a silent scenario per kind with a valid config (the
   existing silent scenarios).
 - Regression scenarios for the four bugs of section 1, landing with their v0.18.3 fixes:
-  1. nested `git_blame_age` fires without a top-level blame rule (the engine decides blame-cache
-     construction from all rules, nested included, through `KindMeta`'s `Git(blame)`);
+  1. nested `git_blame_age` fires without a top-level blame rule (v0.18.3 visits nested rules
+     through `wants_git_blame()`; the conformance gate asserts it agrees with `Git(blame)`);
   2. `alint fix` never edits a file that `scope_filter` excludes (the literal-paths fast path
      applies the scope);
-  3. nested-config re-rooting uses the typed selectors: regex `select` is not prefixed, and kinds
-     whose selectors cannot be re-rooted are rejected in nested configs;
-  4. `no_case_conflicts` and `max_files_per_directory` become full-index, and `no_submodules`
-     always inspects `.gitmodules` under `--changed`.
+  3. nested-config re-rooting: regex `select` is not prefixed, kinds whose selectors cannot be
+     re-rooted are rejected in nested configs, and confinement runs after template expansion
+     (v0.18.3 ships these as hand lists; W1 derives them from the records);
+  4. `no_case_conflicts` and `max_files_per_directory` become full-index and keep `path_scope` as
+     the `--changed` skip predicate.
 
 ## 7. Open questions
 
