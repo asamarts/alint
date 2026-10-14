@@ -1,10 +1,12 @@
 # What it means for alint to be a general linter
 
-Status: Draft (analysis and architectural proposal). Revised 2026-10-14 after an adversarial
-review against `main` at v0.18.2; section 15 records what the review changed.
-Decisions: none accepted yet. Section 13 lists the open decisions with recommendations, and
-section 13.3 lists the existing ADRs and constitution invariants this program would amend or
-supersede. ADRs are immutable (constitution 13), so each amendment is a new superseding ADR.
+Status: Accepted direction (2026-10-14). Revised after an adversarial review against `main` at
+v0.18.2 (section 15); the program-level decisions are taken (section 13.1) and recorded in
+[ADR-0019](../adr/0019-general-linter-program-and-plugin-architecture.md). Each phase still
+graduates to its own design document before implementation.
+Decisions: [ADR-0019](../adr/0019-general-linter-program-and-plugin-architecture.md). Section 13.2
+lists the questions each phase's design decides, and section 13.3 lists the existing ADRs and
+constitution invariants this program amends or supersedes. ADRs are immutable (constitution 13), so each amendment is a new superseding ADR.
 Any public DSL version, new execution model, or plugin ABI must graduate to its own design
 document and ADR before implementation.
 Demand evidence: the 111-repository v0.12 coverage study and its architecture synthesis
@@ -625,13 +627,15 @@ AST/type/dataflow analysis remains delegated to language tools.
 
 The documents disagreed on this line before the 2026-10-14 revision: the README says alint is
 "not a code or AST linter", the gap study marked anything needing an AST as out of scope, and
-this section proposed syntax adapters. The consistent position, pending decision DEC-10, is:
-**the core parses data and document formats (the eight config formats, CommonMark through
-`pulldown-cmark`, and future tabular or front-matter adapters) but never programming-language
-syntax; programming-language syntax capture enters only through an explicit adapter at the
-plugin boundary, and never type, control-flow, or dataflow analysis.** Under that line,
-Markdown structure (headings, list nesting, image alt text) is in scope today, because the
-shipped CommonMark parser already produces it.
+this section proposed syntax adapters. Decision DEC-10 settles it: **by default the core ships a
+reasonable set of data and document format adapters (the eight config formats, CommonMark through
+`pulldown-cmark`, and planned tabular and front-matter adapters) and no programming-language
+syntax, and every format, built-in included, sits behind one public adapter contract, so other
+repositories, users, and developers can add and enable further adapters, syntax adapters
+included (section 9.4).** Type, control-flow, and dataflow analysis stay out of scope in the
+core in every case. Under that line, Markdown structure (headings, list nesting, image alt text)
+is in scope today, because the shipped CommonMark parser already produces it, and the README's
+"not a code or AST linter" remains true of the core.
 
 ### 5.8 Policy authoring, testing, and debugging
 
@@ -1107,7 +1111,8 @@ with the defaults recommended here:
   the headline (constitution invariant 9 makes those counts gated facts).
 - **Relation to v1.0.** The roadmap's v1.0 milestone commits "DSL schema committed; semver on
   `version: 1`" and a frozen `alint-core` API, while Phase 2 reshapes public `alint-core` types.
-  Decision DEC-9 orders the two.
+  Decision DEC-9 orders the two: `version: 2` ships before v1.0, so v1.0 follows Phase 3 and
+  freezes both versions, the reshaped `alint-core` API, and plugin contract 1.0 together.
 
 ## 8. Diagnostics, exceptions, and remediation
 
@@ -1261,42 +1266,146 @@ Rules that need real filesystem behavior or spawn a command must declare that re
 and cannot run against an incompatible snapshot. Fixes apply only to a mutable working-tree
 snapshot.
 
-### 9.4 Plugin interface
+### 9.4 Plugin architecture
 
-The future WASM interface should use typed records, ideally a WIT component contract, for:
+Decided 2026-10-14 (DEC-10 and DEC-14). Third parties can extend alint with format adapters,
+checkers, and fixers, written as Rust crates (the canonical way) or in any other language, and
+run either as native code or sandboxed. The research behind the choices below is summarized in
+section 9.4.7.
 
-- plugin metadata and compatible ABI range;
-- requested capabilities and resource limits;
-- selected resource metadata and bounded content;
-- configuration validated against a plugin-provided schema;
-- emitted rows or findings with source ranges;
-- optional edits with applicability.
+#### 9.4.1 One contract, three roles
 
-Prefer two plugin roles over one unconstrained callback:
+A single versioned plugin contract defines three roles, each a pure function from inputs the host
+supplies to typed results:
 
-1. **Adapter/extractor plugin:** turns a selected resource into typed rows, after which native
-   constraints operate normally.
-2. **Analyzer plugin:** returns findings for algorithms that do not fit the relation model.
+1. **Adapter:** turns a selected resource (bytes plus metadata) into typed rows with spans, after
+   which native constraints and kinds operate normally. Every built-in format (the eight config
+   formats, CommonMark, and later tabular and front-matter decoding) is an adapter on this same
+   contract (DEC-10), so a third-party adapter is a peer of the built-in ones rather than a
+   special case.
+2. **Analyzer (checker):** turns resources or rows into findings with primary and related
+   locations, for algorithms that do not fit the relation model.
+3. **Fixer:** returns typed edit proposals with an applicability tier. Plugins never write files:
+   the host derives, confines, verifies, tier-gates, and applies every edit through the existing
+   fix engine, so ADR-0017's guarantees and the untrusted-remote demotions apply unchanged.
 
-Capabilities are granted by the user's trusted top-level config. No network, inherited
-environment, host filesystem traversal, process spawn, or wall clock is available by
-default. SRI authenticates bytes but does not confer trust or authority.
+The contract also carries plugin metadata and the compatible contract range, a configuration
+schema the host validates options against, declared capabilities, and resource limits. Only
+contract types cross the boundary, never internal engine layouts (the failure mode in which a
+host's internal tree layout leaked into its plugin ABI and broke every plugin on each change).
+Version 1 of the contract uses a restricted, pure subset of WIT: no resources or handles, no
+streams or futures, no maps, and no recursive types.
 
-This section supersedes the plugin sketch in the roadmap backlog where they differ (decision
-DEC-14):
+#### 9.4.2 Three hosts, one internal interface
 
-- The roadmap describes one `wasm` kind whose config the host interpolates with `{{env.X}}`
-  before passing it to the guest. Since the 2026-10 audit, untrusted remote rulesets may not
-  splice environment-derived values at all, so post-interpolation is acceptable only for a
-  plugin declared in the top-level config; a plugin rule inherited through `extends:` receives
-  no environment-derived values.
-- [ADR-0004](../adr/0004-extends-trust-boundary-and-path-confinement.md) gates only spawning and
-  out-of-root kinds, so a sandboxed plugin arriving through `extends:` has no trust rule yet.
-  Plugin grants should extend the one existing top-level grant mechanism, `trusted_extends:`
-  (ADR-0017 and the 2026-10 audit), rather than add a parallel one.
-- A signed plugin registry is not promised until one adapter plugin and one analyzer plugin
-  have been validated (section 11, Phase 6), and the roadmap's v1.0 "plugin ABI committed" item
-  waits for the native relation and finding model to stabilize.
+| Host | Who writes it | Isolation and trust | Transport |
+|---|---|---|---|
+| **Native Rust** | Rust crates depending on the semver-stable `alint-plugin-api` crate | full trust, decided when the binary is built | direct trait calls |
+| **Out-of-process** | any language, through a generated SDK or the raw protocol | full trust native code, integrity-checked | protobuf frames over stdio (section 9.4.4) |
+| **WASM component** | any language with a component toolchain (Rust, C, C++, C#, Go, and others through `componentize-*`) | sandboxed and pure: no filesystem, network, clock, randomness, or environment imports; fuel or epoch limits and memory limits | wasmtime, behind a cargo feature |
+
+All three feed one internal `Adapter` / `Analyzer` / `Fixer` trait set, which the built-in kinds
+and formats also implement as they move onto the Phase 2 IR. The plugin API is therefore
+exercised by alint itself and cannot drift from what built-ins can do. Registration replaces
+the hard-coded `builtin_registry()` call sites with an injectable registry; plugin kinds are
+namespaced (`<plugin>/<kind>`), carry their option schema for `validate-config` and editors, and
+declare their capabilities through the same `KindMeta` inventory as built-ins (section 9.7), so
+the trust gates and audits see them.
+
+#### 9.4.3 Native Rust plugins: compiled in, never dynamically loaded
+
+Rust has no stable ABI, so loading Rust dynamic libraries is unsound across compiler versions and
+builds (one major Rust game engine deprecated its dynamic-plugin loader as unsound for exactly
+this reason). Native plugins are instead compiled into a custom binary, the model of
+`golangci-lint custom` and `xcaddy`:
+
+- `alint build` reads a manifest naming the alint version and the plugin crates (registry, git,
+  or path sources), generates a throwaway crate that registers them, and runs
+  `cargo build --release`, producing the user's own alint binary.
+- The same registration is available to embedders as a library call (running alint with an
+  extended registry).
+- Native plugins are fully trusted: choosing to compile a crate is the grant.
+
+This supersedes `ARCHITECTURE.md`'s earlier "native Rust plugins are out of scope", whose
+objection was to dynamic loading, not to compiled-in plugins.
+
+#### 9.4.4 Out-of-process plugins: protobuf frames over stdio
+
+The out-of-process protocol follows the persistent-worker and process-plugin designs that have
+worked across languages (Bazel workers, protoc plugins, dprint process plugins, Nushell plugins)
+rather than gRPC. gRPC would add an HTTP/2 and async-runtime stack to the host, needs sockets or
+ports (awkward on Windows), and buys nothing that request ids over stdio do not provide.
+
+- **Framing and encoding.** Length-prefixed protobuf messages on stdin/stdout; stderr is free for
+  plugin logs. A plugin may negotiate the proto3-JSON encoding of the same schema for debugging
+  and for languages where adding protobuf is a hurdle.
+- **Handshake.** The plugin announces its encoding, then both sides exchange a hello carrying the
+  protocol version, the supported contract range, and feature flags. Unknown features are
+  ignored and no side uses a feature the other did not confirm, so minor contract versions do not
+  force lock-step upgrades.
+- **Lifecycle.** One persistent process per plugin per run (and per LSP session), multiplexed
+  request ids, batches of many files per request, best-effort cancellation, per-request
+  timeouts, kill on timeout or EOF, crash isolation, and the bounded-output and process-group
+  machinery the `command` kind already has.
+- **SDKs.** A Rust SDK that runs the same plugin crate either compiled in or as a process, then
+  generated Python, Go, and TypeScript SDKs from the emitted `.proto`.
+
+#### 9.4.5 One source of truth: WIT, compiled by a separate project
+
+The three bindings evolve under different rules. In the component model a published record,
+variant, enum, or flags type cannot gain a member without breaking compatibility (wasmtime checks
+these types for exact equality); protobuf tolerates new fields by stable field number; Rust
+tolerates them with `#[non_exhaustive]`. The strictest system has to be the source, because
+projecting it to the more permissive ones loses nothing, while the reverse is lossy (protobuf to
+WIT yields all-optional fields and open enums; Rust can express recursion and generics WIT
+cannot). So:
+
+- **WIT is the hand-written source of truth** for the contract, as a versioned package.
+- **A new, separate open-source project, a WIT-first contract compiler, generates the other
+  bindings:** plain Rust types and traits for `alint-plugin-api` (with no wasmtime dependency),
+  a `.proto` schema whose field numbers come from a committed, append-only lockfile, and later
+  JSON Schema. alint is its first consumer, and its scope is limited to what alint needs until
+  alint's contract v1 ships. No existing tool generates protobuf or plain Rust from WIT; the
+  closest ecosystem work goes the other way (protobuf to WIT), and the WIT annotations proposal
+  (component-model issue 695) may later let field numbers live in the WIT source, which the
+  lockfile is designed to be replaced by.
+- **Gates.** Generated outputs are committed and checked (`--check`, LF-pinned); the lockfile is
+  monotonic against the merge base; `buf breaking` runs on the emitted schema at the WIRE_JSON
+  level; and a WIT compatibility check rejects any change to a released type.
+- **Evolution policy.** A published contract version is frozen. Changes ship as a new minor
+  version with additive, defaulted members; the previous WIT stays in the tree, and the host keeps
+  one adapter per supported version, converting each into the latest plain types. A major version
+  is a new package, negotiated in the handshake.
+
+#### 9.4.6 Trust and distribution
+
+- **Process plugins** are spawn-capable: declarable only in the top-level config (or through
+  `trusted_extends:`), never by an ordinary `extends:`, and every executable is pinned by
+  SHA-256.
+- **WASM plugins** may arrive through a remote `extends:` when SRI-pinned, because they are
+  sandboxed and receive no capabilities. A plugin inherited through `extends:` receives no
+  environment-derived values, consistent with the 2026-10 audit; the roadmap's earlier sketch of
+  host-side `{{env.X}}` interpolation into plugin configuration applies only to plugins declared
+  in the top-level config.
+- **An `alint.lock`** records per-platform hashes for every platform at once (so a lockfile
+  written on one operating system does not fail CI on another), with optional cosign or
+  attestation verification reusing the release-signing tooling of ADR-0015.
+- **Capability grants** extend `trusted_extends:`, the one existing top-level grant mechanism,
+  rather than add a parallel one; ADR-0004 gains the plugin rules in a superseding ADR.
+- **No public registry** is promised until one adapter plugin and one analyzer plugin have been
+  validated end to end.
+
+#### 9.4.7 Prior art consulted
+
+HashiCorp go-plugin and tflint (gRPC over a local socket, signed checksums), dprint (sandboxed
+WASM plus checksum-pinned process plugins), Nushell (stdio with negotiated encoding, a
+version-and-features handshake, and the cost of minor-version lock-step), Bazel persistent
+workers and protoc plugins (protobuf over stdio), golangci-lint and xcaddy (custom builds), Zed
+(one WIT copy and host adapter per contract version), Typst (pure WASM plugins), sqlc and Buf
+check plugins (one protobuf contract over WASM and processes), Terraform's plugin protocol
+(side-by-side major versions and lock files), wasmCloud and wRPC (WIT as a transport-independent
+IDL), and the Bevy and SWC cautionary cases (unsound dynamic loading; internal layouts in an
+ABI).
 
 ### 9.5 Cost model and limits
 
@@ -1324,7 +1433,7 @@ enforce one on its own. The deterministic gate compares each pull request agains
 read-path regression showed flat instruction counts can hide a real wall-clock loss). A
 ten-PR migration at +1.9% each would pass every check and land about 20% slower. The program
 therefore measures against a **frozen pre-IR reference (the v0.18.2 tag)**, cumulatively, with
-these proposed budgets (decision DEC-13):
+these budgets (decision DEC-13):
 
 | Measure | Budget against v0.18.2 | Where |
 |---|---|---|
@@ -1383,8 +1492,9 @@ expressiveness:
 
 This is intentionally staged. Publishing the generic YAML first would freeze the weakest
 part of the design before provenance, testing, and planning are ready. Each phase has a proposed
-target release, a size, the substrates it delivers, and an exit criterion. Target releases are
-proposals (decision DEC-1); the roadmap records them only once accepted.
+target release, a size, the substrates it delivers, and an exit criterion. DEC-1 adopted these
+targets; the roadmap records Phases 0 and 1a under v0.19, and later targets stay provisional
+until each phase's design document.
 
 ### 11.1 Phase summary
 
@@ -1394,10 +1504,12 @@ proposals (decision DEC-1); the roadmap records them only once accepted.
 | 1a. Fail-loud and finding foundations | v0.19 | L | every row of section 4.12 closed or explicitly recorded as accepted, each with a gate asserting its invariant |
 | 1b. Authoring loop | v0.20 | M | `alint test` public with a published schema; a rule-level `explain --trace`; the bundled rulesets carry their own tests |
 | 2. Internal relation IR (go / no-go) | v0.21 | L | the IR pilot ships as a v1 kind, one existing kind is ported with zero shadow diffs over one release, and the section 9.6 budgets hold |
-| 3. Selectors and report-only constraints | v0.22 or later | L | the section 12.1 measures met on the Phase 3 conformance policies (locale key parity, dependency version consistency, toolchain-pin consistency; stale exceptions are measured at Phase 4); the version-boundary ADR accepted |
+| 3. Selectors, report-only constraints, and `version: 2` | v0.22 or later | L | the section 12.1 measures met on the Phase 3 conformance policies (locale key parity, dependency version consistency, toolchain-pin consistency; stale exceptions are measured at Phase 4); the version-boundary ADR accepted |
 | 4. Typed modules and exception data | unscheduled | M | decided after Phase 3 by measured reuse pressure |
 | 5. Snapshot views | unscheduled | L | the LSP overlay part first; Git index and tree views only with demand |
-| 6. Typed plugins | unscheduled | L | one adapter and one analyzer plugin validated before any registry |
+| 6. Plugin hosts (parallel track, DEC-14) | contract with Phase 2 (v0.21); native Rust and `alint build` next (about v0.22); process host and Rust SDK (about v0.23); WASM host and other-language SDKs after | L (about 33-53 engineer-weeks in all, including the contract compiler; a first real plugin after about 12-18) | one adapter and one analyzer plugin validated end to end before any registry |
+| WIT contract compiler (separate project, DEC-14d) | starts now, in parallel | MVP about 12-18 weeks; 1.0 about 26-45 | generates `alint-plugin-api` and the `.proto` with lockfile gates; alint is the first consumer |
+| v1.0 | after Phase 3 | n/a | freezes `version: 1`, `version: 2` (DEC-9), the `alint-core` API, and plugin contract 1.0 together |
 
 **Stop rule.** If the Phase 2 pilot does not make the ported kind simpler and more consistent,
 or if after Phase 3 the share of new demand that is expressible by configuration (section 12.3)
@@ -1499,10 +1611,14 @@ Stale-exception detection moved to Phase 4, because exception relations are desi
   demand: the pre-commit framework already stashes unstaged changes, which covers the most
   common staged-only use. Dependency-aware LSP and watch invalidation follow the compiled plan.
   Process-spawning and mutable-fix rules stay restricted to compatible snapshots (question Q9).
-- **Phase 6, typed plugins and syntax adapters.** Freeze the WIT ABI only after the native
-  relation and finding model has stabilized. Ship adapter and analyzer roles with capability
-  manifests, fuel and memory limits, SRI, and test fixtures. Validate one adapter plugin (a
-  syntax-query adapter) and one analyzer plugin before promising a registry (decision DEC-14).
+- **Phase 6, plugin hosts (a parallel track, not the last phase).** Per DEC-14e, the plugin
+  contract is designed together with the Phase 2 IR and published as an unstable `0.x` contract,
+  with built-in kinds and formats on the same traits. The hosts then follow in order: native
+  Rust plugins and `alint build`; the out-of-process host and Rust SDK (Linux and macOS first,
+  then Windows hardening); the WASM host; and the Python, Go, and TypeScript SDKs. The WIT
+  contract compiler is built in parallel as its own project. Contract 1.0 freezes at v1.0 with
+  the DSL. Validate one adapter plugin (a syntax-query adapter) and one analyzer plugin before
+  promising a registry (section 9.4).
 
 ### 11.8 Gap-to-substrate matrix
 
@@ -1592,29 +1708,33 @@ JavaScript-monorepo stratum so the claim can be measured rather than assumed.
 
 ## 13. Open decisions
 
-Section 13.1 lists the decisions needed now, because they shape Phases 0 to 2 or reconcile
-this program with recorded decisions. Section 13.2 lists questions that need their phase's
+Section 13.1 lists the program-level decisions, taken on 2026-10-14, because they shape Phases 0
+to 2 or reconcile this program with recorded decisions. Section 13.2 lists questions that need their phase's
 design work first; each carries a recommendation and is decided in that phase's design
 document. Section 13.3 lists the records this program would amend.
 
-### 13.1 Decisions needed now
+### 13.1 Decisions taken (2026-10-14)
 
-| ID | Decision | Recommendation |
+The maintainer decided each of these on 2026-10-14, one at a time, after the review. They are
+recorded in [ADR-0019](../adr/0019-general-linter-program-and-plugin-architecture.md). Where an
+outcome differs from the review's recommendation, the outcome column says so.
+
+| ID | Decision | Outcome |
 |---|---|---|
-| DEC-1 | Adopt the phased program and its proposed targets (section 11.1), and track it in the roadmap | adopt; Phases 0 and 1a in v0.19 |
-| DEC-2 | How analysis failure maps onto exit codes | failures caused by repository content (an unparseable or over-cap target) are findings at level error regardless of the rule's `level`, never baselinable; configuration failures exit 2 and internal errors stay 3; no new exit code |
-| DEC-3 | Redaction default for evidence values | redact values from dotenv and properties by default, add an opt-in `sensitive:` marker elsewhere, never store raw values in baseline files |
-| DEC-4 | How the JSON report evolves | relax v1's `additionalProperties: false` one release before adding fields, announced in the changelog; reserve a v2 report for removals |
-| DEC-5 | Baseline identity under the richer finding model | ADR-0006 already decided the definition; freeze existing kinds' fingerprints behind a golden gate, keep related locations out of fingerprints, and give new kinds sorted identity fields |
-| DEC-6 | The public policy-test format | promote the testkit scenario schema and publish its runner |
-| DEC-7 | The IR proof strategy | pilot on the new `key_parity` kind, then port existing kinds only under differential shadow evaluation |
-| DEC-8 | Named kinds versus generic constraints for the relational gaps | both: named v1 kinds as the ergonomic surface, implemented on the IR; no standalone evaluators for those gaps before Phase 2 |
-| DEC-9 | The DSL version boundary and its order relative to v1.0 | `version: 2` for the new typed namespace, post-1.0, with v1.0 committing only `version: 1`; additive v1 keys only if the Phase 2 IR shows the surface stays small |
-| DEC-10 | The syntax-analysis line | the core parses data and document formats, never programming-language syntax; syntax capture only through plugin adapters; Markdown structure is in scope now |
-| DEC-11 | Time-dependent rules and constitution invariant 1 | a global `--as-of` input (CLI flag and environment variable); without it, time-dependent kinds use the HEAD commit time rather than the wall clock, so a commit always evaluates the same way |
-| DEC-12 | Policy-source files (`.editorconfig`, `.gitattributes`) versus ADR-0010 | a new ADR that defines policy-source files as distinct from intent-inferring manifests, with `editorconfig_conforms` as its first user |
-| DEC-13 | The performance reference and enforcement | cumulative budgets against the frozen v0.18.2 tag (section 9.6), enforced for IR pull requests |
-| DEC-14 | The plugin plan of record | section 9.4 supersedes the roadmap's WASM sketch: two roles, no environment for inherited plugins, grants through `trusted_extends:`, no registry before validation |
+| DEC-1 | Adopt the phased program and its targets (section 11.1), and track it in the roadmap | **Adopted as proposed.** Phases 0 and 1a target v0.19; later targets stay provisional until each phase's design document |
+| DEC-2 | How analysis failure maps onto exit codes | **A failure caused by repository content is a finding that always counts as error**, whatever the rule's `level`, and is never baselinable. Configuration failures exit 2, internal errors stay 3, and there is no new exit code |
+| DEC-3 | Redaction default for evidence values | **Redact values from dotenv and properties by default, plus an opt-in `sensitive:` marker elsewhere.** Raw values never reach baseline files. The baseline fingerprint is already a hash of the identity, so redaction changes only the advisory message; the Phase 1a design must still address that an unsalted hash of a low-entropy value can be brute-forced |
+| DEC-4 | How the JSON report evolves | **Relax v1's `additionalProperties: false` one release before adding fields**, announced in the changelog. A v2 report is reserved for removals and renames. Consequence: related locations reach SARIF and the LSP in v0.19 (both formats already allow them) and the JSON report one release later |
+| DEC-5 | Baseline identity under the richer finding model | **Freeze existing kinds' fingerprints behind a golden gate** recomputed over the scenario corpus. Related locations never enter a fingerprint, new kinds set `baseline_key` from sorted identity fields, and the baseline schema stays at version 1 |
+| DEC-6 | The public policy-test format | **Promote the testkit scenario schema**, with `given.fixture:`, its own version field and a published JSON Schema; the runner moves into a published crate |
+| DEC-7 | The IR proof strategy | **Pilot on the new `key_parity` kind, then port existing kinds only under differential shadow evaluation** with zero differences for one release |
+| DEC-8 | Named kinds versus generic constraints for the relational gaps | **Named v1 kinds implemented on the IR**; no standalone evaluators for those gaps before Phase 2; the generic `constraint` is the escape hatch |
+| DEC-9 | The DSL version boundary and its order relative to v1.0 | **`version: 2` ships before v1.0** (not the review's post-1.0 recommendation). v1.0 therefore follows Phase 3 and freezes both `version: 1` and `version: 2`, together with the plugin contract 1.0 |
+| DEC-10 | The syntax-analysis and format-extension line | **By default the core ships a reasonable set of data and document format adapters** (the eight config formats, CommonMark, and planned tabular and front-matter adapters) and no programming-language syntax. **Every format, built-in included, sits behind one public adapter contract**, so further adapters (including syntax adapters) can be written, distributed, and enabled by other repositories, users, and developers. The adapter contract is designed with the Phase 2 IR, not deferred to the plugin phase |
+| DEC-11 | Time-dependent rules and constitution invariant 1 | **A global `--as-of` input** (CLI flag and `ALINT_AS_OF`); without it, time-dependent kinds use the HEAD commit time; outside a Git repository they report an analysis failure unless `--as-of` is given; recorded in a superseding ADR |
+| DEC-12 | Policy-source files versus ADR-0010 | **A new ADR defining policy-source files** (files whose documented purpose is to declare the checked policy) as distinct from intent-inferring manifests; findings cite the policy line; `editorconfig_conforms` is the first user |
+| DEC-13 | The performance reference and enforcement | **Cumulative budgets against the frozen v0.18.2 tag** (section 9.6), enforced for IR pull requests |
+| DEC-14 | The plugin plan of record | Decided in six parts (section 9.4): **(a)** one versioned plugin contract with adapter, analyzer, and fixer roles, served by three hosts (native Rust compiled in, out-of-process in any language, sandboxed WASM components), all feeding one internal trait set that built-in kinds and formats also use; **(b)** out-of-process plugins speak protobuf frames over stdio, with a negotiated proto3-JSON encoding, a version and feature handshake, persistent processes, multiplexed batched requests, cancellation, and timeouts (no gRPC); **(c)** native Rust plugins are compiled into a custom binary by an `alint build` command, never loaded as dynamic libraries; **(d)** WIT is the single source of truth for the contract, compiled by a new, separate open-source project (a WIT-first contract compiler) with alint as its first consumer; **(e)** the contract is designed with the Phase 2 IR, and the hosts follow in order (native, process, WASM, other-language SDKs); **(f)** tiered trust with a lockfile |
 
 ### 13.2 Questions decided in their phase's design document
 
@@ -1629,7 +1749,9 @@ document. Section 13.3 lists the records this program would amend.
 | Q7 | Are relation rows user-visible in JSON output? | 1b | only through the experimental preview command |
 | Q8 | Which existing kinds compile to generic constraints, and which stay native? | 2 | decided per kind from the shadow-port results; graph, Unicode, and Git kernels stay native |
 | Q9 | Can snapshot views support every pure rule? | 5 | no; the `KindMeta` inventory declares snapshot compatibility and incompatible rules are rejected per view |
-| Q10 | Does a plugin emit rows, findings, or both in ABI v1? | 6 | separate adapter and analyzer worlds, even if one artifact implements both |
+| Q10 | Exact shape of the adapter, analyzer, and fixer worlds in contract 0.x (the roles themselves are decided by DEC-14a) | 2 | separate worlds, even if one artifact implements several; inputs pushed by the host, no host callbacks in 0.x |
+| Q16 | Name and repository of the WIT contract compiler, and its first-release scope | now | a neutral, non-alint name; MVP emits Rust types and traits plus `.proto` with the lockfile; JSON Schema next |
+| Q17 | The plugin manifest and `alint build` manifest formats, and how plugin kinds are namespaced in `.alint.yml` | 6 | `<plugin>/<kind>` kind names; YAML for `plugins:` in config; TOML for the build manifest |
 | Q11 | How do versions mix across `extends:`, and when does `requires:` land? | 1b | v2 consumers may extend v1 sources, never the reverse; `requires:` lands in v1 before Phase 3 |
 | Q12 | How are named objects namespaced and protected from shadowing? | 3 | provenance on every named object, namespace-qualified references, no shadowing of local names, plan-time capability monotonicity |
 | Q13 | How are paths compared in joins? | 2 | byte-exact on normalized paths, opt-in case folding, never host-dependent |
@@ -1643,7 +1765,8 @@ document. Section 13.3 lists the records this program would amend.
 | Constitution invariant 1 (determinism) | an explicit time input and a declared-host-input class (DEC-11) | Phase 1a |
 | Constitution invariant 2 and ADR-0003 (dispatch) | full-index context separated from target selection (Q2) | Phase 3 |
 | ADR-0002 (YAML, flat merge by id) | namespaced modules and a `version: 2` envelope (DEC-9, Q12) | Phases 3 and 4 |
-| ADR-0004 (trust boundary) | plugin and named-object grants (DEC-14, Q12) | Phases 3 and 6 |
+| ADR-0004 (trust boundary) | plugin and named-object grants (DEC-14f, Q12) | Phases 3 and 6 |
+| `ARCHITECTURE.md` "Plugin model" (native Rust plugins out of scope) | compiled-in native plugins, process plugins, and WASM components (DEC-14) | updated 2026-10-14 |
 | ADR-0006 (baseline) | exception relations and the stale default (Q3); fingerprint freeze stated explicitly (DEC-5) | Phases 1a and 4 |
 | ADR-0008 (`git_tracked_only` is a kind option) | a selector-level `tracked` predicate implemented for every domain | Phase 3 |
 | ADR-0009, ADR-0012, ADR-0013 (explain and output projections) | an evaluating trace and new finding fields under the completeness gates | Phases 1a and 1b |

@@ -307,12 +307,12 @@ views {
   }
 
   dynamic view pluginModel {
-    title 'Plugin model: command rule (+ roadmap WASM)'
+    title 'Plugin model: command rule (+ planned plugin hosts)'
 
     core -> rules 'dispatch the command rule per matched file'
     rules -> rules 'spawn external checker (env: path, rule id, level, vars, facts)'
     rules -> core 'exit code = verdict; stdout/stderr = message -> Violation'
-    core -> core 'roadmap v0.13: WASM / WIT plugin host (sandboxed, no network by default)'
+    core -> core 'planned (ADR-0019): one WIT contract on native Rust, process (protobuf over stdio), and sandboxed WASM hosts'
   }
 
   dynamic view pathConfinement {

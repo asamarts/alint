@@ -567,18 +567,25 @@ though the release pipeline publishes them as dependencies of `alint`.
 
 <likec4-view view-id="pluginModel"></likec4-view>
 
-Two tiers, introduced across the roadmap:
+Today there is one tier, and a three-host model is decided
+([ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md),
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 9.4):
 
 - **`command` rule kind** (shipped). The rule spawns a configured argv per matched file; it does
   not implicitly invoke a shell. Exit code is the verdict; bounded stdout/stderr form the default
   failure message. Environment variables expose path, root, rule id, level, vars, and facts.
   Simple, scriptable, language-agnostic.
-- **Future `wasm` plugin kind** (unscheduled backlog). The current direction is a stable WIT
-  interface, a filesystem sandbox, and a signed registry. Exact inputs, distribution, authority,
-  determinism, and capability grants remain design decisions; `general-linter.md` proposes the
-  stricter typed adapter/analyzer boundary.
+- **Plugin contract** (planned, designed with the Phase 2 relation layer). One versioned
+  contract, written in WIT, with adapter, analyzer, and fixer roles. Plugins propose typed
+  edits; the host applies them. Built-in kinds and formats implement the same internal traits.
+- **Three hosts for that contract** (planned, in this order):
+  - native Rust crates compiled into a custom binary by `alint build` (no dynamic loading,
+    because Rust has no stable ABI);
+  - out-of-process plugins in any language, speaking length-prefixed protobuf over stdio;
+  - sandboxed, pure WASM components on wasmtime.
 
-Native Rust plugins are deliberately out of scope. Dynamic library loading has ABI stability problems and would lock the plugin ecosystem to Rust. WASM is the long-term answer.
+Native and process plugins are fully trusted and integrity-pinned; process plugins are
+spawn-gated like the `command` kind. Only SRI-pinned WASM plugins may arrive through `extends:`.
 
 ## Output formats
 

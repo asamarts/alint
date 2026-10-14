@@ -248,21 +248,21 @@ on it for adoption, they can lint without it.
   symlink-aware) and the follow-on e2e-sweep + adversarial-review
   fixes. See `v0.14/README.md`.
 
-- **Proposed, general-linter program.** Typed extraction with
-  provenance, findings with related locations, fail-loud analysis
-  outcomes, `alint test`, an internal relation layer, and later a
-  report-only `constraint` kind, staged in
-  [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 11 with the gap
-  ordering in section 11.8 and the detection gaps in
-  [`rule-coverage-gaps.md`](https://github.com/asamarts/alint/blob/main/docs/design/rule-coverage-gaps.md). Not yet scheduled:
-  its phase targets await the decisions in section 13.
+- **v0.19 to v1.0, general-linter program (adopted 2026-10-14).** Phases
+  0 and 1a in v0.19 (a capability inventory, fail-loud analysis outcomes,
+  redaction, findings with related locations, `--as-of`), the authoring
+  loop in v0.20 (`alint test`, `explain --trace`), the internal relation
+  layer with the `key_parity` pilot and the plugin contract in v0.21, then
+  `version: 2` selectors and constraints, with plugin hosts as a parallel
+  track. Staged in [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 11, decided in
+  [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md), with the detection gaps in
+  [`rule-coverage-gaps.md`](https://github.com/asamarts/alint/blob/main/docs/design/rule-coverage-gaps.md).
 
-- **Future / backlog, WASM plugins.** A `wasm` plugin kind on a
-  `wasmtime` host with a stable WIT interface, a filesystem sandbox, a
-  signed plugin registry, and blessed examples (mock-ratio checker,
-  near-dup detector, debug-statement stripper). Unpinned from a
-  version until the engine work is scheduled; the plugin model is
-  being reconciled with [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+- **Plugins (parallel track).** Format adapters, checkers, and fixers
+  as compiled-in Rust crates (`alint build`), out-of-process plugins in
+  any language over protobuf frames on stdio, and sandboxed WASM
+  components, all on one WIT-defined contract compiled by a separate
+  open-source project. See [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
   section 9.4.
 
 - **v1.0, Stability.** DSL committed, plugin ABI committed,
@@ -1563,14 +1563,45 @@ decisions, and the known limits.
 - New: `markdown_links_resolve`, per-rule `expect_matches:`, and per-file config
   resolution in the LSP.
 
+## v0.19: Fail-loud findings and the capability inventory
+<!-- roadmap-public: blurb="The first phase of the general-linter program: a generated per-kind capability inventory that drives the trust gates, rule-evaluation failures that can no longer pass silently or be baselined, values from secret-bearing files redacted in every report, findings that point at every related location, and an explicit as-of date for time-dependent rules." -->
+
+Phases 0 and 1a of [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) (section 11),
+decided in [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md). Each item graduates to a
+`docs/design/v0.19/` design doc before its code lands.
+
+- **Capability inventory.** A static `KindMeta` per kind (domain,
+  dispatch, selectors, capabilities, formats, fixes), emitted into
+  `facts.json`; the spawn and Git trust lists are derived from it, and
+  `scope_filter` on a kind that ignores it is rejected at load.
+- **Fail-loud analysis.** A rule that cannot evaluate a repository file
+  reports an error-level finding that is never baselinable, whatever the
+  rule's level; manifest parse failures, missing Git, and non-string
+  extraction results become explicit outcomes.
+- **Notes in every format** (SARIF `note` results, summary lines in
+  GitHub, GitLab, and Markdown output).
+- **Redaction.** Values from `.env` and `.properties` files are redacted
+  by default, with an opt-in `sensitive:` marker elsewhere; baseline files
+  never store raw values.
+- **Related locations** on findings in SARIF and the LSP; the JSON report
+  schema is relaxed to accept additive fields one release before they
+  appear there. Existing baseline fingerprints are frozen behind a golden
+  gate.
+- **`--as-of`** (and `ALINT_AS_OF`) for time-dependent rules, defaulting
+  to the HEAD commit time; `git_blame_age` moves onto it.
+- Standalone detection kinds from the gap study as capacity allows
+  (`editorconfig_conforms` after its policy-source ADR, the Markdown
+  structure kinds, the SPDX table).
+
 ## v1.0: Stability
 <!-- roadmap-public: blurb="A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site." -->
 
-- DSL schema committed; semver on `version: 1`. (Whether a `version: 2`
-  surface lands before or after this milestone is decision DEC-9 in
-  [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md).)
-- Plugin ABI committed (see [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
-  section 9.4 for the proposed sequencing).
+- DSL schema committed; semver on both `version: 1` and `version: 2`
+  (`version: 2` ships before this milestone, per decision DEC-9 in
+  [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)).
+- Plugin contract 1.0 committed (the WIT contract and its generated Rust
+  and protobuf bindings; see [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+  section 9.4).
 - `alint-core` public API frozen; breaking changes follow semver-major.
 - Documentation site.
 - **Remove the deprecated `${VAR}` interpolation path** in
@@ -1581,7 +1612,7 @@ decisions, and the known limits.
   successor.
 
 ## Future / backlog
-<!-- roadmap-public: blurb="A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry, plus a language-agnostic duplicate-code detector, all unpinned from a numbered release until the engine work is scheduled." -->
+<!-- roadmap-public: blurb="A language-agnostic duplicate-code detector and the original WASM plugin sketch, now superseded by the plugin track of the general-linter program: compiled-in Rust plugins, out-of-process plugins in any language, and sandboxed WASM components on one typed contract." -->
 
 Scope that is real but deliberately unpinned from a numbered cut, sequenced
 against demand rather than a date.
@@ -1589,12 +1620,14 @@ against demand rather than a date.
 ### WASM plugins
 
 Held the v0.14 slot until the security + correctness hardening pass took it;
-now unversioned until the engine work is scheduled. The sketch below predates
-the 2026-10 audit and the general-linter proposal; where they differ,
-[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 9.4 is the proposed plan of
-record (two plugin roles, no environment-derived values for plugins inherited
-through `extends:`, grants through `trusted_extends:`, no registry before
-validation), pending decision DEC-14 there.
+now scheduled as a parallel track of the general-linter program. **Superseded:**
+the sketch below predates the 2026-10 audit and the general-linter decisions;
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 9.4 is the plan of record
+(DEC-14): three hosts on one WIT contract (compiled-in Rust, out-of-process
+over protobuf on stdio, sandboxed WASM), no environment-derived values for
+plugins inherited through `extends:`, grants through `trusted_extends:`, an
+all-platform `alint.lock`, and no registry before validation. The bullets
+below are kept as the historical sketch.
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT interface. Plugins
   receive their config *post-interpolation* per the v0.11 variable-expansion

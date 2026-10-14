@@ -527,8 +527,9 @@ file`" .-> AlintCliRules
 id, level, vars, facts)`" .-> AlintCliRules
   AlintCliRules -. "`exit code = verdict; stdout/stderr = 
 message -> Violation`" .-> AlintCliCore
-  AlintCliCore -. "`roadmap v0.13: WASM / WIT plugin host 
-(sandboxed, no network by default)`" .-> AlintCliCore
+  AlintCliCore -. "`planned (ADR-0019): one WIT contract on 
+native Rust, process (protobuf over 
+stdio), and sandboxed WASM hosts`" .-> AlintCliCore
 ```
 
 ## Security: path confinement and spawning-kind gating
