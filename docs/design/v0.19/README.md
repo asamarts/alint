@@ -174,8 +174,9 @@ rule-page fixtures, facts) and declares its `KindMeta`.
 ## Parallel tracks during v0.19
 
 - **Plugin contract compiler (P0).** The separate project of
-  [`../plugin-architecture.md`](../plugin-architecture.md) section 6 starts in parallel. Its
-  name and repository are question Q16.
+  [`../plugin-architecture.md`](../plugin-architecture.md) section 6 starts in parallel as
+  `witforge` (`asamarts/witforge`, private until alint's contract `0.x` consumes it; Q16,
+  decided 2026-10-14).
 - **Phase 1b design.** The design documents for `alint test` (DEC-6) and `explain --trace`
   (Q14) can be written during v0.19, for implementation in v0.20.
 

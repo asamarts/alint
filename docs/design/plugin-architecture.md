@@ -230,7 +230,7 @@ host   -> plugin Shutdown
 
 ## 6. The contract compiler
 
-### 6.1 Why a separate project
+### 6.1 Why a separate project (`witforge`)
 
 No existing tool generates protobuf or plain Rust types and traits from WIT. The ecosystem's
 converters go the other way (a young protobuf-to-WIT generator; a draft mapping note), and
@@ -481,7 +481,7 @@ These belong to the slices above and are decided in their design documents, one 
 | ID | Question | Slice | Recommendation |
 |---|---|---|---|
 | Q10 | Exact shape of the adapter, analyzer, and fixer worlds in contract `0.x` | P1 | separate worlds; inputs pushed; no host callbacks in `0.x` |
-| Q16 | Name and repository of the contract compiler, and its first-release scope | P0 | a neutral name not tied to alint; MVP emits Rust and protobuf with the lockfile |
+| Q16 | Name and repository of the contract compiler, and its first-release scope | P0 | **Decided 2026-10-14:** `witforge`, at `asamarts/witforge`, private until alint's contract `0.x` consumes it, then public with 0.1; MVP scope as section 6.2. The name was free on crates.io, npm, and PyPI with no GitHub collision on that date |
 | Q17 | Plugin manifest, `alint build` manifest, and kind namespacing in `.alint.yml` | P2 | `<plugin>/<kind>` names; YAML `plugins:` in config; TOML build manifest |
 | PA-1 | Host callbacks (embedded-region parsing through another adapter, as dprint offers) | after P4 | a versioned feature flag, not in `0.x` |
 | PA-2 | Whether a plugin may contribute DSL fix operations, or only `Fixer` objects attached to its own kinds | P2 | only its own kinds' fixers in `0.x` |
