@@ -6,6 +6,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **rustls updated to 0.23.46** (RUSTSEC-2026-0346, -0347, -0348, -0349). alint uses rustls,
+  through `ureq`, only to fetch remote `extends:` rulesets over HTTPS; the release blocks on
+  RustSec advisories, so the patch picks up the fixed version.
+
 ### Changed
 
 - **Some nested configurations that loaded before are now load errors**, because they never
