@@ -25,8 +25,11 @@ W1:
 4. under `--changed`, `no_case_conflicts` and `max_files_per_directory` miss violations caused by
    a change (they now evaluate on the full index).
 
-Review of the patch found a fifth: a nested rule using `extends_template:` took its kind and
-selectors from a root template without confinement; confinement now runs on the expanded rule.
+Review of the patch found ten more instances of the same classes, fixed in the same patch (see
+[`kind-meta.md`](kind-meta.md) section 1 and the v0.18.3 changelog): nested confinement now runs
+after template expansion and inside `require:` blocks and covers kind-specific path fields;
+`--changed` judges changed files against the whole repository; `json_schema_passes` re-validates
+on a schema-only change; and `file_exists`'s literal stat honours `git_tracked_only`.
 
 ## Work items
 
