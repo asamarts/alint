@@ -248,11 +248,22 @@ on it for adoption, they can lint without it.
   symlink-aware) and the follow-on e2e-sweep + adversarial-review
   fixes. See `v0.14/README.md`.
 
+- **Proposed, general-linter program.** Typed extraction with
+  provenance, findings with related locations, fail-loud analysis
+  outcomes, `alint test`, an internal relation layer, and later a
+  report-only `constraint` kind, staged in
+  [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 11 with the gap
+  ordering in section 11.8 and the detection gaps in
+  [`rule-coverage-gaps.md`](https://github.com/asamarts/alint/blob/main/docs/design/rule-coverage-gaps.md). Not yet scheduled:
+  its phase targets await the decisions in section 13.
+
 - **Future / backlog, WASM plugins.** A `wasm` plugin kind on a
   `wasmtime` host with a stable WIT interface, a filesystem sandbox, a
   signed plugin registry, and blessed examples (mock-ratio checker,
   near-dup detector, debug-statement stripper). Unpinned from a
-  version until the engine work is scheduled.
+  version until the engine work is scheduled; the plugin model is
+  being reconciled with [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+  section 9.4.
 
 - **v1.0, Stability.** DSL committed, plugin ABI committed,
   `alint-core` public API frozen, docs site committed.
@@ -270,7 +281,9 @@ so post-launch users can vote with their adoption.
 ## Positioning
 
 alint's scope is **the filesystem shape and contents of a
-repository**, not the semantics of the code inside it. Sweet
+repository**, not the semantics of the code inside it. Precisely, it
+is a general linter for finite, inspectable project state (see
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 1). Sweet
 spot: workspace-tier monorepos (Cargo, pnpm, yarn, Lerna) and
 OSS-style polyglot monorepos. Honest limits: dependency-graph
 problems (`cargo deny`, `bazel mod`, `buildifier`) and
@@ -308,7 +321,7 @@ The smallest scope that is usefully adoptable.
 <!-- roadmap-public: blurb="Cross-file primitives like pair and for_each_dir, the facts system, the when expression language, extends with SRI, and the fix subcommand." -->
 
 - Cross-file primitives: ✅ `pair`, ✅ `for_each_dir`, ✅ `for_each_file`, ✅ `every_matching_has`, ✅ `dir_contains`, ✅ `dir_only_contains`, ✅ `unique_by`. **(complete)**
-- Facts system: ✅ `any_file_exists`, ✅ `all_files_exist`, ✅ `count_files`, ✅ `file_content_matches`, ✅ `git_branch`, ✅ `custom` (security-gated; only allowed in the top-level config, never in `extends:`); ⏳ `detect: linguist`, ⏳ `detect: askalono`, both likely v0.5 alongside bundled rulesets.
+- Facts system: ✅ `any_file_exists`, ✅ `all_files_exist`, ✅ `count_files`, ✅ `file_content_matches`, ✅ `git_branch`, ✅ `custom` (security-gated; only allowed in the top-level config, never in `extends:`); `detect: linguist` and `detect: askalono` never shipped (an offline license heuristic is now gap F1 in [`rule-coverage-gaps.md`](https://github.com/asamarts/alint/blob/main/docs/design/rule-coverage-gaps.md)).
 - ✅ `when` expression language, bounded grammar with `and`/`or`/`not`, comparison ops (`==` `!=` `<` `<=` `>` `>=`), `in` (list/substring), `matches` (regex), literal types (bool/int/string/list/null), and `facts.X` / `vars.X` identifiers. Parsed at rule-build time; gates rules in Engine + nested rules in `for_each_*`.
 - ✅ `extends`: local files (recursive resolution, cycle detection, child-overrides-parent merge) + HTTPS URLs with SHA-256 SRI and caching under the platform user cache dir (`~/.cache/alint/rulesets/` on Linux). Nested remote extends deferred to v0.3, a relative path inside a fetched config has no principled base.
 - ✅ `fix` subcommand with `file_create`, `file_remove`, `file_prepend`, `file_append`, `file_rename` (the latter wired to `filename_case`, target name derived from the rule's `case:` setting; extension preserved).
@@ -1553,8 +1566,11 @@ decisions, and the known limits.
 ## v1.0: Stability
 <!-- roadmap-public: blurb="A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site." -->
 
-- DSL schema committed; semver on `version: 1`.
-- Plugin ABI committed.
+- DSL schema committed; semver on `version: 1`. (Whether a `version: 2`
+  surface lands before or after this milestone is decision DEC-9 in
+  [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md).)
+- Plugin ABI committed (see [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+  section 9.4 for the proposed sequencing).
 - `alint-core` public API frozen; breaking changes follow semver-major.
 - Documentation site.
 - **Remove the deprecated `${VAR}` interpolation path** in
@@ -1573,7 +1589,12 @@ against demand rather than a date.
 ### WASM plugins
 
 Held the v0.14 slot until the security + correctness hardening pass took it;
-now unversioned until the engine work is scheduled.
+now unversioned until the engine work is scheduled. The sketch below predates
+the 2026-10 audit and the general-linter proposal; where they differ,
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 9.4 is the proposed plan of
+record (two plugin roles, no environment-derived values for plugins inherited
+through `extends:`, grants through `trusted_extends:`, no registry before
+validation), pending decision DEC-14 there.
 
 - `wasm` plugin kind with a `wasmtime` host, stable WIT interface. Plugins
   receive their config *post-interpolation* per the v0.11 variable-expansion

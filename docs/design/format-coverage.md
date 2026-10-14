@@ -1,7 +1,7 @@
 # Design doc: config-format coverage parity
 
 Status: Implemented (format-coverage arc, PRs #213-#223; all 8 formats and the `structured_family_is_symmetric` parity gate shipped). Sections 1-4 are the original design record; section 5 tracks what actually shipped. The 4-format framing in sections 1-3 is the pre-arc starting point, not the current state (now JSON / YAML / TOML / XML / dotenv / properties / INI / HCL).
-Decisions: proposes ADR-0016 (`Format` is the single source of truth for config-format coverage; format-specific surfaces must cover every `Format` variant, enforced by a parity gate).
+Decisions: proposed an ADR (never written; the number ADR-0016 later went to the PyPI channel) recording that `Format` is the single source of truth for config-format coverage; format-specific surfaces must cover every `Format` variant, enforced by a parity gate.
 Demand evidence: [issue #212](https://github.com/asamarts/alint/issues/212). Surfaced by the `yaml_path_absent` kind shipping without its json/toml/xml siblings (fixed in #211 by the `structured_family_is_symmetric` gate); this doc generalizes that fix to the rest of the codebase.
 
 ## 1. Problem
@@ -73,7 +73,7 @@ No new option *keys* are introduced beyond the `xml:` extract mode and the `xml`
 
 `extract.rs`'s `structured(fmt, query, text)` already does `fmt.parse(text)` then runs the JSONPath and keeps string-valued matches. Adding `Extract::Xml(q) => structured(Format::Xml, q, text)` reuses that path verbatim. XML leaves are always strings under the xmltodict mapping, so an XML extract yields string values (a `.csproj` `<Version>1.2.3</Version>` extracts as `"1.2.3"`), exactly what `cross_file`/`file_graph`/`registry_paths_resolve` consume. Dispatch class is unchanged (cross-file, pure-parse, no spawn).
 
-### 3.2 The parity mechanism (the architectural core, ADR-0016)
+### 3.2 The parity mechanism (the architectural core)
 
 The decision this doc asks to record: **`Format` is the single source of truth for the config-format axis, and every format-specific surface must cover every `Format` variant.**
 
@@ -114,7 +114,7 @@ Adding XML variant-by-variant closes today's gap but leaves the drift risk. The 
 - Fold `TargetFormat` into `Format` + an alias map (its only non-redundant job is the `yml` spelling). **As built (Phase 1c): kept `TargetFormat`, deliberately** (decision recorded 2026-08-31). `Format` derives no `Deserialize`/`JsonSchema` today; folding `TargetFormat` in would add both to the core enum, and because schemars does not emit serde `alias`es, `yml` would drop out of the published config-schema enum unless re-added via field-level schema attributes that just re-express `TargetFormat`. The parity gate (`target_format_covers_every_format`) already makes `TargetFormat` drift-safe, so the fold is a lateral move; `TargetFormat` stays as the clean expression of "`Format`'s labels plus the `yml` alias".
 - Leave `did_you_mean` hand-maintained; the gate covers it.
 
-Constitution note: the constitution requires every registered kind to have firing and silent scenarios (constitution section 8) and the structured family to stay symmetric; ADR-0016 extends that invariant to the extract and schema-target surfaces.
+Constitution note: the constitution requires every registered kind to have firing and silent scenarios (constitution section 8) and the structured family to stay symmetric; the `Format` parity gate extends that invariant to the extract and schema-target surfaces.
 
 ### 5.3 Phase 1.5: dotenv (full wiring)
 

@@ -1,11 +1,25 @@
 # What it means for alint to be a general linter
 
-Status: Draft (analysis and architectural proposal).
-Decisions: none yet. Any public DSL version, new execution model, or plugin ABI must graduate
-to its own design document and ADR before implementation.
-Demand evidence: the 100-repository coverage study, the shipped 95-kind catalogue, the
-recurring abstractions in `scope_filter`, `Extract`, `cross_file`, `for_each_*`, facts, and
-fixers, and the companion [`rule-coverage-gaps.md`](rule-coverage-gaps.md) analysis.
+Status: Draft (analysis and architectural proposal). Revised 2026-10-14 after an adversarial
+review against `main` at v0.18.2; section 15 records what the review changed.
+Decisions: none accepted yet. Section 13 lists the open decisions with recommendations, and
+section 13.3 lists the existing ADRs and constitution invariants this program would amend or
+supersede. ADRs are immutable (constitution 13), so each amendment is a new superseding ADR.
+Any public DSL version, new execution model, or plugin ABI must graduate to its own design
+document and ADR before implementation.
+Demand evidence: the 111-repository v0.12 coverage study and its architecture synthesis
+([`v0.12/architecture_synthesis.md`](v0.12/architecture_synthesis.md)), the shipped catalogue
+(counts in the generated [`facts.json`](../../facts.json)), the recurring abstractions in
+`scope_filter`, `Extract`, `cross_file`, `for_each_*`, facts, and fixers, and the companion
+[`rule-coverage-gaps.md`](rule-coverage-gaps.md) analysis. Section 12.3 notes where that
+evidence is thin.
+
+> **How this document is used.** This is an arc document, like [`auto-fix.md`](auto-fix.md):
+> it sets the direction and the invariants for a multi-release program. It does not follow
+> the seven-section [`TEMPLATE.md`](TEMPLATE.md) itself. Each phase in section 11 graduates to
+> its own `docs/design/vX.Y/<name>.md` in that template (including the mandatory
+> false-positive section) before its code is written, and the gap-to-substrate matrix in
+> section 11.8 is the canonical ordering of the work across both documents.
 
 > This document defines the product claim **"A general linter"** precisely, audits how close
 > the current architecture is to that claim, and proposes a path to make alint more general
@@ -28,6 +42,7 @@ fixers, and the companion [`rule-coverage-gaps.md`](rule-coverage-gaps.md) analy
 - [12. Validation and success criteria](#12-validation-and-success-criteria)
 - [13. Open decisions](#13-open-decisions)
 - [14. Research lessons and references](#14-research-lessons-and-references)
+- [15. Review log](#15-review-log)
 
 ## 1. Executive conclusion
 
@@ -54,9 +69,10 @@ That definition is broader than "repository file convention checker" and narrowe
   a typed, sandboxed plugin interface later. Their results can participate in the same
   finding model without pretending that their analysis is native or hermetic.
 
-alint is already broad: 95 canonical kinds across 13 families, eight structured formats,
-cross-file relations, Git-aware rules, baselines, fixes, nested configs, remote rulesets,
-eight report formats, and LSP support. Its main limitation is not a shortage of kinds. It is
+alint is already broad. As of v0.18.2 it has 95 canonical kinds across 13 families, eight
+structured formats, cross-file relations, Git-aware rules, baselines, 26 fix operations,
+nested configs, remote rulesets, eight report formats, and LSP support (the generated
+`facts.json` is the authority for these counts; this document does not track them). Its main limitation is not a shortage of kinds. It is
 that most behavior is packaged as a new bespoke `kind`, while the reusable operations under
 those kinds are only partially exposed.
 
@@ -158,13 +174,17 @@ Several current designs are reusable foundations, not isolated features:
 - The rule registry and common `RuleSpec` support a shared lifecycle across very different
   evaluators.
 - The native fix algebra is typed, tiered, previewable, composition-aware, and checked to a
-  fixpoint. Native path edits are root-confined and content rewrites have a configurable size cap;
-  spawning operations are explicitly privileged because their side effects cannot be confined by
-  that algebra.
+  fixpoint (bounded at ten passes; a fix that has not settled is reported, not looped). Native
+  path edits are root-confined by default (only a top-level, never-inherited
+  `allow_out_of_root` grant lifts that), content rewrites have a configurable size cap, and
+  spawning operations are explicitly privileged because their side effects cannot be confined
+  by that algebra.
 - Baselines turn findings into stable identities and support incremental adoption without
   making a rule stop protecting new code.
-- `extends`, templates, nested configs, bundled rulesets, SRI, and trust gates make policy
-  reusable across teams while distinguishing trusted top-level choices from inherited data.
+- `extends`, templates, nested configs, bundled rulesets, mandatory SRI pinning for remote
+  rulesets, and trust gates make policy reusable across teams while distinguishing trusted
+  top-level choices from inherited data. Since v0.18.0 the gates judge the rule that actually
+  runs, and untrusted remote rulesets lose `ignore:` and environment access.
 
 The rule-coverage study correctly identifies the strongest existing abstraction: much of
 repository linting is schema-on-read over a finite database, followed by familiar integrity
@@ -185,8 +205,10 @@ repository walk
     -> optional kind-compatible Fixer
 ```
 
-The engine shares the walk and coalesces reads for `PerFileRule`, but it cannot generally
-see or optimize the middle stages because the `Rule` trait exposes only `evaluate`. Similar
+The engine shares the walk and coalesces reads for `PerFileRule`. The `Rule` trait exposes
+scheduling metadata (path scope, full-index need, Git-tracked mode, blame need, fixer, scope
+assertions), but extraction, normalization, and assertion are opaque inside
+`evaluate` / `evaluate_file`, so the engine cannot see, share, or optimize those stages. Similar
 operations consequently have multiple public spellings and multiple implementations.
 
 ### 3.3 Concrete signs that an internal algebra already exists
@@ -194,8 +216,9 @@ operations consequently have multiple public spellings and multiple implementati
 The recurring concepts are visible in the source:
 
 - **Selection** appears as `paths`, global `ignore`, `respect_gitignore`, kind-specific
-  `git_tracked_only`, `scope_filter`, `--changed`, `changed_since`, `primary`, `select`, and
-  the selector fields of the `for_each_*` kinds.
+  `git_tracked_only`, `scope_filter`, `--changed`, `changed_since`, `primary`, `select`, the
+  selector fields of the `for_each_*` kinds, and the change selectors of the Git kinds
+  (`since:`, `if_changed` / `then_changed`, `when_changed`).
 - **Extraction** appears in facts, the shared `ExtractSpec`, structured-query kinds,
   Markdown scanners, import scanners, `for_each_match`, manifest-derived scope, and Git
   parsers.
@@ -211,6 +234,29 @@ The recurring concepts are visible in the source:
 The repetition is not evidence that these features were mistakes. Each was a practical,
 tested step toward the latent model. It is evidence that the next step should consolidate
 the model before adding many more surface variations.
+
+### 3.4 Conclusions already reached in v0.12
+
+This proposal continues the v0.12 architecture synthesis rather than starting fresh, and it
+must stay consistent with what that work decided:
+
+- **"Compose, don't accrete"** ([`v0.12/architecture_synthesis.md`](v0.12/architecture_synthesis.md)):
+  cross-file capability is a composition of five shared axes (extract, normalize, relation,
+  quantifier/scope, graph). This document's stage model is the same idea taken one level
+  down, into the engine.
+- **"Relation: essentially complete. Don't add."**
+  ([`v0.12/post_build_coverage_analysis.md`](v0.12/post_build_coverage_analysis.md) section 6):
+  that verdict was about the comparison operators over extracted *value lists*, and it still
+  holds. What this proposal adds is not new comparison operators. It is the parts the v0.12
+  model cannot express: enumerating object keys, grouping rows, counting, and reusing one
+  extraction across rules.
+- **The `file_set` source was dropped for lack of demand**
+  ([`v0.12/cross_file.md`](v0.12/cross_file.md)): not one of the 111 repositories asked for
+  glob-against-glob path-set parity. Named selectors (section 7.2) must therefore be justified
+  by reuse and consistency, not by that use case.
+- **A named `path_sets:` block was deferred, not rejected**
+  ([ADR-0010](../adr/0010-manifest-derived-rule-scope.md), considered options): it is the
+  direct ancestor of named selectors, and question Q1 in section 13.2 decides the two together.
 
 ## 4. Where the current model stops generalizing
 
@@ -236,9 +282,14 @@ shared internal algebra plus a carefully bounded public generic surface, not eit
 
 `paths` is universal-looking but not universal in semantics. Some kinds enumerate files,
 some select directories, some use `source`/`targets`/`primary`, and some inspect the full
-index. `scope_filter` applies to per-file rules and is deliberately rejected by cross-file
-rules. Git-tracked selection is kind-specific. CLI changed-mode and rule-level
-`changed_since` overlap but have different purposes.
+index. `scope_filter` has three behaviours, not two: it applies to per-file rules; it is
+rejected at build time by the cross-file and existence kinds and by fixed-target kinds such
+as `no_submodules`; and it is **accepted and silently ignored** by kinds that never read it
+(the `git_commit_*` family, `git_no_denied_paths`, `generated_file_fresh`,
+`command_idempotent`). That last behaviour is a live silent drop (section 4.12). Git-tracked
+selection is kind-specific by decision: [ADR-0008](../adr/0008-git-tracked-only-is-a-kind-option.md)
+rejected a universal option because kinds that do not honour it fail quietly. CLI changed-mode
+and rule-level `changed_since` overlap but have different purposes.
 
 This creates three problems:
 
@@ -246,7 +297,10 @@ This creates three problems:
 2. The same logical set cannot be named and reused by several rules.
 3. Cross-file rules need the full repository **as evaluation context**, but that should not
    prevent them from applying an explicit selector to the rows they compare. Full-index
-   correctness and rule target selection are different concepts.
+   correctness and rule target selection are different concepts. Today they are fused by
+   constitution invariant 2 and [ADR-0003](../adr/0003-rule-engine-dispatch-and-determinism.md):
+   a full-index rule must have no path scope, which is what keeps `--changed` from skipping
+   it. Separating the two therefore amends that invariant (section 9.1 and question Q2).
 
 ### 4.3 Extracted data is string-only, lossy, and private
 
@@ -255,10 +309,19 @@ The shared extractor is valuable but intentionally narrow:
 - structured extraction returns only string-valued JSONPath matches;
 - non-string nodes are dropped;
 - computed-looking values are often skipped by consumers;
-- duplicate keys and source spans can disappear during parse-to-`serde_json::Value`;
+- duplicate keys and source spans can disappear during parse-to-`serde_json::Value`: JSON,
+  YAML, dotenv, and properties keep the last duplicate, TOML and HCL reject the file, and XML
+  and INI collect duplicates into an array that the string-only extractor then drops entirely.
+  The spanned parsers exist (the v0.17 fix bridge uses `jsonc-parser`, `toml_edit`, and
+  hand-written YAML and INI locators; `adotenv` keeps every `.env` entry with spans since
+  v0.18.2), but extraction flattens them away;
 - path, key, and entry enumeration need custom code;
 - each consumer owns its extracted set rather than publishing a reusable relation;
-- cardinality and skip behavior vary by caller.
+- cardinality and skip behavior vary by caller: `cross_file` and `registry_paths_resolve`
+  report computed-looking values as notes, while `file_graph` and manifest-derived scope drop
+  them silently, and a manifest that fails to parse yields an empty member set (an include
+  rule warns only through `expect_nonempty`; an exclude rule silently falls back to full
+  scope).
 
 A generic constraint system built directly on this shape would amplify silent false
 negatives. Provenance, types, explicit cardinality, and explicit error/skip policy are
@@ -266,7 +329,8 @@ prerequisites, not later polish.
 
 ### 4.4 Facts and conditions are not a general data model
 
-Facts are scalar `Bool`, `Int`, or `String` values evaluated once. They are appropriate for
+Facts are scalar `Bool`, `Int`, or `String` values, evaluated once per `check` run (and again
+on each `fix` pass). They are appropriate for
 gating a rule but cannot represent a set of packages, dependency rows, path-to-owner
 mappings, or graph edges. `when` consequently answers "should this rule run?" but not "for
 which bound records does this assertion fail?"
@@ -309,8 +373,11 @@ This limits:
 ### 4.7 Templates are textual rather than typed
 
 Templates remove repetition, but instance variables are effectively string substitution:
-numbers and booleans are converted to strings, missing placeholders remain literal, chained
-templates are forbidden, and templates declare no parameter schema. This is safe and simple
+numbers and booleans are converted to strings, list, map, and null values are dropped without
+an error (so their placeholders stay literal), missing placeholders remain literal, chained
+templates are forbidden, and templates declare no parameter schema. Since v0.18.0,
+`{{vars.*}}` is also forbidden in `kind:` and in fix `applicability:`, because a
+trust-relevant field must be literal for the gates to judge it. This is safe and simple
 for path/message variation, but weak as the composition layer for reusable generalized
 policies.
 
@@ -347,13 +414,15 @@ current walker.
 Most built-in checks are pure over the repository snapshot, but the complete product already
 has several other dependency classes:
 
-- `when: env.*` reads the host environment;
+- `when: env.*` and config-wide `{{env.X}}` interpolation read the host environment (untrusted
+  remote rulesets have been refused both since v0.18.0);
 - `custom` facts, `command`, `generated_file_fresh`, `command_idempotent`, and spawning fix ops
   launch processes;
 - Git-aware rules inspect repository metadata beyond walked files;
+- `git_commit_gpg_signed` depends on the host's GPG keyring through `git verify-commit`;
 - `git_blame_age` currently compares commit timestamps with `SystemTime::now()`;
-- HTTPS `extends` resolves remote content before evaluation, albeit with caching, limits, and
-  optional SRI.
+- HTTPS `extends` resolves remote content before evaluation, with mandatory SRI pinning
+  (`#sha256-...`), an SRI-keyed cache, fetch timeouts, and a body-size cap.
 
 The trust gates cover the most dangerous operations, but the evaluation plan and report do
 not describe the resulting reproducibility class. In particular, the implicit wall-clock read
@@ -362,14 +431,19 @@ accurate description of every current kind.
 
 Failure is also not typed uniformly at these boundaries. A failed, timed-out, non-zero, or
 non-UTF-8 `custom` fact becomes an empty string; an unavailable or detached `git_branch` does the
-same. That behavior is compatible with v1's scalar gate model, but a generalized plan must not
-confuse “provider failed,” “value is absent,” and “provider successfully returned an empty
-string.”
+same, and the Git-aware rule kinds (`pair_changed_together`, `changeset_requires_path`, the
+commit-range kinds) quietly do nothing when `git` or the repository is unavailable. That
+behavior is compatible with v1's scalar gate model, but a generalized plan must not confuse
+“provider failed,” “value is absent,” and “provider successfully returned an empty string.”
 
 Each plan node should therefore declare one of: hermetic snapshot input, local Git input,
 declared host input, or privileged effect. Environment variables must be enumerated in the
-plan; time-sensitive policy should receive an explicit `as_of` value (with a documented CLI/CI
-source); process and future network nodes remain top-level-capability-gated. Caches, policy
+plan; time-sensitive policy should receive an explicit `--as-of` value (with a documented
+CLI/CI source, decision DEC-11); process and future network nodes remain
+top-level-capability-gated. Constitution invariant 1 (byte-identical output for the same input)
+is already broken by `git_blame_age`'s wall-clock read and the GPG keyring dependency, so this
+is a correction to make, not only a target: either the invariant gains a declared-host-input
+exception or those kinds take explicit inputs, and either way through a superseding ADR. Caches, policy
 tests, snapshot compatibility, and `explain --trace` can then use the real dependency set
 instead of assuming all rules are equivalent.
 
@@ -386,6 +460,37 @@ overlaps, and applicability before its first write. It must then report per-edit
 remain idempotently resumable if application stops partway through. It should not promise
 cross-file atomicity unless a future implementation can actually provide rollback with correct
 filesystem and process semantics.
+
+This is not a new idea: [`auto-fix.md`](auto-fix.md) section 5.2.4 and
+[ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md) designed all-or-nothing
+application through verification, and it was explicitly deferred during v0.17 in favour of per-file atomic writes plus convergent
+re-runs (see [`v0.17/auto-fix-completion-plan.md`](v0.17/auto-fix-completion-plan.md)). The generalized edit
+plan should pick up that deferred design, not restart it, and only in the phase that first
+enables generic multi-resource fixes (section 11).
+
+### 4.12 Current fail-open and leak sites
+
+The review that revised this document checked the "fail-loudly" envelope of section 2.3 against
+the v0.18.2 code. These sites violate it today. They are concrete Phase 1a work (section 11.3),
+and several can be fixed on their own before any IR exists:
+
+| Site | Current behaviour | Consequence |
+|---|---|---|
+| Rule evaluation error | an `Err` from `evaluate` / `evaluate_file` becomes `Violation::new("rule error: ...")` at the rule's own `level`, with no path | a `level: warning` rule that cannot evaluate exits 0 without `--fail-on-warning`; the pathless violation fingerprints on its message, so `alint baseline` can grandfather a broken rule permanently |
+| Notes in CI formats | notes reach `json`, the LSP, and `human` (a count on stderr; the list only with `--show-notes`); `sarif`, `github`, `gitlab`, `junit`, `markdown`, and `agent` drop them | anything routed to "note" (computed values skipped, incomplete analysis) is invisible in GitHub code scanning and PR comments |
+| Extracted values in output | structured-query messages render the actual value ("expected X, got Y"), and the same value enters the `baseline_key` and the advisory message stored in the baseline file | `dotenv_path_equals` on `.env` can echo a secret into terminal, JSON, SARIF uploads, PR comments, and a committed `.alint-baseline.json` |
+| `scope_filter` on kinds that ignore it | accepted and silently ignored (section 4.2); `include_manifest_paths` on such a rule passes `validate-config` and fails only at `check` time | a user believes a Git or spawning rule is scoped when it is not |
+| Manifest-derived scope parse failure | empty member set; include rules warn only via `expect_nonempty`, exclude rules silently fall back to full scope | silent scope change on a malformed manifest |
+| Git unavailable | Git-aware rule kinds return no findings | a CI image without `git`, or a shallow export, passes every change-set rule |
+| Non-string extraction results | dropped by the string-only extractor | a typed value (number, boolean, array) at a queried path cannot fail a `cross_file` relation |
+
+Two related facts belong next to these. JSON Schema `pattern` keywords in `json_schema_passes`
+run on `fancy-regex` (pulled in by `jsonschema`), so they support backreferences and
+lookaround, bounded by fancy-regex's default backtrack limit of 1,000,000 steps; hitting the
+limit surfaces as an ordinary schema-validation finding, indistinguishable from a real schema
+failure. And the
+rule-error row interacts with exit codes: today 0 is pass, 1 is violations, 2 is config or
+usage error, 3 is internal error. Decision DEC-2 chooses how incomplete analysis maps onto them.
 
 ## 5. Linting and lint-adjacent uses not fully covered
 
@@ -423,7 +528,10 @@ unbounded recursive embedding, and executing notebook cells remain out of scope.
 
 ### 5.3 Change-set and transition policy
 
-Current state and changed-path selection do not cover all transition assertions:
+Path-level co-change already has native kernels: `pair_changed_together` (if X changed, Y must
+change) and `changeset_requires_path` (the diff must add a matching file) cover "the changelog
+must change" and "a registry and its members change together" at the level of paths. What they
+do not cover is content-level and rename-aware transition assertions:
 
 - a public declaration changed, so a changelog or migration file must change;
 - an exception set may shrink but not grow without an approval marker;
@@ -452,7 +560,9 @@ way to assert:
 
 Counts and distinct counts over finite relations are safe additions. Trend dashboards and
 time-series storage are not linter responsibilities; a comparison must receive both finite
-snapshots explicitly.
+snapshots explicitly. Threshold ratchets against a baseline are a recorded v1 limitation of
+baseline mode ([`baseline.md`](baseline.md) section 7, its question 8; ADR-0006), so "no increase relative
+to a baseline" reopens that decision and needs its own superseding design.
 
 ### 5.5 Exception and waiver hygiene
 
@@ -465,11 +575,23 @@ also have reviewed allowlists and per-policy exceptions that should be:
 - optionally time-limited against an explicit `--as-of` input, never an implicit wall clock;
 - visible in reports rather than silently filtered from evaluation.
 
-This should **not** be a generic `suppress:` escape hatch in inherited config. ADR-0006
-correctly rejects that trust model. The safer abstraction is an explicit exception relation
-owned by the top-level policy, joined against would-be findings, with unmatched exception
-rows themselves producing findings. Existing rule-specific allowlists can migrate to this
-model internally.
+This should **not** be a generic `suppress:` escape hatch in inherited config. Two separate
+existing rules apply. [ADR-0006](../adr/0006-baseline-suppression.md) rejected config-embedded
+suppressions even in top-level config, because they mix hand-edited policy with a
+machine-regenerated debt snapshot and tempt per-line entries that drift. Separately, ADR-0006
+makes the baseline a trusted top-level input that `extends:` and nested configs can never
+supply. The safer abstraction is an explicit exception relation owned by the top-level policy,
+joined against would-be findings, with unmatched exception rows themselves producing findings.
+That stale check is the answer to ADR-0006's drift objection, but it is still a reversal of a
+recorded decision and needs a superseding ADR (question Q3). Existing rule-specific allowlists
+can migrate to this model internally.
+
+Two further constraints apply. ADR-0006 makes stale baseline entries warn by default and fail
+only under `--strict-baseline`; the exception model must choose its own default deliberately
+rather than inherit "stale is a finding" by accident. And "owned by the top-level policy" does
+not stop a pull request from adding its own exception to an in-repository file. Until change
+relations exist (section 5.3), the mitigation is ownership (CODEOWNERS on the exception file) or
+keeping exceptions inside the top-level config file.
 
 ### 5.6 Policy conformance and policy-as-source-of-truth
 
@@ -482,6 +604,14 @@ This is different from arbitrary configuration execution. Each supported policy 
 needs documented semantics, provenance, conflict handling, and a fail-loudly mode. The
 `editorconfig_conforms` proposal in the gap study is the flagship case.
 
+It also crosses a recorded boundary. [ADR-0010](../adr/0010-manifest-derived-rule-scope.md)
+states that "manifest VALUES may gate WHICH files a rule sees, never WHAT the rule decides
+about a file". An `.editorconfig` value such as `indent_size = 4` decides exactly that. The
+distinction worth making is between a *build manifest* read to infer intent (ADR-0010's
+subject) and a *policy-source file* whose documented purpose is to declare the policy being
+checked. Decision DEC-12 chooses whether policy-source files get their own ADR or
+`editorconfig_conforms` is restricted to parametrizing existing kinds' options.
+
 ### 5.7 Syntax-aware but language-light linting
 
 Regex remains the right default for text. Some useful checks need syntax structure but not
@@ -492,6 +622,16 @@ Tree-sitter-style query adapters or a syntax-aware WASM plugin can emit captures
 alint should not bundle a growing grammar zoo in the core binary. Grammar identity, version,
 hash, resource limits, parse-error handling, and query semantics must be explicit. Semantic
 AST/type/dataflow analysis remains delegated to language tools.
+
+The documents disagreed on this line before the 2026-10-14 revision: the README says alint is
+"not a code or AST linter", the gap study marked anything needing an AST as out of scope, and
+this section proposed syntax adapters. The consistent position, pending decision DEC-10, is:
+**the core parses data and document formats (the eight config formats, CommonMark through
+`pulldown-cmark`, and future tabular or front-matter adapters) but never programming-language
+syntax; programming-language syntax capture enters only through an explicit adapter at the
+plugin boundary, and never type, control-flow, or dataflow analysis.** Under that line,
+Markdown structure (headings, list nesting, image alt text) is in scope today, because the
+shipped CommonMark parser already produces it.
 
 ### 5.8 Policy authoring, testing, and debugging
 
@@ -596,6 +736,28 @@ but is not semantic unless a constraint declares that order matters. Missing, ex
 and an extraction error are distinct states; none may be collapsed into another by a convenient
 coercion.
 
+Three details must be fixed before any of this is public:
+
+- **Numbers keep their source lexeme.** The list above has integers but no decimals, and the
+  formats disagree: YAML reads `version: 1.10` as the float 1.1, while TOML and JSON have
+  their own number grammars. A `number` value therefore carries its original lexeme, and
+  comparison uses the lexeme unless the policy declares a numeric transform. Otherwise the
+  model would commit the silent coercion section 4.3 warns about.
+- **Paths are compared byte-exactly after normalization.** Path values in relations are
+  forward-slash, root-relative, with `./`, `..`, and trailing slashes resolved the way
+  manifest-derived scope already resolves them. Case folding is opt-in per join, never
+  dependent on the host operating system. A symlink is its own resource type and is never
+  followed for relation membership. The cross-platform test class (case-insensitive file
+  systems, Windows separators) applies to every join.
+- **Canonical order is defined, not implied.** Rows, related locations, and groups sort by
+  (normalized path bytes, byte offset, structural pointer, label). Every truncation ("top N",
+  "and N more") cuts after that sort, so it is deterministic.
+
+Provenance is also a memory question at a million files. The default should be eager only for
+(resource id, structural pointer); byte and line ranges are resolved lazily, for failing rows
+only, through the span resolvers the v0.17 fix bridge already has for every span-capable
+format (`structured_fix::resolve_value_span`). Section 9.6 sets the budget this must meet.
+
 ### 6.3 Cardinality and absence are types of outcome
 
 Current consumers differ on whether missing files, no matches, non-string values, parse
@@ -619,6 +781,16 @@ And every fallible stage should have a small, common policy vocabulary:
 
 There must be no default where a parse failure or type mismatch becomes an empty relation and
 therefore a passing universal assertion.
+
+**Current behaviour and migration.** Today none of these outcomes exists as a type. A rule that
+cannot evaluate emits an ordinary violation at its own severity (section 4.12), and v1 exit codes
+are 0 (pass), 1 (violations), 2 (config or usage error), and 3 (internal error). Introducing the
+vocabulary above therefore changes observable pass/fail behaviour, which is why it ships first,
+in Phase 1a, as a deliberate and announced minor-version change (decision DEC-2), before anything
+builds on it. The rule for section 12.1's stability criterion is: pass/fail stays stable except
+where v1 produced a false pass. Two constraints follow from current mechanics: an analysis
+failure must never be baselinable (today a pathless "rule error" can be grandfathered), and its
+failing effect must not depend on the rule's `level`.
 
 ### 6.4 Constraints, not general code
 
@@ -674,8 +846,19 @@ The public syntax should follow these rules:
 7. Evaluation cost can be estimated from the plan and bounded.
 8. Every generic finding has deterministic evidence and a stable identity.
 9. Remote rulesets cannot acquire capabilities by indirection through templates, relations,
-   adapters, or fixes.
+   adapters, or fixes. Today trust is enforced by per-rule markers that survive merging
+   (provenance and environment markers in `alint-dsl`'s trust module). Named top-level objects
+   are a new indirection that those markers do not cover, so every named selector, relation,
+   input, and module carries its own provenance; references resolve by namespace; a local name
+   can never be shadowed by an inherited one; and the planner checks capability monotonicity
+   (a rule never gains a capability through what it references).
 10. v1 configs remain supported. A v2 surface must not reinterpret existing keys.
+11. Trust-relevant fields stay literal. The v0.18 rule that `kind:` and fix `applicability:`
+    cannot come from `{{vars.*}}` extends to every v2 field the gates judge (severity is not
+    trust-relevant, but kinds, capabilities, inputs, and exception sources are).
+12. Interpolated globs are escaped. A parameter or variable spliced into a glob is literal
+    text, following the v0.18 glob-escaping decision; a parameter that is meant to be a
+    pattern must be typed as one.
 
 ### 7.2 Named selectors
 
@@ -711,6 +894,14 @@ Global ignores and root confinement remain outside user-overridable selector log
 The initial predicate set should consolidate existing behavior only: path globs, resource
 type, tracked status, changed status, ancestor manifest, and manifest-derived membership.
 Content predicates belong after decoding, not in the resource selector.
+
+Two existing decisions constrain this sketch. A universal `tracked` predicate is what
+[ADR-0008](../adr/0008-git-tracked-only-is-a-kind-option.md) rejected, because kinds that do not
+honour a universal option fail quietly. A v2 selector predicate is acceptable only if the engine
+implements it for every resource domain (and rejects it where it cannot), never as an option a
+kind may ignore; otherwise it supersedes ADR-0008 with the same flaw. And `inputs:` is a second
+pathway to the host environment beside `when: env.*` and `{{env.X}}`, both already denied to
+untrusted remote rulesets. It is therefore declarable only in the top-level config.
 
 ### 7.3 Named relations
 
@@ -818,8 +1009,8 @@ A v2 template should declare parameters:
 templates:
   - id: package-required-file
     params:
-      manifest: { type: path }
-      filename: { type: string }
+      manifest: { type: filename }
+      filename: { type: filename }
       severity: { type: level, default: warning }
     rule:
       kind: for_each_file
@@ -827,15 +1018,19 @@ templates:
       require:
         kind: file_exists
         paths: ["{dir}/{{params.filename}}"]
-      level: "{{params.severity}}"
+      level: { param: severity }
 ```
 
-This example remains illustrative. The necessary behavior is:
+This example remains illustrative. `filename` parameters splice into globs as escaped literal
+text (rule 12 in section 7.1), and `level` is a whole-node typed substitution rather than string
+interpolation. The necessary behavior is:
 
 - missing required, unknown, and unused parameters fail validation;
 - whole-node substitution preserves booleans, integers, lists, paths, and enums;
 - interpolation inside a larger string is allowed only for scalar stringable types;
-- references are namespaced when policies are imported;
+- references are namespaced when policies are imported (today templates and rules merge by flat
+  id through `extends:`, per ADR-0002 and the v0.5 composition design, so namespacing is a
+  change to that merge model, not only new syntax);
 - templates remain acyclic and capability-monotone;
 - a module can ship fixture tests and metadata alongside rules/templates/relations.
 
@@ -869,6 +1064,51 @@ must explicitly declare and provide those capabilities. This is a dedicated poli
 not a `.alint.yml` config with an overloaded `version` field; fixture paths remain confined to
 the test package by default.
 
+**Build on the existing harness rather than inventing a second format.** alint already has a
+deny-unknown-fields scenario format in `crates/alint-testkit` (`given.tree` / `given.config`,
+a `when: [check, fix, check]` step list, `expect` per step, `expect_tree`, and the ADR-0014
+rule-page marker), and over 500 scenarios use it. The sketch above is a different format for
+the same job. The recommended path (decision DEC-6) is to promote that scenario schema, plus an
+optional `given.fixture: <dir>` for on-disk fixtures, as the public policy-test format with a
+published JSON Schema and its own version field. Two mechanics follow:
+
+- `alint-testkit` is `publish = false` and documented as not a stable API, and a published
+  crate cannot depend on an unpublished one. The runner either moves into a published crate or
+  the testkit is published with a stability statement.
+- The design doc must specify fixture confinement (resolved under the test file's directory,
+  `..` rejected the same way `extends:` targets are confined), `extends:` inside tests (bundled
+  and local only, `https://` refused), cases that need a Git repository (the harness already
+  builds one by spawning `git`), and message matching (exact, regex, or omitted).
+
+Module authors then also get what ADR-0014 gives rule pages: the same fixture can render as a
+documented example.
+
+### 7.8 Versioning across `extends`, schemas, and tooling
+
+A new DSL surface touches more than the parser. Each of these needs an answer in the Phase 3
+design document (except the `requires:` field, question Q11, which lands earlier in Phase 1b),
+with the defaults recommended here:
+
+- **Version mixing across `extends:`.** The loader currently drops an extended file's `version:`
+  without checking it, so a v1 consumer extending a v2 ruleset would fail with an opaque
+  "unknown field" error. Each extended source's version is validated before it is dropped. A
+  v2 consumer may extend v1 sources; a v1 consumer extending a v2 source is a hard error that
+  names the required version. A v1-compatible `requires: { alint: ">=0.N" }` ruleset field
+  should land before Phase 3, so rulesets that use new kinds can say so (question Q11).
+- **JSON Schema and editors.** Configs point editors at `schemas/v1/config.json` on `main`. A v2
+  surface ships `schemas/v2/config.json`; the v1 schema is frozen, and the published `$id`
+  stops pointing at a moving branch.
+- **Commands.** `validate-config` validates both versions; `init` and `suggest` keep emitting v1
+  until v2 is stable; `list`, `explain`, and `export-agents-md` render named selectors and
+  relations, under the ADR-0012 completeness gates.
+- **Generated documentation.** Rule pages are generated per kind from `docs/rules.md`, and
+  ADR-0011 summaries come from the first sentence. A `constraint` kind with a dozen operators
+  needs per-operator pages, and the facts pipeline must decide whether operators count toward
+  the headline (constitution invariant 9 makes those counts gated facts).
+- **Relation to v1.0.** The roadmap's v1.0 milestone commits "DSL schema committed; semver on
+  `version: 1`" and a frozen `alint-core` API, while Phase 2 reshapes public `alint-core` types.
+  Decision DEC-9 orders the two.
+
 ## 8. Diagnostics, exceptions, and remediation
 
 ### 8.1 A richer finding record
@@ -885,9 +1125,29 @@ finding that can carry:
 - stable structural identity for baselines and external systems;
 - zero or more typed edit proposals with applicability.
 
-Existing output formats can project this richer record down. SARIF can preserve related
-locations and fixes; terminal output can show a concise primary message with labeled
-secondary lines; formats that cannot express the structure must not alter pass/fail.
+Existing output formats can project this richer record down. SARIF already emits `fixes[]`
+from proposed edits and can add `relatedLocations`; terminal output can show a concise primary
+message with labeled secondary lines; formats that cannot express the structure must not alter
+pass/fail.
+
+The record must be specified against what already ships:
+
+| Concern | Today | Requirement |
+|---|---|---|
+| JSON report schema | `schemas/v1/check-report.json` sets `additionalProperties: false` on violation and rule-result objects, while the agent format documents field additions as non-breaking | decision DEC-4: relax v1 one release ahead of new fields, or version the report |
+| Per-format projection | `github` and `gitlab` annotations hold one location; `junit` has none; `markdown` is a PR comment; the LSP maps one range | each format's projection is specified and gated by ADR-0012 positive-completeness tests, not by the weaker "cross-formatter tests" alone; LSP `relatedInformation` only when the client advertises it |
+| Primary location | one optional path | it decides the baseline path, the GitHub annotation file, and SARIF `locations[0]`: the rule's declared `report.at`, else the non-canonical side, else the first in canonical order; existing kinds keep today's anchor |
+| Baseline identity | ADR-0006 and `baseline.md`: one fingerprint definition; cross-file findings key on the sorted set of involved paths; baseline `SCHEMA_VERSION` 1 and other versions are rejected | decision DEC-5: fingerprints of existing kinds are frozen and gated by a golden file recomputed over the scenario corpus; related locations never enter the fingerprint; new kinds set `baseline_key` from sorted identity fields |
+| Proposed edits | computed only for fix-carrying formats | stay lazily attached; a plain `check` does not derive edits for every finding (the located-fixer correlation rules still apply) |
+| Notes | dropped by six of eight formats (section 4.12) | SARIF `level: note` results, plus `toolExecutionNotifications` for truncated analysis; a summary line in `github`, `gitlab`, and `markdown` |
+| Evidence values | rendered verbatim in messages and baseline files | decision DEC-3: redaction by default for secret-bearing formats, opt-in `sensitive:` elsewhere, fingerprints hash values instead of storing them, and a gate proving a planted secret never appears in any format's bytes |
+| Repository-controlled text | `sanitize_terminal` and Markdown escaping cover messages | the same sanitizers cover every new label, evidence string, and related-location field |
+| Evidence size | messages are capped by short rendering | at most a fixed number of related locations per finding (for example 20, then "and N more") and a byte cap on structured evidence |
+
+alint is not a secret scanner, and it must not become a secret leaker: the redaction row is a
+Phase 1a deliverable, not polish. Messages stay English-only; message templates over row fields
+are stored as a message id plus arguments, so a future localization never changes a
+fingerprint.
 
 ### 8.2 Exceptions are evaluated data
 
@@ -904,7 +1164,8 @@ would-be findings + top-level exception relation
 
 This gives allowlists a reverse check and makes stale debt removable. Baselines remain a
 separate mechanism for snapshotting existing findings. Path exclusions remain policy scope,
-not exceptions. The three concepts should not be conflated.
+not exceptions. The three concepts should not be conflated. Section 5.5 lists the ADR-0006
+decisions this reverses or must align with (question Q3).
 
 Expiry needs an explicit reference date supplied by CLI/config/CI. The default evaluator
 must not read the current time. Remote or nested configs must not choose top-level exception
@@ -920,12 +1181,18 @@ not automatically imply a unique fix:
 - a duplicate does not say which record is correct;
 - a broken reference does not say whether the target or declaration is wrong.
 
-The first constraint release should report only. Later fixes can be enabled when the policy
-declares direction and the engine has source spans, for example:
+The first constraint release should report only ("report-only" here means no fixes; it is a
+different guardrail from "check, never infer" in the gap study, which forbids deriving or
+minimizing constraints). Later fixes can be enabled when the policy declares direction and the
+engine has source spans. They should reuse the shipped v0.17 operations rather than invent
+parallel ones:
 
-- `canonical: relation-row-selector` for one source of truth;
-- `on_missing: insert` with a format-aware insertion strategy;
-- `on_drift: set_from canonical.FIELD`;
+- `canonical: relation-row-selector` for one source of truth, generalizing the shipped
+  `sync_from` (which already fixes `cross_file equals` drift from a declared source, Unsafe by
+  default);
+- `on_missing: insert` with a format-aware insertion strategy, bounded by
+  [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md) Decision 2: only a scalar
+  replacing a scalar can be Safe, and key insertion is a Suggestion;
 - explicit applicability, conflict detection, and a unique target provenance check.
 
 If any derivation is ambiguous, the result is a suggestion or no fix, never a guessed edit.
@@ -948,6 +1215,21 @@ The planner can then:
 
 Existing `Rule` implementations can coexist during migration. An adapter can wrap a native
 kind as a plan node, and high-value shared paths can move incrementally.
+
+Two engine invariants constrain the planner:
+
+- **Full-index context versus target selection.** Constitution invariant 2 and ADR-0003 fix three
+  dispatch classes and require a full-index rule to have no path scope; that is how
+  `--changed` mode avoids skipping cross-file rules. A selector on a cross-file rule must
+  therefore be modelled as a filter over the rows it compares, never as a path scope, and
+  `--changed` must still run the rule when any row of its context changed, not only a selected
+  row; otherwise a pull request that edits only the canonical side of a drift relation would
+  pass. This amends invariant 2 and needs a superseding ADR (question Q2).
+- **Read coalescing survives relation-major execution.** Per-file rules share one read per file
+  (ADR-0003). A relation-major schedule that reads a file once per relation would repeat the
+  v0.18.0 content-scan regression class. The planner keeps file-major read coalescing for every
+  extractor over a per-file selector, and the deterministic benchmark gains a scenario with at
+  least three relations over one glob.
 
 ### 9.2 Cache parsed resources and relations, not verdicts only
 
@@ -1000,6 +1282,22 @@ Capabilities are granted by the user's trusted top-level config. No network, inh
 environment, host filesystem traversal, process spawn, or wall clock is available by
 default. SRI authenticates bytes but does not confer trust or authority.
 
+This section supersedes the plugin sketch in the roadmap backlog where they differ (decision
+DEC-14):
+
+- The roadmap describes one `wasm` kind whose config the host interpolates with `{{env.X}}`
+  before passing it to the guest. Since the 2026-10 audit, untrusted remote rulesets may not
+  splice environment-derived values at all, so post-interpolation is acceptable only for a
+  plugin declared in the top-level config; a plugin rule inherited through `extends:` receives
+  no environment-derived values.
+- [ADR-0004](../adr/0004-extends-trust-boundary-and-path-confinement.md) gates only spawning and
+  out-of-root kinds, so a sandboxed plugin arriving through `extends:` has no trust rule yet.
+  Plugin grants should extend the one existing top-level grant mechanism, `trusted_extends:`
+  (ADR-0017 and the 2026-10 audit), rather than add a parallel one.
+- A signed plugin registry is not promised until one adapter plugin and one analyzer plugin
+  have been validated (section 11, Phase 6), and the roadmap's v1.0 "plugin ABI committed" item
+  waits for the native relation and finding model to stabilize.
+
 ### 9.5 Cost model and limits
 
 Generality without limits invites accidental quadratic behavior. The plan needs defaults
@@ -1018,9 +1316,45 @@ and hard caps for:
 Hitting a limit is an incomplete-analysis error or explicit note according to policy. It is
 never a silent pass.
 
+### 9.6 Performance budget
+
+"Prove performance on the million-file benchmark" is not a budget, and the existing gate cannot
+enforce one on its own. The deterministic gate compares each pull request against its base
+(+2% instructions, +5% estimated cycles), is advisory in CI, and is blind to I/O (the v0.14 S2
+read-path regression showed flat instruction counts can hide a real wall-clock loss). A
+ten-PR migration at +1.9% each would pass every check and land about 20% slower. The program
+therefore measures against a **frozen pre-IR reference (the v0.18.2 tag)**, cumulatively, with
+these proposed budgets (decision DEC-13):
+
+| Measure | Budget against v0.18.2 | Where |
+|---|---|---|
+| Instruction count, deterministic scenarios S1-S3 | at most +3% cumulative | the gungraun gate, enforced (not advisory) for IR pull requests |
+| Wall-clock median, 30 runs, S1-S4 x {full, changed}, 100k and 1M files | at most +3% | the canonical bench host with caches dropped |
+| `read` / `stat` syscall count | no increase | strace counts on the same scenarios, because the instruction gate is I/O-blind |
+| Peak RSS at 1M files | at most +10% | the bench harness |
+
+New capabilities (relations, constraints) are budgeted separately as new scenarios; the
+budgets above protect configurations that do not use them.
+
+### 9.7 Capability inventory as a source of truth
+
+Phase 0's per-kind capability inventory needs a defined source. Today `RuleRegistry` stores only
+builders and aliases, dispatch traits are instance methods that can depend on options, and the
+trust lists are hand-maintained (`SPAWNING_RULE_KINDS` in the DSL trust module, the Git-required
+kind list in a coverage audit). The inventory should be a static `KindMeta` declared at
+registration: resource domain, dispatch class, accepted selectors, capabilities (spawn, Git,
+environment, time, host keyring), formats, and fix operations. It is emitted into `facts.json`,
+a coverage audit asserts that every scenario-built rule instance behaves within its declared
+`KindMeta`, and the spawn and Git lists are derived from it. That turns Phase 0 from
+documentation into the single source for trust decisions, and it is the migration map for
+Phase 2. It would also have caught the `scope_filter` silent-ignore row of section 4.12, since a
+kind that declares no `scope_filter` support would reject the field.
+
 ## 10. What alint should not generalize
 
-The following directions would weaken the product even if they increase expressiveness:
+These are this proposal's recommendations; each becomes binding only through the ADRs of
+section 13.3. The following directions would weaken the product even if they increase
+expressiveness:
 
 - **No general-purpose language embedded in YAML.** No loops, recursion, user functions,
   I/O, dynamic imports, or mutation in the declarative core.
@@ -1048,155 +1382,274 @@ The following directions would weaken the product even if they increase expressi
 ## 11. Delivery sequence
 
 This is intentionally staged. Publishing the generic YAML first would freeze the weakest
-part of the design before provenance, testing, and planning are ready.
+part of the design before provenance, testing, and planning are ready. Each phase has a proposed
+target release, a size, the substrates it delivers, and an exit criterion. Target releases are
+proposals (decision DEC-1); the roadmap records them only once accepted.
 
-### Phase 0: terminology and inventory
+### 11.1 Phase summary
+
+| Phase | Proposed target | Size | Exit criterion |
+|---|---|---|---|
+| 0. Terminology and capability inventory | v0.19 | S | `KindMeta` declared for every kind, emitted into `facts.json`, the spawn and Git lists derived from it, and the audit gate green |
+| 1a. Fail-loud and finding foundations | v0.19 | L | every row of section 4.12 closed or explicitly recorded as accepted, each with a gate asserting its invariant |
+| 1b. Authoring loop | v0.20 | M | `alint test` public with a published schema; a rule-level `explain --trace`; the bundled rulesets carry their own tests |
+| 2. Internal relation IR (go / no-go) | v0.21 | L | the IR pilot ships as a v1 kind, one existing kind is ported with zero shadow diffs over one release, and the section 9.6 budgets hold |
+| 3. Selectors and report-only constraints | v0.22 or later | L | the section 12.1 measures met on the Phase 3 conformance policies (locale key parity, dependency version consistency, toolchain-pin consistency; stale exceptions are measured at Phase 4); the version-boundary ADR accepted |
+| 4. Typed modules and exception data | unscheduled | M | decided after Phase 3 by measured reuse pressure |
+| 5. Snapshot views | unscheduled | L | the LSP overlay part first; Git index and tree views only with demand |
+| 6. Typed plugins | unscheduled | L | one adapter and one analyzer plugin validated before any registry |
+
+**Stop rule.** If the Phase 2 pilot does not make the ported kind simpler and more consistent,
+or if after Phase 3 the share of new demand that is expressible by configuration (section 12.3)
+does not move, the program stops there. Phases 0 to 2 have standalone value either way.
+
+### 11.2 Phase 0: terminology and capability inventory
 
 - Keep the bounded definition from section 1 synchronized across contributor-facing architecture
-  and product documentation. `ARCHITECTURE.md` was corrected alongside this proposal.
+  and product documentation. `ARCHITECTURE.md` was corrected alongside the first version of this
+  proposal; the roadmap's Positioning section was aligned in the 2026-10-14 revision.
 - Keep the short public tagline "A general linter," but describe the domain as finite,
   inspectable project state in longer copy.
-- Create a generated capability inventory per kind: resource domain, dispatch, selectors,
-  adapters, capabilities, finding shape, and fixes. This becomes the migration map and a
-  drift gate.
+- Add the static `KindMeta` inventory of section 9.7: resource domain, dispatch, selectors,
+  adapters, capabilities, finding shape, and fixes. It becomes the migration map, a drift gate,
+  and the source of the trust lists.
 
-### Phase 1: authoring and finding foundations
+### 11.3 Phase 1a: fail-loud and finding foundations
 
-- Add primary ranges and labeled related evidence to the core finding model and output
-  projections.
-- Make extraction outcomes carry provenance, types, cardinality, and explicit incomplete
-  analysis.
-- Add `alint test` for downstream rulesets and fixtures.
-- Add `explain --trace` and an extraction/relation preview suitable for debugging.
-- Tighten silent-drop sites before making them reusable.
-- Define edit-plan preconditions and partial-application reporting before generic constraints can
-  propose multi-resource remediation.
+- Separate analysis failure from violations, with the exit semantics chosen in decision DEC-2.
+  Analysis failures are never baselinable and do not depend on `level`.
+- Render notes in every format (section 8.1).
+- Redact evidence values and add the leak gate (decision DEC-3).
+- Reject `scope_filter` and manifest predicates on kinds that do not honour them, at
+  `validate-config` time (driven by `KindMeta`).
+- Make the remaining section 4.12 rows explicit: manifest parse failure, Git unavailable, and
+  non-string extraction results each become an analysis failure or an explicit, visible
+  outcome.
+- Add primary ranges and labeled related locations to the finding model, with the JSON report
+  decision (DEC-4), per-format projections, and the frozen-fingerprint golden gate (DEC-5).
+- Add the `--as-of` input (decision DEC-11) and move `git_blame_age` onto it.
 
-This phase has standalone value and reduces the risk of every later phase.
+Edit-plan preconditions and partial-application reporting move out of Phase 1. Generic fixes
+are deferred until after the report-only constraint release, so that work belongs to the phase
+that first enables generic multi-resource fixes, building on the deferred auto-fix
+section 5.2.4 design (section 4.11). Phase 1 keeps today's per-file atomicity and reports it.
 
-### Phase 2: internal plan and relation IR
+### 11.4 Phase 1b: authoring loop
 
-- Implement internal resource, selector, adapter, relation, and constraint traits/types.
-- Port the shared `ExtractSpec`, manifest-derived scope, `cross_file`,
-  `registry_paths_resolve`, and one `for_each_*` path to the IR behind unchanged v1 syntax.
-- Prove parse/read deduplication, deterministic ordering, error semantics, and performance on
-  the million-file benchmark.
-- Keep `file_graph` and other specialized kernels native but make them consume/emit shared
-  relation/finding records where useful.
+- Promote the testkit scenario format to `alint test` for downstream rulesets and fixtures
+  (section 7.7, decision DEC-6).
+- Add a rule-level `explain --trace`: which gates ran, which selectors matched how many
+  resources, extracted counts and cardinalities, and which assertion failed. The plan-level
+  trace of section 9.1 waits for the Phase 2 IR. Trace output is experimental (human output,
+  or JSON under ADR-0009's `schema_version` envelope marked experimental) until v2 is stable,
+  so users cannot freeze IR internals by scripting against it (question Q14).
+- Add an extraction preview with provenance and truncation markers.
+
+Phase 1 as a whole has standalone value and reduces the risk of every later phase.
+
+### 11.5 Phase 2: internal relation IR (go / no-go)
+
+- Implement internal resource, selector, adapter, relation, and constraint types, with lazy spans
+  (section 6.2) and file-major read coalescing (section 9.1).
+- **Pilot on a new kind, not a port.** The first user of the IR is a new v1 kind with no
+  existing users, `key_parity` (a reference file plus a glob of peers, covering locale files and
+  `.env.example`), so the IR delivers user value with zero migration risk (decision DEC-7).
+- **Port existing kinds only under differential shadow evaluation.** Today's parity evidence is
+  thin for this purpose: the coverage audit requires one firing and one silent scenario per
+  kind, the property tests cover panics and fix idempotence, and the ADR-0014 rule-page fixtures
+  are one pass/fail pair per kind, which exercises one documented shape rather than the extract
+  and relation matrix. A port keeps the old implementation and runs both on every
+  scenario, on the 110 committed v0.12 corpus configurations (111 repositories were studied)
+  at their pinned commits, and on a
+  property-test generator over extract specs, asserting byte-identical findings, messages, and
+  baseline fingerprints. The old implementation is deleted only after one release with zero
+  differences. The first port is `cross_file_value_equals` (an alias over `cross_file`, so its
+  surface is small), then the shared `ExtractSpec` and manifest-derived scope.
+- Keep `file_graph` and other specialized kernels native but make them consume and emit shared
+  relation and finding records where useful.
+- Meet the section 9.6 budgets against v0.18.2.
 
 This is the go/no-go proof. If several real kinds do not become simpler and more consistent,
 do not expose a generic DSL.
 
-### Phase 3: additive selectors and read-only constraints
+### 11.6 Phase 3: selectors and report-only constraints
 
-- Design and ADR the version boundary: additive v1 keys versus `version: 2`. The default
-  recommendation is v2 for the new top-level typed namespace while continuing v1 support.
-- Expose named selectors and relations.
-- Ship the check-only `constraint` kind with cardinality, unique/key, reference, equality,
+- Design and ADR the version boundary (decision DEC-9) and the cross-file selector amendment of
+  constitution invariant 2 (question Q2).
+- Expose named selectors and relations (question Q1).
+- Ship the report-only `constraint` kind with cardinality, unique/key, reference, equality,
   set, group, and bounded-count assertions.
 - Implement the first high-value policies from the gap study as conformance cases: locale
-  key parity, dependency version consistency, and stale exception detection.
-- Ship specialized wrappers or bundled templates for common cases so most users need not
-  author raw relations.
+  key parity (already a kind from Phase 2, re-expressed), dependency version consistency, and
+  toolchain-pin consistency.
+- Ship specialized named kinds or bundled templates for common cases so most users need not
+  author raw relations (decision DEC-8).
 
-### Phase 4: typed modules and exception data
+Stale-exception detection moved to Phase 4, because exception relations are designed there.
 
-- Add typed template parameters and namespaced module references.
-- Let rule modules ship tests and minimum-engine/capability metadata.
-- Design explicit top-level exception relations, including reverse/stale checks and
-  optional explicit-as-of expiry.
-- Add policy-impact comparison between configs.
+### 11.7 Phases 4 to 6
 
-### Phase 5: snapshot views and incremental evaluation
+- **Phase 4, typed modules and exception data.** Typed template parameters and namespaced module
+  references; modules that ship tests and minimum-engine and capability metadata; explicit
+  top-level exception relations with reverse (stale) checks and optional `--as-of` expiry
+  (question Q3); policy-impact comparison between configs. Scheduled only if Phase 3 shows
+  named-relation reuse.
+- **Phase 5, snapshot views.** The LSP overlay snapshot first, because it fixes a real
+  inconsistency (cross-file findings refresh only on save). Git index and Git tree views wait for
+  demand: the pre-commit framework already stashes unstaged changes, which covers the most
+  common staged-only use. Dependency-aware LSP and watch invalidation follow the compiled plan.
+  Process-spawning and mutable-fix rules stay restricted to compatible snapshots (question Q9).
+- **Phase 6, typed plugins and syntax adapters.** Freeze the WIT ABI only after the native
+  relation and finding model has stabilized. Ship adapter and analyzer roles with capability
+  manifests, fuel and memory limits, SRI, and test fixtures. Validate one adapter plugin (a
+  syntax-query adapter) and one analyzer plugin before promising a registry (decision DEC-14).
 
-- Introduce worktree, overlay, index, and Git-tree snapshot implementations.
-- Add staged-only and revision checking once parity tests cover all applicable rule classes.
-- Build dependency-aware LSP/watch invalidation from the compiled plan.
-- Keep process-spawning and mutable-fix rules restricted to compatible snapshots.
+### 11.8 Gap-to-substrate matrix
 
-### Phase 6: typed plugins and syntax adapters
+This is the canonical ordering of every detection gap in [`rule-coverage-gaps.md`](rule-coverage-gaps.md)
+(IDs as in its section 4) against the phases above. Its purpose is to prevent throwaway work: a gap in the "after the IR"
+bucket built today as a standalone evaluator would be replaced by Phase 3 and leave two
+spellings frozen.
 
-- Freeze the WIT ABI only after the native relation/finding model has stabilized.
-- Ship adapter and analyzer roles with capability manifests, fuel/memory limits, SRI, and
-  test fixtures.
-- Validate one syntax-query adapter and one non-syntax domain adapter before promising a
-  registry ecosystem.
+| Bucket | Gaps | Why |
+|---|---|---|
+| Ship now as native kinds or bundled rulesets (no IR needed, nothing thrown away) | A1 `editorconfig_conforms` (after decision DEC-12), A2 `gitattributes_valid`, A3 `ignore_consistency` (coverage and duplicate halves), B2 `well_formed`, B4 path casing and mutual exclusion, B5 `yaml_footguns`, B6 self-declared schemas, the Markdown structure kinds (E2 alt text, E3 required headings, E4 reference definitions, E5 duplicate headings, E7 fragment resolution, E8 list structure), E6 `frontmatter_*`, F1 `license_detectable`, F2 the SPDX table with `spdx_identifier_valid`, F4 `manifest_license_valid`, G1 `delimited_columns`, H1 `pinned_references`, H2 `dockerfile_structural`, I1 `max_path_length`, I2 `lfs_pointer_valid`, I3 `file_encoding`, I4 `symlinks_valid`, I5 normalization collisions, J1 `codeowners_valid` syntax checks, J2 the governance-schema pack, J4 `numeric_sequence`, and the C1 version-SSOT, C2 toolchain-pin (exact pins), and Keep-a-Changelog bundled rulesets | native kernels or adapters; under section 6.5 they stay native after the IR exists |
+| Needs local Git tag access | C6 `git_tag_*` | a small new Git input, independent of the IR |
+| Needs a Phase 1 substrate first | B1 `no_duplicate_keys`, B3 `structured_key_sort` | the duplicate-aware spanned extraction is part of Phase 1a's provenance work (dotenv is ready through `adotenv`; JSON through the `jsonc-parser` AST, and YAML, INI, and properties through hand-written locators, have span resolvers in the fix bridge; TOML and HCL already reject duplicates at parse), so it is built once there, not inside a kind |
+| Needs `--as-of` first | J3 `field_date_valid`, F5 header and copyright-year consistency, exception expiry | the Phase 1a time input |
+| Build on the IR (Phase 2 or later), not before | D1 `key_parity` for nested formats (the Phase 2 pilot), C3 `dependency_version_consistency`, D2 `placeholder_parity`, F3 `reuse_license_completeness`, C5 `dependabot_ecosystem_drift`, the dead-pattern halves of A3 `ignore_consistency` and J1 `codeowners_valid`, B7 in-file reference integrity | relational; as standalone evaluators they would duplicate the Phase 3 constraint |
+| Standalone library now, reused by the IR | C4 `semver_range` | lands first as a standalone library (a canonicalizing `normalize:` band plus range-satisfaction and intersection checks), then becomes the `semver` domain scalar of section 6.2 |
+
+Flat-format key parity (`.env` against `.env.example`, `.properties`) is already expressible today
+with `cross_file` `set_equals` over a `regex:` extract, and should be documented as a recipe now.
 
 ## 12. Validation and success criteria
 
 ### 12.1 Product criteria
 
-The proposal succeeds if:
+The proposal succeeds if, measurably:
 
-- a user can express the recurring extract/group/compare policies without adding Rust;
-- the common built-in kinds remain simpler than the generic spelling;
-- incomplete analysis is visible and cannot produce a false pass;
-- a finding explains the failed relation and navigates to all material evidence;
+- each named conformance policy (locale key parity, dependency version consistency,
+  toolchain-pin consistency, stale exceptions) is expressible without Rust, in a documented
+  configuration of bounded length, with its firing and silent fixtures shipped as `alint test`
+  cases;
+- for every specialized kind given a generic spelling, the specialized spelling stays shorter,
+  and the documentation shows both;
+- incomplete analysis cannot produce a false pass: mutation tests on the error, truncation, and
+  type-mismatch paths kill every "empty success" mutant;
+- a finding navigates to all material evidence in SARIF and the LSP, verified by the ADR-0012
+  completeness gates;
 - policy packs are testable without cloning a large real repository;
-- the trust boundary is no weaker than v1;
-- v1 configs and output pass/fail semantics remain stable.
+- the trust boundary is no weaker than v1, verified by the trust tests of section 12.2;
+- v1 configs keep their pass/fail semantics, except where v1 produced a false pass (section 6.3),
+  and every such change is listed in the changelog.
 
 ### 12.2 Engineering criteria
 
 Before public DSL release, require:
 
-- semantic parity tests for every v1 kind moved onto the shared plan;
+- differential shadow evaluation with zero differences for every v1 kind moved onto the shared
+  plan (section 11.5);
 - firing and silent end-to-end cases for every new assertion operator;
 - property tests for relation ordering, grouping, joins, cardinality, and normalization;
 - mutation tests proving parse/type/truncation errors cannot become empty-success;
-- cross-formatter tests for primary and related locations;
-- baseline identity tests under row reordering and benign source movement;
+- ADR-0012 positive-completeness tests for primary and related locations, notes, and redaction in
+  every format;
+- the frozen-fingerprint golden gate, plus baseline identity tests under row reordering and
+  benign source movement;
 - trust tests for every way a remote/nested policy can reference selectors, modules,
-  adapters, exceptions, or fixes;
+  adapters, exceptions, inputs, or fixes;
 - bounded-resource tests for adversarial documents and relation explosions;
-- benchmark comparison for small, 100k-file, and million-file repositories;
+- the section 9.6 budgets on small, 100k-file, and million-file repositories;
 - LSP/CLI parity tests for any snapshot-supported subset;
 - JSON Schema/runtime parity and generated documentation gates.
 
 ### 12.3 A useful coverage metric
 
-Do not measure generality by the number of kinds alone. Track new policy demand by outcome:
+Do not measure generality by the number of kinds alone. The v0.12 study already fixed a unit
+and a taxonomy ([`v0.12/case_study_100_repos.md`](v0.12/case_study_100_repos.md)): each finding
+is A (expressible today), B (a gap needing new capability), C (a tuning candidate: expressible
+but awkward), or D (a deliberate non-goal), and
+`coverage_today = A / (A + B + C)` over 111 pinned repositories. This program splits bucket B by
+the kind of work it needs:
 
-- expressible by an existing specialized kind;
-- expressible by configuration of a generic constraint;
-- needs a new reusable adapter/operator;
-- needs a specialized native kernel;
-- delegated to a plugin/command;
-- out of scope.
+- B-config: expressible by configuration of a generic constraint;
+- B-adapter: needs a new reusable adapter or operator;
+- B-kernel: needs a specialized native kernel;
+- B-delegate: delegated to a plugin or `command`.
 
-The desired trend is that most new **static repository-state** requests land in the first two
-buckets, while semantic/external-state requests are cleanly delegated or declined. A growing
-kind count can still be healthy when kinds are ergonomic wrappers over stable substrates.
+The pinned corpus is re-scored at each phase exit. The success signal is that B1's share of new
+static repository-state demand grows while semantic and external-state requests land in
+B-delegate or D. A growing kind count can still be healthy when kinds are ergonomic wrappers over stable
+substrates.
+
+**The demand evidence is thinner than the first version of this document implied.** The v0.12
+locked backlog contains no locale, i18n, key-parity, dependency-version-consistency, or
+duplicate-key findings. The flagship Phase 3 policies rest on outside tools (syncpack, manypkg,
+i18n-tasks, compare-locales, yamllint) and on the 30-repository examples set, whose analyses
+are v0.9.17 snapshots. Before Phase 3 is scheduled, the corpus should gain an i18n and
+JavaScript-monorepo stratum so the claim can be measured rather than assumed.
 
 ## 13. Open decisions
 
-These questions require separate design work, not answers smuggled into implementation:
+Section 13.1 lists the decisions needed now, because they shape Phases 0 to 2 or reconcile
+this program with recorded decisions. Section 13.2 lists questions that need their phase's
+design work first; each carries a recommendation and is decided in that phase's design
+document. Section 13.3 lists the records this program would amend.
 
-1. Does the generalized surface require `version: 2`, or can named selectors/relations be
-   added to v1 without constraining the eventual language? Recommendation: use v2 unless the
-   internal IR proves the surface can remain small and purely additive.
-2. Are relations top-level reusable objects, rule-local objects, or both? Recommendation:
-   support both, with local definitions anonymous and top-level definitions namespaced.
-3. Is the expression syntax evolved in place or replaced for v2? Recommendation: preserve
-   v1 `when`; extend a typed evaluator internally before choosing syntax.
-4. Which value types are core? Recommendation: primitive values, path, lists, and records
-   first; add semantic scalars only with multiple demonstrated consumers.
-5. How are object keys and duplicate entries represented across all eight formats without
-   forcing them into a misleading JSON object model?
-6. What is the smallest join vocabulary that covers the corpus without enabling accidental
-   quadratic plans?
-7. Should relation rows be user-visible in JSON output, or only through a bounded debug
-   command?
-8. How does baseline identity treat a relational finding with several equally important
-   locations?
-9. What exception metadata is mandatory, and how is an explicit reference date supplied in
-   local development and CI?
-10. Which existing kinds should compile to generic constraints, and which should stay native
-    permanently?
-11. Can snapshot views support every pure rule, or should the registry expose a compatibility
-    matrix and reject incompatible rules per view?
-12. Does a plugin emit rows, findings, or both in ABI v1? Recommendation: define separate
-    adapter and analyzer worlds even if one artifact implements both.
+### 13.1 Decisions needed now
+
+| ID | Decision | Recommendation |
+|---|---|---|
+| DEC-1 | Adopt the phased program and its proposed targets (section 11.1), and track it in the roadmap | adopt; Phases 0 and 1a in v0.19 |
+| DEC-2 | How analysis failure maps onto exit codes | failures caused by repository content (an unparseable or over-cap target) are findings at level error regardless of the rule's `level`, never baselinable; configuration failures exit 2 and internal errors stay 3; no new exit code |
+| DEC-3 | Redaction default for evidence values | redact values from dotenv and properties by default, add an opt-in `sensitive:` marker elsewhere, never store raw values in baseline files |
+| DEC-4 | How the JSON report evolves | relax v1's `additionalProperties: false` one release before adding fields, announced in the changelog; reserve a v2 report for removals |
+| DEC-5 | Baseline identity under the richer finding model | ADR-0006 already decided the definition; freeze existing kinds' fingerprints behind a golden gate, keep related locations out of fingerprints, and give new kinds sorted identity fields |
+| DEC-6 | The public policy-test format | promote the testkit scenario schema and publish its runner |
+| DEC-7 | The IR proof strategy | pilot on the new `key_parity` kind, then port existing kinds only under differential shadow evaluation |
+| DEC-8 | Named kinds versus generic constraints for the relational gaps | both: named v1 kinds as the ergonomic surface, implemented on the IR; no standalone evaluators for those gaps before Phase 2 |
+| DEC-9 | The DSL version boundary and its order relative to v1.0 | `version: 2` for the new typed namespace, post-1.0, with v1.0 committing only `version: 1`; additive v1 keys only if the Phase 2 IR shows the surface stays small |
+| DEC-10 | The syntax-analysis line | the core parses data and document formats, never programming-language syntax; syntax capture only through plugin adapters; Markdown structure is in scope now |
+| DEC-11 | Time-dependent rules and constitution invariant 1 | a global `--as-of` input (CLI flag and environment variable); without it, time-dependent kinds use the HEAD commit time rather than the wall clock, so a commit always evaluates the same way |
+| DEC-12 | Policy-source files (`.editorconfig`, `.gitattributes`) versus ADR-0010 | a new ADR that defines policy-source files as distinct from intent-inferring manifests, with `editorconfig_conforms` as its first user |
+| DEC-13 | The performance reference and enforcement | cumulative budgets against the frozen v0.18.2 tag (section 9.6), enforced for IR pull requests |
+| DEC-14 | The plugin plan of record | section 9.4 supersedes the roadmap's WASM sketch: two roles, no environment for inherited plugins, grants through `trusted_extends:`, no registry before validation |
+
+### 13.2 Questions decided in their phase's design document
+
+| ID | Question | Phase | Recommendation |
+|---|---|---|---|
+| Q1 | Are selectors and relations top-level, rule-local, or both, and how do they relate to ADR-0010's deferred `path_sets:` block? | 3 | both, with local definitions anonymous and top-level ones namespaced; `path_sets:` becomes the selector feature, not a second concept |
+| Q2 | How do selectors on full-index rules interact with `--changed`? | 3 | selectors filter compared rows, never path scope; the rule runs when any context row changed |
+| Q3 | Do exception relations supersede ADR-0006's rejection of config-embedded suppressions, and what is the stale default? | 4 | yes, by a superseding ADR justified by the stale check; stale exceptions warn by default and fail under the existing strict flag; the first release keeps exceptions in the top-level config file |
+| Q4 | Which value types are core? | 2 | primitives with lexeme-preserving numbers, path, lists, and records; semantic scalars (`semver`, SPDX) only with several consumers |
+| Q5 | How are object keys and duplicate entries represented across all eight formats? | 1a | as ordered entry rows with spans, never as a JSON object |
+| Q6 | What is the smallest join vocabulary that covers the corpus without accidental quadratic plans? | 3 | equality joins on declared fields only, with explicit caps; no implicit cross products |
+| Q7 | Are relation rows user-visible in JSON output? | 1b | only through the experimental preview command |
+| Q8 | Which existing kinds compile to generic constraints, and which stay native? | 2 | decided per kind from the shadow-port results; graph, Unicode, and Git kernels stay native |
+| Q9 | Can snapshot views support every pure rule? | 5 | no; the `KindMeta` inventory declares snapshot compatibility and incompatible rules are rejected per view |
+| Q10 | Does a plugin emit rows, findings, or both in ABI v1? | 6 | separate adapter and analyzer worlds, even if one artifact implements both |
+| Q11 | How do versions mix across `extends:`, and when does `requires:` land? | 1b | v2 consumers may extend v1 sources, never the reverse; `requires:` lands in v1 before Phase 3 |
+| Q12 | How are named objects namespaced and protected from shadowing? | 3 | provenance on every named object, namespace-qualified references, no shadowing of local names, plan-time capability monotonicity |
+| Q13 | How are paths compared in joins? | 2 | byte-exact on normalized paths, opt-in case folding, never host-dependent |
+| Q14 | What is the stability tier of `explain --trace` and previews? | 1b | experimental until v2 is stable |
+| Q15 | Is the `when` expression syntax evolved in place or replaced for v2? | 3 | preserve v1 `when`; extend a typed evaluator internally before choosing syntax |
+
+### 13.3 Records this program would amend or supersede
+
+| Record | What changes | When |
+|---|---|---|
+| Constitution invariant 1 (determinism) | an explicit time input and a declared-host-input class (DEC-11) | Phase 1a |
+| Constitution invariant 2 and ADR-0003 (dispatch) | full-index context separated from target selection (Q2) | Phase 3 |
+| ADR-0002 (YAML, flat merge by id) | namespaced modules and a `version: 2` envelope (DEC-9, Q12) | Phases 3 and 4 |
+| ADR-0004 (trust boundary) | plugin and named-object grants (DEC-14, Q12) | Phases 3 and 6 |
+| ADR-0006 (baseline) | exception relations and the stale default (Q3); fingerprint freeze stated explicitly (DEC-5) | Phases 1a and 4 |
+| ADR-0008 (`git_tracked_only` is a kind option) | a selector-level `tracked` predicate implemented for every domain | Phase 3 |
+| ADR-0009, ADR-0012, ADR-0013 (explain and output projections) | an evaluating trace and new finding fields under the completeness gates | Phases 1a and 1b |
+| ADR-0010 (manifest values never decide verdicts) | policy-source files (DEC-12) | before `editorconfig_conforms` |
+| ADR-0017 (fix model) | generic edit plans built on `sync_from` and the deferred section 5.2.4 transaction | after Phase 3 |
+| Roadmap backlog and v1.0 milestone | plugin plan of record (DEC-14) and DSL ordering (DEC-9) | on acceptance of DEC-1 |
 
 ## 14. Research lessons and references
 
@@ -1242,6 +1695,13 @@ The proposal borrows design lessons, not syntax wholesale:
   shows why the future plugin boundary should be a typed interface contract rather than a
   guest-specific serialization convention.
 
+Within this repository, the direct predecessors are the v0.12 records:
+[`v0.12/architecture_synthesis.md`](v0.12/architecture_synthesis.md) (the five composable axes),
+[`v0.12/post_build_coverage_analysis.md`](v0.12/post_build_coverage_analysis.md) (where the
+relation axis was declared complete), [`v0.12/cross_file.md`](v0.12/cross_file.md) (the dropped
+`file_set` source), and [`v0.12/case_study_100_repos.md`](v0.12/case_study_100_repos.md) (the
+coverage taxonomy section 12.3 extends).
+
 The formal recognition/assertion framework, database-integrity analogy, coverage map, and
 additional primary references are in
 [`rule-coverage-gaps.md`](rule-coverage-gaps.md). The non-negotiable engine properties are in
@@ -1251,3 +1711,37 @@ additional primary references are in
 in [`ADR-0006`](../adr/0006-baseline-suppression.md), fix semantics in
 [`ADR-0017`](../adr/0017-auto-fix-edit-model-and-applicability.md), and host-linter integration
 in [`ADR-0018`](../adr/0018-eslint-integration-boundary.md).
+
+## 15. Review log
+
+**2026-10-14, adversarial review against `main` at v0.18.2.** Four independent passes checked
+this document and [`rule-coverage-gaps.md`](rule-coverage-gaps.md) against the code, against
+each other, and against the roadmap, constitution, and ADRs, then critiqued the plan as an
+executable program. The revision made these changes:
+
+- **Factual corrections.** Remote `extends:` SRI is mandatory, not optional; native path edits
+  are root-confined by default, not unconditionally; `scope_filter` has a third, silently
+  ignored behaviour; the `Rule` trait exposes scheduling metadata; the environment is also
+  read by `{{env.X}}`; the GPG keyring is a host input; Git-aware kinds no-op without Git;
+  facts re-evaluate per fix pass; template list, map, and null values are dropped; SARIF
+  already emits fixes; ADR-0006's rejection of `suppress:` was about drift, not trust.
+- **New analysis.** Section 4.12 tabulates the fail-open and leak sites found in the code, the
+  most serious being rule errors that become ordinary, level-dependent, baselinable violations
+  and extracted values (possibly secrets) echoed into reports and baseline files.
+- **Reconciliation with recorded decisions.** The v0.12 conclusions (section 3.4), constitution
+  invariants 1 and 2, and ADRs 0002, 0003, 0004, 0006, 0008, 0010, 0012, 0013, and 0017 are now
+  cited where this program touches them, and section 13.3 lists every record it would amend.
+- **Filled gaps.** The finding-model compatibility table (section 8.1), lexeme-preserving
+  numbers, path semantics, and canonical ordering (section 6.2), the policy-test plan built on
+  the existing harness (section 7.7), DSL versioning across `extends:` and tooling (section
+  7.8), the plugin reconciliation (section 9.4), a performance budget (section 9.6), the
+  capability inventory as a source of truth (section 9.7), phase targets with exit criteria
+  and a stop rule (section 11.1), the gap-to-substrate matrix (section 11.8), measurable
+  success criteria tied to the v0.12 taxonomy (section 12), and the honest demand caveat.
+- **Re-sequencing.** Phase 1 split into fail-loud foundations (1a) and the authoring loop (1b);
+  the IR pilots on a new kind before any port, and ports run under differential shadow
+  evaluation; edit-plan preconditions moved to the phase that first enables generic fixes;
+  stale-exception detection moved from Phase 3 to Phase 4; Phase 5 starts with the LSP overlay.
+- **Overstated finding withdrawn.** One pass flagged JSON Schema `pattern` matching as an
+  unbounded backtracking surface; `fancy-regex`'s default limit of 1,000,000 steps applies, so
+  section 4.12 records only that a limit hit is indistinguishable from a schema failure.

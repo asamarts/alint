@@ -1,6 +1,6 @@
 # Auto-fix implementation plan
 
-Status: Planning (execution companion to the accepted design). This doc turns the
+Status: Implemented, shipped in v0.17.0 (2026-10-01); kept as the execution record. Originally the planning companion to the accepted design. This doc turns the
 [`auto-fix.md`](auto-fix.md) framework (accepted) and [ADR-0017](../adr/0017-auto-fix-edit-model-and-applicability.md)
 (accepted) into a phased, test-first build plan grounded in the current code. It does not
 re-argue the design; it says, per phase, exactly what changes, where, how it is tested, which
