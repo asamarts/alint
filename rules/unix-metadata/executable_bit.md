@@ -8,7 +8,7 @@ categories: ['unix-metadata']
 
 Assert every file in scope either has the `+x` bit set (`require: true`) or does not (`require: false`).
 
-No fix op — chmod auto-apply is deferred.
+Fix op: `chmod` sets (`require: true`) or clears (`require: false`) the executable bits to match the rule. Safe by default; Unix only; demoted to a suggestion when the rule arrives through an untrusted remote `extends:`.
 
 ## Options
 

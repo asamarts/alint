@@ -110,6 +110,12 @@
       "blurb": "A whole-repository security and correctness audit, then an adversarial re-review of its fixes: the config trust gates judge the rule that actually runs, untrusted remote rulesets lose ignore and environment access, crafted YAML and XML files are bounded, RustSec advisories block releases, and the new markdown_links_resolve kind and expect_matches scope assertions land alongside."
     },
     {
+      "version": "0.19",
+      "title": "Fail-loud findings and the capability inventory",
+      "kind": "release",
+      "blurb": "The first phase of the general-linter program: a generated per-kind capability inventory that drives the trust gates, rule-evaluation failures that can no longer pass silently or be baselined, values from secret-bearing files redacted in every report, findings that point at every related location, and an explicit as-of date for time-dependent rules."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",
@@ -119,7 +125,7 @@
       "version": null,
       "title": "Future / backlog",
       "kind": "foundations",
-      "blurb": "A wasm plugin kind on a wasmtime host with a stable WIT interface, a filesystem sandbox, and a signed plugin registry, plus a language-agnostic duplicate-code detector, all unpinned from a numbered release until the engine work is scheduled."
+      "blurb": "A language-agnostic duplicate-code detector and the original WASM plugin sketch, now superseded by the plugin track of the general-linter program: compiled-in Rust plugins, out-of-process plugins in any language, and sandboxed WASM components on one typed contract."
     }
   ]
 }
