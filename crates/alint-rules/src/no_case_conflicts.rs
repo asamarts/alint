@@ -27,6 +27,13 @@ impl Rule for NoCaseConflictsRule {
         Some(&self.scope)
     }
 
+    /// The verdict is a whole-tree judgement (a collision needs both paths, and the unchanged half
+    /// may be outside a `--changed` diff), so evaluate on the full index. `path_scope` still lets
+    /// `--changed` skip the rule when no in-scope file changed.
+    fn requires_full_index(&self) -> bool {
+        true
+    }
+
     alint_core::rule_common_impl!();
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {

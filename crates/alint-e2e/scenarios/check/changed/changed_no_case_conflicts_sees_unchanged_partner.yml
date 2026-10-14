@@ -1,0 +1,34 @@
+name: --changed no_case_conflicts sees the unchanged half of a collision
+tags: [check, check_changed, changed, no_case_conflicts, requires-case-sensitive-fs]
+
+# Regression (v0.18.3): no_case_conflicts judges the whole tree (a collision needs two paths),
+# but it was not `requires_full_index`, so under `--changed` it saw only the changed files.
+# Adding `Readme.md` next to a committed `README.md` is the change that creates the collision,
+# yet `check --changed` reported nothing. It now evaluates on the full index (still skipped by
+# `path_scope` when no in-scope file changed).
+
+given:
+  tree:
+    README.md: "# demo\n"
+    Readme.md: "# demo\n"
+  config: |
+    version: 1
+    rules:
+      - id: case
+        kind: no_case_conflicts
+        paths: "**"
+        level: error
+  git:
+    init: true
+    add: [README.md]
+    commit: true
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: case, level: error, path: README.md}
+      - {rule: case, level: error, path: Readme.md}
+  - violations:
+      - {rule: case, level: error, path: README.md}
+      - {rule: case, level: error, path: Readme.md}

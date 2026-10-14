@@ -2227,6 +2227,75 @@ rules:
 }
 
 #[test]
+fn nested_regex_select_is_not_rerooted() {
+    // `for_each_match`'s `select:` is a line regex, not a path glob: prefixing it with
+    // the nested directory (`packages/foo/TODO`) made it never match (v0.18.3).
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: todo-lines
+    kind: for_each_match
+    paths: "**/*.md"
+    select: '^TODO'
+    require:
+      matches: ['#\d+']
+    level: warning
+"#,
+    )
+    .unwrap();
+
+    let cfg = load(&root_cfg).unwrap();
+    let rule = &cfg.rules[0];
+    let paths_dbg = format!("{:?}", rule.paths);
+    assert!(
+        paths_dbg.contains("packages/foo/**/*.md"),
+        "paths not scoped: {paths_dbg}"
+    );
+    let select = rule.extra.get("select").and_then(|v| v.as_str());
+    assert_eq!(
+        select,
+        Some("^TODO"),
+        "the regex select must be left untouched"
+    );
+}
+
+#[test]
+fn nested_unconfinable_kind_is_rejected() {
+    // A kind whose selectors are not `paths` / `select` / `primary` (here the commit
+    // range of `git_commit_message`) cannot be confined to the subtree; a dummy
+    // `paths:` used to let it run repo-wide from a nested config (v0.18.3).
+    let tmp = tempfile::tempdir().unwrap();
+    let root_cfg = tmp.path().join(".alint.yml");
+    std::fs::write(&root_cfg, "version: 1\nnested_configs: true\nrules: []\n").unwrap();
+    let pkg_dir = tmp.path().join("packages/foo");
+    std::fs::create_dir_all(&pkg_dir).unwrap();
+    std::fs::write(
+        pkg_dir.join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: subject
+    kind: git_commit_message
+    paths: "dummy"
+    pattern: '^feat'
+    level: error
+"#,
+    )
+    .unwrap();
+
+    let err = load(&root_cfg).unwrap_err().to_string();
+    assert!(
+        err.contains("cannot be confined"),
+        "unexpected error: {err}"
+    );
+}
+
+#[test]
 fn nested_baseline_is_rejected() {
     // A nested config may not declare `baseline:` — it's a trusted,
     // root-only input (a subtree must not pick what the gate suppresses).

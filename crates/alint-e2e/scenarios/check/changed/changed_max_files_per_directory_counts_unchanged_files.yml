@@ -1,0 +1,34 @@
+name: --changed max_files_per_directory counts the unchanged files in the directory
+tags: [check, check_changed, changed, max_files_per_directory]
+
+# Regression (v0.18.3): max_files_per_directory counts every file in a directory, but it was not
+# `requires_full_index`, so under `--changed` it counted only the changed files. Adding a third
+# file to a directory that already held two (limit 2) is the change that breaks the limit, yet
+# `check --changed` reported nothing.
+
+given:
+  tree:
+    dir:
+      a.txt: "a\n"
+      b.txt: "b\n"
+      c.txt: "c\n"
+  config: |
+    version: 1
+    rules:
+      - id: dir-size
+        kind: max_files_per_directory
+        paths: "**"
+        max_files: 2
+        level: error
+  git:
+    init: true
+    add: [dir/a.txt, dir/b.txt]
+    commit: true
+
+when: [check, check_changed]
+
+expect:
+  - violations:
+      - {rule: dir-size, level: error, path: dir}
+  - violations:
+      - {rule: dir-size, level: error, path: dir}

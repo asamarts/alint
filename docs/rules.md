@@ -1236,5 +1236,7 @@ At load time, alint walks the tree (respecting `.gitignore` + `ignore:`), picks 
 - Only the root config sets `nested_configs: true`. Nested configs can't spawn further nesting.
 - Nested configs can only declare `version:` and `rules:` — `extends:`, `facts:`, `vars:`, `ignore:`, `respect_gitignore:`, `fix_size_limit:`, and `allow_out_of_root:` are root-only.
 - Every rule in a nested config must have a path-like scope field (`paths`, `select`, or `primary`). Rules without any (e.g. `no_submodules`, which is hardcoded to repo root) can't be nested.
+- The regex `select:` of `for_each_match` and `ordered_block` is a line selector, not a path, so it is not prefixed; their `paths:` is.
+- Kinds whose selectors can't be confined to a subdirectory are rejected in nested configs: `cross_file` (and `cross_file_value_equals`), `registry_paths_resolve`, `file_graph`, `pair_hash`, `pair_changed_together`, `changeset_requires_path`, `git_no_denied_paths`, and the `git_commit_*` kinds. Declare them in the root config.
 - Absolute paths and `..`-prefixed globs are rejected — they'd escape the subtree the config is supposed to confine.
 - Rule-id collisions across configs are rejected with a clear error. Per-subtree overrides aren't supported yet; if you want to disable a root rule under one subtree, use a `when:` gate on the root rule for now.

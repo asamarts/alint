@@ -1,0 +1,55 @@
+name: fix on literal paths honours scope_filter (only the in-scope file is edited)
+tags: [fix, set_value, json, scope_filter]
+
+# Regression (v0.18.3): the structured `*_path_*` kinds take a literal-paths fast path in the
+# rule-by-rule evaluator, which skipped `scope_filter`. `check` (file-major dispatch) honoured
+# the filter, but `alint fix` evaluated rule-by-rule and rewrote `other/app.json`, a file the
+# filter excluded. Both literal paths are listed; only `pkg/` has the `Cargo.toml` ancestor.
+
+given:
+  tree:
+    pkg:
+      Cargo.toml: "[package]\nname = \"pkg\"\n"
+      app.json: |
+        {
+          "port": 8080
+        }
+    other:
+      app.json: |
+        {
+          "port": 8080
+        }
+  config: |
+    version: 1
+    rules:
+      - id: port
+        kind: json_path_equals
+        paths: ["pkg/app.json", "other/app.json"]
+        scope_filter:
+          has_ancestor: Cargo.toml
+        path: "$.port"
+        equals: 9090
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: port, level: error, path: pkg/app.json}
+  - applied: [port]
+  - violations: []
+
+expect_tree:
+  pkg:
+    Cargo.toml: "[package]\nname = \"pkg\"\n"
+    app.json: |
+      {
+        "port": 9090
+      }
+  other:
+    app.json: |
+      {
+        "port": 8080
+      }

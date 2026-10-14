@@ -1,0 +1,33 @@
+name: a nested git_blame_age fires without any top-level blame rule
+tags: [check, git_blame_age, for_each_dir]
+
+# Regression (v0.18.3): the engine built the blame cache only when a TOP-LEVEL rule wanted
+# blame, so a `git_blame_age` nested under `for_each_dir` silently never fired unless some
+# other top-level rule also used blame. The decision now visits nested rules too.
+
+given:
+  tree:
+    pkg:
+      src:
+        main.rs: "fn main() {\n    // TODO: refactor this\n}\n"
+  config: |
+    version: 1
+    rules:
+      - id: per-package
+        kind: for_each_dir
+        select: "pkg"
+        level: warning
+        require:
+          - kind: git_blame_age
+            paths: "{path}/**/*.rs"
+            pattern: '\bTODO\b'
+            max_age_days: 30
+  git:
+    commits:
+      - { message: "add a todo", add: [pkg/src/main.rs], date: "2000-01-01T00:00:00" }
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: per-package, level: warning}

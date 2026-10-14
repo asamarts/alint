@@ -249,7 +249,11 @@ impl Rule for StructuredPathRule {
             // re-introduce the O(N) work this fast path
             // exists to avoid.)
             for literal in literals {
-                if !ctx.index.contains_file(literal) {
+                // The scope still applies: a literal `paths:` entry satisfies the
+                // include globs trivially, but `scope_filter` can exclude it. Skipping
+                // this check let `alint fix` (which evaluates rule-by-rule) edit a file
+                // that `check`'s file-major dispatch had excluded.
+                if !ctx.index.contains_file(literal) || !self.scope.matches(literal, ctx.index) {
                     continue;
                 }
                 let full = ctx.root.join(literal);

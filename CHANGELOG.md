@@ -6,6 +6,35 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **`alint fix` no longer edits files that `scope_filter` excludes.** The structured
+  `*_path_*` kinds (JSON, YAML, TOML, XML, dotenv, properties, INI, HCL) took a fast path for
+  literal `paths:` entries that skipped `scope_filter` when a rule was evaluated on its own.
+  `check` was unaffected (it dispatches file by file and honoured the filter), but `fix`
+  evaluates rule by rule, so a `set_value` or `remove_value` fix could rewrite a listed file
+  that `scope_filter` (for example `has_ancestor`) had excluded. The fast path now applies
+  the rule's scope.
+- **`check --changed` no longer misses `no_case_conflicts` and `max_files_per_directory`
+  violations.** Both judge the whole tree (a case collision needs both paths; a directory's
+  count includes its unchanged files), but in changed mode they saw only the changed files,
+  so adding `Readme.md` next to a committed `README.md`, or a file to a directory already at
+  its limit, went unreported. They now evaluate on the full index, and are still skipped when
+  no file in their scope changed.
+- **A `git_blame_age` rule nested under `for_each_dir`, `for_each_file`, or
+  `every_matching_has` now fires.** The engine built the blame cache only when a top-level
+  rule needed it, so a nested `git_blame_age` silently never reported anything unless some
+  other top-level rule also used blame.
+- **Nested `.alint.yml` configs re-root only path-like fields.** A nested config prefixes
+  path fields with its directory, but it also prefixed the regex `select:` of
+  `for_each_match` and `ordered_block` (turning `^TODO` into `sub/^TODO`, which never
+  matches); those are now left alone. Kinds whose selectors cannot be confined to a
+  subdirectory (`cross_file` and `cross_file_value_equals`, `registry_paths_resolve`,
+  `file_graph`, `pair_hash`, `pair_changed_together`, `changeset_requires_path`,
+  `git_no_denied_paths`, and the `git_commit_*` kinds) are now rejected in nested configs
+  with an error, instead of being accepted with a dummy `paths:` and running over the whole
+  repository. Declare them in the root config.
+
 ## [0.18.2] - 2026-10-13
 
 A security and correctness patch: alint's terminal output now escapes every

@@ -2277,7 +2277,18 @@ impl Engine {
     /// [`Engine::collect_git_tracked_if_needed`] and once here —
     /// negligible cost (sub-ms) compared to the blame work.
     fn build_blame_cache_if_needed(&self, root: &Path) -> Option<crate::git::BlameCache> {
-        let any_wants = self.entries.iter().any(|e| e.rule.wants_git_blame());
+        // Nested `require:` rules count too: a `git_blame_age` under `for_each_dir`
+        // reads the same cache, and deciding from top-level rules alone made it
+        // silently never fire. The visit builds each nested rule once with
+        // placeholder tokens; its errors are already surfaced by the scope
+        // preparation pass, so a failed visit here falls back to the top level.
+        let mut any_wants = self.entries.iter().any(|e| e.rule.wants_git_blame());
+        if !any_wants {
+            let _ = self.visit_all_rules(&mut |rule, _spec| {
+                any_wants |= rule.wants_git_blame();
+                Ok(())
+            });
+        }
         if !any_wants {
             return None;
         }

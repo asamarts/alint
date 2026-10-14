@@ -25,6 +25,34 @@ use crate::{DEFAULT_CONFIG_NAMES, RawConfig};
 /// lifted from a nested config into the root's rule list.
 const NESTED_SCOPE_FIELDS: &[&str] = &["paths", "select", "primary"];
 
+/// Kinds whose `select:` is a line-selector REGEX, not a path glob: re-rooting it
+/// would prefix the regex with the directory (`sub/TODO`) so it never matches.
+/// Their file scope is `paths:`, which is still re-rooted.
+const REGEX_SELECT_KINDS: &[&str] = &["for_each_match", "ordered_block"];
+
+/// Kinds whose real selectors are not `paths` / `select` / `primary` (commit
+/// ranges, diff globs, `source` / `targets`, graph nodes), so re-rooting the
+/// scope fields cannot confine them to the nested directory: a dummy `paths:`
+/// would let them run repo-wide from a subtree config. Refused in nested configs;
+/// declare them in the root config. (v0.19's `KindMeta` derives this from each
+/// kind's typed selectors.)
+const UNCONFINABLE_KINDS: &[&str] = &[
+    "changeset_requires_path",
+    "cross_file",
+    "cross_file_value_equals",
+    "file_graph",
+    "git_commit_author_allowlist",
+    "git_commit_gpg_signed",
+    "git_commit_message",
+    "git_commit_no_fixup",
+    "git_commit_signed_off",
+    "git_commit_subject_matches",
+    "git_no_denied_paths",
+    "pair_changed_together",
+    "pair_hash",
+    "registry_paths_resolve",
+];
+
 /// Walk `root_dir` (respecting the root config's gitignore +
 /// ignore settings), locate every `.alint.yml` / `.alint.yaml` /
 /// `alint.yml` / `alint.yaml` that is not the root config
@@ -259,8 +287,27 @@ fn scope_rule(rule: &mut Mapping, prefix: &str, source: &str) -> Result<()> {
         ));
     }
 
+    let kind = rule
+        .get("kind")
+        .and_then(|v| v.as_str())
+        .unwrap_or_default()
+        .to_string();
+    if UNCONFINABLE_KINDS.contains(&kind.as_str()) {
+        return Err(Error::rule_config(
+            &id_hint,
+            format!(
+                "rule in nested config {source} uses kind `{kind}`, whose selectors \
+                 cannot be confined to the nested directory (it would run over the whole \
+                 repository); declare it in the root config"
+            ),
+        ));
+    }
+
     let mut any_scoped = false;
     for field in NESTED_SCOPE_FIELDS {
+        if *field == "select" && REGEX_SELECT_KINDS.contains(&kind.as_str()) {
+            continue;
+        }
         if let Some(value) = rule.get_mut(*field) {
             scope_paths_value(value, prefix).map_err(|e| {
                 Error::rule_config(&id_hint, format!("scoping `{field}` in {source}: {e}"))
