@@ -193,6 +193,22 @@ pub(crate) fn validate_nested_require(
 ) -> Result<()> {
     let tokens = alint_core::template::PathTokens::from_path(std::path::Path::new("_"));
     for (idx, compiled) in require.iter().enumerate() {
+        // A nested rule's `fix`, `git_tracked_only`, and `respect_gitignore` are
+        // stripped before the leaf rule is built (`NestedRuleSpec::instantiate`), so
+        // they never take effect; accepting them silently made a nested existence
+        // rule count untracked files and a nested fix never apply (v0.18.3).
+        for field in ["fix", "git_tracked_only", "respect_gitignore"] {
+            if compiled.spec.extra.contains_key(field) {
+                return Err(Error::rule_config(
+                    parent_id,
+                    format!(
+                        "nested rule #{idx} (`{}`): `{field}` is not supported on a nested \
+                         rule and would be ignored; declare a top-level rule instead",
+                        compiled.spec.kind
+                    ),
+                ));
+            }
+        }
         let synthesized = compiled.spec.instantiate(parent_id, idx, level, &tokens);
         let nested_rule = registry.build(&synthesized).map_err(|e| {
             Error::rule_config(
@@ -691,6 +707,30 @@ mod tests {
         let r = rule("components/*", vec![require_file_exists("{dir}/index.tsx")]);
         let v = eval_with(&r, &[("src", true), ("src/foo", true)]);
         assert!(v.is_empty());
+    }
+
+    #[test]
+    fn validate_nested_rejects_fields_a_nested_rule_would_ignore() {
+        // `fix`, `git_tracked_only`, and `respect_gitignore` are stripped from a
+        // nested rule before it is built, so they never applied; they are now load
+        // errors instead of silent no-ops (v0.18.3).
+        let reg = registry();
+        for extra in [
+            "git_tracked_only: true",
+            "respect_gitignore: false",
+            "fix:\n  file_create:\n    content: x",
+        ] {
+            let yaml = format!("kind: file_exists\npaths: \"{{path}}/LICENSE\"\n{extra}\n");
+            let nested: NestedRuleSpec = serde_yaml_ng::from_str(&yaml).unwrap();
+            let err = rule("pkgs/*", vec![nested])
+                .validate_nested(&reg)
+                .unwrap_err()
+                .to_string();
+            assert!(
+                err.contains("not supported on a nested rule"),
+                "{extra}: {err}"
+            );
+        }
     }
 
     #[test]

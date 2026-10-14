@@ -158,7 +158,15 @@ impl Rule for FileExistsRule {
                     // doesn't stat through an in-repo symlink out of the tree
                     // (an existence oracle reachable from an extends'd ruleset).
                     let abs = ctx.root.join(&confined);
-                    if crate::pathsafe::resolved_within_root(&abs, ctx.root) && abs.is_file() {
+                    // `git_tracked_only` still applies to a file found by the stat:
+                    // the walker-bypass exists for tracked-but-gitignored files, so
+                    // an untracked one on disk must not satisfy the rule (v0.18.3).
+                    let tracked_ok = !self.git_tracked_only
+                        || ctx.git_tracked.is_some_and(|t| t.contains(&confined));
+                    if tracked_ok
+                        && crate::pathsafe::resolved_within_root(&abs, ctx.root)
+                        && abs.is_file()
+                    {
                         return true;
                     }
                 }

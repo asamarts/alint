@@ -57,6 +57,13 @@ impl Rule for MarkdownPathsResolveRule {
         Some(&self.scope)
     }
 
+    /// A document's verdict depends on files outside it (the paths it names), so
+    /// under `--changed` every in-scope document is checked: deleting or renaming
+    /// an unchanged target is a change that breaks an unchanged document.
+    fn requires_full_index(&self) -> bool {
+        true
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         eval_per_file(self, ctx)
     }
@@ -413,10 +420,10 @@ fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
             return false;
         };
         let matcher = glob.compile_matcher();
-        return ctx.index.entries.iter().any(|e| matcher.is_match(&e.path));
+        return ctx.index.tree_paths().any(|p| matcher.is_match(p));
     }
-    let p = Path::new(lookup);
-    ctx.index.entries.iter().any(|e| &*e.path == p)
+    // Look up against the whole repository, not only the iterated files.
+    ctx.index.contains_path_in_tree(Path::new(lookup))
 }
 
 #[cfg(test)]

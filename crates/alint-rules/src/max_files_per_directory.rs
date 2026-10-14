@@ -40,8 +40,8 @@ impl Rule for MaxFilesPerDirectoryRule {
         Some(&self.scope)
     }
 
-    /// The verdict is a whole-tree judgement (a directory's count includes its unchanged files
-    /// may be outside a `--changed` diff), so evaluate on the full index. `path_scope` still lets
+    /// The verdict is a whole-tree judgement (a directory's count includes files that are
+    /// outside a `--changed` diff), so evaluate on the full index. `path_scope` still lets
     /// `--changed` skip the rule when no in-scope file changed.
     fn requires_full_index(&self) -> bool {
         true

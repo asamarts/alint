@@ -500,6 +500,13 @@ impl Engine {
                 fi.set_changed_paths(map.clone());
             }
         }
+        // Tree-wide lookups (a `has_ancestor` marker, a referenced path) on the
+        // `--changed` index must see unchanged files too. Only the changed-set
+        // index shares the full tree; the git-tracked indexes are deliberately
+        // subsets and must not.
+        if let Some(fi) = filtered_index.as_ref() {
+            fi.share_tree_sets_from(index);
+        }
 
         // Per-rule wall-time accumulator for the cross-file
         // partition. One AtomicU64 per entry, indexed by
@@ -530,6 +537,7 @@ impl Engine {
                         self.skip_for_changed(entry.rule.as_ref(), full_ctx.index, None);
                     let ctx = pick_ctx(
                         entry.rule.as_ref(),
+                        self.dependency_changed(entry.rule.as_ref()),
                         &full_ctx,
                         filtered_ctx.as_ref(),
                         git_file_only_ctx.as_ref(),
@@ -661,7 +669,22 @@ impl Engine {
             return gate_results;
         }
 
-        let per_file_ctx = filtered_ctx.unwrap_or(full_ctx);
+        // Under `--changed`, the per-file pass reads only the changed files, but
+        // every scope match and every evaluation uses the FULL context: whether a
+        // file is in scope (a `has_ancestor` marker) and what it references are
+        // facts about the repository, not about the diff. A per-file rule that
+        // declares `requires_full_index` (its verdict on a file depends on other
+        // files, such as `markdown_paths_resolve`'s targets) is evaluated on every
+        // in-scope file, so deleting an unchanged target is still caught.
+        let any_full_index = filtered_ctx.is_some()
+            && live
+                .iter()
+                .any(|(_, entry)| entry.rule.requires_full_index());
+        let walk_index = match filtered_ctx {
+            Some(filtered) if !any_full_index => filtered.index,
+            _ => full_ctx.index,
+        };
+        let per_file_ctx = full_ctx;
 
         // Each file-major iteration produces a Vec of
         // `(entry-index, Violation)` tuples. The flatten
@@ -679,12 +702,16 @@ impl Engine {
         // observable iteration, no shared lock on the hot
         // path.
         let by_file: Vec<(usize, Violation)> = with_worker_pool(|| {
-            per_file_ctx
-                .index
+            walk_index
                 .entries
                 .par_iter()
                 .filter(|e| !e.is_dir)
                 .flat_map_iter(|file_entry| {
+                    // Whether this file is in the `--changed` set (always true
+                    // for a full run, or when the walk is already the filtered
+                    // index). Only full-index per-file rules see the others.
+                    let in_changed = !any_full_index
+                        || filtered_ctx.is_none_or(|f| f.index.contains_file(&file_entry.path));
                     // 1. Decide which per-file rules apply to this
                     // file. Per-file rules expose their scope via
                     // `PerFileRule::path_scope`; we filter on it
@@ -696,6 +723,9 @@ impl Engine {
                     let applicable: Vec<(usize, &RuleEntry)> = live
                         .iter()
                         .filter(|(_, entry)| {
+                            if !in_changed && !entry.rule.requires_full_index() {
+                                return false;
+                            }
                             // 1a. Path-scope glob — cheap, dropping
                             // files no rule cares about before any
                             // further work.
@@ -828,7 +858,11 @@ impl Engine {
             if entry.rule.as_per_file().is_none() {
                 continue;
             }
-            let skipped_for_changed = self.skip_for_changed(entry.rule.as_ref(), index, None);
+            // A full-index per-file rule is never `--changed`-skipped by its scope:
+            // a change outside its scope (a deleted target) can still change its
+            // verdict, exactly as for `markdown_links_resolve`.
+            let skipped_for_changed = !entry.rule.requires_full_index()
+                && self.skip_for_changed(entry.rule.as_ref(), index, None);
             if skipped_for_changed && !entry.expect_matches() {
                 continue;
             }
@@ -1640,6 +1674,13 @@ impl Engine {
                 fi.set_changed_paths(map.clone());
             }
         }
+        // Tree-wide lookups (a `has_ancestor` marker, a referenced path) on the
+        // `--changed` index must see unchanged files too. Only the changed-set
+        // index shares the full tree; the git-tracked indexes are deliberately
+        // subsets and must not.
+        if let Some(fi) = filtered_index.as_ref() {
+            fi.share_tree_sets_from(index);
+        }
 
         let mut results: Vec<FixRuleResult> = Vec::new();
         // Accumulator for the located-edit regime, filled by fixers that opt in
@@ -1709,6 +1750,7 @@ impl Engine {
             } else {
                 let ctx = pick_ctx(
                     entry.rule.as_ref(),
+                    self.dependency_changed(entry.rule.as_ref()),
                     &full_ctx,
                     filtered_ctx.as_ref(),
                     git_file_only_ctx.as_ref(),
@@ -2421,6 +2463,18 @@ impl Engine {
     /// satisfies it. Cross-file rules return `path_scope = None`
     /// per the roadmap contract — so they always return `false`
     /// here (i.e. never skipped).
+    /// Whether a file the rule depends on, outside its own scope, is in the
+    /// `--changed` set ([`Rule::changed_dependencies`]). Always `false` without
+    /// `--changed`.
+    fn dependency_changed(&self, rule: &dyn Rule) -> bool {
+        let Some(set) = &self.changed_paths else {
+            return false;
+        };
+        rule.changed_dependencies()
+            .into_iter()
+            .any(|dep| crate::pathsafe::normalize_confined(dep).is_some_and(|p| set.contains(&p)))
+    }
+
     fn skip_for_changed(
         &self,
         rule: &dyn Rule,
@@ -2430,6 +2484,9 @@ impl Engine {
         let Some(set) = &self.changed_paths else {
             return false;
         };
+        if self.dependency_changed(rule) {
+            return false;
+        }
         let Some(scope) = rule.path_scope() else {
             return false;
         };
@@ -2818,6 +2875,7 @@ fn located_edit_path(edit: &FixEdit) -> String {
 /// `full_ctx` when no `--changed` set is configured).
 fn pick_ctx<'a>(
     rule: &dyn Rule,
+    dependency_changed: bool,
     full_ctx: &'a Context<'a>,
     filtered_ctx: Option<&'a Context<'a>>,
     git_file_only_ctx: Option<&'a Context<'a>>,
@@ -2838,7 +2896,7 @@ fn pick_ctx<'a>(
         }
         crate::rule::GitTrackedMode::Off => {}
     }
-    if rule.requires_full_index() {
+    if rule.requires_full_index() || dependency_changed {
         full_ctx
     } else {
         filtered_ctx.unwrap_or(full_ctx)

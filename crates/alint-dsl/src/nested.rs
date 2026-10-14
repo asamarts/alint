@@ -257,10 +257,41 @@ fn load_nested_config(abs_path: &Path, rel_dir: &Path) -> Result<Vec<Mapping>> {
     let dir_prefix = rel_dir.to_string_lossy().replace('\\', "/");
     let mut out = Vec::with_capacity(config.rules.len());
     for mut rule in config.rules {
-        scope_rule(&mut rule, &dir_prefix, &source)?;
+        // Re-rooting is deferred to `finalize`, AFTER template expansion: a nested
+        // rule may `extends_template:` a root template, and the template's kind and
+        // path fields must be confined (and kind-checked) too. Re-rooting the raw
+        // instance here missed both (v0.18.3 review). The marker carries the prefix.
+        let mut marker = Mapping::new();
+        marker.insert("prefix".into(), dir_prefix.clone().into());
+        marker.insert("source".into(), source.clone().into());
+        rule.insert(
+            NESTED_SCOPE_MARKER.into(),
+            serde_yaml_ng::Value::Mapping(marker),
+        );
         out.push(rule);
     }
     Ok(out)
+}
+
+/// Internal raw-mapping marker on a rule contributed by a nested config: the
+/// subtree prefix and the config's path. [`apply_nested_scope`] consumes it in
+/// `finalize`, after template expansion, so it never reaches the typed `RuleSpec`.
+pub(crate) const NESTED_SCOPE_MARKER: &str = "__alint_internal_nested_scope";
+
+/// Confine an expanded rule to the nested subtree it came from, if it came from a
+/// nested config. Called on the EFFECTIVE (template-expanded) rule.
+pub(crate) fn apply_nested_scope(rule: &mut Mapping) -> Result<()> {
+    let Some(serde_yaml_ng::Value::Mapping(marker)) = rule.remove(NESTED_SCOPE_MARKER) else {
+        return Ok(());
+    };
+    let field = |name: &str| {
+        marker
+            .get(name)
+            .and_then(|v| v.as_str())
+            .unwrap_or_default()
+            .to_string()
+    };
+    scope_rule(rule, &field("prefix"), &field("source"))
 }
 
 /// Re-root every path-like scope field of a rule mapping in
@@ -292,29 +323,7 @@ fn scope_rule(rule: &mut Mapping, prefix: &str, source: &str) -> Result<()> {
         .and_then(|v| v.as_str())
         .unwrap_or_default()
         .to_string();
-    if UNCONFINABLE_KINDS.contains(&kind.as_str()) {
-        return Err(Error::rule_config(
-            &id_hint,
-            format!(
-                "rule in nested config {source} uses kind `{kind}`, whose selectors \
-                 cannot be confined to the nested directory (it would run over the whole \
-                 repository); declare it in the root config"
-            ),
-        ));
-    }
-
-    let mut any_scoped = false;
-    for field in NESTED_SCOPE_FIELDS {
-        if *field == "select" && REGEX_SELECT_KINDS.contains(&kind.as_str()) {
-            continue;
-        }
-        if let Some(value) = rule.get_mut(*field) {
-            scope_paths_value(value, prefix).map_err(|e| {
-                Error::rule_config(&id_hint, format!("scoping `{field}` in {source}: {e}"))
-            })?;
-            any_scoped = true;
-        }
-    }
+    let any_scoped = scope_kind_fields(rule, &kind, prefix, &id_hint, source, false)?;
 
     // A manifest predicate's `source:` is a path relative to this config's
     // directory (like `paths:`), so rebase it under the nested prefix — else a
@@ -353,6 +362,157 @@ fn scope_rule(rule: &mut Mapping, prefix: &str, source: &str) -> Result<()> {
                 NESTED_SCOPE_FIELDS.join(", "),
             ),
         ));
+    }
+    Ok(())
+}
+
+/// Nested `require:` rules of these kinds are themselves rules with scope fields.
+const NESTED_RULE_KINDS: &[&str] = &["for_each_dir", "for_each_file", "every_matching_has"];
+
+/// Re-root the path-like fields of one rule (or, with `in_require`, of one nested
+/// `require:` entry) of kind `kind`, recursing into nested `require:` blocks.
+/// Returns whether any primary scope field (`paths`, `select`, `primary`) was
+/// present. Inside a `require:` block, a value that starts with a template token
+/// (`{path}/...`) is already anchored to the iterated entry, which is itself
+/// re-rooted, so it is left alone; any other value is relative to the repository
+/// root and is prefixed, or it would escape the subtree (v0.18.3 review).
+fn scope_kind_fields(
+    rule: &mut Mapping,
+    kind: &str,
+    prefix: &str,
+    id_hint: &str,
+    source: &str,
+    in_require: bool,
+) -> Result<bool> {
+    if UNCONFINABLE_KINDS.contains(&kind) {
+        return Err(Error::rule_config(
+            id_hint,
+            format!(
+                "rule in nested config {source} uses kind `{kind}`{}, whose selectors \
+                 cannot be confined to the nested directory (it would run over the whole \
+                 repository); declare it in the root config",
+                if in_require {
+                    " in a `require:` block"
+                } else {
+                    ""
+                }
+            ),
+        ));
+    }
+    let scope_err = |field: &str, e: Error| {
+        Error::rule_config(id_hint, format!("scoping `{field}` in {source}: {e}"))
+    };
+
+    let mut any_scoped = false;
+    for field in NESTED_SCOPE_FIELDS {
+        if *field == "select" && REGEX_SELECT_KINDS.contains(&kind) {
+            continue;
+        }
+        if let Some(value) = rule.get_mut(*field) {
+            scope_paths_value_in(value, prefix, in_require).map_err(|e| scope_err(field, e))?;
+            any_scoped = true;
+        }
+    }
+
+    // Kind-specific fields that are repository-relative paths or globs.
+    match kind {
+        "import_gate" => {
+            if let Some(value) = rule.get_mut("allow") {
+                scope_paths_value_in(value, prefix, in_require)
+                    .map_err(|e| scope_err("allow", e))?;
+            }
+        }
+        "json_schema_passes" => {
+            if let Some(serde_yaml_ng::Value::String(s)) = rule.get_mut("schema_path") {
+                *s = scope_value_in(s, prefix, in_require)
+                    .map_err(|e| scope_err("schema_path", e))?;
+            }
+        }
+        "markdown_links_resolve" => {
+            if let Some(serde_yaml_ng::Value::String(s)) = rule
+                .get_mut("root")
+                .and_then(serde_yaml_ng::Value::as_mapping_mut)
+                .and_then(|m| m.get_mut("dir"))
+            {
+                *s = if s == "." {
+                    prefix.to_string()
+                } else {
+                    scope_value_in(s, prefix, in_require).map_err(|e| scope_err("root.dir", e))?
+                };
+            }
+        }
+        "pair" => {
+            if let Some(serde_yaml_ng::Value::String(s)) = rule.get_mut("partner") {
+                // A partner template built from the (re-rooted) primary's tokens
+                // stays in the subtree; a literal partner is prefixed.
+                if !starts_with_token(s) {
+                    *s = scope_glob(s, prefix).map_err(|e| scope_err("partner", e))?;
+                }
+            }
+        }
+        _ => {}
+    }
+
+    if NESTED_RULE_KINDS.contains(&kind)
+        && let Some(serde_yaml_ng::Value::Sequence(items)) = rule.get_mut("require")
+    {
+        for item in items {
+            let Some(child) = item.as_mapping_mut() else {
+                continue;
+            };
+            let child_kind = child
+                .get("kind")
+                .and_then(|v| v.as_str())
+                .unwrap_or_default()
+                .to_string();
+            scope_kind_fields(child, &child_kind, prefix, id_hint, source, true)?;
+        }
+    }
+    Ok(any_scoped)
+}
+
+/// Whether a path value (after an optional `!`) starts with a template token.
+fn starts_with_token(value: &str) -> bool {
+    value.strip_prefix('!').unwrap_or(value).starts_with('{')
+}
+
+/// Re-root one path or glob, leaving a token-anchored value inside a `require:`
+/// block untouched (see [`scope_kind_fields`]).
+fn scope_value_in(value: &str, prefix: &str, in_require: bool) -> Result<String> {
+    if in_require && starts_with_token(value) {
+        Ok(value.to_string())
+    } else {
+        scope_glob(value, prefix)
+    }
+}
+
+/// [`scope_paths_value`] with the `require:`-block token rule applied to every
+/// string in the value.
+fn scope_paths_value_in(
+    value: &mut serde_yaml_ng::Value,
+    prefix: &str,
+    in_require: bool,
+) -> Result<()> {
+    if !in_require {
+        return scope_paths_value(value, prefix);
+    }
+    match value {
+        serde_yaml_ng::Value::String(s) => *s = scope_value_in(s, prefix, true)?,
+        serde_yaml_ng::Value::Sequence(seq) => {
+            for item in seq {
+                if let serde_yaml_ng::Value::String(s) = item {
+                    *s = scope_value_in(s, prefix, true)?;
+                }
+            }
+        }
+        serde_yaml_ng::Value::Mapping(m) => {
+            for key in &["include", "exclude"] {
+                if let Some(inner) = m.get_mut(*key) {
+                    scope_paths_value_in(inner, prefix, true)?;
+                }
+            }
+        }
+        _ => {}
     }
     Ok(())
 }

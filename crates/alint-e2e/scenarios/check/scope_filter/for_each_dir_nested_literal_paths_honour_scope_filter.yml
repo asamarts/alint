@@ -1,0 +1,38 @@
+name: a nested structured rule with a literal path honours its scope_filter
+tags: [check, for_each_dir, json_path_equals, scope_filter]
+
+# Regression (v0.18.3): a structured `*_path_*` rule nested under `for_each_dir` renders its
+# `{path}/app.json` to a literal path. When the per-iteration shortcut does not apply, the
+# nested rule is evaluated on its own, and its literal-paths fast path skipped `scope_filter`,
+# so `check` reported `crates/b/app.json` although only `crates/a` has the `MARKER` ancestor.
+
+given:
+  tree:
+    crates:
+      a:
+        MARKER: ""
+        app.json: |
+          {"port": 8080}
+      b:
+        app.json: |
+          {"port": 8080}
+  config: |
+    version: 1
+    rules:
+      - id: ports
+        kind: for_each_dir
+        select: "crates/*"
+        level: error
+        require:
+          - kind: json_path_equals
+            paths: "{path}/app.json"
+            path: "$.port"
+            equals: 9090
+            scope_filter:
+              has_ancestor: MARKER
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: ports, level: error, path: crates/a/app.json}

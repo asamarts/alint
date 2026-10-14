@@ -419,6 +419,15 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         false
     }
 
+    /// Repository-relative files, outside the rule's own scope, whose change can
+    /// alter its verdict (for example `json_schema_passes`'s schema). Under
+    /// `--changed`, a change to one of them keeps the rule alive and evaluates it
+    /// on the full index, so editing only the schema re-validates every in-scope
+    /// document. Default: none.
+    fn changed_dependencies(&self) -> Vec<&Path> {
+        Vec::new()
+    }
+
     /// In `--changed` mode, return the [`Scope`](crate::Scope)
     /// this rule is scoped to (typically the rule's `paths:`
     /// field). The engine intersects the scope with the

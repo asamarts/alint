@@ -822,7 +822,10 @@ impl ScopeFilter {
             let dir = cur.unwrap_or_else(|| Path::new(""));
             for name in &self.has_ancestor {
                 let candidate = dir.join(name);
-                if index.contains_file(&candidate) {
+                // The marker is about the repository, not the iterated files: on a
+                // `--changed`-filtered index an unchanged `Cargo.toml` must still
+                // count, or the rule never fires in changed mode (v0.18.3).
+                if index.contains_file_in_tree(&candidate) {
                     return true;
                 }
             }

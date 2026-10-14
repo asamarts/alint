@@ -42,7 +42,7 @@
 //! Check-only — fixing schema violations is a "the user knows
 //! what value belongs there" problem, not alint's.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
 use alint_core::{Context, Error, Format, Level, Result, Rule, RuleSpec, Scope, Violation};
@@ -128,6 +128,12 @@ impl Rule for JsonSchemaPassesRule {
     /// can `--changed`-skip it (see `Rule::path_scope`).
     fn path_scope(&self) -> Option<&Scope> {
         Some(&self.scope)
+    }
+
+    /// Editing only the schema changes the verdict for every in-scope document, so
+    /// under `--changed` a schema change re-validates them all.
+    fn changed_dependencies(&self) -> Vec<&Path> {
+        vec![self.schema_path.as_path()]
     }
 
     alint_core::rule_common_impl!();

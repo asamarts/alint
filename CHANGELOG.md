@@ -6,34 +6,55 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
+### Changed
 
-- **`alint fix` no longer edits files that `scope_filter` excludes.** The structured
-  `*_path_*` kinds (JSON, YAML, TOML, XML, dotenv, properties, INI, HCL) took a fast path for
-  literal `paths:` entries that skipped `scope_filter` when a rule was evaluated on its own.
-  `check` was unaffected (it dispatches file by file and honoured the filter), but `fix`
-  evaluates rule by rule, so a `set_value` or `remove_value` fix could rewrite a listed file
-  that `scope_filter` (for example `has_ancestor`) had excluded. The fast path now applies
-  the rule's scope.
-- **`check --changed` no longer misses `no_case_conflicts` and `max_files_per_directory`
-  violations.** Both judge the whole tree (a case collision needs both paths; a directory's
-  count includes its unchanged files), but in changed mode they saw only the changed files,
-  so adding `Readme.md` next to a committed `README.md`, or a file to a directory already at
-  its limit, went unreported. They now evaluate on the full index, and are still skipped when
-  no file in their scope changed.
-- **A `git_blame_age` rule nested under `for_each_dir`, `for_each_file`, or
-  `every_matching_has` now fires.** The engine built the blame cache only when a top-level
-  rule needed it, so a nested `git_blame_age` silently never reported anything unless some
-  other top-level rule also used blame.
-- **Nested `.alint.yml` configs re-root only path-like fields.** A nested config prefixes
-  path fields with its directory, but it also prefixed the regex `select:` of
-  `for_each_match` and `ordered_block` (turning `^TODO` into `sub/^TODO`, which never
-  matches); those are now left alone. Kinds whose selectors cannot be confined to a
+- **Some nested configurations that loaded before are now load errors**, because they never
+  did what they said. In a nested `.alint.yml`, kinds whose selectors cannot be confined to the
   subdirectory (`cross_file` and `cross_file_value_equals`, `registry_paths_resolve`,
   `file_graph`, `pair_hash`, `pair_changed_together`, `changeset_requires_path`,
-  `git_no_denied_paths`, and the `git_commit_*` kinds) are now rejected in nested configs
-  with an error, instead of being accepted with a dummy `paths:` and running over the whole
-  repository. Declare them in the root config.
+  `git_no_denied_paths`, and the `git_commit_*` kinds) are rejected, at the top level, inside a
+  `require:` block, or through a root template; they used to run over the whole repository.
+  And a rule nested under `for_each_dir`, `for_each_file`, or `every_matching_has` may no
+  longer set `fix`, `git_tracked_only`, or `respect_gitignore`, which were silently discarded.
+  Move such rules to the root config (or a top-level rule).
+
+### Fixed
+
+- **`alint fix` no longer edits files that `scope_filter` excludes, and nested structured rules
+  honour it in `check`.** The structured `*_path_*` kinds (JSON, YAML, TOML, XML, dotenv,
+  properties, INI, HCL) took a fast path for literal `paths:` that skipped `scope_filter`
+  whenever the rule was evaluated on its own. That is how `fix` evaluates, so a `set_value` or
+  `remove_value` fix could rewrite a listed file that `scope_filter` (for example
+  `has_ancestor`) had excluded; and it is how a rule nested under `for_each_dir` is evaluated,
+  so `check` reported such files too. The fast path now applies the rule's scope.
+- **`check --changed` and `fix --changed` judge changed files against the whole repository.**
+  The per-file pass matched scope and resolved references against the changed files only, so:
+  a rule with `scope_filter.has_ancestor` never fired when its marker (an unchanged
+  `Cargo.toml`) was outside the diff; `markdown_paths_resolve` reported an unchanged file it
+  referenced as missing. Scope matching and lookups now see the full tree, while only changed
+  files are read.
+- **`check --changed` catches violations caused by changes elsewhere.**
+  - `no_case_conflicts` and `max_files_per_directory` judge the whole tree but saw only the
+    changed files, so adding `Readme.md` next to a committed `README.md`, or a file to a
+    directory already at its limit, went unreported. They now evaluate on the full index (and
+    are still skipped when no file in their scope changed).
+  - `markdown_paths_resolve` now checks every in-scope document, so deleting or renaming a
+    file that an unchanged document references is caught.
+  - `json_schema_passes` re-validates every in-scope document when only its `schema_path:`
+    changes; it used to be skipped.
+- **A `git_blame_age` rule nested under `for_each_dir`, `for_each_file`, or
+  `every_matching_has` now fires.** The engine built the blame cache only when a top-level rule
+  needed it, so a nested `git_blame_age` silently never reported anything.
+- **Nested `.alint.yml` configs confine every repository-relative field.** They used to prefix
+  only `paths`, `select`, and `primary`, which corrupted the regex `select:` of `for_each_match`
+  and `ordered_block` (now left alone) and let other fields escape the subdirectory: the path
+  fields of rules nested under `require:`, `import_gate`'s `allow:`, `json_schema_passes`'s
+  `schema_path:`, `markdown_links_resolve`'s `root.dir:`, and a literal `pair` `partner:` are
+  now prefixed. Confinement also runs after `extends_template:` expansion, so a nested rule can
+  no longer pick up an unconfined kind or selector from a root template.
+- **`file_exists` with a literal path and `respect_gitignore: false` honours
+  `git_tracked_only`.** The direct filesystem check for tracked-but-gitignored files accepted an
+  untracked file on disk; it now requires the file to be tracked, as the glob form already did.
 
 ## [0.18.2] - 2026-10-13
 

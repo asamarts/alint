@@ -436,6 +436,10 @@ impl RawConfig {
             reject_untrusted_env_instance_vars(m, &templates_by_id, &id_hint)?;
             let mut expanded = expand_template(m, &templates_by_id)?;
             expanded.remove(ENV_VARS_MARKER);
+            // A nested-config rule is confined to its subtree here, on the effective
+            // rule, so fields and the kind a root template contributes are re-rooted
+            // and kind-checked too (not only the instance's own fields).
+            nested::apply_nested_scope(&mut expanded)?;
             // A source-local cap is not enough: an untrusted rule can instantiate
             // a fixer-bearing trusted template, and a trusted rule can instantiate
             // a template partly defined by an untrusted source. Carry one bit of

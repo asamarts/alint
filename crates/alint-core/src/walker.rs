@@ -213,6 +213,12 @@ pub struct FileEntry {
 /// per-dir O(N) scan. Closes the v0.9.5 → v0.9.8 cliff: at 1M
 /// files / 5K dirs, `dir_only_contains` drops from 5 billion
 /// path-parent comparisons to ~1 million.
+/// A shared set of repository-relative paths (see `FileIndex::tree_sets`).
+type SharedPathSet = Arc<HashSet<Arc<Path>>>;
+/// The full tree's (file paths, file-and-directory paths), shared into a
+/// `--changed`-filtered index.
+type TreeSets = (SharedPathSet, SharedPathSet);
+
 #[derive(Debug, Default)]
 pub struct FileIndex {
     pub entries: Vec<FileEntry>,
@@ -221,8 +227,14 @@ pub struct FileIndex {
     /// tree bytes) but recorded here so `no_symlinks` can still flag them (M4).
     /// Relative paths, sorted + deduped. Empty for a fixture-built index.
     escaping_symlinks: Vec<Arc<Path>>,
-    path_set: OnceLock<HashSet<Arc<Path>>>,
-    all_path_set: OnceLock<HashSet<Arc<Path>>>,
+    path_set: OnceLock<SharedPathSet>,
+    all_path_set: OnceLock<SharedPathSet>,
+    /// For a `--changed`-filtered index: the FULL tree's file and path sets,
+    /// shared (not copied) from the index it was filtered from, so lookups that
+    /// are about the repository rather than the iterated files (a
+    /// `scope_filter.has_ancestor` marker, a referenced path) still see unchanged
+    /// files. Unset on a full index, where the own sets are the tree's.
+    tree_sets: OnceLock<TreeSets>,
     parent_to_children: OnceLock<HashMap<Arc<Path>, Vec<usize>>>,
     /// Per-`since`-ref diff sets backing `scope_filter.changed_since:`.
     /// Populated once by the engine before per-file dispatch (a ref
@@ -267,6 +279,7 @@ impl FileIndex {
             escaping_symlinks,
             path_set: OnceLock::new(),
             all_path_set: OnceLock::new(),
+            tree_sets: OnceLock::new(),
             parent_to_children: OnceLock::new(),
             changed_paths: OnceLock::new(),
             manifest_paths: OnceLock::new(),
@@ -385,6 +398,10 @@ impl FileIndex {
     /// calls return the cached set. Concurrent first calls are
     /// safe (`OnceLock` ensures a single initialiser wins).
     pub fn file_path_set(&self) -> &HashSet<Arc<Path>> {
+        self.file_path_set_arc()
+    }
+
+    fn file_path_set_arc(&self) -> &SharedPathSet {
         self.path_set.get_or_init(|| {
             #[cfg(debug_assertions)]
             let start = std::time::Instant::now();
@@ -395,8 +412,63 @@ impl FileIndex {
                 .map(|e| Arc::clone(&e.path))
                 .collect();
             trace_index_build!("path_set", start, self.entries.len());
-            set
+            Arc::new(set)
         })
+    }
+
+    fn all_path_set_arc(&self) -> &SharedPathSet {
+        self.all_path_set.get_or_init(|| {
+            #[cfg(debug_assertions)]
+            let start = std::time::Instant::now();
+            let set = self
+                .entries
+                .iter()
+                .map(|entry| Arc::clone(&entry.path))
+                .collect();
+            trace_index_build!("all_path_set", start, self.entries.len());
+            Arc::new(set)
+        })
+    }
+
+    /// Share `full`'s file and path sets into this (`--changed`-filtered) index,
+    /// so [`Self::contains_file_in_tree`] and [`Self::contains_path_in_tree`]
+    /// answer about the whole repository. Engine-only, once per run; a no-op if
+    /// already set. The sets are reference-counted, not copied.
+    pub(crate) fn share_tree_sets_from(&self, full: &FileIndex) {
+        let _ = self.tree_sets.set((
+            Arc::clone(full.file_path_set_arc()),
+            Arc::clone(full.all_path_set_arc()),
+        ));
+    }
+
+    /// Does `rel` exist as a file anywhere in the repository? On a full index this
+    /// is [`Self::contains_file`]; on a `--changed`-filtered index it also sees
+    /// unchanged files. Use it for lookups about the tree (ancestor markers,
+    /// referenced files), never for deciding which files to iterate.
+    pub fn contains_file_in_tree(&self, rel: &Path) -> bool {
+        match self.tree_sets.get() {
+            Some((files, _)) => files.contains(rel),
+            None => self.contains_file(rel),
+        }
+    }
+
+    /// Does `rel` exist as a file or directory anywhere in the repository? The
+    /// tree-wide counterpart of [`Self::contains_path`], as
+    /// [`Self::contains_file_in_tree`] is of [`Self::contains_file`].
+    pub fn contains_path_in_tree(&self, rel: &Path) -> bool {
+        match self.tree_sets.get() {
+            Some((_, all)) => all.contains(rel),
+            None => self.contains_path(rel),
+        }
+    }
+
+    /// Every file and directory path in the repository: this index's own paths,
+    /// or, on a `--changed`-filtered index, the shared full-tree set.
+    pub fn tree_paths(&self) -> impl Iterator<Item = &Arc<Path>> {
+        match self.tree_sets.get() {
+            Some((_, all)) => all.iter(),
+            None => self.all_path_set_arc().iter(),
+        }
     }
 
     /// O(1) "does this exact relative path exist as a file?"
@@ -413,19 +485,7 @@ impl FileIndex {
     /// [`Self::contains_file`]: documentation links and other repository
     /// references may legitimately target either kind.
     pub fn contains_path(&self, rel: &Path) -> bool {
-        self.all_path_set
-            .get_or_init(|| {
-                #[cfg(debug_assertions)]
-                let start = std::time::Instant::now();
-                let set = self
-                    .entries
-                    .iter()
-                    .map(|entry| Arc::clone(&entry.path))
-                    .collect();
-                trace_index_build!("all_path_set", start, self.entries.len());
-                set
-            })
-            .contains(rel)
+        self.all_path_set_arc().contains(rel)
     }
 
     /// Find a file entry by its exact relative path. Uses the

@@ -1,0 +1,31 @@
+name: file_exists with a literal path and respect_gitignore false still requires the file be tracked
+tags: [check, file_exists, git_tracked_only]
+
+# Regression (v0.18.3): `respect_gitignore: false` makes a literal `paths:` entry stat the
+# filesystem directly (for tracked-but-gitignored files such as `.bazelversion`), but that stat
+# ignored `git_tracked_only`, so an UNTRACKED file on disk satisfied a rule that requires a
+# tracked one. The glob spelling already reported it; the literal spelling now does too.
+
+given:
+  tree:
+    .gitignore: ".bazelversion\n"
+    .bazelversion: "7.0.0\n"
+  config: |
+    version: 1
+    rules:
+      - id: bazelversion-tracked
+        kind: file_exists
+        paths: ".bazelversion"
+        git_tracked_only: true
+        respect_gitignore: false
+        level: error
+  git:
+    init: true
+    add: [.gitignore]
+    commit: true
+
+when: [check]
+
+expect:
+  - violations:
+      - {rule: bazelversion-tracked, level: error}
