@@ -42,8 +42,15 @@ builder functions, trait methods, and nine hand-maintained lists. The inventory 
      (`no_submodules` also skips an unchanged `.gitmodules` under `--changed`, but that matches
      `file_absent` and the `--changed` contract, so it is not a bug.)
 
-  v0.18.3 also found, in review, that a nested rule using `extends_template:` took its kind and
-  selectors from a root template unconfined; nested confinement now runs on the expanded rule.
+  Review of the v0.18.3 patch found ten more instances of the same classes, fixed in the same
+  patch: a nested rule using `extends_template:` took its kind and selectors from a root template
+  unconfined; nested `require:` blocks and several kind-specific path fields were not re-rooted;
+  nested `fix`, `git_tracked_only`, and `respect_gitignore` were silently stripped; under
+  `--changed`, scope matching and reference lookups used the changed files only (so a
+  `has_ancestor` marker outside the diff never counted, and `markdown_paths_resolve` misreported
+  targets), and a `json_schema_passes` schema-only change skipped the rule; and `file_exists`'s
+  literal stat ignored `git_tracked_only`. Each is a capability or selector fact the records must
+  express (section 3.1).
 
 ## 2. Surface area
 
@@ -64,7 +71,7 @@ canonical kind's record. Proposed shape (names indicative):
 
 | Field | Values (from the inventory) |
 |---|---|
-| `dispatch` | `PerFile` (51 kinds), `FullIndex { path_scope: bool }` (20 since v0.18.3, was 18; `file_exists`, `file_absent`, `no_case_conflicts`, and `max_files_per_directory` expose a scope as their `--changed` skip predicate), `RuleMajorScoped` (14, was 16), `SingleShot` (10). No kind's dispatch depends on options. |
+| `dispatch` | `PerFile` (51 kinds; since v0.18.3 one of them, `markdown_paths_resolve`, is also `FullIndex`, which makes the per-file pass evaluate every in-scope file under `--changed`), `FullIndex { path_scope: bool }` (20 since v0.18.3, was 18; `file_exists`, `file_absent`, `no_case_conflicts`, and `max_files_per_directory` expose a scope as their `--changed` skip predicate), `RuleMajorScoped` (14, was 16), `SingleShot` (10). No kind's dispatch depends on options. |
 | `paths` | `Required`, `Optional`, `Forbidden` |
 | `scope_filter` | `Full`, `AncestorOnly` (today's `dir_absent`), `Rejected { reason }` |
 | `git_tracked_only` | `None`, `FileOnly`, `DirAware`; plus `respect_gitignore` and `root_only` flags |
@@ -73,6 +80,7 @@ canonical kind's record. Proposed shape (names indicative):
 | `capabilities` | `SpawnUserCommand`, `Git(ops)` (tracked set, blame, diff, log, verify-commit), `HostKeyring`, `EnvRead`, `EnvExport`, `WallClock`, `OutOfRootRead`, `WritesDuringCheck`, `UnixOnly`; each either unconditional or conditional on a named option |
 | `content` | `PathOnly`, `Metadata`, `Prefix(n)`, `WholeFile`, `OtherFiles`, `Blame`, `Delegated` |
 | `formats` | the `Format`s the kind parses (structured kinds, `json_schema_passes`, extract-based kinds) |
+| `dependencies` | repository files outside the kind's scope whose change alters its verdict, as `Rule::changed_dependencies` (v0.18.3) exposes per instance (today `json_schema_passes`'s `schema_path`) |
 | `fix_ops` | the accepted fix operation names; empty means a `fix:` is rejected |
 | `expect_matches` | supported or not (68 kinds support it) |
 | `nested_rules` | whether the kind carries nested `require:` rules (`for_each_dir`, `for_each_file`, `every_matching_has`) |
@@ -101,7 +109,7 @@ Fix operations get their own small record (`FixOpMeta`): the trust class (`Spawn
 | `SPAWNING_RULE_KINDS` (trust gate) | hand list of 3 | kinds with any `SpawnUserCommand`, conditional or not (the gate runs on raw YAML before options resolve, so it gates by kind; deriving from unconditional spawning only would let a kind that spawns under an option escape the gate) |
 | Git-required kinds (audit) | hand list of 3, should be 10 | kinds with unconditional `Git` |
 | `SPAWNING_FIX_OPS`, `CONTENT_INJECTING_FIX_OPS` | hand lists | `FixOpMeta` trust class |
-| nested-config re-rooting (`REGEX_SELECT_KINDS`, `UNCONFINABLE_KINDS` in `alint-dsl/src/nested.rs`, added in v0.18.3) | two hand lists | a per-selector `rerootable` flag on `selectors` (selector types alone cannot reproduce the list: `pair_hash.source` and `pair_changed_together.if_changed` are glob-typed but cannot be confined) |
+| nested-config re-rooting (`REGEX_SELECT_KINDS`, `UNCONFINABLE_KINDS`, `NESTED_RULE_KINDS`, and the kind-specific path fields in `alint-dsl/src/nested.rs`, added in v0.18.3) | three hand lists and a hand `match` | a per-selector `rerootable` flag on `selectors` (selector types alone cannot reproduce the list: `pair_hash.source` and `pair_changed_together.if_changed` are glob-typed but cannot be confined) |
 | `FAIL_ONLY_KINDS` (docs export) | hand list | kinds with `HostKeyring` |
 | nested-rule kind lists (when_iter audit, template expansion) | two hand lists | `nested_rules` |
 | nested glob options (template expansion) | hand table | `selectors` typed `Glob`/`GlobList`/`DiffGlob` |
