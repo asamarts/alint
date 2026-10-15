@@ -9,6 +9,72 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.3] - 2026-10-15
+
+A correctness and security patch. `check --changed` and `fix --changed` now judge changed files
+against the whole repository (a `scope_filter.has_ancestor` marker outside the diff counts, and
+references to unchanged or deleted files resolve correctly), `alint fix` no longer edits files
+that `scope_filter` excludes, nested `.alint.yml` configs confine every repository-relative field
+(including through root templates and `require:` blocks), and rustls is updated for four new
+RustSec advisories. Some nested configurations that never did what they said now fail to load;
+see Changed.
+
+### Security
+
+- **rustls updated to 0.23.46** (RUSTSEC-2026-0346, -0347, -0348, -0349). alint uses rustls,
+  through `ureq`, only to fetch remote `extends:` rulesets over HTTPS; the release blocks on
+  RustSec advisories, so the patch picks up the fixed version.
+
+### Changed
+
+- **Some nested configurations that loaded before are now load errors**, because they never
+  did what they said. In a nested `.alint.yml`, kinds whose selectors cannot be confined to the
+  subdirectory (`cross_file` and `cross_file_value_equals`, `registry_paths_resolve`,
+  `file_graph`, `pair_hash`, `pair_changed_together`, `changeset_requires_path`,
+  `git_no_denied_paths`, and the `git_commit_*` kinds) are rejected, at the top level, inside a
+  `require:` block, or through a root template; they used to run over the whole repository.
+  And a rule nested under `for_each_dir`, `for_each_file`, or `every_matching_has` may no
+  longer set `fix`, `git_tracked_only`, or `respect_gitignore`, which were silently discarded.
+  Move such rules to the root config (or a top-level rule).
+
+### Fixed
+
+- **`alint fix` no longer edits files that `scope_filter` excludes, and nested structured rules
+  honour it in `check`.** The structured `*_path_*` kinds (JSON, YAML, TOML, XML, dotenv,
+  properties, INI, HCL) took a fast path for literal `paths:` that skipped `scope_filter`
+  whenever the rule was evaluated on its own. That is how `fix` evaluates, so a `set_value` or
+  `remove_value` fix could rewrite a listed file that `scope_filter` (for example
+  `has_ancestor`) had excluded; and it is how a rule nested under `for_each_dir` is evaluated,
+  so `check` reported such files too. The fast path now applies the rule's scope.
+- **`check --changed` and `fix --changed` judge changed files against the whole repository.**
+  The per-file pass matched scope and resolved references against the changed files only, so:
+  a rule with `scope_filter.has_ancestor` never fired when its marker (an unchanged
+  `Cargo.toml`) was outside the diff; `markdown_paths_resolve` reported an unchanged file it
+  referenced as missing. Scope matching and lookups now see the full tree, while only changed
+  files are read.
+- **`check --changed` catches violations caused by changes elsewhere.**
+  - `no_case_conflicts` and `max_files_per_directory` judge the whole tree but saw only the
+    changed files, so adding `Readme.md` next to a committed `README.md`, or a file to a
+    directory already at its limit, went unreported. They now evaluate on the full index (and
+    are still skipped when no file in their scope changed).
+  - `markdown_paths_resolve` now checks every in-scope document, so deleting or renaming a
+    file that an unchanged document references is caught.
+  - `json_schema_passes` re-validates every in-scope document when only its `schema_path:`
+    changes; it used to be skipped.
+- **A `git_blame_age` rule nested under `for_each_dir`, `for_each_file`, or
+  `every_matching_has` now fires.** The engine built the blame cache only when a top-level rule
+  needed it, so a nested `git_blame_age` silently never reported anything.
+- **Nested `.alint.yml` configs confine every repository-relative field.** They used to prefix
+  only `paths`, `select`, and `primary`, which corrupted the regex `select:` of `for_each_match`
+  and `ordered_block` (now left alone) and let other fields escape the subdirectory: the path
+  fields of rules nested under `require:`, `import_gate`'s `allow:`, `json_schema_passes`'s
+  `schema_path:`, `markdown_links_resolve`'s `root.dir:`, and a literal `pair` `partner:` are
+  now prefixed. Confinement also runs after `extends_template:` expansion, so a nested rule can
+  no longer pick up an unconfined kind or selector from a root template.
+- **`file_exists` with a literal path and `respect_gitignore: false` honours
+  `git_tracked_only`.** The direct filesystem check for tracked-but-gitignored files accepted an
+  untracked file on disk; it now requires the file to be tracked, as the glob form already did.
+
 ## [0.18.2] - 2026-10-13
 
 A security and correctness patch: alint's terminal output now escapes every
@@ -7514,7 +7580,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.3...HEAD
+[0.18.3]: https://github.com/asamarts/alint/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/asamarts/alint/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/asamarts/alint/compare/v0.18.0...v0.18.1
 [0.18.0]: https://github.com/asamarts/alint/compare/v0.17.0...v0.18.0
