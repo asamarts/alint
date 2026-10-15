@@ -54,8 +54,14 @@ correct `has_ancestor` evaluation.
 - The filtered index shares only the full tree's FILE set (the file-and-directory set is no
   longer shared: its only reader, `markdown_paths_resolve`, is `requires_full_index` and always
   evaluates on the full index).
-- The set is shared only when some rule, nested ones included, has a `has_ancestor` predicate
-  (`Engine::any_ancestor_lookup`), so other `--changed` runs pay nothing.
+- The set is shared only when a rule with a `has_ancestor` predicate will actually be evaluated
+  against the filtered index (`Engine::needs_tree_files`): it is not `--changed`-skipped, not
+  `requires_full_index`, has no changed dependency, is not git-tracked, and, in `check`, is not
+  a per-file rule (the per-file pass matches scope on the full index). A first version shared
+  it whenever any rule had a `has_ancestor` predicate, which still made a repository that
+  extends the bundled `rust` / `node` / `python` rulesets pay for it on a diff none of those
+  rules covered; review caught that. Cachegrind on a 100k-file tree with such a rule out of the
+  diff's scope: v0.18.2 2.110 G instructions, the first version 2.314 G, the final fix 2.121 G.
 
 ## Publication
 

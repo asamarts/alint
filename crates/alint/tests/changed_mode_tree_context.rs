@@ -191,3 +191,41 @@ rules:
     );
     assert!(text(&changed).contains("data-schema"), "{}", text(&changed));
 }
+
+#[test]
+fn rule_by_rule_has_ancestor_rule_fires_under_changed_with_an_unchanged_marker() {
+    // `filename_case` is evaluated rule by rule on the `--changed` index (not in the
+    // per-file pass, which matches scope on the full index), so its `has_ancestor`
+    // lookup needs the shared tree file set. It is the only `has_ancestor` rule here,
+    // so this also proves the engine decides to share it.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    write(
+        root,
+        ".alint.yml",
+        "version: 1
+rules:
+  - id: rs-snake
+    kind: filename_case
+    paths: \"**/*.rs\"
+    case: snake
+    scope_filter:
+      has_ancestor: Cargo.toml
+    level: error
+",
+    );
+    write(root, "crates/api/Cargo.toml", "[package]\nname = \"api\"\n");
+    write(root, "crates/api/src/main.rs", "fn main() {}\n");
+    commit_all(root);
+    // A new badly named file; the `Cargo.toml` marker is unchanged.
+    write(root, "crates/api/src/BadName.rs", "\n");
+
+    let changed = run(root, &["check", "--changed", "--compact", "."]);
+    assert_eq!(
+        changed.status.code(),
+        Some(1),
+        "check --changed must see the unchanged marker: {}",
+        text(&changed)
+    );
+    assert!(text(&changed).contains("rs-snake"), "{}", text(&changed));
+}

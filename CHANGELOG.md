@@ -8,10 +8,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
-- **`check --changed` no longer pays for whole-tree lookups it does not use.** v0.18.3 built
-  the full tree's path sets on every `--changed` run so that `scope_filter.has_ancestor` could
-  see unchanged markers; a run with no such rule paid for it anyway (about 16% at 1M files on
-  the bench host). The set is now built only when a rule has a `has_ancestor` predicate.
+- **`check --changed` and `fix --changed` no longer pay for whole-tree lookups they do not
+  use.** v0.18.3 built the full tree's path sets on every `--changed` run so that
+  `scope_filter.has_ancestor` could see unchanged markers; a run with no such lookup paid for
+  it anyway (about 16% at 1M files on the bench host). The file set is now built only when a
+  rule with a `has_ancestor` predicate will actually be evaluated against the changed files'
+  index (so a repository whose `has_ancestor` rules are all out of the diff's scope pays
+  nothing either).
 
 ## [0.18.3] - 2026-10-15
 

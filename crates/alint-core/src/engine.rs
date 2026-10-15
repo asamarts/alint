@@ -503,10 +503,11 @@ impl Engine {
         // A `has_ancestor` marker lookup on the `--changed` index must see unchanged
         // files too. Only the changed-set index shares the full tree's file set
         // (the git-tracked indexes are deliberately subsets and must not), and only
-        // when some rule has such a lookup: building the set is a pass over the
-        // full index that other `--changed` runs should not pay.
+        // when a rule will actually look one up on it (`needs_tree_files`):
+        // building the set is a pass over the full index that other `--changed`
+        // runs should not pay.
         if let Some(fi) = filtered_index.as_ref()
-            && self.any_ancestor_lookup()
+            && self.needs_tree_files(index, None, false)
         {
             fi.share_tree_files_from(index);
         }
@@ -1680,10 +1681,11 @@ impl Engine {
         // A `has_ancestor` marker lookup on the `--changed` index must see unchanged
         // files too. Only the changed-set index shares the full tree's file set
         // (the git-tracked indexes are deliberately subsets and must not), and only
-        // when some rule has such a lookup: building the set is a pass over the
-        // full index that other `--changed` runs should not pay.
+        // when a rule will actually look one up on it (`needs_tree_files`):
+        // building the set is a pass over the full index that other `--changed`
+        // runs should not pay.
         if let Some(fi) = filtered_index.as_ref()
-            && self.any_ancestor_lookup()
+            && self.needs_tree_files(index, Some(created), true)
         {
             fi.share_tree_files_from(index);
         }
@@ -2469,22 +2471,49 @@ impl Engine {
     /// satisfies it. Cross-file rules return `path_scope = None`
     /// per the roadmap contract — so they always return `false`
     /// here (i.e. never skipped).
-    /// Whether any rule, nested ones included, has a `scope_filter.has_ancestor`
-    /// predicate (a lookup about the whole tree). A rule tree that cannot be
-    /// visited answers `true`, so a failure never silently narrows a lookup.
-    fn any_ancestor_lookup(&self) -> bool {
-        let mut found = false;
-        let visited = self.visit_all_rules(&mut |rule, _spec| {
-            let scope = rule
+    /// Whether some rule will look up a `scope_filter.has_ancestor` marker on the
+    /// `--changed`-filtered index, so that index needs the full tree's file set.
+    ///
+    /// A rule counts only if it has such a predicate (from the scope it exposes, or
+    /// from its spec, so a kind that hides its scope is still seen) AND it will be
+    /// evaluated on the filtered index: it is not `--changed`-skipped, not
+    /// `requires_full_index`, has no changed dependency, and is not git-tracked
+    /// (each of those gets another index). `per_file_on_filtered` is `false` for
+    /// `check`, whose per-file pass always matches scope against the full index,
+    /// and `true` for `fix`, which evaluates per-file rules on the filtered index.
+    /// Nested rules are evaluated with their parent's full context, so only
+    /// top-level rules matter.
+    fn needs_tree_files(
+        &self,
+        index: &FileIndex,
+        created: Option<&HashSet<PathBuf>>,
+        per_file_on_filtered: bool,
+    ) -> bool {
+        self.entries.iter().any(|entry| {
+            let rule = entry.rule.as_ref();
+            let exposed = rule
                 .as_per_file()
                 .map(super::rule::PerFileRule::path_scope)
-                .or_else(|| rule.path_scope());
-            found |= scope
+                .or_else(|| rule.path_scope())
                 .and_then(crate::Scope::scope_filter)
                 .is_some_and(|filter| !filter.has_ancestor_names().is_empty());
-            Ok(())
-        });
-        found || visited.is_err()
+            let declared = entry.spec.as_deref().is_some_and(|spec| {
+                spec.scope_filter
+                    .as_ref()
+                    .and_then(|f| f.has_ancestor.as_ref())
+                    .is_some_and(|names| !names.is_empty())
+            });
+            if !exposed && !declared {
+                return false;
+            }
+            if rule.as_per_file().is_some() && !per_file_on_filtered {
+                return false;
+            }
+            rule.git_tracked_mode() == crate::rule::GitTrackedMode::Off
+                && !rule.requires_full_index()
+                && !self.dependency_changed(rule)
+                && !self.skip_for_changed(rule, index, created)
+        })
     }
 
     /// Whether a file the rule depends on, outside its own scope, is in the
@@ -3124,29 +3153,6 @@ mod tests {
             full_index: false,
             expose_scope: true,
         })
-    }
-
-    #[test]
-    fn ancestor_lookup_detection_drives_tree_file_sharing() {
-        // `--changed` shares the full tree's file set into the filtered index only
-        // when some rule has a `has_ancestor` lookup: building it is a pass over the
-        // full index that other changed-mode runs must not pay (v0.18.3 bench).
-        let plain = Engine::new(vec![stub("t", "**/*.rs")], RuleRegistry::new());
-        assert!(!plain.any_ancestor_lookup());
-
-        let spec: crate::RuleSpec = serde_yaml_ng::from_str(
-            "id: a\nkind: x\nlevel: error\npaths: \"**/*.rs\"\nscope_filter:\n  has_ancestor: Cargo.toml\n",
-        )
-        .unwrap();
-        let ancestor = Box::new(StubRule {
-            id: "a".into(),
-            level: Level::Error,
-            scope: Scope::from_spec(&spec).unwrap(),
-            full_index: false,
-            expose_scope: true,
-        });
-        let engine = Engine::new(vec![stub("t", "**/*.rs"), ancestor], RuleRegistry::new());
-        assert!(engine.any_ancestor_lookup());
     }
 
     fn full_index_stub(id: &str) -> Box<dyn Rule> {
@@ -4317,6 +4323,64 @@ mod tests {
         fn as_per_file(&self) -> Option<&dyn crate::PerFileRule> {
             Some(self)
         }
+    }
+
+    /// A scope with `scope_filter: { has_ancestor: Cargo.toml }` over `**/*.rs`.
+    fn ancestor_scope() -> Scope {
+        let spec: crate::RuleSpec = serde_yaml_ng::from_str(
+            "id: a\nkind: x\nlevel: error\npaths: \"**/*.rs\"\nscope_filter:\n  has_ancestor: Cargo.toml\n",
+        )
+        .unwrap();
+        Scope::from_spec(&spec).unwrap()
+    }
+
+    #[test]
+    fn tree_files_are_shared_only_for_a_rule_that_looks_them_up_on_the_filtered_index() {
+        // `--changed` shares the full tree's file set into the filtered index only
+        // when a `has_ancestor` lookup will actually run on that index: building it
+        // is a pass over the full index (v0.18.3 bench, PR #329 review).
+        let index = idx(&["crates/api/Cargo.toml", "crates/api/src/main.rs"]);
+        let changed: HashSet<PathBuf> = [PathBuf::from("crates/api/src/main.rs")].into();
+        let rule_major = |full_index: bool| -> Box<dyn Rule> {
+            Box::new(StubRule {
+                id: "a".into(),
+                level: Level::Error,
+                scope: ancestor_scope(),
+                full_index,
+                expose_scope: true,
+            })
+        };
+        let per_file = || -> Box<dyn Rule> {
+            Box::new(PerFileStub {
+                id: "p".into(),
+                scope: ancestor_scope(),
+                prefix: Vec::new(),
+            })
+        };
+        let engine = |rules: Vec<Box<dyn Rule>>, set: HashSet<PathBuf>| {
+            Engine::new(rules, RuleRegistry::new()).with_changed_paths(set)
+        };
+
+        // No `has_ancestor` anywhere: never shared.
+        let plain = engine(vec![stub("t", "**/*.rs")], changed.clone());
+        assert!(!plain.needs_tree_files(&index, None, false));
+        assert!(!plain.needs_tree_files(&index, None, true));
+        // A rule-by-rule rule with a lookup and a changed in-scope file: shared.
+        assert!(
+            engine(vec![rule_major(false)], changed.clone()).needs_tree_files(&index, None, false)
+        );
+        // ...but not when it is `--changed`-skipped (no in-scope file changed),
+        let other: HashSet<PathBuf> = [PathBuf::from("README.md")].into();
+        assert!(!engine(vec![rule_major(false)], other).needs_tree_files(&index, None, false));
+        // ...nor when it is full-index (it gets the full index anyway).
+        assert!(
+            !engine(vec![rule_major(true)], changed.clone()).needs_tree_files(&index, None, false)
+        );
+        // A per-file rule: `check` matches its scope on the full index (no share);
+        // `fix` evaluates it on the filtered index (share).
+        let pf = engine(vec![per_file()], changed);
+        assert!(!pf.needs_tree_files(&index, None, false));
+        assert!(pf.needs_tree_files(&index, None, true));
     }
 
     impl crate::PerFileRule for PerFileStub {
