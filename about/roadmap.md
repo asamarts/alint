@@ -13,7 +13,12 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.18.2** (2026-10-13): a security and correctness patch.
+**Latest release: v0.18.3** (2026-10-15): a correctness and security patch.
+`check --changed` and `fix --changed` judge changed files against the whole
+repository, `alint fix` no longer edits files that `scope_filter` excludes,
+nested configs confine every repository-relative field (including through root
+templates and `require:` blocks), and rustls is updated for four new RustSec
+advisories. The prior v0.18.2 (2026-10-13) was a security and correctness patch:
 alint's terminal output escapes every invisible character its own bidi and
 zero-width rules flag (one shared definition), `.env` parsing and editing moved
 to the new dependency-free `adotenv` crate, and a leading BOM no longer shifts
