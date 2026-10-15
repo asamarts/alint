@@ -13,7 +13,11 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.18.3** (2026-10-15): a correctness and security patch.
+**Latest release: v0.18.4** (2026-10-15): a performance and correctness patch.
+`--changed` runs no longer build whole-tree lookups that no rule uses, and `.env`
+fixes take their edits from adotenv 0.1.1's verified `set` and `remove`, fixing two
+cases where a fix silently changed a file's meaning. The prior v0.18.3 (2026-10-15)
+was a correctness and security patch:
 `check --changed` and `fix --changed` judge changed files against the whole
 repository, `alint fix` no longer edits files that `scope_filter` excludes,
 nested configs confine every repository-relative field (including through root
