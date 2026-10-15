@@ -37,6 +37,13 @@ Each investigation directory ships:
 
 ## Existing investigations
 
+### [`2026-10-v0.18.3-changed-mode/`](2026-10-v0.18.3-changed-mode/)
+
+The v0.18.3 release bench failed the regression gate on S2 1m `changed` (+16%): every
+`--changed` run built and shared the full tree's path sets whether or not a rule needed them.
+Fixed by sharing only the file set, and only when a rule has a `has_ancestor` lookup; the
+remaining S1/S4 `changed` increase is the cost of correct `has_ancestor` evaluation.
+
 ### [`2026-10-competitive-harness-correction/`](2026-10-competitive-harness-correction/)
 
 The v0.5.7 ls-lint comparison measured an immediate missing-config error instead
