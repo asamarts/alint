@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **`.env` fixes go through adotenv 0.1.1's verified edits.** `set_value`, value `replace`,
+  and `remove_value` on dotenv files now use `adotenv::set` and `adotenv::remove` instead of
+  splicing one fixed encoding over an entry's span. A removal that would change how the rest of
+  the file reads (for example, deleting the first line so that a byte-order mark at the start
+  of the next key becomes the file's BOM and renames that key) is declined, and a set keeps the
+  quoting its context needs (a value with text after its closing quote stays quoted), so such a
+  fix now applies instead of being demoted to a suggestion.
+
 ### Fixed
 
 - **`check --changed` and `fix --changed` no longer pay for whole-tree lookups they do not

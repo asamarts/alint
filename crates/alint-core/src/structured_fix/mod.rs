@@ -6,9 +6,12 @@
 //! range with our bytes; the engine then re-parses and re-runs the query
 //! ([`EditVerifier::Structured`](crate::rule::EditVerifier)) before committing.
 //!
-//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), dotenv (`adotenv`
-//! entry spans), and INI + properties (a hand-rolled re-scan of the raw text,
-//! since those parsers keep no spans) are span-capable today; TOML is document-rewrite (`toml_edit`). Every
+//! HCL (`hcl::edit`), XML (`roxmltree` node/attribute ranges), and INI +
+//! properties (a hand-rolled re-scan of the raw text, since those parsers keep no
+//! spans) are span-capable today; TOML is document-rewrite (`toml_edit`); dotenv
+//! sets and removes through `adotenv`'s verified `set` / `remove` (a per-op
+//! document rewrite reduced to its minimal span, see [`set_uses_document`] and
+//! [`removal_uses_document`]). Every
 //! other [`Format`] returns `None`, so its
 //! `set_value` / `remove_value` declines cleanly (the violation is reported
 //! unfixed) until that format's resolver lands. This is a SAFE degradation: a
@@ -115,7 +118,8 @@ pub fn uses_document_rewrite(format: Format) -> bool {
     matches!(format, Format::Toml)
 }
 
-/// Whole-document `set_value` for a [`uses_document_rewrite`] format: set the
+/// Whole-document `set_value` for a [`uses_document_rewrite`] or
+/// [`set_uses_document`] format: set the
 /// scalar at `path` (decor-preserving) and return the FULL new document bytes.
 /// `None` when the format has no rewriter, the source does not parse, the path
 /// does not resolve to a scalar, or the value is not representable. Never panics.
@@ -129,6 +133,7 @@ pub fn document_set(
     let text = std::str::from_utf8(bytes).ok()?;
     match format {
         Format::Toml => toml_::document_set(text, path, want),
+        Format::Dotenv => dotenv::dotenv_document_set(text, path, want),
         _ => None,
     }
 }
@@ -143,6 +148,7 @@ pub fn document_remove(format: Format, bytes: &[u8], paths: &[Vec<PathSeg>]) -> 
     match format {
         Format::Toml => toml_::document_remove(text, paths),
         Format::Json => json_::json_document_remove(text, paths),
+        Format::Dotenv => dotenv::dotenv_document_remove(text, paths),
         _ => None,
     }
 }
@@ -223,14 +229,25 @@ pub fn format_supports_removal(format: Format) -> bool {
 
 /// Whether `format`'s `remove_value` is a WHOLE-DOCUMENT rewrite (edit + reserialize
 /// an editable CST) rather than a per-node span splice. JSON removal uses the
-/// `jsonc-parser` editable CST for correct comma / comment surgery, while its SET
-/// stays a span splice -- a per-OP split, so JSON is listed here but is NOT
-/// [`uses_document_rewrite`] (which is all-ops, for TOML, and whose branch handles
-/// TOML removal already). The fixer emits ONE `ReplaceRange` over the whole file
-/// for a removal on a format listed here.
+/// `jsonc-parser` editable CST for correct comma / comment surgery, and dotenv
+/// removal uses `adotenv::remove`, which verifies that every remaining entry (keys,
+/// values, quoting, export status) and the BOM state are unchanged; their SET is a
+/// separate per-op choice ([`set_uses_document`]), so neither is
+/// [`uses_document_rewrite`] (which is all-ops, for TOML). The fixer reduces the
+/// rewrite to its minimal changed span.
 #[must_use]
 pub fn removal_uses_document(format: Format) -> bool {
-    matches!(format, Format::Json)
+    matches!(format, Format::Json | Format::Dotenv)
+}
+
+/// Whether `format`'s `set_value` (and value `replace`) is a WHOLE-DOCUMENT rewrite
+/// rather than a span splice. Dotenv uses `adotenv::set`, which chooses quoting that
+/// reads back exactly in context (falling back to double quotes when surrounding
+/// text would change a bare value) instead of splicing one fixed encoding. The fixer
+/// reduces the rewrite to its minimal changed span.
+#[must_use]
+pub fn set_uses_document(format: Format) -> bool {
+    matches!(format, Format::Dotenv)
 }
 
 /// The MINIMAL `(range, content)` edit that turns `original` into `new`: the span
@@ -777,6 +794,53 @@ mod dotenv {
         adotenv::parse(text).ok()?.unique(key).ok().cloned()
     }
 
+    /// `set_value` through `adotenv::set`: the key must be assigned exactly once
+    /// (a flat path), and the result is verified to read back `want`. `None` (the
+    /// fix declines) for a non-scalar, a missing or duplicated key, or a value that
+    /// cannot be encoded in context.
+    pub(super) fn dotenv_document_set(
+        text: &str,
+        path: &[PathSeg],
+        want: &serde_json::Value,
+    ) -> Option<Vec<u8>> {
+        let [PathSeg::Key(key)] = path else {
+            return None;
+        };
+        let value = scalar_text(want)?;
+        adotenv::set(text, key, &value).ok().map(String::into_bytes)
+    }
+
+    /// `remove_value` through `adotenv::remove`, one key at a time: each removal is
+    /// verified to leave every other entry and the BOM state unchanged. A path
+    /// adotenv refuses (nested, missing, duplicated, or a removal that would change
+    /// the remaining text's meaning) is left in place, so the `Absent` verifier
+    /// demotes a partial removal. `None` when nothing was removed.
+    pub(super) fn dotenv_document_remove(text: &str, paths: &[Vec<PathSeg>]) -> Option<Vec<u8>> {
+        let mut out = text.to_string();
+        let mut removed = false;
+        for path in paths {
+            let [PathSeg::Key(key)] = path.as_slice() else {
+                continue;
+            };
+            if let Ok(next) = adotenv::remove(&out, key) {
+                out = next;
+                removed = true;
+            }
+        }
+        removed.then(|| out.into_bytes())
+    }
+
+    /// The text of a scalar (`null` and non-scalars have none in dotenv).
+    fn scalar_text(value: &serde_json::Value) -> Option<String> {
+        use serde_json::Value;
+        match value {
+            Value::String(s) => Some(s.clone()),
+            Value::Number(n) => Some(n.to_string()),
+            Value::Bool(b) => Some(b.to_string()),
+            Value::Null | Value::Array(_) | Value::Object(_) => None,
+        }
+    }
+
     /// Serialize a scalar as a dotenv value (`adotenv::encode_value`): bare
     /// when that reads back unchanged wherever it lands after `=`, else
     /// double-quoted with the `\n \r \t \\ \"` escapes. Declines a value
@@ -784,14 +848,7 @@ mod dotenv {
     /// so `set_value` degrades to a Suggestion rather than emit a raw control
     /// byte.
     pub(super) fn dotenv_serialize_scalar(value: &serde_json::Value) -> Option<Vec<u8>> {
-        use serde_json::Value;
-        let s = match value {
-            Value::String(s) => s.clone(),
-            Value::Number(n) => n.to_string(),
-            Value::Bool(b) => b.to_string(),
-            Value::Null | Value::Array(_) | Value::Object(_) => return None,
-        };
-        adotenv::encode_value(&s).map(String::into_bytes)
+        adotenv::encode_value(&scalar_text(value)?).map(String::into_bytes)
     }
 }
 

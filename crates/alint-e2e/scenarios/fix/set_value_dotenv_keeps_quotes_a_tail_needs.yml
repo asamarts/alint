@@ -1,0 +1,33 @@
+name: set_value on a dotenv value with text after its closing quote keeps it quoted
+tags: [fix, dotenv_path_equals, set_value, dotenv]
+
+# adotenv 0.1.1. Text after a closing quote is ignored by the parser but would join a bare
+# value, so a fixed bare splice (`B=ztail`, which reads back as `ztail`) could only be a
+# suggestion. `set_value` now goes through adotenv's verified `set`, which keeps the value
+# quoted, so the fix applies and the next check passes.
+
+given:
+  tree:
+    .env: "B=\"y\"tail\n"
+  config: |
+    version: 1
+    rules:
+      - id: b
+        kind: dotenv_path_equals
+        paths: "**/.env"
+        path: "$.B"
+        equals: "z"
+        level: error
+        fix:
+          set_value: {}
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: b, level: error, path: .env}
+  - applied: [b]
+  - violations: []
+
+expect_tree:
+  .env: "B=\"z\"tail\n"

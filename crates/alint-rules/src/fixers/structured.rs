@@ -425,10 +425,33 @@ impl Fixer for StructuredFixer {
                 if !self.set_value_is_statically_applicable(want) {
                     return Vec::new();
                 }
+                let segs = to_segs(node.location());
+                // A format whose set is a verified document rewrite (dotenv through
+                // `adotenv::set`, which picks quoting that reads back in context)
+                // emits the rewrite's minimal changed span instead of a fixed splice.
+                if structured_fix::set_uses_document(self.format) {
+                    let Some(doc) = structured_fix::document_set(self.format, bytes, &segs, want)
+                    else {
+                        return Vec::new();
+                    };
+                    let (range, content) = structured_fix::minimal_replace(bytes, &doc);
+                    if range.is_empty() && content.is_empty() {
+                        return Vec::new();
+                    }
+                    return vec![CollectedEdit {
+                        edit: FixEdit::ReplaceRange {
+                            path: file.to_path_buf(),
+                            range,
+                            content,
+                        },
+                        applicability: self.applicability,
+                        verify: self.verifier(ExpectedValue::Scalar(want.clone())),
+                        isolation_group: None,
+                    }];
+                }
                 let Some(content) = structured_fix::serialize_scalar(self.format, want) else {
                     return Vec::new(); // unreachable: the predicate proved serialization succeeds
                 };
-                let segs = to_segs(node.location());
                 let Some(range) = structured_fix::resolve_value_span(self.format, bytes, &segs)
                 else {
                     return Vec::new();
@@ -539,12 +562,25 @@ impl Fixer for StructuredFixer {
                                 _ => return None,
                             }
                         }
-                        let content = structured_fix::serialize_scalar(
-                            self.format,
-                            &Value::String(rewritten.into_owned()),
-                        )?;
+                        let rewritten = Value::String(rewritten.into_owned());
                         let segs = to_segs(node.location());
-                        let range = structured_fix::resolve_value_span(self.format, bytes, &segs)?;
+                        let (range, content) = if structured_fix::set_uses_document(self.format) {
+                            // Verified document rewrite (dotenv), reduced to its minimal
+                            // span so several rewritten values co-apply in one pass.
+                            let doc = structured_fix::document_set(
+                                self.format,
+                                bytes,
+                                &segs,
+                                &rewritten,
+                            )?;
+                            structured_fix::minimal_replace(bytes, &doc)
+                        } else {
+                            let content =
+                                structured_fix::serialize_scalar(self.format, &rewritten)?;
+                            let range =
+                                structured_fix::resolve_value_span(self.format, bytes, &segs)?;
+                            (range, content)
+                        };
                         Some(CollectedEdit {
                             edit: FixEdit::ReplaceRange {
                                 path: file.to_path_buf(),

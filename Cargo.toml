@@ -84,7 +84,7 @@ memchr = "2"
 # Literal `.env` parsing, spans and edits for `Format::Dotenv` (alint-core
 # `dotenv`, `structured_fix`). Extracted from alint into its own repository
 # (asamarts/adotenv); no dependencies of its own.
-adotenv = "0.1"
+adotenv = "0.1.1"
 # Span-capable JSONC AST for the Phase-2 structured `set_value`/`remove_value`
 # fixers (alint-core `structured_fix`): `parse_to_ast` yields node byte ranges, so
 # JSON edits are span-splices (disjoint, one-pass) and JSONC comments / trailing

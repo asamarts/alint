@@ -1,0 +1,33 @@
+name: remove_value declines a dotenv removal that would change another key
+tags: [fix, dotenv_path_absent, remove_value, dotenv, safety]
+
+# Safety property (adotenv 0.1.1). `﻿B` is a key whose name starts with a byte-order
+# mark. Deleting the first line would make that BOM the file's leading BOM, which the
+# parser strips, silently renaming the key to `B`. The removal is verified by adotenv,
+# which refuses it, so the fix is skipped and the file is left byte-for-byte intact.
+
+given:
+  tree:
+    .env: "A=1\n﻿B=2\n"
+  config: |
+    version: 1
+    rules:
+      - id: no-a
+        kind: dotenv_path_absent
+        paths: "**/.env"
+        path: "$.A"
+        level: error
+        fix:
+          remove_value: { applicability: safe }
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: no-a, level: error, path: .env}
+  - skipped: [no-a]
+  - violations:
+      - {rule: no-a, level: error, path: .env}
+
+expect_tree:
+  .env: "A=1\n﻿B=2\n"
