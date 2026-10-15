@@ -9,6 +9,38 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.18.4] - 2026-10-15
+
+A performance and correctness patch. `check --changed` and `fix --changed` no longer build
+whole-tree lookups that no rule uses (v0.18.3 paid for them on every changed-mode run, about 16%
+at 1M files), and `.env` fixes now take their edits from adotenv 0.1.1's verified `set` and
+`remove`, which fixes two cases where a fix silently changed a file's meaning.
+
+### Changed
+
+- **`.env` fixes use adotenv 0.1.1's verified edits.** `set_value`, value `replace`, and
+  `remove_value` on dotenv files now take their edit from `adotenv::set` and `adotenv::remove`
+  (still anchored to the entry's value or line) instead of splicing one fixed encoding. A set
+  keeps the quoting its context needs, so a value with text after its closing quote
+  (`B="y"tail`) is now fixed instead of only suggested, and several keys removed together are
+  checked together.
+
+### Fixed
+
+- **Two `.env` fixes no longer silently change a file's meaning.** A value `replace` on a
+  quoted value with text after its closing quote (`D="q"tail` with `^` -> `v`) wrote
+  `D=vqtail`, which reads back as `vqtail` and was reported as applied; it now writes
+  `D="vq"tail`. And `remove_value` on a file's first line could expose a byte-order mark at
+  the start of the next key as the file's BOM, silently renaming that key; such a removal is now
+  declined.
+- **`check --changed` and `fix --changed` no longer pay for whole-tree lookups they do not
+  use.** v0.18.3 built the full tree's path sets on every `--changed` run so that
+  `scope_filter.has_ancestor` could see unchanged markers; a run with no such lookup paid for
+  it anyway (about 16% at 1M files on the bench host). The file set is now built only when a
+  rule with a `has_ancestor` predicate will actually be evaluated against the changed files'
+  index (so a repository whose `has_ancestor` rules are all out of the diff's scope pays
+  nothing either).
+
 ## [0.18.3] - 2026-10-15
 
 A correctness and security patch. `check --changed` and `fix --changed` now judge changed files
@@ -7580,7 +7612,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.3...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.4...HEAD
+[0.18.4]: https://github.com/asamarts/alint/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/asamarts/alint/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/asamarts/alint/compare/v0.18.1...v0.18.2
 [0.18.1]: https://github.com/asamarts/alint/compare/v0.18.0...v0.18.1
