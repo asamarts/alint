@@ -426,18 +426,15 @@ impl Fixer for StructuredFixer {
                     return Vec::new();
                 }
                 let segs = to_segs(node.location());
-                // A format whose set is a verified document rewrite (dotenv through
-                // `adotenv::set`, which picks quoting that reads back in context)
-                // emits the rewrite's minimal changed span instead of a fixed splice.
-                if structured_fix::set_uses_document(self.format) {
-                    let Some(doc) = structured_fix::document_set(self.format, bytes, &segs, want)
+                // A verified-edit format (dotenv, through `adotenv::set`, which picks
+                // quoting that reads back in context) splices its editor's own result
+                // over the value span instead of one fixed encoding.
+                if structured_fix::uses_verified_edits(self.format) {
+                    let Some((range, content)) =
+                        structured_fix::verified_set_edit(self.format, bytes, &segs, want)
                     else {
                         return Vec::new();
                     };
-                    let (range, content) = structured_fix::minimal_replace(bytes, &doc);
-                    if range.is_empty() && content.is_empty() {
-                        return Vec::new();
-                    }
                     return vec![CollectedEdit {
                         edit: FixEdit::ReplaceRange {
                             path: file.to_path_buf(),
@@ -466,6 +463,27 @@ impl Fixer for StructuredFixer {
                     verify: self.verifier(ExpectedValue::Scalar(want.clone())),
                     isolation_group: None,
                 }]
+            }
+            StructuredOp::Remove if structured_fix::uses_verified_edits(self.format) => {
+                // Verified removal (dotenv): one whole-line edit per key, with the keys
+                // checked TOGETHER by the format's editor so removing several never
+                // changes how the remaining text reads. A refused key gets no edit,
+                // and the `Absent` verifier demotes the partial removal.
+                let paths: Vec<Vec<PathSeg>> =
+                    located.iter().map(|n| to_segs(n.location())).collect();
+                structured_fix::verified_removal_spans(self.format, bytes, &paths)
+                    .into_iter()
+                    .map(|range| CollectedEdit {
+                        edit: FixEdit::ReplaceRange {
+                            path: file.to_path_buf(),
+                            range,
+                            content: Vec::new(),
+                        },
+                        applicability: self.applicability,
+                        verify: self.verifier(ExpectedValue::Absent),
+                        isolation_group: None,
+                    })
+                    .collect()
             }
             StructuredOp::Remove => {
                 // One removal edit per matched node. The batch's disjointness is
@@ -564,16 +582,15 @@ impl Fixer for StructuredFixer {
                         }
                         let rewritten = Value::String(rewritten.into_owned());
                         let segs = to_segs(node.location());
-                        let (range, content) = if structured_fix::set_uses_document(self.format) {
-                            // Verified document rewrite (dotenv), reduced to its minimal
-                            // span so several rewritten values co-apply in one pass.
-                            let doc = structured_fix::document_set(
+                        let (range, content) = if structured_fix::uses_verified_edits(self.format) {
+                            // Verified span edit (dotenv): the editor's own result over
+                            // the value span.
+                            structured_fix::verified_set_edit(
                                 self.format,
                                 bytes,
                                 &segs,
                                 &rewritten,
-                            )?;
-                            structured_fix::minimal_replace(bytes, &doc)
+                            )?
                         } else {
                             let content =
                                 structured_fix::serialize_scalar(self.format, &rewritten)?;

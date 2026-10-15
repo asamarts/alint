@@ -1,0 +1,36 @@
+name: replace on a quoted dotenv value with a tail keeps it quoted (no silent corruption)
+tags: [fix, dotenv_path_matches, replace, dotenv, safety]
+
+# Regression (adotenv 0.1.1 adoption). Text after a closing quote is ignored by the parser,
+# so `D="q"tail` reads as `q`. The old fixed bare splice wrote `D=vqtail`, which reads back
+# as `vqtail`: it still matched `^v`, so the fix was reported as applied while silently
+# changing the value. adotenv's verified set keeps the value quoted, so it reads `vq`.
+
+given:
+  tree:
+    .env: "export D=\"q\"tail\n"
+  config: |
+    version: 1
+    rules:
+      - id: v-prefix
+        kind: dotenv_path_matches
+        paths: "**/.env"
+        path: "$.D"
+        matches: "^v"
+        level: error
+        fix:
+          replace:
+            pattern: "^"
+            replacement: "v"
+            applicability: safe
+
+when: [check, fix, check]
+
+expect:
+  - violations:
+      - {rule: v-prefix, level: error, path: .env}
+  - applied: [v-prefix]
+  - violations: []
+
+expect_tree:
+  .env: "export D=\"vq\"tail\n"

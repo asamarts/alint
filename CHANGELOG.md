@@ -8,16 +8,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- **`.env` fixes go through adotenv 0.1.1's verified edits.** `set_value`, value `replace`,
-  and `remove_value` on dotenv files now use `adotenv::set` and `adotenv::remove` instead of
-  splicing one fixed encoding over an entry's span. A removal that would change how the rest of
-  the file reads (for example, deleting the first line so that a byte-order mark at the start
-  of the next key becomes the file's BOM and renames that key) is declined, and a set keeps the
-  quoting its context needs (a value with text after its closing quote stays quoted), so such a
-  fix now applies instead of being demoted to a suggestion.
+- **`.env` fixes use adotenv 0.1.1's verified edits.** `set_value`, value `replace`, and
+  `remove_value` on dotenv files now take their edit from `adotenv::set` and `adotenv::remove`
+  (still anchored to the entry's value or line) instead of splicing one fixed encoding. A set
+  keeps the quoting its context needs, so a value with text after its closing quote
+  (`B="y"tail`) is now fixed instead of only suggested, and several keys removed together are
+  checked together.
 
 ### Fixed
 
+- **Two `.env` fixes no longer silently change a file's meaning.** A value `replace` on a
+  quoted value with text after its closing quote (`D="q"tail` with `^` -> `v`) wrote
+  `D=vqtail`, which reads back as `vqtail` and was reported as applied; it now writes
+  `D="vq"tail`. And `remove_value` on a file's first line could expose a byte-order mark at
+  the start of the next key as the file's BOM, silently renaming that key; such a removal is now
+  declined.
 - **`check --changed` and `fix --changed` no longer pay for whole-tree lookups they do not
   use.** v0.18.3 built the full tree's path sets on every `--changed` run so that
   `scope_filter.has_ancestor` could see unchanged markers; a run with no such lookup paid for
