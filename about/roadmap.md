@@ -1425,6 +1425,8 @@ Phases 0 and 1a of [`general-linter.md`](https://github.com/asamarts/alint/blob/
 broken into work items W1-W10 in [`v0.19/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.19/README.md),
 decided in [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md). Each item graduates to a
 `docs/design/v0.19/` design doc before its code lands.
+Current status and the ordered next steps are kept in that file's
+"Status and next steps" section.
 
 - **Capability inventory.** A static `KindMeta` per kind (domain,
   dispatch, selectors, capabilities, formats, fixes), emitted into
