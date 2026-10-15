@@ -500,12 +500,15 @@ impl Engine {
                 fi.set_changed_paths(map.clone());
             }
         }
-        // Tree-wide lookups (a `has_ancestor` marker, a referenced path) on the
-        // `--changed` index must see unchanged files too. Only the changed-set
-        // index shares the full tree; the git-tracked indexes are deliberately
-        // subsets and must not.
-        if let Some(fi) = filtered_index.as_ref() {
-            fi.share_tree_sets_from(index);
+        // A `has_ancestor` marker lookup on the `--changed` index must see unchanged
+        // files too. Only the changed-set index shares the full tree's file set
+        // (the git-tracked indexes are deliberately subsets and must not), and only
+        // when some rule has such a lookup: building the set is a pass over the
+        // full index that other `--changed` runs should not pay.
+        if let Some(fi) = filtered_index.as_ref()
+            && self.any_ancestor_lookup()
+        {
+            fi.share_tree_files_from(index);
         }
 
         // Per-rule wall-time accumulator for the cross-file
@@ -1674,12 +1677,15 @@ impl Engine {
                 fi.set_changed_paths(map.clone());
             }
         }
-        // Tree-wide lookups (a `has_ancestor` marker, a referenced path) on the
-        // `--changed` index must see unchanged files too. Only the changed-set
-        // index shares the full tree; the git-tracked indexes are deliberately
-        // subsets and must not.
-        if let Some(fi) = filtered_index.as_ref() {
-            fi.share_tree_sets_from(index);
+        // A `has_ancestor` marker lookup on the `--changed` index must see unchanged
+        // files too. Only the changed-set index shares the full tree's file set
+        // (the git-tracked indexes are deliberately subsets and must not), and only
+        // when some rule has such a lookup: building the set is a pass over the
+        // full index that other `--changed` runs should not pay.
+        if let Some(fi) = filtered_index.as_ref()
+            && self.any_ancestor_lookup()
+        {
+            fi.share_tree_files_from(index);
         }
 
         let mut results: Vec<FixRuleResult> = Vec::new();
@@ -2463,6 +2469,24 @@ impl Engine {
     /// satisfies it. Cross-file rules return `path_scope = None`
     /// per the roadmap contract — so they always return `false`
     /// here (i.e. never skipped).
+    /// Whether any rule, nested ones included, has a `scope_filter.has_ancestor`
+    /// predicate (a lookup about the whole tree). A rule tree that cannot be
+    /// visited answers `true`, so a failure never silently narrows a lookup.
+    fn any_ancestor_lookup(&self) -> bool {
+        let mut found = false;
+        let visited = self.visit_all_rules(&mut |rule, _spec| {
+            let scope = rule
+                .as_per_file()
+                .map(super::rule::PerFileRule::path_scope)
+                .or_else(|| rule.path_scope());
+            found |= scope
+                .and_then(crate::Scope::scope_filter)
+                .is_some_and(|filter| !filter.has_ancestor_names().is_empty());
+            Ok(())
+        });
+        found || visited.is_err()
+    }
+
     /// Whether a file the rule depends on, outside its own scope, is in the
     /// `--changed` set ([`Rule::changed_dependencies`]). Always `false` without
     /// `--changed`.
@@ -3100,6 +3124,29 @@ mod tests {
             full_index: false,
             expose_scope: true,
         })
+    }
+
+    #[test]
+    fn ancestor_lookup_detection_drives_tree_file_sharing() {
+        // `--changed` shares the full tree's file set into the filtered index only
+        // when some rule has a `has_ancestor` lookup: building it is a pass over the
+        // full index that other changed-mode runs must not pay (v0.18.3 bench).
+        let plain = Engine::new(vec![stub("t", "**/*.rs")], RuleRegistry::new());
+        assert!(!plain.any_ancestor_lookup());
+
+        let spec: crate::RuleSpec = serde_yaml_ng::from_str(
+            "id: a\nkind: x\nlevel: error\npaths: \"**/*.rs\"\nscope_filter:\n  has_ancestor: Cargo.toml\n",
+        )
+        .unwrap();
+        let ancestor = Box::new(StubRule {
+            id: "a".into(),
+            level: Level::Error,
+            scope: Scope::from_spec(&spec).unwrap(),
+            full_index: false,
+            expose_scope: true,
+        });
+        let engine = Engine::new(vec![stub("t", "**/*.rs"), ancestor], RuleRegistry::new());
+        assert!(engine.any_ancestor_lookup());
     }
 
     fn full_index_stub(id: &str) -> Box<dyn Rule> {

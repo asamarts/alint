@@ -420,10 +420,12 @@ fn path_resolves(ctx: &Context<'_>, lookup: &str) -> bool {
             return false;
         };
         let matcher = glob.compile_matcher();
-        return ctx.index.tree_paths().any(|p| matcher.is_match(p));
+        return ctx.index.entries.iter().any(|e| matcher.is_match(&e.path));
     }
-    // Look up against the whole repository, not only the iterated files.
-    ctx.index.contains_path_in_tree(Path::new(lookup))
+    // `ctx.index` is always the full index here: the rule is `requires_full_index`,
+    // so both the per-file pass and the rule-by-rule path hand it the whole tree,
+    // under `--changed` too.
+    ctx.index.contains_path(Path::new(lookup))
 }
 
 #[cfg(test)]
