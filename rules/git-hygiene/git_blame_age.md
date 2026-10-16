@@ -12,7 +12,7 @@ Fire on lines matching a regex whose `git blame` author-time is older than `max_
 
 Heuristic notes:
 
-- **Formatting passes reset blame age.** `cargo fmt` / `prettier` rewrites every touched line, attributing it to the format commit rather than the original author. List the formatting-sweep commits in `.git-blame-ignore-revs` and git applies the right history automatically.
+- **Formatting passes reset blame age.** `cargo fmt` / `prettier` rewrites every touched line, attributing it to the format commit rather than the original author. List formatting-sweep commits in a tracked, regular `.git-blame-ignore-revs`; alint applies that repository input but ignores global and clone-local `blame.ignoreRevsFile` lists.
 - **Vendored / imported code** carries the import commit's timestamp — exclude `vendor/`, `third_party/`, generated trees.
 - **Squash-merged PRs** collapse to a single commit date, so the squash date wins over the actual edit date.
 - **Performance.** `git blame` is O(file_size × commits_touching_file) per file. On large monorepos pair with `alint check --changed` so blame only runs over modified files in CI.
