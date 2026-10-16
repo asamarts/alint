@@ -27,7 +27,7 @@ The format exists to make an agent's lint loop deterministic: the agent makes a 
 
 ## Report shape
 
-A report is a single JSON object. This example has three violations: one path-bound and fixable, one path-bound and not, and one tree-wide.
+A report is a single JSON object. This example has three violations—one path-bound and fixable, one path-bound and not, and one tree-wide—and two non-violation notes.
 
 ```json
 {
@@ -67,7 +67,11 @@ A report is a single JSON object. This example has three violations: one path-bo
       "agent_instruction": "error: Multiple lockfiles found. To resolve: this is a repository-level rule with no specific file location; resolve the underlying invariant the rule enforces.",
       "fix_available": false
     }
-  ]
+  ],
+  "notes": {
+    "count": 2,
+    "details_format": "json"
+  }
 }
 ```
 
@@ -79,6 +83,17 @@ A report is a single JSON object. This example has three violations: one path-bo
 | `format` | string | Always `"agent"`. Lets a multi-format consumer route on one field. |
 | `summary` | object | Aggregate counts (below). |
 | `violations` | array | One entry per violation, flattened across all rules. |
+| `notes` | object | Optional non-violation note count and full-detail format. Absent when the count is zero. |
+
+### `notes`
+
+| Field | Type | Notes |
+| --- | --- | --- |
+| `count` | integer | Total notes in the report; always at least `1` when `notes` is present. |
+| `details_format` | string | Always `"json"`. Rerun the same check with `--format json` for the full per-rule note list. |
+
+Notes are informational, never enter `violations`, never receive an `agent_instruction`, and do not
+change summary counts or the exit code.
 
 ### `summary`
 
@@ -100,6 +115,7 @@ A report is a single JSON object. This example has three violations: one path-bo
 | `agent_instruction` | string | yes | Templated remediation phrasing (see below). |
 | `fix_available` | boolean | yes | `true` when the source rule declares an autofix. |
 | `fix_command` | array of strings | no | Present iff `fix_available`. Exact argv (after `alint`) to auto-fix this one violation — e.g. `["fix", "--only", "final-newline"]`. Run it programmatically instead of parsing the command out of `agent_instruction`. |
+| `proposed_edit` | array | no | Exact Safe edit payload (`path`, `region`, `inserted`). Omitted when no concrete edit exists or any target path cannot be represented as an exact JSON string; use `fix_command` in that case. |
 | `file` | string | no | Repo-relative path. Absent for tree-wide (cross-file) violations. |
 | `line` | integer | no | 1-based line, when the rule reports one. |
 | `column` | integer | no | 1-based column, when the rule reports one. |

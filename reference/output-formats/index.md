@@ -29,9 +29,30 @@ Each format is shown by example in the [quickstart](/docs/getting-started/quicks
 
 A machine format is the *only* thing written to **stdout** — so `alint check --format json > report.json` (or `sarif` / `gitlab` / `github` / `junit` / `agent`) captures byte-clean output with nothing to strip. Progress and any diagnostic warning (for example an empty `include_manifest_paths` set) are written to **stderr**. Redirect it separately (`2> alint.log`) or discard it (`2>/dev/null`) without touching the report. (In the `human` format, the `Summary` footer is part of the human report and stays on stdout with the findings.)
 
+## Non-violation notes
+
+Rules can emit informational notes when analysis skips an input without asserting a policy
+failure. Notes do not affect pass/fail, severity counts, baseline suppression, fixes, or the exit
+code. A note-only report therefore exits successfully.
+
+| Format | Note projection |
+| --- | --- |
+| `human` | Writes the note count to stderr. `--show-notes` lists each note there. |
+| `json` | Preserves the full per-rule `notes` array, including path, position, message, and structural `kind` (`informational` or `analysis_truncated`). The current emitter always includes `kind`; its absence in an older v1 report means `informational`. |
+| `sarif` | Emits informational notes as `level: note` results. Emits `analysis_truncated` notes as `toolExecutionNotifications`, not policy results. |
+| `github` | Emits one unlocated `notice` with the count and full-list pointer. |
+| `gitlab` | Emits one valid Code Quality `info` issue with the count and full-list pointer. |
+| `markdown` | Emits one blockquote with the count and full-list pointer. |
+| `junit` | Emits one suite-level `system-out` line; notes add no tests, failures, or errors. |
+| `agent` | Adds an optional top-level `notes` object containing `count` and `details_format: "json"`. |
+
+Count-only formats use the exact pointer: `rerun the same check with --format json for the full
+list.` Rerun the original command with that format so its config, path, `--only`, and `--changed`
+arguments are preserved. Summary records never include repository-controlled note bodies.
+
 ## Stable fingerprints
 
-In `sarif`, every result has a location: a finding that isn't tied to one file (a missing `LICENSE`, a tree-level rule) is anchored on line 1 of the config file that loaded the rule, since GitHub Code Scanning drops results without a location. The run declares `columnKind: "unicodeCodePoints"`, because alint counts columns in Unicode characters (in fix regions too), and artifact URIs percent-encode `:` so a file like `a:b.txt` isn't read as a URI scheme.
+In `sarif`, every result has a location: a finding that isn't tied to one file (a missing `LICENSE`, a tree-level rule) is anchored on line 1 of the config file that loaded the rule, since GitHub Code Scanning drops results without a location. The run declares `columnKind: "unicodeCodePoints"`, because alint counts columns in Unicode characters (in fix regions too), and artifact URIs percent-encode `:` so a file like `a:b.txt` isn't read as a URI scheme. On Unix, URI encoding uses the original filename bytes, so distinct non-UTF-8 paths cannot alias. JSON and agent reports omit the optional `proposed_edit` field when an edit path has no exact JSON string representation; their safe `fix_command` remains available.
 
 `sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to **every** run — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitHub Code Scanning uses the SARIF fingerprint to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
 

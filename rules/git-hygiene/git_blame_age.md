@@ -6,9 +6,9 @@ sidebar:
 categories: ['git-hygiene']
 ---
 
-Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. Same regex match shape as `file_content_forbidden`, but with a per-line age gate: a TODO added yesterday passes silently; a TODO that has sat in tree for 18 months fires. Closes the gap between `level: warning` on every TODO (too noisy) and `level: off` (accepts unbounded debt accumulation).
+Fire on lines matching a regex whose `git blame` author-time is older than `max_age_days`. Same regex match shape as `file_content_forbidden`, but with a per-line age gate: a recent TODO passes silently; an old TODO fires. The comparison uses one deterministic UTC reference: `--as-of YYYY-MM-DD`, then `ALINT_AS_OF`, then the HEAD commit's committer timestamp. Every finding ends with `(as of YYYY-MM-DD)`.
 
-`{{ctx.match}}` substitutes the regex capture group 1 when present, otherwise the full match — useful for surfacing which marker was caught (`TODO` vs `FIXME` vs …).
+`{{ctx.match}}` substitutes the regex capture group 1 when present, otherwise the full match — useful for surfacing which marker was caught (`TODO` vs `FIXME` vs …). `alint explain <id>` shows the resolved date and whether it came from explicit input or HEAD.
 
 Heuristic notes:
 
@@ -17,7 +17,7 @@ Heuristic notes:
 - **Squash-merged PRs** collapse to a single commit date, so the squash date wins over the actual edit date.
 - **Performance.** `git blame` is O(file_size × commits_touching_file) per file. On large monorepos pair with `alint check --changed` so blame only runs over modified files in CI.
 
-Outside a git repo, on untracked files, or when blame fails for any other reason, the rule silently no-ops per file. Check-only — auto-removing matched lines is destructive and pinning a line as "do nothing" doesn't help.
+Outside a Git repository, with Git unavailable, or with an unborn HEAD, the rule reports an evaluation failure unless `--as-of` or `ALINT_AS_OF` supplies the reference date. Untracked files and individual files whose blame fails remain silent no-ops. Check-only — auto-removing matched lines is destructive and pinning a line as "do nothing" doesn't help.
 
 ## Options
 
@@ -35,8 +35,13 @@ Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, and `expect_matc
 The rule fires on this repository:
 
 ```text
+reference.txt
 src/
 src/main.rs
+```
+
+```text title="reference.txt"
+advance HEAD's deterministic analysis time
 ```
 
 ```rust title="src/main.rs"
@@ -63,6 +68,7 @@ committed with this history (oldest first):
 
 ```text
 2000-01-01T00:00:00  add a todo  (adds src/main.rs)
+2026-10-16T00:00:00  advance head  (adds reference.txt)
 ```
 
 `alint check` reports:
@@ -71,6 +77,7 @@ committed with this history (oldest first):
 [2m--- src/main.rs ----------------------------------------------------------------[0m
   [1m[33m!  warning[0m  [2mstale-todos[0m
               [2m2:1[0m  This TODO is older than 30 days; address it or remove the marker.
+              (as of 2026-10-16)
 
 [2mSummary (1 violation):[0m
   [1m[33m! 1 warning[0m
