@@ -86,7 +86,7 @@ Every structured-query rule is named `<format>_path_<op>`: `json_path_equals`, `
 | dotenv | `VERSION=1.2` | `$.VERSION` |
 | properties | `version=1.2` | `$.version` |
 
-Four things do not transfer unchanged: **XML wraps everything in its root element** (with an element's attributes read as `@name` keys and its text as `#text`), so the root name is the first path segment; **INI sections are a level** (keys before any section hoist to the top); **dotenv keys keep their casing** (usually upper); and, as below, the flat formats and XML give you **string-typed** leaves.
+Four things do not transfer unchanged: **XML wraps everything in its root element** (with an element's attributes read as `@name` keys and its text as `#text`), so the root name is the first path segment; **INI sections are a level** (keys before any section hoist to the top); **dotenv keys keep their casing** (usually upper), and a bare declaration such as `DEBUG` maps to `null`; and, as below, assigned values in the flat formats plus XML are **string-typed**.
 
 ## The three ops
 
@@ -96,7 +96,7 @@ Four things do not transfer unchanged: **XML wraps everything in its root elemen
 
 ## The footguns
 
-**String-typed leaves.** In JSON, YAML, TOML, and HCL a value keeps its type, so `equals: 8080` matches the number `8080`. But XML, dotenv, properties, and INI have no type system: every leaf is a **string**, so there `equals: 8080` (a number) silently never matches and you must write `equals: "8080"`. This is the one place the "one mental model" leaks, and it bites quietly.
+**String-typed leaves.** In JSON, YAML, TOML, and HCL a value keeps its type, so `equals: 8080` matches the number `8080`. But XML, properties, INI, and assigned dotenv values have no native number/boolean type: `equals: 8080` silently never matches `PORT=8080`; write `equals: "8080"`. Dotenv has one state exception: a bare `PORT` declaration maps to `null`, while `PORT=` maps to `""`. This is the one place the "one mental model" leaks, and it bites quietly.
 
 **Cardinality.** A JSONPath can select zero, one, or many nodes. For `equals` and `matches`, **every** selected node must satisfy the op, and selecting **zero** is itself a "path not found" violation, unless you set `if_present: true` (which passes silently on zero matches and checks only the nodes that exist). In XML a single child is a scalar, not a one-element list, so `$.items.item[*]` reads nothing when there is exactly one `<item>`; reach it with recursive descent (`$..item`) instead. HCL and INI share this shape-shift: a repeated block or key becomes a list, but a lone one stays a scalar or object, so an index or `[*]` that works on many entries reads nothing when there is exactly one.
 
