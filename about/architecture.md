@@ -84,6 +84,14 @@ Every rule is a record:
 - `fix`: optional fixer block
 - kind-specific fields
 
+Each canonical kind is registered with a static, serializable `KindMeta` record
+beside its builder. The record declares dispatch, accepted selectors and common
+fields, host capabilities and their activation conditions, content/formats,
+changed-mode dependencies, fix operations, and nested-rule support. Aliases
+resolve the canonical record. Load-time field validation, trust/audit gates,
+schema restrictions, `facts.json`, and CLI capability discovery all consume this
+catalog instead of maintaining independent kind lists.
+
 Severity maps to exit codes: `error` with violations → 1; `warning` → 0 unless `--fail-on-warning`; `info` → 0; `off` → rule skipped. `off` is useful when overriding a rule inherited from an `extends`-ed ruleset.
 
 The `Rule` trait is the unit of execution:
@@ -159,7 +167,16 @@ test: byte-identical output before/after the type pass. Full design:
 
 <likec4-view view-id="configModel"></likec4-view>
 
-YAML, with a JSON Schema (draft 2020-12) maintained at [`schemas/v1/config.json`](https://github.com/asamarts/alint/blob/main/schemas/v1/config.json) in the repository and embedded into `alint-dsl` at build time via `include_str!` (exposed as `alint_dsl::CONFIG_SCHEMA_V1`). The schema drives editor completion and documentation; the runtime performs typed Serde decoding plus explicit builder validation rather than invoking a JSON Schema validator. Integration tests validate representative configs against both paths and gate the root and embedded schema copies byte-for-byte.
+The JSON Schema (draft 2020-12) at
+[`schemas/v1/config.json`](https://github.com/asamarts/alint/blob/main/schemas/v1/config.json) is
+generated from canonical Rust option types, a shared exact optionless model, and `KindMeta`
+common-field restrictions. Recursively nested `require:` rules reuse the same generated kind
+dispatch while excluding parent-only fields. The committed file remains the descriptive base for
+shared DSL structures and prose. It is embedded into `alint-dsl` via `include_str!` (exposed as
+`alint_dsl::CONFIG_SCHEMA_V1`). The schema drives editor completion and documentation; the runtime
+performs the same typed Serde decoding and metadata-aware builder validation rather than invoking
+a JSON Schema validator. Generation fails on registry, metadata, or schema drift; integration
+tests validate representative configs and gate the root and embedded copies byte-for-byte.
 
 For editor autocomplete, reference the schema via the YAML language server pragma, either by a relative path (recommended inside this repo) or by the GitHub raw URL (for downstream users):
 
@@ -429,9 +446,11 @@ The pipeline from `alint check` to output:
 <likec4-view view-id="checkFlow"></likec4-view>
 
 1. **Config load and build.** Read `.alint.yml`; resolve composition with caching, cycle and
-   trust checks; decode the merged YAML into typed specs; build every enabled top-level rule and
-   structurally validate its nested rules; reject invalid kinds/options and cross-field
-   combinations. JSON Schema is the editor/test contract, not a runtime validation pass.
+   capability-catalog trust checks; validate each effective common field against the selected
+   kind's `KindMeta`; decode merged YAML into typed specs; build every enabled top-level rule and
+   structurally validate its nested rules. Unknown kinds, unsupported fields/fixes, invalid
+   options, and cross-field combinations fail load. JSON Schema is the matching editor/test
+   contract, not a runtime validation pass.
 2. **Walk.** Build one full `FileIndex` with the `ignore` crate's parallel walker. Workers collect
    entries locally; a deterministic post-sort removes filesystem/thread scheduling from output.
    Lazy `OnceLock` indexes accelerate membership, child, descendant, and basename queries.
@@ -678,8 +697,8 @@ A new kind follows the repository's spec-driven workflow, not only a trait imple
    behavior, changed-mode/full-index needs, errors, finding identity, trust, and fixes.
 2. Define a `deny_unknown_fields` options type and generated schema fragment, then implement the
    `Rule` (and `PerFileRule` only when it truly accepts one preloaded file at a time).
-3. Register the builder, option schema, canonical kind, aliases, and family/category metadata in
-   their single sources of truth.
+3. Declare the static `KindMeta` beside the builder, then register that pair, the option schema,
+   canonical kind, aliases, and family/category metadata in their single sources of truth.
 4. Add unit/property tests plus at least one firing and one silent end-to-end scenario. Cover
    changed mode, scoping, limits, trust, output identity, and fix convergence when applicable.
 5. Add examples and generated rule documentation; run all catalogue/schema/docs/coverage gates.

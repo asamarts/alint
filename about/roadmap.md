@@ -1428,10 +1428,11 @@ decided in [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-
 Current status and the ordered next steps are kept in that file's
 "Status and next steps" section.
 
-- **Capability inventory.** A static `KindMeta` per kind (domain,
-  dispatch, selectors, capabilities, formats, fixes), emitted into
-  `facts.json`; the spawn and Git trust lists are derived from it, and
-  `scope_filter` on a kind that ignores it is rejected at load.
+- **Capability inventory (complete 2026-10-16).** A static `KindMeta` per
+  canonical kind (dispatch, selectors, host capabilities, content/formats,
+  changed dependencies, fixes, nested rules), emitted into `facts.json` and the
+  CLI discovery surfaces. Trust/audit gates and load-time common-field rejection
+  derive from it; the generated per-kind schema is parity-gated against it.
 - **Fail-loud analysis.** A rule that cannot evaluate a repository file
   reports an error-level finding that is never baselinable, whatever the
   rule's level; manifest parse failures, missing Git, and non-string

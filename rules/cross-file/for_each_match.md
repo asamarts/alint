@@ -12,10 +12,10 @@ For each line matching `select` (a regex), the line must satisfy the nested `req
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `require` | object | yes |  | Predicates applied to each selected line; at least one of `matches` / `forbid` / `equal` is required. |
+| `require` | object { `equal`, `forbid`, `matches` } | yes |  | Predicates applied to each selected line; at least one of `matches` / `forbid` / `equal` is required. |
 | `select` | string | yes |  | Regex; a line is a checked element iff it matches. Named captures are available to `require.equal`. |
 
-Plus the common `paths`, `level`, `id`, `when`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
+Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
 ## Example
 

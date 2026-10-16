@@ -12,7 +12,7 @@ Every direct-child file of a directory matching `select:` must match at least on
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `allow` | string or list of string | yes |  | Basename glob(s) accepted as direct children. Anything else is a violation. |
+| `allow` | dir only contains allow list | yes |  | Basename glob(s) accepted as direct children. Anything else is a violation. |
 | `select` | string | yes |  | Glob selecting the directories to enumerate. |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.
