@@ -679,7 +679,7 @@
     "S1": 16,
     "S2": 20,
     "S3": 16,
-    "S4": 50
+    "S4": 85
   },
   "bundled_rulesets": [
     "agent-context",

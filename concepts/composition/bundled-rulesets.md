@@ -1,14 +1,14 @@
 ---
 title: Bundled rulesets
-description: Adopt curated, fact-gated rulesets with one extends entry, then override individual rules field by field.
+description: Adopt curated, applicability-gated rulesets with one extends entry, then override individual rules field by field.
 sidebar:
   order: 2
 ---
 
-alint ships **22 bundled rulesets** compiled straight into the binary, with no network round-trip. They are the on-ramp: instead of hand-writing rules, you add one `extends:` line and inherit a curated set, from `oss-baseline` (a Repolinter migration starting point) to per-language, monorepo, CI, hygiene, compliance, and agent-aware sets. Two properties make them safe to adopt broadly: every rule is **fact-gated**, so a ruleset applies itself only where it belongs, and everything it declares is **overridable** field-by-field from your own config.
+alint ships **24 bundled rulesets** compiled straight into the binary, with no network round-trip. They are the on-ramp: instead of hand-writing rules, you add one `extends:` line and inherit a curated set, from `oss-baseline` (a Repolinter migration starting point) to per-language, cross-file consistency, monorepo, CI, hygiene, compliance, and agent-aware sets. Rulesets that span broad repository populations use built-in facts or explicit source files to activate only where they belong; intentionally universal sets treat the `extends:` entry itself as the opt-in. Everything they declare is overridable field-by-field from your own config.
 
 <svg class="alint-br" viewBox="0 0 460 330" role="img" aria-labelledby="br-t br-d" xmlns="http://www.w3.org/2000/svg">
-<title id="br-t">A bundled ruleset's rules are fact-gated, so extending it is a no-op where the fact does not hold</title>
+<title id="br-t">An applicability-gated bundled ruleset is a no-op where its fact does not hold</title>
 <desc id="br-d">One extends line pulls in three bundled rulesets. oss-baseline always applies. rust@v1 is gated on facts.has_rust and fires because the repo has Rust. go@v1 is gated on facts.has_go and stays dormant because the repo has no Go. Every inherited rule can be overridden in your own config.</desc>
 <style>
   .alint-br { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
@@ -28,7 +28,7 @@ alint ships **22 bundled rulesets** compiled straight into the binary, with no n
   @media (prefers-reduced-motion:reduce){ .alint-br .flow{animation:none;stroke-dasharray:none} .alint-br .pulse{animation:none} }
 </style>
 <text class="ui ac" x="18" y="16">one extends line</text>
-<text class="ui mut" x="442" y="16" text-anchor="end">22 bundled rulesets</text>
+<text class="ui mut" x="442" y="16" text-anchor="end">24 bundled rulesets</text>
 <rect class="key" x="70" y="26" width="320" height="46" rx="9"/><text class="tag ac" x="230" y="45" text-anchor="middle">your .alint.yml</text><text class="tag mut" x="230" y="61" text-anchor="middle">extends: oss-baseline, rust@v1, go@v1</text>
 <text class="tag mut" x="230" y="86" text-anchor="middle">repo facts: has_rust = true, has_go = false</text>
 <path class="flow" d="M 150 72 C 150 96, 92 96, 92 112"/>
@@ -43,7 +43,7 @@ alint ships **22 bundled rulesets** compiled straight into the binary, with no n
 
 ## What they are
 
-The 22 sets fall into a few families: `oss-baseline` (the migration starting point for the archived [Repolinter](https://github.com/todogroup/repolinter)); seven **language** sets (`rust`, `python`, `node`, `go`, `java`, `php`, `dotnet`); a `monorepo` base with Cargo, pnpm, and Yarn workspace overlays; `ci/github-actions`; `tooling/editorconfig`; hygiene sets (`hygiene/lockfiles`, `hygiene/no-tracked-artifacts`); compliance (`compliance/reuse`, `compliance/apache-2`) and `apache/governance`; `docs/adr`; and the two agent-aware sets (`agent-context`, `agent-hygiene`). Each is a hand-curated group of rules, compiled into the binary, referenced as `alint://bundled/<name>@v1`. `alint init` scaffolds a starting config for you: it always extends `oss-baseline` and adds a language set for each stack it auto-detects (Rust, Node, Python, Go, or Java). The `php` and `dotnet` sets ship too but are not auto-detected, so add those to `extends:` by hand.
+The 24 sets fall into a few families: `oss-baseline` (the migration starting point for the archived [Repolinter](https://github.com/todogroup/repolinter)); seven **language** sets (`rust`, `python`, `node`, `go`, `java`, `php`, `dotnet`); cross-file consistency sets (`versioning`, `toolchain-pins`); a `monorepo` base with Cargo, pnpm, and Yarn workspace overlays; `ci/github-actions`; `tooling/editorconfig`; hygiene sets (`hygiene/lockfiles`, `hygiene/no-tracked-artifacts`); compliance (`compliance/reuse`, `compliance/apache-2`) and `apache/governance`; `docs/adr`; and the two agent-aware sets (`agent-context`, `agent-hygiene`). Each is a hand-curated group of rules, compiled into the binary, referenced as `alint://bundled/<name>@v1`. `alint init` scaffolds a starting config for you: it always extends `oss-baseline` and the fact-gated language sets, while policy-specific consistency/compliance/agent sets remain deliberate opt-ins.
 
 ## Fact-gating
 

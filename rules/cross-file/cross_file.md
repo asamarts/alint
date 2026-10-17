@@ -8,6 +8,18 @@ categories: ['cross-file']
 
 A `source` must hold a `relation` to one or more `targets` (or, for `resolves`, the filesystem). The `source` is a single `{ file, extract }` (for `registered`, a `file` or `files` with no `extract`) — **or**, for the set relations only (`subset` / `superset` / `set_equals`), `{ files: <glob>, extract }`, whose matches are read and whose extracted values are **unioned into one set** (the "every `*hl-X*` across `runtime/doc/*.txt` must equal the `default link X` set in `highlight.c`" shape — symbol-set / cross-language parity). For the value relations, `targets` is either a `{ files: <glob>, extract }` map (one query applied per glob match) or a sequence of `{ file, extract }` (heterogeneous pins); `extract` is the same one-of as `registry_paths_resolve` (`toml`/`json`/`yaml`/`xml` JSONPath, `lines`, `regex` group 1) plus `whole_file: {}` (the entire file content as one value — for byte-level content equality without `identical`'s no-`extract`/no-`normalize` constraint). `relation` (default `equals`) selects the assertion, checked independently per target; the *shape* (which of `source.file`/`source.files`, `source.extract`, `targets` is present) follows the relation and is validated at load:
 
+Each target glob map or fixed-list entry may add `matches: <regex>`. The predicate runs on each extracted string before the relation and before fixer correlation; non-matching values behave like absent optional values and are never rewritten. This narrows syntactically broad structured queries without changing their source spans.
+
+A regex target whose path is `Dockerfile` / `Dockerfile.*` and whose pattern selects `FROM`
+is constrained to top-level `FROM` lines accepted by alint's Dockerfile parser; heredoc payloads
+and continuation bodies do not become extracted values. The versioning/toolchain selectors apply
+equivalent syntax-aware guards to Python, Rust toolchain TOML, Gemfile, and changelog targets.
+Every cross-file extraction fails analysis above 10,000 values, and a syntax-aware scanner fails
+above 100,000 physical lines. `sync_from` rewrites only the exact target-value occurrence carried
+by the live finding, so a baseline-suppressed duplicate in the same file is untouched. Regex
+propagation declines more than 10,000 edits or output above the lower of `fix_size_limit` and the
+32 MiB hard ceiling.
+
 | `relation` | source ⇒ | asserts (per target) |
 |---|---|---|
 | `equals` | exactly one value `v` | every target value `== v` |
