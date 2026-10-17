@@ -22,6 +22,8 @@ never swallowed into a pass. Single-shot, opt-in. Trust-gated
 like `command` (see below): declarable only in your own
 top-level config.
 
+A completed non-zero checker exit is the configured policy verdict and remains a violation. A spawn or wait failure, or a timeout before the checker exits, produces a non-baselinable `evaluation` analysis failure instead.
+
 As with `generated_file_fresh`, the optional `workdir` (the child's working directory, relative to the lint root) must stay inside the repository: an absolute path or a `..` that climbs out is rejected when the config loads, and a `workdir` that resolves outside the repository through a symlink is refused at run time (reported as a spawn failure) instead of running the command there.
 
 ## Options
@@ -31,7 +33,7 @@ As with `generated_file_fresh`, the optional `workdir` (the child's working dire
 | `command` | list of string | yes |  | Checker argv (no shell), run in its --check / idempotence mode; exit 0 = clean. |
 | `files_from` | one of `none` \| `stdout` \| `stderr` |  | `none` | On failure, parse this stream into per-file violations (default: none = one violation for the whole invocation). |
 | `files_pattern` | string |  | `null` | Regex whose capture group 1 is a file path, applied per output line (requires `files_from`; omit for bare-path listers). |
-| `timeout` | integer (>= 1) |  | `null` | Checker timeout in seconds (default 120). On timeout the child is killed and one violation is emitted. |
+| `timeout` | integer (>= 1) |  | `null` | Checker timeout in seconds (default 120). On timeout the child is killed and one non-baselinable `evaluation` analysis failure is emitted. |
 | `workdir` | string |  | `null` | Checker cwd, relative to the lint root (default: lint root). |
 
 Plus the common `level`, `id`, and `when` fields. This rule analyses the whole repository, so it takes no `paths` or `expect_matches`. This table is generated from the JSON Schema; option types and defaults are authoritative.

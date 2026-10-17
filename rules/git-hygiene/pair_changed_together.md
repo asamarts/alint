@@ -6,7 +6,7 @@ sidebar:
 categories: ['git-hygiene', 'cross-file']
 ---
 
-If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. Corpus signals: rust's `rustdoc-json-types` `FORMAT_VERSION` must bump when the format struct changes; "`version.txt` and the lockfile change together" release guards. Both globs and `since:` (the base ref) are required. **Directional** — the trigger is `if_changed`, the obligation is `then_changed`; a `then_changed`-only change never fires it, so add a second rule with the globs swapped for a bidirectional pact. The `changeset_requires_path` sibling, built on the same merge-base diff as `alint check --changed`. Silent no-op outside a git repo or when `if_changed` didn't change; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
+If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. Corpus signals: rust's `rustdoc-json-types` `FORMAT_VERSION` must bump when the format struct changes; "`version.txt` and the lockfile change together" release guards. Both globs and `since:` (the base ref) are required. **Directional** — the trigger is `if_changed`, the obligation is `then_changed`; a `then_changed`-only change never fires it, so add a second rule with the globs swapped for a bidirectional pact. The `changeset_requires_path` sibling, built on the same merge-base diff as `alint check --changed`. Git or repository unavailability is a `resource_read` analysis failure; an unchanged `if_changed` set is a normal pass; a `since:` that fails to resolve hard-fails with a shallow-clone hint.
 
 ---
 
@@ -63,6 +63,7 @@ change the format struct  (adds src/format.rs)
               the changeset `HEAD~1...HEAD` changes a path matching
               `src/format.rs` but no path matching `FORMAT_VERSION` changed with
               it
+              [2mrelated:[0m changed trigger: src/format.rs
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m

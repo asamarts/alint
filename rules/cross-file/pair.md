@@ -61,6 +61,7 @@ rules:
   [1m[31mx  error  [0m  [2mc-requires-h[0m
               src/beta.c has no matching partner at src/beta.h (template:
               {dir}/{stem}.h)
+              [2mrelated:[0m expected partner: src/beta.h
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m

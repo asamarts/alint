@@ -39,7 +39,7 @@ Turning a linter on for an established repo has a chicken-and-egg problem: the r
 alint baseline
 ```
 
-This runs the same whole-tree evaluation as `check`, then writes every current violation to `.alint-baseline.json`. Commit that file.
+This runs the same whole-tree evaluation as `check`, then writes every current policy violation to `.alint-baseline.json`. It refuses to write if analysis is incomplete. Commit that file.
 
 **2. Enforce the delta.** In CI and locally:
 
@@ -47,7 +47,7 @@ This runs the same whole-tree evaluation as `check`, then writes every current v
 alint check --baseline .alint-baseline.json
 ```
 
-Every violation whose fingerprint is in the baseline is suppressed (up to its recorded count); only new violations are reported, and only they drive the exit code. Persist the path in `.alint.yml` (`baseline: .alint-baseline.json`) so CI need not repeat the flag. A `--baseline` flag overrides the config key, and there is **no silent auto-detect**: suppression is always an explicit, committed decision.
+Every policy violation whose fingerprint is in the baseline is suppressed (up to its recorded count); only new violations are reported, and only they drive the policy exit status. Analysis failures remain visible, always fail the run, and can never be recorded or suppressed. Persist the path in `.alint.yml` (`baseline: .alint-baseline.json`) so CI need not repeat the flag. A `--baseline` flag overrides the config key, and there is **no silent auto-detect**: suppression is always an explicit, committed decision.
 
 ## Fingerprints, not line numbers
 

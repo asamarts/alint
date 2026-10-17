@@ -10,7 +10,7 @@ Directory counterpart of `file_exists`. Every match must correspond to a real di
 
 **Optional `root_only: true`** (like `file_exists`) requires the match to be a
 directory directly at the repository root, not nested.
-**Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
+**Optional `git_tracked_only: true`** further requires that the directory contain at least one tracked file. A tree with a `docs/` checked out from a stale clone where every file was later removed via `git rm` would fail under this stricter check. If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure. See [The walker and `.gitignore`](/docs/concepts/targeting/the-walker-and-git/) for the full semantics.
 
 **When to use it**: for the directories a repository's tooling or contributors rely on being there: a `docs/` tree the site build reads, `.github/workflows/` for CI, `tests/` next to the sources. Listing several paths accepts any one of them, so `paths: ["doc", "docs"]` passes with either name.
 
@@ -20,7 +20,7 @@ directory directly at the repository root, not nested.
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `git_tracked_only` | boolean |  | `false` | Restrict matches to directories that contain at least one git-tracked file. No effect outside a git repo. Default `false`. |
+| `git_tracked_only` | boolean |  | `false` | Restrict matches to directories that contain at least one git-tracked file. Repository unavailability is an analysis failure when enabled. Default `false`. |
 | `root_only` | boolean |  | `false` | If true, only a directory directly at the repository root satisfies the rule; a nested match does not. |
 
 Plus the common `paths`, `level`, `id`, `when`, and `fix` fields. This kind does not support `expect_matches`; its empty-scope semantics are kind-specific. This table is generated from the JSON Schema; option types and defaults are authoritative.

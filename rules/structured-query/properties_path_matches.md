@@ -50,7 +50,7 @@ rules:
 ```ansi
 [2m--- application.properties -----------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mpostgres-only[0m
-              value at path "jdbc:mysql://localhost/app" does not match regex
+              value at path <redacted:1660b7c45ecb> does not match regex
               ^jdbc:postgresql:
 
 [2mSummary (1 violation):[0m

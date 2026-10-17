@@ -459,8 +459,8 @@ The pipeline from `alint check` to output:
    build changed or Git-tracked index views as needed. The LSP's single-file evaluator caches
    facts on its long-lived index; a normal CLI run does not use a persistent content-hash cache.
 4. **Gates.** Skip `off` entries during loading/building; evaluate `when:` once per live rule;
-   apply changed-mode, `expect_matches`, scope, and kind-specific target gates. Gate errors become
-   visible findings rather than silent passes.
+   apply changed-mode, `expect_matches`, scope, and kind-specific target gates. Runtime gate errors
+   become typed, always-error analysis failures rather than silent passes or policy violations.
 5. **Dispatch.** `Rule::as_per_file() == Some(...)` joins the file-major loop. All other rules
    use the rule-major loop. Independently, `requires_full_index()` selects the full rather than
    changed-only index for rules whose verdict needs whole-repository context.
@@ -468,14 +468,16 @@ The pipeline from `alint check` to output:
    matched file once and shares its byte slice among applicable `PerFileRule`s (respecting each
    rule's prefix-read cap). Rule-major evaluators own any reads they require and may therefore
    reread a file used by another rule.
-7. **Aggregate and post-process.** Reassemble results in config order, partition notes from
-   violations, attach fixability/proposed edits where the selected formatter needs them, and
-   apply an optional baseline before deciding the exit status.
+7. **Aggregate and post-process.** Reassemble results in config order; partition typed analysis
+   failures and informational notes from policy violations; attach fixability/proposed edits where
+   the selected formatter needs them; and apply an optional baseline before deciding the exit
+   status. A baseline operates only on violations and cannot suppress incomplete analysis.
 8. **Fix (optional).** Fix evaluation and application are serial to preserve configuration order.
    Applicability gates writes; whole-file edits compose in memory, located edits are ordered and
    overlap-checked, and path operations apply directly or stage for `--diff`. A real fix re-walks
    after a pass that changed bytes and repeats to a bounded fixpoint; dry-run is a non-mutating
-   single-pass preview. Outcomes are `Applied`, `Skipped`, `Suggested`, or `Unfixable`/error.
+   single-pass preview. Policy outcomes are `Applied`, `Skipped`, `Suggested`, or `Unfixable`;
+   analysis failures remain separate, are never offered to a fixer, and force exit 1.
 9. **Emit.** Render one of the selected output formats and derive the command exit code.
 
 The engine builds its main `FileIndex` with one repository walk per pass. An explicitly effectful
@@ -626,6 +628,10 @@ Selected via `--format`:
 - `agent`: agent-oriented JSON sibling of `json`, with a per-violation instruction composed from
   severity, message, location, actual Safe-fix availability, and policy URL, plus a machine-usable
   fix command/edit when available (v0.6).
+
+All eight formats preserve typed analysis failures separately from policy violations. Failures
+always count as errors, cannot be baselined or fixed, and retain a stable class plus resource
+location where available. See the [output-format reference](../site/reference/output-formats/index.md).
 
 ## Full example
 

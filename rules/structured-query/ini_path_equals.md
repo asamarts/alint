@@ -11,7 +11,7 @@ Query a structured document with a JSONPath expression and assert every match de
 **Semantics**:
 - Multiple matches — every match must equal the expected value.
 - Zero matches — counts as a violation (the key the rule is enforcing doesn't exist).
-- Unparseable files — one violation per file (not silently skipped).
+- Unparseable files — one non-baselinable `resource_parse` analysis failure per file (not silently skipped).
 - Numbers compare by value, in every format and at any depth: `equals: 1` matches a document's `1.0` (or `1e0`), and `equals: 1.0` matches `1`. The comparison is exact: an integer equals a float only when the float is a whole number of exactly that value, so `9007199254740993` does not equal `9007199254740992.0` even though both round to the same 64-bit float. There is no other coercion: a string `"1"` never equals the number `1`. (New in v0.18; this supersedes the HCL whole-number caveat above.)
 
 <a id="xml-mapping"></a>

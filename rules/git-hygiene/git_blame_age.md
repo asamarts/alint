@@ -17,7 +17,7 @@ Heuristic notes:
 - **Squash-merged PRs** collapse to a single commit date, so the squash date wins over the actual edit date.
 - **Performance.** `git blame` is O(file_size × commits_touching_file) per file. On large monorepos pair with `alint check --changed` so blame only runs over modified files in CI.
 
-Outside a Git repository, with Git unavailable, or with an unborn HEAD, the rule reports an evaluation failure unless `--as-of` or `ALINT_AS_OF` supplies the reference date. Untracked files and individual files whose blame fails remain silent no-ops. Check-only — auto-removing matched lines is destructive and pinning a line as "do nothing" doesn't help.
+If Git cannot be run or the lint root is not a Git repository, the rule reports a `resource_read` analysis failure even when `--as-of` supplies the reference date. In a usable repository with an unborn HEAD, provide `--as-of` or `ALINT_AS_OF`; otherwise the missing reference date is an evaluation failure. Untracked files and individual files whose blame fails remain silent no-ops. Check-only — auto-removing matched lines is destructive and pinning a line as "do nothing" doesn't help.
 
 ## Options
 

@@ -91,7 +91,7 @@ Four things do not transfer unchanged: **XML wraps everything in its root elemen
 ## The three ops
 
 - **`equals`** asserts the value at the path equals a literal, keeping its type: `equals: 8080` matches the number and `equals: "8080"` matches the string. They are not interchangeable.
-- **`matches`** applies a regex, and only to **string** values. A numeric or boolean node is not a match target.
+- **`matches`** applies a regex only to **string** values. Selecting a numeric, boolean, null, array, or object node produces a value-free type-mismatch violation rather than stringifying or silently dropping it.
 - **`absent`** asserts the query selects **nothing**; any match is a violation. It is the mirror of `equals` / `matches`, for "this key must not be set."
 
 ## The footguns
@@ -102,7 +102,14 @@ Four things do not transfer unchanged: **XML wraps everything in its root elemen
 
 **Keys with dashes or dots.** Dot notation stops at a dashed or dotted key, so `$.scripts.pre-commit` and `$.db.host` (a single dotted properties key) do not resolve. Use bracket notation: `$.scripts['pre-commit']`, `$['db.host']`.
 
-**Parsing.** A `.json` file may carry comments and trailing commas (JSONC, for `tsconfig.json` and friends) and still parses. An empty file parses to `{}`, which matters for `*_path_absent` and `if_present`. And a file that will not parse is one **parse-error violation** for that file, never a silent skip.
+**Parsing.** A `.json` file may carry comments and trailing commas (JSONC, for `tsconfig.json` and friends) and still parses. An empty file parses to `{}`, which matters for `*_path_absent` and `if_present`. A file that will not parse produces one non-baselinable `resource_parse` **analysis failure** for that file, never a policy violation or silent skip.
+
+**String-only relation extraction.** `cross_file`, `file_graph`, and
+`registry_paths_resolve` consume string references and paths. If their structured
+query also selects non-string nodes, the rule reports one ordinary policy violation
+per extraction site with only the match count and sorted JSON type names; selected
+values never enter output. String matches from the same query still evaluate, so a
+mixed result cannot hide either failure.
 
 ## In practice
 

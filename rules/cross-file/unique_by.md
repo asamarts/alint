@@ -63,6 +63,7 @@ rules:
 [2m--- a/util.rs ------------------------------------------------------------------[0m
   [1m[33m!  warning[0m  [2munique-rs-stems[0m
               duplicate key "util" shared by 2 file(s): a/util.rs, b/util.rs
+              [2mrelated:[0m shares this key: b/util.rs
 
 [2mSummary (1 violation):[0m
   [1m[33m! 1 warning[0m

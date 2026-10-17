@@ -19,15 +19,17 @@ alint check --format agent
 - **Flat list of violations.** `json` groups violations under each rule result; `agent` flattens them into a single `violations` array, so an agent loops once.
 - **A templated `agent_instruction` per violation.** A ready-to-act sentence composed from the severity, message, location, fix availability, and policy URL. `json` leaves that synthesis to the consumer.
 - **`severity` is a lowercase string** (`"error"` / `"warning"` / `"info"`), not the SARIF level mapping, so it drops straight into a prompt.
+- **A separate `analysis_failures` list.** Incomplete analysis is error-bearing but not a policy
+  violation, so these records have no remediation instruction, fix command, or proposed edit.
 - **Check-side only.** There is no agent-format fix report. An agent confirming a fix landed re-runs `alint check --format agent` against the modified tree.
 
 ## The self-correction loop
 
-The format exists to make an agent's lint loop deterministic: the agent makes a change, runs `alint check --format agent` (locally or in CI), reads its own violations, acts on each `agent_instruction`, and re-runs until the report is empty.
+The format exists to make an agent's lint loop deterministic: the agent makes a change, runs `alint check --format agent` (locally or in CI), reads its violations and analysis failures, acts on each `agent_instruction`, restores any input alint could not analyze, and re-runs until both arrays are empty.
 
 ## Report shape
 
-A report is a single JSON object. This example has three violations—one path-bound and fixable, one path-bound and not, and one tree-wide—and two non-violation notes.
+A report is a single JSON object. This example has three violations, one analysis failure, and two non-violation notes.
 
 ```json
 {
@@ -38,7 +40,8 @@ A report is a single JSON object. This example has three violations—one path-b
     "by_severity": { "error": 1, "warning": 2, "info": 0 },
     "fixable_violations": 1,
     "passing_rules": 18,
-    "failing_rules": 3
+    "failing_rules": 4,
+    "total_analysis_failures": 1
   },
   "violations": [
     {
@@ -68,6 +71,15 @@ A report is a single JSON object. This example has three violations—one path-b
       "fix_available": false
     }
   ],
+  "analysis_failures": [
+    {
+      "rule_id": "dependency-schema",
+      "kind": "resource_parse",
+      "file": "config/dependencies.json",
+      "line": 1,
+      "human_message": "config/dependencies.json is not valid JSON"
+    }
+  ],
   "notes": {
     "count": 2,
     "details_format": "json"
@@ -83,6 +95,7 @@ A report is a single JSON object. This example has three violations—one path-b
 | `format` | string | Always `"agent"`. Lets a multi-format consumer route on one field. |
 | `summary` | object | Aggregate counts (below). |
 | `violations` | array | One entry per violation, flattened across all rules. |
+| `analysis_failures` | array | Incomplete-analysis records flattened across all rules. |
 | `notes` | object | Optional non-violation note count and full-detail format. Absent when the count is zero. |
 
 ### `notes`
@@ -95,6 +108,21 @@ A report is a single JSON object. This example has three violations—one path-b
 Notes are informational, never enter `violations`, never receive an `agent_instruction`, and do not
 change summary counts or the exit code.
 
+### `analysis_failures[]`
+
+| Field | Type | Required | Notes |
+| --- | --- | --- | --- |
+| `rule_id` | string | yes | Owning configured rule id. |
+| `kind` | string | yes | `evaluation`, `condition`, `resource_read`, `resource_parse`, or `nested_rule_build`. |
+| `human_message` | string | yes | Stable failure reason. |
+| `file` | string | no | Repo-relative resource path, when known. |
+| `line` | integer | no | 1-based line, when known. |
+| `column` | integer | no | 1-based column, when known. |
+
+Analysis failures always force a failing run, regardless of the owning rule's configured severity.
+They never enter `violations`, never receive an `agent_instruction`, and cannot be baselined or
+fixed automatically.
+
 ### `summary`
 
 | Field | Type | Notes |
@@ -102,8 +130,9 @@ change summary counts or the exit code.
 | `total_violations` | integer | Length of `violations`. |
 | `by_severity` | object | `error`, `warning`, `info`, each an integer count. |
 | `fixable_violations` | integer | How many violations come from a rule that declares an autofix. Use it to decide whether to suggest `alint fix`. |
-| `passing_rules` | integer | Rules that produced no violation. |
-| `failing_rules` | integer | Rules that produced at least one violation. |
+| `passing_rules` | integer | Rules that produced neither a violation nor an analysis failure. |
+| `failing_rules` | integer | Rules that produced at least one violation or analysis failure. |
+| `total_analysis_failures` | integer | Length of `analysis_failures`; counted separately from policy violations and severities. |
 
 ### `violations[]`
 

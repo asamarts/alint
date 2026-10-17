@@ -50,11 +50,57 @@ Count-only formats use the exact pointer: `rerun the same check with --format js
 list.` Rerun the original command with that format so its config, path, `--only`, and `--changed`
 arguments are preserved. Summary records never include repository-controlled note bodies.
 
+## Analysis failures
+
+An analysis failure means alint could not obtain the configured policy verdict: evaluation,
+runtime-condition, resource-read, resource-parse, and repository-derived nested-rule build
+failures are tracked separately from violations. They always make the run fail with exit `1`,
+even when the owning rule is `warning`, `info`, or `off`. They have no canonical or baseline
+fingerprint, cannot be baselined, and are never offered to a fixer; `alint baseline` refuses to
+write while analysis is incomplete.
+
+| Format | Analysis-failure projection |
+| --- | --- |
+| `human` | Error-styled `analysis failure` entry grouped by resource path. |
+| `json` | Full per-rule `analysis_failures` records plus `summary.total_analysis_failures`. |
+| `sarif` | An error result with `kind: "fail"` and `properties.analysisFailure`; the invocation has `executionSuccessful: false`. |
+| `github` | An `error` annotation retaining path and position when available. |
+| `gitlab` | A `critical` Code Quality issue with the failure class in its description and a deterministic schema-required transport fingerprint (not a baseline identity). |
+| `markdown` | An error row labeled `analysis failure`. |
+| `junit` | A testcase with `<error type="analysis_failure">`, distinct from a policy `<failure>`. |
+| `agent` | A non-remediation `analysis_failures` record with no instruction, fix command, or edit. |
+
+Violation and severity counts continue to count policy violations only. JSON, agent, and fix
+reports expose failures through dedicated arrays and a separate total, so consumers do not need
+to parse English messages. Fix runs preserve failures and exit `1` under `--fix-only`,
+`--dry-run`, `--diff`, and `--baseline`; non-convergence retains its higher-priority exit `2`.
+
+## Primary ranges and related locations
+
+Findings may identify a half-open primary source range and labeled secondary locations. Existing
+single `line` / `column` points remain valid and are used when no primary range is available.
+Relationship rules use this metadata to keep their established report anchor while also pointing
+to the source, target, partner, or colliding member that explains the failure.
+
+- **`human`** lists each related label and path below the finding. A finding retains at most 20
+  related locations; if producers supplied more, the output reports the omitted count.
+- **`sarif`** projects the primary range into the result's first physical location and emits the
+  secondary locations in `relatedLocations`, including regions when known. SARIF columns use
+  Unicode code points.
+- **LSP diagnostics** project the primary range into `Diagnostic.range` and related locations into
+  `Diagnostic.relatedInformation`, with UTF-16 columns. alint sends related information only when
+  the client advertises `publishDiagnostics.relatedInformation`.
+
+The other check-format payloads do not gain related-location fields in v0.19. In particular, the
+JSON report remains `schema_version: 1` with its previous emitted shape. Its schema now permits
+additive fields so consumers can adopt the structured fields in the next release without an
+atomic schema migration; required fields and known-field types remain enforced.
+
 ## Stable fingerprints
 
 In `sarif`, every result has a location: a finding that isn't tied to one file (a missing `LICENSE`, a tree-level rule) is anchored on line 1 of the config file that loaded the rule, since GitHub Code Scanning drops results without a location. The run declares `columnKind: "unicodeCodePoints"`, because alint counts columns in Unicode characters (in fix regions too), and artifact URIs percent-encode `:` so a file like `a:b.txt` isn't read as a URI scheme. On Unix, URI encoding uses the original filename bytes, so distinct non-UTF-8 paths cannot alias. JSON and agent reports omit the optional `proposed_edit` field when an edit path has no exact JSON string representation; their safe `fix_command` remains available.
 
-`sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to **every** run — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitHub Code Scanning uses the SARIF fingerprint to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
+`sarif` and `gitlab` attach a stable per-finding fingerprint (SARIF `partialFingerprints`, GitLab `fingerprint`) to every **policy-violation** result — not only when a `--baseline` is active. SARIF's is the canonical `violation_fingerprint`, the same identity the [baseline](/docs/concepts/adoption/baseline/) file records, so an alert keeps one identity across SARIF and the baseline. A finding with a unique fingerprint carries that same identity in GitLab too; GitLab additionally disambiguates genuine within-report duplicates (two findings with byte-identical content), because GitLab Code Quality drops entries that share a fingerprint. GitLab analysis-failure issues receive only the deterministic transport identity its schema requires; SARIF analysis failures have no `partialFingerprints`. GitHub Code Scanning uses policy findings' SARIF fingerprints to correlate alerts across runs — dedupe, and track a finding as fixed or reopened — with no `--baseline` required.
 
 ## Baseline suppression
 

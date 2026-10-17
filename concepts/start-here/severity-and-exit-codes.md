@@ -5,11 +5,11 @@ sidebar:
   order: 4
 ---
 
-Every rule carries a `level`, and every `alint check` returns an exit code. The level decides how loud a finding is; the exit code is what your CI gates on. The mapping is small and fixed.
+Every rule carries a `level`, and every `alint check` returns an exit code. The level controls policy violations; an analysis failure is separate and always fails because no verdict was obtained. The mapping is small and fixed.
 
 <svg class="alint-sev" viewBox="0 0 460 292" role="img" aria-labelledby="sev-t sev-d" xmlns="http://www.w3.org/2000/svg">
 <title id="sev-t">Severity levels mapped to exit codes</title>
-<desc id="sev-d">A rule's level maps to an exit code. error exits 1 and fails the run. warning exits 0 by default, or 1 with the --fail-on-warning flag. info exits 0 and is reported only. off means the rule is skipped. A bad config or usage exits 2; an internal error exits 3.</desc>
+<desc id="sev-d">A policy violation's level maps to an exit code. error exits 1 and fails the run. warning exits 0 by default, or 1 with the --fail-on-warning flag. info exits 0 and is reported only. off means the rule is skipped. An analysis failure independently exits 1. A bad config or usage exits 2; an internal error exits 3.</desc>
 <style>
   .alint-sev { --tx:#1e1b4b; --mut:#64748b; --card:#ffffff; --bd:#c7cfe0; --ac:#4f46e5; width:100%; max-width:480px; height:auto; display:block; margin-inline:auto; font:600 13px ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
   :root[data-theme="dark"] .alint-sev { --tx:#e6e8ef; --mut:#93a0b8; --card:#2a2f3e; --bd:#3b4254; --ac:#8b93f8; }
@@ -37,21 +37,25 @@ Every rule carries a `level`, and every `alint check` returns an exit code. The 
 
 ## The four levels
 
-- **`error`** is a hard failure. Any error-level violation makes `alint check` exit non-zero, which is what fails a CI job or blocks a commit.
-- **`warning`** is reported but does not fail the run by default. Pass `--fail-on-warning` to promote warnings into failures when you want a stricter gate.
-- **`info`** is advisory. It shows in the report and never affects the exit code.
+- **`error`** is a hard policy failure. Any error-level violation makes `alint check` exit non-zero, which is what fails a CI job or blocks a commit.
+- **`warning`** is reported but does not fail the run by default. Pass `--fail-on-warning` to promote warning violations into failures when you want a stricter gate.
+- **`info`** is advisory. An info-level policy violation never affects the exit code.
 - **`off`** disables the rule entirely: it is dropped at config load and never runs. Setting `level: off` on an inherited rule is how you switch off something a ruleset you `extends:` turned on.
+
+An **analysis failure** is not a fifth level. It means alint could not read, parse, build, or
+evaluate an input and therefore obtained no policy verdict. It exits `1` regardless of the
+owning rule's configured level, remains visible under a baseline, and is never offered to a fixer.
 
 ## The exit codes
 
 `alint check` returns one of four codes, so a pipeline can tell "clean" from "found problems" from "misconfigured":
 
-- **`0`** clean: no errors, and no warnings under `--fail-on-warning`.
-- **`1`** findings: at least one error, a warning while `--fail-on-warning` is set, or a stale [baseline](/docs/concepts/adoption/baseline/) entry while `--strict-baseline` is set.
+- **`0`** clean: no error violations or analysis failures, and no warnings under `--fail-on-warning`.
+- **`1`** findings or incomplete analysis: at least one error violation, any analysis failure, a warning while `--fail-on-warning` is set, or a stale [baseline](/docs/concepts/adoption/baseline/) entry while `--strict-baseline` is set.
 - **`2`** a bad config or bad usage (an unknown field, a malformed `.alint.yml`, an invalid flag).
 - **`3`** an internal error (a bug). Distinct from `2` so CI can tell "your config is wrong" apart from "alint fell over."
 
-`alint fix` uses the same codes, with one addition to `2`. It returns `0` when the fix pass completed, `1` when a fix was attempted but errored (for example a read-only target) or an error-level violation was left unfixed, and `2` when the fix could not *complete* because it did not converge: a config whose fixes keep re-triggering, which `fix` re-runs to a fixed point and caps after a bounded number of passes. That is still a config problem (so it shares code `2`), but unlike a load-time config error it may have applied some fixes before stopping, and `fix --format json` reports it structurally as `summary.non_convergent`.
+`alint fix` uses the same codes, with one addition to `2`. It returns `0` when the fix pass completed, `1` when analysis failed, a fix was attempted but errored (for example a read-only target), or an error-level violation was left unfixed, and `2` when the fix could not *complete* because it did not converge: a config whose fixes keep re-triggering, which `fix` re-runs to a fixed point and caps after a bounded number of passes. That is still a config problem (so it shares code `2`), but unlike a load-time config error it may have applied some fixes before stopping, and `fix --format json` reports it structurally as `summary.non_convergent`.
 
 ## In practice
 

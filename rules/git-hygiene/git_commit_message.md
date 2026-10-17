@@ -30,9 +30,9 @@ In range mode, merge commits are skipped by default (`include_merges: false`). M
 
 #### Failure modes
 
-- **No git, or `git` not on PATH**: silent no-op. The rule's intent only makes sense inside a git repo.
+- **No Git, `git` not on `PATH`, or the lint root is not a repository**: a `resource_read` analysis failure.
 - **`since:` ref doesn't resolve**: hard error with a shallow-clone hint. The common cause is `actions/checkout@v4` with its default `fetch-depth: 1`, which doesn't fetch the base ref's commits. Use `fetch-depth: 0` to fetch full history.
-- **Range is empty** (`since` == HEAD on a force-push, or no non-merge commits): silent no-op. No commits, no policy to apply.
+- **Range is empty or HEAD is unborn**: normal pass. No commits, no policy input.
 
 #### GitHub Actions PR-validation recipe
 

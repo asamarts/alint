@@ -21,7 +21,7 @@ Environment threaded into the child:
 | `ALINT_VAR_<NAME>` | one per top-level `vars:` entry |
 | `ALINT_FACT_<NAME>` | one per resolved fact, stringified |
 
-`timeout: <seconds>` (default 30) bounds each invocation; past the limit the child is killed and a violation reports the timeout.
+`timeout: <seconds>` (default 30) bounds each invocation; past the limit the child is killed and a non-baselinable `evaluation` analysis failure reports that no policy verdict was obtained. A completed non-zero exit remains the command rule's policy violation.
 
 Output is drained while the child runs (a child writing more than a pipe buffer cannot deadlock), and after the child exits alint waits at most 2 seconds for descendants still holding its output pipes. What the timeout kills depends on whether alint's stdin is a terminal. In a non-interactive run (CI, the language server, piped stdin) each spawned process (the `command` rule, `generated_file_fresh`, `command_idempotent`, the `command` fix, `custom:` facts) gets its own process group on Unix: the timeout kills the whole group, grandchildren included, and descendants left holding the output pipes after a normal exit are killed too. In an interactive run (stdin is a terminal) the child stays in alint's process group so Ctrl-C reaches it and it can prompt on `/dev/tty`; the timeout then kills only the direct child. A timeout too large to represent means no deadline. On Windows only the direct child is killed.
 
@@ -38,7 +38,7 @@ Output is drained while the child runs (a child writing more than a pipe buffer 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `command` | list of string | yes |  | Argv tokens. The first token is the program (looked up via PATH if it's a bare name); remaining tokens accept `{path}` and friends. |
-| `timeout` | integer (>= 1) |  | `null` | Per-file timeout in seconds. Default 30. Past this, the child is killed and a violation reports the timeout. |
+| `timeout` | integer (>= 1) |  | `null` | Per-file timeout in seconds. Default 30. Past this, the child is killed and a non-baselinable `evaluation` analysis failure reports the timeout. |
 
 Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, `fix`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 

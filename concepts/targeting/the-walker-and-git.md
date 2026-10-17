@@ -97,9 +97,9 @@ In a healthy repo neither case is common, and `git ls-files <path>` is the autho
 | Not gitignored, on disk | **fires** | silent (not in index) |
 | Committed (not gitignored) | **fires** | **fires** |
 | Gitignored but force-added | silent (walker prunes it) | **fires** |
-| Not a git repo | **fires** | silent (no index) |
+| Not a Git repo | **fires** | **analysis failure** |
 
-`git_tracked_only` applies to the existence kinds `file_exists`, `file_absent`, `dir_exists`, and `dir_absent`; any other kind rejects it at load rather than ignoring it. Outside a git repo (or with `git` off `PATH`) the tracked set is empty, so absence rules with the flag become silent no-ops (there is nothing to commit) and existence rules with it fail conservatively (no file qualifies). The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other git-aware kinds; see the [rule reference](/docs/rules/) for the full set.
+`git_tracked_only` applies to the existence kinds `file_exists`, `file_absent`, `dir_exists`, and `dir_absent`; any other kind rejects it at load rather than ignoring it. The engine derives the active dependency from capability metadata, runs one repository probe, and reports one `resource_read` analysis failure for each active owning rule if Git cannot run or the lint root is not a repository. A literal `git_tracked_only: false` does not create a dependency. The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other Git-aware kinds; see the [rule reference](/docs/rules/) for the full set.
 
 ## In practice
 

@@ -58,6 +58,7 @@ rules:
 [2m--- hello.txt ------------------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2msums-pins-sources[0m
               hello.txt is not listed in manifest SHA256SUMS
+              [2mrelated:[0m digest target: SHA256SUMS
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m
