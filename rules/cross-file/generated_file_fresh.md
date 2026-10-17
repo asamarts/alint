@@ -2,7 +2,7 @@
 title: 'generated_file_fresh'
 description: 'alint generated_file_fresh rule (cross-file): A committed artefact must equal what a declared command generator produces, in one of two modes...'
 sidebar:
-  order: 9
+  order: 10
 categories: ['cross-file', 'security-unicode-sanity']
 ---
 

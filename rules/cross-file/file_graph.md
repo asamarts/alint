@@ -2,7 +2,7 @@
 title: 'file_graph'
 description: 'alint file_graph rule (cross-file): Assemble the repo''s file -> file reference graph and assert a global structural property the 1-level cross-file kinds...'
 sidebar:
-  order: 6
+  order: 7
 categories: ['cross-file']
 ---
 

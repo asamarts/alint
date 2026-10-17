@@ -2,7 +2,7 @@
 title: 'cross_file'
 description: 'alint cross_file rule (cross-file): A source must hold a relation to one or more targets (or, for resolves, the filesystem).'
 sidebar:
-  order: 5
+  order: 6
 categories: ['cross-file']
 ---
 

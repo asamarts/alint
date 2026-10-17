@@ -2,7 +2,7 @@
 title: 'command_idempotent'
 description: 'alint command_idempotent rule (cross-file): Run a user-declared formatter/checker in its --check (idempotence) mode once: exit 0 => the tree is...'
 sidebar:
-  order: 11
+  order: 12
 categories: ['cross-file']
 ---
 

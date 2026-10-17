@@ -2,7 +2,7 @@
 title: 'for_each_file'
 description: 'alint for_each_file rule (cross-file): For every matching directory / file, evaluate a nested require: block with the entry as context.'
 sidebar:
-  order: 13
+  order: 14
 categories: ['cross-file']
 ---
 

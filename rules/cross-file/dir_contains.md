@@ -2,7 +2,7 @@
 title: 'dir_contains'
 description: 'alint dir_contains rule (cross-file): Every directory matching select: must contain files matching every glob in require.'
 sidebar:
-  order: 14
+  order: 15
 categories: ['cross-file', 'structure']
 ---
 
