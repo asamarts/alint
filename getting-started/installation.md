@@ -27,7 +27,7 @@ Detects platform (Linux / macOS, x86_64 / aarch64), downloads the matching tarba
 Pin a specific version (and skip the "latest release" GitHub API lookup, which can rate-limit on shared CI egress IPs):
 
 ```bash
-ALINT_VERSION=v0.18.4 curl -fsSL https://alint.org/install.sh | bash
+curl -fsSL https://alint.org/install.sh | ALINT_VERSION=v0.18.4 bash
 ```
 
 Supply-chain note: the installer verifies the SHA-256 of the release tarball it downloads, but the script itself is fetched from the `main` branch (`alint.org/install.sh` redirects there). To pin the installer too, point `curl` at a release tag instead of `main` (for example `https://raw.githubusercontent.com/asamarts/alint/v0.18.4/install.sh`), or download it from the [Releases page](https://github.com/asamarts/alint/releases) and review it before running.
