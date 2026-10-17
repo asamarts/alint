@@ -8,7 +8,7 @@ categories: ['git-hygiene']
 
 Assert every commit in scope carries a DCO (Developer Certificate of Origin) `Signed-off-by:` trailer — required by every CNCF / Linux Foundation / kernel-style project. A commit lacking the trailer fires one violation, with the short SHA + subject snippet so you know which to amend (`git commit --amend -s` or `git rebase --signoff`).
 
-The default `pattern:` is the canonical DCO shape `(?m)^Signed-off-by: .+ <.+@.+>$`. Override `pattern:` to enforce a stricter form (e.g. a corporate-domain email). Shares the commit-validation family's `since:` / `include_merges:` semantics and [failure modes](#failure-modes). See [variable interpolation](/docs/configuration/variable-interpolation/) for the `{{env.X}}` form.
+The default `pattern:` is the canonical DCO shape `(?m)^Signed-off-by: .+ <.+@.+>$`. Override `pattern:` to enforce a stricter form (e.g. a corporate-domain email). Shares the commit-validation family's `since:` / `include_merges:` semantics and [failure modes](/docs/rules/git-hygiene/git_commit_message/#failure-modes). See [variable interpolation](/docs/configuration/variable-interpolation/) for the `{{env.X}}` form.
 
 ## Options
 
