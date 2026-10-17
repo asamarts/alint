@@ -261,9 +261,11 @@ on it for adoption, they can lint without it.
   fixes. See `v0.14/README.md`.
 
 - **v0.19 to v1.0, general-linter program (adopted 2026-10-14).** Phases
-  0 and 1a in v0.19 (a capability inventory, fail-loud analysis outcomes,
-  redaction, findings with related locations, `--as-of`), the authoring
-  loop in v0.20 (`alint test`, `explain --trace`), the internal relation
+  0 and 1a in v0.19 deliver the capability inventory, fail-loud analysis,
+  complete notes, redaction, related locations, reproducible analysis time,
+  and duplicate-aware spanned extraction, alongside seven gap-study kinds
+  and the versioning and toolchain consistency bundles. The authoring loop
+  follows in v0.20 (`alint test`, `explain --trace`), the internal relation
   layer with the `key_parity` pilot and the plugin contract in v0.21, then
   `version: 2` selectors and constraints, with plugin hosts as a parallel
   track. Staged in [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 11, decided in
@@ -1448,9 +1450,17 @@ Current status and the ordered next steps are kept in that file's
   gate.
 - **`--as-of`** (and `ALINT_AS_OF`) for time-dependent rules, defaulting
   to the HEAD commit time; `git_blame_age` moves onto it.
-- Standalone detection kinds from the gap study as capacity allows
-  (`editorconfig_conforms` after its policy-source ADR, the Markdown
-  structure kinds, the SPDX table).
+- **Duplicate-aware spanned extraction.** Dotenv, JSON/JSONC, YAML, INI, and
+  Java properties expose source-ordered rows with duplicate keys and exact
+  key/value byte spans, without changing existing last-wins extraction.
+- **Seven standalone detection kinds.** `editorconfig_conforms`, four CommonMark
+  structure checks, `spdx_identifier_valid`, and `pinned_references` cover the
+  selected A1, E2, E3, E5, E7, F2, and H1 gaps. `pinned_references` checks
+  immutable executable references across GitHub Actions, pre-commit, CircleCI,
+  GitLab CI, Cloud Build, and Dockerfiles.
+- **Version and toolchain consistency bundles.** Opt-in `versioning@v1` and
+  `toolchain-pins@v1` rulesets align release versions and exact Node, Rust,
+  Python, Ruby, JVM, and .NET pins across local, container, and CI declarations.
 
 ## v1.0: Stability
 

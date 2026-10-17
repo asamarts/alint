@@ -113,7 +113,7 @@
       "version": "0.19",
       "title": "Fail-loud findings and the capability inventory",
       "kind": "release",
-      "blurb": "The first phase of the general-linter program: a generated per-kind capability inventory that drives the trust gates, rule-evaluation failures that can no longer pass silently or be baselined, values from secret-bearing files redacted in every report, findings that point at every related location, and an explicit as-of date for time-dependent rules."
+      "blurb": "The first phase of the general-linter program: a generated per-kind capability inventory that drives trust gates, fail-loud analysis outcomes, secret-bearing evidence redaction, related finding locations, reproducible analysis time, duplicate-aware spanned extraction, seven standalone policy kinds, and version and toolchain consistency bundles."
     },
     {
       "version": "1.0",
