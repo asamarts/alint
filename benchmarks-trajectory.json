@@ -3,6 +3,33 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.19.0",
+      "date": "2026-10-18",
+      "headline": "General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles.",
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4113.415081166667,
+          "stddev_ms": 29.96124058509341,
+          "display": "4.11 s ± 0.03"
+        },
+        "s2_1m_full": {
+          "mean_ms": 18795.69037362,
+          "stddev_ms": 119.82578100676145,
+          "display": "18.80 s ± 0.12"
+        },
+        "s3_1m_full": {
+          "mean_ms": 475604.0909483001,
+          "stddev_ms": 3581.4605606448017,
+          "display": "475.6 s ± 3.6"
+        },
+        "s4_1m_full": {
+          "mean_ms": 18727.193994366666,
+          "stddev_ms": 658.5013914730483,
+          "display": "18.73 s ± 0.66"
+        }
+      }
+    },
+    {
       "version": "v0.18.4",
       "date": "2026-10-15",
       "headline": "A performance and correctness patch.",
