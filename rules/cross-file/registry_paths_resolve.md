@@ -6,7 +6,7 @@ sidebar:
 categories: ['cross-file']
 ---
 
-A manifest file enumerates path entries; each must resolve to an on-disk artefact. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` RFC 9535 JSONPath), a line list (`lines`, optional `comment` prefix), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. A structured query that selects a non-string reports one value-free violation naming only the count and JSON types; string matches continue. Non-literal string entries (interpolation / antiquotation) are skipped with an informational note, not failed. Optional `orphans` adds the reverse-completeness check: on-disk artefacts under the `space` glob that no entry references (the "new crate not wired into the workspace" detector). Cross-file: reads one manifest, resolves against the file index.
+A manifest file enumerates path entries; each must resolve to an on-disk artefact. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` RFC 9535 JSONPath), a physical-line list (`lines`, optional `comment` prefix; LF, CRLF, and lone CR are recognized), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. A structured query that selects non-string JSON values fails with a type/count diagnostic rather than silently dropping them.
 
 ## Options
 
