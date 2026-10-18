@@ -58,8 +58,8 @@ test time.
 7. Regenerate the derived contracts and run the audits:
    ```text
    cargo run -p xtask -- gen-categories # kind->category bridge (from **Categories:**)
-   cargo run -p xtask -- gen-facts      # headline counts + catalogues + categories
-   cargo run -p xtask -- gen-schema     # config JSON Schema (kinds with options)
+   cargo run -p xtask -- gen-facts      # counts + catalogues + KindMeta inventory
+   cargo run -p xtask -- gen-schema     # config schema (every canonical kind)
    cargo run -p xtask -- gen-model      # LikeC4 model fragments
    cargo test -p alint-e2e -- --no-fail-fast
    ```
@@ -68,19 +68,24 @@ test time.
 
 ### Options and the config schema
 
-If the kind carries options, derive its schema branch from the Rust `Options`
-struct rather than hand-editing `schemas/v1/config.json`:
+Every canonical kind derives its schema option surface from its Rust option
+model. Do not hand-edit generated option properties in
+`schemas/v1/config.json`:
 
 1. Add `#[derive(schemars::JsonSchema)]` to the struct, with `///` docs on each
-   field and any `#[schemars(range/length/regex)]` constraints.
-2. Register the struct in `migrated_option_schemas()` in
+   field and any `#[schemars(range/length/regex)]` constraints. An optionless
+   kind uses the shared exact-empty-object schema.
+2. Register the schema in `rule_option_schemas()` in
    `crates/alint-rules/src/lib.rs`.
-3. Run `cargo run -p xtask -- gen-schema` to regenerate the schema (both the root
+3. For a new kind, add its descriptive base branch: kind discriminator,
+   description, and any branch-level cross-field constraint. Generation
+   replaces its option properties and applies `KindMeta` common fields. The
+   recursive nested-rule schema reuses this generated branch automatically.
+4. Run `cargo run -p xtask -- gen-schema` to regenerate the schema (both the root
    copy and the in-crate copy).
 
-CI and preflight run `gen-schema --check`, which fails when the committed schema
-drifts from the Rust types. Kinds with deeply nested option shapes stay
-hand-written in the schema; leave those out of `migrated_option_schemas()`.
+CI and preflight run `gen-schema --check`, which rejects omissions, extra kind
+branches, KindMeta/schema capability drift, and committed output drift.
 
 The `///` field docs do double duty. `xtask docs-export` reads the type-derived
 `$defs/rule_<kind>` branch and renders an `## Options` table (name, type,
@@ -93,10 +98,10 @@ placed into a clean table cell.
 
 Adding a rule kind moves a surface-area count, so `facts.json` has to be
 regenerated with `cargo run -p xtask -- gen-facts`. That file holds the version,
-the seven headline counts, and the catalogue lists that the README, the docs, and
-alint.org render from. CI and the docs script run `gen-facts --check` and fail on
-drift. The same applies when you add a family, bundled ruleset, fix operation,
-output format, or subcommand.
+the seven headline counts, catalogue lists, and canonical `KindMeta` inventory
+that the README, docs, and alint.org consume. CI and the docs script run
+`gen-facts --check` and fail on drift. The same applies when you add a family,
+bundled ruleset, fix operation, output format, subcommand, or metadata field.
 
 `cargo run -p xtask -- gen-categories` regenerates the in-crate kind-to-category
 bridge (`crates/alint-rules/src/categories_gen.rs`) from the `**Categories:**`

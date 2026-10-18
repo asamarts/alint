@@ -10,6 +10,7 @@ Rule kinds in the **Text hygiene** family. Each rule below links to its own page
 
 | Rule | Description |
 | --- | --- |
+| [`editorconfig_conforms`](/docs/rules/content/editorconfig_conforms/) | Enforce selected formatting properties from the repository's own `.editorconfig` files without repeating those values in `.alint.yml`. |
 | [`no_trailing_whitespace`](/docs/rules/text-hygiene/no_trailing_whitespace/) | No line may end with space or tab. |
 | [`final_newline`](/docs/rules/text-hygiene/final_newline/) | File must end with a single `\n`. |
 | [`line_endings`](/docs/rules/text-hygiene/line_endings/) | Every line ending matches `target`: `lf` or `crlf`. |

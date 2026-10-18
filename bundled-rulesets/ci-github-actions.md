@@ -14,8 +14,9 @@ checks that have the strongest supply-chain signal:
 Plus one readability rule: every workflow has a `name:` so the
 Actions UI doesn't fall back to the filename.
 
-All rules are scoped to `.github/workflows/*.y{,a}ml`, so the
-ruleset no-ops in repos that don't use GitHub Actions.
+Workflow checks remain scoped to `.github/workflows/*.y{,a}ml`. Action pinning also covers
+root and nested `action.yml` / `action.yaml` composite-action manifests, so the ruleset
+no-ops only in repositories containing neither workflows nor action manifests.
 
 Defaults are non-blocking:
   - `warning` for hardening (permissions + action pinning)
@@ -39,7 +40,7 @@ extends:
 | Rule | Reports |
 | --- | --- |
 | [gha-workflow-contents-read](#gha-workflow-contents-read)<br>`warning` | Workflow grants (or defaults to) write access to the GITHUB\_TOKEN. |
-| [gha-pin-actions-to-sha](#gha-pin-actions-to-sha)<br>`warning` | Third-party action is not pinned to a commit SHA. |
+| [gha-pin-actions-to-sha](#gha-pin-actions-to-sha)<br>`warning` | External action, workflow, or container is not pinned to an immutable commit or digest. |
 | [gha-workflow-has-name](#gha-workflow-has-name)<br>`info` | Workflow has no `name:` field; the Actions UI will show the filename instead. |
 
 ## Rules
@@ -75,31 +76,33 @@ The `$[?...]` filter selects the bad state; `yaml_path_absent` emits ONE file-le
 
 ### `gha-pin-actions-to-sha`
 
-OpenSSF Scorecard Pinned-Dependencies check. `if_present: true` so workflows with only `run:` steps aren't flagged — the rule only fires on actual `uses:` values that aren't SHA-pinned.
+OpenSSF Scorecard Pinned-Dependencies check, now backed by the consumer-aware `pinned_references` kind. It covers ordinary and Docker action steps, reusable-workflow `jobs.*.uses`, composite-action steps, and workflow container/service images without treating unrelated YAML strings as dependencies.
 
-The regex accepts any `<owner>/<repo>@<40-hex>` or `<owner>/<repo>/<subpath>@<40-hex>` — it does NOT accept `@v4`, `@main`, or `@v4.1.1`. Teams that trust specific publishers (e.g. `actions/*`) typically tighten or relax via a follow-up rule.
+Local `./` action and workflow references are exempt: they live in the same repository and cannot be SHA-pinned. External Actions references require a full 40- or 64-hex Git object id; container references require a full sha256 digest.
 
-Local `./` composite-action references are exempt: they live in the same repo (same trust boundary) and cannot be SHA-pinned. Digest-pinned Docker actions (`docker://img@sha256:<64-hex>`) are accepted; a tag-pinned `docker://img:tag` still fires.
-
-- **kind**: [`yaml_path_matches`](/docs/rules/structured-query/yaml_path_matches/)
+- **kind**: [`pinned_references`](/docs/rules/content/pinned_references/)
 - **level**: `warning`
 - **policy**: <https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions>
 
-> Third-party action is not pinned to a commit SHA. Pin with `@<40-char-sha> # v4.1.1` (or `docker://img@sha256:...` for a Docker action) so a compromised tag can't silently change what runs. Local `./` action references are allowed.
+> External action, workflow, or container is not pinned to an immutable commit or digest. Pin Actions with `@<full-commit-sha>` and images with `@sha256:<64-hex-digest>` so a compromised tag cannot silently change what runs. Local `./` references are allowed.
 
 ```yaml
 - id: gha-pin-actions-to-sha
-  kind: yaml_path_matches
-  paths: [".github/workflows/*.yml", ".github/workflows/*.yaml"]
-  path: "$.jobs.*.steps[*].uses"
-  matches: '^(\./.*|docker://[^@]+@sha256:[a-f0-9]{64}|[a-zA-Z0-9._/-]+@[a-f0-9]{40})$'
-  if_present: true
+  kind: pinned_references
+  paths:
+    - ".github/workflows/*.yml"
+    - ".github/workflows/*.yaml"
+    - "action.yml"
+    - "action.yaml"
+    - "**/action.yml"
+    - "**/action.yaml"
+  format: github_actions
   level: warning
   message: >-
-    Third-party action is not pinned to a commit SHA. Pin with
-    `@<40-char-sha>  # v4.1.1` (or `docker://img@sha256:...` for a
-    Docker action) so a compromised tag can't silently change what
-    runs. Local `./` action references are allowed.
+    External action, workflow, or container is not pinned to an immutable
+    commit or digest. Pin Actions with `@<full-commit-sha>` and images with
+    `@sha256:<64-hex-digest>` so a compromised tag cannot silently change
+    what runs. Local `./` references are allowed.
   policy_url: "https://docs.github.com/en/actions/security-guides/security-hardening-for-github-actions#using-third-party-actions"
 ```
 

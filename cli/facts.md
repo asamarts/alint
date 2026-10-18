@@ -52,9 +52,14 @@ One line per fact: its id, its kind and the value it resolved to. Facts from
 | `any_file_exists` | `true` if any listed path or glob matches a file |
 | `all_files_exist` | `true` only if every listed path matches |
 | `count_files` | the number of files matching a glob |
-| `file_content_matches` | `true` if a file's content matches a pattern |
+| `file_content_matches` | `true` if raw file content—or strings selected by an optional JSON/YAML/TOML/XML/dotenv/properties/INI/HCL `extract`—matches a pattern |
 | `git_branch` | the current branch name |
 | `custom` | the result of a command, allowed only in your own top-level config |
+
+For node-specific checks, add an `extract` map such as
+`{ json: "$.sdk.version" }` inside `file_content_matches`. The supported keys are `json`,
+`yaml`, `toml`, `xml`, `dotenv`, `properties`, `ini`, and `hcl`. The pattern then sees only
+selected strings; malformed input, non-string nodes, and missing paths are non-matches.
 
 A fact that isn't declared reads as `null` in a `when:` clause, which is
 false. A misspelled fact name therefore turns a rule off rather than failing,

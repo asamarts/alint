@@ -15,6 +15,8 @@ Rule kinds in the **Security / Unicode sanity** family. Each rule below links to
 | [`file_content_forbidden`](/docs/rules/content/file_content_forbidden/) | File contents must NOT match a regex. |
 | [`file_hash`](/docs/rules/content/file_hash/) | Content SHA-256 must equal the expected digest. |
 | [`file_is_ascii`](/docs/rules/content/file_is_ascii/) | Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. |
+| [`pinned_references`](/docs/rules/content/pinned_references/) | Require executable references in supported CI and container files to identify immutable artifacts rather than mutable tags or branches. |
+| [`spdx_identifier_valid`](/docs/rules/content/spdx_identifier_valid/) | Validate every `SPDX-License-Identifier:` value as a strict SPDX license expression. |
 | [`no_merge_conflict_markers`](/docs/rules/security-unicode-sanity/no_merge_conflict_markers/) | Flag `<<<<<<< `, `=======`, `>>>>>>> `, `\|\|\|\|\|\|\| ` markers at the start of a line, almost always left over from an unresolved merge. |
 | [`no_bidi_controls`](/docs/rules/security-unicode-sanity/no_bidi_controls/) | Flag Trojan-Source bidi override characters (U+202A to U+202E, U+2066 to U+2069). |
 | [`no_zero_width_chars`](/docs/rules/security-unicode-sanity/no_zero_width_chars/) | Flag body-internal zero-width characters (U+200B, U+200C, U+200D, and non-leading U+FEFF). |

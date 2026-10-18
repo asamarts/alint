@@ -30,4 +30,6 @@ Adopt with `extends: [alint://bundled/<name>@v1]`. Each ruleset's full rule list
 - [`php@v1`](/docs/bundled-rulesets/php/) — Baseline conventions for PHP / Composer projects.
 - [`python@v1`](/docs/bundled-rulesets/python/) — Hygiene checks for Python projects (pyproject / setuptools / Poetry / PDM / uv).
 - [`rust@v1`](/docs/bundled-rulesets/rust/) — Hygiene checks for Rust projects.
+- [`toolchain-pins@v1`](/docs/bundled-rulesets/toolchain-pins/) — Exact toolchain-version consistency for Node.js, Rust, Python, Ruby, JVM, and .NET repositories.
 - [`tooling/editorconfig@v1`](/docs/bundled-rulesets/tooling-editorconfig/) — Cross-editor standardization: an `.editorconfig` at the root plus a `.gitattributes` that normalizes line endings.
+- [`versioning@v1`](/docs/bundled-rulesets/versioning/) — One repository release version, declared in root VERSION and synchronized into common package, language, chart, API, and changelog surfaces.

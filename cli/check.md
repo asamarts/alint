@@ -5,8 +5,9 @@ description: 'alint check lints a repository against its .alint.yml: the whole t
 
 `alint check` is the default command: it walks the repository once, evaluates
 every rule in the effective config (after `extends:`), and exits non-zero when
-an error-level rule fails. Run it bare locally, with `--changed` as a fast
-pre-commit or PR gate, and with a machine format in CI.
+an error-level policy violation or an analysis failure occurs. Run it bare
+locally, with `--changed` as a fast pre-commit or PR gate, and with a machine
+format in CI.
 
 It reads `.alint.yml` from the directory it checks, honours `.gitignore` while
 walking, and never modifies a file: repairs are [`alint fix`](/docs/cli/fix/)'s
@@ -78,8 +79,8 @@ warnings and infos but no errors.
 
 | Code | Meaning |
 | --- | --- |
-| 0 | No error-level findings (warnings and infos may be present) |
-| 1 | At least one error-level finding, or a warning under `--fail-on-warning` |
+| 0 | No error-level policy violations or analysis failures (warnings and infos may be present) |
+| 1 | At least one error-level policy violation, any analysis failure, or a warning under `--fail-on-warning` |
 | 2 | The config or the command line is invalid |
 | 3 | Internal error |
 
@@ -96,11 +97,17 @@ block.
 - **`--format`** picks the output: `human` (the default; `--compact` makes it
   one line per finding), or `json`, `sarif`, `github`, `gitlab`, `junit`,
   `markdown` and `agent` for tools.
-- **`--baseline <file>`** reports only findings that aren't recorded in a
-  baseline, so a legacy repository can gate on new problems first.
+- **`--baseline <file>`** reports only policy violations that aren't recorded
+  in a baseline. Analysis failures are never suppressible.
 - **`--only <rule-id>`** runs one rule (repeatable), handy while writing or
   debugging a rule.
 - **`--fail-on-warning`** turns warnings into a failing exit code.
+- **`--as-of YYYY-MM-DD`** sets the UTC reference date for time-dependent
+  rules; `ALINT_AS_OF` is the environment equivalent. Without either, alint
+  uses the HEAD commit's committer timestamp, so repeated checks of one commit
+  are byte-identical. An explicit date removes that HEAD-time lookup, but
+  `git_blame_age` still requires a usable Git repository for tracked-file and
+  blame data.
 
 ## Examples
 

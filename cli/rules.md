@@ -28,8 +28,8 @@ The categories and how many kinds each holds:
 alint rules categories
 ```
 
-One kind: summary, categories, aliases and docs link. An alias resolves to its
-kind:
+One kind: summary, categories, aliases, host capabilities, accepted kind-specific
+selectors, fix operations, and docs link. An alias resolves to its canonical kind:
 
 ```bash
 alint rules show content_forbidden
@@ -48,8 +48,8 @@ Usage: alint rules [OPTIONS] <COMMAND>
 Commands:
   list        List rule kinds in the catalog, optionally filtered. Reads no config
   categories  List the rule categories: slug, title, and how many kinds each holds
-  show        Show one rule kind: its summary, categories, aliases, and docs link. Accepts an alias
-              (resolves to the canonical kind)
+  show        Show one rule kind: summary, capabilities, selectors, fixes, and docs. Accepts an
+              alias (resolves to the canonical kind)
   help        Print this message or the help of the given subcommand(s)
 ```
 

@@ -36,6 +36,7 @@ These apply to every subcommand except `--version`.
 | Flag | Description |
 | --- | --- |
 | `-c, --config <CONFIG>` | Path to a config file |
+| `--as-of <YYYY-MM-DD>` | Reference date for time-dependent rules. Strict UTC `YYYY-MM-DD`. Overrides `ALINT_AS_OF`; without either, time-dependent rules use the current HEAD commit time |
 | `-f, --format <FORMAT>` | Output format [default: human] |
 | `--no-gitignore` | Disable .gitignore handling (overrides config) |
 | `--fail-on-warning` | Treat warnings as errors for exit-code purposes |

@@ -6,22 +6,22 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 106 rule kinds across 13 families (95 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 113 rule kinds across 13 families (102 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
 - [Existence](/docs/rules/existence/) — 4 rules
-- [Content](/docs/rules/content/) — 18 rules
+- [Content](/docs/rules/content/) — 25 rules
 - [Structured query](/docs/rules/structured-query/) — 25 rules
 - [Naming](/docs/rules/naming/) — 4 rules
-- [Text hygiene](/docs/rules/text-hygiene/) — 9 rules
-- [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 13 rules
+- [Text hygiene](/docs/rules/text-hygiene/) — 10 rules
+- [Security / Unicode sanity](/docs/rules/security-unicode-sanity/) — 15 rules
 - [Encoding](/docs/rules/encoding/) — 5 rules
 - [Structure](/docs/rules/structure/) — 9 rules
 - [Portable metadata](/docs/rules/portable-metadata/) — 4 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 5 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 13 rules
-- [Cross-file](/docs/rules/cross-file/) — 20 rules
+- [Cross-file](/docs/rules/cross-file/) — 21 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
@@ -38,6 +38,7 @@ alint ships 106 rule kinds across 13 families (95 distinct rule behaviors plus 1
 - [`dotenv_path_absent`](/docs/rules/structured-query/dotenv_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`dotenv_path_equals`](/docs/rules/structured-query/dotenv_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`dotenv_path_matches`](/docs/rules/structured-query/dotenv_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
+- [`editorconfig_conforms`](/docs/rules/content/editorconfig_conforms/) — Enforce selected formatting properties from the repository's own `.editorconfig` files without repeating those values in `.alint.yml`. _(Content)_
 - [`every_matching_has`](/docs/rules/cross-file/every_matching_has/) — For every file or directory matching `select:`, every nested rule under `require:` must be satisfied. _(Cross-file)_
 - [`executable_bit`](/docs/rules/unix-metadata/executable_bit/) — Assert every file in scope either has the `+x` bit set (`require: true`) or does not (`require: false`). _(Unix metadata)_
 - [`executable_has_shebang`](/docs/rules/unix-metadata/executable_has_shebang/) — Every file with `+x` set must begin with `#!`. _(Unix metadata)_
@@ -87,8 +88,12 @@ alint ships 106 rule kinds across 13 families (95 distinct rule behaviors plus 1
 - [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML / XML / dotenv / properties / INI / HCL file in `paths` against a JSON Schema document. _(Structured query)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
+- [`markdown_fragments_resolve`](/docs/rules/cross-file/markdown_fragments_resolve/) — Require every live local Markdown link fragment to name a heading anchor in its resolved target document. _(Cross-file)_
+- [`markdown_images_have_alt`](/docs/rules/content/markdown_images_have_alt/) — Require every live CommonMark image to have non-empty rendered alt text. _(Content)_
 - [`markdown_links_resolve`](/docs/rules/cross-file/markdown_links_resolve/) — Validate live Markdown link, image, and reference-definition destinations against the repository tree. _(Cross-file)_
+- [`markdown_no_duplicate_headings`](/docs/rules/content/markdown_no_duplicate_headings/) — Reject a later Markdown heading whose generated base anchor collides with an earlier heading. _(Content)_
 - [`markdown_paths_resolve`](/docs/rules/git-hygiene/markdown_paths_resolve/) — Validate that backticked workspace paths in markdown files resolve to real files or directories in the repo. _(Git hygiene)_
+- [`markdown_required_headings`](/docs/rules/content/markdown_required_headings/) — Require the complete rendered heading sequence to match an ordered `headings` template. _(Content)_
 - [`max_consecutive_blank_lines`](/docs/rules/text-hygiene/max_consecutive_blank_lines/) — Cap runs of blank lines to `max`. _(Text hygiene)_
 - [`max_directory_depth`](/docs/rules/structure/max_directory_depth/) — Tree depth from repo root may not exceed `max_depth`. _(Structure)_
 - [`max_files_per_directory`](/docs/rules/structure/max_files_per_directory/) — Per-directory fanout may not exceed `max_files`. _(Structure)_
@@ -106,11 +111,13 @@ alint ships 106 rule kinds across 13 families (95 distinct rule behaviors plus 1
 - [`pair`](/docs/rules/cross-file/pair/) — For every file matching `primary`, a file matching the `partner` template must exist. _(Cross-file)_
 - [`pair_changed_together`](/docs/rules/git-hygiene/pair_changed_together/) — If the `<since>...HEAD` diff changes any path matching `if_changed:`, at least one path matching `then_changed:` must change in the same range — the **co-change** gate. _(Git hygiene)_
 - [`pair_hash`](/docs/rules/cross-file/pair_hash/) — The `algorithm` digest (`sha256` default / `sha512`) of every file matching `source` must appear in the single `target` file — either as an embedded hex substring (`format: contains`, default) or a `<hex>  <path>` manifest line (`format: sums-line`, where the path token must be the source's path; a leading `*` binary marker and a `./` prefix are tolerated). _(Cross-file)_
+- [`pinned_references`](/docs/rules/content/pinned_references/) — Require executable references in supported CI and container files to identify immutable artifacts rather than mutable tags or branches. _(Content)_
 - [`properties_path_absent`](/docs/rules/structured-query/properties_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`properties_path_equals`](/docs/rules/structured-query/properties_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`properties_path_matches`](/docs/rules/structured-query/properties_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`registry_paths_resolve`](/docs/rules/cross-file/registry_paths_resolve/) — A manifest file enumerates path entries; each must resolve to an on-disk artefact. _(Cross-file)_
 - [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) — Every file starting with `#!` must have `+x` set. _(Unix metadata)_
+- [`spdx_identifier_valid`](/docs/rules/content/spdx_identifier_valid/) — Validate every `SPDX-License-Identifier:` value as a strict SPDX license expression. _(Content)_
 - [`toml_path_absent`](/docs/rules/structured-query/toml_path_absent/) — Assert a JSONPath query over the document matches nothing; one file-level violation if present. _(Structured query)_
 - [`toml_path_equals`](/docs/rules/structured-query/toml_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`toml_path_matches`](/docs/rules/structured-query/toml_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_

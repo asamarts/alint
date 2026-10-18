@@ -120,6 +120,11 @@ facts:
     count_files: "**/*.rs"
   - id: has_src_dir
     all_files_exist: ["src/.keep"]
+  - id: has_exact_sdk
+    file_content_matches:
+      paths: global.json
+      extract: { json: "$.sdk.version" }
+      pattern: '^[0-9]+\.[0-9]+\.[0-9]+$'
 
 rules:
   - id: rust-snake-case
@@ -131,6 +136,11 @@ rules:
 ```
 
 Available fact kinds: `any_file_exists`, `all_files_exist`, `count_files`, `file_content_matches`, `git_branch`, `custom`.
+
+`file_content_matches` normally applies `pattern` to raw file content. Its optional `extract`
+map accepts exactly one RFC 9535 JSONPath for `json`, `yaml`, `toml`, `xml`, `dotenv`,
+`properties`, `ini`, or `hcl`, and applies the pattern to each selected string instead.
+Non-string selections, malformed input, and missing paths are non-matches.
 
 `custom` (which spawns a subprocess) is a security boundary: it's only allowed in your own top-level config. Any `extends:` ancestor that declares one is rejected at load time, so a malicious or compromised ruleset can't execute arbitrary code merely by being fetched.
 
@@ -168,6 +178,45 @@ Common per-rule fields:
 - **`fix`**: fix-op declaration (e.g. `file_trim_trailing_whitespace: {}`).
 - **`message`**: override the rule's display message.
 - **`policy_url`**: link surfaced when the rule fires.
+- **`sensitive`** *(default `false`)*: redact this rule's message and fix detail before any
+  report or baseline is exposed. Dotenv/properties value extractors enable the same policy
+  automatically. See below.
+
+#### `sensitive` *(all rules, v0.19+)*
+
+Set `sensitive: true` when a finding can contain a credential or other secret:
+
+```yaml
+rules:
+  - id: private-registry-token
+    kind: cross_file
+    source:
+      file: private.yml
+      extract: { yaml: "$.registry.token" }
+    targets:
+      - file: generated.yml
+        extract: { yaml: "$.registry.token" }
+    relation: equals
+    sensitive: true
+    level: error
+```
+
+Before alint returns a public report, it replaces the complete flattened finding message and any
+fix-report detail with a stable `<redacted:…>` marker. Repository paths and source locations remain
+visible. Redaction does not change comparison, selection, severity, exit status, or whether a fix
+is applicable, but proposed replacement bytes and edits for the affected file are not published.
+The baseline stores the marker instead of evidence, and its fingerprint excludes the evidence
+bytes; multiple redacted findings with the same structural identity are represented by the
+baseline count.
+
+Dotenv and Java properties value extractors apply this policy automatically because those formats
+commonly store credentials and tokens. This includes structured-path rules and the relation rules
+that share the extractor. Other JSON, YAML, TOML, XML, INI, HCL, regex, lines, and whole-file
+extractions remain visible unless `sensitive: true` is set. Primary repository paths are
+structural locations, not extracted evidence, and remain navigable.
+
+Custom `message:` text is redacted too; do not use it to try to preserve part of a secret-bearing
+message. A nested `require:` can set `sensitive: true` independently of its parent.
 
 #### `expect_matches` *(file-scoped rules, v0.18+)*
 
@@ -219,7 +268,7 @@ rules:
     level: error
 ```
 
-It accepts the `{{env.X}}` interpolation, resolves the diff once per run, matches nothing outside a git repo (silent), and hard-errors on an unresolvable ref with a shallow-clone hint. The `scope_filter:` predicates AND-compose when more than one is set; at least one of `has_ancestor:`, `changed_since:`, `include_manifest_paths:`, or `exclude_manifest_paths:` must be present.
+It accepts the `{{env.X}}` interpolation and resolves the diff once per run. If Git cannot run or the lint root is not a repository, the owning rule reports a `resource_read` analysis failure; an unresolvable ref remains a hard error with a shallow-clone hint. The `scope_filter:` predicates AND-compose when more than one is set; at least one of `has_ancestor:`, `changed_since:`, `include_manifest_paths:`, or `exclude_manifest_paths:` must be present.
 
 `include_manifest_paths:` / `exclude_manifest_paths:` (v0.15+) scope a per-file rule by membership in a path set a **manifest** declares, so the manifest that owns the truth and the rule that depends on it stay in one place instead of a hand-maintained `paths.exclude` that drifts. `exclude_manifest_paths:` drops files in the set; `include_manifest_paths:` keeps only files in it.
 
@@ -255,9 +304,9 @@ rules:
     level: warning
 ```
 
-Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use; non-literal entries are dropped), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a path that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when the set is empty, since an empty include set would otherwise silently no-op the whole rule. This guards the *declared* set; `expect_matches: true` separately asserts that the final effective scope contains a file on disk.
+Each predicate takes a **`source:`** (the manifest file, always repo-root-confined; its declared paths resolve relative to its own directory), an **`extract:`** (the shared `{ json | toml | yaml: <JSONPath> }` / `{ lines }` / `{ regex }` extractor `registry_paths_resolve` and `file_graph` also use), an optional **`derive_target: { from, to }`** regex mapping applied to each extracted path (a string that does not match `from` is dropped), and, for `include_manifest_paths:` only, **`expect_nonempty:`** (default `true`) to warn when a successfully resolved set is empty. A missing, unreadable, malformed, or over-limit source and a structured query selecting a non-string node are typed analysis failures for every active owning rule; they never become an empty set or a fallback to full scope. Non-literal string entries are dropped with an informational note. This guards the *declared* set; `expect_matches: true` separately asserts that the final effective scope contains a file.
 
-Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). A **glob** member is expanded: a `members = ["crates/*"]` entry (the form a real `Cargo.toml` / `package.json` declares) scopes every file under each matching `crates/<x>` directory. A **negated** member (`!packages/internal`, the pnpm / npm workspaces exclusion form) excludes what it matches; members are applied in declared order and the last one matching a file decides, so `["packages/*", "!packages/internal"]` scopes every package except `packages/internal`, while a later positive entry re-includes it (`["packages/*", "!packages/internal", "packages/int*"]`, or a repeated `"packages/*"`). This ordered reading matches npm workspaces, which apply each entry in turn. pnpm applies `!` entries as excludes regardless of position, so the two agree whenever the `!` entries come last, the usual style. Cargo has no `!` form in `members`; its separate `exclude` list is a second extraction, for example an `exclude_manifest_paths` predicate over `$.workspace.exclude[*]`. The set is extracted once per run and cached, like `changed_since:`. A manifest that is absent or unreadable contributes nothing: the rule runs full-scope for `exclude`, matches nothing for `include`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure-parse (no spawn, safe inside an `extends:`'d ruleset), and `alint explain <rule>` prints the resolved set.
+Membership is **directory-aware**: a declared file matches itself; a declared directory (a workspace member) matches every file under it, respecting component boundaries (`crates/a` does not match `crates/ab`). A **glob** member is expanded, so `members = ["crates/*"]` scopes every file under each matching `crates/<x>` directory. A **negated** member (`!packages/internal`, the pnpm / npm workspaces exclusion form) excludes what it matches; members are applied in declared order and the last one matching a file decides. This ordered reading matches npm workspaces. pnpm applies `!` entries as excludes regardless of position, so the two agree when exclusions come last, the usual style. Cargo has no `!` form in `members`; its separate `exclude` list is a second extraction, for example an `exclude_manifest_paths` predicate over `$.workspace.exclude[*]`. The set is extracted once per run and cached, like `changed_since:`. A manifest **value** gates *which* files a rule sees, never *what* it decides about a file: content rules never read the manifest, extraction is pure parsing (no spawn, safe inside an `extends:`-provided rule), and `alint explain <rule>` prints the resolved set.
 
 Cross-file rules (`pair`, `for_each_dir`, `file_exists`, etc.) reject `scope_filter:` at build time with a pointer to the `for_each_dir + when_iter:` pattern. Rule-major kinds (`filename_case`, `filename_regex`, `file_max_size`, `file_min_size`, `executable_bit`, `no_empty_files`, `json_schema_passes`, and their siblings) honor `scope_filter:` too as of v0.15. (Before v0.15 they applied their own `paths:` glob but silently ignored a `changed_since:` predicate, so a scope that depended on it matched nothing on them.)
 

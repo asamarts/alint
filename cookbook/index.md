@@ -94,9 +94,10 @@ rules:
 
 ## 6. Lock down GitHub Actions workflows
 
-`yaml_path_equals` for workflow-wide permissions; `yaml_path_matches` for action-SHA pinning. Both use the same JSONPath engine. YAML is coerced through serde into a JSON value first, so array and wildcard expressions work the same way. If you want the full set without typing them, `extends: [alint://bundled/ci/github-actions@v1]` ships these rules plus a `name:` presence check.
-
-`if_present: true` on the pinning rule means workflows with only `run:` steps (no `uses:` at all) are silently OK; the rule only fires on actual matches that fail the regex.
+Use `yaml_path_equals` for the workflow-wide permission value and the consumer-aware
+`pinned_references` kind for immutable action, reusable-workflow, composite-action, and container
+references. If you want the full set without typing them,
+`extends: [alint://bundled/ci/github-actions@v1]` ships these rules plus a `name:` presence check.
 
 ```yaml
 version: 1
@@ -109,18 +110,19 @@ rules:
     equals: "read"
     level: error
 
-  # Security practice: pin third-party actions to a full commit SHA,
-  # not a mutable @v4-style tag. `$.jobs.*.steps[*].uses` iterates
-  # every step across every job. `if_present: true` skips workflows
-  # that have no `uses:` at all. The regex also exempts local `./`
-  # actions and digest-pinned `docker://...@sha256:` refs -- both are
-  # already immutable or same-repo, so SHA-pinning doesn't apply.
+  # OpenSSF: pin external actions and reusable workflows to full commit
+  # SHAs, and workflow container images to full sha256 digests. Composite
+  # action manifests are checked too; local `./` references remain exempt.
   - id: pin-actions-to-sha
-    kind: yaml_path_matches
-    paths: ".github/workflows/*.yml"
-    path: "$.jobs.*.steps[*].uses"
-    matches: '^(\./.*|docker://[^@]+@sha256:[a-f0-9]{64}|[a-zA-Z0-9._/-]+@[a-f0-9]{40})$'
-    if_present: true
+    kind: pinned_references
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/workflows/*.yaml"
+      - "action.yml"
+      - "action.yaml"
+      - "**/action.yml"
+      - "**/action.yaml"
+    format: github_actions
     level: warning
 ```
 
@@ -313,6 +315,35 @@ rules:
     key: "{stem}"
     level: warning
 ```
+
+### Keep `.env` keys aligned with `.env.example`
+
+Use `cross_file` with `set_equals` when two flat files must declare the same keys. This rule
+makes `.env.example` authoritative, extracts only declaration names, and ignores declaration
+order and values:
+
+```yaml
+version: 1
+rules:
+  - id: env-key-parity
+    kind: cross_file
+    source:
+      file: .env.example
+      extract:
+        regex: '(?m)^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*='
+    targets:
+      - file: .env
+        extract:
+          regex: '(?m)^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*='
+    relation: set_equals
+    level: error
+```
+
+The line-start anchor excludes commented examples, and capture group 1 returns the key rather
+than its value. `set_equals` compares case-sensitive unique sets: declaration order does not
+matter, but duplicate declarations are not flagged. Keep the missing-target check strict when
+`.env` must exist; if CI does not materialize `.env`, run this rule only in the environment that
+does or point the target at a generated environment file.
 
 ## 13. Ban risky characters / files outright
 

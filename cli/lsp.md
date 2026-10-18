@@ -22,6 +22,25 @@ How `alint lsp` serves an editor over LSP:
 
 <likec4-view view-id="lspFlow"></likec4-view>
 
+## Finding locations
+
+When a rule supplies an exact primary range, the diagnostic highlights that range instead of only
+its starting point. Relationship findings can also point to labeled secondary files or ranges.
+alint publishes those as `Diagnostic.relatedInformation` only when the editor advertises
+`publishDiagnostics.relatedInformation`; clients without that capability receive the same primary
+diagnostic without the optional relationships. Positions are converted from alint's Unicode-scalar
+coordinates to LSP UTF-16 coordinates against open buffers or the current on-disk file.
+
+## Reference date for time-dependent rules
+
+Start the server as `alint lsp --as-of YYYY-MM-DD` to pin one strict UTC date
+for the session. The flag overrides the editor process's `ALINT_AS_OF`;
+without either, each workspace config uses its repository HEAD commit's
+committer timestamp, resolved once for that session. An explicit date removes
+that HEAD-time lookup, but `git_blame_age` still requires a usable Git
+repository for tracked-file and blame data; when unavailable, the LSP reports
+an Error-severity analysis-failure diagnostic.
+
 ## Reference
 
 ```

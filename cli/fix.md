@@ -36,6 +36,11 @@ violation": a fix that only makes progress on a later pass, a cascade where
 one rule's fix creates or resolves another's violation, or content a fix
 writes that the rule still rejects.
 
+If alint cannot obtain a policy verdict, the fix report carries a typed
+`analysis_failure` instead of a fix item. It is never passed to a fixer and
+forces exit `1` under normal fix, `--dry-run`, `--diff`, and `--fix-only`.
+Non-convergence retains exit `2`.
+
 Apply every available fix:
 
 ```bash
@@ -49,6 +54,14 @@ reported as a suggestion instead of being applied:
 ```bash
 alint fix --changed --base origin/main
 ```
+
+## Reference date for time-dependent rules
+
+`alint fix --as-of YYYY-MM-DD` pins one strict UTC reference date for every
+pass, including the final re-check. The flag overrides `ALINT_AS_OF`; without
+either, alint uses the current HEAD commit's committer timestamp. An explicit
+date removes that HEAD-time lookup, but `git_blame_age` still requires a usable
+Git repository for tracked-file and blame data.
 
 ## Reference
 

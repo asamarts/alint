@@ -1,6 +1,6 @@
 ---
 title: 'alint explain'
-description: 'alint explain shows how one configured rule is defined: its kind, level, paths, options, and a link to the rule kind reference.'
+description: 'alint explain shows one configured rule: its kind, capabilities, selectors, fix operations, level, paths, options, and reference link.'
 ---
 
 `alint explain` takes a rule id from your effective config (including rules
@@ -26,6 +26,9 @@ id:         oss-license-exists
 kind:       file_exists
 categories: existence
 summary:    Every glob match in paths must correspond to a real file.
+capabilities: git(tracked_set) [when git_tracked_only is set]
+selectors:   none
+fix_ops:     file_create
 docs:       https://alint.org/docs/rules/existence/file_exists/
 level:      warning
 paths:      LICENSE, LICENSE.{md,txt,TXT,rst}, license, license.{md,txt,rst}, LICENSE-APACHE, LICENSE-MIT, LICENSE-BSD, LICENSE-MPL, COPYING, COPYING.{md,txt}
@@ -39,6 +42,9 @@ The fields, top to bottom:
 - **`kind`**, **`categories`**, **`summary`** and **`docs`** describe the rule
   kind, the check this rule is an instance of. The `docs` link is that kind's
   reference page, with every option it accepts.
+- **`capabilities`** lists host access the kind can require and the condition
+  that activates conditional access; **`selectors`** lists accepted
+  kind-specific selector fields; **`fix_ops`** lists compatible fix operations.
 - **`level`** is the effective level. If your config overrides an inherited
   rule (`level: error`, say), the override is what shows here.
 - **`paths`** and **`options`** are this rule's settings: here, any one of the
@@ -47,6 +53,19 @@ The fields, top to bottom:
   `when: facts.has_rust`. A gated rule that never reports anything is usually
   gated off; [`alint facts`](/docs/cli/facts/) shows what the fact resolved to.
 - **`message`** and **`policy_url`** are what a finding prints and links to.
+- **`analysis_time`** appears when the configured rule—or a rule nested under
+  its `require:` tree—uses deterministic time. It shows the UTC date and whether
+  it came from an `explicit` input or `head`; an unavailable fallback includes
+  the stable failure reason.
+
+## Reference date
+
+`alint explain <id> --as-of YYYY-MM-DD` shows the exact strict UTC date a
+subsequent check would use. The flag overrides `ALINT_AS_OF`; without either,
+alint reads the current HEAD commit's committer timestamp. Human output renders
+`analysis_time: YYYY-MM-DD (explicit|head)`. With `--format json`, the
+`analysis_time` object contains `date` and `source`; an unavailable fallback has
+`date: null`, `source: "unavailable"`, and `error`.
 
 ## Examples
 

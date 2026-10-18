@@ -9,6 +9,339 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-18
+
+General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated
+schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured
+rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles. It also
+makes time-dependent checks reproducible, redacts sensitive evidence, and hardens EditorConfig,
+LSP encoding and teardown, dotenv editing, installers, and release tooling.
+
+### Added
+
+- **All 102 canonical rule kinds now declare serializable capability metadata.** Each built-in
+  registration carries its dispatch class, accepted selectors, conditional host capabilities,
+  content access, formats, changed dependencies, fix operations, and nested-rule support; all 11
+  aliases resolve the exact canonical record. Completeness, transition-list parity, subprocess
+  source auditing, and rule-instance conformance are enforced in tests.
+- **DSL trust and audit decisions now use the rule registry's capability catalog.** Every
+  production loader supplies the same borrowed `KindCatalog` used to build rules, including the
+  CLI, LSP, export, testkit, benchmark, and facts paths. Process-spawning kinds and fix operations,
+  content-injecting fix demotion, nested-config confinement, unconditional-Git coverage, and the
+  docs fail-only exemption now derive from metadata. Loading a template,
+  inherited rule, or nested rule without a catalog, or with a kind absent from
+  that catalog, fails closed; plugin-owned metadata is honored. The former hand
+  lists remain exact one-release transition checks.
+- **Rule capabilities are now generated into every discovery surface.** `facts.json` format v4
+  adds a `kind_meta` record for every canonical kind; aliases resolve through `rule_aliases`.
+  `alint rules show <kind>` and `alint explain <id>` now print capabilities, accepted selectors,
+  and fix operations in human output and expose the structured lists in JSON. The config JSON
+  Schema now derives all 102 kinds' option surfaces from Rust option models and applies each kind's
+  metadata-described `paths`, `scope_filter`, `fix`, and `expect_matches` contract to top-level
+  and nested rules; generation fails on registry, metadata, or schema drift.
+- **Structured extraction now has a duplicate-preserving, source-spanned row API.**
+  `alint_core::extract::extract_entry_rows` returns source-ordered object members with their
+  structural parent path, key, key span, and optional value span for dotenv, JSON/JSONC, YAML,
+  INI, and Java properties. Repeated names remain separate rows; array positions remain explicit
+  path segments. TOML, XML, and HCL return a typed unsupported-format result instead of flattening
+  away information. The adapters share the existing structured-input byte bound. Existing
+  last-wins extraction and all shipped rule results are unchanged; this is the substrate for
+  duplicate-key and structured-key-order kinds.
+- **Six high-value policy gaps now have standalone rule kinds.** `editorconfig_conforms` checks
+  the effective repository-confined EditorConfig policy for indentation, line endings, charset,
+  trailing whitespace, final newlines, and line width. CommonMark-backed
+  `markdown_images_have_alt`, `markdown_required_headings`,
+  `markdown_no_duplicate_headings`, and `markdown_fragments_resolve` enforce accessibility and
+  document structure without treating examples as live markup. `spdx_identifier_valid` validates
+  strict license expressions against the bundled offline SPDX License List 3.29.0 data. All six
+  are check-only, expose precise source ranges, and declare their dispatch, selector, content,
+  and dependency capabilities through `KindMeta`.
+- **`pinned_references` enforces immutable build inputs across six consumers.** The check-only,
+  offline kind validates GitHub Action and reusable-workflow commits, composite-action steps,
+  workflow/container service images, pre-commit revisions, CircleCI orbs and images, GitLab
+  images/services, Cloud Build step images, Dockerfile base images, and remote `ADD` checksums.
+  Findings carry exact YAML scalar or Dockerfile instruction ranges; YAML aliases/merge keys,
+  Dockerfile continuations/heredocs, local references, and `scratch` are handled without network
+  resolution. `ci/github-actions@v1` keeps its existing `gha-pin-actions-to-sha` rule id, warning
+  level, and workflow-step finding identity while migrating to the new kind. Existing users may
+  now see warnings for mutable reusable workflows, composite-action steps, and workflow
+  container/service images: pin them to a full commit SHA or sha256 digest, or narrow/disable the
+  inherited rule when that mutable input is intentional.
+- **Two opt-in bundled rulesets enforce cross-file release and toolchain consistency.**
+  `alint://bundled/versioning@v1` uses a root `VERSION` authority to compare existing package,
+  Cargo, pyproject, Python, Helm, OpenAPI, and changelog values. The
+  `alint://bundled/toolchain-pins@v1` policy uses explicit Node, Rust, Python, Ruby, JVM, and .NET
+  authorities to compare literal local declarations, supported Docker images, and matching
+  GitHub Actions setup inputs. Missing authorities make each policy silent; missing targets are
+  optional; malformed or unsafe authorities fail once; ranges, leading-`v` workflow inputs, and
+  computed targets remain outside the exact-pin surface. Structured authorities and declaration
+  targets are selected from root-qualified nodes, so nested lookalikes cannot activate or satisfy
+  policy; Docker `FROM` selectors reuse the Dockerfile parser and ignore heredoc payloads.
+  `sync_from` repairs are suggested by bare `fix` and require `--unsafe-fixes` to apply. Repairs
+  correlate to the exact live finding (so baseline-suppressed duplicate values in one file stay
+  untouched) and enforce extraction-count, syntax-line, edit-count, and output-size ceilings. The
+  reusable
+  `file_content_matches.extract` fact option applies any of the eight structured formats
+  (JSON/YAML/TOML/XML/dotenv/properties/INI/HCL) before matching, while
+  `cross_file.targets.matches` filters extracted target strings before comparison or repair.
+  Migration: this is additive and affects only repositories that explicitly extend either new URI
+  or adopt the new optional fields. Semver-range policy remains C4 and Git-tag consistency remains
+  C6.
+
+### Changed
+- **Incomplete analysis is now a typed, fail-loud result instead of a policy violation.**
+  Evaluation, runtime-condition, resource-read, resource-parse, and repository-derived nested-rule
+  build failures live in `analysis_failures`, always force an error exit regardless of the rule's
+  configured level, and cannot be baselined or offered to a fixer. All eight check formats, every
+  fix report mode (including `--fix-only`, `--dry-run`, and `--diff`), and LSP diagnostics expose
+  them; SARIF marks the run unsuccessful, JUnit uses `<error>`, and agent output never supplies a
+  remediation command. `alint baseline` refuses to write when analysis is incomplete, while an
+  existing baseline can still suppress ordinary violations without hiding a failure. Migration:
+  JSON, agent, and fix-report consumers must tolerate the additive `analysis_failures` arrays and
+  `total_analysis_failures` summary count. Rust callers constructing `RuleResult` or
+  `FixRuleResult` must add `analysis_failures: Vec::new()`; producers that continue after one bad
+  resource can use `Violation::as_analysis_failure(AnalysisFailureKind::...)`.
+
+- **The remaining runtime fail-open paths now report explicit outcomes.**
+  Manifest-derived `scope_filter` inputs that are missing, unreadable, malformed, over-limit, or
+  select non-string nodes produce typed resource analysis failures for every active owning rule;
+  they no longer collapse to an empty include set or a full-scope exclude. Active Git
+  dependencies derive from each kind's conditional capability metadata—including nested rules,
+  `git_tracked_only`, `scope_filter.changed_since`, and `git_untrack`—and an unavailable Git
+  executable or repository produces one `resource_read` failure per dependent top-level rule
+  while unrelated rules continue. Shared structured extraction no longer drops selected JSON,
+  YAML, TOML, or HCL numbers, booleans, nulls, arrays, or objects: manifest path sets reject them
+  as unusable input, while `cross_file`, `file_graph`, and `registry_paths_resolve` emit a
+  value-free policy violation containing only type counts. `cross_file` stops that affected
+  extraction instead of deriving a second empty-set mismatch or offering an unsafe fixer.
+  Migration: run Git-backed rules inside a Git work tree (or disable conditionally configured Git
+  features), repair unavailable manifest inputs, and narrow string-only relation JSONPaths to
+  string nodes. A literal `git_tracked_only: false` remains Git-independent.
+
+- **Informational and bounded-analysis notes now survive every check output format.** Human and
+  text output keep the existing stderr count and `--show-notes` detail; JSON carries typed
+  per-result notes; SARIF emits informational results or execution notifications; and GitHub,
+  GitLab, Markdown, JUnit, and agent output carry an accepted count-and-pointer projection where
+  their envelopes cannot preserve full detail. Note-only runs still pass, and notes remain
+  excluded from baselines, fixes, fingerprints, and failure counts. Migration: machine-output
+  consumers should tolerate the additive JSON/agent summary fields, SARIF notifications, and
+  synthetic note summaries documented in the output-format reference. Rust callers constructing
+  `alint_core::Violation` must replace `is_note: bool` with
+  `disposition: alint_core::FindingDisposition`; use `Violation::as_note()` for informational notes
+  and `Violation::as_analysis_truncated_note()` for bounded-analysis truncation.
+- **Findings can now identify a primary range and bounded related locations.** The Rust finding
+  model carries an optional half-open source range and up to 20 labeled related locations in
+  deterministic path/range/label order. Relationship-heavy rules (`cross_file`,
+  `registry_paths_resolve`, `unique_by`, `pair`, and `file_graph`, plus the pair hash and
+  changed-together kinds) now preserve both sides of a failed relationship. Human output lists
+  related paths; SARIF emits primary regions and `relatedLocations`; and LSP diagnostics emit
+  `relatedInformation` only when the client advertises support. Ranges and relationships are
+  presentation metadata: they never enter baseline fingerprints, and a Linux full-scenario
+  golden gate freezes existing policy-finding identities. The v1 JSON report payload intentionally
+  remains unchanged until the next release, but `schemas/v1/check-report.json` now accepts
+  additive fields at every report object while retaining its required fields and value-type
+  checks. Migration: strict consumers should continue validating known fields and tolerate
+  additive v1 fields.
+
+- **Secret-bearing evidence is redacted from reports and baselines.** Every rule accepts
+  `sensitive: true`, which replaces its complete flattened finding message and fix-report detail
+  with a stable, value-free marker before any public report is returned. Dotenv and Java
+  properties value extractors enable the same policy automatically for structured-path,
+  `cross_file`, `file_graph`, and `registry_paths_resolve` findings. Primary source paths remain
+  navigable; secondary locations are omitted from sensitive findings because they may be extracted
+  values. Evaluation, severity, exit status, fix applicability, and fix execution are unchanged.
+  Proposed replacement bytes are omitted for sensitive findings, including any composed edit for
+  the same file, and LSP does not offer sensitive code actions. Sensitive baseline fingerprints
+  exclude both the raw value and its digest. A cross-format leak gate covers all eight check
+  formats,
+  baseline output, human and JSON fix reports, and LSP diagnostics. Migration: add
+  `sensitive: true` to any rule whose message can contain credentials or other secrets. Expect
+  existing dotenv/properties findings and baseline messages to become `<redacted:…>` markers;
+  machine consumers must tolerate missing proposed edits for those findings.
+
+- **Time-dependent analysis now has an explicit, reproducible reference date.** The global
+  `--as-of YYYY-MM-DD` option overrides `ALINT_AS_OF`; without either, affected rules use the
+  current HEAD commit's committer timestamp instead of the workstation clock. `git_blame_age`
+  findings and `alint explain` show the UTC reference date and its source as `explicit`, `head`,
+  or `unavailable`. An explicit date removes the HEAD-time lookup, but does not satisfy
+  `git_blame_age`'s independent requirement for a usable Git repository and blame input; when
+  either dependency is unavailable, it reports a typed, always-error analysis failure. Migration:
+  CI jobs that intentionally age findings against a release date should set `--as-of` or
+  `ALINT_AS_OF`; repeated checks of the same commit otherwise remain byte-identical. The public
+  capability variant and serialized metadata value are now `Capability::AnalysisTime` and
+  `analysis_time`; Rust consumers with exhaustive `Capability` matches must replace
+  `Capability::WallClock`, and metadata consumers must replace `wall_clock`. Rust callers
+  constructing `alint_core::Context` must add `analysis_time: None`, or provide an
+  `AnalysisTimeResolution` when evaluating a time-capable rule.
+
+- **Rule fields that their selected kind does not support now fail configuration loading.** Both
+  `check` and `validate-config` validate `paths`, every `scope_filter` predicate, `fix` operation,
+  `expect_matches`, and metadata-described common options before building the rule, including
+  rules nested under `require:`. The error names the incompatible field and kind instead of
+  silently discarding the field, and names the template or `extends:` source that supplied it
+  after composition. Nested rules also reject `id` and `level`, which are synthesized from the
+  parent and were previously ignored. Migration: remove `id` and `level` from nested `require:`
+  entries; remove `paths` and `scope_filter` from single-shot `command_idempotent` rules (or use
+  per-file `command` when the command genuinely consumes `{path}`); replace
+  `scope_filter.changed_since` with top-level `since` on Git commit kinds. A present `fix` must
+  select one operation; `fix: null` is now a load error instead of silently disabling the fix.
+  Likewise, `scope_filter: null` is an error instead of silently disabling every predicate.
+  Remove either key when it is not intended. Bundled rulesets, shipped examples, documentation
+  examples, and scenario configs have been migrated.
+
+  The complete W1 migration matrix below covers all 58 newly rejected canonical
+  kind/field-or-predicate pairs: 57 were silently ignored before this release, while
+  `dir_absent` with `scope_filter.changed_since` silently matched nothing. Kinds and fields not
+  listed here keep their prior meaning; aliases inherit their canonical kind's row.
+
+  | Rejected fields | Canonical kinds | Migration |
+  |---|---|---|
+  | `paths`, `scope_filter` | `changeset_requires_path`; `git_commit_author_allowlist`; `git_commit_gpg_signed`; `git_commit_message`; `git_commit_no_fixup`; `git_commit_signed_off`; `git_commit_subject_matches`; `git_no_denied_paths`; `pair_changed_together` | Remove both fields. Use the kind's own change selectors, such as `since`, `when_changed`, `denied`, `if_changed`, or `then_changed`, where applicable. |
+  | `paths`, `scope_filter`, `fix` | `command_idempotent`; `generated_file_fresh` | Remove all three fields. These are repository-level command checks; use `command` when the command must run once per selected path. |
+  | `scope_filter.changed_since` | `dir_absent` | Remove `changed_since`; `dir_absent` supports only `scope_filter.has_ancestor`. Use a file-scoped kind when the check must be narrowed to a Git diff. |
+  | `paths`, `fix` | `dir_contains`; `dir_only_contains`; `every_matching_has`; `file_graph`; `for_each_dir`; `for_each_file`; `pair`; `registry_paths_resolve`; `unique_by` | Remove `paths` and use the kind-specific selector (`select`, `nodes`, `primary`, or `source`) when narrower input is required. Remove the unsupported top-level `fix`. |
+  | `paths` | `cross_file`; `pair_hash` | Remove `paths`; use `source` and the kind's target/partner fields. |
+  | `fix` | `commented_out_code`; `dir_absent`; `file_is_text`; `file_max_lines`; `file_max_size`; `file_min_lines`; `file_min_size`; `file_shebang`; `filename_regex`; `for_each_match`; `import_gate`; `markdown_links_resolve`; `markdown_paths_resolve` | Remove the unsupported fix or move remediation to a kind that advertises the required fix operation. |
+
+- **The dotenv engine is now adotenv 0.2.1, with a lossless document model and native verified
+  edits.** Parsing accepts bare declarations and maps them to JSON `null` (distinct from `KEY=`,
+  which remains `""`). Compared with 0.1.1, it accepts multiline quotes and portability-warning
+  key forms, recognizes `export` followed by spaces or tabs, treats lone CR as a line ending,
+  and starts an inline comment at `#` after either a space or tab. Double-quoted `\$` decodes to
+  a literal `$`, while non-ASCII whitespace at an unquoted value's edges is retained rather than
+  trimmed. Non-ASCII keys and text after a closing quote are errors. Migration: rename invalid
+  or non-ASCII keys; move any intended quoted tail inside the closing quote (or remove it); write
+  `\\$` inside double quotes when the resulting value must retain a backslash before `$`; quote
+  values when a tab-before-`#` sequence or non-ASCII edge whitespace is meant literally; and
+  account for `null` when querying or schema-validating a bare declaration. `set_value`, value
+  `replace`, and `remove_value` now consume adotenv's exact native `TextEdit` ranges and
+  replacements; existing quote style is retained where possible, bare declarations can be
+  assigned, and multi-key removals are verified atomically.
+
+### Fixed
+
+- **EditorConfig conformance now follows the declared grammar, discovery boundary, and every
+  supported target line ending.** Policy files require `=` with LF/CRLF separators while valid
+  extension pairs in the preamble remain accepted. A nearer `root = true` policy stops discovery
+  before hidden outer policies are read or diagnosed, so a malformed or oversized outer file
+  cannot fail a target governed by the nearer root. Glob character classes treat hyphens
+  literally, a slash inside a complete class does not incorrectly anchor the section to one
+  directory level, and descending numeric ranges no longer match as reversed ranges. CR-only
+  target files are split into physical lines for indentation, trailing-whitespace, width, and
+  final-newline locations. Tab indentation accepts the specification's canonical sub-tab-width
+  space remainder instead of rejecting every space. Unsupported extension properties are discarded
+  while parsing instead of being cloned into every target's effective policy, and ancestor
+  discovery builds only one target's policy chain at a time instead of retaining every selected
+  file's chain.
+
+- **Source locations and line-oriented extraction now agree across LF, CRLF, CR, and BOM-prefixed
+  text.** A shared zero-allocation physical-line iterator backs EditorConfig and SPDX checks,
+  `lines` extraction, and INI parsing. Half-open source ranges, LSP diagnostic and edit positions,
+  and Unicode security scans count CRLF once, recognize lone CR, and do not count a leading UTF-8
+  BOM as a visible column. The LSP text cache strips that signature from editor overlays and disk
+  text and decodes BOM-marked UTF-16LE/UTF-16BE files before converting scalar columns to UTF-16
+  code units. SPDX validation consequently checks every tag in a CR-only file and reports its
+  actual physical line.
+
+- **LSP integration teardown and hosted editor coverage no longer leave audit gaps.** The shared
+  real-server harness waits for the `shutdown` response and gives `exit` time to terminate the
+  child, preventing truncated LLVM profiles from making otherwise-passing coverage runs fail.
+  Real-client editor checks now also run on direct `main` pushes that touch an editor, the LSP
+  server, the binary, or their workflow—not only on pull requests.
+
+- **Compact human output remains one physical line per finding for untrusted input.** Embedded
+  newlines in paths, rule IDs, violation messages, and analysis failures render as inert `\x0a`
+  text instead of injecting forged compact records. Grouped output still preserves and re-indents
+  intentional message paragraphs, and every line of a top-level CLI error retains an `alint:`
+  prefix.
+
+- **The versioning bundle enforces its documented 256-byte source-token ceiling.** A leading
+  `v`/`V` now counts toward the limit in the activation fact, source validation rule, and all ten
+  target extractors; boundary end-to-end scenarios cover 256-byte acceptance and 257-byte
+  rejection.
+
+- **The VS Code extension toolchain no longer carries known npm vulnerabilities.** Open VSX
+  publishing dependencies were updated, while the VS Code 1.91-compatible Mocha 11 runner retains
+  patched `diff` and `serialize-javascript` transitive versions through exact overrides. Both
+  editor CI and the Marketplace/Open VSX release job now block on moderate-or-higher `npm audit`
+  findings.
+
+- **Sensitive findings no longer expose internal fix-correlation keys.** Public check, fix, and
+  staged-diff reports now clear `fix_key` alongside proposed edits and related evidence, preventing
+  extracted secret values from crossing the engine API boundary.
+
+- **Baseline and Markdown identities now follow their lossless consumer semantics.** Baseline
+  fingerprints preserve exact Unix path bytes, so distinct non-UTF-8 filenames cannot collapse to
+  the same finding. Generated Markdown heading anchors now match GitHub's Unicode-category
+  filtering, including punctuation, symbols, tabs, non-breaking spaces, emoji, and combining marks.
+
+- **Mutating generator failures restore partial output before returning.** `generated_file_fresh`
+  rescans after a failed or timed-out process, removes newly-created output, restores prior bytes,
+  and reports any restoration failure instead of silently leaving the working tree modified.
+  Staged fix previews likewise fail on source or metadata read errors rather than fabricating
+  empty-file diffs.
+
+- **Installer version inputs are validated before any URL or filesystem use.** `install.sh` and
+  the GitHub Action accept only `latest` or complete `vMAJOR.MINOR.PATCH` release tags with optional
+  pre-release and build suffixes; branch names, partial versions, and path-like inputs fail early.
+  Exact pre-release action refs select themselves, and the documented piped version pin now passes
+  `ALINT_VERSION` to `bash` rather than `curl`.
+
+- **Generated Mermaid labels no longer contain wrapped newlines or trailing spaces.** The
+  architecture generator joins LikeC4's physical wraps inside quoted labels while preserving
+  statement boundaries.
+
+- **Lossless dotenv parsing is bounded before allocating its document.**
+  Nonempty parsed documents are limited to 4 MiB of original bytes (including
+  all BOMs) and 100,000 physical lines; CRLF counts once, and a terminal ending
+  adds no empty line. Native span and fix entry points share these limits.
+  Repeated leading BOMs are accepted without changing edit/proposal coordinates
+  or removing BOM bytes. Sets budget the complete prospective output before
+  native serialization/verification allocations; conservative double-quoted
+  size estimates may decline otherwise-valid near-limit edits, while retained
+  single quotes use their exact literal size and physical lines. Oversized
+  inputs and generated output are declined rather than exhausting memory.
+  adotenv 0.2.1 also omits discarded warning diagnostics, duplicate-only
+  key tries and CR merge buffers during strict parsing and native verification,
+  fixing the below-cap CR warning-density allocation spike while retaining the
+  documented multi-megabyte / 100,000-entry workload.
+
+- **Machine-readable edit proposals recognize lone carriage returns as line endings.**
+  Dotenv files accepted by adotenv 0.2 now receive correct JSON, agent and SARIF fix
+  coordinates instead of an insertion on the preceding physical line. SARIF
+  exclusive ends retain the last character's line for both CRLF and lone CR.
+
+- **Machine fix payloads cannot alias distinct non-UTF-8 paths.** SARIF artifact URIs
+  percent-encode original Unix filename bytes, while JSON and agent reports omit the optional
+  `proposed_edit` field when an edit path has no exact JSON string representation. The agent's
+  safe `fix_command` remains available. Git subprocesses also ignore inherited repository-
+  redirecting and pathspec-mode environment variables, disable clone-local replacement refs, and
+  force literal internal paths, so HEAD time, tracked-path selection, history, blame, and
+  Git-backed fixes use the requested repository and exact path.
+
+- **`git_blame_age` no longer inherits clone-local history and blame choices.** HEAD and blame
+  disable replacement refs; blame pins the Myers diff algorithm, clears valid global and local
+  `blame.ignoreRevsFile` lists, and applies only a tracked, regular
+  `.git-blame-ignore-revs`. A worktree symlink at that path is not followed, and full SHA-256
+  object IDs are parsed alongside SHA-1 instead of silently dropping every blamed line. These
+  controls prevent clones of the same repository input from assigning different line ages
+  because of local Git configuration or external ignore-list content.
+
+- **Commit-validation findings no longer inherit Git's `core.abbrev` setting.** HEAD and range
+  queries request a seven-hex short object ID, extended only by Git when that prefix is ambiguous,
+  so messages and baseline keys do not vary with clone-local abbreviation preferences.
+
+- **The benchmark regression report now includes changed-mode 1k cells as advisories, as
+  documented.** Those floor-level cells still never block publication; previously an outer size
+  filter silently omitted their deltas despite the gate classifying them as advisory.
+
+- **Minor release preparation now refreshes every version-coupled workspace artifact before
+  resolving the workspace.** Cargo's caret semantics do not allow a pre-1.0 `0.18` requirement to
+  select a local `0.19` crate, so `bump-version.sh` updates all seven workspace dependency
+  requirements when a pre-1.0 minor or any major release crosses a compatibility line. It also
+  regenerates the version-bearing `facts.json` contract. Shell regressions cover both omissions
+  that previously made the documented release command fail preflight.
+
 ## [0.18.4] - 2026-10-15
 
 A performance and correctness patch. `check --changed` and `fix --changed` no longer build
@@ -7612,7 +7945,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.18.4...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/asamarts/alint/compare/v0.18.4...v0.19.0
 [0.18.4]: https://github.com/asamarts/alint/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/asamarts/alint/compare/v0.18.2...v0.18.3
 [0.18.2]: https://github.com/asamarts/alint/compare/v0.18.1...v0.18.2

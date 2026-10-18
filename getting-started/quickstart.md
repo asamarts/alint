@@ -37,13 +37,16 @@ error    needs-readme  file_exists [fix]
 warning  no-bak  file_absent
 ```
 
-`alint explain <id>` resolves a single rule to its full definition — its kind and categories, a one-line `summary:` of what the kind checks plus a `docs:` link to the reference, the level, the `paths:` scope, any kind-specific `options:`, the author `message:`, the `when:` clause as authored, and a one-line description of the auto-fix:
+`alint explain <id>` resolves a single rule to its full definition — its kind and categories, a one-line `summary:` of what the kind checks plus a `docs:` link to the reference, the kind's host `capabilities:`, kind-specific `selectors:`, accepted `fix_ops:`, the level, the `paths:` scope, any kind-specific `options:`, the author `message:`, the `when:` clause as authored, and a one-line description of the configured auto-fix:
 
 ```text
 id:         needs-readme
 kind:       file_exists
 categories: existence
 summary:    Every glob match in paths must correspond to a real file.
+capabilities: git(tracked_set) [when git_tracked_only is set]
+selectors:   none
+fix_ops:     file_create
 docs:       https://alint.org/docs/rules/existence/file_exists/
 level:      error
 paths:      README.md
@@ -58,13 +61,16 @@ id:         readme-size-cap
 kind:       file_max_size
 categories: content, structure
 summary:    File must be at most max_bytes in size.
+capabilities: git(diff) [when scope_filter.changed_since is set]
+selectors:   none
+fix_ops:     none
 docs:       https://alint.org/docs/rules/content/file_max_size/
 level:      warning
 paths:      **/*.md
 options:    max_bytes: 10240
 ```
 
-Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `summary`, `docs`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`.
+Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `summary`, `docs`, `capabilities`, `selectors`, `fix_ops`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`.
 
 ## Discovering rule kinds
 
@@ -87,13 +93,16 @@ Rule catalog (2 kinds)
                   File must be at most max_bytes in size.
 ```
 
-`alint rules show <kind>` prints one kind's summary, categories, aliases, and docs link (and accepts an alias, resolving to the canonical kind):
+`alint rules show <kind>` prints one kind's summary, categories, aliases, host capabilities, kind-specific selectors, accepted fix operations, and docs link (and accepts an alias, resolving to the canonical kind):
 
 ```text
 file_header
   The first N lines must match a regex (line-oriented).
   categories: Content
   aliases:    header
+  capabilities: git(diff) [when scope_filter.changed_since is set]
+  selectors:    none
+  fix_ops:      file_prepend, insert_header
   docs:       https://alint.org/docs/rules/content/file_header/
 ```
 
@@ -116,7 +125,9 @@ Exit codes: `0` no errors; `1` one or more errors; `2` config error; `3` interna
 
 ## Where to next
 
-- [Bundled Rulesets](/docs/bundled-rulesets/) — 22 one-line baselines covering Rust, Python, Go, Node, Java, monorepos, GitHub Actions hardening, agent hygiene, license compliance, and more.
+- [Bundled Rulesets](/docs/bundled-rulesets/) — one-line baselines covering Rust, Python, Go,
+  Node, Java, .NET, PHP, monorepos, GitHub Actions hardening, version consistency, toolchain pins,
+  agent hygiene, license compliance, and more.
 - [Cookbook](/docs/cookbook/) — copy-pasteable patterns for real-world repo-maintenance tasks.
 - [Configuration](/docs/configuration/) — full `.alint.yml` field reference.
 - [Concepts](/docs/concepts/) — the rule model, scopes, when-expressions, composition.

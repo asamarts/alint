@@ -24,7 +24,14 @@ Rule kinds in the **Content** family. Each rule below links to its own page with
 | [`file_shebang`](/docs/rules/content/file_shebang/) | First line of each file in scope must match the `shebang` regex. |
 | [`file_is_text`](/docs/rules/content/file_is_text/) | Content is detected as text (magic bytes + UTF-8 validity check), fails on binary files matched by `paths`. |
 | [`file_is_ascii`](/docs/rules/content/file_is_ascii/) | Every byte in the file must be < 0x80 (pure ASCII), except codepoints listed in `allow:`. |
+| [`editorconfig_conforms`](/docs/rules/content/editorconfig_conforms/) | Enforce selected formatting properties from the repository's own `.editorconfig` files without repeating those values in `.alint.yml`. |
+| [`pinned_references`](/docs/rules/content/pinned_references/) | Require executable references in supported CI and container files to identify immutable artifacts rather than mutable tags or branches. |
+| [`markdown_images_have_alt`](/docs/rules/content/markdown_images_have_alt/) | Require every live CommonMark image to have non-empty rendered alt text. |
+| [`markdown_required_headings`](/docs/rules/content/markdown_required_headings/) | Require the complete rendered heading sequence to match an ordered `headings` template. |
+| [`markdown_no_duplicate_headings`](/docs/rules/content/markdown_no_duplicate_headings/) | Reject a later Markdown heading whose generated base anchor collides with an earlier heading. |
+| [`spdx_identifier_valid`](/docs/rules/content/spdx_identifier_valid/) | Validate every `SPDX-License-Identifier:` value as a strict SPDX license expression. |
 | [`executable_has_shebang`](/docs/rules/unix-metadata/executable_has_shebang/) | Every file with `+x` set must begin with `#!`. |
 | [`shebang_has_executable`](/docs/rules/unix-metadata/shebang_has_executable/) | Every file starting with `#!` must have `+x` set. |
 | [`commented_out_code`](/docs/rules/git-hygiene/commented_out_code/) | Heuristic detector for blocks of commented-out source code (as opposed to prose comments, license headers, doc comments, or ASCII banners). |
 | [`markdown_links_resolve`](/docs/rules/cross-file/markdown_links_resolve/) | Validate live Markdown link, image, and reference-definition destinations against the repository tree. |
+| [`markdown_fragments_resolve`](/docs/rules/cross-file/markdown_fragments_resolve/) | Require every live local Markdown link fragment to name a heading anchor in its resolved target document. |
