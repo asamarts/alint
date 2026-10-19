@@ -55,7 +55,7 @@ committed with this history (oldest first):
 ```ansi
 [2m--- Repository-level -----------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mdco[0m
-              commit e50a8ab: is missing a `Signed-off-by:` trailer (subject:
+              commit 84d301c: is missing a `Signed-off-by:` trailer (subject:
               "feat: a change with no sign-off")
 
 [2mSummary (1 violation):[0m

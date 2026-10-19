@@ -54,7 +54,7 @@ committed with this history (oldest first):
 ```ansi
 [2m--- Repository-level -----------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mno-fixup[0m
-              commit 8f408e3: is a fixup/squash/amend commit; rebase with
+              commit 0e8c43a: is a fixup/squash/amend commit; rebase with
               `--autosquash` before merging (subject: "fixup! feat: the original
               change")
 

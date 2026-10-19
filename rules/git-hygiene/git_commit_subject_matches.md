@@ -54,7 +54,7 @@ committed with this history (oldest first):
 ```ansi
 [2m--- Repository-level -----------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2msubject-grammar[0m
-              commit e103bea: subject does not match `^[a-z0-9_/.-]+: [a-z].*$`
+              commit f829916: subject does not match `^[a-z0-9_/.-]+: [a-z].*$`
               (subject: "WIP: Capitalised and the wrong shape")
 
 [2mSummary (1 violation):[0m

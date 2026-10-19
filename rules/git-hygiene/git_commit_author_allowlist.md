@@ -57,9 +57,9 @@ committed with this history (oldest first):
 ```ansi
 [2m--- Repository-level -----------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2morg-authors[0m
-              commit e3a1641: author "alint scenario <scenario@alint.test>" is
-              not in the allowlist (subject: "feat: a change from an outside
-              author")
+              commit b896fb5: author "alint policy test
+              <policy-test@alint.test>" is not in the allowlist (subject: "feat:
+              a change from an outside author")
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m

@@ -565,12 +565,12 @@ alint/
 │   ├── alint-output/       formatters (human, json, sarif, github, gitlab, junit, markdown, agent)
 │   ├── alint-lsp/          language server behind the `lsp` subcommand (tower-lsp)
 │   ├── alint-bench/        criterion micro-benches + seeded tree generator
-│   ├── alint-testkit/      shared test harness (treespec materializer, scenario runner, proptest strategies)
-│   └── alint-e2e/          end-to-end scenarios + coverage audits + cross-cutting invariant tests
+│   ├── alint-testkit/      public policy-test v1 model, hermetic runner, tree fixtures, optional strategies
+│   └── alint-e2e/          general policy tests + coverage audits + cross-cutting invariant tests
 ├── xtask/                  cargo-xtask helpers (bench-release driver, docs-export, publish-benches)
 ├── ci/                     self-hosted runner + per-job shell scripts
 ├── editors/                editor integrations (VS Code, Zed, JetBrains, Neovim, Helix, Emacs, Sublime, Eclipse)
-├── schemas/v1/             JSON Schemas for .alint.yml and report shapes (only config.json is mirrored in alint-dsl)
+├── schemas/v1/             JSON Schemas for config, reports, and policy tests (config.json is mirrored in alint-dsl)
 ├── docs/
 │   ├── design/             architecture, roadmap, per-cut design passes (v0.7, v0.9, ...)
 │   ├── development/        contributor docs (rule-authoring.md)
@@ -592,18 +592,19 @@ alint/
 
 ### Publishing intent (crates.io)
 
-The public crate surface is kept narrow so the semver-stable API is small and maintainable.
+The public crate surface is kept narrow so the semver-stable API remains maintainable.
 
 | Crate | `publish` | Why |
 |---|---|---|
 | `alint` (binary) | public | Enables `cargo install alint`. Package name matches `[[bin]] name`. |
 | `alint-core` | public | Embeddable engine for custom drivers: scripts, custom CI gates, third-party hosts. Semver-stable from 1.0. |
-| `alint-dsl`, `alint-rules`, `alint-output`, `alint-lsp` | published, but documented as internal | Cargo requires the binary's workspace dependencies to be resolvable from crates.io. Publication does not make these semver-stable public APIs. |
-| `alint-bench`, `alint-testkit`, `alint-e2e`, `xtask` | `publish = false` | Repository-only benchmarking, testing, and maintenance tooling. |
+| `alint-testkit` | public | Versioned policy-test documents, validating hermetic runner, and fixture utilities for third-party rulesets. |
+| `alint-dsl`, `alint-rules`, `alint-output`, `alint-lsp` | published, but documented as internal | Cargo requires the binary and testkit workspace dependencies to be resolvable from crates.io. Publication does not make these semver-stable public APIs. |
+| `alint-bench`, `alint-e2e`, `xtask` | `publish = false` | Repository-only benchmarking, integration testing, and maintenance tooling. |
 
-`publish` is a packaging property, not an API-stability promise. Only `alint-core` is presented
-as an embeddable library; implementation crates carry an `Internal` package description even
-though the release pipeline publishes them as dependencies of `alint`.
+`publish` is a packaging property, not an API-stability promise. `alint-core` and
+`alint-testkit` are the supported library surfaces; implementation crates carry an `Internal`
+package description even though the release pipeline publishes them as dependencies.
 
 ## Plugin model
 

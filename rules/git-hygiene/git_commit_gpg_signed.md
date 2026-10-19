@@ -54,7 +54,7 @@ committed with this history (oldest first):
 ```ansi
 [2m--- Repository-level -----------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2msigned-commits[0m
-              commit 57cf94a: is not signed (or its signature did not verify)
+              commit 490bdd4: is not signed (or its signature did not verify)
               (subject: "feat: an unsigned change")
 
 [2mSummary (1 violation):[0m
