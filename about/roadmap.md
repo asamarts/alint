@@ -272,12 +272,16 @@ on it for adoption, they can lint without it.
   0 and 1a in v0.19 deliver the capability inventory, fail-loud analysis,
   complete notes, redaction, related locations, reproducible analysis time,
   and duplicate-aware spanned extraction, alongside seven gap-study kinds
-  and the versioning and toolchain consistency bundles. The authoring loop
-  follows in v0.20 (`alint test`, `explain --trace`), the internal relation
-  layer with the `key_parity` pilot and the plugin contract in v0.21, then
-  `version: 2` selectors and constraints, with plugin hosts as a parallel
-  track. Staged in [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md) section 11, decided in
-  [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md), with the detection gaps in
+  and the versioning and toolchain consistency bundles. The accepted
+  [`v0.20` authoring-loop design](v0.20/README.md) follows with `alint test`,
+  selected-rule `explain --trace`, and per-source compatibility requirements;
+  the internal relation layer with the `key_parity` pilot and the plugin
+  contract follow in v0.21, then `version: 2` selectors and constraints, with
+  plugin hosts as a parallel track. Staged in
+  [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+  section 11, decided in
+  [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md),
+  with detection gaps in
   [`rule-coverage-gaps.md`](https://github.com/asamarts/alint/blob/main/docs/design/rule-coverage-gaps.md).
 
 - **Plugins (parallel track).** Format adapters, checkers, and fixers
@@ -1469,6 +1473,27 @@ Current status and the ordered next steps are kept in that file's
 - **Version and toolchain consistency bundles.** Opt-in `versioning@v1` and
   `toolchain-pins@v1` rulesets align release versions and exact Node, Rust,
   Python, Ruby, JVM, and .NET pins across local, container, and CI declarations.
+
+## v0.20: Policy authoring loop
+
+Phase 1b of
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+is specified by the accepted
+[`v0.20/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.20/README.md)
+and [ADR-0022](https://github.com/asamarts/alint/blob/main/docs/adr/0022-policy-authoring-loop-contracts.md),
+with detailed policy-test, rule-trace, and config-requirement contracts.
+
+- **Public policy tests.** Promote the existing one-scenario-per-YAML testkit format to
+  `alint test`, publish its schema and runner crate, isolate real directory/config fixtures,
+  require two-key grants for process/keyring capabilities, and make each bundled ruleset own
+  executable pass/fail tests.
+- **Selected-rule trace.** `alint explain <rule-id> --trace` follows production engine dispatch
+  and reports gates, selector/extraction/cardinality counts, assertions, and terminal outcomes.
+  Opt-in previews are deterministic, bounded, and redaction-safe; JSON remains experimental until
+  v2 stabilizes.
+- **Config compatibility.** Validate each complete source's `version` before composition and add
+  source-local `requires.alint` minimum stable release metadata to v1. Future v2 consumers may
+  extend v1 sources; v1 consumers can never extend v2.
 
 ## v1.0: Stability
 

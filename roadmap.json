@@ -116,6 +116,12 @@
       "blurb": "The first phase of the general-linter program: a generated per-kind capability inventory that drives trust gates, fail-loud analysis outcomes, secret-bearing evidence redaction, related finding locations, reproducible analysis time, duplicate-aware spanned extraction, seven standalone policy kinds, and version and toolchain consistency bundles."
     },
     {
+      "version": "0.20",
+      "title": "Policy authoring loop",
+      "kind": "release",
+      "blurb": "The policy authoring loop: a published, versioned alint test runner for isolated fixture repositories; selected-rule explain traces with bounded redaction-safe previews; and per-source config version and minimum-alint requirement checks."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",
