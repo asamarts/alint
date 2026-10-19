@@ -1483,10 +1483,10 @@ is specified by the accepted
 and [ADR-0022](https://github.com/asamarts/alint/blob/main/docs/adr/0022-policy-authoring-loop-contracts.md),
 with detailed policy-test, rule-trace, and config-requirement contracts.
 
-- **Public policy tests (runner complete; CLI next).** The versioned model, schema, published
-  runner crate, isolated directory/config fixtures, two-key process/keyring grants, 578-test
-  migration, and per-bundle executable ownership tree are implemented. `alint test` is the
-  remaining command surface.
+- **Public policy tests and bundle ownership.** The versioned model, schema, published runner
+  crate, `alint test` CLI, isolated directory/config fixtures, two-key process/keyring grants, and
+  578-test migration are implemented. All 24 shipped v1 bundles own whole-bundle pass/fail tests;
+  the runtime catalog, ownership tree, and public parser/runner corpus are parity-gated.
 - **Selected-rule trace.** `alint explain <rule-id> --trace` follows production engine dispatch
   and reports gates, selector/extraction/cardinality counts, assertions, and terminal outcomes.
   Opt-in previews are deterministic, bounded, and redaction-safe; JSON remains experimental until
