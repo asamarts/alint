@@ -178,6 +178,22 @@ performs the same typed Serde decoding and metadata-aware builder validation rat
 a JSON Schema validator. Generation fails on registry, metadata, or schema drift; integration
 tests validate representative configs and gate the root and embedded copies byte-for-byte.
 
+The loader validates each source before composition. Root, local-extended, bundled, HTTPS, and
+nested sources must state a supported `version`; `.alint.d` drop-ins may omit it and inherit the
+root version, while an explicit drop-in version must match the root. A source can also declare a
+literal minimum binary release:
+
+```yaml
+version: 1
+requires:
+  alint: "0.19.0"
+```
+
+`requires.alint` is exactly three unsigned decimal components, not a range or interpolated value.
+It is checked before the source is merged or any child `extends:` is resolved. Version and
+requirement records survive composition as audit metadata; they do not participate in rule or
+top-level policy precedence.
+
 For editor autocomplete, reference the schema via the YAML language server pragma, either by a relative path (recommended inside this repo) or by the GitHub raw URL (for downstream users):
 
 ```yaml
@@ -188,6 +204,8 @@ For editor autocomplete, reference the schema via the YAML language server pragm
 ```yaml
 # .alint.yml
 version: 1
+requires:
+  alint: "0.20.0"
 
 extends:
   # Optional subresource integrity is a `#sha256-<hex>` URL fragment.
