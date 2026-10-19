@@ -110,6 +110,19 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
 
 Rules produce `Violation`s; the engine aggregates them into a `Report`.
 
+### Selected-rule tracing (v0.20 P5)
+
+`Engine::trace_rule` copies one effective `RuleEntry` into a mini-engine that shares the production
+registry and run inputs. It executes the same rule-major or file-major dispatch, common gates,
+nested-rule builder, failure partitioning, fixability marking, result redaction, and canonical
+ordering as `check`; unrelated rules are never evaluated. An optional `TraceSink` on `Context`
+records typed aggregate `TraceStage`s for the selected rule and appends exactly one terminal
+outcome.
+
+Every canonical `KindMeta` declares its allowed and required kind-owned stages. Completion audits
+the runtime trace against that inventory. Ordinary engine runs carry `Context.trace = None` and
+never construct a recorder, format evidence, increment trace counters, or acquire a trace lock.
+
 ### Dispatch flip + `PerFileRule` (v0.9.3)
 
 Since v0.9.3 the engine partitions rules into two execution loops, covering three semantic
