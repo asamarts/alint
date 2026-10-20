@@ -108,7 +108,7 @@ jsonc-parser = { version = "0.34.0", features = ["cst"] }
 # (saphyr-rs/saphyr#129; fix pending in #136). `default-features = false` drops the
 # `encoding` feature (only `load_from_read` uses it; we load from `&str`), whose
 # `encoding_rs < 0.8.40` cap would otherwise hold back the workspace's encoding_rs.
-saphyr = { version = "0.1.0", default-features = false }
+saphyr = { version = "0.2.2", default-features = false }
 # Duplicate-aware YAML entry extraction needs the parser event stream before
 # `saphyr::MarkedYaml` collapses mapping keys. Already transitive through saphyr.
 saphyr-parser = { version = "=0.1.0", default-features = false }
