@@ -102,7 +102,7 @@ jobs:
 
       - name: install cargo-binstall (cargo-binstall channel)
         if: matrix.channel == 'cargo-binstall'
-        uses: cargo-bins/cargo-binstall@3be4ad2b146f3302f92e5956c54fedbb6ae8cccc # v1.25.3
+        uses: cargo-bins/cargo-binstall@8a2045612414e945291083f820cd50b4d8fc2218 # v1.26.0
 
       - name: install cosign (so the install.sh leg exercises its verify path)
         # With cosign v3 present, install.sh's verification actually runs against
