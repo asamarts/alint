@@ -6,6 +6,12 @@
       "version": "v0.19.0",
       "date": "2026-10-18",
       "headline": "General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 2
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4113.415081166667,
@@ -33,6 +39,12 @@
       "version": "v0.18.4",
       "date": "2026-10-15",
       "headline": "A performance and correctness patch.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4007.5868975333337,
@@ -60,6 +72,12 @@
       "version": "v0.18.2",
       "date": "2026-10-13",
       "headline": "A security and correctness patch: alint's terminal output now escapes every invisible character its own rules flag, `.env` parsing and editing moves to the new `adotenv` crate (fixing a `set_value` edit that silently never applied), and a leading BOM no longer shifts columns or widths.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4015.646139466667,
@@ -87,6 +105,12 @@
       "version": "v0.18.1",
       "date": "2026-10-12",
       "headline": "A performance and installer patch.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4119.736971573332,
@@ -114,6 +138,12 @@
       "version": "v0.18.0",
       "date": "2026-10-11",
       "headline": "A security and correctness release from a whole-repository audit and an adversarial re-review of its fixes.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4032.020682213334,
@@ -141,6 +171,12 @@
       "version": "v0.17.0",
       "date": "2026-10-01",
       "headline": "This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4071.061841146666,
@@ -168,6 +204,12 @@
       "version": "v0.16.0",
       "date": "2026-09-02",
       "headline": "This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4045.307623913334,
@@ -195,6 +237,12 @@
       "version": "v0.15.0",
       "date": "2026-08-16",
       "headline": "v0.15 makes rules legible and monorepos first-class.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4176.072396593333,
@@ -222,6 +270,12 @@
       "version": "v0.14.2",
       "date": "2026-08-06",
       "headline": "A fixes-and-hardening patch on top of 0.14.1.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4129.1334899466665,
@@ -249,6 +303,12 @@
       "version": "v0.14.1",
       "date": "2026-07-24",
       "headline": "A performance patch.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4221.5541981666665,
@@ -276,6 +336,12 @@
       "version": "v0.14.0",
       "date": "2026-07-18",
       "headline": "The adoption release. **Baseline mode** (`alint baseline` + `alint check --baseline`) grandfathers a repo's existing violations behind a content-fingerprinted snapshot, so `alint check` reports and gates only on *new* findings — alint becomes a blocking merge gate on an established codebase without a flag-day cleanup, and for SARIF the suppressed findings are *marked, not deleted*, so GitHub Code Scanning dismisses them instead of flapping fixed-then-reopened.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4139.279987206667,
@@ -303,6 +369,12 @@
       "version": "v0.13.0",
       "date": "2026-06-17",
       "headline": "This release turns the documented surface into generated, drift-proof contracts.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4140.41983668,
@@ -330,6 +402,12 @@
       "version": "v0.12.0",
       "date": "2026-06-07",
       "headline": "The case-study-driven rule-kind expansion, paired with a security cycle that hardens path handling into a real boundary.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4608.390787406667,
@@ -357,6 +435,12 @@
       "version": "v0.11.0",
       "date": "2026-05-28",
       "headline": "The LSP + editor-integration release.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": null,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4267.7897067799995,
@@ -380,6 +464,12 @@
       "version": "v0.10.2",
       "date": "2026-05-21",
       "headline": "Targeted follow-up to v0.10.1.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": null,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4071.771508006667,
@@ -403,6 +493,12 @@
       "version": "v0.10.1",
       "date": "2026-05-20",
       "headline": "Small post-release follow-up to v0.10.0.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": null,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4029.0061691533338,
@@ -426,6 +522,12 @@
       "version": "v0.10.0",
       "date": "2026-05-20",
       "headline": "The \"case-study coverage push\" minor.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": null,
+        "S4": 1
+      },
       "cells": {
         "s1_1m_full": {
           "mean_ms": 4055.651753026667,
