@@ -9,6 +9,195 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-10-21
+
+General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test
+runner, selected-rule production traces with bounded redaction-safe previews, and per-source
+configuration compatibility requirements. The release also hardens sensitive diagnostics and YAML
+handling, moves exact-path facts onto the lazy file index, and makes release, benchmark, and
+ruleset ownership contracts executable.
+
+### Added
+
+- **`alint-testkit` now ships the public, hermetic policy-test v1 runner.** `PolicyTest` documents
+  parse through bounded YAML guards and aggregate validation, while `Runner::run` separates the
+  read-only source package from the temporary repository, denies remote config resolution, injects
+  deterministic environment/time/Git state, reloads config for every step, and enforces two-key
+  grants for process and host-keyring capabilities. Structured observations support counted exact
+  matching, notes, analysis failures, related locations, canonical diffs, redacted diagnostics,
+  final-tree checks, and atomic JSON snapshots. All 578 declarative tests use the public contract;
+  bundled ruleset tests now live beside their owning rulesets under `alint-dsl/ruleset-tests/v1`,
+  and the obsolete internal scenario model and unchecked runner are removed. The crate is
+  publishable with an opt-in `strategies` feature and stable policy-test/report JSON Schemas.
+
+- **`alint test` now provides the public policy-authoring loop.** It discovers `.yml` and `.yaml`
+  documents under `alint-tests/` or explicit paths, applies repeatable AND tag filters and a
+  path/name substring filter, preflights every selected definition and capability before execution,
+  and runs tests in deterministic source/name order. Human and stable JSON reports distinguish
+  passed, failed, invalid, and platform-skipped tests; exits 0/1/2/3 map to pass, mismatch, invalid
+  input, and operational failure. Snapshot updates are confined and deferred until every selected
+  test's inline expectations pass. Native process and host-keyring access each require both a
+  document declaration and an explicit CLI grant.
+
+- **The v0.20 selected-rule trace engine now executes production dispatch without observing
+  ordinary checks.** `Engine::trace_rule` evaluates only the requested effective rule through the
+  existing common gates, rule-major/file-major paths, nested-rule builder, result partitioning, and
+  redaction. Typed deterministic stages carry checked aggregate counts, bounded producer-redacted
+  preview rows, and exactly one terminal outcome; runtime completion rejects undeclared, missing,
+  malformed, or result-inconsistent stages against mandatory metadata on all 102 canonical kinds.
+  Preview producers cannot inject engine-owned stages or bypass typed value classes, sensitivity,
+  repository-relative path normalization, source-range validation, or non-UTF-8-safe serialization.
+  Ordinary checks construct no trace recorder. `facts.json` format v6 and `alint rules show` expose
+  each kind's trace inventory.
+- **`alint explain <rule-id> --trace` now diagnoses one effective rule end to end.** It walks the
+  configured repository, runs no unrelated rule, and renders typed pass, violation, skip, and
+  analysis-failure stages in human or explicitly experimental JSON. The production fact context is
+  preserved, so configured custom facts may execute subprocesses just as they do under `check`.
+  `--changed`/`--base` mirror check scope; opt-in `--preview` retains the deterministic first 1–100
+  structured-extraction or nested-child rows with exact omission/redaction/truncation accounting.
+  Environment-derived and explicitly sensitive option, message, policy-URL, condition, preview,
+  result, and configuration-error evidence is redacted before retention, including through
+  template expansion and config merges. The generated rule-trace JSON Schema is committed at
+  `schemas/experimental/rule-trace.json` and packaged with the CLI.
+
+### Changed
+
+- **Exact-path repository facts now use the lazy `FileIndex` path-to-entry index.**
+  `any_file_exists`, `all_files_exist`, and `file_content_matches` retain glob, exclusion, ignore,
+  and validation semantics without rescanning every walked file for each literal fact;
+  `count_files` now takes the same indexed path for an exact zero-or-one count. On the controlled
+  100k-file, 20-fact existence/content workload this removes 90.4% of the incremental instruction
+  cost; a Criterion scaling benchmark and a deterministic Callgrind cell guard the linear shape.
+  See the [investigation](docs/benchmarks/investigations/2026-10-s4-literal-facts/).
+
+- **Release hot paths no longer build avoidable intermediate state.** Static `explain --format
+  json` serializes its typed, borrowed rule document directly through a buffered writer instead of
+  constructing and then copying an outer JSON value tree. Git subprocess setup also skips the
+  scoped-environment registry lookup and map clone for ordinary repositories while continuing to
+  strip every repository redirector from policy-test environments.
+
+- **The S4 benchmark workload is now revision 3.** Its Git fixture commits realistic
+  version and toolchain authorities, activating all 35 rules added in revision 2;
+  the contract pins 23/24 true facts and 82/85 active rules. Published history and
+  trajectory data now carry explicit workload revisions and mark reset boundaries
+  instead of presenting unlike timings as a continuous series.
+
+- **Oversized Rust implementation files are now split by responsibility.** CLI command execution
+  lives in per-command modules; engine execution, fixing, gates, and tests use phase-focused
+  modules; DSL tests are grouped by concern; and docs export separates rule, ruleset, and CLI page
+  generation. All Rust sources remain below the repository's 2,000-line cap without public API or
+  behavior changes.
+
+- **YAML parsing now uses the YAML organization's maintained fork.** `yaml_serde` 0.10.7 and
+  `libyaml-rs` 0.3.0 replace `serde_yaml_ng` and the archived `unsafe-libyaml`, removing
+  `RUSTSEC-2024-0449` from the dependency graph without changing accepted YAML, value semantics,
+  diagnostics, the 128-level recursion boundary, or alint's stricter flow/alias resource guards.
+  The migration includes a parser-independent compatibility contract and a measured
+  [buy-versus-build decision](docs/design/yaml-parser.md).
+
+- **Malformed YAML can no longer produce a partial extraction or an ambiguous fix.**
+  Raw NUL bytes fail direct event-stream extraction instead of terminating it early, and
+  structured fixes decline duplicate mapping keys rather than selecting one value. The
+  aligned `saphyr` and `saphyr-parser` 0.2.2 update is regression-tested and kept in one
+  Dependabot group so their pre-1.0 event contracts cannot drift.
+
+- **Every configuration source now proves language and binary compatibility before composition.**
+  Root, local-extended, bundled, HTTPS, nested, and drop-in sources validate their own `version`
+  before trust gates or merge. Complete sources must declare it; a drop-in may omit it and inherit
+  the root's version. A source may add the closed literal
+  `requires: { alint: "MAJOR.MINOR.PATCH" }` mapping; malformed, interpolated, or unsatisfied
+  requirements fail with source and running-version diagnostics before that source's child
+  resolution. Requirements are retained as audit metadata and never merge as policy. The config
+  JSON Schema and embedded copy include the new field; `facts.json` format v5 publishes the
+  supported config and policy-test version lists from runtime constants.
+
+- **Bundled ruleset tests now have executable ownership gates.** The runtime catalog and
+  `alint-dsl/ruleset-tests/<revision>/` directories must match exactly; all 24 shipped v1 bundles
+  own explicit, unfiltered pass and fail scenarios. Catalog filtering, composition, and declared
+  compatibility metadata run through production loading. The complete 578-document corpus is
+  count-pinned, parsed by `PolicyTest::from_yaml`, and executed by the public runner; supplementary
+  audits no longer deserialize the public test type through an unchecked YAML path.
+
+- **Post-publish distribution smoke now exercises policy-test behavior, not only version
+  metadata.** Every installed CLI channel—release tarball, crates.io source and binary installs,
+  npm, Docker, Homebrew, and PyPI—runs a fresh downstream `alint test` package and validates its
+  stable JSON report, catching package-only runtime omissions that `alint --version` cannot expose.
+
+### Fixed
+
+- **HTTPS configuration loading no longer trusts certificates through compromised emSign
+  intermediates.** The locked `rustls-webpki` and Mozilla root store now contain the coordinated
+  fixes for `RUSTSEC-2026-0382` and `RUSTSEC-2026-0381`.
+
+- **Policy-test corpus audits now follow public discovery semantics.** The CLI, 578-document
+  migration gate, and bundle-ownership gate share one bounded top-level `test_version`
+  discriminator. Package-local YAML support files are no longer misclassified as owned tests,
+  recursive audit walks do not follow directory symlinks, and `.yaml` scenario documents execute
+  through the public runner instead of falling outside the repository harness.
+
+- **Environment-derived selector paths no longer leak through diagnostics.** Static and traced
+  `explain`, bounded previews, check/fix formats, baselines, `export-agents-md`, SARIF annotations,
+  agent output, policy-test observations, and LSP diagnostics now project protected `paths:`,
+  kind-specific selectors, manifest scopes, and nested selectors as `<redacted>` while preserving
+  the original path internally for baseline identity and remediation.
+
+- **The published `alint-testkit` crate now includes the repository's Apache 2.0 license, MIT
+  license, and NOTICE files.** Release packaging no longer omits the attribution files required of
+  every published workspace crate.
+
+- **Policy-test discovery and diagnostics now remain safe around real fixture packages.** Recursive
+  `alint test` discovery ignores YAML without a top-level `test_version`, so config chains,
+  workflows, malformed parser fixtures, and other repository-owned YAML are not misclassified as
+  policy tests; explicitly named files still fail loudly. Policy-test observations, diffs,
+  mismatch details, baseline keys, fingerprints, and pre-execution capability denials now redact
+  every declared `given.env` value before reports or snapshots retain them.
+
+- **Platform-specific policy tests are skipped before fixture materialization again.** The public
+  runner now honors `requires-case-sensitive-fs` on default macOS as well as Windows filesystems,
+  preserving the migrated corpus harness contract instead of overwriting case-variant fixtures.
+  The canonical pass/fail trace audit remains on Linux, where every platform-tagged fixture can
+  execute; non-capturing docs validation accepts explicit platform skips; and the integration suite
+  compiles warning-free while its CLI help snapshots normalize the executable suffix on Windows.
+
+- **Release installation now retries connection-level asset download failures.** The installer uses
+  a bounded portable retry loop for the archive and checksum, covering TLS resets and similar curl
+  failures that `--retry` alone does not classify as transient.
+
+- **Counted policy-test matchers no longer allocate from an impossible declared cardinality or
+  recurse through an unbounded augmenting path.** Exact matching first checks the overflow-safe
+  expected total against the observed result count, so a tiny test document with a platform-sized
+  `count` produces one deterministic mismatch instead of panicking on `Vec` capacity. Matching
+  reuses its traversal storage, flips augmenting paths iteratively to prevent process-stack
+  exhaustion on wide valid documents, and compiles each message regex only once per step.
+
+- **Selected-rule traces can no longer accept successful results that omit required evaluation
+  stages.** Trace completion now checks the declared stage inventory whenever a producer returns a
+  result, while retaining the intentional exemption for engine-owned terminal gate results.
+
+- **The published GitHub Actions guide now follows the post-release immutable pin.** The docs bundle
+  overlays that guide from `main` after a tag is published and rejects generated output whose
+  Action examples do not match `ci/action-doc-pin.env`, instead of leaving alint.org's copy-paste
+  snippets one release behind.
+
+- **Release-bump shell validation now tests the actual candidate tree.** The version-pin harness
+  overlays and commits every tracked working-tree change in its disposable clone, so local
+  pre-commit validation neither fails on the expected uncommitted version bump nor tests stale
+  release metadata from `HEAD`; clean CI checkouts also skip the absent overlay instead of asking
+  `git apply` to consume an empty patch.
+
+- **Nested configs now reject every execution setting they cannot honor.** Explicit
+  `respect_gitignore`, `fix_size_limit`, and `nested_configs` declarations now fail, including an
+  intentional `fix_size_limit: null` or `nested_configs: false`, instead of being silently dropped
+  while only `version`, `requires`, and `rules` take effect. File loading also rejects `null` for
+  the two boolean settings rather than silently applying their defaults.
+
+- **Benchmark regressions now compare like workloads.** Macro reports record a semantic revision
+  for every scenario, `bench-gate` skips cross-version timing comparisons across an intentional
+  revision change while retaining the new run's quality gate, and a contract test pins each
+  revision's resolved rule count. The v0.19.0 S4 expansion from 50 to 85 rules is now explicit
+  instead of being misreported as an engine regression. The bench workflow also no longer passes
+  an unsupported input to its pinned Rust toolchain action.
+
 ## [0.19.0] - 2026-10-18
 
 General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated
@@ -7945,7 +8134,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/asamarts/alint/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/asamarts/alint/compare/v0.18.4...v0.19.0
 [0.18.4]: https://github.com/asamarts/alint/compare/v0.18.3...v0.18.4
 [0.18.3]: https://github.com/asamarts/alint/compare/v0.18.2...v0.18.3

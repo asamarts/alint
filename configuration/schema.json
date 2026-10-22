@@ -7323,6 +7323,20 @@
       "description": "Opt in to discovery of nested `.alint.yml` / `.alint.yaml` files in subdirectories. When true, the loader walks the tree from this config's directory (honoring `.gitignore` + `ignore`) and finds any nested config files. Each nested rule's path-like scope fields (`paths`, `select`, `primary`) are automatically prefixed with the nested config's relative directory, so rules declared in `packages/frontend/.alint.yml` apply only under `packages/frontend/**`. Id collisions across configs are rejected with a clear error - per-subtree overrides aren't supported in this release (use `when:` on the root rule for that). Only the root config sets this; nested configs can't spawn further nested discovery.",
       "type": "boolean"
     },
+    "requires": {
+      "additionalProperties": false,
+      "description": "Minimum stable alint binary version required to interpret this source. The value is a literal MAJOR.MINOR.PATCH triplet; interpolation, ranges, prerelease labels, and build metadata are rejected. Every config source is checked before composition or child resolution.",
+      "properties": {
+        "alint": {
+          "pattern": "^(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)\\.(0|[1-9][0-9]*)$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "alint"
+      ],
+      "type": "object"
+    },
     "respect_gitignore": {
       "default": true,
       "description": "Whether to honor .gitignore files during the walk.",

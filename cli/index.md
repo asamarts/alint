@@ -17,13 +17,14 @@ Usage: alint [OPTIONS] [COMMAND]
 | --- | --- |
 | [`check`](/docs/cli/check/) | Run linters against the current (or given) directory. Default command |
 | [`list`](/docs/cli/list/) | List the rules configured in this repo |
-| [`explain`](/docs/cli/explain/) | Show a rule's definition |
+| [`explain`](/docs/cli/explain/) | Show a configured rule, optionally tracing one real selected-rule run |
 | [`fix`](/docs/cli/fix/) | Apply automatic fixes for violations whose rules declare one |
 | [`baseline`](/docs/cli/baseline/) | Snapshot current violations so later runs fail only on new ones |
 | [`facts`](/docs/cli/facts/) | Evaluate the config's `facts:` entries and print resolved values |
 | [`init`](/docs/cli/init/) | Scaffold a starter `.alint.yml` for the detected ecosystem |
 | [`export-agents-md`](/docs/cli/export-agents-md/) | Generate an `AGENTS.md` section from the active rule set |
 | [`suggest`](/docs/cli/suggest/) | Scan for antipatterns and propose rules that would catch them |
+| [`test`](/docs/cli/test/) | Run versioned policy tests in isolated temporary repositories |
 | [`validate-config`](/docs/cli/validate-config/) | Parse-validate an `.alint.yml` without walking the tree |
 | [`lsp`](/docs/cli/lsp/) | Start the alint language server (LSP over stdio) |
 | [`rules`](/docs/cli/rules/) | Browse the catalog of rule kinds alint ships (config-independent) |

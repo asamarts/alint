@@ -9,6 +9,7 @@ model {
   alint.cli.alintBin -> alint.lspServer.lspd
   alint.cli.alintBin -> alint.cli.output
   alint.cli.alintBin -> alint.cli.rules
+  alint.cli.alintBin -> alint.tooling.testkit
   alint.tooling.bench -> alint.cli.core
   alint.tooling.bench -> alint.cli.dsl
   alint.tooling.bench -> alint.cli.output
@@ -21,6 +22,7 @@ model {
   alint.cli.rules -> alint.cli.core
   alint.tooling.testkit -> alint.cli.core
   alint.tooling.testkit -> alint.cli.dsl
+  alint.tooling.testkit -> alint.cli.output
   alint.tooling.testkit -> alint.cli.rules
   alint.tooling.xtask -> alint.tooling.bench
   alint.tooling.xtask -> alint.cli.core

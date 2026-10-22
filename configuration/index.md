@@ -26,13 +26,32 @@ The schema is also published in the alint repo at [`schemas/v1/config.json`](htt
 
 ### `version`
 
-Schema version. Always `1` for the current schema. Required.
+Config-language version. Complete sources (the root, local/HTTPS/bundled `extends:` targets, and
+nested configs) must declare a supported version. A `.alint.d/` drop-in may omit it and inherit the
+root version; if present, it must equal the root version.
 
 ```yaml
 version: 1
 ```
 
-A future schema bump (to `version: 2`) would be an explicit migration; v1 is stable.
+Each source is checked before it is merged. A future v2 consumer may read v1 or v2 sources; a v1
+consumer never accepts v2.
+
+### `requires`
+
+Optional minimum stable alint binary version for this source:
+
+```yaml
+version: 1
+requires:
+  alint: "0.20.0"
+```
+
+The map is closed and `alint` is a literal `MAJOR.MINOR.PATCH` triplet. Ranges, prerelease/build
+labels, leading zeroes, YAML numbers, and `{{env.*}}` interpolation are rejected. The loader checks
+the requirement before merging the source or following its child `extends:` entries. It cannot
+grant trust or capabilities, and requirements from multiple sources do not override one another:
+every source must be satisfied.
 
 ### `extends`
 

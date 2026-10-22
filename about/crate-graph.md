@@ -29,6 +29,6 @@ Tier = longest runtime-dependency chain to the foundation (`alint-core` = 0); de
 | 1 | `alint-rules` | Internal: built-in rule implementations for alint. Not a stable public API. |
 | 2 | `alint-bench` | Benchmark harness and deterministic fixture generator for alint |
 | 2 | `alint-lsp` | Internal: Language Server Protocol server for alint. Not a stable public API. |
-| 2 | `alint-testkit` | Internal: end-to-end scenario fixtures + tree-spec utilities for alint's own tests. Not a stable public API. |
+| 2 | `alint-testkit` | Versioned policy-test models, hermetic runner, and repository fixture tools for alint rulesets. |
 | 3 | `alint` | Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules. |
 | 3 | `xtask` | Cargo-xtask helpers for alint (bench, release, etc.) |

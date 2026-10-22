@@ -23,6 +23,7 @@ alint fix --dry-run   # preview the auto-fixes that would be applied
 alint fix             # apply every fixable violation in place
 alint list            # list effective rules (after extends + overrides)
 alint explain <id>    # show a rule's full, resolved definition
+alint explain <id> --trace  # run only that rule and explain its outcome
 alint facts           # evaluate facts against the repo — debug `when:` clauses
 ```
 
@@ -71,6 +72,15 @@ options:    max_bytes: 10240
 ```
 
 Pass `--no-docs` to drop the `docs:` line (handy for narrow terminals and screen recordings). Add `--format json` to either for the machine shape: `explain <id> --format json` carries `rule_kind`, `categories`, `summary`, `docs`, `capabilities`, `selectors`, `fix_ops`, `paths`, `options`, `message`, `when`, `conditional`, `fixable`, and `fix`.
+
+Add `--trace` when the static definition is not enough: alint walks the
+repository, evaluates only that effective rule through the production engine,
+and reports why it passed, violated, skipped, or failed analysis. `--preview`
+adds bounded, redacted structured-extraction and nested-child evidence. A
+selected command rule and configured custom facts may execute subprocesses;
+unrelated command rules never run. See
+[`alint explain`](/docs/cli/explain/) for changed-path tracing, exit semantics,
+and the experimental JSON contract.
 
 ## Discovering rule kinds
 

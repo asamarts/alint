@@ -1,6 +1,6 @@
 ---
 title: 'alint explain'
-description: 'alint explain shows one configured rule: its kind, capabilities, selectors, fix operations, level, paths, options, and reference link.'
+description: 'alint explain shows one effective rule and can trace why one production evaluation passed, failed, skipped, or could not complete.'
 ---
 
 `alint explain` takes a rule id from your effective config (including rules
@@ -67,6 +67,67 @@ alint reads the current HEAD commit's committer timestamp. Human output renders
 `analysis_time` object contains `date` and `source`; an unavailable fallback has
 `date: null`, `source: "unavailable"`, and `error`.
 
+## Trace one production evaluation
+
+`--trace` walks the repository and evaluates exactly the selected effective
+rule through the same engine path as `check`:
+
+```bash
+alint explain cargo-workspace-resolver --trace
+alint explain cargo-workspace-resolver --trace --format json
+```
+
+The static definition stays first. Human output then lists ordered gate,
+selection, extraction, cardinality, assertion, nested-evaluation, and outcome
+stages that apply to the rule. JSON uses the experimental `kind: "rule-trace"`
+envelope documented by
+`schemas/experimental/rule-trace.json`; the stable static document remains
+`kind: "rule"`.
+
+A trace is diagnostic. A satisfied, violated, skipped, or analysis-failure
+outcome exits 0 so scripts can inspect `result.status`. Invalid flags or config
+exit 2; an internal invariant failure exits 3. A configured `level: off` rule
+can be selected in trace mode and reports `skipped`.
+
+Only the selected rule executes. This matters for process-backed rules:
+tracing a `command` rule can run that rule's configured subprocess, while
+unrelated command rules are never spawned. The production check context also
+evaluates configured custom facts, which may execute their own subprocesses.
+Plain `alint explain <id>` retains its static no-walk, no-evaluation behavior.
+
+Use the same Git scope as a changed-only check:
+
+```bash
+alint explain my-rule --trace --changed
+alint explain my-rule --trace --base origin/main
+```
+
+`--base REF` implies `--changed` and uses the merge-base diff
+`REF...HEAD`. The JSON `execution` object records the effective controls.
+
+### Bounded evidence preview
+
+`--preview` adds deterministic structured-extraction rows and nested-child
+outcomes where the selected rule exposes them:
+
+```bash
+alint explain package-version --trace --preview
+alint explain package-version --trace --preview --preview-limit 5
+```
+
+The default limit is 20; accepted limits are 1–100. `total`, `shown`,
+`omitted`, `redacted`, and `value_truncated` remain exact even when rows are
+omitted. Retained rows are the lexicographically first rows by structural key,
+not whichever parallel worker finishes first. Display values are bounded to
+256 UTF-8 bytes; nested rows report each child instance's terminal outcome.
+
+Environment-derived and explicitly sensitive option, message, policy URL,
+condition, result, and configuration-error evidence is replaced with
+`<redacted>` before trace storage or rendering. Dotenv and Java-properties
+extracted values are sensitive by default. Rule ids and literal repository
+source paths remain visible structural identity; environment-derived selector
+paths and evidence-derived paths fail closed to `<redacted>`.
+
 ## Examples
 
 Find the id in `alint list` or in a finding, then explain it:
@@ -102,13 +163,31 @@ Three commands describe rules from different angles:
 ## Reference
 
 ```
-Show a rule's definition
+Show a configured rule, optionally tracing one real selected-rule run
 
 Usage: alint explain [OPTIONS] <RULE_ID>
 
 Arguments:
   <RULE_ID>
           Rule id to describe
+
+Options:
+      --trace
+          Walk the repository and evaluate only this effective rule. A traced command rule and any
+          configured custom facts may execute subprocesses, matching `check`; unrelated command
+          rules never run. Trace outcomes are diagnostic and exit 0, including violations and skips
+
+      --preview
+          Include bounded, redacted extraction or nested-child evidence in the trace
+
+      --preview-limit <N>
+          Maximum retained preview rows (1..=100; default 20)
+
+      --changed
+          Restrict the traced run to paths changed in Git
+
+      --base <REF>
+          Base ref for the traced changed-path run. Implies `--changed`
 ```
 
 The [global options](/docs/cli/#global-options) apply to `alint explain` too, where they are relevant.

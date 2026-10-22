@@ -119,11 +119,19 @@ intra-workspace dependency. It refreshes the crate dependency graph
 (`docs/design/architecture/crate-graph.md`) and its model fragment;
 `gen-arch --check` gates them.
 
-### Scenario directory conventions
+### Policy-test directory conventions
 
-Scenarios live under `crates/alint-e2e/scenarios/check/<family>/`. The audits
-walk this tree recursively, so the split is purely organisational. Pick the
-family that matches what the rule does:
+General rule tests live under `crates/alint-e2e/scenarios/check/<family>/`.
+Bundled-ruleset tests live under
+`crates/alint-dsl/ruleset-tests/v1/<bundle>/`. Audits walk both trees recursively.
+
+Downstream rulesets use the same public contract under `alint-tests/`. Run `alint test` from the
+package root, pass files/directories explicitly for another layout, and use
+`alint test --update-snapshots` only after reviewing inline expectation changes. Recursive
+discovery requires a top-level `test_version` discriminator, so YAML owned by `given.fixture` or a
+local config chain is not mistaken for another test; explicitly named files are always validated.
+Command-spawning tests require both `capabilities: { spawn: true }` and the explicit
+`--allow-spawn` host grant.
 
 - `content/` content scanning (`file_content_matches`, `file_content_forbidden`,
   `file_header`, `file_footer`, `no_trailing_whitespace`, `final_newline`,
@@ -150,19 +158,18 @@ family that matches what the rule does:
 
 If your rule does not fit an existing family, add a new directory.
 
-### Scenario shape
+### Policy-test shape
 
-Every scenario YAML uses the same shape:
+Every declarative test uses the versioned public contract:
 
 ```yaml
+test_version: 1
 name: <human-readable description>
 tags: [check, <kind>, <family>, passing|failing]
 
 given:
   tree:
-    <path>: <content>            # files
-    <path>:                      # directories
-      <child>: <content>
+    <path>: <content>            # files; nested maps create directories
   config: |
     version: 1
     rules:
@@ -174,26 +181,25 @@ given:
 when: [check]                    # or [fix]
 
 expect:
-  - violations: []               # a passing case
-  - violations:                  # a firing case
-      - {rule: <test-rule-id>, level: <level>, path: <where>}
+  - exit: success                # policy_failure for error-level findings
+    violations: []               # a passing case
 ```
+
+Each `when` entry has one `expect` entry. Present channels are exact; omitted channels are
+unasserted. A firing check normally uses `exit: policy_failure` and a non-empty `violations`
+list. See the [policy-test contract](../design/v0.20/policy-tests.md) and generated
+[`schemas/v1/policy-test.json`](../../schemas/v1/policy-test.json) for fixtures, capabilities,
+matchers, fixes, final-tree assertions, and snapshots.
 
 For git-aware rules, add `given.git: { init: true, add: [<paths>], commit: true }`.
 
-### Native-test allowlist
+### Native integration tests
 
-A few rule kinds cannot have firing YAML scenarios, because the testkit does not
-yet materialise the filesystem primitive they need (chmod bits, symlinks,
-backdated commits, custom commit messages). For these, add a Rust integration
-test under `crates/alint-rules/tests/` or `crates/alint-e2e/tests/` that
-exercises the firing path directly, then list the kind in
-`NATIVE_FIRES_ALLOWLIST` in `coverage_audit_pass_fail.rs`, with a pointer to that
-test.
-
-The allowlist is meant to shrink, not grow. As the testkit gains `mode: 0o755`,
-`symlink_to: <path>`, custom commit messages, and `GIT_AUTHOR_DATE` overrides,
-allowlist entries move back into native YAML coverage.
+The policy-test tree model supports regular files, executable files, confined file/directory
+symlinks, isolated Git histories, backdated commits, environment input, and real fixtures.
+`NATIVE_FIRES_ALLOWLIST` is intentionally empty. Use a Rust integration test only for a behavior
+that cannot be expressed through this public contract; do not add an allowlist entry to bypass a
+missing declarative fixture.
 
 ## Adding a new bundled ruleset
 
@@ -205,9 +211,9 @@ allowlist entries move back into native YAML coverage.
    ```
    The `bundled-ruleset-has-uri-header` rule in the root `.alint.yml` enforces
    this shape, so `alint check .` catches a malformed header.
-2. Add e2e scenarios under `crates/alint-e2e/scenarios/check/bundled-<name>/`:
-   - `<name>_well_formed_passes.yml` (every `expect.violations: []`)
-   - `<name>_*_flagged.yml` (at least one non-empty `violations` entry)
+2. Add policy tests under `crates/alint-dsl/ruleset-tests/v1/<name>/`:
+   - at least one passing document with `expect.violations: []`
+   - at least one firing document with concrete expected violations
 3. Document the ruleset in `docs/rules.md`. The rule IDs in its markdown table
    and the "N rules" count in the section header must match the YAML exactly;
    `coverage_audit_rules_md_drift` gates this.
@@ -263,10 +269,10 @@ Constraints:
   `has_ancestor: [pom.xml, build.gradle, build.gradle.kts]` are valid; the upward
   walk stops at the first match.
 
-The audit treats a nested ruleset such as `monorepo/cargo-workspace.yml` as a
-single unit, with its scenarios alongside `monorepo`'s under `bundled-monorepo/`.
-No separate family directory is required per nested ruleset; the URI match
-(`extends: alint://bundled/monorepo/cargo-workspace@v1`) is what counts.
+The directory mirrors the complete ruleset path. For example,
+`rulesets/v1/monorepo/cargo-workspace.yml` is tested under
+`ruleset-tests/v1/monorepo/cargo-workspace/`. The parity audit rejects untested bundles,
+orphaned test directories, and documents extending a bundle other than their owner.
 
 ## Adding a rule-kind alias
 

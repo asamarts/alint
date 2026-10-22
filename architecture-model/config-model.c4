@@ -21,6 +21,7 @@ model {
 
     config = entity 'Config' 'Top-level .alint.yml document' {
       f_version = field 'version'
+      f_requires = field 'requires'
       f_extends = field 'extends'
       f_facts = field 'facts'
       f_rules = field 'rules'
