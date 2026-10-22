@@ -13,15 +13,23 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.19.0** (2026-10-18): the first general-linter delivery phase. The rule registry
-is now the authoritative, serializable capability catalog for all 102 canonical kinds and generated
-schema/discovery surfaces; incomplete analysis fails loudly; findings preserve source ranges and
-related locations; sensitive evidence is redacted; and time-dependent checks use a reproducible
-reference date. Seven standalone policy kinds cover EditorConfig, Markdown accessibility and
-structure, SPDX expressions, and immutable build references, while opt-in versioning and toolchain
-bundles enforce cross-file consistency. Duplicate-preserving structured rows prepare the next rule
-families, and the release also hardens dotenv editing, LSP encoding and teardown, installers, and
-release tooling. The prior v0.18.4 (2026-10-15) was a performance and correctness patch:
+**Latest release: v0.20.0** (2026-10-21): the policy-authoring loop. A public, versioned
+`alint test` runner executes hermetic fixture repositories through the production engine;
+`alint explain <rule-id> --trace` reports bounded, deterministic, redaction-safe evidence for one
+effective rule; and every configuration source validates its language version and optional
+`requires.alint` floor before composition. The release also moves exact-path repository facts onto
+the lazy file index, replaces the archived YAML parser without changing accepted input, gives every
+bundled ruleset executable ownership tests, and hardens diagnostics, installers, benchmark
+comparisons, and release documentation. The prior v0.19.0 (2026-10-18) was the first general-linter
+delivery phase. The rule registry became the authoritative, serializable capability catalog for all
+102 canonical kinds and generated schema/discovery surfaces; incomplete analysis fails loudly;
+findings preserve source ranges and related locations; sensitive evidence is redacted; and
+time-dependent checks use a reproducible reference date. Seven standalone policy kinds cover
+EditorConfig, Markdown accessibility and structure, SPDX expressions, and immutable build
+references, while opt-in versioning and toolchain bundles enforce cross-file consistency.
+Duplicate-preserving structured rows prepare the next rule families, and the release also hardened
+dotenv editing, LSP encoding and teardown, installers, and release tooling. The prior v0.18.4
+(2026-10-15) was a performance and correctness patch:
 `--changed` runs no longer build whole-tree lookups that no rule uses, and `.env`
 fixes take their edits from adotenv 0.1.1's verified `set` and `remove`, fixing two
 cases where a fix silently changed a file's meaning. The prior v0.18.3 (2026-10-15)
