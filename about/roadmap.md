@@ -13,13 +13,18 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.20.0** (2026-10-21): the policy-authoring loop. A public, versioned
+**Latest release: v0.20.1** (2026-10-23): a performance and diagnostics patch. Rule path checks,
+nested-rule kinds, `pair`, `unique_by`, terminal output, YAML guards and `extends:` loading are
+cheaper, so structured-query and cross-file checks run 3-5% faster end to end; alint warns when a
+content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant
+(#343); and releases gain a deterministic micro-benchmark gate and a long-horizon performance
+anchor. The prior v0.20.0 (2026-10-21) was the policy-authoring loop. A public, versioned
 `alint test` runner executes hermetic fixture repositories through the production engine;
 `alint explain <rule-id> --trace` reports bounded, deterministic, redaction-safe evidence for one
 effective rule; and every configuration source validates its language version and optional
-`requires.alint` floor before composition. The release also moves exact-path repository facts onto
-the lazy file index, replaces the archived YAML parser without changing accepted input, gives every
-bundled ruleset executable ownership tests, and hardens diagnostics, installers, benchmark
+`requires.alint` floor before composition. The release also moved exact-path repository facts onto
+the lazy file index, replaced the archived YAML parser without changing accepted input, gave every
+bundled ruleset executable ownership tests, and hardened diagnostics, installers, benchmark
 comparisons, and release documentation. The prior v0.19.0 (2026-10-18) was the first general-linter
 delivery phase. The rule registry became the authoritative, serializable capability catalog for all
 102 canonical kinds and generated schema/discovery surfaces; incomplete analysis fails loudly;

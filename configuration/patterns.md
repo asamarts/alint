@@ -38,6 +38,18 @@ To anchor to the whole file on purpose, `\A` and `\z` say so explicitly:
 
 For example, `\A\d+\.\d+\.\d+\s*\z` asserts that a `VERSION` file holds one version and nothing else. `file_content_forbidden` reports the first match in each file, so `(?m)^TODO` flags a file once, at the first line that starts with `TODO`.
 
+## Warnings for mis-anchored patterns
+
+When a config loads, alint warns about two shapes that almost never do what the author meant:
+
+- a `$` that only text without a final newline can reach, such as `[ \t]+$` or `^\d+\.\d+\.\d+$`;
+- a `file_content_forbidden` pattern that starts with `^` and does not end with `$` or `\z`, such as `^TODO`.
+
+```text
+alint: warning: rule `no-todo`: `^` matches only at the start of the file, not at the start of each line; use `(?m)^` to anchor to lines, or `\A` if you mean the start of the file
+```
+
+The warnings appear on `check`, `fix`, `baseline` and `validate-config` (whose JSON output lists them under `warnings`), and as diagnostics on the config file in an editor. They never change findings or the exit code, and `--quiet` silences them. A pattern that turns on `(?m)` anywhere, or that uses `\A` and `\z` instead of `^` and `$`, gets no warning.
 
 ## Other flags
 
