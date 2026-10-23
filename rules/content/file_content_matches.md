@@ -8,13 +8,15 @@ categories: ['content']
 
 File contents must contain at least one match for a regex.
 
+The whole file is one string: `^` and `$` match only at its start and end, and `$` does not match before the final newline. `^\d+\.\d+\.\d+\s*$` therefore asserts that the whole file is one version, while `(?m)^version = ` finds that line anywhere in the file. See [Regex patterns and anchors](/docs/configuration/patterns/).
+
 Fix: `file_append` — append declared content.
 
 ## Options
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `pattern` | string | yes |  | Rust regex. File contents must match. |
+| `pattern` | string | yes |  | Rust regex. File contents must match. The whole file is one string, so `^` and `$` anchor to its start and end unless the pattern turns on multi-line mode with `(?m)`. |
 
 Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, `fix`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 

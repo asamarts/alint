@@ -8,6 +8,8 @@ categories: ['content']
 
 The configured number of final lines in each file in scope must match a regex. Mirror of `file_header` anchored at the end of the file. Use for license footers, signed-off-by trailers, generated-file sentinels.
 
+As in `file_header`, the lines are one string, newlines included, so `$` matches only after the final newline: end a pattern with `\s*$`, or use `(?m)`, to match the last line. See [Regex patterns and anchors](/docs/configuration/patterns/).
+
 Fix: `file_append` — append a declared `content`. With no fix declared, violations are unfixable.
 
 ## Options
@@ -15,7 +17,7 @@ Fix: `file_append` — append a declared `content`. With no fix declared, violat
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
 | `lines` | integer (>= 1) |  | `20` | Number of trailing lines to consider. |
-| `pattern` | string | yes |  | Rust regex. The last `lines` lines of each file must match. |
+| `pattern` | string | yes |  | Rust regex. The last `lines` lines of each file must match. They are one string, newlines included, so `^` and `$` anchor to the block's start and end unless the pattern turns on `(?m)`. |
 
 Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, `fix`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 

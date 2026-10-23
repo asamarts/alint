@@ -10,11 +10,13 @@ File contents must NOT match a regex.
 
 The pattern is matched against the raw bytes, so a file that is not valid UTF-8 (a stray Latin-1 byte, say) is still searched rather than skipped; an invalid byte simply never matches a Unicode class. The `replace` fix edits such a file at the same byte offsets and leaves every other byte intact. A binary-looking file that is not valid UTF-8 (an image, a font, an archive) is still skipped, and the `replace` fix never edits a binary-looking file (a valid-UTF-8 file with a NUL byte is searched, but its finding is reported as not auto-fixable).
 
+**`^` and `$` anchor to the whole file, not to lines.** `^TODO` flags a file only when the file starts with `TODO`, and `TODO$` misses every file that ends in a newline. For line anchors write `(?m)^TODO` and `(?m)TODO$` (`(?Rm)TODO$` with CRLF line endings). alint warns when a config loads with a forbidden pattern that starts with `^`, or with a `$` that cannot match. Each file reports its first match only. See [Regex patterns and anchors](/docs/configuration/patterns/).
+
 ## Options
 
 | Option | Type | Required | Default | Description |
 |---|---|---|---|---|
-| `pattern` | string | yes |  | Rust regex. File contents must NOT match. |
+| `pattern` | string | yes |  | Rust regex. File contents must NOT match. The whole file is one string, so `^` and `$` anchor to its start and end unless the pattern turns on multi-line mode with `(?m)`. |
 
 Plus the common `paths`, `level`, `id`, `when`, `scope_filter`, `fix`, and `expect_matches` fields. This table is generated from the JSON Schema; option types and defaults are authoritative.
 
