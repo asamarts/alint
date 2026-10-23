@@ -960,7 +960,7 @@
                   "$ref": "#/$defs/string_or_string_array"
                 },
                 "pattern": {
-                  "description": "Rust-regex pattern matched against each file's content, or against each string selected by `extract` when set. The fact is true iff at least one match exists. Parse failures, non-string values, and non-UTF-8 files are non-matches.",
+                  "description": "Rust-regex pattern matched against each file's content, or against each string selected by `extract` when set. Against a whole file, `^` and `$` anchor to the file's start and end unless the pattern turns on multi-line mode with `(?m)`. The fact is true iff at least one match exists. Parse failures, non-string values, and non-UTF-8 files are non-matches.",
                   "type": "string"
                 }
               },
@@ -3025,7 +3025,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "pattern": {
-          "description": "Rust regex. File contents must NOT match.",
+          "description": "Rust regex. File contents must NOT match. The whole file is one string, so `^` and `$` anchor to its start and end unless the pattern turns on multi-line mode with `(?m)`.",
           "type": "string"
         },
         "scope_filter": {
@@ -3064,7 +3064,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "pattern": {
-          "description": "Rust regex. File contents must match.",
+          "description": "Rust regex. File contents must match. The whole file is one string, so `^` and `$` anchor to its start and end unless the pattern turns on multi-line mode with `(?m)`.",
           "type": "string"
         },
         "scope_filter": {
@@ -3204,7 +3204,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "pattern": {
-          "description": "Rust regex. The last `lines` lines of each file must match.",
+          "description": "Rust regex. The last `lines` lines of each file must match. They are one string, newlines included, so `^` and `$` anchor to the block's start and end unless the pattern turns on `(?m)`.",
           "type": "string"
         },
         "scope_filter": {
@@ -3341,7 +3341,7 @@
           "$ref": "#/$defs/paths_spec"
         },
         "pattern": {
-          "description": "Rust regex. The first `lines` lines of each file in scope must match.",
+          "description": "Rust regex. The first `lines` lines of each file in scope must match. They are one string, newlines included, so `^` and `$` anchor to the block's start and end unless the pattern turns on `(?m)`.",
           "type": "string"
         },
         "scope_filter": {

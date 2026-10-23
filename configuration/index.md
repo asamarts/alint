@@ -160,6 +160,8 @@ Available fact kinds: `any_file_exists`, `all_files_exist`, `count_files`, `file
 map accepts exactly one RFC 9535 JSONPath for `json`, `yaml`, `toml`, `xml`, `dotenv`,
 `properties`, `ini`, or `hcl`, and applies the pattern to each selected string instead.
 Non-string selections, malformed input, and missing paths are non-matches.
+Against raw content, `^` and `$` anchor to the whole file, not to each line; see
+[Regex patterns and anchors](/docs/configuration/patterns/).
 
 `custom` (which spawns a subprocess) is a security boundary: it's only allowed in your own top-level config. Any `extends:` ancestor that declares one is rejected at load time, so a malicious or compromised ruleset can't execute arbitrary code merely by being fetched.
 
@@ -404,5 +406,6 @@ A `--baseline <path>` flag overrides this key. There is **no silent auto-detect*
 
 - [JSON Schema](https://alint.org/_alint/configuration/schema.json): authoritative source for option types.
 - [Rules](/docs/rules/): every rule kind, organised by family, with per-rule options.
+- [Regex patterns and anchors](/docs/configuration/patterns/): what each kind matches a pattern against, and what `^` and `$` mean there.
 - [Concepts](/docs/concepts/): the rule model, the walker, and how alint runs, explained.
 - [Scoping](/docs/concepts/targeting/scoping/): the `when:`, `paths:`, and `scope_filter:` gates a rule narrows its files through.

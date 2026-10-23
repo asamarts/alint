@@ -162,7 +162,7 @@ rules:
   - id: workspace-bazel-version-pinned
     kind: file_content_matches
     paths: ".bazelversion"
-    pattern: '^\d+\.\d+\.\d+$'
+    pattern: '\A\d+\.\d+\.\d+\s*\z'
     level: error
 ```
 

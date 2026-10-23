@@ -9,6 +9,97 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.20.1] - 2026-10-23
+
+A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot
+paths are cheaper, and alint now warns when a content pattern's `^` or `$` anchors to the whole
+file where a line was almost certainly meant (#343). Structured-query and cross-file checks run
+3-5% faster end to end, the docs explain what each kind matches a regex against, and releases
+gain a deterministic micro-benchmark gate and a long-horizon performance anchor.
+
+### Added
+
+- `xtask micro-det` counts the instructions of every criterion micro
+  benchmark under Callgrind, across git refs. Pull requests and pushes to
+  `main` run a curated low-noise subset (advisory); `bench-record` runs the
+  full suite at release and fails when a benchmark grows more than 3% over
+  the previous release.
+- A long-horizon performance anchor (`docs/benchmarks/ANCHOR`):
+  `xtask bench-gate --anchor` and `xtask micro-det --anchor` fail a release
+  that exceeds the anchor release by more than 10%, so creep that passes
+  every release-to-release check still surfaces. `bench-record` now runs
+  `bench-gate` itself and adds a same-session criterion A/B against the
+  previous release to the results PR.
+- **Warnings for mis-anchored content patterns.** In `file_content_forbidden`,
+  `file_content_matches`, `file_header`, `file_footer` and the
+  `file_content_matches` fact, `^` and `$` anchor to the whole file (or block),
+  so `^TODO` only ever checks line 1 and `TODO$` never matches a file that ends
+  in a newline (#343). alint now warns when a config loads with a `$` that
+  cannot match a newline-terminated file, or a forbidden pattern that starts
+  with `^`: on `check`, `fix`, `baseline`, `validate-config` (its JSON output
+  gains `warnings`) and as diagnostics on the config file in the editor. The
+  warnings never change findings or exit codes, and `--quiet` silences them.
+
+### Changed
+
+- The deterministic perf gate also runs on pushes to `main`, comparing the
+  pushed range.
+
+### Performance
+
+- **Every rule's path check is cheaper.** Matching a file against a rule's
+  `paths:` include and exclude globs prepared the path for matching twice, once
+  per glob set; it is now prepared once. The rule-dispatch benchmark drops 23%
+  in instructions and raw glob matching 12%.
+- **Nested-rule kinds are about three times cheaper.** `every_matching_has`,
+  `for_each_dir` and `for_each_file` build each nested rule once per matched
+  entry, and compiling its literal path (`packages/p0/README.md`) into a glob
+  set was most of that cost. A scope whose only pattern is a literal path now
+  matches by comparing the path instead. Nested rules also no longer re-run
+  build-time validation per entry, skip glob escaping for values with nothing
+  to escape, and derive only the path tokens their templates use. Instruction
+  counts drop 67-70% (`every_matching_has`, `for_each_dir`), below v0.17.0.
+- **`pair` and `unique_by` are cheaper.** Both now derive only the path tokens
+  their templates use; `pair` skips its partner-path normalization when the
+  rendered path is already normal, and `unique_by` groups keys in a hash map
+  (output order unchanged). Instruction counts drop 26-27% (`pair`) and 32-47%
+  (`unique_by`).
+- **Terminal output of many findings is cheaper.** The human, github and
+  markdown formats sanitize every path and message; printable ASCII now skips
+  the per-character check. Instruction counts drop 16-28%, below v0.17.0.
+- **YAML is scanned once, not twice, before parsing.** The denial-of-service
+  guards (flow-collection depth and alias expansion) share one pass and skip it
+  when the document has none of the bytes that could trip them. YAML structured
+  queries drop 16% (back to v0.17.0), `pinned_references` 22%.
+- **Loading an `extends:` chain is cheaper.** A config reached through
+  `extends:` is memoized only when it is loaded a second time (diamond chains
+  stay linear), and provenance markers are updated in place. A 16-level chain
+  loads with 21% fewer instructions.
+- **End to end**, against v0.20.0 on the bench host in two separate sessions,
+  structured-query and cross-file checks (S2, S4) run 3-5% faster from 10k to
+  1m files (best run of each cell). Walk- and content-scan-bound runs (S1, S3)
+  take the same time, although S1 now executes 6% fewer instructions.
+
+### Fixed
+
+- **What a content pattern matches against is documented.** A new "Regex
+  patterns and anchors" configuration page lists what each kind matches a
+  regex against and what `^` and `$` mean there, and the content rules'
+  reference pages and schema descriptions say how they anchor. Seven
+  mis-anchored patterns in the docs and case-study examples are corrected:
+  the monorepo page's `.bazelversion` shape check, for one, failed every
+  file that ends in a newline (#343).
+- The 1k `changed`-mode benchmark cells no longer swing between about 11
+  and 20 ms from one release to the next: the harness committed the
+  generated tree within one second, so git re-hashed every "racily clean"
+  file on each timed run. The index is now settled before timing.
+- The deterministic `det_engine` benchmark now counts the rayon worker that
+  evaluates rules; it had been counting about 0.06% of the engine's work.
+- Correct the crates.io Trusted Publishing instructions for a brand-new crate:
+  bootstrap its first tagged version with a scoped maintainer token from the
+  exact release commit, configure the crate's OIDC publisher, then rerun the
+  idempotent failed release job.
+
 ## [0.20.0] - 2026-10-21
 
 General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test
@@ -8134,7 +8225,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.20.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.20.1...HEAD
+[0.20.1]: https://github.com/asamarts/alint/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/asamarts/alint/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/asamarts/alint/compare/v0.18.4...v0.19.0
 [0.18.4]: https://github.com/asamarts/alint/compare/v0.18.3...v0.18.4

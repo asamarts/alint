@@ -1,6 +1,6 @@
 {
   "format_version": 6,
-  "alint_version": "0.20.0",
+  "alint_version": "0.20.1",
   "counts": {
     "rule_kinds": 102,
     "rule_aliases": 11,
