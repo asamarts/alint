@@ -3,6 +3,39 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.20.0",
+      "date": "2026-10-21",
+      "headline": "General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test runner, selected-rule production traces with bounded redaction-safe previews, and per-source configuration compatibility requirements.",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 3
+      },
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4215.451851379999,
+          "stddev_ms": 79.97383466457265,
+          "display": "4.22 s ± 0.08"
+        },
+        "s2_1m_full": {
+          "mean_ms": 18952.011266760004,
+          "stddev_ms": 808.1178734214178,
+          "display": "18.95 s ± 0.81"
+        },
+        "s3_1m_full": {
+          "mean_ms": 474668.7393696933,
+          "stddev_ms": 2746.297643371826,
+          "display": "474.7 s ± 2.7"
+        },
+        "s4_1m_full": {
+          "mean_ms": 16275.482900153334,
+          "stddev_ms": 328.0091669357465,
+          "display": "16.28 s ± 0.33"
+        }
+      }
+    },
+    {
       "version": "v0.19.0",
       "date": "2026-10-18",
       "headline": "General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles.",
