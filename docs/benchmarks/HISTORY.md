@@ -51,7 +51,8 @@ walk-bound and per-file-content paths.
 
 | Version | Date | 1M S1 full | 1M S2 full | 1M S3 full | S4 workload | 1M S4 full | Headline change |
 |---|---|---:|---:|---:|---|---:|---|
-| **v0.19.0** | 2026-10-18 | 4.11 s ± 0.03 | 18.80 s ± 0.12 | 475.6 s ± 3.6 | **r2 ← reset from r1** | 18.73 s ± 0.66 | General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles. |
+| **v0.20.0-rc-042db8f4f** | ? | 4.15 s ± 0.04 | 17.93 s ± 0.02 | 476.1 s ± 2.4 | **r3 ← reset from r2** | 15.45 s ± 0.17 | — |
+| v0.19.0 | 2026-10-18 | 4.11 s ± 0.03 | 18.80 s ± 0.12 | 475.6 s ± 3.6 | **r2 ← reset from r1** | 18.73 s ± 0.66 | General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles. |
 | v0.18.4 | 2026-10-15 | 4.01 s ± 0.07 | 18.38 s ± 0.04 | 475.2 s ± 2.0 | r1 | 16.17 s ± 0.03 | A performance and correctness patch. |
 | v0.18.2 | 2026-10-13 | 4.02 s ± 0.03 | 18.43 s ± 0.04 | 474.8 s ± 1.2 | r1 | 16.28 s ± 0.10 | A security and correctness patch: alint's terminal output now escapes every invisible character its own rules flag, `.env` parsing and editing moves to the new `adotenv` crate (fixing a `set_value` edit that silently never applied), and a leading BOM no longer shifts columns or widths. |
 | v0.18.1 | 2026-10-12 | 4.12 s ± 0.06 | 18.12 s ± 0.02 | 475.3 s ± 1.3 | r1 | 16.07 s ± 0.02 | A performance and installer patch. |
@@ -84,7 +85,8 @@ Walker + `GlobSet` + path/metadata rules with little or no content read — the 
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | r1 | 11 ms ± 1 | 44 ms ± 2 | 394 ms ± 12 | 4.11 s ± 0.03 |
+| **v0.20.0-rc-042db8f4f** | r1 | 10 ms ± 1 | 44 ms ± 3 | 384 ms ± 12 | 4.15 s ± 0.04 |
+| v0.19.0 | r1 | 11 ms ± 1 | 44 ms ± 2 | 394 ms ± 12 | 4.11 s ± 0.03 |
 | v0.18.4 | r1 | 10 ms ± 1 | 44 ms ± 3 | 385 ms ± 9 | 4.01 s ± 0.07 |
 | v0.18.2 | r1 | 10 ms ± 1 | 44 ms ± 2 | 386 ms ± 6 | 4.02 s ± 0.03 |
 | v0.18.1 | r1 | 10 ms ± 1 | 45 ms ± 2 | 403 ms ± 16 | 4.12 s ± 0.06 |
@@ -106,7 +108,8 @@ Walker + `GlobSet` + path/metadata rules with little or no content read — the 
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | r1 | 13 ms ± 1 | 54 ms ± 2 | 459 ms ± 5 | 5.01 s ± 0.07 |
+| **v0.20.0-rc-042db8f4f** | r1 | 13 ms ± 1 | 51 ms ± 1 | 441 ms ± 12 | 4.68 s ± 0.02 |
+| v0.19.0 | r1 | 13 ms ± 1 | 54 ms ± 2 | 459 ms ± 5 | 5.01 s ± 0.07 |
 | v0.18.4 | r1 | 21 ms ± 1 | 53 ms ± 1 | 448 ms ± 12 | 4.92 s ± 0.01 |
 | v0.18.2 | r1 | 20 ms ± 1 | 52 ms ± 1 | 444 ms ± 7 | 4.92 s ± 0.01 |
 | v0.18.1 | r1 | 20 ms ± 1 | 51 ms ± 1 | 446 ms ± 8 | 4.92 s ± 0.01 |
@@ -132,7 +135,8 @@ Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whol
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | r1 | 24 ms ± 1 | 178 ms ± 6 | 1.81 s ± 0.06 | 18.80 s ± 0.12 |
+| **v0.20.0-rc-042db8f4f** | r1 | 23 ms ± 1 | 171 ms ± 5 | 1.70 s ± 0.04 | 17.93 s ± 0.02 |
+| v0.19.0 | r1 | 24 ms ± 1 | 178 ms ± 6 | 1.81 s ± 0.06 | 18.80 s ± 0.12 |
 | v0.18.4 | r1 | 24 ms ± 1 | 174 ms ± 5 | 1.75 s ± 0.04 | 18.38 s ± 0.04 |
 | v0.18.2 | r1 | 23 ms ± 1 | 171 ms ± 1 | 1.74 s ± 0.01 | 18.43 s ± 0.04 |
 | v0.18.1 | r1 | 23 ms ± 1 | 167 ms ± 1 | 1.73 s ± 0.05 | 18.12 s ± 0.02 |
@@ -154,7 +158,8 @@ Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whol
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | r1 | 15 ms ± 1 | 61 ms ± 1 | 492 ms ± 1 | 5.21 s ± 0.01 |
+| **v0.20.0-rc-042db8f4f** | r1 | 15 ms ± 1 | 59 ms ± 1 | 505 ms ± 9 | 5.24 s ± 0.07 |
+| v0.19.0 | r1 | 15 ms ± 1 | 61 ms ± 1 | 492 ms ± 1 | 5.21 s ± 0.01 |
 | v0.18.4 | r1 | 23 ms ± 1 | 59 ms ± 1 | 503 ms ± 9 | 5.14 s ± 0.01 |
 | v0.18.2 | r1 | 22 ms ± 1 | 58 ms ± 1 | 490 ms ± 3 | 5.16 s ± 0.01 |
 | v0.18.1 | r1 | 23 ms ± 2 | 58 ms ± 1 | 500 ms ± 8 | 5.14 s ± 0.01 |
@@ -180,7 +185,8 @@ Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | r1 | 462 ms ± 21 | 4.68 s ± 0.10 | 47.40 s ± 1.17 | 475.6 s ± 3.6 |
+| **v0.20.0-rc-042db8f4f** | r1 | 459 ms ± 17 | 4.69 s ± 0.13 | 47.66 s ± 1.61 | 476.1 s ± 2.4 |
+| v0.19.0 | r1 | 462 ms ± 21 | 4.68 s ± 0.10 | 47.40 s ± 1.17 | 475.6 s ± 3.6 |
 | v0.18.4 | r1 | 464 ms ± 21 | 4.68 s ± 0.14 | 48.05 s ± 1.76 | 475.2 s ± 2.0 |
 | v0.18.2 | r1 | 450 ms ± 4 | 4.64 s ± 0.03 | 46.93 s ± 0.20 | 474.8 s ± 1.2 |
 | v0.18.1 | r1 | 456 ms ± 14 | 4.76 s ± 0.21 | 46.87 s ± 0.22 | 475.3 s ± 1.3 |
@@ -202,7 +208,8 @@ Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | r1 | 462 ms ± 17 | 4.71 s ± 0.11 | 47.66 s ± 1.44 | 481.6 s ± 7.3 |
+| **v0.20.0-rc-042db8f4f** | r1 | 453 ms ± 2 | 4.73 s ± 0.15 | 48.31 s ± 1.86 | 475.0 s ± 3.3 |
+| v0.19.0 | r1 | 462 ms ± 17 | 4.71 s ± 0.11 | 47.66 s ± 1.44 | 481.6 s ± 7.3 |
 | v0.18.4 | r1 | 467 ms ± 17 | 4.74 s ± 0.18 | 47.16 s ± 0.64 | 474.5 s ± 1.6 |
 | v0.18.2 | r1 | 460 ms ± 3 | 4.67 s ± 0.03 | 47.05 s ± 0.32 | 475.8 s ± 0.4 |
 | v0.18.1 | r1 | 469 ms ± 17 | 4.74 s ± 0.18 | 47.11 s ± 0.33 | 474.4 s ± 0.7 |
@@ -228,7 +235,8 @@ The realistic mixed workload and the release anchor: `extends:` eight bundled ru
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | **r2 ← reset from r1** | 58 ms ± 1 | 203 ms ± 4 | 1.78 s ± 0.05 | 18.73 s ± 0.66 |
+| **v0.20.0-rc-042db8f4f** | **r3 ← reset from r2** | 61 ms ± 2 | 182 ms ± 4 | 1.48 s ± 0.04 | 15.45 s ± 0.17 |
+| v0.19.0 | **r2 ← reset from r1** | 58 ms ± 1 | 203 ms ± 4 | 1.78 s ± 0.05 | 18.73 s ± 0.66 |
 | v0.18.4 | r1 | 33 ms ± 2 | 156 ms ± 4 | 1.45 s ± 0.01 | 16.17 s ± 0.03 |
 | v0.18.2 | r1 | 32 ms ± 1 | 154 ms ± 3 | 1.45 s ± 0.02 | 16.28 s ± 0.10 |
 | v0.18.1 | r1 | 32 ms ± 1 | 152 ms ± 2 | 1.43 s ± 0.01 | 16.07 s ± 0.02 |
@@ -250,7 +258,8 @@ The realistic mixed workload and the release anchor: `extends:` eight bundled ru
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | **r2 ← reset from r1** | 55 ms ± 2 | 146 ms ± 2 | 1.13 s ± 0.03 | 11.91 s ± 0.11 |
+| **v0.20.0-rc-042db8f4f** | **r3 ← reset from r2** | 59 ms ± 3 | 130 ms ± 5 | 898 ms ± 17 | 9.28 s ± 0.10 |
+| v0.19.0 | **r2 ← reset from r1** | 55 ms ± 2 | 146 ms ± 2 | 1.13 s ± 0.03 | 11.91 s ± 0.11 |
 | v0.18.4 | r1 | 37 ms ± 1 | 158 ms ± 4 | 846 ms ± 5 | 9.56 s ± 0.08 |
 | v0.18.2 | r1 | 36 ms ± 1 | 106 ms ± 2 | 828 ms ± 3 | 9.35 s ± 0.04 |
 | v0.18.1 | r1 | 36 ms ± 1 | 98 ms ± 1 | 828 ms ± 6 | 9.36 s ± 0.03 |
@@ -276,7 +285,8 @@ The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.19.0** | r1 | 53 ms ± 2 | 493 ms ± 5 | 5.12 s ± 0.21 | 53.86 s ± 1.91 |
+| **v0.20.0-rc-042db8f4f** | r1 | 52 ms ± 2 | 494 ms ± 22 | 4.91 s ± 0.15 | 52.29 s ± 1.65 |
+| v0.19.0 | r1 | 53 ms ± 2 | 493 ms ± 5 | 5.12 s ± 0.21 | 53.86 s ± 1.91 |
 | v0.18.4 | r1 | 54 ms ± 3 | 503 ms ± 24 | 4.97 s ± 0.06 | 52.68 s ± 0.48 |
 | v0.18.2 | r1 | 53 ms ± 1 | 487 ms ± 4 | 4.94 s ± 0.04 | 52.91 s ± 1.20 |
 | v0.18.1 | r1 | 51 ms ± 1 | 487 ms ± 5 | 4.90 s ± 0.04 | 51.99 s ± 0.29 |
