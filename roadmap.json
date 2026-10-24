@@ -122,6 +122,12 @@
       "blurb": "The policy authoring loop: a published, versioned alint test runner for isolated fixture repositories; selected-rule explain traces with bounded redaction-safe previews; and per-source config version and minimum-alint requirement checks."
     },
     {
+      "version": "0.21",
+      "title": "Internal relation layer",
+      "kind": "release",
+      "blurb": "The go/no-go proof for the general-linter program: an internal relation layer with typed rows and source provenance, a key_parity kind that keeps locale and environment files in step across JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .resx, a byte-identical shadow port of one existing check, and a first design of the plugin contract."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",
