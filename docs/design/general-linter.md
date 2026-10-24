@@ -1552,6 +1552,9 @@ Phase 1 as a whole has standalone value and reduces the risk of every later phas
 
 ### 11.5 Phase 2: internal relation IR (go / no-go)
 
+The proposed v0.21 design, with its starting point checked against the code and its open
+decisions, is [`v0.21/README.md`](v0.21/README.md).
+
 - Implement internal resource, selector, adapter, relation, and constraint types, with lazy spans
   (section 6.2) and file-major read coalescing (section 9.1).
 - **Pilot on a new kind, not a port.** The first user of the IR is a new v1 kind with no
