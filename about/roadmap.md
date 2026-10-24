@@ -1571,3 +1571,4 @@ similarity threshold, in the spirit of jscpd or PMD CPD but language-agnostic.
   plugins above, to keep the core binary lean. Either way it must stay
   near-linear (fingerprint hashing, not pairwise comparison) so it does not
   erode the sub-second structural floor.
+
