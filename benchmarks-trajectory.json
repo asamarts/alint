@@ -3,6 +3,39 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.20.1",
+      "date": "2026-10-23",
+      "headline": "A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot paths are cheaper, and alint now warns when a content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant (#343).",
+      "workload_revisions": {
+        "S1": 1,
+        "S2": 1,
+        "S3": 1,
+        "S4": 3
+      },
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4083.941605806667,
+          "stddev_ms": 60.00594432662683,
+          "display": "4.08 s ± 0.06"
+        },
+        "s2_1m_full": {
+          "mean_ms": 18164.1376244,
+          "stddev_ms": 626.7183466887058,
+          "display": "18.16 s ± 0.63"
+        },
+        "s3_1m_full": {
+          "mean_ms": 480564.19421981997,
+          "stddev_ms": 8422.876299739013,
+          "display": "480.6 s ± 8.4"
+        },
+        "s4_1m_full": {
+          "mean_ms": 15551.477489033334,
+          "stddev_ms": 318.624305338154,
+          "display": "15.55 s ± 0.32"
+        }
+      }
+    },
+    {
       "version": "v0.20.0",
       "date": "2026-10-21",
       "headline": "General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test runner, selected-rule production traces with bounded redaction-safe previews, and per-source configuration compatibility requirements.",
