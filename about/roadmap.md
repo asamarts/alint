@@ -286,10 +286,10 @@ on it for adoption, they can lint without it.
   complete notes, redaction, related locations, reproducible analysis time,
   and duplicate-aware spanned extraction, alongside seven gap-study kinds
   and the versioning and toolchain consistency bundles. The accepted
-  [`v0.20` authoring-loop design](v0.20/README.md) follows with `alint test`,
+  [`v0.20` authoring-loop design](https://github.com/asamarts/alint/blob/main/docs/design/v0.20/README.md) follows with `alint test`,
   selected-rule `explain --trace`, and per-source compatibility requirements;
   the internal relation layer with the `key_parity` pilot and the plugin
-  contract follow in the accepted [`v0.21` design](v0.21/README.md), then `version: 2` selectors and constraints, with
+  contract follow in the accepted [`v0.21` design](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md), then `version: 2` selectors and constraints, with
   plugin hosts as a parallel track. Staged in
   [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
   section 11, decided in
@@ -1517,20 +1517,21 @@ is specified by the accepted
 and [ADR-0023](https://github.com/asamarts/alint/blob/main/docs/adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md).
 Nothing public changes shape except one new rule kind.
 
-- **Measurement first.** Record v0.18.2's instruction and syscall counts and make the
-  deterministic gate blocking for relation-layer pull requests (+3% cumulative, no added
-  `read` or `stat` calls).
+- **Measurement first.** Compare relation-layer changes with v0.18.2 on the deterministic
+  scenarios S1-S3, blocking above +3% instructions or any added `read` or `stat` call.
 - **Internal relation layer.** Typed rows (lexeme-preserving numbers, normalized paths, lists,
   records) with source provenance, distinct missing, `null`, and error states, explicit limits,
-  and byte-exact path comparison on every operating system. Files are still read once per run.
+  and byte-exact path comparison on every operating system. A file that several relations and
+  per-file rules select is read once.
 - **`key_parity`.** A reference file and a glob of peers must declare the same keys, nested
   included, across JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources,
   and `.resx`, with an opt-in CLDR plural mode for locale files.
 - **Shadow port.** A second implementation of `cross_file`'s `equals` relation on the new layer,
-  compared byte for byte in tests and against the 110-repository case-study corpus. The
-  existing implementation stays authoritative until a zero-difference release.
-- **Plugin contract 0.x.** Internal adapter and analyzer traits that the built-in formats and
-  `key_parity` implement, an injectable rule registry, and a draft WIT contract.
+  compared byte for byte in tests and against the 110 case-study configurations at their
+  pinned commits. The existing implementation stays authoritative until a zero-difference
+  release.
+- **Plugin contract 0.x.** Internal adapter and analyzer traits that the built-in row adapters
+  and `key_parity` implement, an injectable rule registry, and a draft WIT contract.
 
 ## v1.0: Stability
 

@@ -125,7 +125,7 @@
       "version": "0.21",
       "title": "Internal relation layer",
       "kind": "release",
-      "blurb": "The go/no-go proof for the general-linter program: an internal relation layer with typed rows and source provenance, a key_parity kind that keeps locale and environment files in step across JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .resx, a byte-identical shadow port of one existing check, and a first design of the plugin contract."
+      "blurb": "The groundwork for cross-file constraints: an internal relation layer with typed values and source locations, a new key_parity rule that keeps locale and environment files in step across JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .resx, a second implementation of one existing check that must match it exactly, and a first draft of the plugin contract."
     },
     {
       "version": "1.0",
