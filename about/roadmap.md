@@ -286,7 +286,7 @@ on it for adoption, they can lint without it.
   complete notes, redaction, related locations, reproducible analysis time,
   and duplicate-aware spanned extraction, alongside seven gap-study kinds
   and the versioning and toolchain consistency bundles. The accepted
-  [`v0.20` authoring-loop design](https://github.com/asamarts/alint/blob/main/docs/design/v0.20/README.md) follows with `alint test`,
+  [`v0.20` authoring-loop design](https://github.com/asamarts/alint/blob/main/docs/design/v0.20/README.md) shipped `alint test`,
   selected-rule `explain --trace`, and per-source compatibility requirements;
   the internal relation layer with the `key_parity` pilot and the plugin
   contract follow in the accepted [`v0.21` design](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md), then `version: 2` selectors and constraints, with
@@ -1515,10 +1515,11 @@ Phase 2 of
 is specified by the accepted
 [`v0.21/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md)
 and [ADR-0023](https://github.com/asamarts/alint/blob/main/docs/adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md).
-Nothing public changes shape except one new rule kind.
+The only new user-facing surface is one rule kind.
 
 - **Measurement first.** Compare relation-layer changes with v0.18.2 on the deterministic
-  scenarios S1-S3, blocking above +3% instructions or any added `read` or `stat` call.
+  scenarios S1-S3, failing above +3% instructions or on file-system call growth beyond a small
+  fixed allowance.
 - **Internal relation layer.** Typed rows (lexeme-preserving numbers, normalized paths, lists,
   records) with source provenance, distinct missing, `null`, and error states, explicit limits,
   and byte-exact path comparison on every operating system. A file that several relations and
