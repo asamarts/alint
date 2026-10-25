@@ -488,9 +488,9 @@ v0.21 is complete only when all of the following are observed:
   retains only paths a relation claims. `resolved_within_root` moved to
   `alint-core::pathsafe` so the cache and `cross_file` share one confinement
   implementation. The test-only relation consumer proves one read, one hit, and
-  one decode alongside a per-file rule. The v0.18.2 reference gate is green:
-  S1 -6.60%/-6.91%, S2 -3.03%/-3.29%, S3 -0.14%/+0.83%, and the 10k syscall
-  families are within one call of the reference.
+  one decode alongside a per-file rule. The v0.18.2 reference gate is green on
+  the audited code: S1 -5.85%/-8.34%, S2 -3.15%/-3.31%, S3 -0.18%/+0.65%, and
+  the 10k syscall families are within two calls of the reference.
 
 - **R0, done.** On every S1-S3 cell, `main` at `fb9820f5e` uses no more instructions than v0.18.2
   (S1 -7% to -8%, S2 about -3%, S3 -0.04% to -0.2%), and its read/stat-family syscall counts match
