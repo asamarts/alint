@@ -114,15 +114,56 @@ crate::options_schema_for!(Options);
 #[derive(Debug, Clone)]
 struct KeyFile {
     keys: BTreeMap<Vec<Segment>, ByteSpan>,
-    text: Arc<[u8]>,
+    text: Arc<str>,
+    line_starts: Vec<usize>,
 }
 
 impl KeyFile {
     fn range(&self, key: &[Segment]) -> Option<SourceRange> {
         let span = self.keys.get(key)?;
-        let text = std::str::from_utf8(&self.text).ok()?;
-        SourceRange::from_byte_range(text, span.as_range())
+        let (start_line, start_column) = self.line_column(span.start)?;
+        let (end_line, end_column) = self.line_column(span.end)?;
+        SourceRange::new(start_line, start_column, end_line, end_column)
     }
+
+    fn line_column(&self, offset: usize) -> Option<(usize, usize)> {
+        if offset > self.text.len() || !self.text.is_char_boundary(offset) {
+            return None;
+        }
+        let line = self.line_starts.partition_point(|start| *start <= offset);
+        let line = line.checked_sub(1)?;
+        let start = *self.line_starts.get(line)?;
+        let column = self.text.get(start..offset)?.chars().count() + 1;
+        Some((line + 1, column))
+    }
+}
+
+/// Byte offsets at which each physical line starts, treating LF, CRLF, and a
+/// lone CR as one line ending. A leading BOM occupies no column.
+fn line_starts(text: &str) -> Vec<usize> {
+    let mut starts = vec![if text.starts_with('\u{feff}') {
+        '\u{feff}'.len_utf8()
+    } else {
+        0
+    }];
+    let bytes = text.as_bytes();
+    let mut index = starts[0];
+    while index < bytes.len() {
+        match bytes[index] {
+            b'\n' => {
+                starts.push(index + 1);
+            }
+            b'\r' => {
+                if bytes.get(index + 1) == Some(&b'\n') {
+                    index += 1;
+                }
+                starts.push(index + 1);
+            }
+            _ => {}
+        }
+        index += 1;
+    }
+    starts
 }
 
 #[derive(Debug)]
@@ -383,7 +424,18 @@ impl KeyParityRule {
             keys.entry(pointer.segments().to_vec()).or_insert(span);
         }
         let keys = leaf_keys(keys);
-        Some(KeyFile { keys, text: bytes })
+        let Ok(text) = std::str::from_utf8(&bytes) else {
+            findings.push(analysis_failure(
+                path,
+                "the entry adapter produced a document that is not valid UTF-8",
+            ));
+            return None;
+        };
+        Some(KeyFile {
+            keys,
+            text: Arc::from(text),
+            line_starts: line_starts(text),
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -903,6 +955,33 @@ mod tests {
             keys.keys().map(|key| render_key(key)).collect::<Vec<_>>(),
             ["item", "msg"]
         );
+    }
+
+    #[test]
+    fn ranges_use_a_line_index_and_ignore_the_bom_column() {
+        let text = "\u{feff}a\r\nbb\nç\rx";
+        let file = KeyFile {
+            keys: BTreeMap::from([
+                (vec![Segment::Key("a".into())], ByteSpan::new(3, 4)),
+                (vec![Segment::Key("bb".into())], ByteSpan::new(6, 8)),
+                (vec![Segment::Key("ç".into())], ByteSpan::new(9, 11)),
+                (vec![Segment::Key("x".into())], ByteSpan::new(12, 13)),
+            ]),
+            text: Arc::from(text),
+            line_starts: line_starts(text),
+        };
+        let range = |key: &str| {
+            file.range(&[Segment::Key(key.into())])
+                .expect("range resolves")
+        };
+        assert_eq!((range("a").start_line(), range("a").start_column()), (1, 1));
+        assert_eq!(
+            (range("bb").start_line(), range("bb").start_column()),
+            (2, 1)
+        );
+        assert_eq!((range("ç").start_line(), range("ç").start_column()), (3, 1));
+        assert_eq!((range("x").start_line(), range("x").start_column()), (4, 1));
+        assert_eq!(range("ç").end_column(), 2);
     }
 
     #[test]
