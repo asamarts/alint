@@ -5111,7 +5111,7 @@
               "type": "null"
             }
           ],
-          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv, and `.xml` cannot be inferred."
+          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv, while `.xml` and `.resx` need an explicit dialect."
         },
         "ignore_keys": {
           "default": [],

@@ -103,7 +103,7 @@ struct Options {
     /// Glob selecting the peer files. The reference is excluded automatically.
     peers: String,
     /// Key format. Inferred from the extension when omitted; `.env` and
-    /// `.env.*` infer dotenv, and `.xml` cannot be inferred.
+    /// `.env.*` infer dotenv, while `.xml` and `.resx` need an explicit dialect.
     #[serde(default)]
     format: Option<KeyFormat>,
     /// Which differences to report.
