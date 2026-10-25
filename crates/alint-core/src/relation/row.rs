@@ -9,12 +9,17 @@ use super::resource::Resource;
 use super::value::Value;
 use crate::extract::ByteSpan;
 
-/// What an extractor found at a row's location. Missing, an explicit `null`
-/// (`Value(Value::Null)`), and an extraction error are three different
-/// outcomes, and no stage may coerce one into another.
+/// What an extractor found at a row's location. An explicit `null`
+/// (`Value(Value::Null)`), a structural key with no value, a missing location,
+/// and an extraction error are four different outcomes, and no stage may
+/// coerce one into another.
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum RowState {
     Value(Value),
+    /// The row names a structural key and has no value. Key-only adapters
+    /// (`key_parity`'s entry rows) use this; it is deliberately not
+    /// `Value(Value::Null)`.
+    Key,
     /// The location does not exist in the resource.
     Missing,
     /// The location exists, but its value could not be extracted, for example
@@ -82,8 +87,14 @@ impl Row {
     pub fn value(&self) -> Option<&Value> {
         match &self.state {
             RowState::Value(value) => Some(value),
-            RowState::Missing | RowState::Error(_) => None,
+            RowState::Key | RowState::Missing | RowState::Error(_) => None,
         }
+    }
+
+    /// Whether this row names a structural key rather than a value.
+    #[must_use]
+    pub fn is_key(&self) -> bool {
+        matches!(self.state, RowState::Key)
     }
 
     /// The canonical order: path (segment by segment, the index order),
@@ -209,14 +220,20 @@ mod tests {
     }
 
     #[test]
-    fn missing_null_and_error_are_distinct() {
+    fn missing_null_key_and_error_are_distinct() {
         let null = row("a.json", "k", RowState::Value(Value::Null));
+        let key = row("a.json", "k", RowState::Key);
         let missing = row("a.json", "k", RowState::Missing);
         let error = row("a.json", "k", RowState::Error("non-literal value".into()));
+        assert_ne!(null, key);
         assert_ne!(null, missing);
         assert_ne!(missing, error);
         assert_ne!(null, error);
+        assert_ne!(key, missing);
+        assert_ne!(key, error);
         assert_eq!(null.value(), Some(&Value::Null));
+        assert_eq!(key.value(), None);
+        assert!(key.is_key());
         assert_eq!(missing.value(), None);
         assert_eq!(error.value(), None);
         let relation = Relation::new(vec![error, missing, null]);
@@ -319,6 +336,7 @@ mod tests {
     fn row_strategy() -> impl Strategy<Value = Row> {
         let state = prop_oneof![
             value_strategy().prop_map(RowState::Value),
+            Just(RowState::Key),
             Just(RowState::Missing),
             "[a-z]{0,3}".prop_map(|m| RowState::Error(m.into())),
         ];

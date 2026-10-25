@@ -390,6 +390,13 @@ impl Engine {
         }
         let t_total = Instant::now();
         self.ensure_manifest_scope_resolvable()?;
+        // Enable the relation read cache only when a rule consumes the layer.
+        // The ordinary per-file path checks `index.read_cache()` and reads
+        // directly when it is `None`, so this leaves a relation-free run's hot
+        // path unchanged.
+        if self.entries.iter().any(|entry| entry.rule.uses_relations()) {
+            index.enable_read_cache();
+        }
         // Empty changed-set fast path: nothing to lint, return
         // an empty report rather than walk the entries list at
         // all. Saves the fact-evaluation pass too.

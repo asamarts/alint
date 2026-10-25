@@ -75,6 +75,49 @@ fn is_confined(p: &Path) -> bool {
     !p.as_os_str().is_empty() && p.components().all(|c| matches!(c, Component::Normal(_)))
 }
 
+/// True iff `candidate` (a `root`-joined, lexically-confined path) really
+/// resolves *inside* `root` once symlinks are followed.
+///
+/// [`normalize_confined`] is purely lexical and therefore symlink-blind, so an
+/// in-repo symlink (`link -> /etc`) makes a lexically-in path (`link/secret`)
+/// escape the tree at read time. We canonicalize the deepest *existing*
+/// ancestor (the final component may legitimately not exist, e.g. an existence
+/// check, and a non-existent component cannot be a symlink), re-attach the
+/// non-existent tail, and confirm the result stays under the real root. Fails
+/// closed if the root itself cannot be resolved.
+///
+/// This lives in `alint-core` because the relation layer's read cache and
+/// `alint-rules`' `confine_read` must share one implementation; a second copy
+/// would let the two read paths diverge.
+#[must_use]
+pub fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
+    let Ok(root_real) = root.canonicalize() else {
+        return false;
+    };
+    let mut tail = PathBuf::new();
+    let mut cur = candidate.to_path_buf();
+    loop {
+        if let Ok(real) = cur.canonicalize() {
+            let full = if tail.as_os_str().is_empty() {
+                real
+            } else {
+                real.join(&tail)
+            };
+            return full.starts_with(&root_real);
+        }
+        // `cur` doesn't resolve yet; fold its last component into `tail`
+        // and retry against the parent. A component that doesn't exist
+        // can't be a symlink, so it cannot introduce an escape.
+        let Some(name) = cur.file_name().map(std::ffi::OsString::from) else {
+            return false;
+        };
+        tail = Path::new(&name).join(&tail);
+        if !cur.pop() {
+            return false;
+        }
+    }
+}
+
 /// Derive a target path from `path` by matching it against the `from`
 /// regex and expanding its captures into the `to` replacement template,
 /// then lexically confining the result to the repo root (via

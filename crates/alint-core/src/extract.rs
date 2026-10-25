@@ -1073,7 +1073,7 @@ pub fn extract_values(
     extract: &Extract,
     text: &str,
 ) -> std::result::Result<ExtractedValues, String> {
-    extract_values_with_limit(extract, text, None)
+    extract_values_with_limit(extract, text, None).map_err(|error| error.to_string())
 }
 
 /// Extract at most `max_values` values, failing before allocating the value
@@ -1085,14 +1085,34 @@ pub fn extract_values_bounded(
     text: &str,
     max_values: usize,
 ) -> std::result::Result<ExtractedValues, String> {
+    extract_values_with_limit(extract, text, Some(max_values)).map_err(|error| error.to_string())
+}
+
+/// [`extract_values_bounded`] with the failure class preserved, for callers
+/// that must distinguish a parse failure from a limit hit (the relation
+/// adapters do; `AdapterError` carries both).
+pub(crate) fn extract_values_bounded_typed(
+    extract: &Extract,
+    text: &str,
+    max_values: usize,
+) -> std::result::Result<ExtractedValues, ExtractFailure> {
     extract_values_with_limit(extract, text, Some(max_values))
+}
+
+/// Why a bounded extraction could not produce values.
+#[derive(Clone, Debug, PartialEq, Eq, thiserror::Error)]
+pub(crate) enum ExtractFailure {
+    #[error("{0}")]
+    Parse(String),
+    #[error("extract selected more than the {limit}-value safety limit")]
+    Limit { limit: usize, reached: usize },
 }
 
 fn extract_values_with_limit(
     extract: &Extract,
     text: &str,
     max_values: Option<usize>,
-) -> std::result::Result<ExtractedValues, String> {
+) -> std::result::Result<ExtractedValues, ExtractFailure> {
     let values = match extract {
         Extract::Structured(extract) => structured(extract, text, max_values)?,
         Extract::Lines(opts) => {
@@ -1110,7 +1130,8 @@ fn extract_values_with_limit(
             values
         }
         Extract::Regex(pattern) => {
-            let regex = Regex::new(pattern).map_err(|error| format!("bad regex: {error}"))?;
+            let regex = Regex::new(pattern)
+                .map_err(|error| ExtractFailure::Parse(format!("bad regex: {error}")))?;
             let mut values = ExtractedValues::default();
             for matched in regex
                 .captures_iter(text)
@@ -1140,23 +1161,26 @@ fn extract_values_with_limit(
 fn ensure_extract_capacity(
     values: &ExtractedValues,
     max_values: Option<usize>,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<(), ExtractFailure> {
     if max_values.is_some_and(|max| values.strings.len() + values.non_strings.len() >= max) {
         return Err(extract_limit_error(max_values.unwrap_or_default()));
     }
     Ok(())
 }
 
-fn extract_limit_error(max_values: usize) -> String {
-    format!("extract selected more than the {max_values}-value safety limit")
+fn extract_limit_error(max_values: usize) -> ExtractFailure {
+    ExtractFailure::Limit {
+        limit: max_values,
+        reached: max_values.saturating_add(1),
+    }
 }
 
 fn structured(
     extract: &StructuredExtract,
     text: &str,
     max_values: Option<usize>,
-) -> std::result::Result<ExtractedValues, String> {
-    let value = extract.format.parse(text)?;
+) -> std::result::Result<ExtractedValues, ExtractFailure> {
+    let value = extract.format.parse(text).map_err(ExtractFailure::Parse)?;
     let mut values = ExtractedValues::default();
     for value in extract.path.query(&value).iter() {
         ensure_extract_capacity(&values, max_values)?;

@@ -15,6 +15,8 @@
 //! nothing in it appears in any report or schema.
 
 mod adapter;
+mod adapters;
+mod cache;
 mod limits;
 mod path;
 mod pointer;
@@ -22,7 +24,9 @@ mod resource;
 mod row;
 mod value;
 
-pub use adapter::{Adapter, AdapterError, check_row_count};
+pub use adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_count};
+pub use adapters::{EntryRowsAdapter, ExtractAdapter};
+pub use cache::{DecodeCache, ReadCache};
 pub use limits::{LimitConfigError, LimitExceeded, LimitKind, Limits, RunBudget};
 pub use path::RelPath;
 pub use pointer::{Pointer, Segment};

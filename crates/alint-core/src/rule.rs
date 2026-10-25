@@ -934,6 +934,16 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         false
     }
 
+    /// Whether this rule reads resources through the relation layer.
+    ///
+    /// The engine enables the run-scoped read/decode cache only when an active
+    /// rule opts in, so a configuration without relation rules keeps the
+    /// direct per-file read path unchanged. `key_parity` (R3) and the R2
+    /// test-only relation consumer override this.
+    fn uses_relations(&self) -> bool {
+        false
+    }
+
     /// Decorate the configuration-integrity finding produced when
     /// `expect_matches: true` sees an empty effective scope. Most rules leave
     /// it unchanged. A rule whose findings carry required contextual data can

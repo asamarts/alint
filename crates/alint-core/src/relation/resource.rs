@@ -73,6 +73,8 @@ impl Resource {
 pub enum ResourceRead {
     Present(Arc<[u8]>),
     Missing,
+    /// The file exceeds the bounded whole-file analysis cap.
+    TooLarge(u64),
     Unreadable(String),
 }
 

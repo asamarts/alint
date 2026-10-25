@@ -129,7 +129,9 @@ impl Engine {
             .filter(|e| set.contains(&*e.path) || created.is_some_and(|c| c.contains(&*e.path)))
             .cloned()
             .collect();
-        Some(FileIndex::from_entries(entries))
+        let filtered = FileIndex::from_entries(entries);
+        full.share_read_cache(&filtered);
+        Some(filtered)
     }
 
     /// Build the per-mode pre-filtered indexes for git-tracked
@@ -179,9 +181,17 @@ impl Engine {
         // are short-circuited to `resource_read` analysis failures before
         // dispatch.
         let Some(tracked) = tracked else {
+            let file_only = any_file_only.then(|| FileIndex::from_entries(Vec::new()));
+            let dir_aware = any_dir_aware.then(|| FileIndex::from_entries(Vec::new()));
+            if let Some(index) = file_only.as_ref() {
+                full.share_read_cache(index);
+            }
+            if let Some(index) = dir_aware.as_ref() {
+                full.share_read_cache(index);
+            }
             return Some(GitTrackedIndexes {
-                file_only: any_file_only.then(|| FileIndex::from_entries(Vec::new())),
-                dir_aware: any_dir_aware.then(|| FileIndex::from_entries(Vec::new())),
+                file_only,
+                dir_aware,
             });
         };
 
@@ -192,7 +202,9 @@ impl Engine {
                 .filter(|e| !e.is_dir && tracked.contains(&*e.path))
                 .cloned()
                 .collect();
-            Some(FileIndex::from_entries(entries))
+            let index = FileIndex::from_entries(entries);
+            full.share_read_cache(&index);
+            Some(index)
         } else {
             None
         };
@@ -210,7 +222,9 @@ impl Engine {
                 })
                 .cloned()
                 .collect();
-            Some(FileIndex::from_entries(entries))
+            let index = FileIndex::from_entries(entries);
+            full.share_read_cache(&index);
+            Some(index)
         } else {
             None
         };

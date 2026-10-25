@@ -1020,79 +1020,67 @@ fn evaluate_per_file_entries<const TRACE: bool>(
                 if applicable.is_empty() {
                     return Vec::new();
                 }
-                // 2. Read once for every applicable rule. Every failure after
-                // repository discovery is a typed `resource_read` analysis
-                // failure for each owning rule; an unreadable or over-cap
-                // in-scope file can never look like a policy pass.
+                // 2. Read once for every applicable rule. When a relation
+                // consumer enabled the run-scoped cache, this read is shared
+                // with it; otherwise the ordinary path reads directly and pays
+                // no cache lookup. Every failure after repository discovery is
+                // a typed `resource_read` analysis failure for each owning
+                // rule; an unreadable or over-cap in-scope file can never look
+                // like a policy pass.
+                if let Some(cache) = per_file_ctx.index.read_cache() {
+                    let read = cache.read_index_path(root, &file_entry.path, file_entry.size);
+                    return match read.as_ref() {
+                        crate::relation::ResourceRead::Present(bytes) => {
+                            dispatch_per_file::<TRACE>(
+                                per_file_ctx,
+                                &applicable,
+                                &file_entry.path,
+                                bytes,
+                            )
+                        }
+                        crate::relation::ResourceRead::Missing => violations_for_each(
+                            &applicable,
+                            &crate::rule::missing_file_violation(&file_entry.path),
+                        ),
+                        crate::relation::ResourceRead::TooLarge(size) => violations_for_each(
+                            &applicable,
+                            &crate::rule::too_large_file_violation(&file_entry.path, *size),
+                        ),
+                        crate::relation::ResourceRead::Unreadable(message) => violations_for_each(
+                            &applicable,
+                            &Violation::new(format!("could not read file: {message}"))
+                                .with_path(file_entry.path.clone())
+                                .as_analysis_failure(AnalysisFailureKind::ResourceRead),
+                        ),
+                    };
+                }
                 let abs = root.join(&file_entry.path);
                 let bytes = match crate::walker::read_for_analysis(&abs, file_entry.size) {
                     crate::walker::AnalysisRead::Bytes(b) => b,
                     crate::walker::AnalysisRead::Missing => {
-                        return applicable
-                            .iter()
-                            .map(|(entry_idx, _)| {
-                                (
-                                    *entry_idx,
-                                    crate::rule::missing_file_violation(&file_entry.path),
-                                )
-                            })
-                            .collect();
+                        return violations_for_each(
+                            &applicable,
+                            &crate::rule::missing_file_violation(&file_entry.path),
+                        );
                     }
                     crate::walker::AnalysisRead::TooLarge(size) => {
-                        return applicable
-                            .iter()
-                            .map(|(entry_idx, _)| {
-                                (
-                                    *entry_idx,
-                                    crate::rule::too_large_file_violation(&file_entry.path, size),
-                                )
-                            })
-                            .collect();
+                        return violations_for_each(
+                            &applicable,
+                            &crate::rule::too_large_file_violation(&file_entry.path, size),
+                        );
                     }
                     crate::walker::AnalysisRead::Unreadable(e) => {
-                        return applicable
-                            .iter()
-                            .map(|(entry_idx, _)| {
-                                (
-                                    *entry_idx,
-                                    crate::rule::unreadable_file_violation(&file_entry.path, &e),
-                                )
-                            })
-                            .collect();
+                        return violations_for_each(
+                            &applicable,
+                            &crate::rule::unreadable_file_violation(&file_entry.path, &e),
+                        );
                     }
                 };
                 // 3. Dispatch. Every applicable rule sees the
                 // same byte slice; the file is read exactly once
                 // even though N rules may produce violations
                 // against it.
-                let mut out: Vec<(usize, Violation)> = Vec::new();
-                for (entry_idx, entry) in applicable {
-                    let pf = entry
-                        .rule
-                        .as_per_file()
-                        .expect("live entries are per-file rules by construction");
-                    let result = if TRACE {
-                        pf.evaluate_file_traced(per_file_ctx, &file_entry.path, &bytes)
-                    } else {
-                        pf.evaluate_file(per_file_ctx, &file_entry.path, &bytes)
-                    };
-                    match result {
-                        Ok(vs) => {
-                            for v in vs {
-                                out.push((entry_idx, v));
-                            }
-                        }
-                        Err(e) => {
-                            out.push((
-                                entry_idx,
-                                Violation::new(format!("rule evaluation failed: {e}"))
-                                    .with_path(file_entry.path.clone())
-                                    .as_analysis_failure(AnalysisFailureKind::Evaluation),
-                            ));
-                        }
-                    }
-                }
-                out
+                dispatch_per_file::<TRACE>(per_file_ctx, &applicable, &file_entry.path, &bytes)
             })
             .collect()
     });
@@ -1108,6 +1096,56 @@ fn evaluate_per_file_entries<const TRACE: bool>(
             TraceCounts::default()
         },
     )
+}
+
+/// Dispatch one file's bytes to every applicable per-file rule. Shared by the
+/// direct read path and the relation-cache path so both observe identical
+/// evaluation and failure semantics.
+fn dispatch_per_file<const TRACE: bool>(
+    ctx: &Context<'_>,
+    applicable: &[(usize, &RuleEntry)],
+    path: &Path,
+    bytes: &[u8],
+) -> Vec<(usize, Violation)> {
+    let mut out = Vec::new();
+    for (entry_idx, entry) in applicable {
+        let pf = entry
+            .rule
+            .as_per_file()
+            .expect("live entries are per-file rules by construction");
+        let result = if TRACE {
+            pf.evaluate_file_traced(ctx, path, bytes)
+        } else {
+            pf.evaluate_file(ctx, path, bytes)
+        };
+        match result {
+            Ok(violations) => {
+                for violation in violations {
+                    out.push((*entry_idx, violation));
+                }
+            }
+            Err(error) => {
+                out.push((
+                    *entry_idx,
+                    Violation::new(format!("rule evaluation failed: {error}"))
+                        .with_path(path.to_path_buf())
+                        .as_analysis_failure(AnalysisFailureKind::Evaluation),
+                ));
+            }
+        }
+    }
+    out
+}
+
+/// One read failure for every rule that would have evaluated the file.
+fn violations_for_each(
+    applicable: &[(usize, &RuleEntry)],
+    violation: &Violation,
+) -> Vec<(usize, Violation)> {
+    applicable
+        .iter()
+        .map(|(entry_idx, _)| (*entry_idx, violation.clone()))
+        .collect()
 }
 
 /// One file a fix pass would change, captured by [`Engine::stage_fixes`] for

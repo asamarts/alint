@@ -475,6 +475,23 @@ v0.21 is complete only when all of the following are observed:
 
 ## Status and next steps
 
+- **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
+  the row/diagnostic model, the strict-versus-lossy decoding split, and the
+  read/decode cache design that R2 implements.
+- **R2, done.** `alint_core::relation::adapters` now provides `EntryRowsAdapter`
+  (JSON, YAML, dotenv, INI, and Java properties; key rows with eager spans) and
+  `ExtractAdapter` (today's `Extract`; lossy decoding, non-string kind
+  diagnostics, non-literal notes). `RowState::Key` keeps a structural key
+  distinct from an explicit `null`. `ReadCache` and `DecodeCache` use per-key
+  `OnceLock`s; the engine enables them only when a rule returns
+  `uses_relations()`, shares them with `--changed` and git-filtered indexes, and
+  retains only paths a relation claims. `resolved_within_root` moved to
+  `alint-core::pathsafe` so the cache and `cross_file` share one confinement
+  implementation. The test-only relation consumer proves one read, one hit, and
+  one decode alongside a per-file rule. The v0.18.2 reference gate is green:
+  S1 -6.60%/-6.91%, S2 -3.03%/-3.29%, S3 -0.14%/+0.83%, and the 10k syscall
+  families are within one call of the reference.
+
 - **R0, done.** On every S1-S3 cell, `main` at `fb9820f5e` uses no more instructions than v0.18.2
   (S1 -7% to -8%, S2 about -3%, S3 -0.04% to -0.2%), and its read/stat-family syscall counts match
   within fixed per-run probes, so the budget is not already spent. S3 has the least headroom, and
@@ -511,5 +528,7 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** R2 (built-in row adapters and the `Extract` wrapper on the IR, with read coalescing),
-  then R3, R4, R6a, and R9 in parallel after R2.
+- **Next:** R3, R4, R6a, and R9 in parallel. R3 (`key_parity`) is the first
+  user-facing kind; R9 completes its TOML and XML dialect formats; R4 adds the
+  shadow harness and the `cross_file` `equals` port; R6a adds the contract
+  traits, bridge, and registry injection.

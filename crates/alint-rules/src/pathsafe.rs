@@ -62,43 +62,11 @@ pub(crate) fn out_of_root_note(path: &Path) -> String {
     )
 }
 
-/// True iff `candidate` (a `root`-joined, lexically-confined path) really
-/// resolves *inside* `root` once symlinks are followed. [`normalize_confined`]
-/// is purely lexical and therefore symlink-blind, so an in-repo symlink
-/// (`link -> /etc`) makes a lexically-in path (`link/secret`) escape the
-/// tree at read time - defeating confinement and the `allow_out_of_root`
-/// gate. We canonicalize the deepest *existing* ancestor (the final
-/// component may legitimately not exist, e.g. an existence check, and a
-/// non-existent component can't be a symlink), re-attach the non-existent
-/// tail, and confirm the result stays under the real root. Fails closed if
-/// the root itself can't be resolved.
-pub(crate) fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
-    let Ok(root_real) = root.canonicalize() else {
-        return false;
-    };
-    let mut tail = PathBuf::new();
-    let mut cur = candidate.to_path_buf();
-    loop {
-        if let Ok(real) = cur.canonicalize() {
-            let full = if tail.as_os_str().is_empty() {
-                real
-            } else {
-                real.join(&tail)
-            };
-            return full.starts_with(&root_real);
-        }
-        // `cur` doesn't resolve yet; fold its last component into `tail`
-        // and retry against the parent. A component that doesn't exist
-        // can't be a symlink, so it cannot introduce an escape.
-        let Some(name) = cur.file_name().map(std::ffi::OsString::from) else {
-            return false;
-        };
-        tail = Path::new(&name).join(&tail);
-        if !cur.pop() {
-            return false;
-        }
-    }
-}
+/// The filesystem-aware containment check now lives in `alint-core` so the
+/// relation read cache and this module share one implementation. Re-exported
+/// here so the existing `crate::pathsafe::resolved_within_root` call sites keep
+/// resolving unchanged.
+pub(crate) use alint_core::resolved_within_root;
 
 /// Like [`confine`] but filesystem-aware: a lexically-confined path can
 /// still escape the root through an in-repo symlink, so after the lexical
