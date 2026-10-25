@@ -644,9 +644,7 @@ fn dispatch_flip_preserves_cross_file_rules_unchanged() {
 /// Test-only relation consumer: reads through the run-scoped cache and decodes
 /// the file, proving the relation path and the per-file path share one read.
 #[derive(Debug)]
-struct RelationConsumer {
-    decodes: std::sync::Arc<crate::relation::DecodeCache>,
-}
+struct RelationConsumer;
 
 impl Rule for RelationConsumer {
     fn id(&self) -> &'static str {
@@ -676,7 +674,9 @@ impl Rule for RelationConsumer {
         if let crate::relation::ResourceRead::Present(bytes) =
             cache.read(ctx.root, &resource, 0).as_ref()
         {
-            self.decodes
+            ctx.index
+                .decode_cache()
+                .expect("a relation consumer enables the run decode cache")
                 .decode(
                     &crate::relation::ExtractAdapter::new(crate::extract::Extract::WholeFile),
                     &resource,
@@ -695,13 +695,24 @@ fn filtered_index_shares_the_full_index_read_cache() {
     changed.insert(std::path::PathBuf::from("a.txt"));
     let engine = Engine::new(vec![], RuleRegistry::new()).with_changed_paths(changed);
     let full = idx(&["a.txt", "b.txt"]);
-    let cache = full.enable_read_cache();
+    full.enable_relation_caches();
+    let cache = full.read_cache().expect("full cache enabled");
+    let decodes = full.decode_cache().expect("full decode cache enabled");
     let filtered = engine
         .build_filtered_index(&full, None)
         .expect("a changed set is present");
     assert!(
         std::ptr::eq(filtered.read_cache().expect("filtered cache shared"), cache),
         "a --changed filtered index must read through the full index's cache"
+    );
+    assert!(
+        std::ptr::eq(
+            filtered
+                .decode_cache()
+                .expect("filtered decode cache shared"),
+            decodes
+        ),
+        "a --changed filtered index must decode through the full index's cache"
     );
 }
 
@@ -726,6 +737,42 @@ fn a_relation_free_run_does_not_enable_the_read_cache() {
         index.read_cache().is_none(),
         "a run without relation consumers must keep the direct read path"
     );
+    assert!(
+        index.decode_cache().is_none(),
+        "a run without relation consumers must not allocate a decode cache"
+    );
+}
+
+#[test]
+fn run_for_file_and_fix_enable_the_relation_cache() {
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-relation-cache-paths-")
+        .tempdir()
+        .unwrap();
+    std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    let engine = Engine::new(vec![Box::new(RelationConsumer)], RuleRegistry::new());
+    engine
+        .run_for_file(tmp.path(), &index, std::path::Path::new("a.txt"), b"hello")
+        .unwrap();
+    assert!(index.read_cache().is_some(), "run_for_file enables it");
+    assert!(
+        index.decode_cache().is_some(),
+        "run_for_file enables decodes"
+    );
+
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    engine
+        .fix(
+            tmp.path(),
+            &index,
+            &crate::WalkOptions::default(),
+            true,
+            crate::Applicability::Safe,
+        )
+        .unwrap();
+    assert!(index.read_cache().is_some(), "fix enables it");
+    assert!(index.decode_cache().is_some(), "fix enables decodes");
 }
 
 #[test]
@@ -736,7 +783,6 @@ fn relation_consumer_and_per_file_rule_share_one_read_and_decode() {
         .unwrap();
     std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
     let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
-    let decodes = std::sync::Arc::new(crate::relation::DecodeCache::new());
     let engine = Engine::new(
         vec![
             Box::new(PerFileStub {
@@ -744,9 +790,7 @@ fn relation_consumer_and_per_file_rule_share_one_read_and_decode() {
                 scope: Scope::from_patterns(&["a.txt".to_string()]).unwrap(),
                 prefix: b"x".to_vec(),
             }),
-            Box::new(RelationConsumer {
-                decodes: std::sync::Arc::clone(&decodes),
-            }),
+            Box::new(RelationConsumer),
         ],
         RuleRegistry::new(),
     );
@@ -766,5 +810,9 @@ fn relation_consumer_and_per_file_rule_share_one_read_and_decode() {
         1,
         "the second consumer must hit the cached read"
     );
-    assert_eq!(decodes.decodes(), 1, "the document must be decoded once");
+    assert_eq!(
+        index.decode_cache().unwrap().decodes(),
+        1,
+        "the document must be decoded once"
+    );
 }

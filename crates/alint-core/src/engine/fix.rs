@@ -817,6 +817,7 @@ impl Engine {
         flush: Option<&RefCell<HashSet<PathBuf>>>,
         stage_ops: Option<&RefCell<Vec<FixEdit>>>,
     ) -> Result<FixRunOutput> {
+        self.enable_relation_caches(index);
         let fact_values = evaluate_facts_with_environment(
             &self.facts,
             root,

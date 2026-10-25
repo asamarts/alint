@@ -323,6 +323,8 @@ pub enum EntryRowsError {
     UnsupportedFormat(Format),
     #[error("structured entry extraction failed: {0}")]
     Parse(String),
+    #[error("entry extraction exceeded the {limit}-row safety limit")]
+    Limit { limit: usize },
 }
 
 /// Extract source-ordered object-member rows without collapsing duplicate keys.
@@ -334,12 +336,55 @@ pub fn extract_entry_rows(
     format: Format,
     text: &str,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+    extract_entry_rows_with(format, text, false, None)
+}
+
+/// Like [`extract_entry_rows`], stopping before a row would exceed
+/// `max_rows`. The limit is enforced while the extractor builds its vector, so
+/// a crafted document cannot allocate an unbounded row set before the caller
+/// checks it.
+pub fn extract_entry_rows_bounded(
+    format: Format,
+    text: &str,
+    max_rows: usize,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+    extract_entry_rows_with(format, text, false, Some(max_rows))
+}
+
+/// Like [`extract_entry_rows`], but a YAML alias or plain merge key is a parse
+/// failure instead of being dropped or emitted as a literal `<<` key.
+///
+/// Key parity cannot compare unexpanded aliases: treating the alias as a
+/// missing value would report false drift. The relation adapter uses this
+/// strict form.
+pub fn extract_entry_rows_strict_yaml(
+    format: Format,
+    text: &str,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+    extract_entry_rows_with(format, text, true, None)
+}
+
+/// [`extract_entry_rows_strict_yaml`] with a bound enforced during extraction.
+pub fn extract_entry_rows_strict_yaml_bounded(
+    format: Format,
+    text: &str,
+    max_rows: usize,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+    extract_entry_rows_with(format, text, true, Some(max_rows))
+}
+
+fn extract_entry_rows_with(
+    format: Format,
+    text: &str,
+    reject_yaml_features: bool,
+    max_rows: Option<usize>,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     match format {
-        Format::Json => json_entry_rows(text),
-        Format::Yaml => yaml_entry_rows(text),
-        Format::Dotenv => dotenv_entry_rows(text),
-        Format::Ini => ini_entry_rows(text),
-        Format::Properties => properties_entry_rows(text),
+        Format::Json => json_entry_rows(text, max_rows),
+        Format::Yaml => yaml_entry_rows(text, reject_yaml_features, max_rows),
+        Format::Dotenv => dotenv_entry_rows(text, max_rows),
+        Format::Ini => ini_entry_rows(text, max_rows),
+        Format::Properties => properties_entry_rows(text, max_rows),
         Format::Toml | Format::Xml | Format::Hcl => Err(EntryRowsError::UnsupportedFormat(format)),
     }
 }
@@ -359,7 +404,22 @@ pub(crate) fn json_parse_options() -> jsonc_parser::ParseOptions {
     }
 }
 
-fn json_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+fn entry_capacity(
+    rows: &[StructuredEntryRow],
+    max_rows: Option<usize>,
+) -> std::result::Result<(), EntryRowsError> {
+    if let Some(limit) = max_rows
+        && rows.len() >= limit
+    {
+        return Err(EntryRowsError::Limit { limit });
+    }
+    Ok(())
+}
+
+fn json_entry_rows(
+    text: &str,
+    max_rows: Option<usize>,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     use jsonc_parser::{CollectOptions, CommentCollectionStrategy, parse_to_ast};
 
     // Reuse the check-side size/depth/dialect guards before the lossless pass.
@@ -377,7 +437,7 @@ fn json_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, E
     .map_err(|error| EntryRowsError::Parse(error.to_string()))?;
     let mut rows = Vec::new();
     if let Some(value) = ast.value.as_ref() {
-        collect_json_rows(value, &mut Vec::new(), offset, &mut rows);
+        collect_json_rows(value, &mut Vec::new(), offset, &mut rows, max_rows)?;
     }
     Ok(rows)
 }
@@ -387,7 +447,8 @@ fn collect_json_rows(
     parent: &mut Vec<EntryPathSegment>,
     offset: usize,
     rows: &mut Vec<StructuredEntryRow>,
-) {
+    max_rows: Option<usize>,
+) -> std::result::Result<(), EntryRowsError> {
     use jsonc_parser::ast::{ObjectPropName, Value};
     use jsonc_parser::common::Ranged as _;
 
@@ -398,6 +459,7 @@ fn collect_json_rows(
                     ObjectPropName::String(literal) => (literal.value.to_string(), literal.range()),
                     ObjectPropName::Word(literal) => (literal.value.to_string(), literal.range()),
                 };
+                entry_capacity(rows, max_rows)?;
                 let value_range = property.value.range();
                 rows.push(StructuredEntryRow {
                     parent: parent.clone(),
@@ -409,14 +471,14 @@ fn collect_json_rows(
                     )),
                 });
                 parent.push(EntryPathSegment::Key(key));
-                collect_json_rows(&property.value, parent, offset, rows);
+                collect_json_rows(&property.value, parent, offset, rows, max_rows)?;
                 parent.pop();
             }
         }
         Value::Array(array) => {
             for (index, element) in array.elements.iter().enumerate() {
                 parent.push(EntryPathSegment::Index(index));
-                collect_json_rows(element, parent, offset, rows);
+                collect_json_rows(element, parent, offset, rows, max_rows)?;
                 parent.pop();
             }
         }
@@ -425,32 +487,39 @@ fn collect_json_rows(
         | Value::BooleanLit(_)
         | Value::NullKeyword(_) => {}
     }
+    Ok(())
 }
 
-fn dotenv_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+fn dotenv_entry_rows(
+    text: &str,
+    max_rows: Option<usize>,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     let (document, offset) = crate::dotenv::parse_document(text).map_err(EntryRowsError::Parse)?;
-    Ok(document
-        .entries()
-        .map(|entry| {
-            let key = entry.key().to_string();
-            let key_span = entry.key_span();
-            StructuredEntryRow {
-                parent: Vec::new(),
-                key,
-                key_span: ByteSpan::new(key_span.start + offset, key_span.end + offset),
-                value_span: entry
-                    .value_span()
-                    .map(|span| ByteSpan::new(span.start + offset, span.end + offset)),
-            }
-        })
-        .collect())
+    let mut rows = Vec::new();
+    for entry in document.entries() {
+        entry_capacity(&rows, max_rows)?;
+        let key = entry.key().to_string();
+        let key_span = entry.key_span();
+        rows.push(StructuredEntryRow {
+            parent: Vec::new(),
+            key,
+            key_span: ByteSpan::new(key_span.start + offset, key_span.end + offset),
+            value_span: entry
+                .value_span()
+                .map(|span| ByteSpan::new(span.start + offset, span.end + offset)),
+        });
+    }
+    Ok(rows)
 }
 
 const fn next_line_start(newline: usize, len: usize) -> usize {
     if newline < len { newline + 1 } else { len }
 }
 
-fn ini_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+fn ini_entry_rows(
+    text: &str,
+    max_rows: Option<usize>,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     Format::Ini.parse(text).map_err(EntryRowsError::Parse)?;
     let stripped = text.trim_start_matches('\u{feff}');
     let base = text.len() - stripped.len();
@@ -507,6 +576,7 @@ fn ini_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, En
             let value = after.trim();
             let key_start = base + at + trim_start + key_lead;
             let value_start = base + at + trim_start + separator + 1 + value_lead;
+            entry_capacity(&rows, max_rows)?;
             rows.push(StructuredEntryRow {
                 parent: section.iter().cloned().map(EntryPathSegment::Key).collect(),
                 key: key.to_string(),
@@ -523,10 +593,11 @@ fn ini_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, En
 
 fn properties_entry_rows(
     text: &str,
+    max_rows: Option<usize>,
 ) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     let stripped = text.trim_start_matches('\u{feff}');
     let base = text.len() - stripped.len();
-    let decoded_keys = properties_decoded_keys(stripped)?;
+    let decoded_keys = properties_decoded_keys(stripped, max_rows)?;
     if decoded_keys.is_empty() {
         return Ok(Vec::new());
     }
@@ -605,6 +676,7 @@ fn properties_entry_rows(
         let key = decoded.next().ok_or_else(|| {
             EntryRowsError::Parse("properties entry/span count diverged".to_string())
         })?;
+        entry_capacity(&rows, max_rows)?;
         rows.push(StructuredEntryRow {
             parent: Vec::new(),
             key,
@@ -620,7 +692,10 @@ fn properties_entry_rows(
     }
     Ok(rows)
 }
-fn properties_decoded_keys(text: &str) -> std::result::Result<Vec<String>, EntryRowsError> {
+fn properties_decoded_keys(
+    text: &str,
+    max_rows: Option<usize>,
+) -> std::result::Result<Vec<String>, EntryRowsError> {
     if text.len() > crate::structured_format::MAX_STRUCTURED_BYTES {
         return Err(EntryRowsError::Parse(format!(
             "input exceeds the maximum supported size for a structured document ({} bytes)",
@@ -628,9 +703,23 @@ fn properties_decoded_keys(text: &str) -> std::result::Result<Vec<String>, Entry
         )));
     }
     let mut keys = Vec::new();
+    let mut limit_hit = false;
     java_properties::PropertiesIter::new_with_encoding(text.as_bytes(), encoding_rs::UTF_8)
-        .read_into(|key, _| keys.push(key))
+        .read_into(|key, _| {
+            if let Some(limit) = max_rows
+                && keys.len() >= limit
+            {
+                limit_hit = true;
+                return;
+            }
+            keys.push(key);
+        })
         .map_err(|error| EntryRowsError::Parse(error.to_string()))?;
+    if limit_hit {
+        return Err(EntryRowsError::Limit {
+            limit: max_rows.unwrap_or_default(),
+        });
+    }
     Ok(keys)
 }
 
@@ -675,7 +764,11 @@ fn properties_physical_line(bytes: &[u8], start: usize) -> (usize, usize) {
     (end, next)
 }
 
-fn yaml_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
+fn yaml_entry_rows(
+    text: &str,
+    reject_yaml_features: bool,
+    max_rows: Option<usize>,
+) -> std::result::Result<Vec<StructuredEntryRow>, EntryRowsError> {
     use saphyr_parser::{Event, Parser};
 
     let stripped = text.trim_start_matches('\u{feff}');
@@ -762,6 +855,8 @@ fn yaml_entry_rows(text: &str) -> std::result::Result<Vec<StructuredEntryRow>, E
             &mut rows,
             true,
             stripped,
+            reject_yaml_features,
+            max_rows,
         )?;
     }
     Ok(rows)
@@ -859,6 +954,7 @@ impl YamlByteOffsets {
 struct YamlNode {
     scalar: Option<String>,
     span: Option<ByteSpan>,
+    style: Option<saphyr_parser::ScalarStyle>,
 }
 
 #[allow(clippy::too_many_arguments, clippy::too_many_lines)]
@@ -871,6 +967,8 @@ fn parse_yaml_node(
     rows: &mut Vec<StructuredEntryRow>,
     emit: bool,
     text: &str,
+    reject_yaml_features: bool,
+    max_rows: Option<usize>,
 ) -> std::result::Result<YamlNode, EntryRowsError> {
     use saphyr_parser::Event;
 
@@ -885,13 +983,20 @@ fn parse_yaml_node(
             Ok(YamlNode {
                 scalar: Some(value.to_string()),
                 span: yaml_scalar_span(*event_span, *style, byte_offsets, offset, text),
+                style: Some(*style),
             })
         }
         Event::Alias(_) => {
+            if reject_yaml_features {
+                return Err(EntryRowsError::Parse(
+                    "YAML aliases are not supported for key extraction".to_string(),
+                ));
+            }
             *index += 1;
             Ok(YamlNode {
                 scalar: None,
                 span: yaml_token_span(*event_span, byte_offsets, offset, text, false),
+                style: None,
             })
         }
         Event::SequenceStart(..) => {
@@ -909,6 +1014,8 @@ fn parse_yaml_node(
                     rows,
                     emit,
                     text,
+                    reject_yaml_features,
+                    max_rows,
                 )?;
                 parent.pop();
                 item += 1;
@@ -918,6 +1025,7 @@ fn parse_yaml_node(
             Ok(YamlNode {
                 scalar: None,
                 span: yaml_flow_container_span(start, end, byte_offsets, offset, text, b'[', b']'),
+                style: None,
             })
         }
         Event::MappingStart(..) => {
@@ -933,8 +1041,21 @@ fn parse_yaml_node(
                     rows,
                     false,
                     text,
+                    reject_yaml_features,
+                    max_rows,
                 )?;
                 if let Some(key_text) = key.scalar {
+                    if reject_yaml_features
+                        && key_text == "<<"
+                        && key.style == Some(saphyr_parser::ScalarStyle::Plain)
+                    {
+                        return Err(EntryRowsError::Parse(
+                            "YAML merge keys are not supported for key extraction".to_string(),
+                        ));
+                    }
+                    if emit {
+                        entry_capacity(rows, max_rows)?;
+                    }
                     let row_index = if emit {
                         key.span.map(|key_span| {
                             rows.push(StructuredEntryRow {
@@ -958,6 +1079,8 @@ fn parse_yaml_node(
                         rows,
                         emit,
                         text,
+                        reject_yaml_features,
+                        max_rows,
                     )?;
                     parent.pop();
                     if let Some(row_index) = row_index {
@@ -973,6 +1096,8 @@ fn parse_yaml_node(
                         rows,
                         emit,
                         text,
+                        reject_yaml_features,
+                        max_rows,
                     )?;
                 }
             }
@@ -981,6 +1106,7 @@ fn parse_yaml_node(
             Ok(YamlNode {
                 scalar: None,
                 span: yaml_flow_container_span(start, end, byte_offsets, offset, text, b'{', b'}'),
+                style: None,
             })
         }
         _ => Err(EntryRowsError::Parse(format!(
@@ -1199,8 +1325,9 @@ fn structured(
 #[cfg(test)]
 mod tests {
     use super::{
-        EntryPathSegment, EntryRowsError, Extract, extract_entry_rows, extract_values_bounded,
-        is_non_literal,
+        EntryPathSegment, EntryRowsError, Extract, extract_entry_rows, extract_entry_rows_bounded,
+        extract_entry_rows_strict_yaml, extract_entry_rows_strict_yaml_bounded,
+        extract_values_bounded, is_non_literal,
     };
     use crate::structured_format::Format;
 
@@ -1653,6 +1780,51 @@ mod tests {
         assert_eq!(span_text(text, rows[1].key_span), "\"ab\"");
         assert_eq!(span_text(text, rows[0].value_span.unwrap()), "1");
         assert_eq!(span_text(text, rows[1].value_span.unwrap()), "2");
+    }
+
+    #[test]
+    fn bounded_entry_extraction_fails_while_building_the_rows() {
+        for format in [
+            Format::Json,
+            Format::Yaml,
+            Format::Dotenv,
+            Format::Ini,
+            Format::Properties,
+        ] {
+            let text = match format {
+                Format::Json => r#"{"a":1,"b":2}"#,
+                Format::Yaml => "a: 1\nb: 2\n",
+                Format::Dotenv => "A=1\nB=2\n",
+                Format::Ini => "[s]\na=1\nb=2\n",
+                Format::Properties => "a=1\nb=2\n",
+                _ => unreachable!(),
+            };
+            let error = extract_entry_rows_bounded(format, text, 1).unwrap_err();
+            assert_eq!(error, EntryRowsError::Limit { limit: 1 }, "{format:?}");
+            let error = extract_entry_rows_bounded(format, text, 0).unwrap_err();
+            assert_eq!(error, EntryRowsError::Limit { limit: 0 }, "{format:?}");
+        }
+        let error =
+            extract_entry_rows_strict_yaml_bounded(Format::Yaml, "a: 1\nb: 2\n", 1).unwrap_err();
+        assert_eq!(error, EntryRowsError::Limit { limit: 1 });
+    }
+
+    #[test]
+    fn strict_yaml_entry_rows_reject_aliases_and_merge_keys() {
+        let alias = "base: &base\n  nested: one\ncopy: *base\n";
+        let error = extract_entry_rows_strict_yaml(Format::Yaml, alias).unwrap_err();
+        assert!(error.to_string().contains("aliases"), "{error}");
+
+        let merge = "base: {nested: one}\ncopy:\n  <<: {nested: two}\n";
+        let error = extract_entry_rows_strict_yaml(Format::Yaml, merge).unwrap_err();
+        assert!(error.to_string().contains("merge keys"), "{error}");
+
+        // A quoted "<<" is a normal key, not a merge key.
+        let rows = extract_entry_rows_strict_yaml(Format::Yaml, "\"<<\": 1\n").unwrap();
+        assert_eq!(
+            rows.iter().map(|row| row.key.as_str()).collect::<Vec<_>>(),
+            ["<<"]
+        );
     }
 
     #[test]

@@ -74,8 +74,11 @@ specifications over the same file never share a decode.
   member, using the entry's `parent + key` pointer and its `key_span`. Duplicate
   keys stay as distinct rows. It decodes **strict UTF-8**: these rows carry byte
   spans into the original file, and lossy replacement would shift every later
-  span. Invalid UTF-8 is a parse failure for the resource. TOML, generic XML,
-  and HCL stay unsupported here; R9 adds the TOML and XML dialect adapters.
+  span. Invalid UTF-8 is a parse failure for the resource. It also uses the
+  strict YAML form: a YAML alias or a plain `<<` merge key is a parse failure,
+  because rows do not expand either and comparing unexpanded keys would report
+  false drift. A quoted `"<<"` remains an ordinary key. TOML, generic XML, and
+  HCL stay unsupported here; R9 adds the TOML and XML dialect adapters.
 - **`ExtractAdapter`** wraps today's `Extract` for every format plus `lines`,
   `regex`, and `whole_file`. It decodes **lossily**, exactly as `cross_file`
   does today, and applies `is_non_literal` to every extractor except
@@ -117,19 +120,25 @@ A literal resource must be symlink-confined before it reaches the read cache:
 resolved path with `resolved_within_root`. R2 moved that filesystem check into
 `alint-core::pathsafe` (where the lexical check already lived) and has
 `alint-rules` re-use it, so the read cache and `cross_file` cannot diverge.
-Index entries take the cheaper path: the walker already prunes symlinks that
-escape the root, so the cache does not repeat the containment check per file.
-The cache records `Present`, `Missing`, `TooLarge`, and `Unreadable`; the
-consuming rule maps those to the existing read-failure findings.
+A literal resource also rejects a FIFO, socket, or device before opening it:
+`read_for_analysis` opens a path, and opening a FIFO read-only blocks until a
+writer appears. Index entries take the cheaper path: the walker already prunes
+escaping symlinks and indexes regular files only, so the cache does not repeat
+the containment or file-type checks per file. The cache records `Present`,
+`Missing`, `TooLarge`, and `Unreadable`; the consuming rule maps those to the
+existing read-failure findings. Its `Debug` implementation prints counts only,
+never cached bytes or error text, because `FileIndex` derives `Debug`.
 
 The engine integration keeps the existing file-major read for per-file rules
-and routes relation consumers through the same run-scoped `ReadCache`. Only
-resources a relation consumer marks (`mark_interest`, or automatically for a
-literal `Resource`) are retained; every other per-file read still happens once
-and is dropped, so enabling a relation rule cannot pin the whole tree's bytes
-in memory at 1M files. The test-only relation consumer in the engine's tests
-reads through that cache while a normal per-file rule reads the same file; the
-counters must show one read and one hit (and one decode) for the pair.
+and routes relation consumers through the same run-scoped caches. Both caches
+live on `FileIndex` and are enabled together, so two relation rules cannot
+decode one `(adapter, resource)` pair twice. Only resources a relation consumer
+marks (`mark_interest`, or automatically for a literal `Resource`) are
+retained; every other per-file read still happens once and is dropped, so
+enabling a relation rule cannot pin the whole tree's bytes in memory at 1M
+files. The test-only relation consumer in the engine's tests reads through that
+cache while a normal per-file rule reads the same file; the counters must show
+one read, one hit, and one decode for the pair.
 
 ## 6. Sensitive parse errors
 

@@ -130,7 +130,7 @@ impl Engine {
             .cloned()
             .collect();
         let filtered = FileIndex::from_entries(entries);
-        full.share_read_cache(&filtered);
+        full.share_relation_caches(&filtered);
         Some(filtered)
     }
 
@@ -184,10 +184,10 @@ impl Engine {
             let file_only = any_file_only.then(|| FileIndex::from_entries(Vec::new()));
             let dir_aware = any_dir_aware.then(|| FileIndex::from_entries(Vec::new()));
             if let Some(index) = file_only.as_ref() {
-                full.share_read_cache(index);
+                full.share_relation_caches(index);
             }
             if let Some(index) = dir_aware.as_ref() {
-                full.share_read_cache(index);
+                full.share_relation_caches(index);
             }
             return Some(GitTrackedIndexes {
                 file_only,
@@ -203,7 +203,7 @@ impl Engine {
                 .cloned()
                 .collect();
             let index = FileIndex::from_entries(entries);
-            full.share_read_cache(&index);
+            full.share_relation_caches(&index);
             Some(index)
         } else {
             None
@@ -223,7 +223,7 @@ impl Engine {
                 .cloned()
                 .collect();
             let index = FileIndex::from_entries(entries);
-            full.share_read_cache(&index);
+            full.share_relation_caches(&index);
             Some(index)
         } else {
             None

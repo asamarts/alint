@@ -1,8 +1,8 @@
 //! Key-only rows from the duplicate-aware structured entry extractor.
 
-use crate::extract::{EntryRowsError, StructuredEntryRow, extract_entry_rows};
+use crate::extract::{EntryRowsError, StructuredEntryRow, extract_entry_rows_strict_yaml_bounded};
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
-use crate::relation::limits::Limits;
+use crate::relation::limits::{LimitExceeded, LimitKind, Limits};
 use crate::relation::pointer::Pointer;
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
@@ -80,7 +80,12 @@ impl Adapter for EntryRowsAdapter {
                 format_name(self.format)
             ))
         })?;
-        let entries = extract_entry_rows(self.format, text).map_err(entry_error)?;
+        let entries = extract_entry_rows_strict_yaml_bounded(
+            self.format,
+            text,
+            limits.get(LimitKind::RowsPerExtractor),
+        )
+        .map_err(entry_error)?;
         let mut rows = Vec::with_capacity(entries.len());
         for (ordinal, entry) in entries.iter().enumerate() {
             check_row_count(limits, rows.len() + 1)?;
@@ -114,6 +119,11 @@ fn entry_error(error: EntryRowsError) -> AdapterError {
             // never formats a finding itself.
             AdapterError::Parse(message)
         }
+        EntryRowsError::Limit { limit } => AdapterError::Limit(LimitExceeded {
+            kind: LimitKind::RowsPerExtractor,
+            limit,
+            reached: limit.saturating_add(1),
+        }),
     }
 }
 
@@ -171,6 +181,23 @@ mod tests {
         );
         assert_eq!(output.non_strings.len(), 0);
         assert_eq!(output.notes.len(), 0);
+    }
+
+    #[test]
+    fn yaml_aliases_and_merge_keys_fail_loudly() {
+        for text in [
+            "base: &base\n  nested: one\ncopy: *base\n",
+            "base: {nested: one}\ncopy:\n  <<: {nested: two}\n",
+        ] {
+            let err = adapter(Format::Yaml)
+                .extract(&resource("a.yml"), text.as_bytes(), &Limits::default())
+                .unwrap_err();
+            assert!(matches!(err, AdapterError::Parse(_)), "{err}");
+            assert!(
+                err.to_string().contains("aliases") || err.to_string().contains("merge keys"),
+                "{err}"
+            );
+        }
     }
 
     #[test]

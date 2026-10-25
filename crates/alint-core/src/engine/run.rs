@@ -357,6 +357,20 @@ impl Engine {
         self.run_internal(root, index, None)
     }
 
+    /// Enable the run-scoped relation read and decode caches when a configured
+    /// rule consumes the relation layer. A disabled rule costs nothing; a rule
+    /// that is merely skipped by `when:` still enables the caches, which only
+    /// adds a per-file lookup for the files that rule's per-file peers read.
+    pub(super) fn enable_relation_caches(&self, index: &FileIndex) {
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.rule.uses_relations() && entry.rule.level() != crate::Level::Off)
+        {
+            index.enable_relation_caches();
+        }
+    }
+
     #[allow(clippy::too_many_lines)]
     pub(super) fn run_internal(
         &self,
@@ -390,13 +404,11 @@ impl Engine {
         }
         let t_total = Instant::now();
         self.ensure_manifest_scope_resolvable()?;
-        // Enable the relation read cache only when a rule consumes the layer.
-        // The ordinary per-file path checks `index.read_cache()` and reads
-        // directly when it is `None`, so this leaves a relation-free run's hot
-        // path unchanged.
-        if self.entries.iter().any(|entry| entry.rule.uses_relations()) {
-            index.enable_read_cache();
-        }
+        // Enable the relation caches only when a rule consumes the layer. The
+        // ordinary per-file path checks `index.read_cache()` and reads directly
+        // when it is `None`, so this leaves a relation-free run's hot path
+        // unchanged.
+        self.enable_relation_caches(index);
         // Empty changed-set fast path: nothing to lint, return
         // an empty report rather than walk the entries list at
         // all. Saves the fact-evaluation pass too.
@@ -920,6 +932,7 @@ impl Engine {
         if !index.contains_file(file_path) {
             return Err(Error::file_not_in_index(file_path));
         }
+        self.enable_relation_caches(index);
 
         // Facts are constant for an index's lifetime, so cache them: the LSP
         // calls this path on every keystroke and re-scanning would dominate.

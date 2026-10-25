@@ -7,9 +7,9 @@
 //! access, and the subject of the Kani proof below. It rejects absolute
 //! and `..`-escaping paths but is **symlink-blind** — a
 //! lexically-confined `link/x` still resolves outside the tree if `link`
-//! is an in-repo symlink pointing out of it. The *filesystem* gate that
-//! closes that gap (`confine_read` / `resolved_within_root`) lives in
-//! `alint-rules`, layered on top of this.
+//! is an in-repo symlink pointing out of it. The filesystem-aware half,
+//! [`resolved_within_root`], lives in this module; `alint-rules` layers its
+//! `allow_out_of_root` policy on top as `confine_read`.
 //!
 //! [`derive_target`] applies a `from`→`to` capture template to a path
 //! and confines the result — the `file_graph` `derive_target` edge.
@@ -35,8 +35,8 @@ use std::path::{Component, Path, PathBuf};
 /// look up in the (symlink-pruned) `FileIndex`. For a direct filesystem
 /// **read** it is **not** sufficient — `root.join(result)` still follows
 /// any in-repo symlink out of the tree — so reads must go through
-/// `confine_read` / `resolved_within_root` (in `alint-rules`), never
-/// this result alone.
+/// [`resolved_within_root`] (or `alint-rules`' `confine_read`), never this
+/// result alone.
 pub fn normalize_confined(p: &Path) -> Option<PathBuf> {
     let mut out = PathBuf::new();
     for comp in p.components() {

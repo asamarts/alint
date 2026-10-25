@@ -23,12 +23,28 @@ use super::resource::{Resource, ResourceRead};
 /// relation and a per-file rule share one read), but a file no relation asked
 /// for is read directly and immediately dropped, so a relation-free file set
 /// cannot turn into gigabytes of retained bytes at 1M files.
-#[derive(Debug, Default)]
+#[derive(Default)]
 pub struct ReadCache {
     slots: Mutex<HashMap<PathBuf, Arc<OnceLock<Arc<ResourceRead>>>>>,
     interested: Mutex<HashSet<PathBuf>>,
     reads: AtomicUsize,
     hits: AtomicUsize,
+}
+
+impl std::fmt::Debug for ReadCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Never print cached bytes or error strings: `FileIndex` derives
+        // `Debug`, and a log line must not carry repository contents.
+        f.debug_struct("ReadCache")
+            .field("entries", &self.slots.lock().map_or(0, |slots| slots.len()))
+            .field(
+                "interested",
+                &self.interested.lock().map_or(0, |set| set.len()),
+            )
+            .field("reads", &self.reads.load(Ordering::Relaxed))
+            .field("hits", &self.hits.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 impl ReadCache {
@@ -44,10 +60,10 @@ impl ReadCache {
     /// A literal path is symlink-confined before the read; an index entry was
     /// already pruned by the walker, so it takes the cheaper path.
     pub fn read(&self, root: &Path, resource: &Resource, size_hint: u64) -> Arc<ResourceRead> {
-        let check_symlinks = matches!(resource.origin(), super::resource::Origin::Literal);
+        let literal = matches!(resource.origin(), super::resource::Origin::Literal);
         let relative = Path::new(resource.path().as_str());
         self.mark_interest(relative);
-        self.read_inner(root, relative, size_hint, check_symlinks)
+        self.read_inner(root, relative, size_hint, literal)
     }
 
     /// Mark a resource as one a relation consumer will read, so the read is
@@ -55,27 +71,47 @@ impl ReadCache {
     /// an index resource; [`read`](Self::read) marks a literal resource
     /// automatically.
     pub fn mark_interest(&self, relative: &Path) {
-        self.interested
-            .lock()
-            .expect("read cache interest lock")
-            .insert(cache_key(relative));
+        let mut interested = self.interested.lock().expect("read cache interest lock");
+        interested.insert(relative.to_path_buf());
+        #[cfg(windows)]
+        {
+            interested.insert(cache_key(relative));
+            if let Some(text) = relative.to_str() {
+                interested.insert(PathBuf::from(text.replace('/', "\\")));
+            }
+        }
     }
 
     fn is_interested(&self, relative: &Path) -> bool {
-        self.interested
-            .lock()
-            .expect("read cache interest lock")
-            .contains(&cache_key(relative))
+        let interested = self.interested.lock().expect("read cache interest lock");
+        if interested.contains(relative) {
+            return true;
+        }
+        // On Unix the walked separator is already `/`, so the exact lookup
+        // above is the complete check. Windows may hand us `a\b` for a
+        // relation path recorded as `a/b`; fall back to the normalized key.
+        #[cfg(windows)]
+        {
+            interested.contains(&cache_key(relative))
+        }
+        #[cfg(not(windows))]
+        {
+            false
+        }
     }
 
     /// [`read`](Self::read) for a walked index path that may not be
     /// representable as a [`RelPath`](super::RelPath) (a non-UTF-8 filename on
-    /// Unix). Index entries are symlink-pruned by the walk, so this skips the
-    /// filesystem containment check.
+    /// Unix). Index entries are symlink-pruned by the walk and are regular
+    /// files, so this skips the filesystem containment and file-type checks.
+    ///
+    /// Crate-internal: the engine's per-file loop calls it with an index path.
+    /// Relation rules use [`read`](Self::read) with a [`Resource`], which
+    /// applies the literal-path checks.
     ///
     /// Without [`mark_interest`](Self::mark_interest) the bytes are returned
     /// directly and not retained.
-    pub fn read_index_path(
+    pub(crate) fn read_index_path(
         &self,
         root: &Path,
         relative: &Path,
@@ -93,7 +129,7 @@ impl ReadCache {
         root: &Path,
         relative: &Path,
         size_hint: u64,
-        check_symlinks: bool,
+        literal: bool,
     ) -> Arc<ResourceRead> {
         let key = cache_key(relative);
         let slot = {
@@ -110,7 +146,7 @@ impl ReadCache {
         let value = slot
             .get_or_init(|| {
                 self.reads.fetch_add(1, Ordering::Relaxed);
-                Arc::new(read_once(root, relative, size_hint, check_symlinks))
+                Arc::new(read_once(root, relative, size_hint, literal))
             })
             .clone();
         if already_present {
@@ -152,10 +188,31 @@ fn cache_key(relative: &Path) -> PathBuf {
     PathBuf::from(parts.join("/"))
 }
 
-fn read_once(root: &Path, relative: &Path, size_hint: u64, check_symlinks: bool) -> ResourceRead {
+fn read_once(root: &Path, relative: &Path, size_hint: u64, literal: bool) -> ResourceRead {
     let absolute = root.join(relative);
-    if check_symlinks && !crate::pathsafe::resolved_within_root(&absolute, root) {
-        return ResourceRead::Unreadable("path escapes the repo root".to_string());
+    let mut size_hint = size_hint;
+    if literal {
+        if !crate::pathsafe::resolved_within_root(&absolute, root) {
+            return ResourceRead::Unreadable("path escapes the repo root".to_string());
+        }
+        // A literal resource is config-derived and may name a FIFO, socket, or
+        // device. Opening a FIFO `O_RDONLY` blocks until a writer appears, so
+        // reject every non-regular file before `read_for_analysis` opens it.
+        // Index entries are already regular files, so the per-file hot path
+        // skips this extra stat.
+        match std::fs::metadata(&absolute) {
+            Ok(metadata) if !metadata.is_file() => {
+                return ResourceRead::Unreadable(format!(
+                    "{} is not a regular file",
+                    absolute.display()
+                ));
+            }
+            Ok(metadata) => size_hint = metadata.len(),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                return ResourceRead::Missing;
+            }
+            Err(error) => return ResourceRead::Unreadable(error.to_string()),
+        }
     }
     match crate::walker::read_for_analysis(&absolute, size_hint) {
         crate::walker::AnalysisRead::Bytes(bytes) => {
@@ -173,10 +230,23 @@ type DecodeResult = Result<Arc<AdapterOutput>, AdapterError>;
 type DecodeSlots = HashMap<(String, String), Arc<OnceLock<DecodeResult>>>;
 
 /// One adapter output, cached for the whole run.
-#[derive(Debug, Default)]
+///
+/// A cache belongs to one run: the limits supplied to [`decode`](Self::decode)
+/// are part of that run's context, not part of the key.
+#[derive(Default)]
 pub struct DecodeCache {
     slots: Mutex<DecodeSlots>,
     decodes: AtomicUsize,
+}
+
+impl std::fmt::Debug for DecodeCache {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // Rows and diagnostics can carry repository values; never print them.
+        f.debug_struct("DecodeCache")
+            .field("entries", &self.slots.lock().map_or(0, |slots| slots.len()))
+            .field("decodes", &self.decodes.load(Ordering::Relaxed))
+            .finish()
+    }
 }
 
 impl DecodeCache {
@@ -233,6 +303,89 @@ mod tests {
 
     fn literal(path: &str) -> Resource {
         Resource::literal(crate::relation::RelPath::parse(path).unwrap())
+    }
+
+    #[test]
+    fn a_literal_non_regular_file_is_rejected_before_opening() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join("a-directory")).unwrap();
+        let cache = ReadCache::new();
+        let read = cache.read(dir.path(), &literal("a-directory"), 0);
+        assert!(
+            matches!(read.as_ref(), ResourceRead::Unreadable(message) if message.contains("not a regular file")),
+            "{read:?}"
+        );
+        #[cfg(unix)]
+        {
+            let _socket = std::os::unix::net::UnixListener::bind(dir.path().join("a-socket"))
+                .expect("bind a test socket");
+            let read = cache.read(dir.path(), &literal("a-socket"), 0);
+            assert!(
+                matches!(read.as_ref(), ResourceRead::Unreadable(message) if message.contains("not a regular file")),
+                "{read:?}"
+            );
+        }
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn a_literal_fifo_is_rejected_without_blocking() {
+        let dir = tempfile::tempdir().unwrap();
+        let fifo = dir.path().join("a-fifo");
+        let status = std::process::Command::new("mkfifo")
+            .arg(&fifo)
+            .status()
+            .expect("run mkfifo");
+        assert!(status.success(), "mkfifo failed");
+        let root = dir.path().to_path_buf();
+        let (sender, receiver) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let cache = ReadCache::new();
+            let read = cache.read(&root, &literal("a-fifo"), 0);
+            let _ = sender.send(read);
+        });
+        let read = receiver
+            .recv_timeout(std::time::Duration::from_secs(2))
+            .expect("a FIFO must be rejected before it can block the read");
+        assert!(
+            matches!(read.as_ref(), ResourceRead::Unreadable(message) if message.contains("not a regular file")),
+            "{read:?}"
+        );
+    }
+
+    #[test]
+    fn cache_debug_never_prints_cached_bytes() {
+        let cache = ReadCache::new();
+        let resource = literal("a.txt");
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"top-secret-value").unwrap();
+        let _ = cache.read(dir.path(), &resource, 0);
+        let rendered = format!("{cache:?}");
+        assert!(!rendered.contains("top-secret-value"), "{rendered}");
+
+        let decodes = DecodeCache::new();
+        let adapter = ExtractAdapter::new(Extract::WholeFile);
+        let _ = decodes
+            .decode(&adapter, &resource, b"top-secret-value", &Limits::default())
+            .unwrap();
+        let rendered = format!("{decodes:?}");
+        assert!(!rendered.contains("top-secret-value"), "{rendered}");
+    }
+
+    #[test]
+    fn file_index_debug_does_not_print_cached_bytes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"top-secret-value").unwrap();
+        let index = crate::walker::FileIndex::from_entries(vec![crate::walker::FileEntry {
+            path: std::sync::Arc::from(std::path::Path::new("a.txt")),
+            is_dir: false,
+            size: 16,
+        }]);
+        index.enable_relation_caches();
+        let cache = index.read_cache().expect("cache enabled");
+        let _ = cache.read(dir.path(), &Resource::for_test(0, "a.txt"), 16);
+        let rendered = format!("{index:?}");
+        assert!(!rendered.contains("top-secret-value"), "{rendered}");
     }
 
     #[test]
