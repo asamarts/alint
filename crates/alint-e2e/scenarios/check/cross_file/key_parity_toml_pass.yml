@@ -1,0 +1,28 @@
+test_version: 1
+name: key_parity compares TOML tables and dotted keys
+tags: [check, key_parity, cross_file, toml]
+
+given:
+  tree:
+    locales:
+      en.toml: |
+        [nav]
+        home = "Home"
+        about = "About"
+      fr.toml: |
+        nav.home = "Accueil"
+        nav.about = "À propos"
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: locales/en.toml
+        peers: "locales/*.toml"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

@@ -386,9 +386,12 @@
       "enum": [
         "json",
         "yaml",
+        "toml",
         "dotenv",
         "properties",
-        "ini"
+        "ini",
+        "android-strings",
+        "resx"
       ],
       "type": "string"
     },

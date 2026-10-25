@@ -1,0 +1,31 @@
+test_version: 1
+name: key_parity compares .resx string entries and skips non-string resources
+tags: [check, key_parity, cross_file, resx]
+
+given:
+  tree:
+    Strings.resx: |
+      <root>
+        <data name="Greeting"><value>Hello</value></data>
+        <data name="Icon" type="System.Drawing.Bitmap" />
+      </root>
+    Strings.fr.resx: |
+      <root>
+        <data name="Greeting"><value>Bonjour</value></data>
+      </root>
+  config: |
+    version: 1
+    rules:
+      - id: resx-strings-match
+        kind: key_parity
+        reference: Strings.resx
+        peers: "Strings.*.resx"
+        format: resx
+        direction: extra
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

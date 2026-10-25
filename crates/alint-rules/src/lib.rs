@@ -1201,6 +1201,7 @@ mod registry_tests {
             &[
                 alint_core::Format::Json,
                 alint_core::Format::Yaml,
+                alint_core::Format::Toml,
                 alint_core::Format::Dotenv,
                 alint_core::Format::Properties,
                 alint_core::Format::Ini,

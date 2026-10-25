@@ -1,0 +1,33 @@
+test_version: 1
+name: key_parity reports a missing Android string key
+tags: [check, key_parity, cross_file, android]
+
+given:
+  tree:
+    values:
+      strings.xml: |
+        <resources>
+          <string name="app">App</string>
+          <string name="title">Title</string>
+        </resources>
+    values-fr:
+      strings.xml: |
+        <resources>
+          <string name="app">App</string>
+        </resources>
+  config: |
+    version: 1
+    rules:
+      - id: android-strings-match
+        kind: key_parity
+        reference: values/strings.xml
+        peers: "values-*/*.xml"
+        format: android-strings
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: android-strings-match, level: error, path: values-fr/strings.xml}

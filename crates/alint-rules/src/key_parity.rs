@@ -20,7 +20,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use alint_core::relation::{
-    EntryRowsAdapter, Limits, Pointer, RelPath, Resource, ResourceRead, Segment, Selector,
+    Adapter, AndroidStringsAdapter, EntryRowsAdapter, Limits, Pointer, RelPath, Resource,
+    ResourceRead, ResxAdapter, Segment, Selector, TomlRowsAdapter,
 };
 use alint_core::{
     AnalysisFailureKind, ByteSpan, Context, Error, Level, RelatedLocation, Result, Rule, RuleSpec,
@@ -33,27 +34,37 @@ use serde::Deserialize;
 enum KeyFormat {
     Json,
     Yaml,
+    Toml,
     Dotenv,
     Properties,
     Ini,
+    AndroidStrings,
+    Resx,
 }
 
 impl KeyFormat {
-    fn to_format(self) -> alint_core::Format {
+    fn adapter(self) -> Result<Box<dyn Adapter>, alint_core::relation::AdapterError> {
         match self {
-            Self::Json => alint_core::Format::Json,
-            Self::Yaml => alint_core::Format::Yaml,
-            Self::Dotenv => alint_core::Format::Dotenv,
-            Self::Properties => alint_core::Format::Properties,
-            Self::Ini => alint_core::Format::Ini,
+            Self::Json => Ok(Box::new(EntryRowsAdapter::new(alint_core::Format::Json)?)),
+            Self::Yaml => Ok(Box::new(EntryRowsAdapter::new(alint_core::Format::Yaml)?)),
+            Self::Dotenv => Ok(Box::new(EntryRowsAdapter::new(alint_core::Format::Dotenv)?)),
+            Self::Properties => Ok(Box::new(EntryRowsAdapter::new(
+                alint_core::Format::Properties,
+            )?)),
+            Self::Ini => Ok(Box::new(EntryRowsAdapter::new(alint_core::Format::Ini)?)),
+            Self::Toml => Ok(Box::new(TomlRowsAdapter::new())),
+            Self::AndroidStrings => Ok(Box::new(AndroidStringsAdapter::new())),
+            Self::Resx => Ok(Box::new(ResxAdapter::new())),
         }
     }
 
     fn model(self) -> KeyModel {
         match self {
-            Self::Json | Self::Yaml => KeyModel::Tree,
+            Self::Json | Self::Yaml | Self::Toml => KeyModel::Tree,
             Self::Dotenv | Self::Properties => KeyModel::Flat,
             Self::Ini => KeyModel::Ini,
+            Self::AndroidStrings => KeyModel::AndroidStrings,
+            Self::Resx => KeyModel::Resx,
         }
     }
 }
@@ -80,6 +91,8 @@ enum KeyModel {
     Tree,
     Flat,
     Ini,
+    AndroidStrings,
+    Resx,
 }
 
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
@@ -382,7 +395,7 @@ impl KeyParityRule {
                 return None;
             }
         };
-        let adapter = match EntryRowsAdapter::new(format.to_format()) {
+        let adapter = match format.adapter() {
             Ok(adapter) => adapter,
             Err(error) => {
                 record_parse_failure(ctx);
@@ -390,8 +403,8 @@ impl KeyParityRule {
                 return None;
             }
         };
-        let redacts = alint_core::relation::Adapter::redacts_by_default(&adapter);
-        let output = match decode_cache.decode(&adapter, resource, &bytes, limits) {
+        let redacts = adapter.redacts_by_default();
+        let output = match decode_cache.decode(adapter.as_ref(), resource, &bytes, limits) {
             Ok(output) => output,
             Err(error) => {
                 record_parse_failure(ctx);
@@ -580,6 +593,7 @@ fn infer_format(path: &Path) -> Option<KeyFormat> {
     match path.extension()?.to_str()?.to_ascii_lowercase().as_str() {
         "json" => Some(KeyFormat::Json),
         "yaml" | "yml" => Some(KeyFormat::Yaml),
+        "toml" => Some(KeyFormat::Toml),
         "properties" => Some(KeyFormat::Properties),
         "ini" => Some(KeyFormat::Ini),
         _ => None,
@@ -796,6 +810,7 @@ pub static META: alint_core::KindMeta = alint_core::KindMeta {
     formats: std::borrow::Cow::Borrowed(&[
         alint_core::Format::Json,
         alint_core::Format::Yaml,
+        alint_core::Format::Toml,
         alint_core::Format::Dotenv,
         alint_core::Format::Properties,
         alint_core::Format::Ini,
@@ -902,8 +917,13 @@ mod tests {
             Some(KeyFormat::Properties)
         );
         assert_eq!(infer_format(Path::new("a.ini")), Some(KeyFormat::Ini));
+        assert_eq!(infer_format(Path::new("a.toml")), Some(KeyFormat::Toml));
+        assert_eq!(infer_format(Path::new("a.xml")), None);
         assert_eq!(KeyFormat::Json.model(), KeyModel::Tree);
+        assert_eq!(KeyFormat::Toml.model(), KeyModel::Tree);
         assert_eq!(KeyFormat::Dotenv.model(), KeyModel::Flat);
+        assert_eq!(KeyFormat::AndroidStrings.model(), KeyModel::AndroidStrings);
+        assert_eq!(KeyFormat::Resx.model(), KeyModel::Resx);
     }
 
     #[test]
@@ -1173,6 +1193,45 @@ mod tests {
             "{:?}",
             messages(&findings)
         );
+    }
+
+    #[test]
+    fn toml_android_and_resx_formats_compare() {
+        let toml = run(
+            "id: t\nkind: key_parity\nreference: locales/en.toml\npeers: 'locales/*.toml'\nlevel: error\n",
+            &[
+                (
+                    "locales/en.toml",
+                    b"[nav]\nhome = \"Home\"\nabout = \"About\"\n",
+                ),
+                ("locales/fr.toml", b"[nav]\nhome = \"Accueil\"\n"),
+            ],
+        );
+        assert!(
+            messages(&toml)
+                .iter()
+                .any(|m| m.contains("missing key `nav.about`")),
+            "{:?}",
+            messages(&toml)
+        );
+
+        let android = run(
+            "id: t\nkind: key_parity\nreference: values/strings.xml\npeers: 'values-*/*.xml'\nformat: android-strings\nlevel: error\n",
+            &[
+                ("values/strings.xml", b"<resources><string name=\"app\">App</string><string name=\"build\" translatable=\"false\">1</string></resources>"),
+                ("values-fr/strings.xml", b"<resources><string name=\"app\">App</string></resources>"),
+            ],
+        );
+        assert!(android.is_empty(), "{:?}", messages(&android));
+
+        let resx = run(
+            "id: t\nkind: key_parity\nreference: Strings.resx\npeers: 'Strings.*.resx'\nformat: resx\nlevel: error\n",
+            &[
+                ("Strings.resx", b"<root><data name=\"Greeting\"><value>Hello</value></data><data name=\"Icon\" type=\"Bitmap\"/></root>"),
+                ("Strings.fr.resx", b"<root><data name=\"Greeting\"><value>Bonjour</value></data></root>"),
+            ],
+        );
+        assert!(resx.is_empty(), "{:?}", messages(&resx));
     }
 
     #[test]

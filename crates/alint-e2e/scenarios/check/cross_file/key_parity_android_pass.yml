@@ -1,0 +1,34 @@
+test_version: 1
+name: key_parity compares Android string resources and skips untranslatable keys
+tags: [check, key_parity, cross_file, android]
+
+given:
+  tree:
+    values:
+      strings.xml: |
+        <resources>
+          <string name="app">App</string>
+          <string name="build" translatable="false">1</string>
+          <plurals name="items"><item quantity="other">%d items</item></plurals>
+        </resources>
+    values-fr:
+      strings.xml: |
+        <resources>
+          <string name="app">App</string>
+          <plurals name="items"><item quantity="other">%d articles</item></plurals>
+        </resources>
+  config: |
+    version: 1
+    rules:
+      - id: android-strings-match
+        kind: key_parity
+        reference: values/strings.xml
+        peers: "values-*/*.xml"
+        format: android-strings
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

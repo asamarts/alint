@@ -25,7 +25,9 @@ mod row;
 mod value;
 
 pub use adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput, check_row_count};
-pub use adapters::{EntryRowsAdapter, ExtractAdapter};
+pub use adapters::{
+    AndroidStringsAdapter, EntryRowsAdapter, ExtractAdapter, ResxAdapter, TomlRowsAdapter,
+};
 pub use cache::{DecodeCache, ReadCache};
 pub use limits::{LimitConfigError, LimitExceeded, LimitKind, Limits, RunBudget};
 pub use path::RelPath;

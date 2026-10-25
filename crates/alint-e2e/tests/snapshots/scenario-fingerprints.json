@@ -96,6 +96,12 @@
     "fingerprint": "05d0e29d1ac7de163c313c62f7b206a27eb8dad9297e068b6eb03d96a20dfc44"
   },
   {
+    "scenario": "check/changed/changed_key_parity_reference_edit_runs.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/fr.json",
+    "fingerprint": "05d0e29d1ac7de163c313c62f7b206a27eb8dad9297e068b6eb03d96a20dfc44"
+  },
+  {
     "scenario": "check/changed/changed_max_files_per_directory_counts_unchanged_files.yml",
     "rule_id": "dir-size",
     "path": "dir",
@@ -576,10 +582,28 @@
     "fingerprint": "22848d1fe6207492f3f85640b54346f31a9449300ad81143b54df74407ad849d"
   },
   {
+    "scenario": "check/cross_file/key_parity_android_fires.yml",
+    "rule_id": "android-strings-match",
+    "path": "values-fr/strings.xml",
+    "fingerprint": "b403e8d0ba13b462b51326ec06824611b0b084804bd10f2c0662adc37b57b27f"
+  },
+  {
     "scenario": "check/cross_file/key_parity_fires.yml",
     "rule_id": "locales-match-english",
     "path": "locales/fr.json",
     "fingerprint": "05d0e29d1ac7de163c313c62f7b206a27eb8dad9297e068b6eb03d96a20dfc44"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_resx_fires.yml",
+    "rule_id": "resx-strings-match",
+    "path": "Strings.fr.resx",
+    "fingerprint": "8917447e6cdd58ead48f959d3975d7fd5a526cb1bd70060f82328834da182bce"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_toml_fires.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/fr.toml",
+    "fingerprint": "c4a96790b7aaf991e6de125c9a7ab0fb2793d34e186f3e93bd22a17da6d9004b"
   },
   {
     "scenario": "check/cross_file/markdown_fragments_resolve_fail.yml",

@@ -475,14 +475,18 @@ v0.21 is complete only when all of the following are observed:
 
 ## Status and next steps
 
-- **R3, in progress.** `key_parity` is registered and evaluated for JSON,
-  YAML, dotenv, INI, and Java properties on the R2 adapters, with the
-  documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
-  options, fail-loud missing/parse/empty-peer outcomes, baseline keys, a
-  `--changed` path scope, a keys-only preview on the extraction trace stage,
-  unit tests, and firing/silent plus `--changed` policy scenarios. R9 adds TOML
-  and the two XML dialects; the relation benchmark scenario remains before R3
-  is complete.
+- **R9, done.** The TOML row adapter uses the lossless `toml_edit` tree;
+  Android `<string>`/`<string-array>`/`<plurals>` and .NET `.resx` string
+  entries parse through the guarded XML path. `key_parity` now covers all eight
+  formats, with per-dialect key models, pass/fail scenarios, and eager key
+  spans.
+- **R3, in progress.** `key_parity` is registered for JSON, YAML, TOML,
+  dotenv, INI, Java properties, Android string resources, and .NET `.resx`,
+  with the documented `direction`, `strip_root`, `plurals: cldr`, and
+  `ignore_keys` options, fail-loud missing/parse/empty-peer outcomes, baseline
+  keys, a `--changed` path scope, a keys-only preview on the extraction trace
+  stage, unit tests, and firing/silent plus `--changed` policy scenarios. The
+  relation benchmark scenario remains before R3 is complete.
 - **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
   the row/diagnostic model, the strict-versus-lossy decoding split, and the
   read/decode cache design that R2 implements.
