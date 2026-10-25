@@ -1,0 +1,30 @@
+test_version: 1
+name: key_parity passes when every peer declares the reference keys
+tags: [check, key_parity, cross_file, passing]
+
+docs:
+  title: Every locale declares the reference key set
+  case: pass
+  kind: key_parity
+
+given:
+  tree:
+    locales:
+      en.json: |
+        {"nav": {"home": "Home", "about": "About"}}
+      fr.json: |
+        {"nav": {"home": "Accueil", "about": "À propos"}}
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: locales/en.json
+        peers: "locales/*.json"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

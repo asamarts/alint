@@ -69,6 +69,7 @@ pub static KIND_CATEGORIES: &[(&str, &[Category])] = &[
     ("json_path_equals", &[Category::StructuredQuery]),
     ("json_path_matches", &[Category::StructuredQuery]),
     ("json_schema_passes", &[Category::StructuredQuery]),
+    ("key_parity", &[Category::CrossFile]),
     ("line_endings", &[Category::TextHygiene, Category::PortableMetadata]),
     ("line_max_width", &[Category::TextHygiene]),
     ("markdown_fragments_resolve", &[Category::CrossFile, Category::Content]),

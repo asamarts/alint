@@ -90,6 +90,12 @@
     "fingerprint": "4ab6239c441890a45799e8202bcdf92064ade9d317281ee225594eb8157e6684"
   },
   {
+    "scenario": "check/changed/changed_key_parity_peer_edit_runs.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/fr.json",
+    "fingerprint": "05d0e29d1ac7de163c313c62f7b206a27eb8dad9297e068b6eb03d96a20dfc44"
+  },
+  {
     "scenario": "check/changed/changed_max_files_per_directory_counts_unchanged_files.yml",
     "rule_id": "dir-size",
     "path": "dir",
@@ -568,6 +574,12 @@
     "rule_id": "unit-has-snapshot",
     "path": "tests/unit/lexer.rs",
     "fingerprint": "22848d1fe6207492f3f85640b54346f31a9449300ad81143b54df74407ad849d"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_fires.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/fr.json",
+    "fingerprint": "05d0e29d1ac7de163c313c62f7b206a27eb8dad9297e068b6eb03d96a20dfc44"
   },
   {
     "scenario": "check/cross_file/markdown_fragments_resolve_fail.yml",

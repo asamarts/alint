@@ -203,6 +203,79 @@ rules:
 }
 
 #[test]
+fn key_parity_trace_preview_carries_keys_not_values() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: locales
+    kind: key_parity
+    reference: locales/en.json
+    peers: "locales/*.json"
+    level: error
+"#,
+    );
+    std::fs::create_dir(root.path().join("locales")).unwrap();
+    write(
+        root.path().join("locales/en.json"),
+        r#"{"nav":{"home":"Home","about":"About"}}"#,
+    );
+    write(
+        root.path().join("locales/fr.json"),
+        r#"{"nav":{"home":"Accueil"}}"#,
+    );
+    let document = json(&run(
+        root.path(),
+        &[
+            "explain",
+            "locales",
+            "--trace",
+            "--preview",
+            "--format",
+            "json",
+        ],
+    ));
+    let extraction = document["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["class"] == "extraction")
+        .expect("extraction stage");
+    let rendered = extraction.to_string();
+    assert!(!rendered.contains("Home"), "{rendered}");
+    assert!(!rendered.contains("Accueil"), "{rendered}");
+    assert!(rendered.contains("nav.home"), "{rendered}");
+    assert!(rendered.contains("nav.about"), "{rendered}");
+    let preview = &extraction["preview"];
+    assert_eq!(preview["total"], 3);
+    assert_eq!(preview["redacted"], 0);
+
+    let bounded = json(&run(
+        root.path(),
+        &[
+            "explain",
+            "locales",
+            "--trace",
+            "--preview",
+            "--preview-limit",
+            "1",
+            "--format",
+            "json",
+        ],
+    ));
+    let preview = &bounded["stages"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|stage| stage["class"] == "extraction")
+        .unwrap()["preview"];
+    assert_eq!(preview["total"], 3);
+    assert_eq!(preview["shown"], 1);
+    assert_eq!(preview["omitted"], 2);
+}
+
+#[test]
 fn preview_is_bounded_deterministic_and_schema_valid() {
     let root = fixture();
     let args = [

@@ -475,6 +475,14 @@ v0.21 is complete only when all of the following are observed:
 
 ## Status and next steps
 
+- **R3, in progress.** `key_parity` is registered and evaluated for JSON,
+  YAML, dotenv, INI, and Java properties on the R2 adapters, with the
+  documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
+  options, fail-loud missing/parse/empty-peer outcomes, baseline keys, a
+  `--changed` path scope, a keys-only preview on the extraction trace stage,
+  unit tests, and firing/silent plus `--changed` policy scenarios. R9 adds TOML
+  and the two XML dialects; the relation benchmark scenario remains before R3
+  is complete.
 - **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
   the row/diagnostic model, the strict-versus-lossy decoding split, and the
   read/decode cache design that R2 implements.

@@ -1,0 +1,34 @@
+test_version: 1
+name: --changed runs key_parity when only a peer changed
+tags: [check, check_changed, changed, key_parity]
+
+given:
+  tree:
+    locales:
+      en.json: |
+        {"nav": {"home": "Home", "about": "About"}}
+      fr.json: |
+        {"nav": {"home": "Accueil"}}
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: locales/en.json
+        peers: "locales/*.json"
+        level: error
+  git:
+    init: true
+    add: [locales/en.json]
+    commit: true
+    # locales/fr.json is untracked, so the changed set is {locales/fr.json}.
+
+when: [check, check_changed]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: locales-match-english, level: error, path: locales/fr.json}
+  - exit: policy_failure
+    violations:
+      - {rule: locales-match-english, level: error, path: locales/fr.json}

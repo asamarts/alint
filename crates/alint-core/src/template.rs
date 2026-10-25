@@ -438,6 +438,7 @@ pub const NESTED_GLOB_OPTIONS: &[(&[&str], &[&str])] = &[
     (&["dir_contains"], &["select", "require"]),
     (&["dir_only_contains"], &["select", "allow"]),
     (&["unique_by"], &["select"]),
+    (&["key_parity"], &["peers"]),
     (
         &["for_each_dir", "for_each_file", "every_matching_has"],
         &["select"],

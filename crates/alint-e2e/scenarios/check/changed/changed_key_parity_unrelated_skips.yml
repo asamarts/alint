@@ -1,0 +1,34 @@
+test_version: 1
+name: --changed skips key_parity when only an unrelated file changed
+tags: [check, check_changed, changed, key_parity]
+
+given:
+  tree:
+    locales:
+      en.json: |
+        {"nav": {"home": "Home"}}
+      fr.json: |
+        {"nav": {"home": "Accueil"}}
+    notes.md: |
+      # scratch
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: locales/en.json
+        peers: "locales/*.json"
+        level: error
+  git:
+    init: true
+    add: [locales/en.json, locales/fr.json]
+    commit: true
+    # notes.md is untracked, so the changed set is {notes.md}.
+
+when: [check, check_changed]
+
+expect:
+  - exit: success
+    violations: []
+  - exit: success
+    violations: []

@@ -882,6 +882,16 @@ Every direct-child file of a directory matching `select:` must match at least on
 
 No two files matching `select` may share the value of `key` (a path template; tokens `{path}`/`{dir}`/`{basename}`/`{stem}`/`{ext}`/`{parent_name}`). Catches basename collisions across subdirectories. With `case_insensitive: true` the key is folded to lowercase before grouping, so `README.md` and `readme.md` collide — the case-insensitive-filesystem hazard (Windows / macOS).
 
+### `key_parity`
+
+**Categories:** Cross-file
+
+One reference file and a glob of peers must declare the same key set. The reference is a literal path read even when ignored (so `.env.example` can be checked against `.env`), while peers come from the index and respect `.gitignore`. JSON, YAML, dotenv, INI, and Java properties are supported; TOML and the Android/.resx dialects arrive with the next relation-layer release. Nested JSON/YAML keys are compared as leaf paths, arrays are values and are not descended, and duplicate keys are not parity violations.
+
+`direction: both|missing|extra` selects the reported differences. `strip_root: true` compares below a single top-level key, as Rails locale files do (`en:`, `fr:`). `plurals: cldr` treats a CLDR plural group — a nested object whose keys are all `zero/one/two/few/many/other` and include `other`, or i18next's `_other` sibling suffixes — as one key; exact per-locale category checking is deliberately not in v0.21. `ignore_keys` takes key-path globs, where `*` stays within one segment and `**` crosses segments. `format` is inferred from the extension (`.env` / `.env.*` infer dotenv) and must be set explicitly for an extensionless reference. Files are compared only within one key model: tree formats together, flat dotenv/properties together, and INI on its own; a mismatch is a configuration error.
+
+A missing reference, an unparsable reference or peer, and a `peers` glob that matches no file are fail-loud analysis outcomes, never a pass. Findings quote keys only, never values. There is no fix in v0.21: inserting a missing key is a Suggestion and waits for the generic edit plan. Under `--changed` the rule is skipped only when neither the reference nor a peer changed; otherwise it evaluates over the full index.
+
 ### `every_matching_has`
 
 **Categories:** Cross-file

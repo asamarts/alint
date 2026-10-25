@@ -2,7 +2,7 @@
   "format_version": 6,
   "alint_version": "0.20.1",
   "counts": {
-    "rule_kinds": 102,
+    "rule_kinds": 103,
     "rule_aliases": 11,
     "families": 13,
     "bundled_rulesets": 24,
@@ -77,6 +77,7 @@
     "json_path_equals",
     "json_path_matches",
     "json_schema_passes",
+    "key_parity",
     "line_endings",
     "line_max_width",
     "markdown_fragments_resolve",
@@ -408,6 +409,9 @@
     ],
     "json_schema_passes": [
       "structured-query"
+    ],
+    "key_parity": [
+      "cross-file"
     ],
     "line_endings": [
       "text-hygiene",
@@ -3854,6 +3858,62 @@
       },
       "nested_rules": false
     },
+    "key_parity": {
+      "dispatch": {
+        "kind": "full_index",
+        "path_scope": true
+      },
+      "paths": "forbidden",
+      "scope_filter": {
+        "kind": "rejected",
+        "reason": "scope_filter is not supported by this kind"
+      },
+      "git_tracked_only": "none",
+      "respect_gitignore": false,
+      "root_only": false,
+      "selectors": [
+        {
+          "name": "reference",
+          "type": "literal_path",
+          "rerootable": false
+        },
+        {
+          "name": "peers",
+          "type": "glob",
+          "rerootable": true
+        }
+      ],
+      "since": "none",
+      "capabilities": [],
+      "content": {
+        "kind": "whole_file"
+      },
+      "formats": [
+        "json",
+        "yaml",
+        "dotenv",
+        "properties",
+        "ini"
+      ],
+      "dependencies": [],
+      "fix_ops": [],
+      "expect_matches": false,
+      "trace": {
+        "allowed_stages": [
+          "selection",
+          "extraction",
+          "cardinality",
+          "assertion"
+        ],
+        "required_stages": [
+          "selection",
+          "assertion"
+        ],
+        "emits_preview_rows": true,
+        "nested_evaluation": false
+      },
+      "nested_rules": false
+    },
     "line_endings": {
       "dispatch": {
         "kind": "per_file",
@@ -6130,6 +6190,7 @@
     "json_path_equals": "structured_path",
     "json_path_matches": "structured_path",
     "json_schema_passes": "json_schema_passes",
+    "key_parity": "key_parity",
     "line_endings": "line_endings",
     "line_max_width": "line_max_width",
     "markdown_fragments_resolve": "markdown_fragments_resolve",

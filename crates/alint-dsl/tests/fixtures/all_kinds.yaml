@@ -285,6 +285,13 @@ rules:
     level: error
     message: "{{ctx.basename}} not allowed under {{ctx.dir}}"
 
+  - id: locale-key-parity
+    kind: key_parity
+    reference: locales/en.json
+    peers: "locales/*.json"
+    direction: both
+    level: warning
+
   - id: unique-rs-stems
     kind: unique_by
     select: "**/*.rs"

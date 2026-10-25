@@ -6,6 +6,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **`key_parity`** keeps a reference locale or environment file and a glob of peers in step. JSON, YAML, dotenv, INI, and Java properties keys are compared as leaf paths; `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys` handle the common locale layouts. Missing references, unparsable files, and a peer glob that matches nothing fail loudly, and findings quote keys only. TOML, Android string resources, `.resx`, and key-insertion fixes are reserved for the remaining relation-layer work.
+
 ### Fixed
 
 - A development build's `alint --version` now reports the checked-out commit.

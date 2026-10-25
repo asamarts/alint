@@ -180,6 +180,7 @@ pub mod import_gate;
 pub mod indent_style;
 pub mod io;
 pub mod json_schema_passes;
+pub mod key_parity;
 pub mod line_endings;
 pub mod line_max_width;
 mod markdown;
@@ -285,6 +286,7 @@ pub fn rule_option_schemas() -> Vec<(&'static str, serde_json::Value)> {
             "rule_max_consecutive_blank_lines",
             max_consecutive_blank_lines::options_schema(),
         ),
+        ("rule_key_parity", key_parity::options_schema()),
         ("rule_unique_by", unique_by::options_schema()),
         (
             "rule_markdown_links_resolve",
@@ -793,6 +795,7 @@ pub fn register_builtin(registry: &mut RuleRegistry) {
         dir_only_contains::build,
     );
     registry.register("unique_by", &unique_by::META, unique_by::build);
+    registry.register("key_parity", &key_parity::META, key_parity::build);
     registry.register("dir_contains", &dir_contains::META, dir_contains::build);
     registry.register(
         "every_matching_has",
@@ -1009,7 +1012,7 @@ mod registry_tests {
             metadata, canonical,
             "every canonical builder must share its registration with one metadata record"
         );
-        assert_eq!(metadata.len(), 102, "the v0.19 inventory covers 102 kinds");
+        assert_eq!(metadata.len(), 103, "the v0.19 inventory covers 103 kinds");
 
         for (alias, canonical) in registry.aliases() {
             let alias_meta = registry.meta(alias).expect("registered alias has metadata");
@@ -1082,7 +1085,7 @@ mod registry_tests {
                 count(&|m| matches!(m.dispatch, DispatchClass::RuleMajorScoped)),
                 count(&|m| matches!(m.dispatch, DispatchClass::SingleShot)),
             ],
-            [56, 22, 14, 10],
+            [56, 23, 14, 10],
             "dispatch-class inventory drifted"
         );
         assert_eq!(
@@ -1091,7 +1094,7 @@ mod registry_tests {
                 count(&|m| m.paths == PathsSupport::Optional),
                 count(&|m| m.paths == PathsSupport::Forbidden),
             ],
-            [79, 0, 23],
+            [79, 0, 24],
             "paths support inventory drifted"
         );
         assert_eq!(
@@ -1100,7 +1103,7 @@ mod registry_tests {
                 count(&|m| matches!(m.scope_filter, ScopeFilterSupport::AncestorOnly)),
                 count(&|m| matches!(m.scope_filter, ScopeFilterSupport::Rejected { .. })),
             ],
-            [73, 1, 28],
+            [73, 1, 29],
             "scope-filter inventory drifted"
         );
         assert_eq!(
@@ -1109,7 +1112,7 @@ mod registry_tests {
                 count(&|m| m.git_tracked_only == GitTrackedSupport::FileOnly),
                 count(&|m| m.git_tracked_only == GitTrackedSupport::DirAware),
             ],
-            [98, 2, 2],
+            [99, 2, 2],
             "git-tracked support inventory drifted"
         );
         assert_eq!(
@@ -1118,7 +1121,7 @@ mod registry_tests {
                 count(&|m| m.since == SinceSupport::Optional),
                 count(&|m| m.since == SinceSupport::Required),
             ],
-            [93, 7, 2],
+            [94, 7, 2],
             "since support inventory drifted"
         );
         assert_eq!(count(&|m| m.expect_matches), 75);
@@ -1134,7 +1137,7 @@ mod registry_tests {
                 count(&|m| m.content == ContentAccess::Blame),
                 count(&|m| m.content == ContentAccess::Delegated),
             ],
-            [23, 5, 6, 1, 54, 6, 1, 6],
+            [23, 5, 6, 1, 55, 6, 1, 6],
             "content-access inventory drifted"
         );
 
@@ -1153,6 +1156,7 @@ mod registry_tests {
             BTreeSet::from([
                 "file_absent",
                 "file_exists",
+                "key_parity",
                 "max_files_per_directory",
                 "no_case_conflicts",
             ])
@@ -1191,6 +1195,17 @@ mod registry_tests {
             kinds_where(&|m| m.formats.as_ref() == alint_core::Format::ALL),
             all_format_kinds
         );
+        let extract_format_kinds = BTreeSet::from(["key_parity"]);
+        assert_eq!(
+            registry.meta("key_parity").unwrap().formats.as_ref(),
+            &[
+                alint_core::Format::Json,
+                alint_core::Format::Yaml,
+                alint_core::Format::Dotenv,
+                alint_core::Format::Properties,
+                alint_core::Format::Ini,
+            ]
+        );
         let mut structured_format_kinds = BTreeSet::new();
         for (prefix, format) in [
             ("json_", alint_core::Format::Json),
@@ -1216,7 +1231,10 @@ mod registry_tests {
         }
         assert_eq!(structured_format_kinds.len(), 24);
         for &(kind, meta) in &records {
-            if !all_format_kinds.contains(kind) && !structured_format_kinds.contains(kind) {
+            if !all_format_kinds.contains(kind)
+                && !structured_format_kinds.contains(kind)
+                && !extract_format_kinds.contains(kind)
+            {
                 assert!(
                     meta.formats.is_empty(),
                     "{kind}: only structured/extract-capable kinds may declare formats"

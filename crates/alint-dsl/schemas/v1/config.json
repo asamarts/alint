@@ -40,6 +40,14 @@
         }
       ]
     },
+    "Direction": {
+      "enum": [
+        "both",
+        "missing",
+        "extra"
+      ],
+      "type": "string"
+    },
     "Expect": {
       "enum": [
         "any",
@@ -374,6 +382,16 @@
         }
       ]
     },
+    "KeyFormat": {
+      "enum": [
+        "json",
+        "yaml",
+        "dotenv",
+        "properties",
+        "ini"
+      ],
+      "type": "string"
+    },
     "Language": {
       "enum": [
         "auto",
@@ -490,6 +508,13 @@
         }
       ],
       "description": "`outputs:` accepts a single glob or a list (a `Scope`)."
+    },
+    "Plurals": {
+      "enum": [
+        "exact",
+        "cldr"
+      ],
+      "type": "string"
     },
     "RegistryOrphansSpec": {
       "additionalProperties": false,
@@ -5043,6 +5068,83 @@
       ],
       "type": "object"
     },
+    "rule_key_parity": {
+      "description": "One reference file and a glob of peers must declare the same key set. The reference is read literally even when ignored; peers come from the index. Supports JSON, YAML, dotenv, INI and Java properties; nested keys are leaf paths, arrays are values, and duplicate keys are not parity violations.",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "paths"
+            ]
+          },
+          {
+            "required": [
+              "scope_filter"
+            ]
+          },
+          {
+            "required": [
+              "fix"
+            ]
+          },
+          {
+            "required": [
+              "expect_matches"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "direction": {
+          "$ref": "#/$defs/Direction",
+          "description": "Which differences to report."
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv, and `.xml` cannot be inferred."
+        },
+        "ignore_keys": {
+          "default": [],
+          "description": "Key-path globs to omit: `*` within a segment, `**` across segments.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "key_parity"
+        },
+        "peers": {
+          "description": "Glob selecting the peer files. The reference is excluded automatically.",
+          "type": "string"
+        },
+        "plurals": {
+          "$ref": "#/$defs/Plurals",
+          "description": "Treat a CLDR plural group (nested object or i18next `_other` siblings) as one key. Exact per-locale category checking is not part of v0.21."
+        },
+        "reference": {
+          "description": "The authoritative key file.",
+          "type": "string"
+        },
+        "strip_root": {
+          "default": false,
+          "description": "When every compared file has one top-level key (Rails' `en:`), compare below it.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reference",
+        "peers"
+      ],
+      "type": "object"
+    },
     "rule_kind_dispatch": {
       "description": "Dispatch on the `kind` discriminator. Each branch sets the required kind-specific fields.",
       "oneOf": [
@@ -5270,6 +5372,9 @@
         },
         {
           "$ref": "#/$defs/rule_unique_by"
+        },
+        {
+          "$ref": "#/$defs/rule_key_parity"
         },
         {
           "$ref": "#/$defs/rule_dir_contains"

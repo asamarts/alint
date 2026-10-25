@@ -1636,6 +1636,24 @@ JsonSchemaPassesRule {
     ),
 }
 
+=== kind: key_parity | id: locale-key-parity ===
+KeyParityRule {
+    id: "locale-key-parity",
+    level: Warning,
+    policy_url: None,
+    message: None,
+    reference: "locales/en.json",
+    reference_format: Json,
+    format_override: None,
+    peers: "locales/*.json",
+    peers_scope: Scope { ... },
+    scope: Scope { ... },
+    direction: Both,
+    plurals: Exact,
+    strip_root: false,
+    ignore: [],
+}
+
 === kind: line_endings | id: line-endings-lf ===
 LineEndingsRule {
     id: "line-endings-lf",
