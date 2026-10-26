@@ -83,7 +83,14 @@ mod tests {
                     .or_else(|| code.strip_prefix("pub use "))
                 {
                     let root = imported.trim_start_matches('{').trim();
-                    if !allowed(root) {
+                    // `super::` from a nested module means plugin_api, but
+                    // `super::super` (or any `super::` in mod.rs itself)
+                    // escapes into the engine's crate root.
+                    let super_depth = root.matches("super::").count();
+                    let at_module_root = path.file_name().is_some_and(|name| name == "mod.rs");
+                    if !allowed(root)
+                        || (root.starts_with("super::") && (super_depth > 1 || at_module_root))
+                    {
                         problems.push(format!("{}:{}: {code}", path.display(), number + 1));
                     }
                 }
