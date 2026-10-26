@@ -1,0 +1,35 @@
+# Scenario relation_coalescing — Relation-layer read coalescing. [v0.21 R3]
+#
+# One full-index relation consumer (`key_parity`) and one per-file structured
+# rule over the SAME `crates/*/Cargo.toml` files. The perf signal is not the
+# number of findings (there are none): it is that a file selected by the
+# relation and by the per-file rule is read once, and its TOML document is
+# decoded once per adapter, for the whole run. Without the run-scoped read/
+# decode caches the per-file rule would re-read every manifest and the relation
+# would re-decode them.
+#
+# The scenario has no v0.18.2 counterpart (the relation layer did not exist),
+# so `reference-perf-gate.sh` deliberately filters `check_grp` only and does
+# not run this group. `det-perf-gate.sh` measures it in the same run as S1-S3;
+# its first committed measurement is the budget baseline for later releases.
+
+version: 1
+
+rules:
+  # Full-index relation: compare every package manifest against one reference.
+  - id: manifest-key-parity
+    kind: key_parity
+    reference: crates/pkg-000000/Cargo.toml
+    peers: "crates/*/Cargo.toml"
+    format: toml
+    level: warning
+
+  # Per-file structured rule over the same files. The engine shares the
+  # relation-enabled read cache with this path; every generated manifest has
+  # the same `[package] name`, so the rule is silent.
+  - id: manifest-name
+    kind: toml_path_matches
+    paths: "crates/*/Cargo.toml"
+    path: "$.package.name"
+    matches: '^pkg-[0-9]{6}$'
+    level: info

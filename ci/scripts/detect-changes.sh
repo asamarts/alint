@@ -159,7 +159,7 @@ fi
 # module root is matched in both `foo.rs` and `foo/` forms. (On pushes to main
 # the gate runs for every Rust change; see ci.yml.) Deliberately not triggered
 # by every CI change: the gate costs two release builds and two Valgrind runs.
-if echo "$CHANGED" | grep -qE '^crates/alint-core/src/((relation|plugin_api|engine)(\.rs$|/)|extract\.rs$|structured_format)|^crates/alint-rules/src/(cross_file(\.rs$|/)|key_parity|io\.rs$)|^ci/scripts/(reference-perf-gate\.sh|syscall-counts\.py|detect-changes\.sh)$|^crates/alint-bench/(benches/det_check\.rs|src/tree\.rs)$|^xtask/src/bench/scenarios/s[123]_'; then
+if echo "$CHANGED" | grep -qE '^crates/alint-core/src/((relation|plugin_api|engine)(\.rs$|/)|extract\.rs$|structured_format)|^crates/alint-rules/src/(cross_file(\.rs$|/)|key_parity|io\.rs$)|^ci/scripts/(reference-perf-gate\.sh|syscall-counts\.py|detect-changes\.sh)$|^crates/alint-bench/(benches/det_check\.rs|src/tree\.rs)$|^xtask/src/bench/scenarios/(s[123]_|relation_coalescing\.yml)'; then
   RELATION=true
 fi
 

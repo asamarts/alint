@@ -76,6 +76,39 @@ some runs (of either binary) read `/sys/devices/system/cpu/online` while others 
 why two identical runs can differ by a call or two. A per-file regression adds thousands of calls
 at 10k files, hence the 32-call allowance.
 
+## Relation scenario
+
+v0.21 R3 adds `xtask/src/bench/scenarios/relation_coalescing.yml`: `key_parity` over
+`crates/*/Cargo.toml`, plus a per-file `toml_path_matches` over the same
+manifests. It has no v0.18.2 counterpart, so it is not part of the absolute
+reference comparison. It runs in `det_check`'s `relation_grp`, which
+`reference-perf-gate.sh` excludes by filtering only `check_grp`; the per-PR
+deterministic gate still measures it, and applies its normal +2% `Ir` / +5%
+`EstimatedCycles` limits once the comparison base contains the cell. The first
+committed measurement is therefore the budget baseline for later releases.
+
+Measured on 2026-10-25 on the shared development host (x86-64, Arch Linux,
+rustc 1.99.1, Valgrind 3.25.1, gungraun 0.20.0):
+
+| Cell | Instructions | Estimated cycles |
+|---|---:|---:|
+| relation 1k | 42,816,797 | 63,368,993 |
+| relation 10k | 297,682,329 | 421,614,713 |
+
+Syscalls on the relation 10k tree, with the same counter and process restrictions as
+S1-S3:
+
+| Family | Calls |
+|---|---:|
+| read | 839 |
+| stat | 10,898 |
+| open | 632 |
+| dents | 804 |
+
+The same run shows the R2 read-coalescing property: with `key_parity` alone the 10k tree makes
+839 read calls; with the per-file rule alone, 441; with both, 839. The two consumers share the
+run-scoped read cache instead of adding 441 calls.
+
 ## Validation
 
 - `ci/scripts/test-reference-perf-gate.sh` pins the outcome handling with stubbed tools: pass,

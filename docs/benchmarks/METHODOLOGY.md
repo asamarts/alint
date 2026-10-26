@@ -375,7 +375,10 @@ The relation layer has its own, stricter reference: v0.18.2 at +3% on the
 deterministic S1-S3 cells, run on relation-layer pull requests and every Rust push to
 main (ADR-0023, ADR-0024). It
 is described, with its recorded measurement, in
-[`REFERENCE-v0.18.2.md`](REFERENCE-v0.18.2.md).
+[`REFERENCE-v0.18.2.md`](REFERENCE-v0.18.2.md). The separate relation scenario
+(`relation_coalescing.yml`: `key_parity` plus a per-file rule over the same files) runs in
+`det_check`'s `relation_grp`, outside the absolute S1-S3 filter, and its first measurement is
+recorded there as the basis for later budgets.
 
 `xtask bench-compare` (micro vs the v0.7.0 floor) is a **local** helper,
 not wired into any workflow. Wall-clock regression is gated

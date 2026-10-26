@@ -60,7 +60,7 @@ det_check::check_grp::check s2_10k:(materialize("s2", S2, 10_000)) -> crates/ali
   L1 Hits:                          2400000000|3300000000           (-27.2727%) [-1.37500x]
 det_engine::engine::engine_run n1k:(fixture(1_000))
   Instructions:                         400000|393021               (+1.77574%) [+1.01776x]
-det_check::check_grp::check s5_1k:(materialize("s5", S5, 1_000)) -> crates/alint-ben...
+det_check::relation_grp::relation relation_1k:(materialize("relation", RELATION, 1_000)) -> crates/alint-ben...
   Instructions:                       51194776|N/A                  (*********)
 Gungraun result: Ok. 3 without regressions; 0 regressed; 3 benchmarks finished in 120s
 OUT
@@ -128,7 +128,7 @@ if [[ $rc -eq 0 ]] && has out 'deterministic perf gate: PASS' \
   && has summary '### Deterministic perf gate: pass' \
   && has summary '| `det_check::check s2_10k` | 2554444779 | 1836071838 | -28.1225% |' \
   && has summary '| `det_engine::engine_run n1k` | 393021 | 400000 | +1.77574% |' \
-  && has summary '| `det_check::check s5_1k` | N/A | 51194776 | new |' \
+  && has summary '| `det_check::relation relation_1k` | N/A | 51194776 | new |' \
   && has log 'bench -p alint-bench --bench det_engine --bench det_check -- --save-baseline=base' \
   && has log 'bench -p alint-bench --bench det_engine --bench det_check -- --baseline=base' \
   && restored; then

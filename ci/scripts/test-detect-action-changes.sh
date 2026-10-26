@@ -90,6 +90,8 @@ expect_routes "format parsers reach the reference gate" crates/alint-core/src/st
 expect_routes "cross_file reaches the reference gate" crates/alint-rules/src/cross_file/eval.rs relation=true
 expect_routes "the shared reader reaches the reference gate" crates/alint-rules/src/io.rs relation=true
 expect_routes "the gate's tree generator reaches it" crates/alint-bench/src/tree.rs relation=true
+expect_routes "the relation scenario reaches the reference gate" \
+  xtask/src/bench/scenarios/relation_coalescing.yml relation=true
 expect_routes "an ordinary kind does not reach the reference gate" crates/alint-rules/src/file_exists.rs relation=false
 expect_routes "a crate change reaches shell tests" crates/alint/src/main.rs shell=true
 

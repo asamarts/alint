@@ -33,10 +33,13 @@ const SEED: u64 = 10_559_047;
 // The real scenario configs, shared with the wall-clock bench (minimal drift —
 // one source of truth). A spread of dispatch classes over the regular
 // gen-monorepo tree: s1 = layout/walk-bound (isolates the walker); s2 = per-file
-// content; s3 = cross-file relational + graph. (s4_workspace is deliberately
-// excluded: its `extends:` pulls the bundled rulesets shipped in the binary,
-// whose rule set evolves per release — a moving target unfit for a fixed
-// deterministic Ir gate.)
+// content; s3 = cross-file relational + graph; relation_coalescing = relation-layer
+// read coalescing (`key_parity` + a per-file rule over the same TOML manifests).
+// (s4_workspace is deliberately excluded: its `extends:` pulls the bundled
+// rulesets shipped in the binary, whose rule set evolves per release — a moving
+// target unfit for a fixed deterministic Ir gate. The relation scenario has no
+// v0.18.2 counterpart, so it lives in its own group and is budgeted separately;
+// see `docs/benchmarks/REFERENCE-v0.18.2.md`.)
 const S1: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../xtask/src/bench/scenarios/s1_layout.yml"
@@ -48,6 +51,10 @@ const S2: &str = include_str!(concat!(
 const S3: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../xtask/src/bench/scenarios/s3_relational.yml"
+));
+const RELATION: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../../xtask/src/bench/scenarios/relation_coalescing.yml"
 ));
 // The consolidated auto-fix scenario. `materialize_fixable` makes every `.rs`
 // line a trailing-whitespace violation, so the `**/*.rs`-scoped content fixers
@@ -218,6 +225,25 @@ fn check(scenario: &str, config: &str, n: usize) -> Command {
 
 binary_benchmark_group!(name = check_grp, benchmarks = check);
 
+// v0.21 R3 relation scenario. It is separate from check_grp because it has no
+// v0.18.2 counterpart: the absolute reference gate filters check_grp only.
+#[binary_benchmark(setup = materialize)]
+#[bench::relation_1k("relation", RELATION, 1_000)]
+#[bench::relation_10k("relation", RELATION, 10_000)]
+#[cfg_attr(
+    feature = "det-100k",
+    bench::relation_100k("relation", RELATION, 100_000)
+)]
+fn relation(scenario: &str, config: &str, n: usize) -> Command {
+    let _ = config; // consumed by `materialize` (setup)
+    Command::new(alint_bin())
+        .arg("check")
+        .arg(tree_path(scenario, n))
+        .build()
+}
+
+binary_benchmark_group!(name = relation_grp, benchmarks = relation);
+
 // `alint fix --dry-run` end to end over a fixable tree. Pairs with the
 // wall-clock `fix_throughput.rs` (which the deterministic Ir signal here cannot
 // replace: callgrind is I/O-blind, so a collect read-path regression that adds
@@ -282,5 +308,5 @@ main!(
             // moving net cycles <1%, so gating them only false-positives.
             .soft_limits([(EventKind::Ir, 2.0), (EventKind::EstimatedCycles, 5.0)]),
     ),
-    binary_benchmark_groups = [check_grp, fix_grp, analysis_time_grp]
+    binary_benchmark_groups = [check_grp, relation_grp, fix_grp, analysis_time_grp]
 );

@@ -348,9 +348,11 @@ are the authoritative, non-IR implementation), so they cannot.
   probing `.alint.d`, and a CPU-count read that some runs make and others do not), while a
   per-file regression adds thousands. A trace that is empty, or of a run that did not complete,
   is a tooling failure, never zero.
-- **Relation scenario:** R3 adds a scenario with `key_parity` and per-file rules over the same
-  files. It has no v0.18.2 counterpart, so it is budgeted separately against the first release
-  that has it (section 9.6, "new capabilities").
+- **Relation scenario:** R3 adds `relation_coalescing.yml` (`key_parity` plus a per-file rule
+  over the same `crates/*/Cargo.toml` files). It has no v0.18.2 counterpart, so it runs in a
+  separate `relation_grp` that the absolute reference gate filters out, and is budgeted
+  separately against its first committed measurement (section 9.6, "new capabilities"); see
+  [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md#relation-scenario).
 - **Release check:** before the release, on kbench with caches dropped, S1-S3 x {full, changed}
   against v0.18.2: wall-clock medians at 100k (30 runs) and at 1M (bench-scale's 1M sampling,
   one warm-up and three runs: at 30 runs S3 alone would take about 16 hours) at most +3%, and
@@ -480,13 +482,16 @@ v0.21 is complete only when all of the following are observed:
   entries parse through the guarded XML path. `key_parity` now covers all eight
   formats, with per-dialect key models, pass/fail scenarios, and eager key
   spans.
-- **R3, in progress.** `key_parity` is registered for JSON, YAML, TOML,
-  dotenv, INI, Java properties, Android string resources, and .NET `.resx`,
-  with the documented `direction`, `strip_root`, `plurals: cldr`, and
-  `ignore_keys` options, fail-loud missing/parse/empty-peer outcomes, baseline
-  keys, a `--changed` path scope, a keys-only preview on the extraction trace
-  stage, unit tests, and firing/silent plus `--changed` policy scenarios. The
-  relation benchmark scenario remains before R3 is complete.
+- **R3, done.** `key_parity` is registered for JSON, YAML, TOML, dotenv, INI,
+  Java properties, Android string resources, and .NET `.resx`, with the
+  documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
+  options, fail-loud missing/parse/empty-peer outcomes, baseline keys, a
+  `--changed` path scope, a keys-only preview on the extraction trace stage,
+  unit tests, and firing/silent plus `--changed` policy scenarios. The relation
+  benchmark scenario is `relation_coalescing.yml`: with `key_parity` alone the 10k tree makes
+  839 read calls, with the per-file rule alone 441, and with both 839, so the two consumers share
+  the run-scoped cache. Its instruction and syscall counts are recorded in
+  [`REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md#relation-scenario).
 - **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
   the row/diagnostic model, the strict-versus-lossy decoding split, and the
   read/decode cache design that R2 implements.
@@ -540,7 +545,7 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** R3, R4, R6a, and R9 in parallel. R3 (`key_parity`) is the first
-  user-facing kind; R9 completes its TOML and XML dialect formats; R4 adds the
-  shadow harness and the `cross_file` `equals` port; R6a adds the contract
-  traits, bridge, and registry injection.
+- **Next:** R4 and R6a in parallel. R4 adds the shadow harness and the
+  `cross_file` `equals` port; R6a adds the contract traits, bridge, and
+  registry injection. R3 (`key_parity`) and R9 (its TOML and XML dialect
+  formats) are complete.
