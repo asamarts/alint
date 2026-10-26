@@ -19,9 +19,9 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "adotenv"
-version = "0.2.1"
+version = "0.9.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "041b8ffc2cac58be9edae6a3047a08474f5a61ecb5552e712c3e74ae44bbbc01"
+checksum = "10f95cb2374bf3356e6efd869c208a4924dc6c78a5f4764fe9999e1f7bd16c35"
 
 [[package]]
 name = "ahash"
