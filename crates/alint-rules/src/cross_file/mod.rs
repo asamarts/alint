@@ -51,6 +51,8 @@ use crate::fixers::cross_file_ops::ValueTargetMatches;
 use crate::fixers::{CreateAndRegisterFixer, CrossFileValueFixer, SyncFromFixer, ValueTargets};
 
 mod eval;
+#[cfg(feature = "shadow-ir")]
+mod shadow;
 mod spec;
 
 use spec::{Options, Relation, Targets, resolve_targets, validate_extract_regexes, validate_shape};
@@ -671,7 +673,16 @@ impl Rule for CrossFileRule {
     }
 
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        Ok(self.evaluate_impl(ctx))
+        let findings = self.evaluate_impl(ctx);
+        #[cfg(feature = "shadow-ir")]
+        shadow::assert_equals_matches(self, ctx, &findings);
+        Ok(findings)
+    }
+
+    fn uses_relations(&self) -> bool {
+        // Only the R4 shadow consumes the relation layer, and only when the
+        // test/corpus feature is on. Production stays on the direct read path.
+        cfg!(feature = "shadow-ir") && self.relation == Relation::Equals
     }
 }
 

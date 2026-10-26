@@ -22,6 +22,12 @@ autotests = false
 name = "it"
 path = "tests/main.rs"
 
+[features]
+# R4 differential shadow: runs the IR-backed cross_file equals evaluator next
+# to the authoritative one. Test-only; enabled from alint-e2e and corpus replay.
+# Release and bench feature trees must never contain it.
+shadow-ir = []
+
 [dependencies]
 alint-core.workspace = true
 schemars.workspace = true

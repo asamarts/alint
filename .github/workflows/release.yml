@@ -98,6 +98,8 @@ jobs:
         run: ci/scripts/test.sh
       - name: build (cargo build --workspace --locked)
         run: ci/scripts/build.sh
+      - name: shadow feature tree (release/bench builds exclude shadow-ir)
+        run: ci/scripts/check-shadow-feature-tree.sh
       - name: docs (cargo doc with -D warnings)
         run: ci/scripts/docs.sh
       - name: verify published Action documentation pin

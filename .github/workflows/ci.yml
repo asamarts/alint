@@ -274,6 +274,7 @@ jobs:
         with:
           key: ci-build
       - run: ci/scripts/build.sh
+      - run: ci/scripts/check-shadow-feature-tree.sh
 
   docs:
     name: Docs

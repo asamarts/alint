@@ -771,7 +771,7 @@ impl CrossFileRule {
         Some(literal)
     }
 
-    fn add_source_locations(
+    pub(super) fn add_source_locations(
         &self,
         ctx: &Context<'_>,
         finding: &mut Violation,
@@ -792,7 +792,7 @@ impl CrossFileRule {
         }
     }
 
-    fn violation(path: &Path, reason: &str) -> Violation {
+    pub(super) fn violation(path: &Path, reason: &str) -> Violation {
         Violation::new(format!("{}: {reason}", crate::slash(path))).with_path(path.to_path_buf())
     }
 
@@ -803,12 +803,12 @@ impl CrossFileRule {
     /// An informational note (non-violation finding), such as a non-literal
     /// value the rule skipped rather than compared. The engine partitions notes
     /// before baseline and fixpoint identity processing, so they need no key.
-    fn note(path: &Path, reason: &str) -> Violation {
+    pub(super) fn note(path: &Path, reason: &str) -> Violation {
         Self::violation(path, reason).as_note()
     }
 
     #[allow(clippy::too_many_arguments)]
-    fn mismatch(
+    pub(super) fn mismatch(
         &self,
         target: &Path,
         source_extract: &Extract,
@@ -850,7 +850,7 @@ impl CrossFileRule {
         finding
     }
 
-    fn redact_extracted(
+    pub(super) fn redact_extracted(
         &self,
         finding: &mut Violation,
         role: &str,

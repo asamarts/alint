@@ -482,6 +482,19 @@ v0.21 is complete only when all of the following are observed:
   entries parse through the guarded XML path. `key_parity` now covers all eight
   formats, with per-dialect key models, pass/fail scenarios, and eager key
   spans.
+- **R4, done.** The `shadow-ir` feature is defined on `alint-rules` and enabled
+  only from `alint-e2e`'s dev-dependency (and corpus replay). `cross_file`'s
+  `relation: equals` now runs through `ExtractAdapter` and the run-scoped
+  read/decode caches beside the authoritative implementation, and the complete
+  finding debug snapshots are compared. The property generator covers generated
+  source/target values and `normalize:` lists (including the non-literal note
+  path), and the full e2e suite runs with the shadow enabled: zero differences.
+  Regex extracts (whose target-side syntax filters are outside the generic
+  adapter) and read/decode failures deliberately remain authoritative-only in
+  this increment; they are still covered by the existing cross_file tests.
+  `ci/scripts/check-shadow-feature-tree.sh`, wired into Build and preflight,
+  proves the release, `-p alint -p xtask`, and criterion feature trees exclude
+  `shadow-ir`.
 - **R3, done.** `key_parity` is registered for JSON, YAML, TOML, dotenv, INI,
   Java properties, Android string resources, and .NET `.resx`, with the
   documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
@@ -545,7 +558,7 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** R4 and R6a in parallel. R4 adds the shadow harness and the
-  `cross_file` `equals` port; R6a adds the contract traits, bridge, and
-  registry injection. R3 (`key_parity`) and R9 (its TOML and XML dialect
+- **Next:** R6a and R5. R6a adds the contract traits, the bridge, and registry
+  injection; R5 adds corpus replay and then uses the shadow comparison there.
+  R3 (`key_parity`), R4 (the shadow harness), and R9 (its TOML and XML dialect
   formats) are complete.

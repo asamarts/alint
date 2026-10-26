@@ -72,6 +72,7 @@ run() {
 # things broken in one pass instead of fix-rerun-fix-rerun.
 run fmt           bash ci/scripts/fmt.sh                          || true
 run clippy        bash ci/scripts/clippy.sh                       || true
+run shadow-feature bash ci/scripts/check-shadow-feature-tree.sh  || true
 run test          bash ci/scripts/test.sh                         || true
 run doc           bash ci/scripts/docs.sh                         || true
 run version-pins  bash ci/scripts/check-version-pins.sh           || true

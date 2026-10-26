@@ -22,7 +22,7 @@ path = "tests/main.rs"
 alint-core.workspace = true
 alint-dsl.workspace = true
 alint-output.workspace = true
-alint-rules.workspace = true
+alint-rules = { workspace = true, features = ["shadow-ir"] }
 alint-testkit = { workspace = true, features = ["strategies"] }
 dir-test.workspace = true
 jsonschema.workspace = true
