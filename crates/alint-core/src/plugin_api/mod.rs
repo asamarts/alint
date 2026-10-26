@@ -9,8 +9,13 @@
 //! no semver promise until the contract reaches 1.0. It moves into a published
 //! `alint-plugin-api` crate with slice P2.
 
+mod contract;
 mod value;
 
+pub use contract::{
+    Adapter, AdapterError, AdapterInput, AdapterOutput, Analyzer, AnalyzerError, AnalyzerInput,
+    Capabilities, Finding, Limits, PointerSegment, RelatedLocation, Resource, Row, RowState,
+};
 pub use value::{FlatValue, FlatValueError, FlatValueLimits, Node};
 
 #[cfg(test)]
@@ -67,6 +72,8 @@ mod tests {
                         "self::",
                         "super::",
                         "crate::plugin_api",
+                        "contract::",
+                        "value::",
                     ]
                     .iter()
                     .any(|prefix| p.starts_with(prefix))
@@ -76,14 +83,15 @@ mod tests {
                     .or_else(|| code.strip_prefix("pub use "))
                 {
                     let root = imported.trim_start_matches('{').trim();
-                    if !allowed(root) && !root.starts_with("value::") {
+                    if !allowed(root) {
                         problems.push(format!("{}:{}: {code}", path.display(), number + 1));
                     }
                 }
                 let mut rest = code;
                 while let Some(at) = rest.find("crate::") {
                     let tail = &rest[at..];
-                    if !tail.starts_with("crate::plugin_api") {
+                    let path_after = &tail["crate::".len()..];
+                    if path_after != "plugin_api" && !path_after.starts_with("plugin_api::") {
                         problems.push(format!("{}:{}: {code}", path.display(), number + 1));
                         break;
                     }

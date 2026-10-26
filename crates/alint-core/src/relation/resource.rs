@@ -17,6 +17,12 @@ impl ResourceId {
     pub fn index(self) -> usize {
         self.0 as usize
     }
+
+    /// Rebuild an id from the plugin contract's numeric index.
+    #[must_use]
+    pub(crate) fn from_index(index: u32) -> Self {
+        Self(index)
+    }
 }
 
 /// How a resource was named.
@@ -50,6 +56,12 @@ impl Resource {
     #[must_use]
     pub fn origin(&self) -> Origin {
         self.origin
+    }
+
+    /// Rebuild a resource from the plugin contract's origin fields.
+    #[must_use]
+    pub(crate) fn from_parts(origin: Origin, path: RelPath) -> Self {
+        Self { origin, path }
     }
 
     #[must_use]

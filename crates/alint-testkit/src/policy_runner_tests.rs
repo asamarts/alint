@@ -309,3 +309,17 @@ fn canonical_pass_fail_corpus_produces_complete_traces() {
         missing.join("\n")
     );
 }
+
+#[test]
+fn runner_with_registry_replaces_the_builtin_registry() {
+    let builtin = Runner::default();
+    assert!(
+        builtin
+            .registry
+            .canonical_kinds()
+            .any(|kind| kind == "file_exists")
+    );
+    let empty = alint_core::RuleRegistry::default();
+    let injected = Runner::default().with_registry(empty);
+    assert_eq!(injected.registry.canonical_kinds().count(), 0);
+}

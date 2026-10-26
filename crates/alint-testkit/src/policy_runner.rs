@@ -37,9 +37,10 @@ pub struct RunnerOptions {
 }
 
 /// Validating high-level policy-test runner. No unchecked execution API is exposed.
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct Runner {
     options: RunnerOptions,
+    registry: alint_core::RuleRegistry,
 }
 
 struct ExecutionContext<'a> {
@@ -75,10 +76,27 @@ enum PreparedStep {
     ConfigurationError(StepObservation),
 }
 
+impl Default for Runner {
+    fn default() -> Self {
+        Self::new(RunnerOptions::default())
+    }
+}
+
 impl Runner {
     #[must_use]
     pub fn new(options: RunnerOptions) -> Self {
-        Self { options }
+        Self {
+            options,
+            registry: alint_rules::builtin_registry(),
+        }
+    }
+
+    /// Replace the built-in rule registry, e.g. for a host that adds plugin
+    /// kinds. The registry also drives config loading and capability checks.
+    #[must_use]
+    pub fn with_registry(mut self, registry: alint_core::RuleRegistry) -> Self {
+        self.registry = registry;
+        self
     }
 
     /// Execute one parsed test document from `source`.
@@ -324,7 +342,7 @@ impl Runner {
     }
 
     fn prepare_step(&self, step: TestStep, context: &ExecutionContext<'_>) -> Result<PreparedStep> {
-        let registry = alint_rules::builtin_registry();
+        let registry = self.registry.clone();
         let options = alint_dsl::LoadOptions {
             kind_catalog: Some(registry.catalog()),
             cache: Some(alint_dsl::extends::Cache::at(context.sandbox.join("cache"))),

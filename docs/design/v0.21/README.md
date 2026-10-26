@@ -531,6 +531,15 @@ v0.21 is complete only when all of the following are observed:
   it (a direct run of the gate's gungraun filter and limit), and a +4% change over `main` passes,
   because S1 starts 7-8% under v0.18.2. Details and the recorded counts:
   [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md).
+- **R6a, in progress.** `alint_core::plugin_api` now carries std-only `Adapter` and
+  `Analyzer` traits over contract resources, rows, findings, related locations,
+  capabilities, and limits. `relation::ContractAdapter` bridges a contract adapter
+  into the engine, `relation::InternalContractAdapter` proves a built-in entry
+  adapter round-trips through the contract, and `alint-testkit` gained additive
+  `Runner::with_registry`. The import-boundary test now rejects `crate::plugin_api`
+  lookalikes and allows only the module's own submodules. Remaining: widen registry
+  injection to the CLI/LSP/DSL runtime call sites and bridge the analyzer role
+  through a built-in analyzer.
 - **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
   replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
   removed from 20 configs. Four configs no longer load on the current release and are reported
@@ -561,7 +570,7 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** R6a and R7. R6a adds the contract traits, the bridge, and registry
-  injection; R7 commits the WIT draft, then R6b runs `key_parity` through the
-  bridge. R3 (`key_parity`), R4 (the shadow harness), R5 (corpus replay), and
-  R9 (its TOML and XML dialect formats) are complete.
+- **Next:** finish R6a's registry injection and analyzer bridge, then R7's WIT
+  draft and R6b's `key_parity` bridge proof. R3 (`key_parity`), R4 (the shadow
+  harness), R5 (corpus replay), and R9 (its TOML and XML dialect formats) are
+  complete.
