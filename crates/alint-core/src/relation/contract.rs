@@ -15,6 +15,12 @@ use super::pointer::{Pointer, Segment};
 use super::resource::{Origin, Resource};
 use super::row::{Row, RowState};
 use super::value::Value;
+use crate::plugin_api::{
+    Analyzer as ContractAnalyzerTrait, AnalyzerError as ContractAnalyzerError,
+    AnalyzerInput as ContractAnalyzerInput, Finding as ContractFinding,
+};
+use crate::{AnalysisFailureKind, RelatedLocation, SourceRange, Violation};
+use std::path::Path;
 
 /// Wraps a contract adapter so the engine sees an internal [`Adapter`].
 pub struct ContractAdapter<A> {
@@ -135,8 +141,88 @@ fn internal_resource(resource: &ContractResource) -> Option<Resource> {
         (true, Some(index)) => {
             Resource::from_parts(Origin::Index(super::ResourceId::from_index(index)), path)
         }
-        _ => Resource::literal(path),
+        (true, None) => return None,
+        (false, _) => Resource::literal(path),
     })
+}
+
+/// Wraps a contract analyzer and exposes its findings to the engine's rule
+/// layer. Rows are converted to the contract form and findings back; the
+/// analyzer never sees an engine type.
+pub struct ContractAnalyzer<A> {
+    inner: A,
+}
+
+impl<A: ContractAnalyzerTrait> std::fmt::Debug for ContractAnalyzer<A> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ContractAnalyzer")
+            .field("id", &self.inner.id())
+            .finish()
+    }
+}
+
+impl<A: ContractAnalyzerTrait> ContractAnalyzer<A> {
+    #[must_use]
+    pub fn new(inner: A) -> Self {
+        Self { inner }
+    }
+
+    /// Run the analyzer over internal rows and convert its findings back.
+    pub fn analyze(
+        &self,
+        rule_id: &str,
+        rows: &[Row],
+        limits: &super::limits::Limits,
+    ) -> Result<Vec<Violation>, ContractAnalyzerError> {
+        let rows: Vec<ContractRow> = rows.iter().cloned().map(to_contract_row).collect();
+        let findings = self.inner.analyze(ContractAnalyzerInput {
+            rule_id,
+            rows: &rows,
+            limits: ContractLimits {
+                max_rows: limits.get(LimitKind::RowsPerExtractor),
+            },
+        })?;
+        Ok(findings
+            .into_iter()
+            .map(|finding| to_violation(finding, rule_id))
+            .collect())
+    }
+}
+
+fn to_violation(finding: ContractFinding, rule_id: &str) -> Violation {
+    let mut violation = Violation::new(finding.message);
+    if let Some(path) = finding.path {
+        violation.path = Some(std::sync::Arc::from(Path::new(&path)));
+    }
+    violation.line = finding.line;
+    violation.column = finding.column;
+    if !finding.related.is_empty() {
+        violation.set_related_locations(finding.related.into_iter().map(|related| {
+            let mut location = RelatedLocation::new(related.path, related.label);
+            if let (Some(line), Some(column)) = (related.line, related.column)
+                && let Some(range) = SourceRange::new(line, column, line, column)
+            {
+                location = location.with_range(range);
+            }
+            location
+        }));
+    }
+    if let Some(key) = finding.baseline_key {
+        violation.baseline_key = Some(key.into());
+    }
+    violation.not_fixable = finding.not_fixable;
+    if let Some(message) = finding.analysis_failure {
+        violation = violation.as_analysis_failure(match finding.failure_kind.as_deref() {
+            Some("resource-read") => AnalysisFailureKind::ResourceRead,
+            _ => AnalysisFailureKind::ResourceParse,
+        });
+        violation.message = message.into();
+    }
+    if finding.sensitive {
+        violation.path_sensitive = true;
+        violation.redact_message(rule_id);
+    }
+    violation
 }
 
 fn from_contract_error(error: ContractError) -> AdapterError {
@@ -167,18 +253,21 @@ fn from_contract_output(output: ContractOutput) -> Result<AdapterOutput, Adapter
     for row in output.rows {
         rows.push(from_contract_row(row)?);
     }
-    let non_strings = output
-        .non_strings
-        .iter()
-        .filter_map(|kind| match kind.as_str() {
-            "null" => Some(NonStringValueKind::Null),
-            "boolean" => Some(NonStringValueKind::Boolean),
-            "number" => Some(NonStringValueKind::Number),
-            "array" => Some(NonStringValueKind::Array),
-            "object" => Some(NonStringValueKind::Object),
-            _ => None,
-        })
-        .collect();
+    let mut non_strings = Vec::with_capacity(output.non_strings.len());
+    for kind in &output.non_strings {
+        non_strings.push(match kind.as_str() {
+            "null" => NonStringValueKind::Null,
+            "boolean" => NonStringValueKind::Boolean,
+            "number" => NonStringValueKind::Number,
+            "array" => NonStringValueKind::Array,
+            "object" => NonStringValueKind::Object,
+            other => {
+                return Err(AdapterError::Parse(format!(
+                    "unknown non-string value kind {other:?}"
+                )));
+            }
+        });
+    }
     let notes = output
         .notes
         .into_iter()
@@ -294,6 +383,48 @@ mod tests {
     use super::*;
     use crate::relation::adapters::EntryRowsAdapter;
     use crate::structured_format::Format;
+
+    struct OneFinding;
+
+    impl crate::plugin_api::Analyzer for OneFinding {
+        fn id(&self) -> &'static str {
+            "one-finding"
+        }
+
+        fn analyze(
+            &self,
+            input: crate::plugin_api::AnalyzerInput<'_>,
+        ) -> Result<Vec<crate::plugin_api::Finding>, crate::plugin_api::AnalyzerError> {
+            Ok(vec![crate::plugin_api::Finding {
+                path: input.rows.first().map(|row| row.resource.path.clone()),
+                message: format!("{} rows", input.rows.len()),
+                line: Some(3),
+                column: Some(4),
+                related: Vec::new(),
+                baseline_key: Some("row".into()),
+                sensitive: false,
+                analysis_failure: None,
+                failure_kind: None,
+                not_fixable: false,
+            }])
+        }
+    }
+
+    #[test]
+    fn contract_analyzer_bridges_rows_and_findings() {
+        let rows = vec![Row::new(
+            Resource::for_test(0, "a.json"),
+            None,
+            0,
+            RowState::Missing,
+        )];
+        let findings = ContractAnalyzer::new(OneFinding)
+            .analyze("test-rule", &rows, &super::super::limits::Limits::default())
+            .unwrap();
+        assert_eq!(findings.len(), 1);
+        assert_eq!(findings[0].line, Some(3));
+        assert_eq!(findings[0].baseline_key.as_deref(), Some("row"));
+    }
 
     #[test]
     fn builtin_entry_adapter_round_trips_through_the_contract() {

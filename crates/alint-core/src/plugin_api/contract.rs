@@ -72,6 +72,9 @@ pub struct Finding {
     pub baseline_key: Option<String>,
     pub sensitive: bool,
     pub analysis_failure: Option<String>,
+    /// One of `resource-read`, `resource-parse`, `resource-limit`,
+    /// `resource-unavailable`; ignored for a non-failure finding.
+    pub failure_kind: Option<String>,
     pub not_fixable: bool,
 }
 
@@ -83,7 +86,9 @@ pub struct Limits {
 
 impl Default for Limits {
     fn default() -> Self {
-        Self { max_rows: 10_000 }
+        Self {
+            max_rows: 1_000_000,
+        }
     }
 }
 
@@ -204,6 +209,7 @@ mod tests {
                     baseline_key: None,
                     sensitive: false,
                     analysis_failure: None,
+                    failure_kind: None,
                     not_fixable: false,
                 })
                 .collect())

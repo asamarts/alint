@@ -535,11 +535,13 @@ v0.21 is complete only when all of the following are observed:
   `Analyzer` traits over contract resources, rows, findings, related locations,
   capabilities, and limits. `relation::ContractAdapter` bridges a contract adapter
   into the engine, `relation::InternalContractAdapter` proves a built-in entry
-  adapter round-trips through the contract, and `alint-testkit` gained additive
-  `Runner::with_registry`. The import-boundary test now rejects `crate::plugin_api`
-  lookalikes and allows only the module's own submodules. Remaining: widen registry
-  injection to the CLI/LSP/DSL runtime call sites and bridge the analyzer role
-  through a built-in analyzer.
+  adapter round-trips through the contract, and `relation::ContractAnalyzer`
+  converts internal rows to contract rows and contract findings back. The
+  import-boundary test now rejects `crate::plugin_api` lookalikes and allows
+  only the module's own submodules. `alint-testkit` gained additive
+  `Runner::with_registry`. Remaining: widen registry injection to the
+  CLI/LSP/DSL runtime call sites and run the `key_parity` pilot through the
+  analyzer bridge.
 - **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
   replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
   removed from 20 configs. Four configs no longer load on the current release and are reported

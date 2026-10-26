@@ -30,7 +30,7 @@ pub use adapters::{
     AndroidStringsAdapter, EntryRowsAdapter, ExtractAdapter, ResxAdapter, TomlRowsAdapter,
 };
 pub use cache::{DecodeCache, ReadCache};
-pub use contract::{ContractAdapter, InternalContractAdapter};
+pub use contract::{ContractAdapter, ContractAnalyzer, InternalContractAdapter};
 pub use limits::{LimitConfigError, LimitExceeded, LimitKind, Limits, RunBudget};
 pub use path::RelPath;
 pub use pointer::{Pointer, Segment};
