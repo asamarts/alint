@@ -10,7 +10,8 @@
 # fails on any report, proposed edit, or baseline fingerprint that differs:
 # RELEASING.md dispatches it with the previous release before a release that
 # changes the relation layer, and each difference must be explained there.
-# v0.21's shadow comparison (ADR-0023, V21-7) joins once work item R4 lands.
+# v0.21's shadow comparison (ADR-0023, V21-7) runs inside the replay binary,
+# built with alint-rules/shadow-ir: any shadow difference aborts that repository.
 #
 # It runs on the canonical bench host's runner, which executes one job at a
 # time, so a replay never overlaps a benchmark. The repository cache lives on
@@ -51,8 +52,12 @@ jobs:
       - uses: Swatinem/rust-cache@f0d9c3887740aee45f6153b24b3a6b815192ec16 # v2
         with:
           key: corpus-replay
-      - name: build alint and xtask
-        run: cargo build --release --locked -p alint -p xtask
+      - name: build alint (shadow-ir) and xtask
+        run: |
+          # The replay binary carries the test-only shadow. xtask itself must
+          # stay feature-free (its bench-record build shares the feature graph).
+          cargo build --release --locked -p alint --features alint-rules/shadow-ir
+          cargo build --release --locked -p xtask
       - name: build the comparison binary
         if: ${{ inputs.compare_ref != '' }}
         env:

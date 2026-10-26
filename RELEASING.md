@@ -98,9 +98,9 @@ points are explicit.
    It replays the 110-repository case-study corpus with both binaries on the
    canonical bench host and lists every repository whose findings changed.
    Each difference must be explained by a CHANGELOG entry, and a crash
-   blocks the release. Once v0.21's shadow harness lands (work item R4), the
-   replay also runs the shadow implementation, and any shadow difference
-   blocks the release.
+   blocks the release. The replay binary is built with
+   `alint-rules/shadow-ir`, so it also runs R4's shadow implementation; any
+   shadow difference blocks the release.
 
 4. **Commit and tag.**
 

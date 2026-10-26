@@ -19,8 +19,11 @@ The configs are pinned to the study's clone SHAs; re-running them targets those
 trees, not current upstream. [`pins.tsv`](pins.tsv) lists each config's
 repository and full 40-character commit, and `cargo run -p xtask --
 corpus-replay` replays the whole corpus at those commits, optionally diffing two
-alint binaries' reports. Build the binary first (`cargo build --release -p
-alint`); `--alint` defaults to `target/release/alint` relative to the current
+alint binaries' reports. The replay workflow builds its alint binary with
+`alint-rules/shadow-ir`, so R4's differential `cross_file` check runs on every
+replayed config; the comparison binary remains authoritative-only. Build the
+binary first (`cargo build --release -p alint`); `--alint` defaults to
+`target/release/alint` relative to the current
 directory, and the cache to `target/corpus-replay`. Nothing from a corpus
 repository runs: spawning and keyring rules, spawning fix operations, and
 configs with custom facts are removed or refused first.

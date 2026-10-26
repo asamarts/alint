@@ -539,7 +539,10 @@ v0.21 is complete only when all of the following are observed:
   `scope_filter.changed_since` on `git_commit_no_fixup`, which takes `since` instead. Its error
   reads only `<redacted>`: a rule with an env-interpolated field has every validation error
   redacted, even one that quotes no value, which is a usability bug of its own. 49 of the
-  replayed configs carry 87 `equals`-path rules.
+  replayed configs carry 87 `equals`-path rules. R4's shadow is part of the
+  replay binary (`-p alint --features alint-rules/shadow-ir`), so any shadow
+  difference aborts the repository; `xtask` is built separately without the
+  feature.
 - **Review round 2026-10-25.** A second audit corrected the replay (no false passes, no command
   execution, fingerprints and proposed edits compared, expectations), the gate (the engine root
   module, untraceable runs, frozen-source lints, attribution), and this design (resource origins,
@@ -558,7 +561,7 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** R6a and R5. R6a adds the contract traits, the bridge, and registry
-  injection; R5 adds corpus replay and then uses the shadow comparison there.
-  R3 (`key_parity`), R4 (the shadow harness), and R9 (its TOML and XML dialect
-  formats) are complete.
+- **Next:** R6a and R7. R6a adds the contract traits, the bridge, and registry
+  injection; R7 commits the WIT draft, then R6b runs `key_parity` through the
+  bridge. R3 (`key_parity`), R4 (the shadow harness), R5 (corpus replay), and
+  R9 (its TOML and XML dialect formats) are complete.
