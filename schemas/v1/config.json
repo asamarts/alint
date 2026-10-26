@@ -5072,7 +5072,7 @@
       "type": "object"
     },
     "rule_key_parity": {
-      "description": "One reference file and a glob of peers must declare the same key set. The reference is read literally even when ignored; peers come from the index. Supports JSON, YAML, dotenv, INI and Java properties; nested keys are leaf paths, arrays are values, and duplicate keys are not parity violations.",
+      "description": "One reference file and a glob of peers must declare the same key set. The reference is read literally even when ignored; peers come from the index. Supports JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources and .NET .resx; nested keys are leaf paths, arrays are values, and duplicate keys are not parity violations.",
       "not": {
         "anyOf": [
           {
