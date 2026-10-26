@@ -201,6 +201,18 @@ mod tests {
             rendered(&output),
             ["string.app", "string-array.tabs", "plurals.items"]
         );
+        let app = output
+            .rows
+            .iter()
+            .find(|row| row.pointer.as_ref().unwrap().render() == "string.app")
+            .unwrap();
+        let text = r#"<resources>
+                 <string name="app">App</string>
+                 <string name="build" translatable="false">1</string>
+                 <string-array name="tabs"><item>One</item></string-array>
+                 <plurals name="items"><item quantity="other">%d items</item></plurals>
+               </resources>"#;
+        assert_eq!(&text[app.span.unwrap().as_range()], "app");
     }
 
     #[test]

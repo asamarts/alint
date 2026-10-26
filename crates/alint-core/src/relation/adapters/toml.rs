@@ -191,6 +191,13 @@ mod tests {
         assert_eq!(rendered(&table), ["nav", "nav.home", "nav.about"]);
         assert_eq!(rendered(&dotted), ["nav", "nav.home", "nav.about"]);
         assert!(table.rows.iter().all(Row::is_key));
+        let home = table
+            .rows
+            .iter()
+            .find(|row| row.pointer.as_ref().unwrap().render() == "nav.home")
+            .unwrap();
+        let text = "[nav]\nhome = \"Home\"\nabout = \"About\"\n";
+        assert_eq!(&text[home.span.unwrap().as_range()], "home");
     }
 
     #[test]
