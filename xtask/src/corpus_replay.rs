@@ -7,7 +7,10 @@
 //! reused by later runs. `--compare` runs a second binary over the same trees
 //! and reports every repository whose JSON report (proposed edits included) or
 //! baseline fingerprints differ: this is how v0.21's shadow port of
-//! `cross_file` `equals` is checked on real configurations (ADR-0023).
+//! `cross_file` `equals` is checked on real configurations (ADR-0023). A
+//! config with analysis failures cannot produce a baseline by design; both
+//! binaries then compare an empty fingerprint list and the check report still
+//! carries the analysis failures.
 //!
 //! Nothing from a corpus repository is executed. Before a config runs, every
 //! rule whose kind spawns a process, reads the host keyring, or is unknown to
@@ -1006,11 +1009,19 @@ fn baseline_entries(
     let text = std::fs::read_to_string(&path);
     let _ = std::fs::remove_file(&path);
     if output.code != Some(0) {
-        return Err(format!(
-            "alint baseline exited {:?}: {}",
-            output.code,
-            refusal_reason(&output.stderr)
-        ));
+        let reason = refusal_reason(&output.stderr);
+        // A config with analysis failures cannot produce a baseline by design:
+        // `alint baseline` refuses to grandfather an incomplete analysis. The
+        // check report still carries those failures and is compared; treat both
+        // sides' fingerprint list as empty rather than turning this expected
+        // outcome into a replay crash.
+        if output.code == Some(1)
+            && reason.contains("refusing to write baseline")
+            && reason.contains("analysis failure")
+        {
+            return Ok(Json::Array(Vec::new()));
+        }
+        return Err(format!("alint baseline exited {:?}: {reason}", output.code));
     }
     // JSON Lines: a header (`schema_version`, `alint_version`), then one entry
     // per fingerprint.
