@@ -562,7 +562,9 @@ v0.21 is complete only when all of the following are observed:
   replayed configs carry 87 `equals`-path rules. R4's shadow is part of the
   replay binary (`-p alint --features alint-rules/shadow-ir`), so any shadow
   difference aborts the repository; `xtask` is built separately without the
-  feature.
+  feature. The shadow-enabled replay on 2026-10-27 (run 40601610148, compare
+  against `v0.20.1`) replayed 106/110 with 4 expected skips, 0 crashes, and
+  0 differences.
 - **Review round 2026-10-25.** A second audit corrected the replay (no false passes, no command
   execution, fingerprints and proposed edits compared, expectations), the gate (the engine root
   module, untraceable runs, frozen-source lints, attribution), and this design (resource origins,
