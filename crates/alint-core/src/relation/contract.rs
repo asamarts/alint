@@ -58,17 +58,24 @@ impl<A: ContractAdapterTrait> Adapter for ContractAdapter<A> {
         limits: &super::limits::Limits,
     ) -> Result<AdapterOutput, AdapterError> {
         let resource = contract_resource(resource);
+        let max_rows = limits.get(LimitKind::RowsPerExtractor);
         let output = self
             .inner
             .extract(ContractInput {
                 resource: &resource,
                 bytes,
-                limits: ContractLimits {
-                    max_rows: limits.get(LimitKind::RowsPerExtractor),
-                },
+                limits: ContractLimits { max_rows },
             })
             .map_err(from_contract_error)?;
-        from_contract_output(output)
+        let output = from_contract_output(output)?;
+        if output.rows.len() > max_rows {
+            return Err(AdapterError::Limit(super::limits::LimitExceeded {
+                kind: LimitKind::RowsPerExtractor,
+                limit: max_rows,
+                reached: output.rows.len(),
+            }));
+        }
+        Ok(output)
     }
 }
 
@@ -175,13 +182,18 @@ impl<A: ContractAnalyzerTrait> ContractAnalyzer<A> {
         limits: &super::limits::Limits,
     ) -> Result<Vec<Violation>, ContractAnalyzerError> {
         let rows: Vec<ContractRow> = rows.iter().cloned().map(to_contract_row).collect();
+        let max_rows = limits.get(LimitKind::RowsPerExtractor);
         let findings = self.inner.analyze(ContractAnalyzerInput {
             rule_id,
             rows: &rows,
-            limits: ContractLimits {
-                max_rows: limits.get(LimitKind::RowsPerExtractor),
-            },
+            limits: ContractLimits { max_rows },
         })?;
+        if findings.len() > max_rows {
+            return Err(ContractAnalyzerError::Limit {
+                limit: max_rows,
+                reached: findings.len(),
+            });
+        }
         Ok(findings
             .into_iter()
             .map(|finding| to_violation(finding, rule_id))
@@ -213,7 +225,7 @@ fn to_violation(finding: ContractFinding, rule_id: &str) -> Violation {
     violation.not_fixable = finding.not_fixable;
     if let Some(message) = finding.analysis_failure {
         violation = violation.as_analysis_failure(match finding.failure_kind.as_deref() {
-            Some("resource-read") => AnalysisFailureKind::ResourceRead,
+            Some("resource-read" | "resource_read") => AnalysisFailureKind::ResourceRead,
             _ => AnalysisFailureKind::ResourceParse,
         });
         violation.message = message.into();
@@ -287,19 +299,23 @@ fn from_contract_row(row: ContractRow) -> Result<Row, AdapterError> {
             row.resource.path
         ))
     })?;
-    let pointer = row.pointer.map(|segments| {
-        Pointer::from_segments(
-            segments
-                .into_iter()
-                .map(|segment| match segment {
+    let pointer = match row.pointer {
+        Some(segments) => {
+            let mut converted = Vec::with_capacity(segments.len());
+            for segment in segments {
+                converted.push(match segment {
                     PointerSegment::Key(key) => Segment::Key(key.into()),
                     PointerSegment::Index(index) => {
-                        Segment::Index(usize::try_from(index).unwrap_or(usize::MAX))
+                        Segment::Index(usize::try_from(index).map_err(|_| {
+                            AdapterError::Parse("pointer index is too large".into())
+                        })?)
                     }
-                })
-                .collect(),
-        )
-    });
+                });
+            }
+            Some(Pointer::from_segments(converted))
+        }
+        None => None,
+    };
     let state = match row.state {
         ContractRowState::Value(value) => RowState::Value(
             Value::from_contract(&value)
