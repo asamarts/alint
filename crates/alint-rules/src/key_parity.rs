@@ -19,9 +19,10 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
 use std::sync::Arc;
 
+use alint_core::plugin_api::{Analyzer, AnalyzerError, AnalyzerInput, Finding, PointerSegment};
 use alint_core::relation::{
-    Adapter, AndroidStringsAdapter, EntryRowsAdapter, Limits, Pointer, RelPath, Resource,
-    ResourceRead, ResxAdapter, Segment, Selector, TomlRowsAdapter,
+    Adapter, AndroidStringsAdapter, ContractAnalyzer, EntryRowsAdapter, Limits, Pointer, RelPath,
+    Resource, ResourceRead, ResxAdapter, Row, RowState, Segment, Selector, TomlRowsAdapter,
 };
 use alint_core::{
     AnalysisFailureKind, ByteSpan, Context, Error, Level, RelatedLocation, Result, Rule, RuleSpec,
@@ -197,6 +198,89 @@ pub struct KeyParityRule {
     ignore: Vec<String>,
 }
 
+/// The key-parity comparison as a pure contract analyzer. `KeyParityRule` uses
+/// this for diff detection, then attaches its own messages, spans, and baseline
+/// keys, so the user-facing output stays unchanged.
+struct KeySetAnalyzer {
+    reference: String,
+    direction: Direction,
+}
+
+impl Analyzer for KeySetAnalyzer {
+    fn id(&self) -> &'static str {
+        "key-parity-keys"
+    }
+
+    fn analyze(&self, input: AnalyzerInput<'_>) -> Result<Vec<Finding>, AnalyzerError> {
+        let mut by_path: BTreeMap<&str, BTreeSet<String>> = BTreeMap::new();
+        for row in input.rows {
+            let Some(pointer) = &row.pointer else {
+                continue;
+            };
+            let key = pointer
+                .iter()
+                .map(|part| match part {
+                    PointerSegment::Key(key) => key.clone(),
+                    PointerSegment::Index(index) => format!("[{index}]"),
+                })
+                .collect::<Vec<_>>()
+                .join(".");
+            by_path.entry(&row.resource.path).or_default().insert(key);
+        }
+        let reference = by_path
+            .get(self.reference.as_str())
+            .cloned()
+            .unwrap_or_default();
+        let mut findings = Vec::new();
+        for (path, keys) in &by_path {
+            if *path == self.reference {
+                continue;
+            }
+            let mut emit = |key: &str, direction: &str| {
+                findings.push(Finding {
+                    path: Some((*path).into()),
+                    message: format!("{direction}\u{0}{key}"),
+                    line: None,
+                    column: None,
+                    related: Vec::new(),
+                    baseline_key: None,
+                    sensitive: false,
+                    analysis_failure: None,
+                    failure_kind: None,
+                    not_fixable: false,
+                });
+            };
+            if matches!(self.direction, Direction::Both | Direction::Missing) {
+                for key in reference.difference(keys) {
+                    emit(key, "missing");
+                }
+            }
+            if matches!(self.direction, Direction::Both | Direction::Extra) {
+                for key in keys.difference(&reference) {
+                    emit(key, "extra");
+                }
+            }
+        }
+        Ok(findings)
+    }
+}
+
+fn key_rows(path: &Path, keys: &BTreeMap<Vec<Segment>, ByteSpan>) -> Vec<Row> {
+    keys.iter()
+        .enumerate()
+        .filter_map(|(ordinal, (segments, span))| {
+            let path = RelPath::parse(&path.to_str()?.replace('\\', "/"))?;
+            let mut row = Row::new(
+                Resource::literal(path),
+                Some(Pointer::from_segments(segments.clone())),
+                u32::try_from(ordinal).ok()?,
+                RowState::Key,
+            );
+            row.span = Some(*span);
+            Some(row)
+        })
+        .collect()
+}
 impl Rule for KeyParityRule {
     alint_core::rule_common_impl!();
 
@@ -463,12 +547,36 @@ impl KeyParityRule {
     ) {
         let peer_path = Path::new(peer.path().as_str());
         let reference_path = Path::new(self.reference.as_str());
+        let mut rows = key_rows(reference_path, reference_keys);
+        rows.extend(key_rows(peer_path, peer_keys));
+        let mut missing = BTreeSet::new();
+        let mut extra = BTreeSet::new();
+        if let Ok(diffs) = ContractAnalyzer::new(KeySetAnalyzer {
+            reference: self.reference.as_str().to_string(),
+            direction: self.direction,
+        })
+        .analyze("key-parity", &rows, &Limits::default())
+        {
+            for finding in diffs {
+                if let Some((direction, key)) = finding.message.split_once('\u{0}') {
+                    match direction {
+                        "missing" => {
+                            missing.insert(key.to_string());
+                        }
+                        "extra" => {
+                            extra.insert(key.to_string());
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
         if matches!(self.direction, Direction::Both | Direction::Missing) {
             for key in reference_keys.keys() {
-                if peer_keys.contains_key(key) {
+                let rendered = render_key(key);
+                if !missing.contains(&rendered) {
                     continue;
                 }
-                let rendered = render_key(key);
                 let mut finding =
                     Violation::new(self.message(&rendered, peer_path, reference_path, "missing"))
                         .with_path(peer_path.to_path_buf())
@@ -486,10 +594,10 @@ impl KeyParityRule {
         }
         if matches!(self.direction, Direction::Both | Direction::Extra) {
             for key in peer_keys.keys() {
-                if reference_keys.contains_key(key) {
+                let rendered = render_key(key);
+                if !extra.contains(&rendered) {
                     continue;
                 }
-                let rendered = render_key(key);
                 let mut finding =
                     Violation::new(self.message(&rendered, peer_path, reference_path, "extra"))
                         .with_path(peer_path.to_path_buf())

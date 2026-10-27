@@ -543,10 +543,10 @@ v0.21 is complete only when all of the following are observed:
   point used by check/fix/validate, rules, and export-agents-md, and the LSP
   carries the same registry through `LspOptions` into config discovery and
   session construction. A key-parity-shaped contract analyzer now runs through
-  `ContractAnalyzer` and is covered by a bridge test, including a comparison
-  against the real rule on parsed JSON key rows; the remaining step is replacing
-  the rule's internal comparison path with that analyzer and keeping the golden
-  fingerprints unchanged.
+  `ContractAnalyzer`. `KeyParityRule` now uses that analyzer for missing/extra
+  diff detection while retaining its existing messages, spans, baseline keys,
+  and trace output; the key-parity tests and the full golden-fingerprint e2e
+  suite pass unchanged. R6b is complete.
 - **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
   replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
   removed from 20 configs. Four configs no longer load on the current release and are reported
@@ -577,7 +577,7 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** finish R6a's registry injection and analyzer bridge, then R7's WIT
-  draft and R6b's `key_parity` bridge proof. R3 (`key_parity`), R4 (the shadow
-  harness), R5 (corpus replay), and R9 (its TOML and XML dialect formats) are
-  complete.
+- **Next:** R7's WIT draft, then R8. R3 (`key_parity`), R4 (the shadow
+  harness), R5 (corpus replay), R6a (contract traits and registry injection),
+  R6b (`key_parity` through the bridge), and R9 (its TOML and XML dialect
+  formats) are complete.
