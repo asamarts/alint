@@ -87,13 +87,23 @@ use edits::{fix_edit_to_workspace_edit, located_edits_to_workspace_edit};
 use render::{render_finding, render_notes};
 
 /// Server options, set from the `alint lsp` command line.
-#[derive(Debug, Clone, Copy, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct LspOptions {
     /// `--show-notes`: list every informational note on stderr after a
     /// full check, instead of the default one-line count.
     pub show_notes: bool,
     /// Explicit reference date shared by full checks and buffer re-evaluation.
     pub analysis_time: Option<alint_core::AnalysisTime>,
+    /// Injected rule registry, or the built-in catalog when `None`.
+    pub registry: Option<alint_core::RuleRegistry>,
+}
+
+impl LspOptions {
+    fn registry(&self) -> alint_core::RuleRegistry {
+        self.registry
+            .clone()
+            .unwrap_or_else(alint_rules::builtin_registry)
+    }
 }
 
 /// One cached finding for a file: enough to publish a diagnostic and to
@@ -377,8 +387,9 @@ impl Backend {
             .map(|(u, t, _)| (u.clone(), t.clone()))
             .collect();
         let analysis_time = self.options.analysis_time;
+        let registry = self.options.registry();
         let check = match tokio::task::spawn_blocking(move || {
-            check_workspace(&folders, &task_docs, analysis_time)
+            check_workspace(&folders, &task_docs, analysis_time, &registry)
         })
         .await
         {
@@ -396,7 +407,7 @@ impl Backend {
 
         let applied = {
             let mut state = self.state.lock();
-            apply_check(&mut state, &docs, check, self.options)
+            apply_check(&mut state, &docs, check, &self.options)
         };
         for message in applied.logs {
             self.client
@@ -880,7 +891,7 @@ fn apply_check(
     state: &mut State,
     docs: &[(Url, Option<String>, Option<i32>)],
     check: WorkspaceCheck,
-    options: LspOptions,
+    options: &LspOptions,
 ) -> Applied {
     let mut applied = Applied::default();
     let mut by_config: HashMap<PathBuf, FindingsByPath> = HashMap::new();

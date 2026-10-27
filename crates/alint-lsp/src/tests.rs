@@ -343,7 +343,12 @@ rules:
     )
     .unwrap();
 
-    let check = super::config::check_workspace(&[dir.path().to_path_buf()], &[], None);
+    let check = super::config::check_workspace(
+        &[dir.path().to_path_buf()],
+        &[],
+        None,
+        &alint_rules::builtin_registry(),
+    );
     let [(_, run)] = &check.runs[..] else {
         panic!("one config run: {:?}", check.runs.len());
     };

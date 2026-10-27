@@ -403,7 +403,7 @@ fn run(mut cli: Cli) -> Result<ExitCode> {
         Command::ValidateConfig { path, format } => cmd_validate_config(path, &format, &cli),
         Command::Lsp => {
             reject_non_human_format(&cli, "lsp")?;
-            cmd_lsp(cli.show_notes, cli.as_of)
+            cmd_lsp(cli.show_notes, cli.as_of, cli.registry())
         }
         Command::Rules { command } => rules::run(&command, &cli),
     }
@@ -439,10 +439,15 @@ fn reject_non_human_baseline_format(cli: &Cli) -> anyhow::Result<()> {
 /// disconnects; exits `0` after a clean `shutdown` + `exit`, `1` for an
 /// `exit` without `shutdown` (per the LSP specification).
 /// `--show-notes` lists informational notes on stderr after each check.
-fn cmd_lsp(show_notes: bool, analysis_time: Option<alint_core::AnalysisTime>) -> Result<ExitCode> {
+fn cmd_lsp(
+    show_notes: bool,
+    analysis_time: Option<alint_core::AnalysisTime>,
+    registry: alint_core::RuleRegistry,
+) -> Result<ExitCode> {
     let code = alint_lsp::run_stdio(alint_lsp::LspOptions {
         show_notes,
         analysis_time,
+        registry: Some(registry),
     })
     .context("running language server")?;
     Ok(ExitCode::from(u8::try_from(code).unwrap_or(1)))

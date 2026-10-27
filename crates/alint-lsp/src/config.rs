@@ -10,6 +10,8 @@ use alint_core::baseline::Baseline;
 use alint_core::{Engine, Level, Report, RuleEntry, RuleResult, WalkOptions, walk};
 
 use crate::diagnostics::{TextSource, group_findings, hint_findings};
+use alint_core::RuleRegistry;
+
 use crate::{ConfigRun, Finding, Session, WorkspaceCheck};
 
 /// Run every config relevant to the workspace: the config each open
@@ -19,6 +21,7 @@ pub(crate) fn check_workspace(
     folders: &[PathBuf],
     docs: &[(Url, Option<String>)],
     analysis_time: Option<alint_core::AnalysisTime>,
+    registry: &RuleRegistry,
 ) -> WorkspaceCheck {
     let mut check = WorkspaceCheck::default();
     let mut configs: Vec<PathBuf> = Vec::new();
@@ -31,7 +34,7 @@ pub(crate) fn check_workspace(
     }
     for (uri, _) in docs {
         if let Ok(abs) = uri.to_file_path()
-            && let Some(config) = config_for_document(&abs, folders)
+            && let Some(config) = config_for_document_with_registry(&abs, folders, registry)
         {
             if !configs.contains(&config) {
                 configs.push(config.clone());
@@ -45,7 +48,7 @@ pub(crate) fn check_workspace(
             .filter(|(uri, _)| check.doc_config.get(uri) == Some(&config))
             .filter_map(|(uri, text)| Some((uri.to_file_path().ok()?, text.clone()?)))
             .collect();
-        let run = run_config(&config, &overlays, analysis_time);
+        let run = run_config(&config, &overlays, analysis_time, registry);
         check.runs.push((config, run));
     }
     check
@@ -64,12 +67,20 @@ pub(crate) fn check_workspace(
 /// `nested_configs:`, the outermost such config governs the document
 /// (its rules AND the nested config's, scoped), not the nearest config
 /// alone.
+#[cfg(test)]
 pub(crate) fn config_for_document(doc: &Path, folders: &[PathBuf]) -> Option<PathBuf> {
+    config_for_document_with_registry(doc, folders, &alint_rules::builtin_registry())
+}
+
+pub(crate) fn config_for_document_with_registry(
+    doc: &Path,
+    folders: &[PathBuf],
+    registry: &RuleRegistry,
+) -> Option<PathBuf> {
     let folder = folders
         .iter()
         .filter(|f| doc.starts_with(f))
         .max_by_key(|f| f.components().count())?;
-    let registry = alint_rules::builtin_registry();
     let load_options = alint_dsl::LoadOptions::with_catalog(registry.catalog());
     let nearest = alint_dsl::discover(doc.parent()?)?;
     let Some(top) = alint_dsl::discover(folder) else {
@@ -113,8 +124,9 @@ fn run_config(
     config_path: &Path,
     overlays: &[(PathBuf, String)],
     analysis_time: Option<alint_core::AnalysisTime>,
+    registry: &RuleRegistry,
 ) -> Result<ConfigRun, String> {
-    let session = build_session_for_config(config_path, analysis_time)?;
+    let session = build_session_for_config(config_path, analysis_time, registry)?;
     let report = session
         .engine
         .run(&session.root, &session.index)
@@ -208,7 +220,9 @@ pub(crate) fn workspace_folders(params: &InitializeParams) -> Vec<PathBuf> {
 #[cfg(test)]
 pub(crate) fn build_session(start: &Path) -> Result<Option<Session>, String> {
     match alint_dsl::discover(start) {
-        Some(config_path) => build_session_for_config(&config_path, None).map(Some),
+        Some(config_path) => {
+            build_session_for_config(&config_path, None, &alint_rules::builtin_registry()).map(Some)
+        }
         None => Ok(None),
     }
 }
@@ -219,13 +233,13 @@ pub(crate) fn build_session(start: &Path) -> Result<Option<Session>, String> {
 fn build_session_for_config(
     config_path: &Path,
     analysis_time: Option<alint_core::AnalysisTime>,
+    registry: &RuleRegistry,
 ) -> Result<Session, String> {
     // The config's directory is the effective repo root, so relative
     // paths in rules resolve from there, matching the CLI.
     let effective_root = config_path
         .parent()
         .map_or_else(|| PathBuf::from("."), Path::to_path_buf);
-    let registry = alint_rules::builtin_registry();
     let config = alint_dsl::load_with(
         config_path,
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
@@ -243,7 +257,7 @@ fn build_session_for_config(
         // Match the CLI's load contract: nested `require:` specs must fail at
         // session construction, not only if a later full run happens to select
         // a parent entry and builds them lazily.
-        rule.validate_nested(&registry)
+        rule.validate_nested(registry)
             .map_err(|error| spec.redact_configuration_error(error))
             .map_err(|error| format!("building rule {:?}: {error}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (top-level
@@ -270,10 +284,10 @@ fn build_session_for_config(
 
     let pattern_hints: Vec<_> = entries
         .iter()
-        .flat_map(|entry| entry.pattern_hints(&registry))
+        .flat_map(|entry| entry.pattern_hints(registry))
         .chain(alint_core::pattern_hints::fact_hints(&config.facts))
         .collect();
-    let mut engine = Engine::from_entries(entries, registry)
+    let mut engine = Engine::from_entries(entries, registry.clone())
         .with_facts(config.facts)
         .with_vars(config.vars)
         .with_fix_size_limit(config.fix_size_limit);
