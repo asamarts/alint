@@ -1286,3 +1286,122 @@ mod tests {
         assert!(!rule.supports_expect_matches());
     }
 }
+
+#[cfg(test)]
+mod analyzer_pilot {
+    use super::*;
+    use alint_core::plugin_api::{Analyzer, AnalyzerError, AnalyzerInput, Finding, PointerSegment};
+    use alint_core::relation::{ContractAnalyzer, Limits, Row, RowState};
+
+    /// The key-parity shape as a pure contract analyzer: the first resource is
+    /// the reference, every other resource is a peer, and pointer segments are
+    /// the keys. This is the R6a pilot, not a replacement for the rule.
+    struct ParityPilot {
+        reference: String,
+    }
+
+    impl Analyzer for ParityPilot {
+        fn id(&self) -> &'static str {
+            "key-parity-pilot"
+        }
+
+        fn analyze(&self, input: AnalyzerInput<'_>) -> Result<Vec<Finding>, AnalyzerError> {
+            let keys = |path: &str| -> BTreeSet<String> {
+                input
+                    .rows
+                    .iter()
+                    .filter(|row| row.resource.path == path)
+                    .filter_map(|row| match &row.pointer {
+                        Some(parts) => Some(
+                            parts
+                                .iter()
+                                .map(|part| match part {
+                                    PointerSegment::Key(key) => key.clone(),
+                                    PointerSegment::Index(index) => format!("[{index}]"),
+                                })
+                                .collect::<Vec<_>>()
+                                .join("."),
+                        ),
+                        None => None,
+                    })
+                    .collect()
+            };
+            let reference = keys(&self.reference);
+            let mut findings = Vec::new();
+            for path in input
+                .rows
+                .iter()
+                .map(|row| row.resource.path.as_str())
+                .collect::<BTreeSet<_>>()
+            {
+                if path == self.reference {
+                    continue;
+                }
+                let peer = keys(path);
+                for key in reference.difference(&peer) {
+                    findings.push(Finding {
+                        path: Some(path.into()),
+                        message: format!(
+                            "{path}: missing key `{key}` (present in {})",
+                            self.reference
+                        ),
+                        line: None,
+                        column: None,
+                        related: Vec::new(),
+                        baseline_key: None,
+                        sensitive: false,
+                        analysis_failure: None,
+                        failure_kind: None,
+                        not_fixable: false,
+                    });
+                }
+                for key in peer.difference(&reference) {
+                    findings.push(Finding {
+                        path: Some(path.into()),
+                        message: format!(
+                            "{path}: extra key `{key}` (absent from {})",
+                            self.reference
+                        ),
+                        line: None,
+                        column: None,
+                        related: Vec::new(),
+                        baseline_key: None,
+                        sensitive: false,
+                        analysis_failure: None,
+                        failure_kind: None,
+                        not_fixable: false,
+                    });
+                }
+            }
+            Ok(findings)
+        }
+    }
+
+    fn key_row(path: &str, key: &str) -> Row {
+        Row::new(
+            Resource::literal(RelPath::parse(path).unwrap()),
+            Some(Pointer::root().key(key)),
+            0,
+            RowState::Key,
+        )
+    }
+
+    #[test]
+    fn key_parity_shape_runs_through_contract_analyzer() {
+        let rows = [
+            key_row("en.json", "a"),
+            key_row("en.json", "b"),
+            key_row("fr.json", "a"),
+            key_row("fr.json", "c"),
+        ];
+        let findings = ContractAnalyzer::new(ParityPilot {
+            reference: "en.json".into(),
+        })
+        .analyze("key-parity-pilot", &rows, &Limits::default())
+        .unwrap();
+        let messages: Vec<String> = findings.iter().map(|f| f.message.to_string()).collect();
+        assert!(messages.iter().any(|m| m.contains("missing key `b`")));
+        assert!(messages.iter().any(|m| m.contains("extra key `c`")));
+        assert_eq!(findings.len(), 2);
+    }
+}
