@@ -1290,8 +1290,12 @@ mod tests {
 #[cfg(test)]
 mod analyzer_pilot {
     use super::*;
+    use crate::test_support::{ctx, spec_yaml, tempdir_with_files};
+    use alint_core::Format;
     use alint_core::plugin_api::{Analyzer, AnalyzerError, AnalyzerInput, Finding, PointerSegment};
-    use alint_core::relation::{ContractAnalyzer, Limits, Row, RowState};
+    use alint_core::relation::{
+        Adapter, ContractAnalyzer, EntryRowsAdapter, Limits, Row, RowState,
+    };
 
     /// The key-parity shape as a pure contract analyzer: the first resource is
     /// the reference, every other resource is a peer, and pointer segments are
@@ -1384,6 +1388,52 @@ mod analyzer_pilot {
             0,
             RowState::Key,
         )
+    }
+
+    fn parsed_rows(path: &str, text: &str) -> Vec<Row> {
+        EntryRowsAdapter::new(Format::Json)
+            .unwrap()
+            .extract(
+                &Resource::literal(RelPath::parse(path).unwrap()),
+                text.as_bytes(),
+                &Limits::default(),
+            )
+            .unwrap()
+            .rows
+    }
+
+    #[test]
+    fn pilot_matches_the_real_rule_on_parsed_key_rows() {
+        let (tmp, index) = tempdir_with_files(&[
+            ("en.json", br#"{"a":1,"b":2}"#),
+            ("fr.json", br#"{"a":1,"c":3}"#),
+        ]);
+        index.enable_relation_caches();
+        let rule = build(&spec_yaml(
+            "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nlevel: error\n",
+        ))
+        .unwrap();
+        let expected: Vec<String> = rule
+            .evaluate(&ctx(tmp.path(), &index))
+            .unwrap()
+            .iter()
+            .map(|finding| finding.message.to_string())
+            .collect();
+        let mut rows = parsed_rows("en.json", r#"{"a":1,"b":2}"#);
+        rows.extend(parsed_rows("fr.json", r#"{"a":1,"c":3}"#));
+        let actual: Vec<String> = ContractAnalyzer::new(ParityPilot {
+            reference: "en.json".into(),
+        })
+        .analyze("key-parity-pilot", &rows, &Limits::default())
+        .unwrap()
+        .iter()
+        .map(|finding| finding.message.to_string())
+        .collect();
+        let mut expected = expected;
+        let mut actual = actual;
+        expected.sort();
+        actual.sort();
+        assert_eq!(actual, expected);
     }
 
     #[test]

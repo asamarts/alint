@@ -543,9 +543,10 @@ v0.21 is complete only when all of the following are observed:
   point used by check/fix/validate, rules, and export-agents-md, and the LSP
   carries the same registry through `LspOptions` into config discovery and
   session construction. A key-parity-shaped contract analyzer now runs through
-  `ContractAnalyzer` and is covered by a bridge test; the remaining step is
-  replacing the rule's internal comparison path with that analyzer and keeping
-  the golden fingerprints unchanged.
+  `ContractAnalyzer` and is covered by a bridge test, including a comparison
+  against the real rule on parsed JSON key rows; the remaining step is replacing
+  the rule's internal comparison path with that analyzer and keeping the golden
+  fingerprints unchanged.
 - **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
   replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
   removed from 20 configs. Four configs no longer load on the current release and are reported
