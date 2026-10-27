@@ -474,7 +474,12 @@ fn cmd_export_agents_md(opts: &ExportAgentsMdOptions, cli: &Cli) -> Result<ExitC
         section_title,
         include_info: opts.include_info,
     };
-    export_agents_md::run(cli.config.first().map(PathBuf::as_path), &run_opts)
+    let registry = cli.registry();
+    export_agents_md::run(
+        cli.config.first().map(PathBuf::as_path),
+        &run_opts,
+        &registry,
+    )
 }
 
 #[derive(Debug)]

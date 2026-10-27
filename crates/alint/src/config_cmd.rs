@@ -187,7 +187,7 @@ pub(super) fn cmd_validate_config(
     // Same load + build + when-parse path as `check`, with the
     // failures plumbed back as a Result for the validate handler
     // rather than aborting the run.
-    match validate_config_inner(&config_path) {
+    match validate_config_inner(&config_path, cli) {
         Ok((rule_count, hints)) => {
             emit_validate_success(rule_count, &hints, &config_path, format, cli)
         }
@@ -197,8 +197,9 @@ pub(super) fn cmd_validate_config(
 
 fn validate_config_inner(
     config_path: &Path,
+    cli: &Cli,
 ) -> Result<(usize, Vec<alint_core::pattern_hints::ConfigHint>)> {
-    let registry: alint_core::RuleRegistry = alint_rules::builtin_registry();
+    let registry = cli.registry();
     let config = alint_dsl::load_with(
         config_path,
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
@@ -352,7 +353,7 @@ pub(super) fn load_rules_for_explain(
         (config_path, root)
     };
     tracing::debug!(?config_path, "loading config");
-    let registry: RuleRegistry = alint_rules::builtin_registry();
+    let registry = cli.registry();
     let config = alint_dsl::load_with(
         &config_path,
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),

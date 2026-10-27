@@ -243,7 +243,7 @@ pub(crate) fn run(command: &RulesCommand, cli: &Cli) -> Result<ExitCode> {
             list(category.as_deref(), search.as_deref(), format)
         }
         RulesCommand::Categories => categories(format),
-        RulesCommand::Show { kind } => show(kind, format, !cli.no_docs),
+        RulesCommand::Show { kind } => show(kind, format, !cli.no_docs, cli),
     }
 }
 
@@ -403,13 +403,13 @@ fn list(category: Option<&str>, search: Option<&str>, format: Format) -> Result<
 /// `alint rules show <kind>`: one kind's summary, categories, aliases,
 /// capabilities, accepted selectors, fix operations, and docs link.
 /// Accepts an alias, resolving to its canonical kind.
-fn show(kind: &str, format: Format, show_docs: bool) -> Result<ExitCode> {
+fn show(kind: &str, format: Format, show_docs: bool, cli: &Cli) -> Result<ExitCode> {
     let cats = categories_for_kind(kind);
     if cats.is_empty() {
         bail!("unknown rule kind {kind:?}. Run `alint rules list` for the catalog.");
     }
     let canonical = canonical_kind(kind);
-    let registry = alint_rules::builtin_registry();
+    let registry = cli.registry();
     let meta = registry
         .meta(canonical)
         .expect("catalog kind must have registered capability metadata");

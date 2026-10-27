@@ -186,6 +186,18 @@ pub(crate) struct Cli {
 
     #[command(subcommand)]
     pub(crate) command: Option<Command>,
+    /// Injected rule registry for embedders/tests; `None` uses the built-ins.
+    #[arg(skip)]
+    pub(crate) registry: Option<alint_core::RuleRegistry>,
+}
+
+impl Cli {
+    /// The injected registry, or the built-in catalog for ordinary CLI use.
+    pub(crate) fn registry(&self) -> alint_core::RuleRegistry {
+        self.registry
+            .clone()
+            .unwrap_or_else(alint_rules::builtin_registry)
+    }
 }
 
 #[derive(Subcommand, Debug)]

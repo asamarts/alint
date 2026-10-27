@@ -77,7 +77,11 @@ pub struct RunOptions {
     pub include_info: bool,
 }
 
-pub fn run(config_path: Option<&Path>, opts: &RunOptions) -> Result<ExitCode> {
+pub fn run(
+    config_path: Option<&Path>,
+    opts: &RunOptions,
+    registry: &alint_core::RuleRegistry,
+) -> Result<ExitCode> {
     let cwd = std::env::current_dir().context("resolving current directory")?;
     let resolved_config_path = match config_path {
         Some(p) => p.to_path_buf(),
@@ -85,7 +89,6 @@ pub fn run(config_path: Option<&Path>, opts: &RunOptions) -> Result<ExitCode> {
             anyhow::anyhow!("no .alint.yml found (searched from {})", cwd.display())
         })?,
     };
-    let registry = alint_rules::builtin_registry();
     let config = alint_dsl::load_with(
         &resolved_config_path,
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
