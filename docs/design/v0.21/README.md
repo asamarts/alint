@@ -531,7 +531,11 @@ v0.21 is complete only when all of the following are observed:
   it (a direct run of the gate's gungraun filter and limit), and a +4% change over `main` passes,
   because S1 starts 7-8% under v0.18.2. Details and the recorded counts:
   [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md).
-- **R6a, in progress.** `alint_core::plugin_api` now carries std-only `Adapter` and
+- **R7, done.** `wit/alint-plugin/0.1.0/plugin.wit` is the committed
+  `alint:plugin@0.1.0` draft with shared types, `adapter` and `analyzer` worlds,
+  host-pushed inputs, no callbacks, and an append-only `wire.lock`. witforge's
+  subset checker accepts it (`witforge check wit/alint-plugin/0.1.0`).
+- **R6a and R6b, done.** `alint_core::plugin_api` now carries std-only `Adapter` and
   `Analyzer` traits over contract resources, rows, findings, related locations,
   capabilities, and limits. `relation::ContractAdapter` bridges a contract adapter
   into the engine, `relation::InternalContractAdapter` proves a built-in entry
@@ -577,7 +581,7 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** R7's WIT draft, then R8. R3 (`key_parity`), R4 (the shadow
-  harness), R5 (corpus replay), R6a (contract traits and registry injection),
-  R6b (`key_parity` through the bridge), and R9 (its TOML and XML dialect
-  formats) are complete.
+- **Next:** R8 release readiness. R3 (`key_parity`), R4 (the shadow harness),
+  R5 (corpus replay), R6a (contract traits and registry injection), R6b
+  (`key_parity` through the bridge), R7 (the WIT draft), and R9 (its TOML and
+  XML dialect formats) are complete.

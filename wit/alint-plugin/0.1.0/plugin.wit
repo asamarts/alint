@@ -1,0 +1,274 @@
+/// The alint plugin contract, draft 0.1.0.
+///
+/// Hosts push all inputs. The contract has no host callbacks, resources, or
+/// handles; rows are flat value node lists because WIT has no recursive types.
+package alint:plugin@0.1.0;
+
+/// Shared contract types.
+@since(version = 0.1.0)
+interface types {
+    /// A confined repository resource.
+    @since(version = 0.1.0)
+    record repo-resource {
+        /// Normalized `/`-separated repository path.
+        path: string,
+        /// Whether the host selected it from the walked index.
+        indexed: bool,
+        /// Index position when `indexed` is true.
+        index: option<u32>,
+    }
+
+    /// One flat value node. Containers name children by index.
+    @since(version = 0.1.0)
+    variant node {
+        /// Null.
+        null,
+        /// Boolean.
+        %bool(bool),
+        /// Number lexeme as written.
+        number(string),
+        /// String.
+        %string(string),
+        /// Bytes.
+        bytes(list<u8>),
+        /// Normalized repository path.
+        path(string),
+        /// List children.
+        %list(list<u32>),
+        /// Record fields in source order.
+        %record(list<record-field>),
+    }
+
+    /// One record field and its child node.
+    @since(version = 0.1.0)
+    record record-field {
+        /// Field name.
+        name: string,
+        /// Child node index.
+        child: u32,
+    }
+
+    /// A flat value: node 0 is the root, children follow parents.
+    @since(version = 0.1.0)
+    record flat-value {
+        /// Pre-order nodes.
+        nodes: list<node>,
+    }
+
+    /// One pointer segment.
+    @since(version = 0.1.0)
+    variant pointer-segment {
+        /// Object key.
+        key(string),
+        /// Array index.
+        index(u64),
+    }
+
+    /// One row state.
+    @since(version = 0.1.0)
+    variant row-state {
+        /// A value.
+        value(flat-value),
+        /// A structural key with no value.
+        key,
+        /// The location does not exist.
+        missing,
+        /// The location exists but could not be extracted.
+        error(string),
+    }
+
+    /// One adapter row.
+    @since(version = 0.1.0)
+    record row {
+        /// Resource provenance.
+        %resource: repo-resource,
+        /// Structural pointer when known.
+        pointer: option<list<pointer-segment>>,
+        /// Extractor-chosen label.
+        label: option<string>,
+        /// Emission order within the resource.
+        ordinal: u32,
+        /// Half-open byte start.
+        start: option<u64>,
+        /// Half-open byte end.
+        end: option<u64>,
+        /// Row state.
+        state: row-state,
+        /// Value before a transform.
+        original: option<flat-value>,
+    }
+
+    /// Adapter output.
+    @since(version = 0.1.0)
+    record adapter-output {
+        /// Rows.
+        rows: list<row>,
+        /// Non-string kinds skipped by a string-only adapter.
+        non-strings: list<string>,
+        /// Informational notes.
+        notes: list<string>,
+    }
+
+    /// Adapter input.
+    @since(version = 0.1.0)
+    record adapter-input {
+        /// Resource.
+        %resource: repo-resource,
+        /// Resource bytes.
+        bytes: list<u8>,
+        /// Row limit.
+        max-rows: u32,
+    }
+
+    /// Adapter failure.
+    @since(version = 0.1.0)
+    variant adapter-error {
+        /// Parse failure.
+        parse(string),
+        /// Row limit.
+        limit(limit-error),
+    }
+
+    /// A reached limit.
+    @since(version = 0.1.0)
+    record limit-error {
+        /// Configured limit.
+        limit: u32,
+        /// Reached count.
+        reached: u32,
+    }
+
+    /// Related location.
+    @since(version = 0.1.0)
+    record related-location {
+        /// Path.
+        path: string,
+        /// Label.
+        label: string,
+        /// 1-based line.
+        line: option<u32>,
+        /// 1-based column.
+        column: option<u32>,
+    }
+
+    /// Analyzer finding.
+    @since(version = 0.1.0)
+    record finding {
+        /// Primary path.
+        path: option<string>,
+        /// Message.
+        message: string,
+        /// 1-based line.
+        line: option<u32>,
+        /// 1-based column.
+        column: option<u32>,
+        /// Related locations.
+        related: list<related-location>,
+        /// Stable baseline key.
+        baseline-key: option<string>,
+        /// Sensitive evidence.
+        sensitive: bool,
+        /// Analysis-failure message.
+        analysis-failure: option<string>,
+        /// Analysis-failure kind.
+        failure-kind: option<string>,
+        /// Cannot be auto-fixed.
+        not-fixable: bool,
+    }
+
+    /// Analyzer input.
+    @since(version = 0.1.0)
+    record analyzer-input {
+        /// Rule id.
+        rule-id: string,
+        /// Host-pushed rows.
+        rows: list<row>,
+        /// Finding limit.
+        max-findings: u32,
+    }
+
+    /// Analyzer failure.
+    @since(version = 0.1.0)
+    variant analyzer-error {
+        /// Invalid input.
+        invalid-input(string),
+        /// Finding limit.
+        limit(limit-error),
+    }
+
+    /// Capabilities a plugin may request.
+    @since(version = 0.1.0)
+    record capabilities {
+        /// May spawn a user command.
+        spawn-user-command: bool,
+        /// May read the host keyring.
+        host-keyring: bool,
+    }
+
+    /// Plugin metadata.
+    @since(version = 0.1.0)
+    record plugin-info {
+        /// Name.
+        name: string,
+        /// Version.
+        version: string,
+        /// Supported contract range.
+        contract: string,
+        /// Requested capabilities.
+        capabilities: capabilities,
+    }
+}
+
+/// Host-pushed resource adapter.
+@since(version = 0.1.0)
+interface adapter-api {
+    use types.{adapter-error, adapter-input, adapter-output};
+
+    /// Stable adapter id.
+    @since(version = 0.1.0)
+    id: func() -> string;
+
+    /// Whether parse errors may quote sensitive source material.
+    @since(version = 0.1.0)
+    redacts-by-default: func() -> bool;
+
+    /// Decode one resource.
+    @since(version = 0.1.0)
+    extract: func(input: adapter-input) -> result<adapter-output, adapter-error>;
+}
+
+/// Host-pushed relation analyzer.
+@since(version = 0.1.0)
+interface analyzer-api {
+    use types.{analyzer-error, analyzer-input, finding};
+
+    /// Stable analyzer id.
+    @since(version = 0.1.0)
+    id: func() -> string;
+
+    /// Analyze host-pushed rows.
+    @since(version = 0.1.0)
+    analyze: func(input: analyzer-input) -> result<list<finding>, analyzer-error>;
+}
+
+/// Adapter plugin world.
+@since(version = 0.1.0)
+world adapter {
+    /// Shared contract types.
+    @since(version = 0.1.0)
+    import types;
+    /// Adapter entry points.
+    @since(version = 0.1.0)
+    export adapter-api;
+}
+
+/// Analyzer plugin world.
+@since(version = 0.1.0)
+world analyzer {
+    /// Shared contract types.
+    @since(version = 0.1.0)
+    import types;
+    /// Analyzer entry points.
+    @since(version = 0.1.0)
+    export analyzer-api;
+}
