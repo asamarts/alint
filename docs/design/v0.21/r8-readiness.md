@@ -42,6 +42,12 @@ waiver.
   1,042,236 KB (**+64.8%**); S3 249,868 KB vs 253,200 KB (−1.3%).
   v0.20.1 measures 1,725,096 KB on S2 with the same scenario, so the increase
   predates v0.21 and is not caused by the relation layer.
+- Release bisect (same 1M tree, S2/full, same toolchain): v0.18.2 1,068,512 KB;
+  v0.19.0 1,656,816 KB; v0.20.0 1,682,880 KB; v0.20.1 1,764,188 KB; current
+  1,744,668 KB. A one-rule `file_exists` config is ~11.5 MB on all versions.
+  The growth appears with per-file line rules; `final_newline`,
+  `no_trailing_whitespace`, and `indent_style` each reproduce it in isolation.
+  The v0.19.0 release is therefore the first affected release.
 
 ## Remaining release blockers
 
