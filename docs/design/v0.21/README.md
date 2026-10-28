@@ -583,7 +583,12 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **Next:** R8 release readiness. R3 (`key_parity`), R4 (the shadow harness),
-  R5 (corpus replay), R6a (contract traits and registry injection), R6b
+- **R8, in progress.** [`r8-readiness.md`](r8-readiness.md) records a conditional
+  go: correctness, corpus, plugin, generated-artifact and CI gates pass, but the
+  kbench 100k/1M wall-clock and 1M RSS measurements are still required before a
+  release tag.
+- **Next:** run the kbench budgets, re-run the final-candidate corpus replay,
+  and fill the R8 report. R3 (`key_parity`), R4 (the shadow harness), R5
+  (corpus replay), R6a (contract traits and registry injection), R6b
   (`key_parity` through the bridge), R7 (the WIT draft), and R9 (its TOML and
   XML dialect formats) are complete.

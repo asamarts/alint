@@ -9,6 +9,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Added
 
 - **`key_parity`** keeps a reference locale or environment file and a glob of peers in step. JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .NET `.resx` keys are compared as leaf paths; `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys` handle the common locale layouts. Missing references, unparsable files, and a peer glob that matches nothing fail loudly, and findings quote keys only. Key-insertion fixes remain reserved for the generic edit plan.
+- The plugin contract `0.x` now has std-only adapter and analyzer traits, a bridge to the internal relation layer, CLI/LSP/testkit registry injection, and a committed `alint:plugin@0.1.0` WIT draft.
+- `cross_file`'s `relation: equals` has a differential shadow implementation under the test-only `shadow-ir` feature, exercised by e2e properties and the corpus replay.
 
 ### Fixed
 
