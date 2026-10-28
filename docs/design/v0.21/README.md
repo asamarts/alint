@@ -583,10 +583,11 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **R8, in progress.** [`r8-readiness.md`](r8-readiness.md) records a no-go on
-  the 1M S2/full RSS budget: wall-clock and all correctness gates pass, but S2
-  uses ~1.72 GB vs v0.18.2's ~1.04 GB. v0.20.1 reproduces the increase, so it
-  predates v0.21, but V21-6 requires a resolution rather than a waiver.
+- **R8, in progress.** [`r8-readiness.md`](r8-readiness.md) records the
+  generator fix and corrected-workload RSS: current 1M S2 is 923,708 KB vs
+  v0.20.1 937,552 KB, meeting the approved target. The original v0.18.2 +10%
+  budget remains exceeded (v0.18.2 600,652 KB on the corrected tree), so a
+  V21-6 decision is still required before release.
 - **Next:** run the kbench budgets, re-run the final-candidate corpus replay,
   and fill the R8 report. R3 (`key_parity`), R4 (the shadow harness), R5
   (corpus replay), R6a (contract traits and registry injection), R6b

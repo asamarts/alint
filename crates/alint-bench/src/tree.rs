@@ -136,7 +136,11 @@ pub fn generate_monorepo(packages: usize, files_per_package: usize, seed: u64) -
             };
             let rel = pkg_rel.join("src").join(format!("{stem}.rs"));
             let size = rng.random_range(256usize..2048);
-            let content = lorem_bytes(size, &mut rng);
+            let mut content = lorem_bytes(size, &mut rng);
+            // Generated Rust sources are text files: terminate them so the
+            // final_newline benchmark rule does not fabricate one finding per
+            // file (which made the 1M RSS budget measure the findings vector).
+            content.push(b'\n');
             std::fs::write(dir.path().join(&rel), content)?;
             file_list.push(rel);
         }

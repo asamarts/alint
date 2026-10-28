@@ -12,6 +12,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   diagnostics, spans and verified-edit APIs used by alint remain compatible;
   no source changes were required.
 
+### Fixed
+
+- The benchmark tree generator now newline-terminates generated Rust sources.
+  S2's `final_newline` rule previously produced one finding per file at 1M, so
+  the 1M RSS budget measured the findings vector rather than ordinary linter
+  memory. Generated-tree scenarios carry workload revision 2.
+
 ### Added
 
 - **`key_parity`** keeps a reference locale or environment file and a glob of peers in step. JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .NET `.resx` keys are compared as leaf paths; `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys` handle the common locale layouts. Missing references, unparsable files, and a peer glob that matches nothing fail loudly, and findings quote keys only. Key-insertion fixes remain reserved for the generic edit plan.

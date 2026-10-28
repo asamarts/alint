@@ -208,7 +208,7 @@ impl Scenario {
     pub fn workload_revision(self) -> u32 {
         match self {
             Self::S4 => 3,
-            Self::S1 | Self::S2 | Self::S3 | Self::Sfix => 1,
+            Self::S1 | Self::S2 | Self::S3 | Self::Sfix => 2,
         }
     }
 
@@ -675,11 +675,11 @@ mod tests {
     #[test]
     fn scenario_workload_revisions_match_resolved_rule_counts() {
         let expected = [
-            (Scenario::S1, 1, 16),
-            (Scenario::S2, 1, 20),
-            (Scenario::S3, 1, 16),
+            (Scenario::S1, 2, 16),
+            (Scenario::S2, 2, 20),
+            (Scenario::S3, 2, 16),
             (Scenario::S4, 3, 85),
-            (Scenario::Sfix, 1, 24),
+            (Scenario::Sfix, 2, 24),
         ];
         let tmp = tempfile::tempdir().expect("tempdir");
         let registry = alint_rules::builtin_registry();
