@@ -583,10 +583,10 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **R8, in progress.** [`r8-readiness.md`](r8-readiness.md) records a conditional
-  go: correctness, corpus, plugin, generated-artifact and CI gates pass, but the
-  kbench 100k/1M wall-clock and 1M RSS measurements are still required before a
-  release tag.
+- **R8, in progress.** [`r8-readiness.md`](r8-readiness.md) records a no-go on
+  the 1M S2/full RSS budget: wall-clock and all correctness gates pass, but S2
+  uses ~1.72 GB vs v0.18.2's ~1.04 GB. v0.20.1 reproduces the increase, so it
+  predates v0.21, but V21-6 requires a resolution rather than a waiver.
 - **Next:** run the kbench budgets, re-run the final-candidate corpus replay,
   and fill the R8 report. R3 (`key_parity`), R4 (the shadow harness), R5
   (corpus replay), R6a (contract traits and registry injection), R6b

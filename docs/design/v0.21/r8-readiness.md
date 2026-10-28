@@ -1,8 +1,9 @@
 # v0.21 R8 release-readiness report
 
-Status: **conditional go** — all code, semantic, corpus, generated-artifact and
-CI gates pass. The release remains blocked on the kbench 100k/1M wall-clock and
-1M RSS measurements required by section 9.6.
+Status: **no-go on the RSS budget** — all code, semantic, corpus,
+generated-artifact, CI and wall-clock gates pass. The 1M S2/full peak RSS is
+materially above the v0.18.2 reference; V21-6 requires a decision rather than a
+waiver.
 
 ## Acceptance matrix
 
@@ -20,9 +21,9 @@ CI gates pass. The release remains blocked on the kbench 100k/1M wall-clock and
 | Generated artifacts | preflight: schema, facts, architecture, docs export, roadmap | pass |
 | Formatting, clippy, workspace tests | preflight | pass |
 | Cross-platform CI | Linux/macOS/Windows green | pass |
-| 100k wall-clock vs `v0.18.2` | kbench, S1-S3 × full/changed, 30 runs | **not run** |
-| 1M wall-clock vs `v0.18.2` | kbench, one warm-up + three runs | **not run** |
-| 1M peak RSS vs `v0.18.2` | kbench, ≤ +10% | **not run** |
+| 100k wall-clock vs `v0.18.2` | kbench, S1-S3 × full/changed, 30 runs | pass (worst +0.27%) |
+| 1M wall-clock vs `v0.18.2` | kbench, same-session, one warm-up + three runs | pass (worst +2.15%) |
+| 1M peak RSS vs `v0.18.2` | kbench, 1M persistent tree | **fail on S2/full (+65%)** |
 
 ## Performance evidence already recorded
 
@@ -33,22 +34,27 @@ CI gates pass. The release remains blocked on the kbench 100k/1M wall-clock and
   `key_parity` alone 839 reads, per-file rule alone 441, both 839 at 10k.
 - Full corpus replay: 106/110 replayed, 49 with `cross_file` `equals`, zero
   shadow differences.
+- kbench 100k (30 runs, same-session v0.18.2 reference): S1 −8.80%/−9.37%,
+  S2 −4.01%/−5.63%, S3 +0.27%/+0.25%.
+- kbench 1M (same-session v0.18.2 reference, 3 runs): S1 −2.88%/−2.55%,
+  S2 −3.19%/−0.60%, S3 −3.24%/+2.15%.
+- kbench 1M peak RSS: S1 163,920 KB vs 172,100 KB (−4.8%); S2 1,717,604 KB vs
+  1,042,236 KB (**+64.8%**); S3 249,868 KB vs 253,200 KB (−1.3%).
+  v0.20.1 measures 1,725,096 KB on S2 with the same scenario, so the increase
+  predates v0.21 and is not caused by the relation layer.
 
 ## Remaining release blockers
 
-1. Run on the canonical kbench host with caches dropped:
-   - S1-S3 × {full, changed} at 100k, 30 runs, median ≤ +3% vs v0.18.2;
-   - S1-S3 × {full, changed} at 1M, one warm-up + three runs, ≤ +3%;
-   - peak RSS at 1M ≤ +10%.
+1. Resolve the S2 1M RSS budget with V21-6: either fix the pre-existing
+   memory growth, or record an approved budget revision with evidence.
 2. Re-run the shadow corpus replay against `v0.20.1` on the final release
    candidate.
-3. Fill the measured numbers into this report and replace the conditional
-   verdict with the final go/no-go.
+3. Replace this no-go with the final decision once the RSS budget is resolved.
 
 ## Go/no-go
 
-**Conditional GO.** Phase 2's relation IR, `key_parity`, shadow port, plugin
-contract and corpus evidence meet the semantic and correctness bar. The
-release must not be tagged until the kbench budgets above are measured and
-within budget. If any budget is exceeded, the numbers return for a V21-6
-decision rather than being waived.
+**NO-GO** until the 1M S2 RSS budget is resolved. Phase 2's relation IR,
+`key_parity`, shadow port, plugin contract, corpus evidence and wall-clock
+budgets meet the bar. The S2 RSS increase predates v0.21 (v0.20.1 reproduces
+it), but V21-6 applies to the cumulative release budget and the numbers must go
+back for a decision; they are not waived here.
