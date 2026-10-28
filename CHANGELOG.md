@@ -12,6 +12,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   diagnostics, spans and verified-edit APIs used by alint remain compatible;
   no source changes were required.
 
+### Security
+
+- Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
+  (exponential event growth with `ENABLE_WIKILINKS`).
+
 ### Fixed
 
 - The benchmark tree generator now newline-terminates generated Rust sources.
