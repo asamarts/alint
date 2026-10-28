@@ -47,7 +47,11 @@ waiver.
   1,744,668 KB. A one-rule `file_exists` config is ~11.5 MB on all versions.
   The growth appears with per-file line rules; `final_newline`,
   `no_trailing_whitespace`, and `indent_style` each reproduce it in isolation.
-  The v0.19.0 release is therefore the first affected release.
+  The v0.19.0 release is therefore the first affected release. A symbolized
+  100k Massif run peaks at ~82 MB; its largest visible allocations are the
+  `ignore` walker queues and `FileIndex` path storage, so the next step is an
+  allocation-level profile of per-file index retention, not a speculative rule
+  change.
 
 ## Remaining release blockers
 
