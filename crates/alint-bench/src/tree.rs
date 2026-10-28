@@ -508,19 +508,30 @@ pub fn select_subset(files: &[PathBuf], fraction: f64, seed: u64) -> Vec<&PathBu
 fn lorem_bytes(size: usize, rng: &mut impl Rng) -> Vec<u8> {
     let mut out = Vec::with_capacity(size);
     let mut line_len = 0;
+    let mut line_start = true;
     while out.len() < size {
         if line_len >= 72 {
+            // Never leave trailing whitespace before a generated newline.
+            if out.last() == Some(&b' ') {
+                *out.last_mut().expect("non-empty line") = b'a';
+            }
             out.push(b'\n');
             line_len = 0;
+            line_start = true;
             continue;
         }
         let c = rng.random_range(0u8..27);
-        if c == 26 {
+        if c == 26 && !line_start {
             out.push(b' ');
         } else {
-            out.push(b'a' + c);
+            let letter = b'a' + (c % 26);
+            out.push(letter);
+            line_start = false;
         }
         line_len += 1;
+    }
+    if out.last() == Some(&b' ') {
+        *out.last_mut().expect("non-empty") = b'a';
     }
     out
 }

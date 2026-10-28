@@ -1,11 +1,11 @@
 # v0.21 R8 release-readiness report
 
-Status: **no-go on the original RSS budget, but the approved v0.20.1 target is
-met.** The benchmark generator now terminates generated Rust sources, removing
-one million accidental `final_newline` findings. On the corrected workload,
-current 1M S2/full RSS is 923,708 KB vs v0.20.1 937,552 KB. The original
-V21-6 v0.18.2 comparison is still above its +10% budget (v0.18.2 600,652 KB on
-the corrected tree), so that gate requires an explicit decision.
+Status: **memory gate passes; strict performance target fails.** The benchmark
+generator now writes well-formed Rust text, eliminating accidental
+`final_newline`, trailing-whitespace and indentation findings. On the corrected
+1M workload, current S2 RSS is 118,924 KB, within the v0.18.2 +10% gate and
+below v0.20.1. S2 wall-clock remains about 3% above v0.20.1, so the release
+hold remains under the strict performance decision.
 
 ## Acceptance matrix
 
@@ -25,8 +25,9 @@ the corrected tree), so that gate requires an explicit decision.
 | Cross-platform CI | Linux/macOS/Windows green | pass |
 | 100k wall-clock vs `v0.18.2` | kbench, S1-S3 × full/changed, 30 runs | pass (worst +0.27%) |
 | 1M wall-clock vs `v0.18.2` | kbench, same-session, one warm-up + three runs | pass (worst +2.15%) |
-| 1M peak RSS vs `v0.18.2` | corrected workload, 1M persistent tree | **fail on S2/full (+53.8%)** |
-| 1M peak RSS vs `v0.20.1` | corrected workload, 1M persistent tree | **pass** (923,708 vs 937,552 KB) |
+| 1M peak RSS vs `v0.18.2` | clean workload, 1M persistent tree | **pass** (118,924 vs 118,044 KB, +0.75%) |
+| 1M peak RSS vs `v0.20.1` | clean workload, 1M persistent tree | **pass** (118,924 vs 119,420 KB) |
+| 1M S2 wall-clock vs `v0.20.1` | clean workload, 10 runs | **fail** (~6.04 s vs 5.86 s, +3.1%) |
 
 ## Performance evidence already recorded
 
@@ -44,12 +45,10 @@ the corrected tree), so that gate requires an explicit decision.
 - Benchmark-generator correction: generated `.rs` sources now end with a
   newline, so S2 does not fabricate one `final_newline` finding per file.
   Generated-tree scenarios carry workload revision 2.
-- Corrected-workload 1M S2 peak RSS: v0.18.2 600,652 KB; v0.20.1 937,552 KB;
-  current 923,708 KB. Current is below v0.20.1 but remains above v0.18.2's
-  +10% budget.
-- Corrected-workload 1M wall-clock is at parity with v0.20.1: S1 4.153 s vs
-  4.150 s (10 runs); S2 11.97 s vs 11.75 s (10 runs). It is not strictly below
-  v0.20.1 on S2, so the release hold remains.
+- Clean-workload 1M S2 peak RSS: v0.18.2 118,044 KB; v0.20.1 119,420 KB;
+  current 118,924 KB (+0.75% vs v0.18.2, below v0.20.1).
+- Clean-workload 1M S2 wall-clock: v0.20.1 5.855 s; current 6.040 s (+3.1%).
+  S1 remains at parity (4.15 s). The strict “below v0.20.1” target is not met.
 - Release bisect (same 1M tree, S2/full, same toolchain): v0.18.2 1,068,512 KB;
   v0.19.0 1,656,816 KB; v0.20.0 1,682,880 KB; v0.20.1 1,764,188 KB; current
   1,744,668 KB. A one-rule `file_exists` config is ~11.5 MB on all versions.
@@ -63,16 +62,14 @@ the corrected tree), so that gate requires an explicit decision.
 
 ## Remaining release blockers
 
-1. Decide the original V21-6 v0.18.2 RSS gate: the approved v0.20.1 target is
-   met, but v0.18.2's +10% budget is not. Record the decision or continue
-   reducing findings-vector memory.
+1. Optimize S2 by at least 3% against v0.20.1, or revise the strict performance
+   decision.
 2. Re-run the shadow corpus replay against `v0.20.1` on the final release
    candidate.
 3. Replace this report's verdict with the final decision.
 
 ## Go/no-go
 
-**Conditional GO against the approved v0.20.1 target; NO-GO against the
-original v0.18.2 RSS gate.** The generated-workload bug is fixed and current
-RSS is below v0.20.1. The remaining v0.18.2 budget gap needs an explicit V21-6
-decision; it is not silently waived.
+**NO-GO on the strict performance target.** Memory now passes both the v0.18.2
++10% gate and the v0.20.1 comparison. S2 remains ~3.1% slower than v0.20.1, so
+the release hold stays until performance is reduced or the target is revised.

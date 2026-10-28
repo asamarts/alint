@@ -966,6 +966,9 @@ fn evaluate_per_file_entries<const TRACE: bool>(
 ) -> (Vec<(usize, Violation)>, TraceCounts) {
     let considered = TRACE.then(|| AtomicU64::new(0));
     let matched = TRACE.then(|| AtomicU64::new(0));
+    // Resolve the relation cache once, not once per file: S2 at 1M otherwise
+    // pays a million OnceLock reads even though the cache is absent.
+    let read_cache = per_file_ctx.index.read_cache();
     let by_file: Vec<(usize, Violation)> = with_worker_pool(|| {
         walk_index
             .entries
@@ -1027,7 +1030,7 @@ fn evaluate_per_file_entries<const TRACE: bool>(
                 // a typed `resource_read` analysis failure for each owning
                 // rule; an unreadable or over-cap in-scope file can never look
                 // like a policy pass.
-                if let Some(cache) = per_file_ctx.index.read_cache() {
+                if let Some(cache) = read_cache {
                     let read = cache.read_index_path(root, &file_entry.path, file_entry.size);
                     return match read.as_ref() {
                         crate::relation::ResourceRead::Present(bytes) => {
@@ -1101,6 +1104,7 @@ fn evaluate_per_file_entries<const TRACE: bool>(
 /// Dispatch one file's bytes to every applicable per-file rule. Shared by the
 /// direct read path and the relation-cache path so both observe identical
 /// evaluation and failure semantics.
+#[inline]
 fn dispatch_per_file<const TRACE: bool>(
     ctx: &Context<'_>,
     applicable: &[(usize, &RuleEntry)],
@@ -1138,6 +1142,7 @@ fn dispatch_per_file<const TRACE: bool>(
 }
 
 /// One read failure for every rule that would have evaluated the file.
+#[inline]
 fn violations_for_each(
     applicable: &[(usize, &RuleEntry)],
     violation: &Violation,
