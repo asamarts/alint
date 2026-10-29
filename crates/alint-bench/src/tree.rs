@@ -630,6 +630,23 @@ mod tests {
     // ─── select_subset ───────────────────────────────────────────
 
     #[test]
+    fn monorepo_sources_are_clean_text() {
+        let t = generate_monorepo(3, 4, 42).unwrap();
+        for rel in t
+            .files
+            .iter()
+            .filter(|p| p.extension().is_some_and(|e| e == "rs"))
+        {
+            let text = std::fs::read_to_string(t.root().join(rel)).unwrap();
+            assert!(text.ends_with('\n'), "{rel:?} lacks a final newline");
+            for line in text.lines() {
+                assert!(!line.starts_with(' '), "{rel:?} has leading whitespace");
+                assert!(!line.ends_with(' '), "{rel:?} has trailing whitespace");
+            }
+        }
+    }
+
+    #[test]
     fn select_subset_zero_fraction_is_empty() {
         let files: Vec<PathBuf> = (0..100).map(|i| PathBuf::from(format!("f{i}"))).collect();
         assert_eq!(select_subset(&files, 0.0, 1), Vec::<&PathBuf>::new());

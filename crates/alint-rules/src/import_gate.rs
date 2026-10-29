@@ -559,6 +559,20 @@ mod tests {
     }
 
     #[test]
+    fn rust_prefilter_skips_files_without_the_use_literal() {
+        let r = rule(Language::Rust, r"^internal::", &[]);
+        assert!(eval(&r, "src/a.rs", "pub fn f() {}\n").is_empty());
+        assert!(eval(&r, "src/a.rs", "// no import here\nlet x = 1;\n").is_empty());
+    }
+
+    #[test]
+    fn rust_prefilter_never_hides_a_real_import() {
+        let r = rule(Language::Rust, r"^internal::", &[]);
+        let v = eval(&r, "src/a.rs", "use internal::secret;\n");
+        assert_eq!(v.len(), 1, "{v:?}");
+    }
+
+    #[test]
     fn build_errors_on_generic_without_pattern_and_bad_regex() {
         let mut spec = crate::test_support::spec_yaml(
             "id: t\nkind: import_gate\npaths: \"**/*\"\nlanguage: generic\nforbid: x\nlevel: error\n",
