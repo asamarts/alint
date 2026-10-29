@@ -796,7 +796,11 @@ impl CrossFileRule {
         Violation::new(format!("{}: {reason}", crate::slash(path))).with_path(path.to_path_buf())
     }
 
-    fn analysis_failure(path: &Path, kind: AnalysisFailureKind, reason: &str) -> Violation {
+    pub(super) fn analysis_failure(
+        path: &Path,
+        kind: AnalysisFailureKind,
+        reason: &str,
+    ) -> Violation {
         Self::violation(path, reason).as_analysis_failure(kind)
     }
 
@@ -920,7 +924,7 @@ fn confined_rel(ctx: &Context<'_>, rel: &Path) -> Option<PathBuf> {
 
 /// Read a tree-relative path as text (the index stores paths, not
 /// contents, so the cross-file rules read the file themselves).
-fn read_rel(ctx: &Context<'_>, rel: &Path) -> Result<String, crate::io::ReadCapError> {
+pub(super) fn read_rel(ctx: &Context<'_>, rel: &Path) -> Result<String, crate::io::ReadCapError> {
     // Confine to the repo root before any read — an absolute or
     // root-escaping (lexically or via symlink) `source.file` /
     // `targets[].file` must never read a file outside the tree.
