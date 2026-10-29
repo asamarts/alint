@@ -119,6 +119,10 @@ pub struct ImportGateRule {
     /// The anchored presets (`^\s*import …`) can't match a comment
     /// line, so they don't need it.
     strip_comments: bool,
+    /// Optional literal that must occur before the import regex can match.
+    /// Default Rust imports always contain `use`; skipping empty scans is a
+    /// large win on generated/minified source with no imports.
+    prefilter: Option<&'static str>,
 }
 
 impl Rule for ImportGateRule {
@@ -169,6 +173,12 @@ impl PerFileRule for ImportGateRule {
         } else {
             text
         };
+        if self
+            .prefilter
+            .is_some_and(|needle| !scan_text.contains(needle))
+        {
+            return Ok(Vec::new());
+        }
         let mut violations = Vec::new();
         for (i, line) in scan_text.lines().enumerate() {
             let Some(caps) = self.import_re.captures(line) else {
@@ -339,6 +349,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     // custom `import_pattern` or any other (anchored) preset opts out.
     let strip_comments =
         opts.import_pattern.is_none() && matches!(opts.language, Some(Language::Js));
+    let prefilter = (opts.import_pattern.is_none()
+        && matches!(opts.language, Some(Language::Rust)))
+    .then_some("use");
 
     Ok(Box::new(ImportGateRule {
         id: spec.id.clone(),
@@ -351,6 +364,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         import_re,
         allow,
         strip_comments,
+        prefilter,
     }))
 }
 
@@ -380,6 +394,7 @@ mod tests {
                 )
             },
             strip_comments: matches!(language, Language::Js),
+            prefilter: matches!(language, Language::Rust).then_some("use"),
         }
     }
 

@@ -19,6 +19,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `import_gate`'s Rust preset now checks for the literal `use` before running
+  its per-line regex, avoiding a full regex scan of import-free source.
 - The benchmark tree generator now newline-terminates generated Rust sources.
   S2's `final_newline` rule previously produced one finding per file at 1M, so
   the 1M RSS budget measured the findings vector rather than ordinary linter

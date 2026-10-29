@@ -1332,6 +1332,9 @@ ImportGateRule {
         Scope { ... },
     ),
     strip_comments: false,
+    prefilter: Some(
+        "use",
+    ),
 }
 
 === kind: indent_style | id: indent-style ===

@@ -583,10 +583,11 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **R8, in progress.** [`r8-readiness.md`](r8-readiness.md) records the clean
-  benchmark workload: RSS now passes both the v0.18.2 +10% gate and v0.20.1
-  (118,924 KB vs 118,044 / 119,420 KB). The strict performance target still
-  fails: S2 is ~6.04 s vs v0.20.1 5.855 s (+3.1%), so the release hold remains.
+- **R8, go.** [`r8-readiness.md`](r8-readiness.md) records the clean benchmark
+  workload and import-gate prefilter: RSS passes both the v0.18.2 +10% gate and
+  v0.20.1 (118,924 KB vs 118,044 / 119,420 KB), and 1M S2 is faster than
+  v0.20.1 (5.357 s vs 5.861 s). Complete the final-candidate corpus replay and
+  release preflight before tagging.
 - **Next:** run the kbench budgets, re-run the final-candidate corpus replay,
   and fill the R8 report. R3 (`key_parity`), R4 (the shadow harness), R5
   (corpus replay), R6a (contract traits and registry injection), R6b

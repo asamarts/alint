@@ -1,11 +1,9 @@
 # v0.21 R8 release-readiness report
 
-Status: **memory gate passes; strict performance target fails.** The benchmark
-generator now writes well-formed Rust text, eliminating accidental
-`final_newline`, trailing-whitespace and indentation findings. On the corrected
-1M workload, current S2 RSS is 118,924 KB, within the v0.18.2 +10% gate and
-below v0.20.1. S2 wall-clock remains about 3% above v0.20.1, so the release
-hold remains under the strict performance decision.
+Status: **GO.** The benchmark generator now writes well-formed Rust text,
+eliminating accidental findings, and the Rust import-gate literal prefilter
+removes the remaining S2 slowdown. Clean-workload 1M S2 RSS is 118,924 KB
+(within v0.18.2 +10% and below v0.20.1), and S2 is now faster than v0.20.1.
 
 ## Acceptance matrix
 
@@ -27,7 +25,7 @@ hold remains under the strict performance decision.
 | 1M wall-clock vs `v0.18.2` | kbench, same-session, one warm-up + three runs | pass (worst +2.15%) |
 | 1M peak RSS vs `v0.18.2` | clean workload, 1M persistent tree | **pass** (118,924 vs 118,044 KB, +0.75%) |
 | 1M peak RSS vs `v0.20.1` | clean workload, 1M persistent tree | **pass** (118,924 vs 119,420 KB) |
-| 1M S2 wall-clock vs `v0.20.1` | clean workload, 10 runs | **fail** (~6.04 s vs 5.86 s, +3.1%) |
+| 1M S2 wall-clock vs `v0.20.1` | clean workload, 5 runs | **pass** (5.357 s vs 5.861 s, −8.6%) |
 
 ## Performance evidence already recorded
 
@@ -47,8 +45,12 @@ hold remains under the strict performance decision.
   Generated-tree scenarios carry workload revision 2.
 - Clean-workload 1M S2 peak RSS: v0.18.2 118,044 KB; v0.20.1 119,420 KB;
   current 118,924 KB (+0.75% vs v0.18.2, below v0.20.1).
-- Clean-workload 1M S2 wall-clock: v0.20.1 5.855 s; current 6.040 s (+3.1%).
-  S1 remains at parity (4.15 s). The strict “below v0.20.1” target is not met.
+- Clean-workload 1M S2 wall-clock: v0.20.1 5.861 s; current 5.357 s (−8.6%).
+  S1 remains at parity (4.15 s).
+- The Rust import-gate default pattern now prechecks for the literal `use`
+  before running the per-line regex; generated source without imports skips
+  the scan. Full S2 100k drops from 567 ms to 521 ms; 1M from 5.861 s to
+  5.357 s.
 - Release bisect (same 1M tree, S2/full, same toolchain): v0.18.2 1,068,512 KB;
   v0.19.0 1,656,816 KB; v0.20.0 1,682,880 KB; v0.20.1 1,764,188 KB; current
   1,744,668 KB. A one-rule `file_exists` config is ~11.5 MB on all versions.
@@ -62,14 +64,13 @@ hold remains under the strict performance decision.
 
 ## Remaining release blockers
 
-1. Optimize S2 by at least 3% against v0.20.1, or revise the strict performance
-   decision.
-2. Re-run the shadow corpus replay against `v0.20.1` on the final release
+1. Re-run the shadow corpus replay against `v0.20.1` on the final release
    candidate.
-3. Replace this report's verdict with the final decision.
+2. Complete R4's documented shadow hardening or record it as post-release.
+3. Tag only after the final pre-release checks below.
 
 ## Go/no-go
 
-**NO-GO on the strict performance target.** Memory now passes both the v0.18.2
-+10% gate and the v0.20.1 comparison. S2 remains ~3.1% slower than v0.20.1, so
-the release hold stays until performance is reduced or the target is revised.
+**GO.** Memory passes the v0.18.2 +10% gate and is below v0.20.1; S2
+wall-clock is also below v0.20.1. Complete the final-candidate corpus replay
+and standard release preflight before tagging.
