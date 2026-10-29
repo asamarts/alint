@@ -482,7 +482,9 @@ v0.21 is complete only when all of the following are observed:
   entries parse through the guarded XML path. `key_parity` now covers all eight
   formats, with per-dialect key models, pass/fail scenarios, and eager key
   spans.
-- **R4, done.** The `shadow-ir` feature is defined on `alint-rules` and enabled
+- **R4, done.** Regex targets and read/decode diagnostics are now inside the
+  differential comparison; the expanded-scope corpus replay remains zero-diff.
+ The `shadow-ir` feature is defined on `alint-rules` and enabled
   only from `alint-e2e`'s dev-dependency (and corpus replay). `cross_file`'s
   `relation: equals` now runs through `ExtractAdapter` and the run-scoped
   read/decode caches beside the authoritative implementation, and the complete
