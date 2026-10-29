@@ -585,14 +585,16 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **R8, go.** [`r8-readiness.md`](r8-readiness.md) records the clean benchmark
-  workload and import-gate prefilter: RSS passes both the v0.18.2 +10% gate and
-  v0.20.1 (118,924 KB vs 118,044 / 119,420 KB), and 1M S2 is faster than
-  v0.20.1 (5.357 s vs 5.861 s). The expanded-shadow final-candidate corpus
-  replay is zero-diff. Release preparation and the standard release preflight
-  remain before tagging.
-- **Next:** complete release preparation (version bump, changelog, generated
-  artifacts, release preflight/cross-platform) and tag. R3 (`key_parity`), R4
-  (the shadow harness), R5 (corpus replay), R6a (contract traits and registry
-  injection), R6b (`key_parity` through the bridge), R7 (the WIT draft), and R9
-  (its TOML and XML dialect formats) are complete.
+- **R8, on hold.** [`r8-readiness.md`](r8-readiness.md) records the clean
+  benchmark workload and import-gate prefilter: RSS passes both the v0.18.2
+  +10% gate and v0.20.1 (118,924 KB vs 118,044 / 119,420 KB), and 1M S2 is
+  faster than v0.20.1 (5.357 s vs 5.861 s). The expanded-shadow corpus replay
+  is zero-diff. The pre-tag audit
+  ([`pre-release-audit.md`](pre-release-audit.md), 2026-10-29) moved the
+  verdict from GO to HOLD: `key_parity` misses dotted keys and empty peers
+  since R6b's bridge change and cannot read a gitignored literal peer, several
+  readiness rows have no gate, and the go/no-go assessment is unwritten.
+- **Next:** the audit's W1 (`key_parity` correctness) and W2 (the remaining
+  readiness gaps and the go/no-go assessment), then W3's documentation and
+  release preparation (version bump, changelog, generated artifacts, release
+  preflight and cross-platform checks) and the tag.
