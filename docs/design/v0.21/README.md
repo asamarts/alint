@@ -489,9 +489,9 @@ v0.21 is complete only when all of the following are observed:
   finding debug snapshots are compared. The property generator covers generated
   source/target values and `normalize:` lists (including the non-literal note
   path), and the full e2e suite runs with the shadow enabled: zero differences.
-  Regex extracts (whose target-side syntax filters are outside the generic
-  adapter) and read/decode failures deliberately remain authoritative-only in
-  this increment; they are still covered by the existing cross_file tests.
+  Regex targets use the same target-side syntax filter as the authoritative
+  path, and read/parse failures now emit and compare the same diagnostics
+  instead of being skipped. Regression tests cover both.
   `ci/scripts/check-shadow-feature-tree.sh`, wired into Build and preflight,
   proves the release, `-p alint -p xtask`, and criterion feature trees exclude
   `shadow-ir`.

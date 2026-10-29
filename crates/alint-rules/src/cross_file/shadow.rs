@@ -43,21 +43,9 @@ pub(super) fn assert_equals_matches(
     let Some(source_extract) = rule.source_extract.as_ref() else {
         return;
     };
-    if !supported_extract(source_extract) {
-        return;
-    }
     let Some(targets) = rule.targets.as_ref() else {
         return;
     };
-    let supported = match targets {
-        Targets::Glob { extract, .. } => extract.as_ref().is_none_or(supported_extract),
-        Targets::List(list) => list
-            .iter()
-            .all(|target| target.extract.as_ref().is_none_or(supported_extract)),
-    };
-    if !supported {
-        return;
-    }
 
     let mut shadow = Vec::new();
     // Prefer the engine's run-scoped caches, so the shadow exercises the same
@@ -81,7 +69,7 @@ pub(super) fn assert_equals_matches(
         Err(Skip::Unavailable) => return,
     };
     let Some(source_values) = source_values else {
-        return;
+        return compare(existing, &shadow);
     };
 
     let source = match source_values.as_slice() {
@@ -233,10 +221,6 @@ pub(super) fn assert_equals_matches(
     compare(existing, &shadow);
 }
 
-fn supported_extract(extract: &Extract) -> bool {
-    !matches!(extract, Extract::Regex(_))
-}
-
 #[allow(clippy::too_many_arguments)]
 fn values(
     rule: &CrossFileRule,
@@ -253,39 +237,140 @@ fn values(
     };
     let read = read_cache.read(ctx.root, &resource, 0);
     let ResourceRead::Present(bytes) = read.as_ref() else {
-        return Err(Skip::Unavailable);
+        emit_read_failure(rule, ctx, path, side, out, read.as_ref())?;
+        return Ok(None);
     };
-    let adapter = ExtractAdapter::new(extract.clone());
-    let output = decode_cache
-        .decode(&adapter, &resource, bytes, &Limits::default())
-        .map_err(|_| Skip::Unavailable)?;
-    let has_non_strings = !output.non_strings.is_empty();
+    let mut non_strings = Vec::new();
+    let mut notes = Vec::new();
+    let values: Vec<String> = if side == "target" && matches!(extract, Extract::Regex(_)) {
+        let text = String::from_utf8_lossy(bytes);
+        let Extract::Regex(pattern) = extract else {
+            unreachable!()
+        };
+        match super::target_regex_capture_ranges(path, &text, pattern) {
+            Ok(captures) => captures
+                .ranges
+                .into_iter()
+                .map(|range| text[range].to_string())
+                .collect::<Vec<String>>(),
+            Err(error) => {
+                emit_parse_failure(rule, path, extract, side, &error, out);
+                return Ok(None);
+            }
+        }
+    } else {
+        let adapter = ExtractAdapter::new(extract.clone());
+        let output = match decode_cache.decode(&adapter, &resource, bytes, &Limits::default()) {
+            Ok(output) => output,
+            Err(error) => {
+                let message = match error {
+                    alint_core::relation::AdapterError::Parse(message) => message,
+                    alint_core::relation::AdapterError::Limit(limit) => format!(
+                        "extract selected more than the {}-value safety limit",
+                        limit.limit
+                    ),
+                };
+                emit_parse_failure(rule, path, extract, side, &message, out);
+                return Ok(None);
+            }
+        };
+        non_strings.clone_from(&output.non_strings);
+        notes.clone_from(&output.notes);
+        output
+            .rows
+            .iter()
+            .filter_map(|row| row.value())
+            .filter_map(|value| match value {
+                alint_core::relation::Value::String(text) => Some(text.to_string()),
+                _ => None,
+            })
+            .collect::<Vec<String>>()
+    };
     if let Some(mut violation) =
-        crate::non_string_extract_violation(path, &format!("{side} extract"), &output.non_strings)
+        crate::non_string_extract_violation(path, &format!("{side} extract"), &non_strings)
     {
         rule.redact_extracted(&mut violation, side, path, extract, "non_string", &[]);
         out.push(violation);
     }
-    for note in &output.notes {
+    for note in &notes {
         let alint_core::relation::AdapterNote::NonLiteral { value } = note;
         let mut finding =
             CrossFileRule::note(path, &format!("skipped non-literal {side} value {value:?}"));
         rule.redact_extracted(&mut finding, side, path, extract, "skipped", &[value]);
         out.push(finding);
     }
-    if has_non_strings && output.rows.is_empty() {
+    if !non_strings.is_empty() && values.is_empty() {
         return Ok(None);
     }
-    let values = output
-        .rows
-        .iter()
-        .filter_map(|row| row.value())
-        .filter_map(|value| match value {
-            alint_core::relation::Value::String(text) => Some(text.to_string()),
-            _ => None,
-        })
-        .collect();
-    Ok(Some(values))
+    if matches!(extract, Extract::WholeFile) {
+        return Ok(Some(values));
+    }
+    let (skipped, literal): (Vec<String>, Vec<String>) = values
+        .into_iter()
+        .partition(|value| alint_core::is_non_literal(value));
+    for value in &skipped {
+        let mut finding =
+            CrossFileRule::note(path, &format!("skipped non-literal {side} value {value:?}"));
+        rule.redact_extracted(&mut finding, side, path, extract, "skipped", &[value]);
+        out.push(finding);
+    }
+    Ok(Some(literal))
+}
+
+fn emit_read_failure(
+    rule: &CrossFileRule,
+    ctx: &Context<'_>,
+    path: &Path,
+    side: &str,
+    out: &mut Vec<Violation>,
+    read: &ResourceRead,
+) -> Result<(), Skip> {
+    let _ = rule;
+    match read {
+        ResourceRead::TooLarge(too_large) => {
+            out.push(alint_core::too_large_file_violation(path, *too_large));
+        }
+        ResourceRead::Missing if side == "target" => {
+            if !rule.allow_missing {
+                out.push(CrossFileRule::violation(path, "target file is missing"));
+            }
+        }
+        ResourceRead::Missing => {
+            let reason = match super::eval::read_rel(ctx, path) {
+                Err(crate::io::ReadCapError::Io(error)) => {
+                    format!("source file is missing: {error}")
+                }
+                _ => "source file is missing".to_string(),
+            };
+            out.push(CrossFileRule::violation(path, &reason));
+        }
+        ResourceRead::Unreadable(message) => out.push(
+            Violation::new(format!("could not read file: {message}"))
+                .with_path(path.to_path_buf())
+                .as_analysis_failure(alint_core::AnalysisFailureKind::ResourceRead),
+        ),
+        ResourceRead::Present(_) => return Err(Skip::Unavailable),
+    }
+    Ok(())
+}
+
+fn emit_parse_failure(
+    rule: &CrossFileRule,
+    path: &Path,
+    extract: &Extract,
+    side: &str,
+    message: &str,
+    out: &mut Vec<Violation>,
+) {
+    let mut finding = CrossFileRule::analysis_failure(
+        path,
+        alint_core::AnalysisFailureKind::ResourceParse,
+        &format!("{side} extract failed: {message}"),
+    );
+    if extract.redacts_by_default() {
+        finding.redact_message(&rule.id);
+    }
+    out.push(finding);
 }
 
 fn resource_for(path: &Path) -> Option<Resource> {
@@ -398,9 +483,132 @@ mod tests {
     }
 
     #[test]
-    fn regex_extracts_are_skipped_by_the_shadow() {
+    fn regex_targets_use_the_target_syntax_filter() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("source.txt"), "v=1\n").unwrap();
+        fs::write(dir.path().join("target.txt"), "v=1\nv=2\n").unwrap();
         let extract = Extract::Regex(r"(?m)^v=(.*)$".into());
-        assert!(!supported_extract(&extract));
+        let rule = CrossFileRule {
+            id: "shadow-regex".into(),
+            level: Level::Error,
+            policy_url: None,
+            message: None,
+            source_file: "source.txt".into(),
+            source_glob: None,
+            source_extract: Some(extract.clone()),
+            targets: Some(Targets::List(vec![Target {
+                file: "target.txt".into(),
+                extract: Some(extract),
+                matches: None,
+            }])),
+            relation: Relation::Equals,
+            normalize: NormalizeSpec::default().into_list(),
+            allow_missing: false,
+            skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
+        };
+        let index = FileIndex::from_entries(Vec::new());
+        let ctx = Context {
+            root: dir.path(),
+            index: &index,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+            analysis_time: None,
+            process_environment: None,
+            trace: None,
+        };
+        let findings = rule.evaluate(&ctx).unwrap();
+        assert_eq!(findings.len(), 1, "{findings:#?}");
+    }
+
+    #[test]
+    fn parse_failure_diagnostic_matches_authoritative_path() {
+        let dir = tempfile::tempdir().unwrap();
+        fs::write(dir.path().join("source.json"), "{").unwrap();
+        fs::write(dir.path().join("target.json"), r#"{"v":"1"}"#).unwrap();
+        let extract = Extract::structured(Format::Json, "$.v").unwrap();
+        let rule = CrossFileRule {
+            id: "shadow-parse".into(),
+            level: Level::Error,
+            policy_url: None,
+            message: None,
+            source_file: "source.json".into(),
+            source_glob: None,
+            source_extract: Some(extract.clone()),
+            targets: Some(Targets::List(vec![Target {
+                file: "target.json".into(),
+                extract: Some(extract),
+                matches: None,
+            }])),
+            relation: Relation::Equals,
+            normalize: NormalizeSpec::default().into_list(),
+            allow_missing: false,
+            skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
+        };
+        let index = FileIndex::from_entries(Vec::new());
+        let ctx = Context {
+            root: dir.path(),
+            index: &index,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+            analysis_time: None,
+            process_environment: None,
+            trace: None,
+        };
+        let findings = rule.evaluate(&ctx).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].message.contains("source extract failed"));
+    }
+
+    #[test]
+    fn missing_source_diagnostic_matches_authoritative_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let extract = Extract::structured(Format::Json, "$.v").unwrap();
+        let rule = CrossFileRule {
+            id: "shadow-missing".into(),
+            level: Level::Error,
+            policy_url: None,
+            message: None,
+            source_file: "missing.json".into(),
+            source_glob: None,
+            source_extract: Some(extract.clone()),
+            targets: Some(Targets::List(vec![Target {
+                file: "target.json".into(),
+                extract: Some(extract),
+                matches: None,
+            }])),
+            relation: Relation::Equals,
+            normalize: NormalizeSpec::default().into_list(),
+            allow_missing: false,
+            skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
+        };
+        let index = FileIndex::from_entries(Vec::new());
+        let ctx = Context {
+            root: dir.path(),
+            index: &index,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+            analysis_time: None,
+            process_environment: None,
+            trace: None,
+        };
+        let findings = rule.evaluate(&ctx).unwrap();
+        assert_eq!(findings.len(), 1);
+        assert!(findings[0].message.contains("source file is missing"));
     }
 
     #[test]
