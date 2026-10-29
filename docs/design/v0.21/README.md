@@ -588,10 +588,11 @@ v0.21 is complete only when all of the following are observed:
 - **R8, go.** [`r8-readiness.md`](r8-readiness.md) records the clean benchmark
   workload and import-gate prefilter: RSS passes both the v0.18.2 +10% gate and
   v0.20.1 (118,924 KB vs 118,044 / 119,420 KB), and 1M S2 is faster than
-  v0.20.1 (5.357 s vs 5.861 s). Complete the final-candidate corpus replay and
-  release preflight before tagging.
-- **Next:** run the kbench budgets, re-run the final-candidate corpus replay,
-  and fill the R8 report. R3 (`key_parity`), R4 (the shadow harness), R5
-  (corpus replay), R6a (contract traits and registry injection), R6b
-  (`key_parity` through the bridge), R7 (the WIT draft), and R9 (its TOML and
-  XML dialect formats) are complete.
+  v0.20.1 (5.357 s vs 5.861 s). The expanded-shadow final-candidate corpus
+  replay is zero-diff. Release preparation and the standard release preflight
+  remain before tagging.
+- **Next:** complete release preparation (version bump, changelog, generated
+  artifacts, release preflight/cross-platform) and tag. R3 (`key_parity`), R4
+  (the shadow harness), R5 (corpus replay), R6a (contract traits and registry
+  injection), R6b (`key_parity` through the bridge), R7 (the WIT draft), and R9
+  (its TOML and XML dialect formats) are complete.
