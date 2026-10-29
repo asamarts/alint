@@ -12,7 +12,7 @@ removes the remaining S2 slowdown. Clean-workload 1M S2 RSS is 118,924 KB
 | `key_parity` across eight formats | rule scenarios + 19 unit tests | pass |
 | `key_parity` `--changed`, trace, fingerprints | e2e scenarios + golden fingerprints (715 tests) | pass |
 | `cross_file` `equals` shadow | e2e + property generator; 0 differences | pass |
-| Corpus shadow replay | run 40601610148 vs `v0.20.1`: 106/110 replayed, 4 expected skips, 0 crashed, 0 differ | pass |
+| Corpus shadow replay | final-candidate run 40895555874 vs `v0.20.1`: 106/110 replayed, 4 expected skips, 0 crashed, 0 differ | pass |
 | Contract traits and bridge | adapter/analyzer bridge tests; `key_parity` uses `ContractAnalyzer` | pass |
 | Registry injection | CLI, LSP, testkit (`Runner::with_registry`), DSL catalog | pass |
 | WIT draft | `witforge check wit/alint-plugin/0.1.0` (v2 wire lock) | pass |
@@ -34,8 +34,9 @@ removes the remaining S2 slowdown. Clean-workload 1M S2 RSS is 118,924 KB
   recording host; 839 read / 10,898 stat / 632 open / 804 dents at 10k.
 - The combined relation + per-file configuration reads the same files once:
   `key_parity` alone 839 reads, per-file rule alone 441, both 839 at 10k.
-- Full corpus replay: 106/110 replayed, 49 with `cross_file` `equals`, zero
-  shadow differences.
+- Final-candidate corpus replay (2026-10-29, run 40895555874): 106/110
+  replayed, 49 with `cross_file` `equals`, four expected skips, zero crashes,
+  zero shadow differences against `v0.20.1`.
 - kbench 100k (30 runs, same-session v0.18.2 reference): S1 −8.80%/−9.37%,
   S2 −4.01%/−5.63%, S3 +0.27%/+0.25%.
 - kbench 1M (same-session v0.18.2 reference, 3 runs): S1 −2.88%/−2.55%,
@@ -64,10 +65,10 @@ removes the remaining S2 slowdown. Clean-workload 1M S2 RSS is 118,924 KB
 
 ## Remaining release blockers
 
-1. Re-run the shadow corpus replay against `v0.20.1` on the final release
-   candidate.
-2. Complete R4's documented shadow hardening or record it as post-release.
-3. Tag only after the final pre-release checks below.
+1. Complete R4's documented shadow hardening or record it as post-release.
+2. Complete release preparation: version bump, changelog, generated artifacts,
+   full release preflight and cross-platform checks.
+3. Tag only after those checks pass.
 
 ## Go/no-go
 
