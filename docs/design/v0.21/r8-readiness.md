@@ -52,26 +52,15 @@ removes the remaining S2 slowdown. Clean-workload 1M S2 RSS is 118,924 KB
   before running the per-line regex; generated source without imports skips
   the scan. Full S2 100k drops from 567 ms to 521 ms; 1M from 5.861 s to
   5.357 s.
-- Release bisect (same 1M tree, S2/full, same toolchain): v0.18.2 1,068,512 KB;
-  v0.19.0 1,656,816 KB; v0.20.0 1,682,880 KB; v0.20.1 1,764,188 KB; current
-  1,744,668 KB. A one-rule `file_exists` config is ~11.5 MB on all versions.
-  The growth appears with per-file line rules; `final_newline`,
-  `no_trailing_whitespace`, and `indent_style` each reproduce it in isolation.
-  The v0.19.0 release is therefore the first affected release. A symbolized
-  100k Massif run peaks at ~82 MB; its largest visible allocations are the
-  `ignore` walker queues and `FileIndex` path storage, so the next step is an
-  allocation-level profile of per-file index retention, not a speculative rule
-  change.
+## Remaining release work
 
-## Remaining release blockers
-
-1. Complete R4's documented shadow hardening or record it as post-release.
-2. Complete release preparation: version bump, changelog, generated artifacts,
+1. Complete release preparation: version bump, changelog, generated artifacts,
    full release preflight and cross-platform checks.
-3. Tag only after those checks pass.
+2. Tag only after those checks pass.
 
 ## Go/no-go
 
 **GO.** Memory passes the v0.18.2 +10% gate and is below v0.20.1; S2
-wall-clock is also below v0.20.1. Complete the final-candidate corpus replay
-and standard release preflight before tagging.
+wall-clock is also below v0.20.1. The expanded-shadow corpus replay is
+zero-diff. Release preparation and the standard release preflight remain
+before tagging.
