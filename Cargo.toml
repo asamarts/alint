@@ -60,7 +60,7 @@ unicode-general-category = "1.1"
 # `spdx_identifier_valid`; no optional detection/regex features and no network.
 spdx = { version = "0.13.6", default-features = false }
 anyhow = "1"
-jsonschema = { version = "0.58", default-features = false }
+jsonschema = { version = "0.60", default-features = false }
 schemars = "1"
 criterion = "0.8"
 rand = "0.10"
