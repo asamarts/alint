@@ -278,7 +278,12 @@ fn build_session_for_config(
             })?;
             entry = entry.with_when(expr);
         }
-        kinds.insert(spec.id.clone(), spec.kind.clone());
+        // Resolve aliases through the session's registry, which may be an
+        // injected one, so hover docs find the canonical kind.
+        kinds.insert(
+            spec.id.clone(),
+            registry.canonical_kind(&spec.kind).to_string(),
+        );
         entries.push(entry);
     }
 

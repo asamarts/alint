@@ -79,6 +79,8 @@ mod edits;
 mod render;
 
 #[cfg(test)]
+mod registry_tests;
+#[cfg(test)]
 mod tests;
 
 use config::{check_workspace, eval_buffer, workspace_folders};
@@ -157,7 +159,8 @@ struct Session {
     /// The config's `baseline:` file, loaded — grandfathered findings
     /// are filtered out exactly as `alint check` filters them.
     baseline: Option<Baseline>,
-    /// Rule id → rule kind, for the hover's description + docs link.
+    /// Rule id → canonical rule kind (aliases resolved through the session's
+    /// registry), for the hover's description + docs link.
     kinds: HashMap<String, String>,
     /// Load-time pattern hints, shown as warnings on the config file.
     pattern_hints: Vec<alint_core::pattern_hints::ConfigHint>,

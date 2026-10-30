@@ -323,3 +323,91 @@ fn runner_with_registry_replaces_the_builtin_registry() {
     let injected = Runner::default().with_registry(empty);
     assert_eq!(injected.registry.canonical_kinds().count(), 0);
 }
+
+static MARKER_META: alint_core::KindMeta = alint_core::KindMeta {
+    dispatch: alint_core::DispatchClass::SingleShot,
+    paths: alint_core::PathsSupport::Forbidden,
+    scope_filter: alint_core::ScopeFilterSupport::Rejected {
+        reason: std::borrow::Cow::Borrowed("not file-scoped"),
+    },
+    git_tracked_only: alint_core::GitTrackedSupport::None,
+    respect_gitignore: false,
+    root_only: false,
+    selectors: std::borrow::Cow::Borrowed(&[]),
+    since: alint_core::SinceSupport::None,
+    capabilities: std::borrow::Cow::Borrowed(&[]),
+    content: alint_core::ContentAccess::PathOnly,
+    formats: std::borrow::Cow::Borrowed(&[]),
+    dependencies: std::borrow::Cow::Borrowed(&[]),
+    fix_ops: std::borrow::Cow::Borrowed(&[]),
+    expect_matches: false,
+    trace: alint_core::TraceMeta::ASSERTION,
+    nested_rules: false,
+};
+
+/// A kind no built-in registry has: it always reports one finding.
+#[derive(Debug)]
+struct MarkerRule {
+    id: String,
+}
+
+impl alint_core::Rule for MarkerRule {
+    fn id(&self) -> &str {
+        &self.id
+    }
+
+    fn level(&self) -> Level {
+        Level::Error
+    }
+
+    fn evaluate(
+        &self,
+        _ctx: &alint_core::Context<'_>,
+    ) -> alint_core::Result<Vec<alint_core::Violation>> {
+        Ok(vec![alint_core::Violation::new("custom kind ran")])
+    }
+}
+
+// The function must match the public `RuleBuilder` signature.
+#[allow(clippy::unnecessary_wraps)]
+fn build_marker(spec: &alint_core::RuleSpec) -> alint_core::Result<Box<dyn alint_core::Rule>> {
+    Ok(Box::new(MarkerRule {
+        id: spec.id.clone(),
+    }))
+}
+
+#[test]
+fn runner_with_registry_runs_a_custom_kind() {
+    let dir = tempfile::tempdir().unwrap();
+    let source = dir.path().join("marker.yml");
+    let policy = PolicyTest::from_yaml(
+        "test_version: 1\nname: marker\ngiven:\n  tree: {}\n  config: |\n    version: 1\n    \
+rules:\n      - id: marker\n        kind: custom_marker\n        level: error\nwhen: [check]\n\
+expect:\n  - exit: policy_failure\n    violations:\n      - {rule: marker, message: {regex: \
+\"^custom kind ran$\"}}\n",
+    )
+    .unwrap();
+    std::fs::write(&source, "").unwrap();
+
+    let mut registry = alint_rules::builtin_registry();
+    registry.register("custom_marker", &MARKER_META, build_marker);
+    let injected = Runner::default()
+        .with_registry(registry)
+        .run(&policy, &source)
+        .expect("the runner runs");
+    assert_eq!(
+        injected.status,
+        TestStatus::Passed,
+        "{:?}",
+        injected.mismatches
+    );
+
+    let builtin = Runner::default()
+        .run(&policy, &source)
+        .expect("the runner runs");
+    assert_eq!(
+        builtin.status,
+        TestStatus::Failed,
+        "without the kind the config fails to load"
+    );
+}
