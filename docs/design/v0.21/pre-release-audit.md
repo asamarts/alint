@@ -1,10 +1,11 @@
 # v0.21 pre-release audit and remediation plan
 
 Status: Plan (2026-10-29). Audited `main` at `f4e5fa225`; version 0.20.1, v0.21.0 untagged.
-Progress: W1 in #407 (all twelve items, with tests); W2, W3, and W4 not started.
-Decisions: the fixes stay inside [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md)
-and the accepted [`README.md`](README.md), except where section 7 says otherwise; section 7 lists
-the calls that are the owner's.
+Progress: W1 in #407 (all twelve items, the review's follow-ups, and ADR-0025's `key_parity`
+changes, with tests); W4 housekeeping done; the rest of W2, W3, and W4 not started.
+Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
+design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
+supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
 
 [`r8-readiness.md`](r8-readiness.md) declared v0.21 a GO on performance, memory, and the corpus
 replay. An independent pre-tag audit found that the GO cannot stand: `key_parity`, the release's
@@ -87,9 +88,9 @@ that cannot be closed in v0.21 is listed with its reason and the readiness row s
 | W2-4 | The `plugin_api` import-boundary test scans text: it checks only lines starting with `use`/`pub use` plus `crate::` substrings, so `super::super::X` in type position, an external crate path such as `serde::Serialize` in a derive, or a `use` split across lines passes. The module is clean today. | Read | Parse the module and visit every path, allowing only `std`, `core`, `alloc`, the module's own items, and bounded `super::`. |
 | W2-5 | Invariant 6: `FileIndex::read_cache`, `decode_cache`, and `enable_relation_caches` (`walker.rs:315-329`) are documented public methods that return or touch doc-hidden relation types. The test checks only the `mod` declarations. | Read | `#[doc(hidden)]` on the three methods, asserted by the existing visibility test. |
 | W2-6 | The contract bridge (`relation/contract.rs`) does not check a finding's or related location's path, or a row's resource, against the input resources, and accepts any index id. Finding paths are not even normalized or confined: `to_violation` copies them as given (`contract.rs:206`), while row paths at least pass `RelPath::parse` (`contract.rs:146`). Latent until a plugin host exists. | Read | Validate them in the bridge and reject what does not belong to the input. |
-| W2-7 | Nothing in CI checks the WIT draft; R7's evidence is a manual `witforge check`, and nothing compares `plugin_api` with `plugin.wit`. | Read | witforge is private and preparing 0.1.0. Once it is installable in CI, add the check; until then the readiness row records a manual check at a stated commit. |
-| W2-8 | The go/no-go assessment is missing. The release acceptance and the stop rule (`general-linter.md` section 11.1) require a written judgment of whether the ported path became simpler and more consistent, with evidence; `r8-readiness.md` covers performance and the replay only. | Read | Write it in `r8-readiness.md` from the port's diff, the shadow's shared code paths, and W1's lessons; the verdict is the owner's (section 7). |
-| W2-9 | S4's workload changed without a revision bump. #399 changed `lorem_bytes`, which S4's polyglot tree also uses (`crates/alint-bench/src/tree.rs:375/407/439`), but S4 stayed at revision 3 (`xtask/src/bench/mod.rs:210`). At the tag, `bench-gate` resets S1-S3 and SFIX, so S4 is the only scenario still compared with v0.20.1, across a changed workload. S4's generated sources also still lack the final newline #397 added for S2. | Read | Bump S4 to revision 4 and newline-terminate its generated sources, and say so in the changelog. |
+| W2-7 | Nothing in CI checks the WIT draft; R7's evidence is a manual `witforge check`, and nothing compares `plugin_api` with `plugin.wit`. | Read | The tag waits for witforge 0.1.0 (ADR-0025 decision 4): pin it, then run the check, generation, and regeneration `--check` in default CI. #409 (another session) already adds the generated consumer crate and `ci/scripts/witforge-consumer.sh`. |
+| W2-8 | The go/no-go assessment is missing. The release acceptance and the stop rule (`general-linter.md` section 11.1) require a written judgment of whether the ported path became simpler and more consistent, with evidence; `r8-readiness.md` covers performance and the replay only. | Read | The verdict is decided (ADR-0025 decision 3: GO on consistency, three simplicity gates in v0.22). Write the assessment in `r8-readiness.md` from the port's diff, the shadow's shared code paths, and W1's lessons. |
+| W2-9 | S4's workload changed without a revision bump (decided: revision 4, terminated sources, and a same-session kbench run of v0.20.1 against v0.21 on the revision-4 tree, recorded in `r8-readiness.md`). #399 changed `lorem_bytes`, which S4's polyglot tree also uses (`crates/alint-bench/src/tree.rs:375/407/439`), but S4 stayed at revision 3 (`xtask/src/bench/mod.rs:210`). At the tag, `bench-gate` resets S1-S3 and SFIX, so S4 is the only scenario still compared with v0.20.1, across a changed workload. S4's generated sources also still lack the final newline #397 added for S2. | Read | Bump S4 to revision 4 and newline-terminate its generated sources, and say so in the changelog. |
 
 Accepted as is: `cargo test --workspace` unifies `alint-e2e`'s dev-dependency feature, so the CLI's
 own test binaries run with the shadow enabled. That adds checking and never reaches a shipped
@@ -123,6 +124,10 @@ build (W2-2 guards that).
 - **`docs/adr/`:** no index. The bundled `docs/adr` ruleset's `adr-filename-pattern` applies to
   `docs/adr/*.md`, so an index there needs an exclusion or a home elsewhere (for example a table
   in `docs/design/README.md`).
+- **Absolute paths in read errors:** a literal path that is a directory or another non-regular
+  file is reported with its absolute path (`alint-rules/src/io.rs:14`,
+  `relation/cache.rs:206`), so the message depends on the machine. Fix both together: the
+  `cross_file` shadow compares the two paths' messages.
 - **`cross_file/shadow.rs` module doc:** it still says read/decode failures and regex extracts
   are skipped; since #403 they are compared, and the only remaining skip is a path that is not a
   valid `RelPath`.
@@ -144,9 +149,9 @@ build (W2-2 guards that).
   pre-existing, tracked nowhere, and behind no readiness row, so it does not block the tag:
   redact only errors that can quote a value, and keep structural errors readable.
 - **Mutants nightly never runs.** `mutants.yml:34` targets the self-hosted `alint` runner, whose
-  listener is held (`ci.yml` routes every job to `ubuntu-latest`). Every scheduled run since at
-  least 2026-09-30 was cancelled after about a day in the queue. Move it to `ubuntu-latest` (its
-  240-minute timeout fits) or disable the cron.
+  listener is held (`ci.yml` routes every job to `ubuntu-latest`). Every scheduled run since
+  2026-09-22 was cancelled after about a day in the queue; the last success (2026-09-18) was a
+  tiny crate. Replace it with a pull-request `--in-diff` job (section 7, item 3).
 - **No scheduled advisory check.** Deny and Audit run only when Rust, supply-chain, `.github/`,
   or `ci/` files change, and in the release preflight, so a new RustSec advisory surfaces on the
   next such pull request. Add a weekly scheduled run.
@@ -154,42 +159,54 @@ build (W2-2 guards that).
   `cargo-mutants` without a version (`cargo-deny` is pinned).
 - **MSRV headroom is zero:** nine locked packages (`ignore`, `globset`, `encoding_rs`, `sha2`,
   `proptest`, and four `gungraun` crates) already require exactly 1.88, so the next dependency to
-  raise it fails the MSRV job. Decide the bump policy before it happens (section 7).
-- **Release toolchain:** `RELEASE_RUST` is 1.98.1 while stable is 1.99.1; a bump is optional, in
-  its own pull request.
+  raise it fails the MSRV job. Write the rolling policy into `CONTRIBUTING.md` and
+  `RELEASING.md` (section 7, item 8).
+- **Release toolchain:** `RELEASE_RUST` is 1.98.1 while stable is 1.99.1; bump it at the cut, in
+  its own pull request (section 7, item 8).
 - **Dependabot:** #398 (similar, ureq), #378 (Gradle wrapper), #376 (rust-cache), and #377
-  (vscode-languageclient 11; no code change, the VS Code floor stays `^1.91.0`) are green and
-  can merge before the cut, one at a time. #375 updates release actions that pull-request CI does
-  not exercise, and #373 (jsonschema 0.60) is a breaking pre-1.0 bump; both wait until after
-  v0.21.0. None touches `roxmltree`, which stays at 0.20.
-- **Housekeeping (owner approval before any deletion):** 104 local branches, 63 fully merged;
-  remote branches `feat/key-parity`, `feat/key-parity-formats`, `feat/relation-ir-r2` (merged)
-  and `bench-record/v0.18.3` (PR closed); five extra worktrees, one of which
-  (`~/dn0-19-alint.XOcCz0/source`) holds staged changes; `target/` at 47 GB.
+  (vscode-languageclient 11; no code change, the VS Code floor stays `^1.91.0`) are green, as are
+  #373 (jsonschema 0.60, a pre-1.0 minor that can change `json_schema_passes` messages) and #375
+  (release actions that pull-request CI does not exercise, so v0.21's release is their first
+  run). All six merge now, one at a time (section 7, item 8); the corpus replay against v0.20.1
+  then covers them. None touches `roxmltree`, which stays at 0.20.
+- **Housekeeping:** 104 local branches, 63 fully merged; remote branches `feat/key-parity`,
+  `feat/key-parity-formats`, `feat/relation-ir-r2` (merged) and `bench-record/v0.18.3` (PR
+  closed); extra worktrees, one of which (`~/dn0-19-alint.XOcCz0/source`) holds staged changes;
+  `target/` at 47 GB. Done as section 7, item 4 records.
 
 ## 7. Owner decisions
 
-1. **The go/no-go verdict (W2-8).** The evidence is drafted for you; whether the port is simpler
-   and more consistent, and so whether Phase 3 starts, is the stop rule's call.
-2. **S4 (W2-9).** Recommended: revision 4 with terminated sources. The alternative, documenting
-   the change and keeping revision 3, leaves the only cross-release scenario comparing two
-   workloads.
-3. **Mutants (W4).** Recommended: run it on `ubuntu-latest`. The alternative is disabling the
-   cron until the self-hosted listener returns.
-4. **Housekeeping (W4).** Which branches and worktrees to delete.
-5. **Flat keys that contain a dot.** ADR-0024 decision 4 gives every key one rendering, so a
-   properties or dotenv key `app.title` renders `['app.title']` in messages, `ignore_keys`, and
-   baseline keys. That keeps identities distinct, but properties users will write
-   `ignore_keys: ["app.*"]` and match nothing. Changing it needs a new ADR, and baseline keys fix
-   it at the tag.
-6. **A missing literal peer.** #407 makes it a fail-loud analysis failure, like a missing
-   reference. A `.env` that exists on developer machines but not in CI therefore fails the CI
-   run; the choice is whether that is the intended behaviour or needs an opt-out.
-7. **WIT acceptance (W2-7).** Whether a manual `witforge check` at a stated commit satisfies
-   the release acceptance until witforge is installable in CI.
-8. **Toolchains and dependencies (W4).** The MSRV bump policy, whether the four green Dependabot
-   pull requests merge before the cut, and whether `RELEASE_RUST` moves to 1.99.1 in this
-   release.
+All decided on 2026-10-30. Items 1, 5, 6, and 7 change the design and are recorded in
+[ADR-0025](../../adr/0025-v021-pre-release-decisions.md).
+
+1. **The go/no-go verdict (W2-8).** GO on consistency; v0.21 ships. Phase 3 starts only if v0.22
+   makes the IR path authoritative for `cross_file` `equals` and deletes the old code, keeps
+   that code within today's 190 non-comment lines with no calls into `cross_file::eval`, and
+   shows zero e2e and corpus differences with the budgets held (ADR-0025 decision 3).
+2. **S4 (W2-9).** Revision 4 with newline-terminated sources, plus a same-session kbench run of
+   v0.20.1 against v0.21 on the revision-4 tree (100k and 1M), recorded in `r8-readiness.md`.
+3. **Mutants (W4).** Replace the nightly with an advisory `cargo mutants --in-diff` job on pull
+   requests that change Rust (`ubuntu-latest`, missed mutants in the job summary), keep
+   `workflow_dispatch` for targeted runs, and pin `cargo-mutants`. A full-crate run of
+   `alint-rules` or `alint-core` has thousands of mutants and cannot fit any job timeout.
+4. **Housekeeping (W4).** Done 2026-10-30: the 61 local branches fully merged into `main` and
+   checked out nowhere were deleted by exact name, and so were the remote branches
+   `feat/key-parity`, `feat/key-parity-formats`, `feat/relation-ir-r2` (squash-merged) and
+   `bench-record/v0.18.3` (PR #328, closed). The `~/dn0-19-alint.XOcCz0` worktree, the other
+   sessions' worktrees, the unmerged branches, and `target/` were kept.
+5. **Flat keys that contain a dot.** Shown as written in dotenv, properties, and `.resx`
+   (`app.title`), with `ignore_keys` matching the name there and path patterns matching segment
+   by segment elsewhere (ADR-0025 decision 1).
+6. **A missing literal peer.** Fail-loud by default; `allow_missing_peers: true` turns an absent
+   peer into an informational note (ADR-0025 decision 2).
+7. **WIT acceptance (W2-7).** No tag until witforge 0.1.0 is published and the regeneration
+   check runs in default CI (ADR-0025 decision 4).
+8. **Toolchains and dependencies (W4).** MSRV: a written rolling policy (the MSRV may rise to
+   any stable release at least six months old, only when a dependency or language feature needs
+   it, in a minor release or a security patch, with a changelog line), staying on 1.88 for now.
+   Dependabot: all six open pull requests (#398, #378, #376, #377, #373, #375) merge now, one at
+   a time with `main` green between them. `RELEASE_RUST`: bumped at the cut, in its own pull
+   request, to the newest stable at least two weeks old, per `RELEASING.md`.
 
 ## 8. Order
 

@@ -22,11 +22,11 @@ verdict is revisited once W1 and W2 land.
 | Relation limits | defined with defaults and caps; `RowsPerRun` and `DistinctValues` are not enforced and the join limits have no consumer (W2-3) | **gap** |
 | Invariants 6-8: visibility, feature isolation, contract boundary | module visibility test; `check-shadow-feature-tree.sh`; text-scan import test. Three cache methods are public and undocumented as hidden (W2-5), the feature check passes with a leak injected (W2-2), and the import test misses non-`use` paths (W2-4) | **gap** |
 | Registry injection | CLI, LSP, testkit (`Runner::with_registry`), DSL catalog; `alint test`, `rules show`/`list`, and LSP hover bypass it, and no test runs a custom kind (W2-1) | **gap** |
-| WIT draft | `witforge check wit/alint-plugin/0.1.0` (v2 wire lock), run by hand; no CI check (W2-7) | pass (manual) |
+| WIT draft | `witforge check wit/alint-plugin/0.1.0` (v2 wire lock), run by hand; no CI check (W2-7). The tag waits for witforge 0.1.0 and a CI regeneration check (ADR-0025 decision 4) | **blocked** |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
 | S4 workload | #399 changed the polyglot tree's content without a revision bump (W2-9) | **gap** |
-| Go/no-go assessment of the port | not written (W2-8) | **missing** |
+| Go/no-go assessment of the port | verdict decided: GO on consistency, simplicity gated in v0.22 (ADR-0025 decision 3); the written assessment is W2-8 | **gap** |
 | Generated artifacts | preflight: schema, facts, architecture, docs export, roadmap | pass |
 | Formatting, clippy, workspace tests | preflight | pass |
 | Cross-platform CI | Linux/macOS/Windows green | pass |
@@ -74,7 +74,9 @@ verdict is revisited once W1 and W2 land.
    ported path became simpler and more consistent, with evidence.
 3. Complete release preparation: version bump, changelog, generated artifacts,
    full release preflight and cross-platform checks.
-4. Tag only after those checks pass.
+4. Wait for witforge 0.1.0 and run the contract's regeneration check in
+   default CI (ADR-0025 decision 4).
+5. Tag only after those checks pass.
 
 ## Go/no-go
 
@@ -82,4 +84,10 @@ verdict is revisited once W1 and W2 land.
 wall-clock is also below v0.20.1; the expanded-shadow corpus replay is
 zero-diff. Those results stand, but they cover performance and the replay
 only. The release acceptance also requires a correct `key_parity` and a
-written judgment of the port, and the audit found neither yet.
+written judgment of the port.
+
+The owner's verdict on the port (2026-10-30, ADR-0025 decision 3) is GO on
+consistency: v0.21 ships once W1, W2, and the witforge check are done, and
+Phase 3 starts only if v0.22 deletes the old `equals` code, keeps its
+replacement within today's 190 non-comment lines with no calls into
+`cross_file::eval`, and shows zero differences with the budgets held.

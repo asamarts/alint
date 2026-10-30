@@ -205,7 +205,10 @@ are the authoritative, non-IR implementation), so they cannot.
   baseline keys use one rendering: segments joined by `.`, indices as `[n]`, and bracket notation
   (`nav['a.b']`) for a segment that is empty or contains `.`, `[`, `]`, or a quote, with `\`
   and `'` escaped inside the brackets, so distinct keys never render alike. Properties keys are
-  single segments.
+  single segments. (Corrected by [ADR-0025](../../adr/0025-v021-pre-release-decisions.md),
+  2026-10-30: the comparison keeps this rendering, but findings, baseline keys, and
+  `ignore_keys` show a dotenv, properties, or `.resx` key as written, and path patterns match
+  segment by segment.)
   YAML aliases and merge keys (`<<: *defaults`) are an analysis failure in a compared file:
   rows do not expand them, and comparing unexpanded keys would report false drift. With
   `plurals: cldr`, a CLDR plural group counts as one key:
@@ -602,7 +605,13 @@ v0.21 is complete only when all of the following are observed:
   verdict from GO to HOLD: `key_parity` misses dotted keys and empty peers
   since R6b's bridge change and cannot read a gitignored literal peer, several
   readiness rows have no gate, and the go/no-go assessment is unwritten.
-- **Next:** the audit's W1 (`key_parity` correctness) and W2 (the remaining
-  readiness gaps and the go/no-go assessment), then W3's documentation and
-  release preparation (version bump, changelog, generated artifacts, release
-  preflight and cross-platform checks) and the tag.
+- **Decisions (2026-10-30).** [ADR-0025](../../adr/0025-v021-pre-release-decisions.md)
+  records the owner's calls from the audit: single-name keys shown as written,
+  an opt-in `allow_missing_peers`, a GO on consistency with three simplicity
+  gates for v0.22 before Phase 3 may start, and no tag until witforge 0.1.0's
+  regeneration check runs in CI. Section 7 of the audit lists the rest.
+- **Next:** the audit's W1 (`key_parity` correctness, with ADR-0025's changes)
+  and W2 (the remaining readiness gaps and the go/no-go write-up), then W3's
+  documentation and release preparation (version bump, changelog, generated
+  artifacts, release preflight and cross-platform checks) and, once witforge
+  0.1.0 is checked in CI, the tag.
