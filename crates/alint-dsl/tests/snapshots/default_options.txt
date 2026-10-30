@@ -1650,11 +1650,13 @@ KeyParityRule {
     format_override: None,
     peers: "locales/*.json",
     peers_scope: Scope { ... },
+    literal_peer: None,
     scope: Scope { ... },
     direction: Both,
     plurals: Exact,
     strip_root: false,
     ignore: [],
+    allow_missing_peers: false,
 }
 
 === kind: line_endings | id: line-endings-lf ===

@@ -5098,6 +5098,11 @@
         ]
       },
       "properties": {
+        "allow_missing_peers": {
+          "default": false,
+          "description": "Report an absent literal peer, or a `peers` glob that selects no file, as an informational note instead of an analysis failure. For a peer that exists only on developer machines, such as a gitignored `.env`.",
+          "type": "boolean"
+        },
         "direction": {
           "$ref": "#/$defs/Direction",
           "description": "Which differences to report."
@@ -5111,11 +5116,11 @@
               "type": "null"
             }
           ],
-          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv, while `.xml` and `.resx` need an explicit dialect."
+          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv and `.resx` infers resx, while an Android `.xml` file needs `android-strings`."
         },
         "ignore_keys": {
           "default": [],
-          "description": "Key-path globs to omit: `*` within a segment, `**` across segments.",
+          "description": "Keys to omit, written as they appear in findings. In dotenv, properties, and `.resx` files a pattern matches the key name, where `*` stops at a `.` and `**` crosses it. In every other format a pattern is a key path: `*` matches within one segment, a `**` segment matches any number of segments, and `['a.b']` names a segment that contains a dot.",
           "items": {
             "type": "string"
           },
@@ -5125,7 +5130,7 @@
           "const": "key_parity"
         },
         "peers": {
-          "description": "Glob selecting the peer files. The reference is excluded automatically.",
+          "description": "Glob selecting the peer files. The reference is excluded automatically. A value without glob metacharacters is a literal path, read even when gitignored (`peers: .env`).",
           "type": "string"
         },
         "plurals": {

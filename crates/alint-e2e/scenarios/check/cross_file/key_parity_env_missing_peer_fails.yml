@@ -1,0 +1,28 @@
+test_version: 1
+name: key_parity fails loudly when a literal peer is absent
+tags: [check, key_parity, cross_file, dotenv, failing]
+
+# A fresh clone has no `.env`. Without `allow_missing_peers` an absent literal
+# peer is an analysis failure, so a typo in `peers` can never pass.
+
+given:
+  tree:
+    .gitignore: ".env\n"
+    .env.example: |
+      DATABASE_URL=
+  config: |
+    version: 1
+    rules:
+      - id: env-keys-match-example
+        kind: key_parity
+        reference: .env.example
+        peers: .env
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - {rule: env-keys-match-example, kind: resource_read, path: .env}

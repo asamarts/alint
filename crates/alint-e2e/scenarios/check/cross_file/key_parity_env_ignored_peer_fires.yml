@@ -1,0 +1,31 @@
+test_version: 1
+name: key_parity reads a gitignored literal peer such as .env
+tags: [check, key_parity, cross_file, dotenv, failing]
+
+# `.env` is gitignored, so the index never lists it. A `peers` value without
+# glob metacharacters is a literal path read from disk, so `.env` is still
+# compared against the committed `.env.example`.
+
+given:
+  tree:
+    .gitignore: ".env\n"
+    .env.example: |
+      DATABASE_URL=
+      API_KEY=
+    .env: |
+      DATABASE_URL=postgres://localhost/app
+  config: |
+    version: 1
+    rules:
+      - id: env-keys-match-example
+        kind: key_parity
+        reference: .env.example
+        peers: .env
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: env-keys-match-example, level: error, path: .env, message: {regex: "missing key `API_KEY`"}}

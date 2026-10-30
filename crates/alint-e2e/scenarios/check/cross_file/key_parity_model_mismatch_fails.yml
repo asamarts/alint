@@ -1,0 +1,30 @@
+test_version: 1
+name: key_parity refuses to compare files with different key models
+tags: [check, key_parity, cross_file, failing]
+
+# A JSON reference has nested keys; a properties peer has flat ones. Comparing
+# them would report false drift, so the peer is an analysis failure.
+
+given:
+  tree:
+    locales:
+      en.json: |
+        {"nav": {"home": "Home"}}
+      fr.properties: |
+        nav.home=Accueil
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: locales/en.json
+        peers: "locales/*"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - {rule: locales-match-english, kind: resource_parse, path: locales/fr.properties}

@@ -1,0 +1,33 @@
+test_version: 1
+name: key_parity reports every key missing from a peer that ignore_keys empties
+tags: [check, key_parity, cross_file, failing]
+
+# Every key of `fr.json` matches `ignore_keys`, so the peer has nothing left to
+# compare. That is not a pass: the reference keys outside the pattern are all
+# missing from it. `debug.*` also shows that a path pattern's `*` matches one
+# whole segment.
+
+given:
+  tree:
+    locales:
+      en.json: |
+        {"nav": {"home": "Home"}, "title": "T", "debug": {"flag": "x"}}
+      fr.json: |
+        {"debug": {"flag": "x", "trace.level": "y"}}
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: locales/en.json
+        peers: "locales/*.json"
+        ignore_keys: ["debug.*"]
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: locales-match-english, level: error, path: locales/fr.json, message: {regex: "missing key `nav\\.home`"}}
+      - {rule: locales-match-english, level: error, path: locales/fr.json, message: {regex: "missing key `title`"}}

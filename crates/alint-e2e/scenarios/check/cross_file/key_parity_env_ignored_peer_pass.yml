@@ -1,0 +1,31 @@
+test_version: 1
+name: key_parity passes when a gitignored .env declares the example's keys
+tags: [check, key_parity, cross_file, dotenv, passing]
+
+# Values differ and the peer repeats a key; parity compares distinct key
+# names only, and findings never quote values.
+
+given:
+  tree:
+    .gitignore: ".env\n"
+    .env.example: |
+      DATABASE_URL=
+      API_KEY=
+    .env: |
+      DATABASE_URL=postgres://localhost/app
+      API_KEY=secret
+      API_KEY=override
+  config: |
+    version: 1
+    rules:
+      - id: env-keys-match-example
+        kind: key_parity
+        reference: .env.example
+        peers: .env
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

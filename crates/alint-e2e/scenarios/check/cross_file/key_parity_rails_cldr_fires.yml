@@ -1,0 +1,46 @@
+test_version: 1
+name: key_parity compares Rails locales below their root with CLDR plural groups
+tags: [check, key_parity, cross_file, yaml, failing]
+
+# `strip_root` compares below `en:` / `fr:`, and `plurals: cldr` treats each
+# plural object as one key, so French's extra `many` category is not drift.
+# Findings keep the locations of the keys they came from.
+
+given:
+  tree:
+    config:
+      locales:
+        en.yml: |
+          en:
+            title: Title
+            items:
+              one: one item
+              other: "%{count} items"
+            nav:
+              home: Home
+        fr.yml: |
+          fr:
+            title: Titre
+            items:
+              one: un article
+              many: "%{count} d'articles"
+              other: "%{count} articles"
+            footer: Pied
+  config: |
+    version: 1
+    rules:
+      - id: rails-locales
+        kind: key_parity
+        reference: config/locales/en.yml
+        peers: "config/locales/*.yml"
+        strip_root: true
+        plurals: cldr
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: rails-locales, level: error, path: config/locales/fr.yml, message: {regex: "missing key `nav\\.home`"}, related: [{label: reference key, path: config/locales/en.yml, line: 7, column: 5, end_line: 7, end_column: 9}]}
+      - {rule: rails-locales, level: error, path: config/locales/fr.yml, line: 7, column: 3, end_line: 7, end_column: 9, message: {regex: "extra key `footer`"}}
