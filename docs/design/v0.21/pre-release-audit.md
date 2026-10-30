@@ -1,6 +1,7 @@
 # v0.21 pre-release audit and remediation plan
 
 Status: Plan (2026-10-29). Audited `main` at `f4e5fa225`; version 0.20.1, v0.21.0 untagged.
+Progress: W1 in #407 (all twelve items, with tests); W2, W3, and W4 not started.
 Decisions: none new. The work stays inside [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md)
 and the accepted [`README.md`](README.md); section 7 lists the calls that are the owner's.
 
