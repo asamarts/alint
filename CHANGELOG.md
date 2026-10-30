@@ -11,6 +11,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Updated the dotenv engine from `adotenv` 0.2.1 to 0.10.4. The lossless parser,
   diagnostics, spans and verified-edit APIs used by alint remain compatible;
   no source changes were required.
+- `json_schema_passes` uses `jsonschema` 0.60. A regex in a schema that
+  exceeds the backtracking limit no longer counts as a non-match, which could
+  let `not` or `patternProperties` accept an invalid document; the verdict now
+  holds only if it is the same either way, and otherwise the document gets a
+  backtracking-limit finding.
+- The VS Code extension uses `vscode-languageclient` 11 (still VS Code 1.91 or
+  newer).
 
 ### Security
 
