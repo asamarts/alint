@@ -145,6 +145,35 @@ fn build_rejects_an_uninferable_reference_format() {
 }
 
 #[test]
+fn build_rejects_a_literal_peer_in_another_key_model() {
+    let error = |yaml: &str| build(&spec_yaml(yaml)).err().map(|e| e.to_string());
+    let mismatch =
+        error("id: t\nkind: key_parity\nreference: en.json\npeers: fr.properties\nlevel: error\n");
+    assert!(
+        mismatch
+            .as_deref()
+            .is_some_and(|e| e.contains("different key model")),
+        "{mismatch:?}"
+    );
+    let uninferable =
+        error("id: t\nkind: key_parity\nreference: en.json\npeers: locales/fr\nlevel: error\n");
+    assert!(
+        uninferable
+            .as_deref()
+            .is_some_and(|e| e.contains("literal `peers` path")),
+        "{uninferable:?}"
+    );
+    // The same model, or an explicit `format` that every file shares, builds.
+    for yaml in [
+        "id: t\nkind: key_parity\nreference: en.json\npeers: fr.yaml\nlevel: error\n",
+        "id: t\nkind: key_parity\nreference: .env.example\npeers: .env\nlevel: error\n",
+        "id: t\nkind: key_parity\nreference: en.json\npeers: locales/fr\nformat: json\nlevel: error\n",
+    ] {
+        assert_eq!(error(yaml), None, "{yaml}");
+    }
+}
+
+#[test]
 fn reports_missing_and_extra_keys() {
     let findings = run(
         "id: t\nkind: key_parity\nreference: locales/en.json\npeers: 'locales/*.json'\nlevel: error\n",
@@ -443,6 +472,23 @@ fn dotted_and_bracketed_keys_are_compared_by_identity() {
         );
     }
     assert_eq!(msgs.len(), 3, "{msgs:?}");
+
+    // `ignore_keys` matches the same rendering, so a dotted flat key is
+    // ignored by its bracketed form and not by the bare one.
+    let ignored = |pattern: &str| {
+        let yaml = format!(
+            "id: t\nkind: key_parity\nreference: en.properties\npeers: '*.properties'\nignore_keys: [\"{pattern}\"]\nlevel: error\n"
+        );
+        messages(&run(
+            &yaml,
+            &[
+                ("en.properties", b"app.title=Hello\nother=1\n"),
+                ("fr.properties", b"other=1\n"),
+            ],
+        ))
+    };
+    assert_eq!(ignored("['app.*']"), Vec::<String>::new());
+    assert_eq!(ignored("app.*").len(), 1);
 
     // A flat dotted key and a nested key are different keys (V21-4).
     let json = run(

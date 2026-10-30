@@ -3,8 +3,8 @@ name: key_parity compares Rails locales below their root with CLDR plural groups
 tags: [check, key_parity, cross_file, yaml, failing]
 
 # `strip_root` compares below `en:` / `fr:`, and `plurals: cldr` treats each
-# plural object as one key, so French's extra `few`/`many` categories are not
-# drift. Findings keep the locations of the keys they came from.
+# plural object as one key, so French's extra `many` category is not drift.
+# Findings keep the locations of the keys they came from.
 
 given:
   tree:

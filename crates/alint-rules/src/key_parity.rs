@@ -13,7 +13,8 @@
 //! Android string-resource and .NET `.resx` XML dialects. Files are compared
 //! only within one key model: the tree formats (JSON/YAML/TOML) together, the
 //! flat formats (dotenv/properties) together, and INI and each XML dialect on
-//! their own. A peer in another key model is an analysis failure.
+//! their own. A literal peer in another key model is a config error; a peer a
+//! glob selects in another key model is an analysis failure.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -1086,24 +1087,7 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
         ));
     }
     let ignore = opts.ignore_keys.clone();
-    let literal_peer = match alint_core::template::literal_glob_path(opts.peers.trim()) {
-        Some(path) => {
-            let path = RelPath::parse(&path).ok_or_else(|| {
-                Error::rule_config(
-                    &spec.id,
-                    "a literal `peers` path must be a confined repository path",
-                )
-            })?;
-            if path == reference {
-                return Err(Error::rule_config(
-                    &spec.id,
-                    "`peers` must select at least one file other than the reference",
-                ));
-            }
-            Some(path)
-        }
-        None => None,
-    };
+    let literal_peer = literal_peer(spec, &opts, &reference, reference_format)?;
     let peers_scope = Scope::from_patterns(std::slice::from_ref(&opts.peers))?;
     // The reference is a literal path: escape it, so a name such as
     // `locales/[id].json` matches its own `--changed` edit.
@@ -1128,6 +1112,50 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
         strip_root: opts.strip_root,
         ignore,
     })
+}
+
+/// A `peers` value with no glob metacharacters, as a confined path other than
+/// the reference. Without an explicit `format` its extension picks its format,
+/// so a key-model mismatch is a config error here rather than an analysis
+/// failure when it is read.
+fn literal_peer(
+    spec: &RuleSpec,
+    opts: &Options,
+    reference: &RelPath,
+    reference_format: KeyFormat,
+) -> Result<Option<RelPath>> {
+    let Some(path) = alint_core::template::literal_glob_path(opts.peers.trim()) else {
+        return Ok(None);
+    };
+    let path = RelPath::parse(&path).ok_or_else(|| {
+        Error::rule_config(
+            &spec.id,
+            "a literal `peers` path must be a confined repository path",
+        )
+    })?;
+    if &path == reference {
+        return Err(Error::rule_config(
+            &spec.id,
+            "`peers` must select at least one file other than the reference",
+        ));
+    }
+    if opts.format.is_none() {
+        let format = infer_format(Path::new(path.as_str())).ok_or_else(|| {
+            Error::rule_config(
+                &spec.id,
+                "cannot infer the key format of the literal `peers` path; set `format` explicitly",
+            )
+        })?;
+        if format.model() != reference_format.model() {
+            return Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "the literal `peers` path ({format:?}) has a different key model than the reference ({reference_format:?})"
+                ),
+            ));
+        }
+    }
+    Ok(Some(path))
 }
 
 #[cfg(test)]
