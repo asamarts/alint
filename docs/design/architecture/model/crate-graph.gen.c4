@@ -41,6 +41,6 @@ model {
 views {
   view crateGraph {
     title 'Crate dependency graph'
-    include alint.cli.alintBin, alint.cli.core, alint.cli.dsl, alint.cli.output, alint.cli.rules, alint.lspServer.lspd, alint.tooling.bench, alint.tooling.e2e, alint.tooling.testkit, alint.tooling.xtask
+    include alint.cli.alintBin, alint.cli.core, alint.cli.dsl, alint.cli.output, alint.cli.rules, alint.lspServer.lspd, alint.tooling.bench, alint.tooling.consumer, alint.tooling.e2e, alint.tooling.testkit, alint.tooling.xtask
   }
 }

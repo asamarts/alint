@@ -1,0 +1,23 @@
+[package]
+name = "alint-witforge-consumer"
+description = "Generated compile/round-trip proof for the alint plugin contract."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+pbjson = "0.9"
+prost = "0.14"
+serde.workspace = true
+serde_json.workspace = true
+
+[lints]
+workspace = true
+
+[[test]]
+name = "it"
+path = "tests/main.rs"

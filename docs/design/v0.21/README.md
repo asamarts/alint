@@ -556,10 +556,10 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   it (a direct run of the gate's gungraun filter and limit), and a +4% change over `main` passes,
   because S1 starts 7-8% under v0.18.2. Details and the recorded counts:
   [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md).
-- **R7, done.** `wit/alint-plugin/0.1.0/plugin.wit` is the committed
+- **R7, done.** `wit/alint-plugin/v0.1/plugin.wit` is the committed
   `alint:plugin@0.1.0` draft with shared types, `adapter` and `analyzer` worlds,
   host-pushed inputs, no callbacks, and an append-only `wire.lock`. witforge's
-  subset checker accepts it (`witforge check wit/alint-plugin/0.1.0`).
+  subset checker accepts it (`witforge check wit/alint-plugin/v0.1`).
 - **R6a and R6b, done.** `alint_core::plugin_api` now carries std-only `Adapter` and
   `Analyzer` traits over contract resources, rows, findings, related locations,
   capabilities, and limits. `relation::ContractAdapter` bridges a contract adapter
