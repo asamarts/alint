@@ -453,7 +453,7 @@ fn environment_sensitive_fields(entries: Option<&yaml_serde::Value>) -> Vec<Mapp
             entry
                 .as_mapping()
                 .into_iter()
-                .flat_map(|mapping| mapping.iter())
+                .flat_map(yaml_serde::Mapping::iter)
                 .filter(|(field, value)| {
                     !matches!(field.as_str(), Some("id" | "kind" | "level" | "vars"))
                         && reads_environment(value)
