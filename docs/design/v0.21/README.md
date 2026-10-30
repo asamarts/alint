@@ -193,7 +193,9 @@ are the authoritative, non-IR implementation), so they cannot.
   reference documents the two dialects. The extension picks the format, except for `.xml`:
   generic XML has no key model, so an `.xml` reference needs `format: android-strings`. HCL and
   any other format are rejected at config load. Files are compared only within one key model,
-  and a mismatch is a config error: the tree formats (JSON, YAML, TOML) together, the flat
+  and a mismatch is refused: a config error when the configuration shows it (an explicit
+  `format` against the reference's extension, or a literal peer), otherwise an analysis failure
+  on the peer whose extension reveals it (wording corrected 2026-10-29, W1): the tree formats (JSON, YAML, TOML) together, the flat
   formats (dotenv, properties, whose keys are single segments) together, and INI (`[section,
   key]`) and each XML dialect on their own. Both XML dialects parse through the existing guarded
   XML path (the `roxmltree` 0.20 pin and its depth pre-scan).
@@ -203,7 +205,10 @@ are the authoritative, non-IR implementation), so they cannot.
   baseline keys use one rendering: segments joined by `.`, indices as `[n]`, and bracket notation
   (`nav['a.b']`) for a segment that is empty or contains `.`, `[`, `]`, or a quote, with `\`
   and `'` escaped inside the brackets, so distinct keys never render alike. Properties keys are
-  single segments.
+  single segments. (Corrected by [ADR-0025](../../adr/0025-v021-pre-release-decisions.md),
+  2026-10-30: the comparison keeps this rendering, but findings, baseline keys, and
+  `ignore_keys` show a dotenv, properties, or `.resx` key as written, and path patterns match
+  segment by segment.)
   YAML aliases and merge keys (`<<: *defaults`) are an analysis failure in a compared file:
   rows do not expand them, and comparing unexpanded keys would report false drift. With
   `plurals: cldr`, a CLDR plural group counts as one key:
@@ -495,8 +500,9 @@ v0.21 is complete only when all of the following are observed:
   path, and read/parse failures now emit and compare the same diagnostics
   instead of being skipped. Regression tests cover both.
   `ci/scripts/check-shadow-feature-tree.sh`, wired into Build and preflight,
-  proves the release, `-p alint -p xtask`, and criterion feature trees exclude
-  `shadow-ir`.
+  is meant to prove the release, `-p alint -p xtask`, and criterion feature
+  trees exclude `shadow-ir`; the pre-tag audit found it passes with a leak
+  injected (W2-2 in [`pre-release-audit.md`](pre-release-audit.md)).
 - **R3, done.** `key_parity` is registered for JSON, YAML, TOML, dotenv, INI,
   Java properties, Android string resources, and .NET `.resx`, with the
   documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
@@ -507,6 +513,8 @@ v0.21 is complete only when all of the following are observed:
   839 read calls, with the per-file rule alone 441, and with both 839, so the two consumers share
   the run-scoped cache. Its instruction and syscall counts are recorded in
   [`REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md#relation-scenario).
+  The pre-tag audit found correctness gaps in the kind (W1 in
+  [`pre-release-audit.md`](pre-release-audit.md)).
 - **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
   the row/diagnostic model, the strict-versus-lossy decoding split, and the
   read/decode cache design that R2 implements.
@@ -552,7 +560,10 @@ v0.21 is complete only when all of the following are observed:
   `ContractAnalyzer`. `KeyParityRule` now uses that analyzer for missing/extra
   diff detection while retaining its existing messages, spans, baseline keys,
   and trace output; the key-parity tests and the full golden-fingerprint e2e
-  suite pass unchanged. R6b is complete.
+  suite pass unchanged. R6b is complete. The pre-tag audit found that the
+  bridge change made the comparison miss dotted keys and empty peers and
+  dropped analyzer errors (W1-1 to W1-3), and that registry injection skips
+  several surfaces (W2-1).
 - **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
   replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
   removed from 20 configs. Four configs no longer load on the current release and are reported
@@ -585,14 +596,22 @@ v0.21 is complete only when all of the following are observed:
   independence from input order, the absence states, every limit, the nested-to-flat round trip,
   and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
   size and depth limits).
-- **R8, go.** [`r8-readiness.md`](r8-readiness.md) records the clean benchmark
-  workload and import-gate prefilter: RSS passes both the v0.18.2 +10% gate and
-  v0.20.1 (118,924 KB vs 118,044 / 119,420 KB), and 1M S2 is faster than
-  v0.20.1 (5.357 s vs 5.861 s). The expanded-shadow final-candidate corpus
-  replay is zero-diff. Release preparation and the standard release preflight
-  remain before tagging.
-- **Next:** complete release preparation (version bump, changelog, generated
-  artifacts, release preflight/cross-platform) and tag. R3 (`key_parity`), R4
-  (the shadow harness), R5 (corpus replay), R6a (contract traits and registry
-  injection), R6b (`key_parity` through the bridge), R7 (the WIT draft), and R9
-  (its TOML and XML dialect formats) are complete.
+- **R8, on hold.** [`r8-readiness.md`](r8-readiness.md) records the clean
+  benchmark workload and import-gate prefilter: RSS passes both the v0.18.2
+  +10% gate and v0.20.1 (118,924 KB vs 118,044 / 119,420 KB), and 1M S2 is
+  faster than v0.20.1 (5.357 s vs 5.861 s). The expanded-shadow corpus replay
+  is zero-diff. The pre-tag audit
+  ([`pre-release-audit.md`](pre-release-audit.md), 2026-10-29) moved the
+  verdict from GO to HOLD: `key_parity` misses dotted keys and empty peers
+  since R6b's bridge change and cannot read a gitignored literal peer, several
+  readiness rows have no gate, and the go/no-go assessment is unwritten.
+- **Decisions (2026-10-30).** [ADR-0025](../../adr/0025-v021-pre-release-decisions.md)
+  records the owner's calls from the audit: single-name keys shown as written,
+  an opt-in `allow_missing_peers`, a GO on consistency with three simplicity
+  gates for v0.22 before Phase 3 may start, and no tag until witforge 0.1.0's
+  regeneration check runs in CI. Section 7 of the audit lists the rest.
+- **Next:** the audit's W1 (`key_parity` correctness, with ADR-0025's changes)
+  and W2 (the remaining readiness gaps and the go/no-go write-up), then W3's
+  documentation and release preparation (version bump, changelog, generated
+  artifacts, release preflight and cross-platform checks) and, once witforge
+  0.1.0 is checked in CI, the tag.

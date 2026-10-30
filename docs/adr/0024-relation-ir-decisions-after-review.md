@@ -11,6 +11,8 @@ decision-makers: asamarts
 Accepted (2026-10-25). Supersedes [ADR-0023](0023-relation-ir-key-parity-and-plugin-contract-0x.md).
 Decision 6 relaxes how ADR-0019 DEC-13's budget is measured, and the decision-maker confirmed it;
 the other decisions correct or complete ADR-0023 without changing what was chosen.
+Decision 4's single rendering of every key is partly superseded by
+[ADR-0025](0025-v021-pre-release-decisions.md) (2026-10-30).
 
 ## Context
 
