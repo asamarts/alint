@@ -1650,6 +1650,7 @@ KeyParityRule {
     format_override: None,
     peers: "locales/*.json",
     peers_scope: Scope { ... },
+    literal_peer: None,
     scope: Scope { ... },
     direction: Both,
     plurals: Exact,

@@ -1,0 +1,35 @@
+test_version: 1
+name: key_parity compares dotted Java properties keys by identity
+tags: [check, key_parity, cross_file, failing]
+
+# Properties keys are single segments, so a dotted key renders in bracket
+# notation. A peer that drops `app.title` and adds `menu.item` must report
+# both; the dotted names may never collapse into a nested path.
+
+given:
+  tree:
+    i18n:
+      messages.properties: |
+        app.title=Hello
+        app.name=Demo
+        footer=Bye
+      messages_fr.properties: |
+        app.name=Demo
+        footer=Au revoir
+        menu.item=Menu
+  config: |
+    version: 1
+    rules:
+      - id: messages-match
+        kind: key_parity
+        reference: i18n/messages.properties
+        peers: "i18n/messages_*.properties"
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: messages-match, level: error, path: i18n/messages_fr.properties, message: {regex: "missing key `\\['app\\.title'\\]`"}}
+      - {rule: messages-match, level: error, path: i18n/messages_fr.properties, line: 3, column: 1, end_line: 3, end_column: 10, message: {regex: "extra key `\\['menu\\.item'\\]`"}}
