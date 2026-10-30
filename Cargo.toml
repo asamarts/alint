@@ -175,3 +175,6 @@ strip = false
 debug = "line-tables-only"
 lto = false
 codegen-units = 1
+
+[patch.crates-io]
+yaml_serde = { path = "/home/kaminsod/projects/ayaml/tools/yaml-serde-compat" }
