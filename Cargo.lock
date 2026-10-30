@@ -58,6 +58,7 @@ dependencies = [
  "alint-testkit",
  "anstream",
  "anyhow",
+ "ayaml",
  "clap",
  "indicatif",
  "jsonschema",
@@ -72,7 +73,6 @@ dependencies = [
  "tracing",
  "tracing-subscriber",
  "trycmd",
- "yaml_serde",
 ]
 
 [[package]]
@@ -97,6 +97,7 @@ name = "alint-core"
 version = "0.20.1"
 dependencies = [
  "adotenv",
+ "ayaml",
  "encoding_rs",
  "globset",
  "hcl-rs",
@@ -121,7 +122,6 @@ dependencies = [
  "toml",
  "toml_edit",
  "tracing",
- "yaml_serde",
 ]
 
 [[package]]
@@ -130,6 +130,7 @@ version = "0.20.1"
 dependencies = [
  "alint-core",
  "alint-rules",
+ "ayaml",
  "directories",
  "jsonschema",
  "serde",
@@ -139,7 +140,6 @@ dependencies = [
  "thiserror 2.0.21",
  "tracing",
  "ureq",
- "yaml_serde",
 ]
 
 [[package]]
@@ -151,6 +151,7 @@ dependencies = [
  "alint-output",
  "alint-rules",
  "alint-testkit",
+ "ayaml",
  "dir-test",
  "jsonschema",
  "proptest",
@@ -159,7 +160,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "toml",
- "yaml_serde",
 ]
 
 [[package]]
@@ -196,6 +196,7 @@ name = "alint-rules"
 version = "0.20.1"
 dependencies = [
  "alint-core",
+ "ayaml",
  "content_inspector",
  "globset",
  "jsonschema",
@@ -214,7 +215,6 @@ dependencies = [
  "tempfile",
  "toml",
  "unicode-general-category",
- "yaml_serde",
 ]
 
 [[package]]
@@ -225,6 +225,7 @@ dependencies = [
  "alint-dsl",
  "alint-output",
  "alint-rules",
+ "ayaml",
  "jsonschema",
  "proptest",
  "regex",
@@ -233,7 +234,6 @@ dependencies = [
  "serde_json",
  "tempfile",
  "thiserror 2.0.21",
- "yaml_serde",
 ]
 
 [[package]]
@@ -3761,21 +3761,13 @@ dependencies = [
  "alint-rules",
  "alint-testkit",
  "anyhow",
+ "ayaml",
  "clap",
  "jsonschema",
  "regex",
  "serde",
  "serde_json",
  "tempfile",
- "yaml_serde",
-]
-
-[[package]]
-name = "yaml_serde"
-version = "0.10.7"
-dependencies = [
- "ayaml",
- "serde",
 ]
 
 [[package]]

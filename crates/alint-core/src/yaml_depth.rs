@@ -159,14 +159,13 @@ fn expansion_within_limit_with(text: &str, max: usize) -> bool {
 /// The discard-only counting pass of [`expansion_within_limit`], for text that
 /// holds an alias.
 fn expansion_budget_pass(text: &str, max: usize) -> bool {
-    use serde::de::DeserializeSeed as _;
     let remaining = std::cell::Cell::new(max);
     let exceeded = std::cell::Cell::new(false);
     let seed = NodeBudget {
         remaining: &remaining,
         exceeded: &exceeded,
     };
-    let _ = seed.deserialize(yaml_serde::Deserializer::from_str(text));
+    let _ = yaml_serde::from_str_seed(text, seed);
     !exceeded.get()
 }
 

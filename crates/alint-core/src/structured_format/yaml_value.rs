@@ -24,10 +24,7 @@ use serde_json::Value;
 /// `serde_json::Value`'s own visitor, keys are read as strings the same way, and a
 /// duplicate key keeps its last value -- which a test pins on untagged documents.
 pub(super) fn yaml_to_value(text: &str) -> std::result::Result<Value, String> {
-    use serde::de::DeserializeSeed as _;
-    YamlJson { src: text }
-        .deserialize(yaml_serde::Deserializer::from_str(text))
-        .map_err(|e| e.to_string())
+    yaml_serde::from_str_seed(text, YamlJson { src: text }).map_err(|e| e.to_string())
 }
 
 /// The [`yaml_to_value`] seed / visitor: builds a `serde_json::Value`, applying
