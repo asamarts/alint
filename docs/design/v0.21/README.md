@@ -193,7 +193,9 @@ are the authoritative, non-IR implementation), so they cannot.
   reference documents the two dialects. The extension picks the format, except for `.xml`:
   generic XML has no key model, so an `.xml` reference needs `format: android-strings`. HCL and
   any other format are rejected at config load. Files are compared only within one key model,
-  and a mismatch is a config error: the tree formats (JSON, YAML, TOML) together, the flat
+  and a mismatch is refused: a config error when the configuration shows it (an explicit
+  `format` against the reference's extension, or a literal peer), otherwise an analysis failure
+  on the peer whose extension reveals it (wording corrected 2026-10-29, W1): the tree formats (JSON, YAML, TOML) together, the flat
   formats (dotenv, properties, whose keys are single segments) together, and INI (`[section,
   key]`) and each XML dialect on their own. Both XML dialects parse through the existing guarded
   XML path (the `roxmltree` 0.20 pin and its depth pre-scan).
@@ -495,8 +497,9 @@ v0.21 is complete only when all of the following are observed:
   path, and read/parse failures now emit and compare the same diagnostics
   instead of being skipped. Regression tests cover both.
   `ci/scripts/check-shadow-feature-tree.sh`, wired into Build and preflight,
-  proves the release, `-p alint -p xtask`, and criterion feature trees exclude
-  `shadow-ir`.
+  is meant to prove the release, `-p alint -p xtask`, and criterion feature
+  trees exclude `shadow-ir`; the pre-tag audit found it passes with a leak
+  injected (W2-2 in [`pre-release-audit.md`](pre-release-audit.md)).
 - **R3, done.** `key_parity` is registered for JSON, YAML, TOML, dotenv, INI,
   Java properties, Android string resources, and .NET `.resx`, with the
   documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
@@ -507,6 +510,8 @@ v0.21 is complete only when all of the following are observed:
   839 read calls, with the per-file rule alone 441, and with both 839, so the two consumers share
   the run-scoped cache. Its instruction and syscall counts are recorded in
   [`REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md#relation-scenario).
+  The pre-tag audit found correctness gaps in the kind (W1 in
+  [`pre-release-audit.md`](pre-release-audit.md)).
 - **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
   the row/diagnostic model, the strict-versus-lossy decoding split, and the
   read/decode cache design that R2 implements.
@@ -552,7 +557,10 @@ v0.21 is complete only when all of the following are observed:
   `ContractAnalyzer`. `KeyParityRule` now uses that analyzer for missing/extra
   diff detection while retaining its existing messages, spans, baseline keys,
   and trace output; the key-parity tests and the full golden-fingerprint e2e
-  suite pass unchanged. R6b is complete.
+  suite pass unchanged. R6b is complete. The pre-tag audit found that the
+  bridge change made the comparison miss dotted keys and empty peers and
+  dropped analyzer errors (W1-1 to W1-3), and that registry injection skips
+  several surfaces (W2-1).
 - **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
   replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
   removed from 20 configs. Four configs no longer load on the current release and are reported
