@@ -106,6 +106,7 @@ graph TB
 ```mermaid
 graph TB
   subgraph AlintTooling["`Dev + build tooling`"]
+    AlintTooling.Consumer["alint-witforge-consumer"]
     AlintTooling.E2e["alint-e2e"]
     AlintTooling.Xtask["xtask"]
     AlintTooling.Bench["alint-bench"]
