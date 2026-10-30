@@ -1,0 +1,29 @@
+test_version: 1
+name: key_parity treats i18next plural suffixes as one key under plurals cldr
+tags: [check, key_parity, cross_file, passing]
+
+given:
+  tree:
+    public:
+      locales:
+        en:
+          common.json: |
+            {"item_one": "{{count}} item", "item_other": "{{count}} items", "title": "Title"}
+        pl:
+          common.json: |
+            {"item_one": "{{count}} element", "item_few": "{{count}} elementy", "item_many": "{{count}} elementów", "item_other": "{{count}} elementu", "title": "Tytuł"}
+  config: |
+    version: 1
+    rules:
+      - id: i18next-locales
+        kind: key_parity
+        reference: public/locales/en/common.json
+        peers: "public/locales/*/common.json"
+        plurals: cldr
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

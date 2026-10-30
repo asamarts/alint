@@ -5111,7 +5111,7 @@
               "type": "null"
             }
           ],
-          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv, while `.xml` and `.resx` need an explicit dialect."
+          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv and `.resx` infers resx, while an Android `.xml` file needs `android-strings`."
         },
         "ignore_keys": {
           "default": [],
@@ -5125,7 +5125,7 @@
           "const": "key_parity"
         },
         "peers": {
-          "description": "Glob selecting the peer files. The reference is excluded automatically.",
+          "description": "Glob selecting the peer files. The reference is excluded automatically. A value without glob metacharacters is a literal path, read even when gitignored (`peers: .env`).",
           "type": "string"
         },
         "plurals": {

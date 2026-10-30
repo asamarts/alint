@@ -6,7 +6,7 @@ given:
   tree:
     locales:
       en.json: |
-        {"nav": {"home": "Home"}}
+        {"nav": {"home": "Home", "about": "About"}}
       fr.json: |
         {"nav": {"home": "Accueil"}}
     notes.md: |
@@ -27,8 +27,12 @@ given:
 
 when: [check, check_changed]
 
+# fr.json lacks `nav.about`, so a full check fails. Under --changed only
+# notes.md changed, outside the rule's scope, so the rule is skipped: the
+# passing second run proves the skip rather than a clean tree.
 expect:
-  - exit: success
-    violations: []
+  - exit: policy_failure
+    violations:
+      - {rule: locales-match-english, level: error, path: locales/fr.json, message: {regex: "missing key `nav\\.about`"}}
   - exit: success
     violations: []

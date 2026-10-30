@@ -38,8 +38,9 @@ impl Adapter for TomlRowsAdapter {
     ) -> Result<AdapterOutput, AdapterError> {
         let text = std::str::from_utf8(bytes)
             .map_err(|_| AdapterError::Parse("the TOML document is not valid UTF-8".to_string()))?;
-        let document = Document::parse(text)
-            .map_err(|error: toml_edit::TomlError| AdapterError::Parse(error.to_string()))?;
+        let document = Document::parse(text).map_err(|error: toml_edit::TomlError| {
+            AdapterError::Parse(parse_error(text, &error))
+        })?;
         let mut rows = Vec::new();
         let mut parent = Vec::new();
         collect_table(
@@ -102,38 +103,67 @@ fn collect_item(
     Ok(())
 }
 
+/// Descend an inline table and every inline table nested in it, so
+/// `x = { a = { b = 1 } }` yields the same leaf `x.a.b` as `[x.a] b = 1`.
+/// The walk uses an explicit stack: nesting depth cannot exhaust the call
+/// stack, and the row limit bounds the work.
 fn collect_inline_table(
     table: &InlineTable,
     resource: &Resource,
-    parent: &mut Vec<Segment>,
+    parent: &[Segment],
     table_key: &str,
     rows: &mut Vec<Row>,
     limits: &Limits,
 ) -> Result<(), AdapterError> {
-    parent.push(Segment::Key(table_key.into()));
-    for (path, _) in table.get_values() {
-        let span = path
-            .iter()
-            .filter_map(|key| key.span())
-            .next_back()
-            .ok_or_else(|| {
-                AdapterError::Parse("a TOML inline-table key has no span".to_string())
-            })?;
-        let mut segments = parent.clone();
-        for key in path {
-            let text = key.get().to_string();
-            segments.push(Segment::Key(text.into()));
+    let mut root = parent.to_vec();
+    root.push(Segment::Key(table_key.into()));
+    let mut pending: Vec<(Vec<Segment>, &InlineTable)> = vec![(root, table)];
+    while let Some((prefix, table)) = pending.pop() {
+        let mut nested = Vec::new();
+        for (path, value) in table.get_values() {
+            let span = path
+                .iter()
+                .filter_map(|key| key.span())
+                .next_back()
+                .ok_or_else(|| {
+                    AdapterError::Parse("a TOML inline-table key has no span".to_string())
+                })?;
+            let mut segments = prefix.clone();
+            for key in path {
+                segments.push(Segment::Key(key.get().into()));
+            }
+            push_row(
+                resource,
+                Pointer::from_segments(segments.clone()),
+                span,
+                rows,
+                limits,
+            )?;
+            if let Value::InlineTable(inner) = value {
+                nested.push((segments, inner));
+            }
         }
-        push_row(
-            resource,
-            Pointer::from_segments(segments),
-            span,
-            rows,
-            limits,
-        )?;
+        // Reverse so the stack visits nested tables in source order.
+        pending.extend(nested.into_iter().rev());
     }
-    parent.pop();
     Ok(())
+}
+
+/// A TOML parse error as its position and reason, without the source line
+/// `toml_edit`'s `Display` quotes: the line may hold a value, and key-only
+/// consumers must never echo one.
+fn parse_error(text: &str, error: &toml_edit::TomlError) -> String {
+    let reason = error.message().trim();
+    let Some(offset) = error.span().map(|span| span.start.min(text.len())) else {
+        return format!("TOML parse error: {reason}");
+    };
+    let before = text.get(..offset).unwrap_or(text);
+    let line = before.matches('\n').count() + 1;
+    let column = before
+        .rsplit('\n')
+        .next()
+        .map_or(1, |tail| tail.chars().count() + 1);
+    format!("TOML parse error at line {line}, column {column}: {reason}")
 }
 
 fn pointer_for(parent: &[Segment], key: &str) -> Pointer {
@@ -209,6 +239,42 @@ mod tests {
             keys,
             ["list", "inline", "inline.one", "inline.two", "items"]
         );
+    }
+
+    #[test]
+    fn nested_inline_tables_are_descended_to_their_leaves() {
+        let inline = output("x = { a = { b = 1, c = { d = 2 } } }\n");
+        assert_eq!(rendered(&inline), ["x", "x.a", "x.a.b", "x.a.c", "x.a.c.d"]);
+        let tables = output("[x.a]\nb = 1\n[x.a.c]\nd = 2\n");
+        let leaves = |keys: Vec<String>| {
+            keys.iter()
+                .filter(|key| {
+                    !keys
+                        .iter()
+                        .any(|other| other.starts_with(&format!("{key}.")))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(leaves(rendered(&inline)), leaves(rendered(&tables)));
+        let deep = format!("x = {}1{}\n", "{ a = ".repeat(40), " }".repeat(40));
+        assert_eq!(output(&deep).rows.len(), 41);
+    }
+
+    #[test]
+    fn parse_errors_report_a_position_without_echoing_the_source() {
+        let AdapterError::Parse(message) = TomlRowsAdapter::new()
+            .extract(
+                &resource(),
+                b"ok = 1\nsecret = \"hunter2\n",
+                &Limits::default(),
+            )
+            .unwrap_err()
+        else {
+            panic!("expected a parse error");
+        };
+        assert!(message.contains("line 2"), "{message}");
+        assert!(!message.contains("hunter2"), "{message}");
     }
 
     #[test]
