@@ -30,7 +30,7 @@ regex.workspace = true
 schemars.workspace = true
 serde.workspace = true
 serde_json.workspace = true
-yaml_serde.workspace = true
+ayaml.workspace = true
 tempfile.workspace = true
 thiserror.workspace = true
 

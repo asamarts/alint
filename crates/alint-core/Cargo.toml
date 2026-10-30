@@ -22,7 +22,7 @@ path = "tests/main.rs"
 [dependencies]
 thiserror.workspace = true
 serde.workspace = true
-yaml_serde.workspace = true
+ayaml.workspace = true
 serde_json.workspace = true
 sha2.workspace = true
 globset.workspace = true

@@ -827,8 +827,8 @@ fn parse_rejects_a_yaml_flow_bomb_without_hanging() {
 
 #[test]
 fn extends_promoting_file_remove_to_safe_is_rejected() {
-    use yaml_serde::Mapping;
-    let parse_rule = |y: &str| -> Mapping { yaml_serde::from_str(y).unwrap() };
+    use ayaml::Mapping;
+    let parse_rule = |y: &str| -> Mapping { ayaml::from_str(y).unwrap() };
 
     // An INHERITED rule promoting `file_remove` to Safe is refused (5.5: an
     // inherited fixer may be demoted, never promoted -- an extended ruleset must

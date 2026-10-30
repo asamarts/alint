@@ -195,7 +195,7 @@ mod tests {
     #[test]
     fn passes_when_every_file_has_required_sibling() {
         let require: Vec<NestedRuleSpec> =
-            vec![yaml_serde::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap()];
+            vec![ayaml::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap()];
         let require = compile_nested_require("t", require).unwrap();
         let r = ForEachFileRule {
             id: "t".into(),
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn violates_per_missing_sibling() {
         let require: Vec<NestedRuleSpec> =
-            vec![yaml_serde::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap()];
+            vec![ayaml::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap()];
         let require = compile_nested_require("t", require).unwrap();
         let r = ForEachFileRule {
             id: "t".into(),

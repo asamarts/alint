@@ -24,7 +24,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 use alint_core::FixSpec;
-use yaml_serde::Value;
+use ayaml::Value;
 
 /// Ops exempt from the convergence requirement. A user-supplied `command`-fix
 /// runs an arbitrary command, so idempotence is the command author's business,
@@ -205,7 +205,7 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(scn) = yaml_serde::from_str::<Value>(&text) else {
+        let Ok(scn) = ayaml::from_str::<Value>(&text) else {
             continue;
         };
         let Some(config) = scn
@@ -215,7 +215,7 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
         else {
             continue;
         };
-        let Ok(cfg) = yaml_serde::from_str::<Value>(config) else {
+        let Ok(cfg) = ayaml::from_str::<Value>(config) else {
             continue;
         };
         let mut id_to_op = HashMap::new();
@@ -304,7 +304,7 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
 mod classify {
     use std::collections::{BTreeSet, HashMap};
 
-    use yaml_serde::Value;
+    use ayaml::Value;
 
     use super::classify_scenario;
 
@@ -315,7 +315,7 @@ mod classify {
     fn exp(items: &[&str]) -> Vec<Value> {
         items
             .iter()
-            .map(|s| yaml_serde::from_str(s).expect("valid expect yaml"))
+            .map(|s| ayaml::from_str(s).expect("valid expect yaml"))
             .collect()
     }
 

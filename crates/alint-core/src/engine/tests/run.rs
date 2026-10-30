@@ -275,7 +275,7 @@ fn skip_for_changed_returns_false_for_full_check() {
 
 /// A scope with `scope_filter: { has_ancestor: Cargo.toml }` over `**/*.rs`.
 fn ancestor_scope() -> Scope {
-    let spec: crate::RuleSpec = yaml_serde::from_str(
+    let spec: crate::RuleSpec = ayaml::from_str(
             "id: a\nkind: x\nlevel: error\npaths: \"**/*.rs\"\nscope_filter:\n  has_ancestor: Cargo.toml\n",
         )
         .unwrap();
@@ -470,7 +470,7 @@ fn run_for_file_applies_explicit_sensitivity_before_returning() {
         scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
         prefix: b"MAGIC".to_vec(),
     });
-    let spec: crate::RuleSpec = yaml_serde::from_str(
+    let spec: crate::RuleSpec = ayaml::from_str(
         "id: needs-magic\nkind: file_content_matches\npaths: \"**/*.txt\"\n\
              pattern: MAGIC\nsensitive: true\nlevel: error\n",
     )
@@ -503,7 +503,7 @@ fn explicit_sensitive_scope_covers_an_unindexed_editor_file() {
         scope: Scope::from_patterns(&["**/*.txt".to_string()]).unwrap(),
         prefix: b"MAGIC".to_vec(),
     });
-    let spec: crate::RuleSpec = yaml_serde::from_str(
+    let spec: crate::RuleSpec = ayaml::from_str(
         "id: needs-magic\nkind: file_content_matches\npaths: \"**/*.txt\"\n\
              pattern: MAGIC\nsensitive: true\nlevel: error\n",
     )

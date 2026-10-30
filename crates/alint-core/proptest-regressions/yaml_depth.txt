@@ -5,3 +5,4 @@
 # It is recommended to check this file in to source control so that
 # everyone who runs the test benefits from these saved cases.
 cc 2c90651e6c7fb7ba8ea3c22788616f8331c9030f858d6d598374ab15c2a7baed # shrinks to boms = 1, prefix = ["--- '", ":"], sep = " "
+cc 0fae1f55f70097114d3c0e5c670ce576293370c5313bf094a5279f747c83e3c5 # shrinks to boms = 1, prefix = ["--- '", "*a ", ": ", "\""], sep = "\n"

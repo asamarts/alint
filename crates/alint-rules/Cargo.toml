@@ -50,7 +50,7 @@ saphyr-parser.workspace = true
 [dev-dependencies]
 proptest.workspace = true
 tempfile.workspace = true
-yaml_serde.workspace = true
+ayaml.workspace = true
 
 [lints]
 workspace = true

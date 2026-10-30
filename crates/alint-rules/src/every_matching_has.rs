@@ -201,7 +201,7 @@ mod tests {
         // (rare but possible). The rule should evaluate require against
         // both.
         let require: Vec<NestedRuleSpec> =
-            vec![yaml_serde::from_str("kind: file_exists\npaths: \"{path}\"\n").unwrap()];
+            vec![ayaml::from_str("kind: file_exists\npaths: \"{path}\"\n").unwrap()];
         let require = compile_nested_require("t", require).unwrap();
         let r = EveryMatchingHasRule {
             id: "t".into(),

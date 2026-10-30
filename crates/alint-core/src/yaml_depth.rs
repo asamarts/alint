@@ -75,7 +75,7 @@ fn flow_depth_within_limit_with(text: &str, max: usize) -> bool {
 /// billion-laughs), and the alias-DEREF counter (`jumpcount > events.len()*100`)
 /// is never reached by a SINGLE anchor referenced many times -- N flat `*a` refs
 /// make only N derefs but N x (anchor size) materializations. Measured (release,
-/// peak RSS, both the `yaml_serde::Value` config path and the
+/// peak RSS, both the `ayaml::Value` config path and the
 /// `serde_json::Value` structured-query path): an 18.5 KB `a: &a [{k: v} x 500]` +
 /// 5000 refs (7.5M nodes, ~235 B/node) took 1.6-1.8 GB and 2-3 s, and a 1 MB
 /// `a: &a "<1 MB>"` + 4000 refs (only 4000 nodes, but 4 GB of string copies)
@@ -165,7 +165,7 @@ fn expansion_budget_pass(text: &str, max: usize) -> bool {
         remaining: &remaining,
         exceeded: &exceeded,
     };
-    let _ = yaml_serde::from_str_seed(text, seed);
+    let _ = ayaml::from_str_seed(text, seed);
     !exceeded.get()
 }
 
@@ -1115,17 +1115,17 @@ mod tests {
         let at = MAX_YAML_FLOW_DEPTH;
         let ok = bomb(at);
         assert!(flow_depth_within_limit(&ok));
-        let parsed = yaml_serde::from_str::<serde_json::Value>(&ok).unwrap();
+        let parsed = ayaml::from_str::<serde_json::Value>(&ok).unwrap();
         assert_eq!(crate::Format::Yaml.parse(&ok).unwrap(), parsed);
         let over = bomb(at + 1);
-        assert!(yaml_serde::from_str::<serde_json::Value>(&over).is_err());
-        assert!(yaml_serde::from_str::<yaml_serde::Value>(&over).is_err());
+        assert!(ayaml::from_str::<serde_json::Value>(&over).is_err());
+        assert!(ayaml::from_str::<ayaml::Value>(&over).is_err());
         assert!(!flow_depth_within_limit(&over));
         // Curly flow maps count the same way.
         let maps = |n: usize| format!("{}1{}", "{a: ".repeat(n), "}".repeat(n));
-        assert!(yaml_serde::from_str::<serde_json::Value>(&maps(at)).is_ok());
+        assert!(ayaml::from_str::<serde_json::Value>(&maps(at)).is_ok());
         assert!(flow_depth_within_limit(&maps(at)));
-        assert!(yaml_serde::from_str::<serde_json::Value>(&maps(at + 1)).is_err());
+        assert!(ayaml::from_str::<serde_json::Value>(&maps(at + 1)).is_err());
         assert!(!flow_depth_within_limit(&maps(at + 1)));
     }
 
@@ -1158,7 +1158,7 @@ mod tests {
         ];
         for case in cases {
             // Sanity: each case is genuinely parseable YAML (so the bomb is real).
-            let parsed: Result<yaml_serde::Value, _> = yaml_serde::from_str(case);
+            let parsed: Result<ayaml::Value, _> = ayaml::from_str(case);
             assert!(parsed.is_ok(), "case must be valid YAML: {case:?}");
             assert!(
                 contains_alias(case),
@@ -1226,7 +1226,7 @@ mod tests {
     /// its 128-level recursion limit -- i.e. the fixture's bracket run is genuine
     /// structure, not text hidden inside a scalar or comment.
     fn libyaml_sees_deep_nesting(doc: &str) -> bool {
-        yaml_serde::from_str::<yaml_serde::Value>(doc)
+        ayaml::from_str::<ayaml::Value>(doc)
             .err()
             .is_some_and(|e| e.to_string().contains("recursion limit"))
     }
@@ -1257,7 +1257,7 @@ mod tests {
     /// `true` when the REAL parser sees a genuine alias token (an undefined
     /// `*undefined_zz` reference is reported as an unknown anchor).
     fn libyaml_sees_alias(doc: &str) -> bool {
-        yaml_serde::from_str::<yaml_serde::Value>(doc)
+        ayaml::from_str::<ayaml::Value>(doc)
             .err()
             .is_some_and(|e| e.to_string().contains("unknown anchor"))
     }
@@ -1338,7 +1338,7 @@ mod tests {
         ];
         for doc in &ok {
             assert!(
-                yaml_serde::from_str::<yaml_serde::Value>(doc).is_ok(),
+                ayaml::from_str::<ayaml::Value>(doc).is_ok(),
                 "fixture must be valid YAML: {doc:?}"
             );
             assert!(flow_depth_within_limit(doc), "false reject: {doc:?}");
@@ -1404,7 +1404,7 @@ mod tests {
         // ayaml rejects this BOM-desynced document before replaying aliases;
         // either an early parse error or the expansion budget is a safe outcome.
         assert!(
-            yaml_serde::from_str::<yaml_serde::Value>(&doc).is_err()
+            ayaml::from_str::<ayaml::Value>(&doc).is_err()
                 || !expansion_within_limit_with(&doc, 10_000 * YAML_NODE_COST)
         );
         // A BOM before an ordinary document still scans like the document.
@@ -1626,7 +1626,7 @@ mod tests {
             )
         }));
         assert!(contains_alias(&doc));
-        assert!(yaml_serde::from_str::<yaml_serde::Value>(&doc).is_ok());
+        assert!(ayaml::from_str::<ayaml::Value>(&doc).is_ok());
         assert!(expansion_within_limit_with(
             &doc,
             MAX_YAML_EXPANSION_BYTES / 10

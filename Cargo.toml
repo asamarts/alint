@@ -35,7 +35,7 @@ alint-testkit = { path = "crates/alint-testkit", version = "0.20.0" }
 thiserror = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
-yaml_serde = { package = "ayaml", path = "/home/kaminsod/projects/ayaml/crates/ayaml", version = "0.1.0", features = ["yaml-serde-compat"] }
+ayaml = { path = "/home/kaminsod/projects/ayaml/crates/ayaml", version = "0.1.0", features = ["yaml-serde-compat"] }
 globset = "0.4"
 ignore = "0.4"
 regex = "1"

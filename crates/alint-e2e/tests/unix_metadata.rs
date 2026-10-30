@@ -91,7 +91,7 @@ fn tempdir() -> tempfile::TempDir {
 }
 
 fn tree_from(yaml: &str) -> TreeSpec {
-    yaml_serde::from_str(yaml).unwrap()
+    ayaml::from_str(yaml).unwrap()
 }
 
 fn violation_count(report: &Report, rule_id: &str) -> usize {

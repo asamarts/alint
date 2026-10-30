@@ -702,7 +702,7 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
     let git_tracked_only = spec
         .extra
         .get("git_tracked_only")
-        .and_then(yaml_serde::Value::as_bool)
+        .and_then(ayaml::Value::as_bool)
         .unwrap_or(false);
     let expected_git_mode = match (meta.git_tracked_only, git_tracked_only) {
         (GitTrackedSupport::FileOnly, true) => GitTrackedMode::FileOnly,
@@ -833,12 +833,12 @@ mod tests {
             sensitive_fields: std::collections::BTreeSet::new(),
             fix: None,
             scope_filter: None,
-            extra: yaml_serde::Mapping::new(),
+            extra: ayaml::Mapping::new(),
         }
     }
 
     fn parsed_spec(fields: &str) -> RuleSpec {
-        yaml_serde::from_str(&format!("id: t\nkind: test_kind\nlevel: error\n{fields}")).unwrap()
+        ayaml::from_str(&format!("id: t\nkind: test_kind\nlevel: error\n{fields}")).unwrap()
     }
 
     #[derive(Debug)]
@@ -1100,7 +1100,7 @@ mod tests {
     /// an instantiation does not depend on the token values.
     #[test]
     fn nested_instantiation_field_set_is_token_independent() {
-        let nested: crate::config::NestedRuleSpec = yaml_serde::from_str(
+        let nested: crate::config::NestedRuleSpec = ayaml::from_str(
             "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: \"{dir} needs a README\"\n\
              root_only: false\nscope_filter:\n  has_ancestor: Cargo.toml\n",
         )

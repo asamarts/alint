@@ -478,7 +478,7 @@ pub enum PolicyTestParseError {
     #[error("policy-test YAML uses explicit `null`; omit optional fields instead")]
     ExplicitNull,
     #[error("policy-test YAML parse error: {0}")]
-    Yaml(#[from] yaml_serde::Error),
+    Yaml(#[from] ayaml::Error),
     #[error("policy-test document must be a YAML mapping")]
     NotMapping,
     #[error("policy-test document must declare integer `test_version: 1`")]
@@ -515,7 +515,7 @@ pub fn has_policy_test_discriminator(input: &str) -> bool {
     if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(input) {
         return false;
     }
-    yaml_serde::from_str::<yaml_serde::Value>(input).is_ok_and(|value| {
+    ayaml::from_str::<ayaml::Value>(input).is_ok_and(|value| {
         value
             .as_mapping()
             .is_some_and(|mapping| mapping.contains_key("test_version"))
@@ -534,7 +534,7 @@ impl PolicyTest {
         if !yaml_guards.expansion_within_limit(input) {
             return Err(PolicyTestParseError::AliasExpansion);
         }
-        let value: yaml_serde::Value = yaml_serde::from_str(input)?;
+        let value: ayaml::Value = ayaml::from_str(input)?;
         if contains_tag(&value) {
             return Err(PolicyTestParseError::ExplicitTag);
         }
@@ -544,7 +544,7 @@ impl PolicyTest {
         let mapping = value.as_mapping().ok_or(PolicyTestParseError::NotMapping)?;
         let version = mapping
             .get("test_version")
-            .and_then(yaml_serde::Value::as_u64)
+            .and_then(ayaml::Value::as_u64)
             .ok_or(PolicyTestParseError::MissingVersion)?;
         if version != u64::from(POLICY_TEST_VERSION) {
             return Err(PolicyTestParseError::UnsupportedVersion {
@@ -552,7 +552,7 @@ impl PolicyTest {
                 supported: POLICY_TEST_VERSION,
             });
         }
-        yaml_serde::from_value(value).map_err(PolicyTestParseError::Yaml)
+        ayaml::from_value(value).map_err(PolicyTestParseError::Yaml)
     }
 
     /// Return every definition error in deterministic document order.
@@ -1288,25 +1288,25 @@ fn validate_range(
     }
 }
 
-fn contains_tag(value: &yaml_serde::Value) -> bool {
+fn contains_tag(value: &ayaml::Value) -> bool {
     match value {
-        yaml_serde::Value::Tagged(_) => true,
-        yaml_serde::Value::Sequence(values) => values.iter().any(contains_tag),
-        yaml_serde::Value::Mapping(values) => values
+        ayaml::Value::Tagged(_) => true,
+        ayaml::Value::Sequence(values) => values.iter().any(contains_tag),
+        ayaml::Value::Mapping(values) => values
             .iter()
             .any(|(key, value)| contains_tag(key) || contains_tag(value)),
         _ => false,
     }
 }
 
-fn contains_null(value: &yaml_serde::Value) -> bool {
+fn contains_null(value: &ayaml::Value) -> bool {
     match value {
-        yaml_serde::Value::Null => true,
-        yaml_serde::Value::Sequence(values) => values.iter().any(contains_null),
-        yaml_serde::Value::Mapping(values) => values
+        ayaml::Value::Null => true,
+        ayaml::Value::Sequence(values) => values.iter().any(contains_null),
+        ayaml::Value::Mapping(values) => values
             .iter()
             .any(|(key, value)| contains_null(key) || contains_null(value)),
-        yaml_serde::Value::Tagged(value) => contains_null(&value.value),
+        ayaml::Value::Tagged(value) => contains_null(&value.value),
         _ => false,
     }
 }

@@ -15,17 +15,17 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 fn collect_kinds_from_yaml(yaml: &str, out: &mut HashSet<String>) {
-    let Ok(parsed) = yaml_serde::from_str::<yaml_serde::Value>(yaml) else {
+    let Ok(parsed) = ayaml::from_str::<ayaml::Value>(yaml) else {
         return;
     };
     walk(&parsed, out);
 }
 
-fn walk(v: &yaml_serde::Value, out: &mut HashSet<String>) {
+fn walk(v: &ayaml::Value, out: &mut HashSet<String>) {
     match v {
-        yaml_serde::Value::Mapping(m) => {
+        ayaml::Value::Mapping(m) => {
             if let Some(kind) = m
-                .get(yaml_serde::Value::String("kind".into()))
+                .get(ayaml::Value::String("kind".into()))
                 .and_then(|v| v.as_str())
             {
                 // Harvest the raw spelling; canonicalisation happens once the
@@ -36,7 +36,7 @@ fn walk(v: &yaml_serde::Value, out: &mut HashSet<String>) {
                 walk(child, out);
             }
         }
-        yaml_serde::Value::Sequence(seq) => {
+        ayaml::Value::Sequence(seq) => {
             for child in seq {
                 walk(child, out);
             }

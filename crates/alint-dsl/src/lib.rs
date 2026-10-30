@@ -6,7 +6,7 @@
 //! `extends:` resolution happens at the YAML-`Value` layer, not
 //! the typed-`Config` layer. Each `.alint.yml` (local, HTTPS,
 //! bundled) is parsed into a private `RawConfig` that keeps each
-//! rule as a `yaml_serde::Mapping` rather than an
+//! rule as a `ayaml::Mapping` rather than an
 //! [`alint_core::RuleSpec`]. This lets children in the extends
 //! chain specify only the fields they want to override — e.g.,
 //!
@@ -59,8 +59,8 @@ pub use trust::{
 use alint_core::{
     Config, ConfigCompatibility, ConfigRequirements, Error, FactSpec, Result, RunningVersion,
 };
+use ayaml::Mapping;
 use serde::Deserialize;
-use yaml_serde::Mapping;
 
 /// The canonical JSON Schema (draft 2020-12) for `.alint.yml` configuration
 /// files. Embedded at build time from the in-crate copy at
@@ -244,7 +244,7 @@ fn collect_drop_ins(
 
 /// Intermediate form used during `extends:` resolution. Identical
 /// to [`Config`] except that rules are kept as raw
-/// `yaml_serde::Mapping`s so overrides can merge per-field
+/// `ayaml::Mapping`s so overrides can merge per-field
 /// instead of per-rule. See the module-level docs for the full
 /// composition model.
 #[derive(Debug, Clone, Deserialize, Default)]
@@ -530,11 +530,11 @@ fn deserialize_effective_rule(
 ) -> Result<alint_core::RuleSpec> {
     let sensitive_configuration = expanded
         .get(SENSITIVE_FIELDS_MARKER)
-        .and_then(yaml_serde::Value::as_mapping)
+        .and_then(ayaml::Value::as_mapping)
         .is_some_and(|fields| !fields.is_empty())
         || expanded
             .get("sensitive")
-            .and_then(yaml_serde::Value::as_bool)
+            .and_then(ayaml::Value::as_bool)
             .unwrap_or(false);
     validate_effective_rule_fields(&expanded, catalog, id_hint, None, None).map_err(|error| {
         if sensitive_configuration {
@@ -549,8 +549,8 @@ fn deserialize_effective_rule(
     })?;
     expanded.remove(FIELD_SOURCES_MARKER);
     let sensitive_fields = take_sensitive_fields(&mut expanded);
-    let mut spec: alint_core::RuleSpec =
-        yaml_serde::from_value(yaml_serde::Value::Mapping(expanded)).map_err(|error| {
+    let mut spec: alint_core::RuleSpec = ayaml::from_value(ayaml::Value::Mapping(expanded))
+        .map_err(|error| {
             if sensitive_configuration {
                 Error::rule_config(id_hint, "<redacted>")
             } else {
@@ -655,8 +655,8 @@ fn expand_template(
     }
     if untrusted_fix_source {
         expanded.insert(
-            yaml_serde::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
-            yaml_serde::Value::Bool(true),
+            ayaml::Value::from(UNTRUSTED_FIX_SOURCE_MARKER),
+            ayaml::Value::Bool(true),
         );
     }
     Ok(expanded)
@@ -669,7 +669,7 @@ fn validate_effective_rule_fields(
     inherited_source: Option<&str>,
     nested_context: Option<(usize, &str)>,
 ) -> Result<()> {
-    let kind = mapping.get("kind").and_then(yaml_serde::Value::as_str);
+    let kind = mapping.get("kind").and_then(ayaml::Value::as_str);
 
     if nested_context.is_some() {
         for field in [
@@ -714,17 +714,14 @@ fn validate_effective_rule_fields(
     }
 
     let nested_source = configured_source(mapping, "require", inherited_source);
-    if let Some(require) = mapping
-        .get("require")
-        .and_then(yaml_serde::Value::as_sequence)
-    {
+    if let Some(require) = mapping.get("require").and_then(ayaml::Value::as_sequence) {
         for (idx, value) in require.iter().enumerate() {
             let Some(nested) = value.as_mapping() else {
                 continue;
             };
             let nested_kind = nested
                 .get("kind")
-                .and_then(yaml_serde::Value::as_str)
+                .and_then(ayaml::Value::as_str)
                 .unwrap_or("<unknown>");
             validate_effective_rule_fields(
                 nested,
@@ -741,20 +738,20 @@ fn validate_effective_rule_fields(
 fn configured_fields(mapping: &Mapping) -> alint_core::ConfiguredFields<'_> {
     let predicates = mapping
         .get("scope_filter")
-        .and_then(yaml_serde::Value::as_mapping);
+        .and_then(ayaml::Value::as_mapping);
     let fix_op = mapping
         .get("fix")
-        .and_then(yaml_serde::Value::as_mapping)
+        .and_then(ayaml::Value::as_mapping)
         .and_then(|fix| {
             fix.iter()
                 .find_map(|(op, options)| options.as_mapping().and_then(|_| op.as_str()))
         });
     alint_core::ConfiguredFields::new(fix_op)
-        .with_null_fix(mapping.get("fix").is_some_and(yaml_serde::Value::is_null))
+        .with_null_fix(mapping.get("fix").is_some_and(ayaml::Value::is_null))
         .with_null_scope_filter(
             mapping
                 .get("scope_filter")
-                .is_some_and(yaml_serde::Value::is_null),
+                .is_some_and(ayaml::Value::is_null),
         )
         .with(
             alint_core::ConfiguredField::Paths,
@@ -841,13 +838,9 @@ fn instance_vars(rule: &Mapping) -> std::collections::HashMap<String, String> {
         .map(|m| {
             m.iter()
                 .filter_map(|(k, v)| match (k.as_str(), v) {
-                    (Some(key), yaml_serde::Value::String(s)) => Some((key.to_string(), s.clone())),
-                    (Some(key), yaml_serde::Value::Number(n)) => {
-                        Some((key.to_string(), n.to_string()))
-                    }
-                    (Some(key), yaml_serde::Value::Bool(b)) => {
-                        Some((key.to_string(), b.to_string()))
-                    }
+                    (Some(key), ayaml::Value::String(s)) => Some((key.to_string(), s.clone())),
+                    (Some(key), ayaml::Value::Number(n)) => Some((key.to_string(), n.to_string())),
+                    (Some(key), ayaml::Value::Bool(b)) => Some((key.to_string(), b.to_string())),
                     _ => None,
                 })
                 .collect()
@@ -884,10 +877,10 @@ fn substitute_template_vars(
 }
 
 fn substitute_template_vars_value(
-    value: yaml_serde::Value,
+    value: ayaml::Value,
     vars: &std::collections::HashMap<String, String>,
-) -> yaml_serde::Value {
-    use yaml_serde::Value;
+) -> ayaml::Value {
+    use ayaml::Value;
     match value {
         Value::String(s) => Value::String(render_template_vars(&s, vars)),
         Value::Sequence(seq) => Value::Sequence(
@@ -1062,7 +1055,7 @@ pub fn parse(yaml: &str) -> Result<Config> {
             "YAML alias expansion exceeds the maximum supported size".to_string(),
         ));
     }
-    let mut config: Config = match yaml_serde::from_str(yaml) {
+    let mut config: Config = match ayaml::from_str(yaml) {
         Ok(config) => config,
         Err(parse_error) => {
             if let Err(error @ Error::Other(_)) =
@@ -1118,10 +1111,10 @@ pub fn parse(yaml: &str) -> Result<Config> {
 /// ruleset (unknown ids are almost always typos worth catching at
 /// load time).
 pub(crate) fn apply_rule_filter(
-    rules: Vec<yaml_serde::Mapping>,
+    rules: Vec<ayaml::Mapping>,
     entry: &alint_core::ExtendsEntry,
     source_display: &str,
-) -> Result<Vec<yaml_serde::Mapping>> {
+) -> Result<Vec<ayaml::Mapping>> {
     if entry.only().is_some() && entry.except().is_some() {
         return Err(Error::Other(format!(
             "`extends:` entry {source_display:?}: `only:` and `except:` are mutually exclusive"

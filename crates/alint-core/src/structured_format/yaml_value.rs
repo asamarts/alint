@@ -24,7 +24,7 @@ use serde_json::Value;
 /// `serde_json::Value`'s own visitor, keys are read as strings the same way, and a
 /// duplicate key keeps its last value -- which a test pins on untagged documents.
 pub(super) fn yaml_to_value(text: &str) -> std::result::Result<Value, String> {
-    yaml_serde::from_str_seed(text, YamlJson { src: text }).map_err(|e| e.to_string())
+    ayaml::from_str_seed(text, YamlJson { src: text }).map_err(|e| e.to_string())
 }
 
 /// The [`yaml_to_value`] seed / visitor: builds a `serde_json::Value`, applying
@@ -309,7 +309,7 @@ mod tests {
             "s: |\n  multi\n  line\nf: >-\n  folded\n  text\n",
         ];
         for doc in docs {
-            let plain = yaml_serde::from_str::<serde_json::Value>(doc).map_err(|e| e.to_string());
+            let plain = ayaml::from_str::<serde_json::Value>(doc).map_err(|e| e.to_string());
             assert_eq!(Format::Yaml.parse(doc), plain, "diverged on {doc:?}");
         }
     }

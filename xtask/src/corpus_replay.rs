@@ -37,9 +37,9 @@ use std::time::{Duration, Instant};
 
 use alint_core::{Capability, FixTrustClass, KindCatalog};
 use anyhow::{Context, Result, bail};
+use ayaml::Value as Yaml;
 use serde::Serialize;
 use serde_json::Value as Json;
-use yaml_serde::Value as Yaml;
 
 /// The committed pin list, relative to the workspace root.
 const PINS: &str = "docs/design/v0.12/corpus/pins.tsv";
@@ -254,7 +254,7 @@ struct Derived {
 }
 
 fn derive_config(source: &str, catalog: KindCatalog<'_>) -> Result<Derived> {
-    let mut doc: Yaml = yaml_serde::from_str(source).context("parse the config")?;
+    let mut doc: Yaml = ayaml::from_str(source).context("parse the config")?;
     let custom_facts: Vec<String> = doc
         .get("facts")
         .and_then(Yaml::as_sequence)
@@ -300,7 +300,7 @@ fn derive_config(source: &str, catalog: KindCatalog<'_>) -> Result<Derived> {
     let equals_rules = doc
         .get("rules")
         .map_or(0, |rules| count_equals_rules(rules, catalog));
-    let yaml = yaml_serde::to_string(&doc).context("serialize the derived config")?;
+    let yaml = ayaml::to_string(&doc).context("serialize the derived config")?;
     Ok(Derived {
         yaml,
         dropped,
@@ -1267,7 +1267,7 @@ rules:
             derived.dropped,
             ["fmt", "nested", "signed", "future", "fixed (fix)"]
         );
-        let doc: Yaml = yaml_serde::from_str(&derived.yaml).unwrap();
+        let doc: Yaml = ayaml::from_str(&derived.yaml).unwrap();
         let rules = doc["rules"].as_sequence().unwrap();
         let ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["keep", "fixed", "safe-fix"]);

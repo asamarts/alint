@@ -109,8 +109,7 @@ fn scan_bundled_messages(
             scan_bundled_messages(root, &path, offenders);
         } else if path.extension().and_then(|s| s.to_str()) == Some("yml") {
             let text = std::fs::read_to_string(&path).expect("read bundled ruleset");
-            let value: yaml_serde::Value =
-                yaml_serde::from_str(&text).expect("parse bundled ruleset");
+            let value: ayaml::Value = ayaml::from_str(&text).expect("parse bundled ruleset");
             scan_message_fields(root, &path, &value, None, offenders);
         }
     }
@@ -119,15 +118,15 @@ fn scan_bundled_messages(
 fn scan_message_fields(
     root: &std::path::Path,
     path: &std::path::Path,
-    value: &yaml_serde::Value,
+    value: &ayaml::Value,
     inherited_id: Option<&str>,
     offenders: &mut Vec<String>,
 ) {
     match value {
-        yaml_serde::Value::Mapping(map) => {
+        ayaml::Value::Mapping(map) => {
             let id = value
                 .get("id")
-                .and_then(yaml_serde::Value::as_str)
+                .and_then(ayaml::Value::as_str)
                 .or(inherited_id);
             for (key, child) in map {
                 if key.as_str() == Some("message")
@@ -144,7 +143,7 @@ fn scan_message_fields(
                 scan_message_fields(root, path, child, id, offenders);
             }
         }
-        yaml_serde::Value::Sequence(items) => {
+        ayaml::Value::Sequence(items) => {
             for item in items {
                 scan_message_fields(root, path, item, inherited_id, offenders);
             }
@@ -155,7 +154,7 @@ fn scan_message_fields(
 
 #[test]
 fn bundled_message_scan_reaches_nested_rules() {
-    let value: yaml_serde::Value = yaml_serde::from_str(
+    let value: ayaml::Value = ayaml::from_str(
         "rules:\n  - id: parent\n    require:\n      - kind: file_exists\n        message: \"nested \\u2014 offender\"\n",
     )
     .unwrap();
