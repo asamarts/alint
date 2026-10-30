@@ -15,7 +15,7 @@ removes the remaining S2 slowdown. Clean-workload 1M S2 RSS is 118,924 KB
 | Corpus shadow replay | expanded-scope run 40912352842 vs `v0.20.1`: 106/110 replayed, 4 expected skips, 0 crashed, 0 differ | pass |
 | Contract traits and bridge | adapter/analyzer bridge tests; `key_parity` uses `ContractAnalyzer` | pass |
 | Registry injection | CLI, LSP, testkit (`Runner::with_registry`), DSL catalog | pass |
-| WIT draft | `witforge check wit/alint-plugin/0.1.0` (v2 wire lock) | pass |
+| WIT draft | `witforge check wit/alint-plugin/v0.1` (v2 wire lock) | pass |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
 | Generated artifacts | preflight: schema, facts, architecture, docs export, roadmap | pass |
