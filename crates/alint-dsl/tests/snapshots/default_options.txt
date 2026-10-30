@@ -1656,6 +1656,7 @@ KeyParityRule {
     plurals: Exact,
     strip_root: false,
     ignore: [],
+    allow_missing_peers: false,
 }
 
 === kind: line_endings | id: line-endings-lf ===

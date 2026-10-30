@@ -98,6 +98,14 @@ enum KeyModel {
     Resx,
 }
 
+impl KeyModel {
+    /// Whether every key is one name (dotenv, properties, `.resx`), so a dot
+    /// in it is part of the name and never a path separator.
+    fn single_name(self) -> bool {
+        matches!(self, Self::Flat | Self::Resx)
+    }
+}
+
 #[derive(Debug, Deserialize, schemars::JsonSchema)]
 #[serde(deny_unknown_fields)]
 struct Options {
@@ -123,9 +131,19 @@ struct Options {
     /// below it.
     #[serde(default)]
     strip_root: bool,
-    /// Key-path globs to omit: `*` within a segment, `**` across segments.
+    /// Keys to omit, written as they appear in findings. In dotenv,
+    /// properties, and `.resx` files a pattern matches the key name, where
+    /// `*` stops at a `.` and `**` crosses it. In every other format a
+    /// pattern is a key path: `*` matches within one segment, a `**` segment
+    /// matches any number of segments, and `['a.b']` names a segment that
+    /// contains a dot.
     #[serde(default)]
     ignore_keys: Vec<String>,
+    /// Report an absent literal peer, or a `peers` glob that selects no file,
+    /// as an informational note instead of an analysis failure. For a peer
+    /// that exists only on developer machines, such as a gitignored `.env`.
+    #[serde(default)]
+    allow_missing_peers: bool,
 }
 
 crate::options_schema_for!(Options);
@@ -211,7 +229,8 @@ pub struct KeyParityRule {
     direction: Direction,
     plurals: Plurals,
     strip_root: bool,
-    ignore: Vec<String>,
+    ignore: Vec<KeyPattern>,
+    allow_missing_peers: bool,
 }
 
 /// The key-parity comparison as a pure contract analyzer over one reference
@@ -393,15 +412,17 @@ impl Rule for KeyParityRule {
         peers.retain(|resource| resource.path() != &self.reference);
         peers.sort_by(|a, b| a.path().cmp(b.path()));
         if peers.is_empty() {
-            findings.push(
-                Violation::new(format!(
-                    "{}: `peers` glob {:?} matched no files other than the reference",
-                    crate::slash(Path::new(self.reference.as_str())),
-                    self.peers_scope_label()
-                ))
-                .with_path(Path::new(self.reference.as_str()).to_path_buf())
-                .as_analysis_failure(AnalysisFailureKind::Evaluation),
-            );
+            let finding = Violation::new(format!(
+                "{}: `peers` glob {:?} matched no files other than the reference",
+                crate::slash(Path::new(self.reference.as_str())),
+                self.peers_scope_label()
+            ))
+            .with_path(Path::new(self.reference.as_str()).to_path_buf());
+            findings.push(if self.allow_missing_peers {
+                finding.as_note()
+            } else {
+                finding.as_analysis_failure(AnalysisFailureKind::Evaluation)
+            });
             return Ok(findings);
         }
 
@@ -447,13 +468,21 @@ impl Rule for KeyParityRule {
             return Ok(findings);
         }
 
+        // A file with no keys has no root to strip and must not turn
+        // stripping off for the others: it then reports every key missing.
         let strip = self.strip_root
             && self.reference_format.model() == KeyModel::Tree
             && std::iter::once(&reference_file)
                 .chain(files.iter().map(|(_, file)| file))
+                .filter(|file| !file.keys.is_empty())
                 .all(has_single_root);
         let reference_keys = transform(&reference_file, self.plurals, strip, &self.ignore);
-        record_key_trace(ctx, Path::new(self.reference.as_str()), &reference_keys);
+        record_key_trace(
+            ctx,
+            Path::new(self.reference.as_str()),
+            self.reference_format.model(),
+            &reference_keys,
+        );
         let reference_rows = match key_rows(&reference, &reference_keys) {
             Ok(rows) => rows,
             Err(message) => {
@@ -471,7 +500,12 @@ impl Rule for KeyParityRule {
         };
         for (peer, file) in &files {
             let peer_keys = transform(file, self.plurals, strip, &self.ignore);
-            record_key_trace(ctx, Path::new(peer.path().as_str()), &peer_keys);
+            record_key_trace(
+                ctx,
+                Path::new(peer.path().as_str()),
+                self.reference_format.model(),
+                &peer_keys,
+            );
             self.compare(&limits, &compared, peer, file, &peer_keys, &mut findings);
         }
         Ok(findings)
@@ -513,6 +547,12 @@ impl KeyParityRule {
                     None
                 };
                 findings.push(match role {
+                    Some("peer") if self.allow_missing_peers => Violation::new(format!(
+                        "{}: peer file is not present, so nothing was compared",
+                        crate::slash(path)
+                    ))
+                    .with_path(path.to_path_buf())
+                    .as_note(),
                     Some(role) => {
                         Violation::new(format!("{}: {role} file is missing", crate::slash(path)))
                             .with_path(path.to_path_buf())
@@ -629,36 +669,27 @@ impl KeyParityRule {
                 return;
             }
         };
-        let mut missing = BTreeSet::new();
-        let mut extra = BTreeSet::new();
-        for finding in diffs {
-            match finding.message.split_once('\u{0}') {
-                Some(("missing", key)) => {
-                    missing.insert(key.to_string());
-                }
-                Some(("extra", key)) => {
-                    extra.insert(key.to_string());
-                }
-                _ => {
-                    findings.push(evaluation_failure(
-                        peer_path,
-                        "the key comparison returned an unrecognized finding",
-                    ));
-                    return;
-                }
+        let (missing, extra) = match classify(&diffs) {
+            Ok(sets) => sets,
+            Err(message) => {
+                findings.push(evaluation_failure(peer_path, message));
+                return;
             }
-        }
+        };
+        // Sets hold key identities; findings show each key as its format
+        // writes it (ADR-0025).
+        let model = self.reference_format.model();
         if matches!(self.direction, Direction::Both | Direction::Missing) {
             for (key, span) in reference.keys {
-                let rendered = render_key(key);
-                if !missing.contains(&rendered) {
+                if !missing.contains(&render_key(key)) {
                     continue;
                 }
+                let shown = display_key(model, key);
                 let mut finding =
-                    Violation::new(self.message(&rendered, peer_path, reference_path, "missing"))
+                    Violation::new(self.message(&shown, peer_path, reference_path, "missing"))
                         .with_path(peer_path.to_path_buf())
                         .with_baseline_key(format!(
-                            "key-parity\u{0}{}\u{0}{rendered}\u{0}missing",
+                            "key-parity\u{0}{}\u{0}{shown}\u{0}missing",
                             crate::slash(peer_path)
                         ));
                 if let Some(range) = reference.file.range_at(*span) {
@@ -671,15 +702,15 @@ impl KeyParityRule {
         }
         if matches!(self.direction, Direction::Both | Direction::Extra) {
             for (key, span) in peer_keys {
-                let rendered = render_key(key);
-                if !extra.contains(&rendered) {
+                if !extra.contains(&render_key(key)) {
                     continue;
                 }
+                let shown = display_key(model, key);
                 let mut finding =
-                    Violation::new(self.message(&rendered, peer_path, reference_path, "extra"))
+                    Violation::new(self.message(&shown, peer_path, reference_path, "extra"))
                         .with_path(peer_path.to_path_buf())
                         .with_baseline_key(format!(
-                            "key-parity\u{0}{}\u{0}{rendered}\u{0}extra",
+                            "key-parity\u{0}{}\u{0}{shown}\u{0}extra",
                             crate::slash(peer_path)
                         ));
                 if let Some(range) = peer_file.range_at(*span) {
@@ -731,7 +762,12 @@ fn record_parse_failure(ctx: &Context<'_>) {
     }
 }
 
-fn record_key_trace(ctx: &Context<'_>, path: &Path, keys: &BTreeMap<Vec<Segment>, ByteSpan>) {
+fn record_key_trace(
+    ctx: &Context<'_>,
+    path: &Path,
+    model: KeyModel,
+    keys: &BTreeMap<Vec<Segment>, ByteSpan>,
+) {
     if ctx.trace.is_none() {
         return;
     }
@@ -745,7 +781,7 @@ fn record_key_trace(ctx: &Context<'_>, path: &Path, keys: &BTreeMap<Vec<Segment>
     }
     let sensitivity = ctx.trace_evidence_sensitivity(false);
     for (occurrence, key) in keys.keys().enumerate() {
-        let rendered = render_key(key);
+        let rendered = display_key(model, key);
         ctx.record_trace_preview(alint_core::TracePreviewRow::new(
             path,
             alint_core::TracePathOrigin::RepositorySource,
@@ -765,6 +801,27 @@ struct Compared<'a> {
     file: &'a KeyFile,
     keys: &'a BTreeMap<Vec<Segment>, ByteSpan>,
     rows: &'a [Row],
+}
+
+/// Split the analyzer's findings into missing and extra key identities. A
+/// finding of any other shape is an error, never a silently dropped key.
+fn classify(
+    diffs: &[Violation],
+) -> std::result::Result<(BTreeSet<String>, BTreeSet<String>), &'static str> {
+    let mut missing = BTreeSet::new();
+    let mut extra = BTreeSet::new();
+    for finding in diffs {
+        match finding.message.split_once('\u{0}') {
+            Some(("missing", key)) => {
+                missing.insert(key.to_string());
+            }
+            Some(("extra", key)) => {
+                extra.insert(key.to_string());
+            }
+            _ => return Err("the key comparison returned an unrecognized finding"),
+        }
+    }
+    Ok((missing, extra))
 }
 
 /// An analysis failure for a comparison that could not complete: never an
@@ -835,7 +892,7 @@ fn transform(
     file: &KeyFile,
     plurals: Plurals,
     strip_root: bool,
-    ignore: &[String],
+    ignore: &[KeyPattern],
 ) -> BTreeMap<Vec<Segment>, ByteSpan> {
     let mut keys = file.keys.clone();
     if strip_root {
@@ -857,12 +914,7 @@ fn transform(
     }
     keys.retain(|key, _| !key.is_empty());
     if !ignore.is_empty() {
-        keys.retain(|key, _| {
-            let rendered = render_key(key);
-            !ignore
-                .iter()
-                .any(|pattern| key_glob_match(pattern, &rendered))
-        });
+        keys.retain(|key, _| !ignore.iter().any(|pattern| pattern.matches(key)));
     }
     keys
 }
@@ -874,36 +926,24 @@ fn cldr_category(name: &str) -> bool {
 /// Merge each nested CLDR plural group into one key: an object whose children
 /// are all CLDR categories and include `other` (Rails YAML). An object with any
 /// other child, or with a container child, is not a plural group and keeps its
-/// keys.
+/// keys; a plural object at the root is never merged.
 fn merge_plural_groups(
     keys: &BTreeMap<Vec<Segment>, ByteSpan>,
 ) -> BTreeMap<Vec<Segment>, ByteSpan> {
-    // Every object that has a child which cannot belong to a plural group:
-    // a leaf whose name is not a category, or any container.
-    let mut not_groups: BTreeSet<&[Segment]> = BTreeSet::new();
+    // Only the parents of a category-named leaf can be groups, so a file with
+    // no such leaf costs one pass.
     let mut groups: BTreeMap<&[Segment], Vec<(&str, ByteSpan)>> = BTreeMap::new();
     for (key, span) in keys {
-        for depth in 0..key.len().saturating_sub(1) {
-            not_groups.insert(&key[..depth]);
-        }
-        let Some((last, parent)) = key.split_last() else {
-            continue;
-        };
-        match last {
-            Segment::Key(name) if cldr_category(name) => {
-                groups.entry(parent).or_default().push((name, *span));
-            }
-            _ => {
-                not_groups.insert(parent);
-            }
+        if let Some((Segment::Key(name), parent)) = key.split_last()
+            && !parent.is_empty()
+            && cldr_category(name)
+        {
+            groups.entry(parent).or_default().push((name, *span));
         }
     }
     let mut out = keys.clone();
     for (parent, members) in groups {
-        if parent.is_empty()
-            || not_groups.contains(parent)
-            || !members.iter().any(|(name, _)| *name == "other")
-        {
+        if !members.iter().any(|(name, _)| *name == "other") || !is_plural_object(keys, parent) {
             continue;
         }
         let mut span = ByteSpan::new(0, 0);
@@ -918,6 +958,18 @@ fn merge_plural_groups(
         out.insert(parent.to_vec(), span);
     }
     out
+}
+
+/// Whether every key below `parent` is a leaf child named for a CLDR category.
+/// Keys that share a prefix are contiguous in the map, so this visits only
+/// `parent`'s own keys and stops at the first that disqualifies it.
+fn is_plural_object(keys: &BTreeMap<Vec<Segment>, ByteSpan>, parent: &[Segment]) -> bool {
+    keys.range(parent.to_vec()..)
+        .take_while(|(key, _)| key.starts_with(parent))
+        .all(|(key, _)| {
+            key.len() == parent.len() + 1
+                && matches!(&key[parent.len()], Segment::Key(name) if cldr_category(name))
+        })
 }
 
 /// Merge i18next plural siblings (`<base>_<category>`, including
@@ -965,9 +1017,9 @@ fn merge_i18next_groups(
     out
 }
 
-/// Match a key-path glob: `*` stays within one segment (does not cross `.`),
-/// `**` crosses segments. Every other character is literal. The matcher is
-/// iterative so a long config pattern cannot overflow the stack.
+/// Match a single-name key against a glob: `*` stops at a `.`, `**` crosses
+/// it, and every other character is literal. The matcher is iterative so a
+/// long config pattern cannot overflow the stack.
 fn key_glob_match(pattern: &str, text: &str) -> bool {
     let pattern: Vec<char> = pattern.chars().collect();
     let text: Vec<char> = text.chars().collect();
@@ -996,8 +1048,182 @@ fn key_glob_match(pattern: &str, text: &str) -> bool {
     next[0]
 }
 
+/// A key's identity: the injective [`Pointer::render`] form the comparison
+/// uses, so `nav['a.b']` and `nav.a.b` stay distinct.
 fn render_key(key: &[Segment]) -> String {
     Pointer::from_segments(key.to_vec()).render()
+}
+
+/// A key as findings, baseline keys, and traces show it (ADR-0025). A key of
+/// a single-name format is its name as written (`app.title`); every other key
+/// is its identity. A name that is empty or starts with `[` keeps the bracket
+/// form, so the display stays injective: a plain name never starts with `[`
+/// and a bracket form always does.
+fn display_key(model: KeyModel, key: &[Segment]) -> String {
+    if model.single_name()
+        && let [Segment::Key(name)] = key
+        && !name.is_empty()
+        && !name.starts_with('[')
+    {
+        return name.to_string();
+    }
+    render_key(key)
+}
+
+/// One `ignore_keys` pattern, parsed for the rule's key model.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum KeyPattern {
+    /// A glob over a single-name key ([`key_glob_match`]).
+    Name(String),
+    /// A key path, one entry per segment.
+    Path(Vec<PatternSegment>),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum PatternSegment {
+    /// `**`: any number of segments; at the end of a longer pattern, at
+    /// least one (`nav.**` matches below `nav`, not `nav` itself).
+    Any,
+    /// One segment whose name matches this glob, where `*` is any run of
+    /// characters.
+    Name(String),
+    /// One array index, `[n]`.
+    Index(usize),
+}
+
+impl KeyPattern {
+    fn parse(pattern: &str, model: KeyModel) -> std::result::Result<Self, String> {
+        if model.single_name() {
+            Ok(Self::Name(pattern.to_string()))
+        } else {
+            parse_path_pattern(pattern).map(Self::Path)
+        }
+    }
+
+    fn matches(&self, key: &[Segment]) -> bool {
+        match (self, key) {
+            (Self::Name(glob), [Segment::Key(name)]) => key_glob_match(glob, name),
+            (Self::Name(_), _) => false,
+            (Self::Path(pattern), _) => path_pattern_match(pattern, key),
+        }
+    }
+}
+
+/// Parse a key-path pattern in the notation findings use: names joined by
+/// `.`, `['name']` for a segment with a dot, bracket, quote, or nothing in it
+/// (`\` escapes a quote or backslash), and `[n]` for an index.
+fn parse_path_pattern(pattern: &str) -> std::result::Result<Vec<PatternSegment>, String> {
+    let mut segments = Vec::new();
+    let mut chars = pattern.chars().peekable();
+    loop {
+        if chars.next_if_eq(&'[').is_some() {
+            if chars.next_if_eq(&'\'').is_some() {
+                let mut name = String::new();
+                loop {
+                    match chars.next() {
+                        Some('\\') => {
+                            name.push(chars.next().ok_or("a `\\` escape ends the pattern")?);
+                        }
+                        Some('\'') => break,
+                        Some(c) => name.push(c),
+                        None => return Err("a `['` name is not closed".to_string()),
+                    }
+                }
+                if chars.next() != Some(']') {
+                    return Err("a `['name'` must be followed by `]`".to_string());
+                }
+                segments.push(PatternSegment::Name(name));
+            } else {
+                let mut digits = String::new();
+                while let Some(c) = chars.next_if(char::is_ascii_digit) {
+                    digits.push(c);
+                }
+                if digits.is_empty() || chars.next() != Some(']') {
+                    return Err("`[` must start `['name']` or an index `[n]`".to_string());
+                }
+                let index = digits
+                    .parse()
+                    .map_err(|_| format!("the index {digits} is too large"))?;
+                segments.push(PatternSegment::Index(index));
+            }
+        } else {
+            let mut name = String::new();
+            while let Some(c) = chars.next_if(|c| *c != '.' && *c != '[') {
+                name.push(c);
+            }
+            if name.is_empty() {
+                return Err("a segment is empty; write `['']` for an empty key".to_string());
+            }
+            segments.push(if name == "**" {
+                PatternSegment::Any
+            } else {
+                PatternSegment::Name(name)
+            });
+        }
+        match chars.peek() {
+            None => return Ok(segments),
+            Some('.') => {
+                chars.next();
+                if chars.peek().is_none() {
+                    return Err("the pattern ends with `.`".to_string());
+                }
+            }
+            Some('[') => {}
+            Some(c) => return Err(format!("expected `.` or `[` after `]`, found {c:?}")),
+        }
+    }
+}
+
+/// Whether a key path matches a parsed pattern. Iterative over the pattern,
+/// so neither a long pattern nor a deep key can exhaust the stack.
+fn path_pattern_match(pattern: &[PatternSegment], key: &[Segment]) -> bool {
+    // `next[j]`: the rest of the pattern after the current part matches `key[j..]`.
+    let mut next = vec![false; key.len() + 1];
+    next[key.len()] = true;
+    for (i, part) in pattern.iter().enumerate().rev() {
+        let trailing = i + 1 == pattern.len() && i > 0;
+        let mut current = vec![false; key.len() + 1];
+        for j in (0..=key.len()).rev() {
+            current[j] = match part {
+                PatternSegment::Any if trailing => j < key.len(),
+                PatternSegment::Any => next[j] || (j < key.len() && current[j + 1]),
+                PatternSegment::Name(glob) => {
+                    j < key.len()
+                        && matches!(&key[j], Segment::Key(name) if wildcard_match(glob, name))
+                        && next[j + 1]
+                }
+                PatternSegment::Index(index) => {
+                    j < key.len() && key[j] == Segment::Index(*index) && next[j + 1]
+                }
+            };
+        }
+        next = current;
+    }
+    next[0]
+}
+
+/// Match one segment name against a glob where `*` is any run of characters.
+fn wildcard_match(pattern: &str, text: &str) -> bool {
+    let pattern: Vec<char> = pattern.chars().collect();
+    let text: Vec<char> = text.chars().collect();
+    let (mut p, mut t) = (0, 0);
+    let mut star: Option<(usize, usize)> = None;
+    while t < text.len() {
+        if pattern.get(p) == Some(&'*') {
+            star = Some((p, t));
+            p += 1;
+        } else if pattern.get(p) == Some(&text[t]) {
+            p += 1;
+            t += 1;
+        } else if let Some((star_p, star_t)) = star {
+            p = star_p + 1;
+            t = star_t + 1;
+            star = Some((star_p, star_t + 1));
+        } else {
+            return false;
+        }
+    }
+    pattern[p..].iter().all(|c| *c == '*')
 }
 
 pub static META: alint_core::KindMeta = alint_core::KindMeta {
@@ -1086,15 +1312,32 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
             "`ignore_keys` patterns must be at most 1024 bytes",
         ));
     }
-    let ignore = opts.ignore_keys.clone();
+    let ignore = opts
+        .ignore_keys
+        .iter()
+        .map(|pattern| {
+            KeyPattern::parse(pattern, reference_format.model()).map_err(|error| {
+                Error::rule_config(
+                    &spec.id,
+                    format!("`ignore_keys` pattern {pattern:?}: {error}"),
+                )
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
     let literal_peer = literal_peer(spec, &opts, &reference, reference_format)?;
     let peers_scope = Scope::from_patterns(std::slice::from_ref(&opts.peers))?;
     // The reference is a literal path: escape it, so a name such as
-    // `locales/[id].json` matches its own `--changed` edit.
-    let scope = Scope::from_patterns(&[
-        alint_core::template::glob_escape(reference.as_str()),
-        opts.peers.clone(),
-    ])?;
+    // `locales/[id].json` matches its own `--changed` edit. Git cannot report
+    // an edit to a gitignored literal peer such as `.env`, so a rule with a
+    // literal peer runs whenever anything changed.
+    let scope = if literal_peer.is_some() {
+        Scope::match_all()
+    } else {
+        Scope::from_patterns(&[
+            alint_core::template::glob_escape(reference.as_str()),
+            opts.peers.clone(),
+        ])?
+    };
     Ok(KeyParityRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -1111,6 +1354,7 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
         plurals: opts.plurals,
         strip_root: opts.strip_root,
         ignore,
+        allow_missing_peers: opts.allow_missing_peers,
     })
 }
 

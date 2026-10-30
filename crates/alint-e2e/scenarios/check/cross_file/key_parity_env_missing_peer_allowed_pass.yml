@@ -1,0 +1,30 @@
+test_version: 1
+name: key_parity notes an absent literal peer when allow_missing_peers is set
+tags: [check, key_parity, cross_file, dotenv, passing]
+
+# CI has no `.env`, only the committed `.env.example`. With
+# `allow_missing_peers` the absent peer is an informational note, so the same
+# config checks developer machines and passes in CI.
+
+given:
+  tree:
+    .gitignore: ".env\n"
+    .env.example: |
+      DATABASE_URL=
+  config: |
+    version: 1
+    rules:
+      - id: env-keys-match-example
+        kind: key_parity
+        reference: .env.example
+        peers: .env
+        allow_missing_peers: true
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []
+    notes:
+      - {kind: informational, path: .env, message: {regex: "peer file is not present"}}

@@ -618,6 +618,18 @@
     "fingerprint": "05d0e29d1ac7de163c313c62f7b206a27eb8dad9297e068b6eb03d96a20dfc44"
   },
   {
+    "scenario": "check/cross_file/key_parity_ignored_keys_empty_peer_fires.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/fr.json",
+    "fingerprint": "da07bba5ccf347ae3fd2f705478588f6da9ad009fbe49524bbd924b3e31bcec1"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_ignored_keys_empty_peer_fires.yml",
+    "rule_id": "locales-match-english",
+    "path": "locales/fr.json",
+    "fingerprint": "f543ebc2a43049d0bc3928ada039a597b3265331b3a71ce34a54b3cfa52a248f"
+  },
+  {
     "scenario": "check/cross_file/key_parity_ini_fires.yml",
     "rule_id": "ini-parity",
     "path": "conf/production.ini",
@@ -627,13 +639,13 @@
     "scenario": "check/cross_file/key_parity_properties_dotted_fires.yml",
     "rule_id": "messages-match",
     "path": "i18n/messages_fr.properties",
-    "fingerprint": "0a642643c25073689b8d32ac454b974d41894137638f6a86f0f065099c121fc1"
+    "fingerprint": "4e5fbe2dcc9daaf56902d3f8865ce81110091ff3c49a502dbc4b183431e1c5c6"
   },
   {
     "scenario": "check/cross_file/key_parity_properties_dotted_fires.yml",
     "rule_id": "messages-match",
     "path": "i18n/messages_fr.properties",
-    "fingerprint": "a43865e0bd0216145d4817f33cfbb7d03f076ae0435b8540a503b8914785d0d4"
+    "fingerprint": "d1514a19f97db0302a8ef567bf3faec26c49b0dbee55ddba4f4401abd68070b1"
   },
   {
     "scenario": "check/cross_file/key_parity_rails_cldr_fires.yml",

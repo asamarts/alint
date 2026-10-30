@@ -460,11 +460,13 @@ fn dotted_and_bracketed_keys_are_compared_by_identity() {
             ("fr.properties", b"other=1\nmenu.item=Y\n"),
         ],
     );
+    // A single-name format shows each key as written (ADR-0025), and the
+    // baseline key carries the same form.
     let msgs = messages(&properties);
     for expected in [
-        "missing key `['app.title']`",
-        "missing key `['app.name']`",
-        "extra key `['menu.item']`",
+        "missing key `app.title`",
+        "missing key `app.name`",
+        "extra key `menu.item`",
     ] {
         assert!(
             msgs.iter().any(|m| m.contains(expected)),
@@ -472,23 +474,17 @@ fn dotted_and_bracketed_keys_are_compared_by_identity() {
         );
     }
     assert_eq!(msgs.len(), 3, "{msgs:?}");
-
-    // `ignore_keys` matches the same rendering, so a dotted flat key is
-    // ignored by its bracketed form and not by the bare one.
-    let ignored = |pattern: &str| {
-        let yaml = format!(
-            "id: t\nkind: key_parity\nreference: en.properties\npeers: '*.properties'\nignore_keys: [\"{pattern}\"]\nlevel: error\n"
-        );
-        messages(&run(
-            &yaml,
-            &[
-                ("en.properties", b"app.title=Hello\nother=1\n"),
-                ("fr.properties", b"other=1\n"),
-            ],
-        ))
-    };
-    assert_eq!(ignored("['app.*']"), Vec::<String>::new());
-    assert_eq!(ignored("app.*").len(), 1);
+    assert!(
+        properties
+            .iter()
+            .filter_map(|v| v.baseline_key.as_deref())
+            .any(|key| key.contains("\u{0}app.title\u{0}")),
+        "{:?}",
+        properties
+            .iter()
+            .map(|v| &v.baseline_key)
+            .collect::<Vec<_>>()
+    );
 
     // A flat dotted key and a nested key are different keys (V21-4).
     let json = run(
@@ -528,6 +524,67 @@ fn dotted_and_bracketed_keys_are_compared_by_identity() {
             .any(|m| m.contains("button1.Text")),
         "{:?}",
         messages_of(&resx)
+    );
+}
+
+#[test]
+fn dotted_dotenv_and_ini_keys_compare_by_identity() {
+    // Dotted dotenv names and INI keys inside a section compare by identity
+    // too; an INI key keeps its section path.
+    let dotenv = messages(&run(
+        "id: t\nkind: key_parity\nreference: .env.example\npeers: .env\nlevel: error\n",
+        &[
+            (".env.example", b"APP.NAME=x\nAPP=y\n"),
+            (".env", b"APP=y\n"),
+        ],
+    ));
+    assert_eq!(dotenv.len(), 1, "{dotenv:?}");
+    assert!(dotenv[0].contains("missing key `APP.NAME`"), "{dotenv:?}");
+    let ini = messages(&run(
+        "id: t\nkind: key_parity\nreference: en.ini\npeers: '*.ini'\nlevel: error\n",
+        &[
+            ("en.ini", b"[Session]\nsession.save_path=/tmp\n"),
+            ("fr.ini", b"[Session.session]\nsave_path=/tmp\n"),
+        ],
+    ));
+    assert_eq!(ini.len(), 2, "{ini:?}");
+    assert!(
+        ini.iter()
+            .any(|m| m.contains("missing key `Session['session.save_path']`")),
+        "{ini:?}"
+    );
+    assert!(
+        ini.iter()
+            .any(|m| m.contains("extra key `['Session.session'].save_path`")),
+        "{ini:?}"
+    );
+}
+
+#[test]
+fn single_name_ignore_patterns_match_the_name() {
+    // `ignore_keys` matches the shown form: a dotted flat name by its name,
+    // where `*` stops at a dot and `**` crosses it.
+    let ignored = |pattern: &str| {
+        let yaml = format!(
+            "id: t\nkind: key_parity\nreference: en.properties\npeers: '*.properties'\nignore_keys: [\"{pattern}\"]\nlevel: error\n"
+        );
+        messages(&run(
+            &yaml,
+            &[
+                (
+                    "en.properties",
+                    b"app.title=Hello\napp.menu.item=M\nother=1\n",
+                ),
+                ("fr.properties", b"other=1\n"),
+            ],
+        ))
+    };
+    assert_eq!(ignored("app.**"), Vec::<String>::new());
+    assert_eq!(ignored("app.*").len(), 1, "`*` stops at the dot");
+    assert_eq!(
+        ignored("['app.*']").len(),
+        2,
+        "a flat name has no bracket form"
     );
 }
 
@@ -710,7 +767,7 @@ fn a_literal_peer_is_read_even_when_the_index_omits_it() {
         messages(&findings)
     );
 
-    // A literal peer naming the reference is a config error, as before.
+    // A literal peer naming the reference is a config error.
     let error = build(&spec_yaml(
         "id: t\nkind: key_parity\nreference: a.json\npeers: './a.json'\nlevel: error\n",
     ))
@@ -812,13 +869,231 @@ fn only_whole_plural_objects_merge_and_merges_never_hide_keys() {
 
 #[test]
 fn a_reference_with_glob_metacharacters_matches_its_own_changed_edit() {
+    // The reference sits outside the peers glob, so only the escaped
+    // reference pattern can match its edit.
     let rule = rule(
-        "id: t\nkind: key_parity\nreference: 'locales/[id].json'\npeers: 'locales/*.json'\nlevel: error\n",
+        "id: t\nkind: key_parity\nreference: 'ref/[id].json'\npeers: 'locales/*.json'\nlevel: error\n",
     );
-    let index = crate::test_support::index(&["locales/[id].json"]);
+    let index = crate::test_support::index(&["ref/[id].json", "ref/i.json"]);
     let scope = rule.path_scope().expect("a path scope");
-    assert!(scope.matches(Path::new("locales/[id].json"), &index));
+    assert!(scope.matches(Path::new("ref/[id].json"), &index));
+    assert!(!scope.matches(Path::new("ref/i.json"), &index));
+    assert!(scope.matches(Path::new("locales/fr.json"), &index));
     assert!(!scope.matches(Path::new("other/i.txt"), &index));
+}
+
+#[test]
+fn a_literal_peer_is_evaluated_whenever_anything_changed() {
+    // Git cannot report an edit to a gitignored `.env`, and `./x` and `x`
+    // name the same peer, so a literal peer's scope is every path.
+    let index = crate::test_support::index(&["src/main.rs"]);
+    for (reference, peers) in [
+        (".env.example", ".env"),
+        ("locales/en.json", "./locales/fr.json"),
+    ] {
+        let rule = rule(&format!(
+            "id: t\nkind: key_parity\nreference: {reference}\npeers: '{peers}'\nlevel: error\n"
+        ));
+        let scope = rule.path_scope().expect("a path scope");
+        assert!(scope.matches(Path::new("src/main.rs"), &index), "{peers}");
+        assert!(
+            scope.matches(Path::new("locales/fr.json"), &index),
+            "{peers}"
+        );
+    }
+}
+
+#[test]
+fn tree_ignore_patterns_match_by_segment() {
+    let keys = |pattern: &str| {
+        let pattern = KeyPattern::parse(pattern, KeyModel::Tree).unwrap();
+        [
+            vec!["nav"],
+            vec!["nav", "home"],
+            vec!["nav", "a.b"],
+            vec!["nav", ""],
+            vec!["nav", "x", "y"],
+            vec!["debug.flag"],
+            vec!["navbar"],
+        ]
+        .into_iter()
+        .filter(|key| {
+            let key: Vec<Segment> = key.iter().map(|s| Segment::Key((*s).into())).collect();
+            pattern.matches(&key)
+        })
+        .map(|key| key.join("/"))
+        .collect::<Vec<_>>()
+    };
+    // `*` is one whole segment, dots and all; a trailing `**` needs at least
+    // one segment below its prefix.
+    assert_eq!(keys("nav.*"), ["nav/home", "nav/a.b", "nav/"]);
+    assert_eq!(keys("nav.**"), ["nav/home", "nav/a.b", "nav/", "nav/x/y"]);
+    assert_eq!(keys("nav*"), ["nav", "navbar"]);
+    assert_eq!(keys("nav['a.b']"), ["nav/a.b"]);
+    assert_eq!(keys("nav.['a.b']"), ["nav/a.b"]);
+    assert_eq!(keys("nav['']"), ["nav/"]);
+    assert_eq!(keys("['debug.*']"), ["debug.flag"]);
+    assert_eq!(keys("**.y"), ["nav/x/y"]);
+    assert_eq!(keys("**"), keys("**.**"));
+    assert_eq!(keys("**").len(), 7);
+}
+
+#[test]
+fn malformed_ignore_patterns_are_config_errors() {
+    for pattern in [
+        "nav.",
+        ".nav",
+        "nav..home",
+        "nav['a",
+        "nav['a'",
+        "nav[x]",
+        "['a']b",
+    ] {
+        let yaml = format!(
+            "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nignore_keys: [\"{pattern}\"]\nlevel: error\n"
+        );
+        let error = build(&spec_yaml(&yaml)).err().map(|e| e.to_string());
+        assert!(
+            error.as_deref().is_some_and(|e| e.contains("ignore_keys")),
+            "{pattern}: {error:?}"
+        );
+    }
+    // In a single-name format a pattern is a plain glob, never parsed as a path.
+    assert!(
+        build(&spec_yaml(
+            "id: t\nkind: key_parity\nreference: en.properties\npeers: '*.properties'\nignore_keys: ['a..b[']\nlevel: error\n"
+        ))
+        .is_ok()
+    );
+}
+
+#[test]
+fn single_name_keys_display_as_written_and_stay_injective() {
+    let key = |name: &str| vec![Segment::Key(name.into())];
+    assert_eq!(display_key(KeyModel::Flat, &key("app.title")), "app.title");
+    assert_eq!(
+        display_key(KeyModel::Resx, &key("button1.Text")),
+        "button1.Text"
+    );
+    assert_eq!(display_key(KeyModel::Flat, &key("")), "['']");
+    assert_eq!(display_key(KeyModel::Flat, &key("[x")), "['[x']");
+    assert_eq!(
+        display_key(KeyModel::Tree, &key("app.title")),
+        "['app.title']"
+    );
+    let names = ["", "[x", "['[x']", "['']", "a.b", "['a.b']", "x"];
+    let shown: BTreeSet<String> = names
+        .iter()
+        .map(|name| display_key(KeyModel::Flat, &key(name)))
+        .collect();
+    assert_eq!(shown.len(), names.len(), "{shown:?}");
+}
+
+#[test]
+fn a_root_plural_object_is_not_merged() {
+    let findings = run(
+        "id: t\nkind: key_parity\nreference: en.json\npeers: '*.json'\nplurals: cldr\nlevel: error\n",
+        &[
+            ("en.json", br#"{"one":"a","other":"b"}"#),
+            ("fr.json", br#"{"one":"a"}"#),
+        ],
+    );
+    assert_eq!(
+        messages(&findings),
+        ["fr.json: missing key `other` (present in en.json)"]
+    );
+}
+
+#[test]
+fn an_empty_peer_does_not_turn_off_strip_root() {
+    let findings = run(
+        "id: t\nkind: key_parity\nreference: en.yml\npeers: '*.yml'\nstrip_root: true\nlevel: error\n",
+        &[
+            ("en.yml", b"en:\n  title: T\n"),
+            ("fr.yml", b"fr:\n  title: T\n"),
+            ("de.yml", b"{}\n"),
+        ],
+    );
+    assert_eq!(
+        messages(&findings),
+        ["de.yml: missing key `title` (present in en.yml)"]
+    );
+}
+
+#[test]
+fn allow_missing_peers_turns_an_absent_peer_into_a_note() {
+    let note = |findings: &[Violation]| {
+        findings.len() == 1 && matches!(findings[0].disposition, FindingDisposition::Note(_))
+    };
+    let literal = "id: t\nkind: key_parity\nreference: .env.example\npeers: .env\nlevel: error\n";
+    let glob = "id: t\nkind: key_parity\nreference: locales/en.json\npeers: 'locales/*.json'\nlevel: error\n";
+    let files: &[(&str, &[u8])] = &[(".env.example", b"A=1\n"), ("locales/en.json", b"{}")];
+    for yaml in [literal, glob] {
+        let strict = run(yaml, files);
+        assert!(
+            strict.len() == 1
+                && matches!(
+                    strict[0].disposition,
+                    FindingDisposition::AnalysisFailure(_)
+                ),
+            "{:?}",
+            messages(&strict)
+        );
+        let allowed = run(&format!("{yaml}allow_missing_peers: true\n"), files);
+        assert!(note(&allowed), "{:?}", messages(&allowed));
+    }
+    // A present peer is still compared, and a missing reference still fails.
+    let compared = run(
+        &format!("{literal}allow_missing_peers: true\n"),
+        &[(".env.example", b"A=1\nB=2\n"), (".env", b"A=1\n")],
+    );
+    assert_eq!(messages(&compared).len(), 1);
+    assert!(messages(&compared)[0].contains("missing key `B`"));
+    let no_reference = run(
+        &format!("{literal}allow_missing_peers: true\n"),
+        &[(".env", b"A=1\n")],
+    );
+    assert!(
+        matches!(
+            no_reference[0].disposition,
+            FindingDisposition::AnalysisFailure(_)
+        ),
+        "{:?}",
+        messages(&no_reference)
+    );
+}
+
+#[test]
+fn the_analyzer_and_rule_refuse_malformed_comparisons() {
+    // A row without a key path is an analyzer error, never a skipped key.
+    let mut row = key_rows(
+        &Resource::literal(RelPath::parse("en.json").unwrap()),
+        &BTreeMap::from([(vec![Segment::Key("a".into())], ByteSpan::new(0, 1))]),
+    )
+    .unwrap();
+    row[0].pointer = None;
+    let error = ContractAnalyzer::new(KeySetAnalyzer {
+        reference: "en.json".into(),
+        peer: "fr.json".into(),
+        direction: Direction::Both,
+    })
+    .analyze("t", &row, &Limits::default())
+    .unwrap_err();
+    assert!(error.to_string().contains("no key path"), "{error}");
+
+    // A finding the rule cannot classify is an error, never dropped.
+    assert_eq!(
+        classify(&[
+            Violation::new("missing\u{0}a"),
+            Violation::new("extra\u{0}b")
+        ]),
+        Ok((
+            BTreeSet::from(["a".to_string()]),
+            BTreeSet::from(["b".to_string()])
+        ))
+    );
+    assert!(classify(&[Violation::new("changed\u{0}a")]).is_err());
+    assert!(classify(&[Violation::new("no separator")]).is_err());
 }
 
 /// Invariant 4: the same tree gives the same findings, in the same order,

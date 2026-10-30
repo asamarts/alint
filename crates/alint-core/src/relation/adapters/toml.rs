@@ -159,9 +159,17 @@ fn parse_error(text: &str, error: &toml_edit::TomlError) -> String {
     };
     let before = text.get(..offset).unwrap_or(text);
     let line = before.matches('\n').count() + 1;
+    // A byte-order mark is not a column.
     let column = before
         .rsplit('\n')
         .next()
+        .map(|tail| {
+            if line == 1 {
+                tail.trim_start_matches('\u{feff}')
+            } else {
+                tail
+            }
+        })
         .map_or(1, |tail| tail.chars().count() + 1);
     format!("TOML parse error at line {line}, column {column}: {reason}")
 }
@@ -275,6 +283,18 @@ mod tests {
         };
         assert!(message.contains("line 2"), "{message}");
         assert!(!message.contains("hunter2"), "{message}");
+
+        // A byte-order mark does not shift the first line's columns.
+        let column = |text: &str| {
+            let AdapterError::Parse(message) = TomlRowsAdapter::new()
+                .extract(&resource(), text.as_bytes(), &Limits::default())
+                .unwrap_err()
+            else {
+                panic!("expected a parse error");
+            };
+            message
+        };
+        assert_eq!(column("a = = 1\n"), column("\u{feff}a = = 1\n"));
     }
 
     #[test]
