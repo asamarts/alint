@@ -1,6 +1,7 @@
 # v0.21: witforge adoption and the WIT gate (W2-7)
 
-Status: In progress (2026-10-31). Steps 1 and 2 of section 4 are done and step 3 is under way.
+Status: In progress (2026-10-31). Steps 1 to 3 of section 4 are done; step 4, publishing
+witforge, is next.
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is
 [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 4: v0.21.0 is not tagged until
@@ -12,8 +13,9 @@ and the one blocked row in [`r8-readiness.md`](r8-readiness.md).
 
 - **witforge** (`asamarts/witforge`) has 0.1.0 on its `main`: the subset checker, the wire lock,
   and the Rust, protobuf, and glue emitters, with publishing enabled and a package dry run of
-  both crates done. Its history has been cleaned (step 2). It is still private, untagged, and
-  unpublished, with Actions off until it is public.
+  both crates done. Its history has been cleaned (step 2), and it has been public since
+  2026-10-31 with CI on GitHub-hosted Linux, macOS, and Windows runners and no self-hosted
+  runner (step 3). It is not yet tagged or published.
 - **alint** has the `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, the hand-written
   `alint_core::plugin_api` it describes, and, since #409, the consumer crate
   `crates/alint-witforge-consumer` with witforge's output for the draft.
@@ -95,13 +97,13 @@ and the plan is checked locally until then.
 |---|---|---|---|---|
 | 1 | Merge #409 | alint | CI | done (6e437c61e) |
 | 2 | Clean witforge's history, remap its commit references, and fence its private-tool gates | witforge | owner confirmation | done |
-| 3 | Make witforge public and enable Actions; run CI and confirm the hosted Linux, macOS, and Windows jobs are green; deregister the self-hosted runner from the repository it is registered on, as the release checklist says | witforge | step 2, owner confirmation | under way |
+| 3 | Make witforge public and enable Actions; run CI and confirm the hosted Linux, macOS, and Windows jobs are green; deregister the self-hosted runner from the repository it is registered on, as the release checklist says | witforge | step 2, owner confirmation | done (CI run 41240165506) |
 | 4 | Publish `witforge`, then `witforge-cli` (its registry dependency needs the library first). Both names are new on crates.io, so the first publish uses the owner's token | witforge | step 3 | |
 | 5 | Tag `v0.1.0` and create the GitHub release | witforge | step 4 | |
 | 6 | Add the W2-7 job (section 5) to default CI and mark the readiness row passed | alint | step 5 | |
 | 7 | W3 of the pre-release audit (documentation and release preparation), then the v0.21.0 tag | alint | step 6 | |
 
-Steps 3 to 5 change nothing in alint, and W3 can proceed in parallel with them.
+Steps 4 and 5 change nothing in alint, and W3 can proceed in parallel with them.
 
 ## 5. The W2-7 job
 
