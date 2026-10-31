@@ -10,8 +10,8 @@
 use crate::extract::NonStringValueKind;
 use crate::plugin_api::{
     Adapter as ContractAdapterTrait, AdapterError as ContractError, AdapterInput as ContractInput,
-    AdapterOutput as ContractOutput, Limits as ContractLimits, PointerSegment,
-    Resource as ContractResource, Row as ContractRow, RowState as ContractRowState,
+    AdapterOutput as ContractOutput, PointerSegment, Resource as ContractResource,
+    Row as ContractRow, RowState as ContractRowState,
 };
 
 use super::adapter::{Adapter, AdapterError, AdapterNote, AdapterOutput};
@@ -81,7 +81,7 @@ impl<A: ContractAdapterTrait> Adapter for ContractAdapter<A> {
             .extract(ContractInput {
                 resource: &contract,
                 bytes,
-                limits: ContractLimits { max_rows },
+                max_rows,
             })
             .map_err(from_contract_error)?;
         let output = from_contract_output(output, resource, &contract)?;
@@ -135,9 +135,9 @@ impl<A: Adapter> ContractAdapterTrait for InternalContractAdapter<A> {
             ))
         })?;
         let limits = super::limits::Limits::default()
-            .with(LimitKind::RowsPerExtractor, input.limits.max_rows)
+            .with(LimitKind::RowsPerExtractor, input.max_rows)
             .map_err(|error| ContractError::Limit {
-                limit: input.limits.max_rows,
+                limit: input.max_rows,
                 reached: error.value,
             })?;
         let output = self
@@ -211,18 +211,20 @@ impl<A: ContractAnalyzerTrait> ContractAnalyzer<A> {
             .chain(rows.iter().map(|row| row.resource.path().as_str()))
             .collect();
         let rows: Vec<ContractRow> = rows.iter().cloned().map(to_contract_row).collect();
-        let max_rows = limits.get(LimitKind::RowsPerExtractor);
+        // No limit kind bounds findings yet, so an analyzer may return as many
+        // findings as one extractor may return rows.
+        let max_findings = limits.get(LimitKind::RowsPerExtractor);
         let findings = self
             .inner
             .analyze(ContractAnalyzerInput {
                 rule_id,
                 rows: &rows,
-                limits: ContractLimits { max_rows },
+                max_findings,
             })
             .map_err(AnalyzeError::Analyzer)?;
-        if findings.len() > max_rows {
+        if findings.len() > max_findings {
             return Err(AnalyzeError::Analyzer(ContractAnalyzerError::Limit {
-                limit: max_rows,
+                limit: max_findings,
                 reached: findings.len(),
             }));
         }
