@@ -4,7 +4,8 @@ Status: Plan (2026-10-29). Audited `main` at `f4e5fa225`; version 0.20.1, v0.21.
 Progress: W1 done (#407, merged 2026-10-30: all twelve items, the review's follow-ups, and
 ADR-0025's `key_parity` changes, with tests), and a review of that increment fixed more (section
 3); W4 housekeeping and the six Dependabot merges done 2026-10-30; W2 done in #411 except W2-7,
-which waits on witforge 0.1.0 ([`witforge-adoption.md`](witforge-adoption.md)); W3 and the rest of W4 not started.
+which waits on witforge 0.1.0 ([`witforge-adoption.md`](witforge-adoption.md)); W3 and the rest
+of W4 not started.
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
@@ -205,7 +206,7 @@ build (W2-2 guards that).
   check that resolves each commented tag and compares the commit.
 - **Housekeeping:** 104 local branches, 63 fully merged; remote branches `feat/key-parity`,
   `feat/key-parity-formats`, `feat/relation-ir-r2` (merged) and `bench-record/v0.18.3` (PR
-  closed); extra worktrees, one of which (`~/dn0-19-alint.XOcCz0/source`) holds staged changes;
+  closed); extra worktrees, one of which (an older benchmark worktree) holds staged changes;
   `target/` at 47 GB. Done as section 7, item 4 records.
 
 ## 7. Owner decisions
@@ -227,8 +228,8 @@ All decided on 2026-10-30. Items 1, 5, 6, and 7 change the design and are record
 4. **Housekeeping (W4).** Done 2026-10-30: the 61 local branches fully merged into `main` and
    checked out nowhere were deleted by exact name, and so were the remote branches
    `feat/key-parity`, `feat/key-parity-formats`, `feat/relation-ir-r2` (squash-merged) and
-   `bench-record/v0.18.3` (PR #328, closed). The `~/dn0-19-alint.XOcCz0` worktree, the other
-   sessions' worktrees, the unmerged branches, and `target/` were kept.
+   `bench-record/v0.18.3` (PR #328, closed). That benchmark worktree, the other worktrees,
+   the unmerged branches, and `target/` were kept.
 5. **Flat keys that contain a dot.** Shown as written in dotenv, properties, and `.resx`
    (`app.title`), with `ignore_keys` matching the name there and path patterns matching segment
    by segment elsewhere (ADR-0025 decision 1).

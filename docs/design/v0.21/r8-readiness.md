@@ -127,8 +127,9 @@ applies:
 1. W3 of [`pre-release-audit.md`](pre-release-audit.md): changelog, documentation, and release
    preparation (version bump, generated artifacts, full release preflight, cross-platform
    checks, a fresh corpus replay).
-2. Wait for witforge 0.1.0 and run the contract's regeneration check in default CI (W2-7,
-   ADR-0025 decision 4); [`witforge-adoption.md`](witforge-adoption.md) has the path.
+2. Wait until witforge 0.1.0 is published and pinned, and run the contract's check, generation,
+   and regeneration `--check` in default CI (W2-7, ADR-0025 decision 4);
+   [`witforge-adoption.md`](witforge-adoption.md) has the path.
 3. Tag only after those checks pass.
 
 ## Go/no-go
