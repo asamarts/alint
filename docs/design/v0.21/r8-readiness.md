@@ -27,7 +27,7 @@ verdict is revisited once W1 and W2 land.
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
 | S4 workload | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; the same-session kbench run of v0.20.1 against v0.21 on the revision-4 tree is pending (W2-9) | **gap** |
-| Go/no-go assessment of the port | verdict decided: GO on consistency, simplicity gated in v0.22 (ADR-0025 decision 3); the written assessment is W2-8 | **gap** |
+| Go/no-go assessment of the port | written below (W2-8): GO on consistency, simplicity gated in v0.22 (ADR-0025 decision 3), with gate 2 measured as ADR-0026 defines | pass |
 | Generated artifacts | preflight: schema, facts, architecture, docs export, roadmap | pass |
 | Formatting, clippy, workspace tests | preflight | pass |
 | Cross-platform CI | Linux/macOS/Windows green | pass |
@@ -63,20 +63,61 @@ verdict is revisited once W1 and W2 land.
   the scan. Full S2 100k drops from 567 ms to 521 ms; 1M from 5.861 s to
   5.357 s.
 
+## Assessment of the port (W2-8)
+
+The stop rule (`general-linter.md` section 11.1) asks whether the ported path became simpler
+and more consistent. The port is `cross_file` `equals` evaluated through the relation IR (the
+R4 shadow), and `key_parity`, the first kind built on the IR (R6-R9).
+
+**Consistency is shown.**
+
+- *Same results.* The shadow finds zero differences on the 17 e2e scenarios that use
+  `relation: equals`, on its property generator, and on 106 of 110 corpus configurations (49 of
+  them with `equals`; four expected skips; run 40912352842).
+- *One model.* The shadow and `key_parity` read through the run's one read cache and decode
+  cache (with `key_parity` alone the 10k relation scenario makes 839 reads, and with a per-file
+  rule added still 839), produce rows of one row, resource, and pointer model, and share the
+  `Adapter` trait and the limits. `key_parity` also runs through the contract bridge, and the
+  built-in adapters round-trip through it unchanged. (ADR-0025 called this "one extract adapter
+  shared with `key_parity`"; ADR-0026 corrects that: the adapters differ, the caches, trait, and
+  model are shared.)
+- *What W1 showed.* Every `key_parity` defect W1 and the review after it found was in rule code
+  layered over the IR (a `.join(".")` key rendering, plural grouping, `strip_root`, an analyzer
+  error dropped by the rule), and the dotted-key fix was to use the IR's key identity, the
+  segment list, throughout. The IR's own guarantees now each have a gate: enforced limits
+  (W2-3), a bridge that refuses output outside its input (W2-6), the visibility and import
+  boundaries (W2-4, W2-5), and feature isolation (W2-2).
+
+**Simplicity is not shown, and cannot be in v0.21.**
+
+- Production `equals` still runs the old code. The code only `equals` executes is
+  `check_equals` (93 non-comment lines) and `mismatch` (41): 134 lines, measured as ADR-0026
+  defines. (ADR-0025's 190 also counted the source extraction the set relations share.)
+- The shadow adds 359 non-comment lines and calls back into the old code: `mismatch` and
+  `add_source_locations` to build findings, `redact_extracted` to redact them, and
+  `eval::read_rel` for a missing source's message. A shadow must reproduce the old output, so
+  this is expected, but it is not evidence that the IR path is simpler.
+
+**Verdict: GO on consistency** (ADR-0025 decision 3). v0.21 ships once the remaining release
+work below is done. Phase 3 starts only if v0.22 meets all three gates; otherwise the stop rule
+applies:
+
+1. the IR path becomes the authoritative `equals`, and the old `equals` code is deleted;
+2. the code only the new `equals` executes is at most 134 lines, counted as ADR-0026 defines,
+   and calls nothing in `cross_file::eval`;
+3. the e2e suite and the corpus replay show zero differences against v0.21, with the section
+   9.6 budgets held as ADR-0024 decision 6 measures them.
+
 ## Remaining release work
 
-1. W2 of [`pre-release-audit.md`](pre-release-audit.md) (W1 is done in
-   #407): close the gaps behind the rows the audit disputes (W2: registry injection, the
-   shadow feature-tree check, limits, the import-boundary test, the cache
-   methods' visibility, the contract bridge's path checks, the WIT check,
-   S4's workload revision), each with a gate.
-2. Write the go/no-go assessment the release acceptance requires: whether the
-   ported path became simpler and more consistent, with evidence.
-3. Complete release preparation: version bump, changelog, generated artifacts,
-   full release preflight and cross-platform checks.
-4. Wait for witforge 0.1.0 and run the contract's regeneration check in
-   default CI (ADR-0025 decision 4).
-5. Tag only after those checks pass.
+1. W2-9's same-session kbench run of v0.20.1 against v0.21 on S4's revision-4 tree (100k and
+   1M), recorded here.
+2. W3 of [`pre-release-audit.md`](pre-release-audit.md): changelog, documentation, and release
+   preparation (version bump, generated artifacts, full release preflight, cross-platform
+   checks, a fresh corpus replay).
+3. Wait for witforge 0.1.0 and run the contract's regeneration check in default CI (W2-7,
+   ADR-0025 decision 4).
+4. Tag only after those checks pass.
 
 ## Go/no-go
 
@@ -89,5 +130,6 @@ written judgment of the port.
 The owner's verdict on the port (2026-10-30, ADR-0025 decision 3) is GO on
 consistency: v0.21 ships once W1, W2, and the witforge check are done, and
 Phase 3 starts only if v0.22 deletes the old `equals` code, keeps its
-replacement within today's 190 non-comment lines with no calls into
-`cross_file::eval`, and shows zero differences with the budgets held.
+replacement within today's 134 `equals`-only lines (ADR-0026, which replaces
+ADR-0025's 190) with no calls into `cross_file::eval`, and shows zero
+differences with the budgets held. The assessment above records the evidence.

@@ -215,7 +215,8 @@ All decided on 2026-10-30. Items 1, 5, 6, and 7 change the design and are record
 
 1. **The go/no-go verdict (W2-8).** GO on consistency; v0.21 ships. Phase 3 starts only if v0.22
    makes the IR path authoritative for `cross_file` `equals` and deletes the old code, keeps
-   that code within today's 190 non-comment lines with no calls into `cross_file::eval`, and
+   that code within today's 190 non-comment lines (134 `equals`-only lines, as ADR-0026
+   measures it from 2026-10-30) with no calls into `cross_file::eval`, and
    shows zero e2e and corpus differences with the budgets held (ADR-0025 decision 3).
 2. **S4 (W2-9).** Revision 4 with newline-terminated sources, plus a same-session kbench run of
    v0.20.1 against v0.21 on the revision-4 tree (100k and 1M), recorded in `r8-readiness.md`.
