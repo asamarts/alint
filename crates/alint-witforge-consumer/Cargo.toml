@@ -15,6 +15,14 @@ prost = "0.14"
 serde.workspace = true
 serde_json.workspace = true
 
+# `build.rs` generates the prost and proto3-JSON code from `proto/v0.proto`;
+# protox parses the schema, so no `protoc` binary is needed.
+[build-dependencies]
+pbjson-build = "0.9"
+prost = "0.14"
+prost-build = "0.14"
+protox = "0.10"
+
 [lints]
 workspace = true
 
