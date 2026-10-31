@@ -68,6 +68,11 @@ rand_chacha = "0.10"
 tempfile = "3"
 dir-test = "0.4"
 proptest = "1"
+# Test-only: the `plugin_api` import-boundary test parses the module and visits
+# every path. Both are already in the tree through the derive macros, so this
+# adds no crate.
+syn = { version = "2", features = ["full", "visit"] }
+proc-macro2 = "1"
 trycmd = "1"
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 sha2 = "0.11"

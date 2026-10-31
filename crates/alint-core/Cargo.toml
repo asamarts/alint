@@ -51,6 +51,8 @@ adotenv.workspace = true
 [dev-dependencies]
 tempfile.workspace = true
 proptest.workspace = true
+syn.workspace = true
+proc-macro2.workspace = true
 
 [lints]
 workspace = true
