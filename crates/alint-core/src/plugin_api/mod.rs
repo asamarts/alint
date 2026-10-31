@@ -394,19 +394,68 @@ mod tests {
         boundary.problems
     }
 
-    fn module_sources() -> Vec<(String, String)> {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugin_api");
-        let mut sources: Vec<(String, String)> = std::fs::read_dir(&dir)
-            .unwrap()
-            .map(|entry| entry.unwrap().path())
-            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
-            .map(|path| {
+    /// Every `.rs` file under `dir`, at any depth, as its `/`-separated path
+    /// relative to `dir` and its module depth below `dir/mod.rs`: `mod.rs` is
+    /// 0, `a.rs` and `a/mod.rs` are 1, `a/b.rs` is 2.
+    fn rust_files(dir: &Path) -> Vec<(String, usize)> {
+        fn walk(dir: &Path, prefix: &str, out: &mut Vec<(String, usize)>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
                 let name = path.file_name().unwrap().to_string_lossy().into_owned();
-                (name, std::fs::read_to_string(&path).unwrap())
+                if path.is_dir() {
+                    walk(&path, &format!("{prefix}{name}/"), out);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let relative = format!("{prefix}{name}");
+                    let components = relative.split('/').count();
+                    out.push((relative, components - usize::from(name == "mod.rs")));
+                }
+            }
+        }
+        let mut out = Vec::new();
+        walk(dir, "", &mut out);
+        out.sort();
+        out
+    }
+
+    /// The module's sources with their depths, from every file under
+    /// `src/plugin_api`, so a submodule in a subdirectory is checked too.
+    fn module_sources() -> Vec<(String, usize, String)> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugin_api");
+        rust_files(&dir)
+            .into_iter()
+            .map(|(file, depth)| {
+                let source = std::fs::read_to_string(dir.join(&file)).unwrap();
+                (file, depth, source)
             })
-            .collect();
-        sources.sort();
-        sources
+            .collect()
+    }
+
+    #[test]
+    fn every_file_under_the_module_is_found_with_its_depth() {
+        let dir = tempfile::tempdir().unwrap();
+        for file in [
+            "mod.rs",
+            "a.rs",
+            "x/mod.rs",
+            "x/y.rs",
+            "x/z/w.rs",
+            "x/notes.md",
+        ] {
+            let path = dir.path().join(file);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "").unwrap();
+        }
+        assert_eq!(
+            rust_files(dir.path()),
+            [
+                ("a.rs", 1),
+                ("mod.rs", 0),
+                ("x/mod.rs", 1),
+                ("x/y.rs", 2),
+                ("x/z/w.rs", 3),
+            ]
+            .map(|(file, depth)| (file.to_string(), depth))
+        );
     }
 
     /// Nothing in this module names anything outside it except the standard
@@ -418,14 +467,12 @@ mod tests {
         let sources = module_sources();
         assert!(sources.len() >= 3, "plugin_api sources not found");
         let mut names = Names::default();
-        for (_, source) in &sources {
+        for (_, _, source) in &sources {
             names.visit_file(&syn::parse_file(source).unwrap());
         }
         let mut found = Vec::new();
-        for (file, source) in &sources {
-            // mod.rs is `plugin_api` itself; every other file is a child.
-            let depth = usize::from(file != "mod.rs");
-            found.extend(problems(file, source, depth, &names.0));
+        for (file, depth, source) in &sources {
+            found.extend(problems(file, source, *depth, &names.0));
         }
         assert!(
             found.is_empty(),
