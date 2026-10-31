@@ -1,0 +1,35 @@
+[package]
+name = "alint-witforge-consumer"
+description = "Generated compile/round-trip proof for the alint plugin contract."
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+publish = false
+autotests = false
+
+[dependencies]
+pbjson = "0.9"
+prost = "0.14"
+serde.workspace = true
+serde_json.workspace = true
+
+# `build.rs` generates the prost and proto3-JSON code from `proto/v0.proto`;
+# protox parses the schema, so no `protoc` binary is needed.
+[build-dependencies]
+pbjson-build = "0.9"
+prost = "0.14"
+prost-build = "0.14"
+protox = "0.10"
+
+[dev-dependencies]
+# tests/plugin_api.rs compares the hand-written contract with the generated one.
+alint-core.workspace = true
+
+[lints]
+workspace = true
+
+[[test]]
+name = "it"
+path = "tests/main.rs"

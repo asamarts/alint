@@ -66,3 +66,11 @@ docs/design/architecture/DIAGRAMS.md text eol=lf
 LICENSE-APACHE text eol=lf
 LICENSE-MIT text eol=lf
 NOTICE text eol=lf
+
+# The plugin contract and the witforge output generated from it:
+# `ci/scripts/witforge-consumer.sh` byte-compares these with witforge's
+# LF-only output, so a CRLF checkout would report them stale.
+wit/alint-plugin/** text eol=lf
+crates/alint-witforge-consumer/src/plain/*.rs text eol=lf
+crates/alint-witforge-consumer/src/glue/*.rs text eol=lf
+crates/alint-witforge-consumer/proto/*.proto text eol=lf

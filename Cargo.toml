@@ -9,6 +9,7 @@ members = [
     "crates/alint",
     "crates/alint-bench",
     "crates/alint-testkit",
+    "crates/alint-witforge-consumer",
     "crates/alint-e2e",
     "xtask",
 ]

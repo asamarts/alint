@@ -6,6 +6,8 @@ review found are recorded in [ADR-0024](../../adr/0024-relation-ir-decisions-aft
 which supersedes it and which this document follows. The owner's pre-release decisions are
 recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly supersedes
 ADR-0024 decision 4; where this document disagrees with ADR-0025, the ADR applies.
+[ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md) keeps contract 0.1 a draft in
+v0.21.
 Decisions it builds on: [ADR-0019](../../adr/0019-general-linter-program-and-plugin-architecture.md)
 (DEC-2, DEC-5, DEC-7, DEC-8, DEC-10, DEC-13, DEC-14). Questions it decides: Q4, Q10, and Q13;
 the port's results feed Q8, which is decided per kind later.
@@ -556,10 +558,10 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   it (a direct run of the gate's gungraun filter and limit), and a +4% change over `main` passes,
   because S1 starts 7-8% under v0.18.2. Details and the recorded counts:
   [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md).
-- **R7, done.** `wit/alint-plugin/0.1.0/plugin.wit` is the committed
+- **R7, done.** `wit/alint-plugin/v0.1/plugin.wit` is the committed
   `alint:plugin@0.1.0` draft with shared types, `adapter` and `analyzer` worlds,
   host-pushed inputs, no callbacks, and an append-only `wire.lock`. witforge's
-  subset checker accepts it (`witforge check wit/alint-plugin/0.1.0`).
+  subset checker accepts it (`witforge check wit/alint-plugin/v0.1`).
 - **R6a and R6b, done.** `alint_core::plugin_api` now carries std-only `Adapter` and
   `Analyzer` traits over contract resources, rows, findings, related locations,
   capabilities, and limits. `relation::ContractAdapter` bridges a contract adapter
@@ -635,6 +637,12 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   [`r8-readiness.md`](r8-readiness.md), and S4 workload revision 4 with a
   same-session kbench run against v0.20.1. W2-7, the WIT check in CI, waits on
   witforge 0.1.0.
+- **witforge consumer (#409).** The generated consumer crate, the regeneration
+  `--check` against its committed output with controls, and a test that
+  converts every `plugin_api` type to and from the generated ones; the review
+  that took it over, and the path to witforge 0.1.0 and the W2-7 CI job, are in
+  [`witforge-adoption.md`](witforge-adoption.md). ADR-0027 keeps contract 0.1 a
+  draft until the first release that loads plugins.
 - **Next:** W3's documentation and release preparation (version bump,
   changelog, generated artifacts, release preflight and cross-platform checks)
-  and, once witforge 0.1.0 is checked in CI, the tag.
+  and, once witforge 0.1.0 is published and checked in CI, the tag.

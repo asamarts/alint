@@ -36,11 +36,12 @@ model {
   alint.tooling.e2e -[dev]-> alint.cli.output
   alint.tooling.e2e -[dev]-> alint.cli.rules
   alint.tooling.e2e -[dev]-> alint.tooling.testkit
+  alint.tooling.consumer -[dev]-> alint.cli.core
 }
 
 views {
   view crateGraph {
     title 'Crate dependency graph'
-    include alint.cli.alintBin, alint.cli.core, alint.cli.dsl, alint.cli.output, alint.cli.rules, alint.lspServer.lspd, alint.tooling.bench, alint.tooling.e2e, alint.tooling.testkit, alint.tooling.xtask
+    include alint.cli.alintBin, alint.cli.core, alint.cli.dsl, alint.cli.output, alint.cli.rules, alint.lspServer.lspd, alint.tooling.bench, alint.tooling.consumer, alint.tooling.e2e, alint.tooling.testkit, alint.tooling.xtask
   }
 }

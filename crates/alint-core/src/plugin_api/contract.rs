@@ -78,26 +78,13 @@ pub struct Finding {
     pub not_fixable: bool,
 }
 
-/// Resource and adapter limits pushed by the host.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub struct Limits {
-    pub max_rows: usize,
-}
-
-impl Default for Limits {
-    fn default() -> Self {
-        Self {
-            max_rows: 1_000_000,
-        }
-    }
-}
-
 /// The input to one adapter extraction.
 #[derive(Debug)]
 pub struct AdapterInput<'a> {
     pub resource: &'a Resource,
     pub bytes: &'a [u8],
-    pub limits: Limits,
+    /// The most rows the adapter may return for this resource.
+    pub max_rows: usize,
 }
 
 /// What one adapter produced for one resource.
@@ -146,7 +133,8 @@ pub trait Adapter: Send + Sync {
 pub struct AnalyzerInput<'a> {
     pub rule_id: &'a str,
     pub rows: &'a [Row],
-    pub limits: Limits,
+    /// The most findings the analyzer may return.
+    pub max_findings: usize,
 }
 
 /// Why an analyzer could not produce findings.
@@ -236,7 +224,7 @@ mod tests {
             .analyze(AnalyzerInput {
                 rule_id: "test",
                 rows: &rows,
-                limits: Limits::default(),
+                max_findings: 10,
             })
             .unwrap();
         assert_eq!(findings.len(), 1);

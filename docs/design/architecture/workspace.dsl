@@ -51,6 +51,7 @@ workspace "alint" "Language-agnostic repository linter" {
                 comp_bench = component "alint-bench" "Criterion micro-benchmarks and the seeded deterministic tree generator." "Rust crate"
                 comp_testkit = component "alint-testkit" "Tree-spec materializer, scenario runner, and proptest strategies for tests." "Rust crate"
                 comp_e2e = component "alint-e2e" "End-to-end scenarios plus the coverage-audit and invariant tests." "Rust crate"
+                comp_witforge_consumer = component "alint-witforge-consumer" "Generated compile and round-trip proof for the committed plugin contract." "Rust crate"
                 comp_xtask = component "xtask" "Build automation: bench-release, docs-export, gen-schema, gen-facts, gen-arch." "Rust crate"
             }
         }

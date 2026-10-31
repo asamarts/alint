@@ -106,6 +106,7 @@ graph TB
 ```mermaid
 graph TB
   subgraph AlintTooling["`Dev + build tooling`"]
+    AlintTooling.Consumer["alint-witforge-consumer"]
     AlintTooling.E2e["alint-e2e"]
     AlintTooling.Xtask["xtask"]
     AlintTooling.Bench["alint-bench"]
@@ -137,6 +138,7 @@ graph TB
   AlintTooling.Bench -.-> AlintCli.Dsl
   AlintTooling.Bench -.-> AlintCli.Output
   AlintTooling.Bench -.-> AlintCli.Rules
+  AlintTooling.Consumer -.-> AlintCli.Core
   AlintTooling.E2e -.-> AlintCli.Core
   AlintTooling.E2e -.-> AlintCli.Dsl
   AlintTooling.E2e -.-> AlintCli.Output

@@ -14,7 +14,7 @@ mod value;
 
 pub use contract::{
     Adapter, AdapterError, AdapterInput, AdapterOutput, Analyzer, AnalyzerError, AnalyzerInput,
-    Capabilities, Finding, Limits, PointerSegment, RelatedLocation, Resource, Row, RowState,
+    Capabilities, Finding, PointerSegment, RelatedLocation, Resource, Row, RowState,
 };
 pub use value::{FlatValue, FlatValueError, FlatValueLimits, Node};
 
