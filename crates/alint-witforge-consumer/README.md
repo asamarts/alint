@@ -10,8 +10,8 @@ contract (`wit/alint-plugin/v0.1`).
   generates from `proto/v0.proto` with `protox`, `prost-build`, and
   `pbjson-build`; nothing generated from the schema is committed.
 - `tests/` round-trips requests and responses through protobuf binary and
-  proto3-JSON, converts every `alint_core::plugin_api` type and trait to and
-  from the generated ones (`plugin_api.rs`), and accounts for every item on
+  proto3-JSON, converts every type and trait that `alint_core::plugin_api` and
+  the generated code share (`plugin_api.rs`), and accounts for every item on
   both sides, recording why each unpaired one has no counterpart
   (`inventory.rs`). These tests compare `plugin_api` with the committed
   output; `ci/scripts/witforge-consumer.sh` compares that output with the WIT.

@@ -3,8 +3,10 @@
 //! destructures its input without `..` and builds its output with a full struct
 //! literal or an exhaustive match, and every enum converts both ways, so a
 //! field, case, or required trait method on one side without a counterpart on
-//! the other stops this file compiling. What no conversion names (a new type
-//! or interface, or a method with a default body) fails `inventory.rs`.
+//! the other stops this file compiling. The exception is `api::FlatValue`,
+//! whose fields are private, so its conversion goes through `nodes()`. What no
+//! conversion names (a new type or interface, a method with a default body, or
+//! a field on `FlatValue`) fails `inventory.rs`.
 //!
 //! The intended differences appear where they occur: the engine's `usize`
 //! against the wire's `u32`, borrowed inputs, `Resource` against

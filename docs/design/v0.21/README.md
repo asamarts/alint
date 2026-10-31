@@ -638,8 +638,9 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   same-session kbench run against v0.20.1. W2-7, the WIT check in CI, waits on
   witforge 0.1.0.
 - **witforge consumer (#409).** The generated consumer crate, the regeneration
-  `--check` against its committed output with controls, and a test that
-  converts every `plugin_api` type to and from the generated ones; the review
+  `--check` against its committed output with controls, and tests that
+  convert every type the two sides share and account for every item on both
+  (#412); the review
   that took it over, and the path to witforge 0.1.0 and the W2-7 CI job, are in
   [`witforge-adoption.md`](witforge-adoption.md). ADR-0027 keeps contract 0.1 a
   draft until the first release that loads plugins.
