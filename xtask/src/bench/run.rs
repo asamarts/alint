@@ -335,9 +335,36 @@ struct HfOutput {
     results: Vec<HfResult>,
 }
 
+/// One benchmark from `hyperfine --export-json`. Hyperfine 1.x writes the
+/// wall-clock statistics at the top level; 2.x (`"schema_version": 2`) moves
+/// them under `summary.time_wall_clock`, each with a unit, and the runs under
+/// `measurements`.
 #[derive(Debug, Deserialize)]
-struct HfResult {
-    command: String,
+#[serde(untagged)]
+enum HfResult {
+    V2 {
+        command: String,
+        summary: HfSummary,
+        measurements: Vec<HfMeasurement>,
+    },
+    V1 {
+        command: String,
+        #[serde(flatten)]
+        stats: HfStats,
+        times: Vec<f64>,
+    },
+}
+
+#[derive(Debug, Deserialize)]
+struct HfSummary {
+    time_wall_clock: HfStats,
+}
+
+#[derive(Debug, Deserialize)]
+struct HfStats {
+    /// Only 2.x states it; 1.x always reports seconds.
+    #[serde(default)]
+    unit: Option<String>,
     mean: f64,
     /// Hyperfine reports `null` for stddev when only one
     /// measured run was made (no variance to compute). The
@@ -349,7 +376,54 @@ struct HfResult {
     median: f64,
     min: f64,
     max: f64,
-    times: Vec<f64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct HfMeasurement {
+    time_wall_clock: HfValue,
+}
+
+#[derive(Debug, Deserialize)]
+struct HfValue {
+    value: f64,
+    unit: String,
+}
+
+impl HfResult {
+    /// The command, its wall-clock statistics, and every run's time, in
+    /// seconds, whichever schema hyperfine wrote.
+    fn wall_clock(self) -> Result<(String, HfStats, Vec<f64>)> {
+        let seconds = |unit: Option<&str>| unit.is_none_or(|unit| unit == "second");
+        match self {
+            Self::V1 {
+                command,
+                stats,
+                times,
+            } => Ok((command, stats, times)),
+            Self::V2 {
+                command,
+                summary,
+                measurements,
+            } => {
+                let stats = summary.time_wall_clock;
+                if !seconds(stats.unit.as_deref())
+                    || measurements
+                        .iter()
+                        .any(|run| !seconds(Some(&run.time_wall_clock.unit)))
+                {
+                    bail!(
+                        "hyperfine reported wall-clock time in {:?}, not seconds",
+                        stats.unit
+                    );
+                }
+                let times = measurements
+                    .into_iter()
+                    .map(|run| run.time_wall_clock.value)
+                    .collect();
+                Ok((command, stats, times))
+            }
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -427,12 +501,13 @@ fn run_one(
     let raw = fs::read_to_string(&json_path)?;
     let parsed: HfOutput =
         serde_json::from_str(&raw).context("parsing hyperfine --export-json output")?;
-    let r = parsed
+    let (command, r, times) = parsed
         .results
         .into_iter()
         .next()
-        .context("hyperfine produced no results")?;
-    let times_ms = r.times.iter().map(|seconds| seconds * 1000.0).collect();
+        .context("hyperfine produced no results")?
+        .wall_clock()?;
+    let times_ms = times.iter().map(|seconds| seconds * 1000.0).collect();
 
     Ok(Row {
         tool: tool.name().into(),
@@ -445,9 +520,9 @@ fn run_one(
         median_ms: r.median * 1000.0,
         min_ms: r.min * 1000.0,
         max_ms: r.max * 1000.0,
-        samples: r.times.len(),
+        samples: times.len(),
         times_ms,
-        command: r.command,
+        command,
     })
 }
 
@@ -779,6 +854,67 @@ mod tests {
             assert_eq!(probe.needle, needle);
         }
         assert!(readiness_probe(Tool::Alint, Scenario::S1, Mode::Changed).is_none());
+    }
+
+    /// Both export schemas yield the same statistics: 1.x (top-level fields)
+    /// and 2.x (`summary.time_wall_clock` and `measurements`, as hyperfine
+    /// 2.0.0 writes them), including 2.x's `null` stddev for one run.
+    #[test]
+    fn hyperfine_exports_parse_in_either_schema() {
+        let v1 = r#"{"results":[{"command":"alint check","mean":0.0108,"stddev":0.0003,
+            "median":0.0107,"user":0.0,"system":0.0,"min":0.0105,"max":0.0112,
+            "times":[0.0105,0.0107,0.0112],"exit_codes":[0,0,0]}]}"#;
+        let v2 = r#"{"schema_version":2,"metadata":{"hyperfine_version":"2.0.0"},
+            "primary_metric":"time_wall_clock","results":[{"command":"alint check",
+            "measurements":[
+              {"time_wall_clock":{"value":0.0105,"unit":"second"},"exit_code":0},
+              {"time_wall_clock":{"value":0.0107,"unit":"second"},"exit_code":0},
+              {"time_wall_clock":{"value":0.0112,"unit":"second"},"exit_code":0}],
+            "summary":{"time_wall_clock":{"unit":"second","count":3,"mean":0.0108,
+              "stddev":0.0003,"median":0.0107,"min":0.0105,"max":0.0112},
+              "cpu_cycles":{"count":3,"mean":1.0,"stddev":0.0,"median":1.0,"min":1.0,"max":1.0}}}]}"#;
+        for raw in [v1, v2] {
+            let parsed: HfOutput = serde_json::from_str(raw).unwrap();
+            let (command, stats, times) = parsed
+                .results
+                .into_iter()
+                .next()
+                .unwrap()
+                .wall_clock()
+                .unwrap();
+            assert_eq!(command, "alint check");
+            assert!((stats.mean - 0.0108).abs() < 1e-12);
+            assert_eq!(stats.stddev, Some(0.0003));
+            assert!((stats.median - 0.0107).abs() < 1e-12);
+            assert_eq!((stats.min, stats.max), (0.0105, 0.0112));
+            assert_eq!(times, [0.0105, 0.0107, 0.0112]);
+        }
+
+        let one_run = r#"{"schema_version":2,"results":[{"command":"c",
+            "measurements":[{"time_wall_clock":{"value":0.5,"unit":"second"}}],
+            "summary":{"time_wall_clock":{"unit":"second","count":1,"mean":0.5,
+              "stddev":null,"median":0.5,"min":0.5,"max":0.5}}}]}"#;
+        let parsed: HfOutput = serde_json::from_str(one_run).unwrap();
+        let (_, stats, _) = parsed
+            .results
+            .into_iter()
+            .next()
+            .unwrap()
+            .wall_clock()
+            .unwrap();
+        assert_eq!(stats.stddev, None);
+
+        let millis = one_run.replace("\"second\"", "\"millisecond\"");
+        let parsed: HfOutput = serde_json::from_str(&millis).unwrap();
+        assert!(
+            parsed
+                .results
+                .into_iter()
+                .next()
+                .unwrap()
+                .wall_clock()
+                .is_err()
+        );
     }
 
     #[test]
