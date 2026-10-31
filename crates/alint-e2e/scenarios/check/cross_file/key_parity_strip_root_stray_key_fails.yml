@@ -1,0 +1,45 @@
+test_version: 1
+name: key_parity fails a strip_root file without one root, and only that file
+tags: [check, key_parity, cross_file, failing]
+
+# `strip_root` needs one top-level object in every file with keys. A file with
+# a stray top-level key is an analysis failure; the other locales still compare
+# below their root.
+
+given:
+  tree:
+    config:
+      locales:
+        en.yml: |
+          en:
+            title: Title
+            nav:
+              home: Home
+        de.yml: |
+          de:
+            title: Titel
+            nav:
+              home: Start
+        fr.yml: |
+          fr:
+            title: Titre
+            nav:
+              home: Accueil
+          stray: x
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: config/locales/en.yml
+        peers: "config/locales/*.yml"
+        strip_root: true
+        level: error
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - {rule: locales-match-english, kind: evaluation, path: config/locales/fr.yml}

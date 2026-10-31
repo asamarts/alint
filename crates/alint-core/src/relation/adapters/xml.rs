@@ -1,8 +1,8 @@
 //! Android string-resource and .NET `.resx` key rows (v0.21 R9).
 //!
-//! Both dialects parse through the same guarded XML path as every other XML
-//! surface (`Format::Xml.parse` runs the depth, attribute-width and namespace
-//! guards before `roxmltree` follows).
+//! Both dialects run the same depth, attribute-width and namespace guards as
+//! every other XML surface before `roxmltree` parses the document, and report
+//! a parse failure by position only, since a key file's text may hold values.
 
 use crate::ByteSpan;
 use crate::relation::adapter::{Adapter, AdapterError, AdapterOutput, check_row_count};
@@ -10,7 +10,6 @@ use crate::relation::limits::Limits;
 use crate::relation::pointer::{Pointer, Segment};
 use crate::relation::resource::Resource;
 use crate::relation::row::{Row, RowState};
-use crate::structured_format::Format;
 
 /// Android `<resources>` string bundles.
 ///
@@ -41,8 +40,7 @@ impl Adapter for AndroidStringsAdapter {
     ) -> Result<AdapterOutput, AdapterError> {
         let text = xml_text(bytes)?;
         guarded_xml(text)?;
-        let document = roxmltree::Document::parse(text)
-            .map_err(|error| AdapterError::Parse(error.to_string()))?;
+        let document = roxmltree::Document::parse(text).map_err(|error| xml_parse_error(&error))?;
         let root = document.root_element();
         if root.tag_name().name() != "resources" {
             return Err(AdapterError::Parse(
@@ -111,8 +109,7 @@ impl Adapter for ResxAdapter {
     ) -> Result<AdapterOutput, AdapterError> {
         let text = xml_text(bytes)?;
         guarded_xml(text)?;
-        let document = roxmltree::Document::parse(text)
-            .map_err(|error| AdapterError::Parse(error.to_string()))?;
+        let document = roxmltree::Document::parse(text).map_err(|error| xml_parse_error(&error))?;
         if document.root_element().tag_name().name() != "root" {
             return Err(AdapterError::Parse(
                 ".resx resources must have a <root> element".to_string(),
@@ -152,16 +149,31 @@ impl Adapter for ResxAdapter {
     }
 }
 
+/// A parse error by position only: roxmltree's messages can quote document
+/// text, such as an entity name, and findings never quote values.
+fn xml_parse_error(error: &roxmltree::Error) -> AdapterError {
+    if matches!(error, roxmltree::Error::DtdDetected) {
+        return AdapterError::Parse(
+            "the XML document has a DTD, and alint parses XML with DTDs disabled for safety"
+                .to_string(),
+        );
+    }
+    let pos = error.pos();
+    AdapterError::Parse(format!(
+        "the XML document is not well-formed at line {}, column {}",
+        pos.row, pos.col
+    ))
+}
+
 fn xml_text(bytes: &[u8]) -> Result<&str, AdapterError> {
     std::str::from_utf8(bytes)
         .map_err(|_| AdapterError::Parse("the XML document is not valid UTF-8".to_string()))
 }
 
+/// The depth, width, and namespace limits `roxmltree` needs to stay bounded;
+/// their messages quote no document text.
 fn guarded_xml(text: &str) -> Result<(), AdapterError> {
-    Format::Xml
-        .parse(text)
-        .map(|_| ())
-        .map_err(AdapterError::Parse)
+    crate::structured_format::xml_within_parse_limits(text).map_err(AdapterError::Parse)
 }
 
 #[cfg(test)]

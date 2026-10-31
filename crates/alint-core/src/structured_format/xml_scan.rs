@@ -120,7 +120,7 @@ const MAX_XML_NAMESPACE_WORK: usize = 512 * 1024 * 1024;
 /// quoted value (roxmltree rejects `<` there), so a runaway quote can't swallow
 /// the markup that follows. Hidden-close fixtures are probed against the real
 /// parser in the tests.
-pub(super) fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
+pub(crate) fn xml_within_parse_limits(text: &str) -> std::result::Result<(), String> {
     xml_within_limits(text, MAX_XML_DEPTH, MAX_XML_NAMESPACES_IN_SCOPE)
 }
 

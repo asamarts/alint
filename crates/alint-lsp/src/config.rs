@@ -136,7 +136,7 @@ fn run_config(
         .iter()
         .flat_map(|r| r.notes.iter())
         .map(|n| match &n.path {
-            Some(p) => format!("{}: {}", p.display(), n.message),
+            Some(p) => format!("{}: {}", p.display(), n.message_after_path(p)),
             None => n.message.to_string(),
         })
         .collect();

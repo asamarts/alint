@@ -676,7 +676,7 @@ pub(super) fn write_report_notes(
                     w,
                     "  {label}: {}: {}",
                     term(&p.display().to_string()),
-                    term(&note.message)
+                    term(note.message_after_path(p))
                 )?,
                 None => writeln!(w, "  {label}: {}", term(&note.message))?,
             }

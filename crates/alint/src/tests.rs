@@ -372,6 +372,11 @@ fn human_note_stderr_summarizes_by_default_and_lists_structural_kinds_on_request
                 alint_core::Violation::new("dynamic value skipped")
                     .with_path(Path::new("Cargo.toml"))
                     .as_note(),
+                // A message that already starts with its path is not
+                // prefixed twice.
+                alint_core::Violation::new("sub/x.json: peer file is not present")
+                    .with_path(Path::new("sub/x.json"))
+                    .as_note(),
                 alint_core::Violation::new("stopped at 64 KiB").as_analysis_truncated_note(),
             ],
             false,
@@ -383,13 +388,18 @@ fn human_note_stderr_summarizes_by_default_and_lists_structural_kinds_on_request
     let summary = String::from_utf8(summary).unwrap();
     assert_eq!(
         summary,
-        "alint: 2 informational note(s); run with --show-notes to list.\n"
+        "alint: 3 informational note(s); run with --show-notes to list.\n"
     );
 
     let mut details = Vec::new();
     write_report_notes(&report, true, &mut details).unwrap();
     let details = String::from_utf8(details).unwrap();
     assert!(details.contains("note: Cargo.toml: dynamic value skipped"));
+    let shown = Path::new("sub/x.json").display().to_string();
+    assert!(
+        details.contains(&format!("note: {shown}: peer file is not present\n")),
+        "{details}"
+    );
     assert!(details.contains("analysis truncated: stopped at 64 KiB"));
 }
 

@@ -1086,6 +1086,13 @@ fn parse_yaml_node(
                     if let Some(row_index) = row_index {
                         rows[row_index].value_span = value.span;
                     }
+                } else if reject_yaml_features {
+                    // A sequence or mapping key has no key path; reading its
+                    // value under the parent would invent keys there.
+                    return Err(EntryRowsError::Parse(
+                        "YAML complex (non-scalar) mapping keys are not supported for key extraction"
+                            .to_string(),
+                    ));
                 } else {
                     parse_yaml_node(
                         events,

@@ -5120,7 +5120,7 @@
         },
         "ignore_keys": {
           "default": [],
-          "description": "Keys to omit, written as they appear in findings. In dotenv, properties, and `.resx` files a pattern matches the key name, where `*` stops at a `.` and `**` crosses it. In every other format a pattern is a key path: `*` matches within one segment, a `**` segment matches any number of segments, and `['a.b']` names a segment that contains a dot.",
+          "description": "Keys to omit, written as they appear in findings. In dotenv, properties, and `.resx` files a pattern matches the key name, where `*` stops at a `.` and `**` crosses it; a name shown in bracket form (`['']`, `['[x']`) is written that way too. In every other format a pattern is a key path: `*` matches within one segment, a `**` segment matches any number of segments (at the end of a pattern, at least one), and `['a.b']` names a segment that contains a dot.",
           "items": {
             "type": "string"
           },
@@ -5143,7 +5143,7 @@
         },
         "strip_root": {
           "default": false,
-          "description": "When every compared file has one top-level key (Rails' `en:`), compare below it.",
+          "description": "Compare below each file's single top-level key, as in Rails locale files (`en:`, `fr:`). JSON, YAML, and TOML only. A file with keys must have exactly one top-level key, an object, or it is an analysis failure.",
           "type": "boolean"
         }
       },
