@@ -197,7 +197,8 @@ pub mod types {
         /// Requested capabilities.
         pub capabilities: Capabilities,
     }
-    pub trait Types {}
+    pub trait Types {
+    }
 }
 
 /// Host-pushed resource adapter.
@@ -211,10 +212,7 @@ pub mod adapter_api {
         /// Whether parse errors may quote sensitive source material.
         fn redacts_by_default(&self) -> bool;
         /// Decode one resource.
-        fn extract(
-            &self,
-            input: AdapterInput,
-        ) -> ::std::result::Result<AdapterOutput, AdapterError>;
+        fn extract(&self, input: AdapterInput) -> ::std::result::Result<AdapterOutput, AdapterError>;
     }
 }
 
@@ -227,13 +225,10 @@ pub mod analyzer_api {
         /// Stable analyzer id.
         fn id(&self) -> ::std::string::String;
         /// Analyze host-pushed rows.
-        fn analyze(
-            &self,
-            input: AnalyzerInput,
-        ) -> ::std::result::Result<::std::vec::Vec<Finding>, AnalyzerError>;
+        fn analyze(&self, input: AnalyzerInput) -> ::std::result::Result<::std::vec::Vec<Finding>, AnalyzerError>;
     }
 }
 
+pub use types::Types;
 pub use adapter_api::AdapterApi;
 pub use analyzer_api::AnalyzerApi;
-pub use types::Types;

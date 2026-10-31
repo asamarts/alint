@@ -40,10 +40,7 @@ impl ::core::fmt::Display for GlueError {
     fn fmt(&self, formatter: &mut ::core::fmt::Formatter<'_>) -> ::core::fmt::Result {
         match self {
             Self::IntegerOutOfRange { field, value } => {
-                write!(
-                    formatter,
-                    "field `{field}`: integer {value} is out of range"
-                )
+                write!(formatter, "field `{field}`: integer {value} is out of range")
             }
             Self::MissingField { field } => write!(formatter, "field `{field}` is missing"),
             Self::UnknownEnumValue { enumeration, value } => {
