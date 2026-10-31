@@ -1,8 +1,10 @@
 # v0.21 pre-release audit and remediation plan
 
 Status: Plan (2026-10-29). Audited `main` at `f4e5fa225`; version 0.20.1, v0.21.0 untagged.
-Progress: W1 in #407 (all twelve items, the review's follow-ups, and ADR-0025's `key_parity`
-changes, with tests); W4 housekeeping done; the rest of W2, W3, and W4 not started.
+Progress: W1 done (#407, merged 2026-10-30: all twelve items, the review's follow-ups, and
+ADR-0025's `key_parity` changes, with tests), and a review of that increment fixed more (section
+3); W4 housekeeping and the six Dependabot merges done 2026-10-30; W2 under way; W3 and the rest of
+W4 not started.
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
@@ -72,8 +74,34 @@ in `key_parity.rs` ("TOML and the Android/.resx dialects arrive with R9") is upd
 #407 also makes changes the table does not list: a missing literal peer is a fail-loud analysis
 failure (before, a gitignored peer never reached the index, and an indexed one that was missing
 was a missing-file violation); the key-set analyzer rejects a row with no key path or from a
-third file instead of ignoring it; both have tests. It also updates the CHANGELOG `key_parity`
-entry and the schema descriptions of `peers` and `format`, which W3's changelog item builds on.
+third file instead of ignoring it; both have tests. It also adds `allow_missing_peers` and the
+`ignore_keys` name matching of ADR-0025, and updates the CHANGELOG `key_parity` entry and the
+schema descriptions of `peers`, `format`, `ignore_keys`, and `allow_missing_peers`, which W3's
+changelog item builds on.
+
+A review of the whole increment after #407 merged found more in `key_parity`, fixed with tests in
+the follow-up pull request:
+
+- **Values in parse errors.** An INI parse error quoted the offending line and an XML parse
+  error could quote an entity name, so a secret on a malformed line reached the finding. Both now
+  report a position only, as the other formats do.
+- **Plural groups decided per file.** CLDR plural groups were merged in each file on its own, so
+  a group complete in the reference and partial in a peer was compared as one key against loose
+  members. Groups are now decided over each reference-peer pair.
+- **`strip_root` on a file without one object root.** A leaf root or a stray second top-level key
+  was compared unstripped and reported every key as different. Such a file is now an analysis
+  failure (the reference stops the run; a peer is skipped), and `strip_root` on a format without
+  nesting is a configuration error.
+- **An explicit `format` on a peer of another key model** was compared under the forced format.
+  A peer whose extension implies another key model is now refused as before, with or without
+  `format`, and so is a literal peer at configuration time.
+- **Bracket-shown names in `ignore_keys`.** A single-name key shown as `['app.title']` could not
+  be ignored by that form; it now can. An index pattern (`[0]`), which never matches a key, is a
+  configuration error, and so is a `peers` value with surrounding whitespace.
+- **YAML complex keys** (a mapping or sequence used as a key) were flattened silently; they are
+  now an analysis failure.
+- Smaller: messages name formats by their configuration spelling, the report notes no longer
+  print a peer's path twice, and the glob matchers compare bytes without allocating.
 
 ## 4. W2: the other gaps behind `r8-readiness.md`'s "pass" rows
 
@@ -88,7 +116,7 @@ that cannot be closed in v0.21 is listed with its reason and the readiness row s
 | W2-4 | The `plugin_api` import-boundary test scans text: it checks only lines starting with `use`/`pub use` plus `crate::` substrings, so `super::super::X` in type position, an external crate path such as `serde::Serialize` in a derive, or a `use` split across lines passes. The module is clean today. | Read | Parse the module and visit every path, allowing only `std`, `core`, `alloc`, the module's own items, and bounded `super::`. |
 | W2-5 | Invariant 6: `FileIndex::read_cache`, `decode_cache`, and `enable_relation_caches` (`walker.rs:315-329`) are documented public methods that return or touch doc-hidden relation types. The test checks only the `mod` declarations. | Read | `#[doc(hidden)]` on the three methods, asserted by the existing visibility test. |
 | W2-6 | The contract bridge (`relation/contract.rs`) does not check a finding's or related location's path, or a row's resource, against the input resources, and accepts any index id. Finding paths are not even normalized or confined: `to_violation` copies them as given (`contract.rs:206`), while row paths at least pass `RelPath::parse` (`contract.rs:146`). Latent until a plugin host exists. | Read | Validate them in the bridge and reject what does not belong to the input. |
-| W2-7 | Nothing in CI checks the WIT draft; R7's evidence is a manual `witforge check`, and nothing compares `plugin_api` with `plugin.wit`. | Read | The tag waits for witforge 0.1.0 (ADR-0025 decision 4): pin it, then run the check, generation, and regeneration `--check` in default CI. #409 (another session) already adds the generated consumer crate and `ci/scripts/witforge-consumer.sh`. |
+| W2-7 | Nothing in CI checks the WIT draft; R7's evidence is a manual `witforge check`, and nothing compares `plugin_api` with `plugin.wit`. | Read | The tag waits for witforge 0.1.0 (ADR-0025 decision 4): pin it, then run the check, generation, and regeneration `--check` in default CI. #409 (another session, open) adds the generated consumer crate and `ci/scripts/witforge-consumer.sh`. |
 | W2-8 | The go/no-go assessment is missing. The release acceptance and the stop rule (`general-linter.md` section 11.1) require a written judgment of whether the ported path became simpler and more consistent, with evidence; `r8-readiness.md` covers performance and the replay only. | Read | The verdict is decided (ADR-0025 decision 3: GO on consistency, three simplicity gates in v0.22). Write the assessment in `r8-readiness.md` from the port's diff, the shadow's shared code paths, and W1's lessons. |
 | W2-9 | S4's workload changed without a revision bump (decided: revision 4, terminated sources, and a same-session kbench run of v0.20.1 against v0.21 on the revision-4 tree, recorded in `r8-readiness.md`). #399 changed `lorem_bytes`, which S4's polyglot tree also uses (`crates/alint-bench/src/tree.rs:375/407/439`), but S4 stayed at revision 3 (`xtask/src/bench/mod.rs:210`). At the tag, `bench-gate` resets S1-S3 and SFIX, so S4 is the only scenario still compared with v0.20.1, across a changed workload. S4's generated sources also still lack the final newline #397 added for S2. | Read | Bump S4 to revision 4 and newline-terminate its generated sources, and say so in the changelog. |
 
@@ -98,14 +126,14 @@ build (W2-2 guards that).
 
 ## 5. W3: documentation and release preparation
 
-- **CHANGELOG `[Unreleased]`:** one `### Fixed` (there are two), one section order (Added,
-  Changed, Performance, Fixed, Security, as recent releases use; `RELEASING.md` step 2 names no
-  Performance section, so it gains one), the `import_gate` prefilter under Performance,
+- **CHANGELOG `[Unreleased]`:** one `### Fixed` (there are two), one section order (Security
+  first when present, then Added, Changed, Performance, Fixed, as 0.18.0 to 0.20.1 use;
+  `RELEASING.md` step 2 names no Performance section, so it gains one), the `import_gate` prefilter under Performance,
   the plugin-contract entry reworded to say what shipped (doc-hidden modules with no semver
   promise, no plugin host; the public additions are `Runner::with_registry` and the test-only
   `shadow-ir` feature), the benchmark entry corrected (every size, and #399's whitespace change),
   W1 and W2's user-visible fixes, and the summary paragraph at the cut.
-- **Stale ADR-0023 citation:** the ROADMAP's v0.21 section (`ROADMAP.md:1673`, public on
+- **Stale ADR-0023 citation:** the ROADMAP's v0.21 section (`docs/design/ROADMAP.md:1673`, public on
   alint.org) cites ADR-0023 alone; it gains ADR-0024, which supersedes it. (`REFERENCE-v0.18.2.md`
   and `general-linter.md` already cite both.)
 - **`plugin-architecture.md`:** status "not yet implemented" and "there is no injection hook"
@@ -143,7 +171,7 @@ build (W2-2 guards that).
 
 - **Redaction hides structural configuration errors.** Every configuration load (not only
   `validate-config`) replaces each validation error with `<redacted>` for a rule that has an
-  env-interpolated field or `sensitive: true` (`alint-dsl/src/lib.rs:530`), even an error that
+  env-interpolated field or `sensitive: true` (`alint-dsl/src/lib.rs:539-549` and `:553-555`), even an error that
   quotes no value. It hid the message of `facebook/react`'s own configuration error during R5
   (its `scope_filter.changed_since` is invalid; the redaction did not cause the failure). It is
   pre-existing, tracked nowhere, and behind no readiness row, so it does not block the tag:
@@ -163,12 +191,18 @@ build (W2-2 guards that).
   `RELEASING.md` (section 7, item 8).
 - **Release toolchain:** `RELEASE_RUST` is 1.98.1 while stable is 1.99.1; bump it at the cut, in
   its own pull request (section 7, item 8).
-- **Dependabot:** #398 (similar, ureq), #378 (Gradle wrapper), #376 (rust-cache), and #377
-  (vscode-languageclient 11; no code change, the VS Code floor stays `^1.91.0`) are green, as are
-  #373 (jsonschema 0.60, a pre-1.0 minor that can change `json_schema_passes` messages) and #375
-  (release actions that pull-request CI does not exercise, so v0.21's release is their first
-  run). All six merge now, one at a time (section 7, item 8); the corpus replay against v0.20.1
-  then covers them. None touches `roxmltree`, which stays at 0.20.
+- **Dependabot:** done 2026-10-30. #398 (similar, ureq), #378 (Gradle wrapper), #376
+  (rust-cache), #377 (vscode-languageclient 11; no code change, the VS Code floor stays
+  `^1.91.0`), #373 (jsonschema 0.60, a pre-1.0 minor that can change `json_schema_passes`
+  messages), and #375 (release actions that pull-request CI does not exercise, so v0.21's release
+  is their first run) merged one at a time with `main` green between them (section 7, item 8).
+  The review that followed re-pinned `Swatinem/rust-cache` to the commit its `v2.9.3` comment
+  names (#376 had pinned an untagged commit), took jsonschema 0.60.2, and added a test that schema
+  compilation never retrieves a remote or file `$ref`. The corpus replay against v0.20.1 covers
+  the six. None touches `roxmltree`, which stays at 0.20.
+- **Action pins can drift from their comments.** Nothing checks that a pinned commit is the one
+  its `# vX.Y.Z` comment names; #376 showed that Dependabot can pin an untagged commit. Add a CI
+  check that resolves each commented tag and compares the commit.
 - **Housekeeping:** 104 local branches, 63 fully merged; remote branches `feat/key-parity`,
   `feat/key-parity-formats`, `feat/relation-ir-r2` (merged) and `bench-record/v0.18.3` (PR
   closed); extra worktrees, one of which (`~/dn0-19-alint.XOcCz0/source`) holds staged changes;
@@ -205,7 +239,7 @@ All decided on 2026-10-30. Items 1, 5, 6, and 7 change the design and are record
    any stable release at least six months old, only when a dependency or language feature needs
    it, in a minor release or a security patch, with a changelog line), staying on 1.88 for now.
    Dependabot: all six open pull requests (#398, #378, #376, #377, #373, #375) merge now, one at
-   a time with `main` green between them. `RELEASE_RUST`: bumped at the cut, in its own pull
+   a time with `main` green between them (done 2026-10-30). `RELEASE_RUST`: bumped at the cut, in its own pull
    request, to the newest stable at least two weeks old, per `RELEASING.md`.
 
 ## 8. Order
