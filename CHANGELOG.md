@@ -23,6 +23,12 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
   (exponential event growth with `ENABLE_WIKILINKS`).
+- The VS Code extension bundles `minimatch` 11.0.3 through an npm override,
+  because `vscode-languageclient` 11 still asks for 10. This fixes
+  GHSA-g3hv-75wg-m249, a pattern-expansion denial of service that only occurs
+  at `optimizationLevel` 2 or higher. The language client uses the default
+  level, so the extension was not exposed. Its development tools move to
+  `glob` 14.0.3 (GHSA-3g3m-2fjr-6pw4).
 
 ### Fixed
 
