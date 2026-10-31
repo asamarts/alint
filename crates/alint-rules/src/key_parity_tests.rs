@@ -988,7 +988,7 @@ fn a_comparison_error_is_an_analysis_failure_not_a_pass() {
         peer: "fr.json".into(),
         direction: Direction::Both,
     })
-    .analyze("t", &foreign, &Limits::default())
+    .analyze("t", &[], &foreign, &Limits::default())
     .unwrap_err();
     assert!(
         error.to_string().contains("neither compared file"),
@@ -1341,7 +1341,7 @@ fn the_analyzer_and_rule_refuse_malformed_comparisons() {
         peer: "fr.json".into(),
         direction: Direction::Both,
     })
-    .analyze("t", &row, &Limits::default())
+    .analyze("t", &[], &row, &Limits::default())
     .unwrap_err();
     assert!(error.to_string().contains("no key path"), "{error}");
 
