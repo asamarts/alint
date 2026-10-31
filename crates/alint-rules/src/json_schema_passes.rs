@@ -571,6 +571,37 @@ mod tests {
     }
 
     #[test]
+    fn compile_never_retrieves_external_references() {
+        // alint never fetches what a config names over the network or from
+        // outside the checkout. jsonschema retrieves `file` and `http(s)`
+        // references only with its `resolve-file` / `resolve-http` features,
+        // which the workspace leaves off. If a crate turned them back on, the
+        // `file` reference below would compile, since its target exists.
+        let dir = tempfile::tempdir().unwrap();
+        let target = dir.path().join("target.json");
+        std::fs::write(&target, r#"{"type": "string"}"#).unwrap();
+        let file_url = format!(
+            "file:///{}",
+            target
+                .to_str()
+                .unwrap()
+                .replace('\\', "/")
+                .trim_start_matches('/')
+        );
+        for (reference, refusal) in [
+            (file_url.as_str(), "`resolve-file`"),
+            ("https://alint.invalid/schema.json", "`resolve-http`"),
+        ] {
+            let path = dir.path().join("schema.json");
+            std::fs::write(&path, serde_json::json!({ "$ref": reference }).to_string()).unwrap();
+            let (kind, message) =
+                compile_schema(&path, std::path::Path::new("schema.json")).expect_err(reference);
+            assert_eq!(kind, AnalysisFailureKind::ResourceParse, "{reference}");
+            assert!(message.contains(refusal), "{reference}: {message}");
+        }
+    }
+
+    #[test]
     fn detect_from_path_handles_standard_extensions() {
         assert_eq!(
             Format::detect_from_path(std::path::Path::new("a.json")),

@@ -1,0 +1,30 @@
+test_version: 1
+name: key_parity treats a partial CLDR plural group as the same key
+tags: [check, key_parity, cross_file, passing]
+
+# Plural groups are decided over the reference and the peer together, so a
+# locale that lacks a category (here `other`) still has the group and is not
+# reported as missing `item` with an extra `item_one`.
+
+given:
+  tree:
+    locales:
+      en.json: |
+        {"title": "Shop", "item_one": "{{count}} item", "item_other": "{{count}} items"}
+      fr.json: |
+        {"title": "Boutique", "item_one": "{{count}} article"}
+  config: |
+    version: 1
+    rules:
+      - id: locales-match-english
+        kind: key_parity
+        reference: locales/en.json
+        peers: "locales/*.json"
+        plurals: cldr
+        level: error
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

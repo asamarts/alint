@@ -395,6 +395,18 @@ impl Violation {
         })
     }
 
+    /// The message without a leading `"{path}: "` that repeats `path`, for a
+    /// renderer that prints the path itself: many rules start a message with
+    /// the slash-separated path of the file it concerns.
+    #[must_use]
+    pub fn message_after_path(&self, path: &Path) -> &str {
+        let shown = path.to_string_lossy().replace('\\', "/");
+        self.message
+            .strip_prefix(shown.as_str())
+            .and_then(|rest| rest.strip_prefix(": "))
+            .unwrap_or(&self.message)
+    }
+
     /// Whether public consumers must suppress the primary and related paths.
     #[must_use]
     pub const fn path_is_sensitive(&self) -> bool {

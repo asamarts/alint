@@ -124,8 +124,10 @@ pub(crate) fn parse(text: &str) -> Result<Value, String> {
         // `key = value` / `key : value`: split on the earliest separator so a value
         // containing the other separator (a URL's `:`, a query's `=`) survives.
         let Some(idx) = line.find(['=', ':']) else {
+            // The line is not quoted: it may be part of a value, such as a
+            // multi-line secret.
             return Err(format!(
-                "line {lineno}: expected `key = value` (or `key : value`), found `{line}`"
+                "line {lineno}: expected `key = value` (or `key : value`)"
             ));
         };
         let key = line[..idx].trim();

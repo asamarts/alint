@@ -26,7 +26,7 @@ mod yaml_value;
 #[cfg(test)]
 use xml_scan::MAX_XML_ATTRS_PER_ELEMENT;
 pub use xml_scan::MAX_XML_DEPTH;
-use xml_scan::xml_within_parse_limits;
+pub(crate) use xml_scan::xml_within_parse_limits;
 
 /// Maximum INPUT size any structured format will parse into a value tree. The read
 /// cap [`crate::walker::MAX_ANALYZE_BYTES`] (256 MiB) bounds bytes, but a parsed tree

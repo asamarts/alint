@@ -4,7 +4,8 @@ Status: **HOLD** (2026-10-29). The pre-tag audit in
 [`pre-release-audit.md`](pre-release-audit.md) found that `key_parity` misses
 real differences (W1), that several "pass" rows below have no gate behind them
 (W2), and that the go/no-go assessment of the port was never written (W2-8).
-The performance and memory evidence below still stands: the benchmark
+W1 has since been fixed (#407, merged 2026-10-30, and the review that followed it); W2 is under
+way. The performance and memory evidence below still stands: the benchmark
 generator writes well-formed Rust text, the Rust import-gate literal prefilter
 removes the remaining S2 slowdown, clean-workload 1M S2 RSS is 118,924 KB
 (within v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. The
@@ -14,11 +15,11 @@ verdict is revisited once W1 and W2 land.
 
 | Gate | Evidence | Status |
 |---|---|---|
-| `key_parity` across eight formats | rule scenarios + 19 unit tests; dotted keys, empty peers, and gitignored literal peers are missed (audit W1-1 to W1-4; fix in #407) | **fail** |
-| `key_parity` `--changed`, trace, fingerprints | e2e scenarios + golden fingerprints (715 tests); the unrelated-edit scenario cannot fail and no determinism test exists (W1-11, W1-12; fix in #407) | **gap** |
+| `key_parity` across eight formats | 25 e2e scenarios + 47 unit tests; dotted keys, empty peers, and gitignored literal peers (audit W1-1 to W1-4) fixed in #407, and per-file plural grouping, `strip_root` on a file without one object root, and values in parse errors fixed in the review after it | pass |
+| `key_parity` `--changed`, trace, fingerprints | e2e scenarios + golden fingerprints (729 tests); the unrelated-edit scenario now fails a full run, and a determinism test runs shuffled index orders and several thread counts (W1-11, W1-12, #407) | pass |
 | `cross_file` `equals` shadow | e2e + property generator; 0 differences | pass |
 | Corpus shadow replay | expanded-scope run 40912352842 vs `v0.20.1`: 106/110 replayed, 4 expected skips, 0 crashed, 0 differ | pass |
-| Contract traits and bridge | adapter/analyzer bridge tests; `key_parity` uses `ContractAnalyzer`, but the rule drops the analyzer's errors and the analyzer misses dotted keys (W1-1, W1-3; fix in #407); the bridge does not validate or confine finding paths (W2-6) | **fail** |
+| Contract traits and bridge | adapter/analyzer bridge tests; `key_parity` uses `ContractAnalyzer` and reports its errors (W1-1, W1-3, fixed in #407); the bridge does not validate or confine finding paths (W2-6, latent until a plugin host exists) | **gap** |
 | Relation limits | defined with defaults and caps; `RowsPerRun` and `DistinctValues` are not enforced and the join limits have no consumer (W2-3) | **gap** |
 | Invariants 6-8: visibility, feature isolation, contract boundary | module visibility test; `check-shadow-feature-tree.sh`; text-scan import test. Three cache methods are public and undocumented as hidden (W2-5), the feature check passes with a leak injected (W2-2), and the import test misses non-`use` paths (W2-4) | **gap** |
 | Registry injection | CLI, LSP, testkit (`Runner::with_registry`), DSL catalog; `alint test`, `rules show`/`list`, and LSP hover bypass it, and no test runs a custom kind (W2-1) | **gap** |
@@ -64,9 +65,8 @@ verdict is revisited once W1 and W2 land.
 
 ## Remaining release work
 
-1. W1 and W2 of [`pre-release-audit.md`](pre-release-audit.md): fix
-   `key_parity` and give it a determinism test (W1, #407), then close the
-   gaps behind the rows the audit disputes (W2: registry injection, the
+1. W2 of [`pre-release-audit.md`](pre-release-audit.md) (W1 is done in
+   #407): close the gaps behind the rows the audit disputes (W2: registry injection, the
    shadow feature-tree check, limits, the import-boundary test, the cache
    methods' visibility, the contract bridge's path checks, the WIT check,
    S4's workload revision), each with a gate.

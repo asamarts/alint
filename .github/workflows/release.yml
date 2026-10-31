@@ -87,7 +87,7 @@ jobs:
       - name: pin the release toolchain (overrides rust-toolchain.toml)
         shell: bash
         run: ci/scripts/pin-release-toolchain.sh
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: release-preflight
       - name: fmt
@@ -168,7 +168,7 @@ jobs:
       - name: pin the release toolchain (overrides rust-toolchain.toml)
         shell: bash
         run: ci/scripts/pin-release-toolchain.sh
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: release-${{ matrix.target }}
 
@@ -228,7 +228,7 @@ jobs:
       - name: pin the release toolchain (overrides rust-toolchain.toml)
         shell: bash
         run: ci/scripts/pin-release-toolchain.sh
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: release-supply-chain
       - name: generate SBOM + third-party license bundle
@@ -639,11 +639,11 @@ jobs:
       - name: pin the release toolchain (overrides rust-toolchain.toml)
         shell: bash
         run: ci/scripts/pin-release-toolchain.sh
-      - uses: Swatinem/rust-cache@c8037a86dde8214a8310e9f54a8fc61ab362aa31 # v2
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: publish-crates
       - name: mint a short-lived crates.io token via OIDC
-        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1
+        uses: rust-lang/crates-io-auth-action@3268eb413133e2960fa4ae0e963ca76380c54cd9 # v1.0.6
         id: crates-auth
       - name: publish all 6 crates in dependency order
         env:
@@ -938,7 +938,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
       - name: stamp version from tag + publish
         env:
           # Repo secrets (Settings → Secrets → Actions):

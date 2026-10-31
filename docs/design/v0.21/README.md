@@ -3,7 +3,9 @@
 Status: Accepted (2026-10-24). The eight decisions in "Decisions" are recorded in
 [ADR-0023](../../adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md); the corrections
 review found are recorded in [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md),
-which supersedes it and which this document follows.
+which supersedes it and which this document follows. The owner's pre-release decisions are
+recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly supersedes
+ADR-0024 decision 4; where this document disagrees with ADR-0025, the ADR applies.
 Decisions it builds on: [ADR-0019](../../adr/0019-general-linter-program-and-plugin-architecture.md)
 (DEC-2, DEC-5, DEC-7, DEC-8, DEC-10, DEC-13, DEC-14). Questions it decides: Q4, Q10, and Q13;
 the port's results feed Q8, which is decided per kind later.
@@ -172,8 +174,13 @@ are the authoritative, non-IR implementation), so they cannot.
   - `direction` (`both`, `missing` or `extra`; default `both`);
   - `plurals` (`exact` or `cldr`; default `exact`);
   - `strip_root` (default `false`): when every compared file has exactly one top-level key, as
-    Rails locale files do (`en:`, `fr:`), compare below it;
-  - `ignore_keys` (key-path globs: `*` within a segment, `**` across segments).
+    Rails locale files do (`en:`, `fr:`), compare below it (JSON, YAML, and TOML only; a file
+    whose root is not one object is an analysis failure, corrected 2026-10-30);
+  - `ignore_keys` (key-path globs: `*` within a segment, `**` across segments; for dotenv,
+    properties, and `.resx`, a glob over the key as written, per ADR-0025 decision 1);
+  - `allow_missing_peers` (default `false`): an absent literal peer, or a `peers` glob that
+    matches nothing, becomes an informational note instead of an analysis failure (ADR-0025
+    decision 2).
 - **Formats (V21-3):**
   - The five row formats: JSON, YAML, dotenv, INI, and Java properties.
   - TOML, through a new lossless row adapter on `toml_edit`. `[nav] home = ...` and
@@ -227,8 +234,9 @@ are the authoritative, non-IR implementation), so they cannot.
 - **Failures:**
   - A missing reference file is a finding that always counts as error (DEC-2).
   - A reference or a peer that fails to parse is an analysis failure for that file.
-  - A `peers` glob that matches no file is an error-level finding: a misconfiguration, never a
-    pass.
+  - A `peers` glob that matches no file, or a literal peer that is absent, is an analysis
+    failure: a misconfiguration, never a pass. With `allow_missing_peers: true` it is an
+    informational note (ADR-0025 decision 2; corrected 2026-10-30).
   - Duplicate keys within one file are not parity violations; they are the concern of the planned
     B1 `no_duplicate_keys` kind. Rows keep them, and parity compares distinct key paths.
   - The `reference`, and any `peers` entry without glob characters, is a literal path read from
@@ -241,7 +249,9 @@ are the authoritative, non-IR implementation), so they cannot.
   full index. The scope is the rule's whole context, so this does not narrow what it compares
   (section 9.1). Constitution invariant 2 forbids narrowing a full-index rule's evaluation; this
   only decides whether the rule runs. R3 tests that the scope covers both the reference and the
-  peers, that a peer-only edit runs the rule, and that an unrelated edit skips it.
+  peers, that a peer-only edit runs the rule, and that an unrelated edit skips it. A rule with a
+  literal peer (such as `.env`) runs on every `--changed` run instead: git cannot report an edit
+  to a gitignored file, so its scope matches everything (corrected 2026-10-30).
 - **Fixes:** none in v0.21. ADR-0017 classifies key insertion as a Suggestion, and stub insertion
   waits for the generic edit plan.
 - **Baseline key:** sorted identity fields (peer path, key path, direction), per DEC-5.
@@ -462,6 +472,11 @@ v0.21 is complete only when all of the following are observed:
   with the evidence. If it did not, the stop rule applies and Phase 3 does not start.
 - Full workspace, cross-platform, shell, advisory, and preflight checks pass, and generated
   artifacts (schema, facts, docs export, roadmap) regenerate cleanly.
+- witforge 0.1.0 is published and pinned, and default CI checks the WIT draft and regenerates its
+  consumer with `--check` (ADR-0025 decision 4).
+
+ADR-0025 decision 3 settled the go/no-go assessment as a GO on consistency; the simplicity it
+could not show moves to three gates v0.22 must pass before Phase 3 starts.
 
 ## Risks
 
@@ -514,7 +529,7 @@ v0.21 is complete only when all of the following are observed:
   the run-scoped cache. Its instruction and syscall counts are recorded in
   [`REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md#relation-scenario).
   The pre-tag audit found correctness gaps in the kind (W1 in
-  [`pre-release-audit.md`](pre-release-audit.md)).
+  [`pre-release-audit.md`](pre-release-audit.md)), fixed by #407 and the review that followed it.
 - **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
   the row/diagnostic model, the strict-versus-lossy decoding split, and the
   read/decode cache design that R2 implements.
@@ -604,14 +619,15 @@ v0.21 is complete only when all of the following are observed:
   ([`pre-release-audit.md`](pre-release-audit.md), 2026-10-29) moved the
   verdict from GO to HOLD: `key_parity` misses dotted keys and empty peers
   since R6b's bridge change and cannot read a gitignored literal peer, several
-  readiness rows have no gate, and the go/no-go assessment is unwritten.
+  readiness rows have no gate, and the go/no-go assessment is unwritten. W1 has since been fixed
+  (#407, merged 2026-10-30).
 - **Decisions (2026-10-30).** [ADR-0025](../../adr/0025-v021-pre-release-decisions.md)
   records the owner's calls from the audit: single-name keys shown as written,
   an opt-in `allow_missing_peers`, a GO on consistency with three simplicity
   gates for v0.22 before Phase 3 may start, and no tag until witforge 0.1.0's
   regeneration check runs in CI. Section 7 of the audit lists the rest.
-- **Next:** the audit's W1 (`key_parity` correctness, with ADR-0025's changes)
-  and W2 (the remaining readiness gaps and the go/no-go write-up), then W3's
+- **Next:** the audit's W2 (the remaining readiness gaps and the go/no-go
+  write-up; W1 is done), then W3's
   documentation and release preparation (version bump, changelog, generated
   artifacts, release preflight and cross-platform checks) and, once witforge
   0.1.0 is checked in CI, the tag.

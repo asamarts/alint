@@ -67,6 +67,12 @@ fn leaf_keys_drop_containers_and_array_members() {
     );
 }
 
+/// One file's keys with the CLDR plural groups it forms on its own.
+fn merged_alone(keys: &Keys) -> Keys {
+    let nested = merge_nested_groups(keys, &nested_plural_groups(&[keys]));
+    merge_i18next_groups(&nested, &i18next_plural_groups(&[&nested]))
+}
+
 #[test]
 fn plural_groups_merge_nested_and_i18next_keys() {
     let mut keys = BTreeMap::new();
@@ -84,7 +90,7 @@ fn plural_groups_merge_nested_and_i18next_keys() {
     ] {
         keys.insert(parts, span);
     }
-    let keys = merge_i18next_groups(&merge_plural_groups(&keys));
+    let keys = merged_alone(&keys);
     assert_eq!(
         keys.keys().map(|key| render_key(key)).collect::<Vec<_>>(),
         ["item", "msg"]
@@ -583,8 +589,272 @@ fn single_name_ignore_patterns_match_the_name() {
     assert_eq!(ignored("app.*").len(), 1, "`*` stops at the dot");
     assert_eq!(
         ignored("['app.*']").len(),
-        2,
-        "a flat name has no bracket form"
+        1,
+        "a bracketed pattern is the name it brackets"
+    );
+}
+
+#[test]
+fn bracket_shown_single_names_are_ignored_as_shown() {
+    // A name that is empty or starts with `[` is shown in bracket form, and
+    // `ignore_keys` takes the form the finding shows.
+    let run_with = |ignore: &str| {
+        messages(&run(
+            &format!(
+                "id: t\nkind: key_parity\nreference: en.properties\npeers: fr.properties\nignore_keys: {ignore}\nlevel: error\n"
+            ),
+            &[
+                ("en.properties", b"[x=1\n=2\nkept=3\n"),
+                ("fr.properties", b"kept=3\n"),
+            ],
+        ))
+    };
+    let shown = run_with("[]");
+    assert!(shown.iter().any(|m| m.contains("`['[x']`")), "{shown:?}");
+    assert!(shown.iter().any(|m| m.contains("`['']`")), "{shown:?}");
+    assert_eq!(run_with(r#"["['[x']", "['']"]"#), Vec::<String>::new());
+    let error = build(&spec_yaml(
+        "id: t\nkind: key_parity\nreference: en.properties\npeers: fr.properties\nignore_keys: [\"['a'].b\"]\nlevel: error\n",
+    ))
+    .expect_err("one bracketed name only");
+    assert!(error.to_string().contains("one `['...']`"), "{error}");
+}
+
+#[test]
+fn index_patterns_and_padded_peers_are_config_errors() {
+    for (options, expected) in [
+        (
+            "peers: '*.json'\nignore_keys: ['items[0]']",
+            "never matches",
+        ),
+        ("peers: ' *.json'", "whitespace"),
+    ] {
+        let error = build(&spec_yaml(&format!(
+            "id: t\nkind: key_parity\nreference: en.json\n{options}\nlevel: error\n"
+        )))
+        .expect_err(options);
+        assert!(error.to_string().contains(expected), "{options}: {error}");
+    }
+}
+
+#[test]
+fn glob_matchers_compare_bytes_like_characters() {
+    assert!(key_glob_match("é*", "éa"));
+    assert!(key_glob_match("*é", "aé"));
+    assert!(!key_glob_match("a*b", "a.b"));
+    assert!(key_glob_match("a**b", "a.b"));
+    assert!(key_glob_match("app.**", "app.menu.item"));
+    assert!(!key_glob_match("app.*", "app.menu.item"));
+    assert!(key_glob_match("", ""));
+    assert!(!key_glob_match("", "x"));
+    assert!(wildcard_match("*é*", "aéb"));
+    assert!(!wildcard_match("é", "e"));
+    assert!(wildcard_match("a*", "a"));
+}
+
+#[test]
+fn parse_failures_never_quote_values() {
+    const SECRET: &str = "MIIEowIBAAKCAQEAsecretmaterial";
+    let ini = format!("[s]\npassword = -----BEGIN RSA PRIVATE KEY-----\n{SECRET}\n");
+    let android = format!("<resources><string name=\"a\">&{SECRET};</string></resources>");
+    let ini_reference: (&str, &[u8]) = ("en.ini", b"[s]\npassword=x\n");
+    let android_reference: (&str, &[u8]) = (
+        "values/strings.xml",
+        b"<resources><string name=\"a\">A</string></resources>",
+    );
+    for (yaml, reference, peer, bytes) in [
+        (
+            "reference: en.ini\npeers: fr.ini",
+            ini_reference,
+            "fr.ini",
+            ini.as_bytes(),
+        ),
+        (
+            "reference: values/strings.xml\npeers: 'values-*/strings.xml'\nformat: android-strings",
+            android_reference,
+            "values-fr/strings.xml",
+            android.as_bytes(),
+        ),
+    ] {
+        let findings = run(
+            &format!("id: t\nkind: key_parity\n{yaml}\nlevel: error\n"),
+            &[reference, (peer, bytes)],
+        );
+        assert!(
+            findings
+                .iter()
+                .any(|v| matches!(v.disposition, FindingDisposition::AnalysisFailure(_))),
+            "{peer}: {:?}",
+            messages(&findings)
+        );
+        for message in messages(&findings) {
+            assert!(!message.contains(SECRET), "{peer}: {message}");
+        }
+    }
+}
+
+#[test]
+fn plural_groups_are_decided_over_both_files() {
+    let cldr = |reference: &str, peer: &str, files: &[(&str, &[u8])]| {
+        messages(&run(
+            &format!(
+                "id: t\nkind: key_parity\nreference: {reference}\npeers: {peer}\nplurals: cldr\nlevel: error\n"
+            ),
+            files,
+        ))
+    };
+    // A locale with fewer categories keeps the group.
+    assert_eq!(
+        cldr(
+            "en.json",
+            "fr.json",
+            &[
+                ("en.json", br#"{"item_one":"a","item_other":"b"}"#),
+                ("fr.json", br#"{"item_one":"a"}"#),
+            ]
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        cldr(
+            "en.yml",
+            "fr.yml",
+            &[
+                ("en.yml", b"count:\n  one: a\n  other: b\n"),
+                ("fr.yml", b"count:\n  one: a\n"),
+            ]
+        ),
+        Vec::<String>::new()
+    );
+    assert_eq!(
+        cldr(
+            "values/strings.xml",
+            "values-fr/strings.xml\nformat: android-strings",
+            &[
+                (
+                    "values/strings.xml",
+                    b"<resources><string name=\"share_one\">a</string><string name=\"share_other\">b</string></resources>"
+                ),
+                (
+                    "values-fr/strings.xml",
+                    b"<resources><string name=\"share_one\">a</string></resources>"
+                ),
+            ]
+        ),
+        Vec::<String>::new()
+    );
+    // A base that is a real key in either file is never merged, so the
+    // difference is the real key.
+    let missing = cldr(
+        "en.json",
+        "fr.json",
+        &[
+            ("en.json", br#"{"msg":"m","msg_one":"a","msg_other":"b"}"#),
+            ("fr.json", br#"{"msg_one":"a","msg_other":"b"}"#),
+        ],
+    );
+    assert_eq!(missing.len(), 1, "{missing:?}");
+    assert!(missing[0].contains("missing key `msg`"), "{missing:?}");
+    let extra = cldr(
+        "en.json",
+        "fr.json",
+        &[
+            ("en.json", br#"{"msg_one":"a","msg_other":"b"}"#),
+            ("fr.json", br#"{"msg":"m","msg_one":"a","msg_other":"b"}"#),
+        ],
+    );
+    assert_eq!(extra.len(), 1, "{extra:?}");
+    assert!(extra[0].contains("extra key `msg`"), "{extra:?}");
+}
+
+#[test]
+fn strip_root_needs_one_object_root_in_every_file() {
+    let strip = |files: &[(&str, &[u8])]| {
+        run(
+            "id: t\nkind: key_parity\nreference: en.yml\npeers: '*.yml'\nstrip_root: true\nlevel: error\n",
+            files,
+        )
+    };
+    // A lone leaf is not a root to strip below.
+    let leaf = strip(&[
+        ("en.yml", b"greeting: Hello\n"),
+        ("fr.yml", b"farewell: Bye\n"),
+    ]);
+    assert_eq!(leaf.len(), 1, "{:?}", messages(&leaf));
+    assert!(matches!(
+        leaf[0].disposition,
+        FindingDisposition::AnalysisFailure(_)
+    ));
+    assert!(leaf[0].message.contains("an object"), "{}", leaf[0].message);
+    // One file without a single root fails alone; the others still compare.
+    let stray = strip(&[
+        ("en.yml", b"en:\n  a: A\n  b: B\n"),
+        ("de.yml", b"de:\n  a: A\n  b: B\n"),
+        ("fr.yml", b"fr:\n  a: A\n  b: B\nstray: x\n"),
+    ]);
+    assert_eq!(stray.len(), 1, "{:?}", messages(&stray));
+    assert_eq!(stray[0].path.as_deref(), Some(Path::new("fr.yml")));
+    assert!(
+        stray[0].message.contains("one top-level key"),
+        "{}",
+        stray[0].message
+    );
+    let error = build(&spec_yaml(
+        "id: t\nkind: key_parity\nreference: en.properties\npeers: '*.properties'\nstrip_root: true\nlevel: error\n",
+    ))
+    .expect_err("strip_root needs a tree format");
+    assert!(
+        error.to_string().contains("JSON, YAML, and TOML"),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_explicit_format_still_refuses_another_key_model() {
+    let error = build(&spec_yaml(
+        "id: t\nkind: key_parity\nreference: en.yml\npeers: fr.properties\nformat: yaml\nlevel: error\n",
+    ))
+    .expect_err("a literal peer in another model");
+    assert!(error.to_string().contains("(properties)"), "{error}");
+    let findings = run(
+        "id: t\nkind: key_parity\nreference: locales/en.yml\npeers: 'locales/*'\nformat: yaml\nlevel: error\n",
+        &[
+            ("locales/en.yml", b"a: 1\n"),
+            ("locales/fr.properties", b"a=1\n"),
+        ],
+    );
+    assert_eq!(findings.len(), 1, "{:?}", messages(&findings));
+    assert!(matches!(
+        findings[0].disposition,
+        FindingDisposition::AnalysisFailure(_)
+    ));
+    assert!(
+        findings[0]
+            .message
+            .contains("format properties has a different key model"),
+        "{}",
+        findings[0].message
+    );
+}
+
+#[test]
+fn yaml_complex_keys_fail_instead_of_moving_values() {
+    let findings = run(
+        "id: t\nkind: key_parity\nreference: en.yml\npeers: fr.yml\nlevel: error\n",
+        &[
+            ("en.yml", b"nav:\n  home: Home\n"),
+            ("fr.yml", b"? [complex, key]\n: nav:\n    home: Accueil\n"),
+        ],
+    );
+    assert_eq!(findings.len(), 1, "{:?}", messages(&findings));
+    assert!(matches!(
+        findings[0].disposition,
+        FindingDisposition::AnalysisFailure(_)
+    ));
+    assert!(
+        findings[0].message.contains("complex"),
+        "{}",
+        findings[0].message
     );
 }
 
@@ -668,8 +938,8 @@ fn a_comparison_error_is_an_analysis_failure_not_a_pass() {
     };
     let (reference, reference_file) = load("en.json", &mut findings);
     let (peer, peer_file) = load("fr.json", &mut findings);
-    let reference_keys = transform(&reference_file, Plurals::Exact, false, &[]);
-    let peer_keys = transform(&peer_file, Plurals::Exact, false, &[]);
+    let reference_keys = base_keys(&reference_file, false);
+    let peer_keys = base_keys(&peer_file, false);
     let rows = key_rows(&reference, &reference_keys).unwrap();
     let compared = Compared {
         file: &reference_file,
@@ -844,27 +1114,21 @@ fn only_whole_plural_objects_merge_and_merges_never_hide_keys() {
     // `other` plus a non-category sibling: not a plural group.
     let mixed = keys(&[&["item", "one"], &["item", "other"], &["item", "label"]]);
     assert_eq!(
-        render(merge_plural_groups(&mixed)),
+        render(merged_alone(&mixed)),
         ["item.label", "item.one", "item.other"]
     );
     // A container child also disqualifies the parent.
     let nested = keys(&[&["item", "other"], &["item", "one", "x"]]);
-    assert_eq!(
-        render(merge_plural_groups(&nested)),
-        ["item.one.x", "item.other"]
-    );
+    assert_eq!(render(merged_alone(&nested)), ["item.one.x", "item.other"]);
     // An i18next base that is already a key stays unmerged.
     let colliding = keys(&[&["msg"], &["msg_one"], &["msg_other"]]);
     assert_eq!(
-        render(merge_i18next_groups(&colliding)),
+        render(merged_alone(&colliding)),
         ["msg", "msg_one", "msg_other"]
     );
     // So does an empty base.
     let empty_base = keys(&[&["_one"], &["_other"]]);
-    assert_eq!(
-        render(merge_i18next_groups(&empty_base)),
-        ["_one", "_other"]
-    );
+    assert_eq!(render(merged_alone(&empty_base)), ["_one", "_other"]);
 }
 
 #[test]
