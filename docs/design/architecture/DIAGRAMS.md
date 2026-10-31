@@ -138,6 +138,7 @@ graph TB
   AlintTooling.Bench -.-> AlintCli.Dsl
   AlintTooling.Bench -.-> AlintCli.Output
   AlintTooling.Bench -.-> AlintCli.Rules
+  AlintTooling.Consumer -.-> AlintCli.Core
   AlintTooling.E2e -.-> AlintCli.Core
   AlintTooling.E2e -.-> AlintCli.Dsl
   AlintTooling.E2e -.-> AlintCli.Output
