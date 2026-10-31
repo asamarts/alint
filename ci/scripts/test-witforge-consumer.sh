@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # Controls for witforge-consumer.sh. In a copy of the contract and the
 # generated consumer crate, the unmodified copy must pass; a changed, extra, or
-# missing generated file must fail naming it; and a contract whose wire lock
-# lost an entry must fail `witforge check`.
+# missing generated file must fail naming it; a contract whose wire lock lost
+# an entry must fail `witforge check`; a version directory the script does not
+# check must fail; and `--write` must restore a changed file.
 #
-# Needs witforge. Without it this harness skips, unless WITFORGE_REQUIRED=1
-# (set by the CI job that installs the pinned release), where it fails.
+# Needs witforge. Without it this harness skips (exit 77, which
+# shell-tests.sh reports as skipped), unless WITFORGE_REQUIRED=1 (set by the CI
+# job that installs the pinned release), where it fails.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -16,7 +18,7 @@ if ! "$WITFORGE_BIN" --version >/dev/null 2>&1; then
     exit 1
   fi
   echo "[witforge-consumer] skipped: witforge is not installed (WITFORGE_REQUIRED=1 makes this fail)"
-  exit 0
+  exit 77
 fi
 export WITFORGE_BIN
 
@@ -67,7 +69,7 @@ control() {
   fi
 }
 
-for file in src/plain/v0_1.rs src/glue/mod.rs src/glue/v0.rs proto/v0.proto; do
+for file in src/plain/mod.rs src/plain/v0_1.rs src/glue/mod.rs src/glue/v0.rs proto/v0.proto; do
   control "changed-${file//\//-}" "changed generated file \`$CRATE/$file\`" \
     "echo '// edited by hand' >> '$CRATE/$file'"
 done
@@ -85,6 +87,32 @@ entries = [i for i, line in enumerate(lines) if line.strip() and not line.starts
 del lines[entries[-1]]
 open(path, 'w').write(''.join(lines))
 PY"
+control unchecked-version "this script checks only v0.1" \
+  "cp -R wit/alint-plugin/v0.1 wit/alint-plugin/v0.2"
+
+# --write regenerates a changed file, after which the check passes again.
+rewritten="$TMP_ROOT/write"
+cp -R "$pristine" "$rewritten"
+echo '// edited by hand' >> "$rewritten/$CRATE/src/glue/v0.rs"
+set +e
+out=$(bash "$rewritten/ci/scripts/witforge-consumer.sh" --write 2>&1)
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  fail "--write failed (rc=$rc):"
+  printf '%s\n' "$out" >&2
+elif ! diff -r "$pristine" "$rewritten" >/dev/null; then
+  fail "--write left the copy different from the committed tree:"
+  diff -r "$pristine" "$rewritten" >&2 || true
+else
+  run_check "$rewritten"
+  if [[ $rc -ne 0 ]]; then
+    fail "the check fails after --write (rc=$rc):"
+    printf '%s\n' "$out" >&2
+  else
+    echo "ok: --write restores a changed file"
+  fi
+fi
 
 if [[ $failures -ne 0 ]]; then
   echo "[witforge-consumer] $failures control(s) failed" >&2
