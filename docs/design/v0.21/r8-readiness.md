@@ -1,15 +1,14 @@
 # v0.21 R8 release-readiness report
 
-Status: **HOLD** (2026-10-29). The pre-tag audit in
-[`pre-release-audit.md`](pre-release-audit.md) found that `key_parity` misses
-real differences (W1), that several "pass" rows below have no gate behind them
-(W2), and that the go/no-go assessment of the port was never written (W2-8).
-W1 has since been fixed (#407, merged 2026-10-30, and the review that followed it); W2 is under
-way. The performance and memory evidence below still stands: the benchmark
-generator writes well-formed Rust text, the Rust import-gate literal prefilter
-removes the remaining S2 slowdown, clean-workload 1M S2 RSS is 118,924 KB
-(within v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. The
-verdict is revisited once W1 and W2 land.
+Status: **HOLD** (2026-10-29). The pre-tag audit in [`pre-release-audit.md`](pre-release-audit.md)
+found that `key_parity` misses real differences (W1), that several "pass" rows below have no gate
+behind them (W2), and that the go/no-go assessment of the port was never written (W2-8). W1 has
+since been fixed (#407, merged 2026-10-30, and the review that followed it), and W2 is done (#411)
+except W2-7, which waits on witforge 0.1.0. The performance and memory evidence below still
+stands: the benchmark generator writes well-formed Rust text, the Rust import-gate literal
+prefilter removes the remaining S2 slowdown, clean-workload 1M S2 RSS is 118,924 KB (within
+v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. The status stays HOLD until the
+remaining release work below is done.
 
 ## Acceptance matrix
 
@@ -26,7 +25,7 @@ verdict is revisited once W1 and W2 land.
 | WIT draft | `witforge check wit/alint-plugin/0.1.0` (v2 wire lock), run by hand; no CI check (W2-7). The tag waits for witforge 0.1.0 and a CI regeneration check (ADR-0025 decision 4) | **blocked** |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
-| S4 workload | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; the same-session kbench run of v0.20.1 against v0.21 on the revision-4 tree is pending (W2-9) | **gap** |
+| S4 workload vs `v0.20.1` | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; same-session kbench run on the revision-4 tree, full and changed, 30 runs at 100k and three at 1M (W2-9) | pass (worst +2.12%, 1M changed) |
 | Go/no-go assessment of the port | written below (W2-8): GO on consistency, simplicity gated in v0.22 (ADR-0025 decision 3), with gate 2 measured as ADR-0026 defines | pass |
 | Generated artifacts | preflight: schema, facts, architecture, docs export, roadmap | pass |
 | Formatting, clippy, workspace tests | preflight | pass |
@@ -54,6 +53,21 @@ verdict is revisited once W1 and W2 land.
 - Benchmark-generator correction: generated `.rs` sources now end with a
   newline, so S2 does not fabricate one `final_newline` finding per file.
   S1-S3 carry workload revision 2; S4 carries revision 4 (W2-9).
+- S4 revision 4, kbench, caches dropped, one session (2026-10-30), in ABBA
+  order: v0.21 at 100k, v0.20.1 at 100k, v0.20.1 at 1M, then v0.21 at 1M.
+  v0.21 (built from #411's `crates/`, unchanged through its merge) against
+  v0.20.1 (the tag), median wall-clock: 100k full 857.1 vs 871.5 ms (−1.65%), 100k
+  changed 868.7 vs 875.5 ms (−0.78%), 1M full 8.920 vs 9.030 s (−1.22%), 1M
+  changed 10.497 vs 10.279 s (+2.12%; the fastest runs differ by +0.79%, and
+  v0.21's three runs span 10.29-10.84 s). Section 9.6's +3% wall-clock budget
+  holds. ADR-0024 decision 6 keeps S4 out of the v0.18.2 comparison, so this run
+  is S4's only check.
+- Revision 4 removes the per-file findings that dominated S4's full runs
+  (v0.20.1 at 1M: 15.55 s recorded under revision 3, 9.03 s here). Changed runs
+  did not get faster (v0.20.1 at 100k: 884 ms recorded, 876 ms here; at 1M,
+  9.12 s and 10.28 s, from different sessions). So on this workload a changed
+  run is now no faster than a full one in either version: level at 100k, about
+  14% slower at 1M. That cost comes from `--changed` itself, not from v0.21.
 - Clean-workload 1M S2 peak RSS: v0.18.2 118,044 KB; v0.20.1 119,420 KB;
   current 118,924 KB (+0.75% vs v0.18.2, below v0.20.1).
 - Clean-workload 1M S2 wall-clock: v0.20.1 5.861 s; current 5.357 s (−8.6%).
@@ -110,14 +124,12 @@ applies:
 
 ## Remaining release work
 
-1. W2-9's same-session kbench run of v0.20.1 against v0.21 on S4's revision-4 tree (100k and
-   1M), recorded here.
-2. W3 of [`pre-release-audit.md`](pre-release-audit.md): changelog, documentation, and release
+1. W3 of [`pre-release-audit.md`](pre-release-audit.md): changelog, documentation, and release
    preparation (version bump, generated artifacts, full release preflight, cross-platform
    checks, a fresh corpus replay).
-3. Wait for witforge 0.1.0 and run the contract's regeneration check in default CI (W2-7,
+2. Wait for witforge 0.1.0 and run the contract's regeneration check in default CI (W2-7,
    ADR-0025 decision 4).
-4. Tag only after those checks pass.
+3. Tag only after those checks pass.
 
 ## Go/no-go
 

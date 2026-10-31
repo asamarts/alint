@@ -626,8 +626,15 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   an opt-in `allow_missing_peers`, a GO on consistency with three simplicity
   gates for v0.22 before Phase 3 may start, and no tag until witforge 0.1.0's
   regeneration check runs in CI. Section 7 of the audit lists the rest.
-- **Next:** the audit's W2 (the remaining readiness gaps and the go/no-go
-  write-up; W1 is done), then W3's
-  documentation and release preparation (version bump, changelog, generated
-  artifacts, release preflight and cross-platform checks) and, once witforge
-  0.1.0 is checked in CI, the tag.
+  [ADR-0026](../../adr/0026-measuring-the-v022-simplicity-gate.md) then set how
+  the second gate is counted: `equals`-only code on both sides, a bound of 134
+  lines instead of 190.
+- **W2 (#411).** Gates for the readiness rows that had none (registry
+  injection, feature isolation, relation limits, the contract boundary, the
+  bridge's path checks), the go/no-go assessment in
+  [`r8-readiness.md`](r8-readiness.md), and S4 workload revision 4 with a
+  same-session kbench run against v0.20.1. W2-7, the WIT check in CI, waits on
+  witforge 0.1.0.
+- **Next:** W3's documentation and release preparation (version bump,
+  changelog, generated artifacts, release preflight and cross-platform checks)
+  and, once witforge 0.1.0 is checked in CI, the tag.
