@@ -9,7 +9,9 @@
 # over the **shipped** crates only — `xtask` is dev tooling
 # (hyperfine wrappers, docs-export, scenario generators) whose
 # coverage is structurally low and not user-facing, so it's
-# excluded from both report and floor.
+# excluded from both report and floor, as is the unpublished
+# `alint-witforge-consumer`, whose code witforge, prost, and
+# pbjson generate.
 #
 # Set ALINT_COVERAGE_FLOOR=<float> to override locally.
 set -euo pipefail
@@ -20,8 +22,10 @@ cd "$REPO_ROOT"
 FLOOR="${ALINT_COVERAGE_FLOOR:-85.0}"
 OUT_DIR="${ALINT_COVERAGE_OUT:-target/coverage}"
 # Regex matched against source-file paths in the coverage
-# report. `xtask/` excludes the whole xtask crate.
-EXCLUDE_REGEX='xtask/'
+# report. `xtask/` excludes the whole xtask crate;
+# `alint-witforge-consumer` excludes that crate and the code its
+# build script writes under target/.
+EXCLUDE_REGEX='xtask/|alint-witforge-consumer'
 
 # Cap build parallelism to bound peak memory. The instrumented `--workspace`
 # build of the big test crates (proptest + full `-C instrument-coverage`)

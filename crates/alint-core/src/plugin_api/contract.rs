@@ -1,4 +1,5 @@
-//! Contract-side rows, findings, limits, and the `Adapter`/`Analyzer` traits.
+//! Contract-side resources, rows, findings, inputs, errors, and the
+//! `Adapter`/`Analyzer` traits.
 //!
 //! These types are deliberately independent of the engine's relation layer:
 //! the bridge in `crate::relation::contract` converts between them. That keeps
@@ -163,10 +164,12 @@ pub trait Analyzer: Send + Sync {
     fn analyze(&self, input: AnalyzerInput<'_>) -> Result<Vec<Finding>, AnalyzerError>;
 }
 
-/// Capabilities a host advertises for a plugin.
+/// Capabilities a plugin may request.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct Capabilities {
+    /// May spawn a user command.
     pub spawn_user_command: bool,
+    /// May read the host keyring.
     pub host_keyring: bool,
 }
 

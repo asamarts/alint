@@ -250,6 +250,7 @@ dependencies = [
  "protox",
  "serde",
  "serde_json",
+ "syn 2.0.117",
 ]
 
 [[package]]

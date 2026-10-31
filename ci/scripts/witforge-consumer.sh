@@ -3,15 +3,18 @@
 # against witforge (ADR-0025 decision 4).
 #
 # 1. `witforge check` validates the contract against witforge's WIT subset and
-#    its wire lock.
+#    its wire lock. Only v0.1 exists; a new version directory fails here until
+#    its check is added (a new minor checks `--against` the previous version's
+#    wire.lock).
 # 2. `rust`, `proto`, and `glue` regenerate with `--check` against the copies
 #    committed in crates/alint-witforge-consumer, so a stale or hand-edited
 #    file fails. (The crate's build.rs generates the prost and proto3-JSON code
 #    from the checked schema, so none of that is committed.)
 #
-# The crate's tests (round-trips through protobuf and proto3-JSON, and the
-# comparison with `alint_core::plugin_api`) run with the workspace tests on
-# every CI platform; test-witforge-consumer.sh holds this check's controls.
+# The crate's tests (round trips through protobuf and proto3-JSON, the
+# conversions to and from `alint_core::plugin_api`, and the inventory of both
+# sides) run with the workspace tests on every CI platform;
+# test-witforge-consumer.sh holds this check's controls.
 #
 # Usage: WITFORGE_BIN=/path/to/witforge ci/scripts/witforge-consumer.sh [--write]
 #   --write   regenerate the committed copies instead of checking them
@@ -21,15 +24,23 @@ set -euo pipefail
 
 WITFORGE_VERSION="0.1.0"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-cd "$ROOT"
 WITFORGE_BIN="${WITFORGE_BIN:-witforge}"
+# A relative path names a file from the caller's directory, not the root's.
+if [[ "$WITFORGE_BIN" == */* && "$WITFORGE_BIN" != /* ]]; then
+  WITFORGE_BIN="$PWD/$WITFORGE_BIN"
+fi
+cd "$ROOT"
 WIT_ROOT="wit/alint-plugin"
 CRATE="crates/alint-witforge-consumer"
 
 mode=(--check)
+done_message="the plugin contract and its generated consumer match witforge ${WITFORGE_VERSION}"
 case "${1:-}" in
   "") ;;
-  --write) mode=() ;;
+  --write)
+    mode=()
+    done_message="regenerated the plugin contract's consumer with witforge ${WITFORGE_VERSION}"
+    ;;
   *) echo "usage: $0 [--write]" >&2; exit 2 ;;
 esac
 
@@ -42,10 +53,15 @@ if [[ "$version" != "witforge ${WITFORGE_VERSION}" ]]; then
   exit 1
 fi
 
+versions=("$WIT_ROOT"/*/)
+if [[ "${versions[*]}" != "${WIT_ROOT}/v0.1/" ]]; then
+  echo "::error title=witforge consumer::${WIT_ROOT} has ${versions[*]}; this script checks only v0.1, so add a check for each new version directory" >&2
+  exit 1
+fi
 "$WITFORGE_BIN" check "${WIT_ROOT}/v0.1"
 "$WITFORGE_BIN" rust "$WIT_ROOT" --out "${CRATE}/src/plain" ${mode[@]+"${mode[@]}"}
 "$WITFORGE_BIN" proto "$WIT_ROOT" --out "${CRATE}/proto" ${mode[@]+"${mode[@]}"}
 "$WITFORGE_BIN" glue "$WIT_ROOT" --out "${CRATE}/src/glue" \
   --plain-root crate::plain --proto-root crate::proto ${mode[@]+"${mode[@]}"}
 
-echo "the plugin contract and its generated consumer match witforge ${WITFORGE_VERSION}"
+echo "$done_message"
