@@ -6,15 +6,19 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 /// One bounded quantity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub enum LimitKind {
-    /// Rows one extractor emits for one resource.
+    /// Rows one extractor emits for one resource; every adapter checks it.
     RowsPerExtractor,
-    /// Rows all extractors emit in one run.
+    /// Rows all extractors emit in one run; the decode cache's [`RunBudget`]
+    /// enforces it.
     RowsPerRun,
-    /// Distinct values one relation may hold when converted to a set.
+    /// Distinct values one relation may hold when converted to a set;
+    /// [`Relation::distinct_values`](super::Relation::distinct_values)
+    /// enforces it.
     DistinctValues,
-    /// Rows entering one equality join.
+    /// Rows entering one equality join. Reserved: joins arrive in Phase 3,
+    /// and nothing in v0.21 joins relations.
     JoinInputs,
-    /// Rows one equality join produces.
+    /// Rows one equality join produces. Reserved, like `JoinInputs`.
     JoinOutputs,
 }
 
@@ -26,6 +30,10 @@ impl LimitKind {
         Self::JoinInputs,
         Self::JoinOutputs,
     ];
+
+    /// The limits no code enforces yet, because what they bound does not
+    /// exist: equality joins arrive in Phase 3.
+    pub const RESERVED: [Self; 2] = [Self::JoinInputs, Self::JoinOutputs];
 
     #[must_use]
     pub fn name(self) -> &'static str {
@@ -85,7 +93,7 @@ pub struct LimitConfigError {
 }
 
 /// The limits one evaluation runs under.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct Limits {
     values: [usize; LimitKind::ALL.len()],
 }
@@ -220,6 +228,56 @@ mod tests {
             );
             assert!(Limits::default().with(kind, 0).is_err());
         }
+    }
+
+    /// The join limits stay reserved until Phase 3 adds joins: a use of one
+    /// outside this module must come with the join that it bounds, and with
+    /// this test's update.
+    #[test]
+    fn the_join_limits_are_reserved_and_unused() {
+        assert_eq!(
+            LimitKind::RESERVED,
+            [LimitKind::JoinInputs, LimitKind::JoinOutputs]
+        );
+        let crates = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("the workspace's crates directory");
+        let mut pending = vec![crates.to_path_buf()];
+        let mut scanned = 0;
+        let mut uses = Vec::new();
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    if path.file_name().is_some_and(|name| name != "target") {
+                        pending.push(path);
+                    }
+                    continue;
+                }
+                if path.extension().is_none_or(|ext| ext != "rs")
+                    || path.ends_with("relation/limits.rs")
+                {
+                    continue;
+                }
+                scanned += 1;
+                let text = std::fs::read_to_string(&path).unwrap();
+                for kind in LimitKind::RESERVED {
+                    if text.contains(&format!("{kind:?}")) {
+                        uses.push(format!("{}: {kind:?}", path.display()));
+                    }
+                }
+            }
+        }
+        assert!(
+            scanned > 100,
+            "only {scanned} Rust files found under {}",
+            crates.display()
+        );
+        assert!(
+            uses.is_empty(),
+            "reserved join limits used:\n{}",
+            uses.join("\n")
+        );
     }
 
     #[test]

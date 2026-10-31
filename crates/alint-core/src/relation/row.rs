@@ -4,6 +4,7 @@
 use std::cmp::Ordering;
 use std::collections::BTreeSet;
 
+use super::limits::{LimitExceeded, LimitKind, Limits};
 use super::pointer::Pointer;
 use super::resource::Resource;
 use super::value::Value;
@@ -188,11 +189,16 @@ impl Relation {
         self.rows.is_empty()
     }
 
-    /// The distinct values present, ignoring missing and error rows. The
-    /// caller checks the result against `LimitKind::DistinctValues`.
-    #[must_use]
-    pub fn distinct_values(&self) -> BTreeSet<&Value> {
-        self.rows.iter().filter_map(Row::value).collect()
+    /// The distinct values present, ignoring missing and error rows, or
+    /// [`LimitKind::DistinctValues`] once there are more than `limits` allow.
+    pub fn distinct_values(&self, limits: &Limits) -> Result<BTreeSet<&Value>, LimitExceeded> {
+        let mut values = BTreeSet::new();
+        for value in self.rows.iter().filter_map(Row::value) {
+            if values.insert(value) {
+                limits.check(LimitKind::DistinctValues, values.len())?;
+            }
+        }
+        Ok(values)
     }
 
     /// The first `n` rows in canonical order and how many were cut, so a "top
@@ -239,7 +245,11 @@ mod tests {
         let relation = Relation::new(vec![error, missing, null]);
         assert_eq!(relation.len(), 3, "absence states are rows, not omissions");
         assert_eq!(
-            relation.distinct_values().into_iter().collect::<Vec<_>>(),
+            relation
+                .distinct_values(&Limits::default())
+                .unwrap()
+                .into_iter()
+                .collect::<Vec<_>>(),
             [&Value::Null]
         );
     }
@@ -304,10 +314,47 @@ mod tests {
             .collect();
         let relation = Relation::new(rows);
         assert_eq!(relation.len(), 5);
-        assert_eq!(relation.distinct_values().len(), 2);
+        assert_eq!(
+            relation.distinct_values(&Limits::default()).unwrap().len(),
+            2
+        );
         let (shown, cut) = relation.first(2);
         assert_eq!((shown.len(), cut), (2, 3));
         assert_eq!(relation.first(10).1, 0);
+    }
+
+    #[test]
+    fn set_conversion_fails_past_the_distinct_values_limit() {
+        let rows: Vec<Row> = (0..6)
+            .map(|i| {
+                row(
+                    "a.json",
+                    "k",
+                    RowState::Value(Value::String((i % 3).to_string().into())),
+                )
+            })
+            .chain([row("a.json", "k", RowState::Missing)])
+            .collect();
+        let relation = Relation::new(rows);
+        let at_limit = Limits::default()
+            .with(LimitKind::DistinctValues, 3)
+            .unwrap();
+        assert_eq!(
+            relation.distinct_values(&at_limit).unwrap().len(),
+            3,
+            "duplicates and absent rows do not count"
+        );
+        let below = Limits::default()
+            .with(LimitKind::DistinctValues, 2)
+            .unwrap();
+        assert_eq!(
+            relation.distinct_values(&below),
+            Err(LimitExceeded {
+                kind: LimitKind::DistinctValues,
+                limit: 2,
+                reached: 3
+            })
+        );
     }
 
     #[test]

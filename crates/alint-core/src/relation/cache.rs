@@ -3,7 +3,8 @@
 //! The engine reads a file once for every per-file rule (ADR-0003) and the
 //! relation layer must extend that guarantee. A [`ReadCache`] maps a
 //! repository path to one [`ResourceRead`]; a [`DecodeCache`] maps
-//! `(adapter id, repository path)` to one [`AdapterOutput`]. Both use a
+//! `(adapter id, repository path, limits)` to one [`AdapterOutput`] and takes
+//! each fresh decode's rows from the run's [`RunBudget`]. Both use a
 //! per-key [`OnceLock`] obtained under a short map lock, so concurrent
 //! consumers share one initializer instead of racing to decode twice.
 
@@ -13,7 +14,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use super::adapter::{Adapter, AdapterError, AdapterOutput};
-use super::limits::Limits;
+use super::limits::{Limits, RunBudget};
 use super::resource::{Resource, ResourceRead};
 
 /// One resource read, cached for the whole run.
@@ -227,16 +228,25 @@ fn read_once(root: &Path, relative: &Path, size_hint: u64, literal: bool) -> Res
 }
 
 type DecodeResult = Result<Arc<AdapterOutput>, AdapterError>;
-type DecodeSlots = HashMap<(String, String), Arc<OnceLock<DecodeResult>>>;
+type DecodeSlots = HashMap<(String, String, Limits), Arc<OnceLock<DecodeResult>>>;
 
 /// One adapter output, cached for the whole run.
 ///
-/// A cache belongs to one run: the limits supplied to [`decode`](Self::decode)
-/// are part of that run's context, not part of the key.
-#[derive(Default)]
+/// The limits a consumer passes to [`decode`](Self::decode) are part of the
+/// key, so a consumer never receives a decode made under other limits. The
+/// run-wide row limit is the cache's own: it belongs to the run, and every
+/// fresh decode takes its rows from one [`RunBudget`] built from the run's
+/// limits.
 pub struct DecodeCache {
     slots: Mutex<DecodeSlots>,
     decodes: AtomicUsize,
+    budget: RunBudget,
+}
+
+impl Default for DecodeCache {
+    fn default() -> Self {
+        Self::with_run_limits(&Limits::default())
+    }
 }
 
 impl std::fmt::Debug for DecodeCache {
@@ -245,21 +255,40 @@ impl std::fmt::Debug for DecodeCache {
         f.debug_struct("DecodeCache")
             .field("entries", &self.slots.lock().map_or(0, |slots| slots.len()))
             .field("decodes", &self.decodes.load(Ordering::Relaxed))
+            .field("rows", &self.budget.used())
             .finish()
     }
 }
 
 impl DecodeCache {
+    /// A cache for a run under the default limits.
     #[must_use]
     pub fn new() -> Self {
         Self::default()
     }
 
+    /// A cache for a run whose run-wide row limit is
+    /// [`LimitKind::RowsPerRun`](super::LimitKind::RowsPerRun) in `limits`.
+    #[must_use]
+    pub fn with_run_limits(limits: &Limits) -> Self {
+        Self {
+            slots: Mutex::default(),
+            decodes: AtomicUsize::new(0),
+            budget: RunBudget::new(limits),
+        }
+    }
+
     /// Decode `resource` through `adapter` at most once per
-    /// `(adapter.id(), resource.path())` pair.
+    /// `(adapter.id(), resource.path(), limits)`.
     ///
     /// The cache keys on the adapter's specification-bearing id, so two
-    /// different `Extract` queries over one file do not share an entry.
+    /// different `Extract` queries over one file do not share an entry, and on
+    /// the limits, which bound one extraction. A fresh decode's rows are then
+    /// taken from the run's budget: once the run's rows exceed it, that decode
+    /// and every later one fail with
+    /// [`LimitKind::RowsPerRun`](super::LimitKind::RowsPerRun), an analysis
+    /// failure for the resource (which decodes fail first depends on
+    /// evaluation order; that one does is not).
     pub fn decode(
         &self,
         adapter: &dyn Adapter,
@@ -270,6 +299,7 @@ impl DecodeCache {
         let key = (
             adapter.id().to_string(),
             resource.path().as_str().to_string(),
+            *limits,
         );
         let slot = {
             let mut slots = self.slots.lock().expect("decode cache lock");
@@ -280,7 +310,9 @@ impl DecodeCache {
         };
         slot.get_or_init(|| {
             self.decodes.fetch_add(1, Ordering::Relaxed);
-            adapter.extract(resource, bytes, limits).map(Arc::new)
+            let output = adapter.extract(resource, bytes, limits)?;
+            self.budget.take(output.rows.len())?;
+            Ok(Arc::new(output))
         })
         .clone()
     }
@@ -495,6 +527,71 @@ mod tests {
             }
         });
         assert_eq!(cache.decodes(), 1);
+    }
+
+    #[test]
+    fn consumers_with_different_limits_never_share_a_decode() {
+        let cache = DecodeCache::new();
+        let resource = literal("a.txt");
+        let adapter = ExtractAdapter::new(Extract::Regex(r"(?m)^(.*)$".to_string()));
+        let tight = Limits::default()
+            .with(LimitKind::RowsPerExtractor, 1)
+            .unwrap();
+        assert!(matches!(
+            cache.decode(&adapter, &resource, b"a\nb\n", &tight),
+            Err(AdapterError::Limit(_))
+        ));
+        let rows = cache
+            .decode(&adapter, &resource, b"a\nb\n", &Limits::default())
+            .expect("the default limits are not bound by the tight decode");
+        assert!(rows.rows.len() >= 2);
+        assert!(matches!(
+            cache.decode(&adapter, &resource, b"a\nb\n", &tight),
+            Err(AdapterError::Limit(_))
+        ));
+        assert_eq!(cache.decodes(), 2, "one decode per limits value");
+    }
+
+    #[test]
+    fn fresh_decodes_take_their_rows_from_the_run_budget() {
+        let run = Limits::default().with(LimitKind::RowsPerRun, 3).unwrap();
+        let cache = DecodeCache::with_run_limits(&run);
+        let adapter = ExtractAdapter::new(Extract::Regex(r"(?m)^(\w+)$".to_string()));
+        let limits = Limits::default();
+        let first = cache
+            .decode(&adapter, &literal("a.txt"), b"a\nb\n", &limits)
+            .unwrap();
+        assert_eq!(first.rows.len(), 2);
+        // A cache hit takes nothing.
+        cache
+            .decode(&adapter, &literal("a.txt"), b"a\nb\n", &limits)
+            .unwrap();
+        let over = cache
+            .decode(&adapter, &literal("b.txt"), b"c\nd\n", &limits)
+            .unwrap_err();
+        assert_eq!(
+            over,
+            AdapterError::Limit(crate::relation::LimitExceeded {
+                kind: LimitKind::RowsPerRun,
+                limit: 3,
+                reached: 4
+            })
+        );
+        // The failure is cached for that resource, and the budget stays spent.
+        assert_eq!(
+            cache
+                .decode(&adapter, &literal("b.txt"), b"c\nd\n", &limits)
+                .unwrap_err(),
+            over
+        );
+        assert!(matches!(
+            cache.decode(&adapter, &literal("c.txt"), b"e\n", &limits),
+            Err(AdapterError::Limit(crate::relation::LimitExceeded {
+                kind: LimitKind::RowsPerRun,
+                ..
+            }))
+        ));
+        assert_eq!(cache.decodes(), 3);
     }
 
     #[test]
