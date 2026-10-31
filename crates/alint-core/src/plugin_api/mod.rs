@@ -20,97 +20,477 @@ pub use value::{FlatValue, FlatValueError, FlatValueLimits, Node};
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::path::Path;
 
-    /// `line` with the contents of its string literals removed.
-    fn without_strings(line: &str) -> String {
-        let mut out = String::with_capacity(line.len());
-        let mut in_string = false;
-        let mut escaped = false;
-        for c in line.chars() {
-            if in_string {
-                if escaped {
-                    escaped = false;
-                } else if c == '\\' {
-                    escaped = true;
-                } else if c == '"' {
-                    in_string = false;
-                    out.push(c);
-                }
-            } else {
-                if c == '"' {
-                    in_string = true;
-                }
-                out.push(c);
-            }
-        }
-        out
+    use proc_macro2::{Spacing, TokenStream, TokenTree};
+    use syn::visit::{self, Visit};
+
+    /// Roots a path may start with to reach the standard library.
+    const STD_ROOTS: &[&str] = &["std", "core", "alloc"];
+    /// Names usable without an import: the prelude, the primitive types, and
+    /// the built-in derives.
+    const PRELUDE: &[&str] = &[
+        "Option",
+        "Some",
+        "None",
+        "Result",
+        "Ok",
+        "Err",
+        "Vec",
+        "String",
+        "Box",
+        "ToString",
+        "ToOwned",
+        "Clone",
+        "Copy",
+        "Default",
+        "Debug",
+        "PartialEq",
+        "Eq",
+        "PartialOrd",
+        "Ord",
+        "Hash",
+        "Iterator",
+        "IntoIterator",
+        "DoubleEndedIterator",
+        "ExactSizeIterator",
+        "FromIterator",
+        "Extend",
+        "From",
+        "Into",
+        "TryFrom",
+        "TryInto",
+        "AsRef",
+        "AsMut",
+        "Send",
+        "Sync",
+        "Sized",
+        "Drop",
+        "Fn",
+        "FnMut",
+        "FnOnce",
+        "bool",
+        "char",
+        "str",
+        "u8",
+        "u16",
+        "u32",
+        "u64",
+        "u128",
+        "usize",
+        "i8",
+        "i16",
+        "i32",
+        "i64",
+        "i128",
+        "isize",
+        "f32",
+        "f64",
+    ];
+    /// Built-in attributes; any other attribute is a macro from outside the
+    /// module.
+    const ATTRIBUTES: &[&str] = &[
+        "doc",
+        "derive",
+        "cfg",
+        "must_use",
+        "non_exhaustive",
+        "allow",
+        "expect",
+        "warn",
+        "deny",
+        "inline",
+        "repr",
+        "track_caller",
+        "deprecated",
+    ];
+
+    fn is_cfg_test(attrs: &[syn::Attribute]) -> bool {
+        attrs.iter().any(|attr| {
+            attr.path().is_ident("cfg")
+                && attr
+                    .parse_args::<syn::Ident>()
+                    .is_ok_and(|ident| ident == "test")
+        })
     }
 
-    /// Every `use` and every `crate::` path in this module stays inside it or
-    /// in the standard library, so no engine type can cross the contract.
-    #[test]
-    fn imports_nothing_but_std_and_itself() {
-        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugin_api");
-        let mut problems = Vec::new();
-        let mut checked = 0;
-        for entry in std::fs::read_dir(&dir).unwrap() {
-            let path = entry.unwrap().path();
-            if path.extension().is_none_or(|e| e != "rs") {
-                continue;
-            }
-            checked += 1;
-            let text = std::fs::read_to_string(&path).unwrap();
-            for (number, line) in text.lines().enumerate() {
-                let code = without_strings(line.split("//").next().unwrap_or_default());
-                let code = code.trim();
-                let allowed = |p: &str| {
-                    [
-                        "std::",
-                        "core::",
-                        "alloc::",
-                        "self::",
-                        "super::",
-                        "crate::plugin_api",
-                        "contract::",
-                        "value::",
-                    ]
-                    .iter()
-                    .any(|prefix| p.starts_with(prefix))
-                };
-                if let Some(imported) = code
-                    .strip_prefix("use ")
-                    .or_else(|| code.strip_prefix("pub use "))
-                {
-                    let root = imported.trim_start_matches('{').trim();
-                    // `super::` from a nested module means plugin_api, but
-                    // `super::super` (or any `super::` in mod.rs itself)
-                    // escapes into the engine's crate root.
-                    let super_depth = root.matches("super::").count();
-                    let at_module_root = path.file_name().is_some_and(|name| name == "mod.rs");
-                    if !allowed(root)
-                        || (root.starts_with("super::") && (super_depth > 1 || at_module_root))
-                    {
-                        problems.push(format!("{}:{}: {code}", path.display(), number + 1));
+    fn item_attrs(item: &syn::Item) -> &[syn::Attribute] {
+        match item {
+            syn::Item::Const(i) => &i.attrs,
+            syn::Item::Enum(i) => &i.attrs,
+            syn::Item::ExternCrate(i) => &i.attrs,
+            syn::Item::Fn(i) => &i.attrs,
+            syn::Item::ForeignMod(i) => &i.attrs,
+            syn::Item::Impl(i) => &i.attrs,
+            syn::Item::Macro(i) => &i.attrs,
+            syn::Item::Mod(i) => &i.attrs,
+            syn::Item::Static(i) => &i.attrs,
+            syn::Item::Struct(i) => &i.attrs,
+            syn::Item::Trait(i) => &i.attrs,
+            syn::Item::TraitAlias(i) => &i.attrs,
+            syn::Item::Type(i) => &i.attrs,
+            syn::Item::Union(i) => &i.attrs,
+            syn::Item::Use(i) => &i.attrs,
+            _ => &[],
+        }
+    }
+
+    /// The names the module declares or imports, and its generic
+    /// parameters: a path may start with any of them.
+    #[derive(Default)]
+    struct Names(BTreeSet<String>);
+
+    impl<'ast> Visit<'ast> for Names {
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            let ident = match item {
+                syn::Item::Const(i) => Some(&i.ident),
+                syn::Item::Enum(i) => Some(&i.ident),
+                syn::Item::Fn(i) => Some(&i.sig.ident),
+                syn::Item::Macro(i) => i.ident.as_ref(),
+                syn::Item::Mod(i) => Some(&i.ident),
+                syn::Item::Static(i) => Some(&i.ident),
+                syn::Item::Struct(i) => Some(&i.ident),
+                syn::Item::Trait(i) => Some(&i.ident),
+                syn::Item::Type(i) => Some(&i.ident),
+                syn::Item::Union(i) => Some(&i.ident),
+                _ => None,
+            };
+            self.0.extend(ident.map(ToString::to_string));
+            visit::visit_item(self, item);
+        }
+
+        fn visit_use_name(&mut self, name: &'ast syn::UseName) {
+            self.0.insert(name.ident.to_string());
+        }
+
+        fn visit_use_rename(&mut self, rename: &'ast syn::UseRename) {
+            self.0.insert(rename.rename.to_string());
+        }
+
+        fn visit_type_param(&mut self, param: &'ast syn::TypeParam) {
+            self.0.insert(param.ident.to_string());
+            visit::visit_type_param(self, param);
+        }
+    }
+
+    /// Every path in one file of the module, outside `#[cfg(test)]` items:
+    /// expression, type, pattern, and trait paths, `use` trees, attributes and
+    /// derives, and the paths inside macro arguments.
+    struct Boundary<'a> {
+        file: &'a str,
+        /// How many leading `super`s stay inside `plugin_api` here.
+        depth: usize,
+        names: &'a BTreeSet<String>,
+        /// The names the `use` item being checked introduces, which cannot
+        /// vouch for its own path (`use serde;`).
+        introducing: BTreeSet<String>,
+        problems: Vec<String>,
+    }
+
+    impl Boundary<'_> {
+        fn check(&mut self, leading_colon: bool, segments: &[String]) {
+            let Some(root) = segments.first().map(String::as_str) else {
+                return;
+            };
+            let allowed = if leading_colon {
+                STD_ROOTS.contains(&root)
+            } else {
+                match root {
+                    "crate" => segments.get(1).is_some_and(|next| next == "plugin_api"),
+                    "super" => segments.iter().take_while(|s| *s == "super").count() <= self.depth,
+                    "self" | "Self" => true,
+                    _ => {
+                        STD_ROOTS.contains(&root)
+                            || PRELUDE.contains(&root)
+                            || (self.names.contains(root) && !self.introducing.contains(root))
                     }
                 }
-                let mut rest = code;
-                while let Some(at) = rest.find("crate::") {
-                    let tail = &rest[at..];
-                    let path_after = &tail["crate::".len()..];
-                    if path_after != "plugin_api" && !path_after.starts_with("plugin_api::") {
-                        problems.push(format!("{}:{}: {code}", path.display(), number + 1));
-                        break;
+            };
+            if !allowed {
+                let colon = if leading_colon { "::" } else { "" };
+                self.problems
+                    .push(format!("{}: {colon}{}", self.file, segments.join("::")));
+            }
+        }
+
+        fn check_path(&mut self, path: &syn::Path) {
+            let segments: Vec<String> = path.segments.iter().map(|s| s.ident.to_string()).collect();
+            // A single name is a local item, a prelude name, or a macro: an
+            // outside one would need a `use`, which is checked.
+            if path.leading_colon.is_some() || segments.len() > 1 {
+                self.check(path.leading_colon.is_some(), &segments);
+            }
+        }
+
+        fn check_use(
+            &mut self,
+            leading_colon: bool,
+            prefix: &mut Vec<String>,
+            tree: &syn::UseTree,
+        ) {
+            match tree {
+                syn::UseTree::Path(path) => {
+                    prefix.push(path.ident.to_string());
+                    self.check_use(leading_colon, prefix, &path.tree);
+                    prefix.pop();
+                }
+                syn::UseTree::Name(name) => {
+                    prefix.push(name.ident.to_string());
+                    self.check(leading_colon, prefix);
+                    prefix.pop();
+                }
+                syn::UseTree::Rename(rename) => {
+                    prefix.push(rename.ident.to_string());
+                    self.check(leading_colon, prefix);
+                    prefix.pop();
+                }
+                syn::UseTree::Glob(_) => self.check(leading_colon, prefix),
+                syn::UseTree::Group(group) => {
+                    for tree in &group.items {
+                        self.check_use(leading_colon, prefix, tree);
                     }
-                    rest = &tail["crate::".len()..];
                 }
             }
         }
-        assert!(checked >= 2, "plugin_api sources not found");
+
+        /// The paths in a macro's argument tokens, which `syn` leaves
+        /// unparsed: each `a::b` chain, and a leading `::a`.
+        fn check_tokens(&mut self, tokens: TokenStream) {
+            let tokens: Vec<TokenTree> = tokens.into_iter().collect();
+            let colons_at = |at: usize| {
+                matches!(
+                    (tokens.get(at), tokens.get(at + 1)),
+                    (Some(TokenTree::Punct(a)), Some(TokenTree::Punct(b)))
+                        if a.as_char() == ':' && a.spacing() == Spacing::Joint && b.as_char() == ':'
+                )
+            };
+            let mut at = 0;
+            while at < tokens.len() {
+                match &tokens[at] {
+                    TokenTree::Group(group) => self.check_tokens(group.stream()),
+                    TokenTree::Ident(ident)
+                        if colons_at(at + 1) || (at >= 2 && colons_at(at - 2)) =>
+                    {
+                        let leading_colon = at >= 2
+                            && colons_at(at - 2)
+                            && !matches!(tokens.get(at.wrapping_sub(3)), Some(TokenTree::Ident(_)))
+                            && !matches!(tokens.get(at.wrapping_sub(3)), Some(TokenTree::Punct(p)) if p.as_char() == '>');
+                        let continues = at >= 2 && colons_at(at - 2) && !leading_colon;
+                        let mut segments = vec![ident.to_string()];
+                        let mut next = at + 1;
+                        while colons_at(next) {
+                            let Some(TokenTree::Ident(ident)) = tokens.get(next + 2) else {
+                                break;
+                            };
+                            segments.push(ident.to_string());
+                            next += 3;
+                        }
+                        if !continues {
+                            self.check(leading_colon, &segments);
+                        }
+                        at = next;
+                        continue;
+                    }
+                    _ => {}
+                }
+                at += 1;
+            }
+        }
+    }
+
+    impl<'ast> Visit<'ast> for Boundary<'_> {
+        fn visit_item(&mut self, item: &'ast syn::Item) {
+            if is_cfg_test(item_attrs(item)) {
+                return;
+            }
+            visit::visit_item(self, item);
+        }
+
+        fn visit_item_mod(&mut self, module: &'ast syn::ItemMod) {
+            self.depth += 1;
+            visit::visit_item_mod(self, module);
+            self.depth -= 1;
+        }
+
+        fn visit_item_extern_crate(&mut self, item: &'ast syn::ItemExternCrate) {
+            self.problems
+                .push(format!("{}: extern crate {}", self.file, item.ident));
+        }
+
+        fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
+            let mut introduced = Names::default();
+            introduced.visit_item_use(item);
+            self.introducing = introduced.0;
+            self.check_use(item.leading_colon.is_some(), &mut Vec::new(), &item.tree);
+            self.introducing.clear();
+        }
+
+        fn visit_path(&mut self, path: &'ast syn::Path) {
+            self.check_path(path);
+            visit::visit_path(self, path);
+        }
+
+        fn visit_attribute(&mut self, attr: &'ast syn::Attribute) {
+            let builtin = ATTRIBUTES.iter().any(|name| attr.path().is_ident(name));
+            if !builtin {
+                let name: Vec<String> = attr
+                    .path()
+                    .segments
+                    .iter()
+                    .map(|s| s.ident.to_string())
+                    .collect();
+                self.problems
+                    .push(format!("{}: #[{}]", self.file, name.join("::")));
+            } else if attr.path().is_ident("derive") {
+                let derives = attr
+                    .parse_args_with(
+                        syn::punctuated::Punctuated::<syn::Path, syn::Token![,]>::parse_terminated,
+                    )
+                    .expect("a derive list parses");
+                for derive in derives {
+                    let segments: Vec<String> = derive
+                        .segments
+                        .iter()
+                        .map(|s| s.ident.to_string())
+                        .collect();
+                    if derive.leading_colon.is_none() && segments.len() == 1 {
+                        if !PRELUDE.contains(&segments[0].as_str()) {
+                            self.problems
+                                .push(format!("{}: derive({})", self.file, segments[0]));
+                        }
+                    } else {
+                        self.check(derive.leading_colon.is_some(), &segments);
+                    }
+                }
+            }
+            visit::visit_attribute(self, attr);
+        }
+
+        fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+            self.check_tokens(mac.tokens.clone());
+            visit::visit_macro(self, mac);
+        }
+    }
+
+    fn problems(
+        file: &str,
+        source: &str,
+        depth: usize,
+        extra_names: &BTreeSet<String>,
+    ) -> Vec<String> {
+        let syntax = syn::parse_file(source).expect("plugin_api source parses");
+        let mut names = Names::default();
+        names.visit_file(&syntax);
+        names.0.extend(extra_names.iter().cloned());
+        let mut boundary = Boundary {
+            file,
+            depth,
+            names: &names.0,
+            introducing: BTreeSet::new(),
+            problems: Vec::new(),
+        };
+        boundary.visit_file(&syntax);
+        boundary.problems
+    }
+
+    fn module_sources() -> Vec<(String, String)> {
+        let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("src/plugin_api");
+        let mut sources: Vec<(String, String)> = std::fs::read_dir(&dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| path.extension().is_some_and(|ext| ext == "rs"))
+            .map(|path| {
+                let name = path.file_name().unwrap().to_string_lossy().into_owned();
+                (name, std::fs::read_to_string(&path).unwrap())
+            })
+            .collect();
+        sources.sort();
+        sources
+    }
+
+    /// Nothing in this module names anything outside it except the standard
+    /// library, so no engine or third-party type can cross the contract. The
+    /// module's sources are parsed and every path is visited; `#[cfg(test)]`
+    /// items never ship and are skipped.
+    #[test]
+    fn imports_nothing_but_std_and_itself() {
+        let sources = module_sources();
+        assert!(sources.len() >= 3, "plugin_api sources not found");
+        let mut names = Names::default();
+        for (_, source) in &sources {
+            names.visit_file(&syn::parse_file(source).unwrap());
+        }
+        let mut found = Vec::new();
+        for (file, source) in &sources {
+            // mod.rs is `plugin_api` itself; every other file is a child.
+            let depth = usize::from(file != "mod.rs");
+            found.extend(problems(file, source, depth, &names.0));
+        }
         assert!(
-            problems.is_empty(),
-            "engine imports in plugin_api:\n{}",
-            problems.join("\n")
+            found.is_empty(),
+            "plugin_api names items outside itself and std:\n{}",
+            found.join("\n")
+        );
+    }
+
+    /// The paths a line-based scan missed are caught, and the paths the
+    /// module legitimately uses are not.
+    #[test]
+    fn the_boundary_check_sees_every_kind_of_path() {
+        let none = BTreeSet::new();
+        let escapes = [
+            "fn f() -> super::super::engine::Row { todo!() }",
+            "#[derive(Clone, serde::Serialize)] struct A;",
+            "#[derive(Serialize)] struct A;",
+            "#[serde(rename = \"a\")] struct A;",
+            "use\n    crate::relation::Row;",
+            "use crate::{plugin_api::Node, relation::Row};",
+            "use serde;",
+            "fn f() { let _ = crate::relation::Row::new; }",
+            "fn f() { let _ = vec![serde_json::Value::Null]; }",
+            "fn f() { assert!(matches!(x, ::regex::Regex { .. })); }",
+            "fn f(x: ::serde::de::IgnoredAny) {}",
+            "extern crate serde;",
+            "impl serde::Serialize for A {}",
+            "mod inner { fn f() -> super::super::super::X { todo!() } }",
+        ];
+        for source in escapes {
+            assert!(
+                !problems("child.rs", source, 1, &none).is_empty(),
+                "not caught: {source}"
+            );
+        }
+        assert!(
+            !problems("mod.rs", "use super::relation::Row;", 0, &none).is_empty(),
+            "`super` from plugin_api itself is the crate root"
+        );
+        let allowed = "
+            use std::fmt;
+            use fmt::Write as _;
+            use super::FlatValue;
+            use crate::plugin_api::Node;
+            #[derive(Clone, Debug, PartialEq, Eq)]
+            #[non_exhaustive]
+            pub enum E { A(Box<str>), B }
+            impl fmt::Display for E {
+                fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                    write!(f, \"{}\", Self::B as u8)?;
+                    let _ = vec![E::B, std::mem::take(&mut E::B)];
+                    let _: Option<FlatValue> = None;
+                    let _ = u32::try_from(1usize);
+                    Ok(())
+                }
+            }
+            impl std::error::Error for E {}
+            fn g<T: Iterator>(t: T) -> Option<T::Item> { let _ = Node::Null; None }
+            mod inner { use super::super::FlatValue; }
+            #[cfg(test)]
+            mod tests { use serde::Serialize; }
+        ";
+        assert_eq!(
+            problems("child.rs", allowed, 1, &none),
+            Vec::<String>::new()
         );
     }
 

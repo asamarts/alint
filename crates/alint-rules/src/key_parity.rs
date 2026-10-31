@@ -735,7 +735,7 @@ impl KeyParityRule {
             peer: peer.path().as_str().to_string(),
             direction: self.direction,
         })
-        .analyze("key-parity", &rows, limits)
+        .analyze("key-parity", &[&self.reference, peer.path()], &rows, limits)
         {
             Ok(diffs) => diffs,
             Err(error) => {
@@ -1667,7 +1667,7 @@ mod analyzer_pilot {
         let actual: Vec<String> = ContractAnalyzer::new(ParityPilot {
             reference: "en.json".into(),
         })
-        .analyze("key-parity-pilot", &rows, &Limits::default())
+        .analyze("key-parity-pilot", &[], &rows, &Limits::default())
         .unwrap()
         .iter()
         .map(|finding| finding.message.to_string())
@@ -1690,7 +1690,7 @@ mod analyzer_pilot {
         let findings = ContractAnalyzer::new(ParityPilot {
             reference: "en.json".into(),
         })
-        .analyze("key-parity-pilot", &rows, &Limits::default())
+        .analyze("key-parity-pilot", &[], &rows, &Limits::default())
         .unwrap();
         let messages: Vec<String> = findings.iter().map(|f| f.message.to_string()).collect();
         assert!(messages.iter().any(|m| m.contains("missing key `b`")));

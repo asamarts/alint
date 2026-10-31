@@ -116,7 +116,8 @@ pub(crate) fn run(options: &RunOptions<'_>, cli: &Cli) -> Result<ExitCode> {
         allow_spawn: options.allow_spawn,
         allow_host_keyring: options.allow_host_keyring,
         update_snapshots: options.update_snapshots,
-    });
+    })
+    .with_registry(cli.registry());
     let mut operational_issues = Vec::new();
     collect_preflight_issues(&mut parsed, &runner, &mut invalid, &mut operational_issues);
     if let Some(exit) =

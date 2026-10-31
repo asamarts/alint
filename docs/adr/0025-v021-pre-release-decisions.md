@@ -11,6 +11,8 @@ decision-makers: asamarts
 Accepted (2026-10-30). Supersedes the part of [ADR-0024](0024-relation-ir-decisions-after-review.md)
 decision 4 that gives every key one rendering for messages, `ignore_keys`, and baseline keys;
 the rest of ADR-0024 stands.
+Decision 3's gate 2 is measured as [ADR-0026](0026-measuring-the-v022-simplicity-gate.md)
+defines (2026-10-30).
 
 ## Context
 

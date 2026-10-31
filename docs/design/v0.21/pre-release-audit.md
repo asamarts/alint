@@ -3,8 +3,8 @@
 Status: Plan (2026-10-29). Audited `main` at `f4e5fa225`; version 0.20.1, v0.21.0 untagged.
 Progress: W1 done (#407, merged 2026-10-30: all twelve items, the review's follow-ups, and
 ADR-0025's `key_parity` changes, with tests), and a review of that increment fixed more (section
-3); W4 housekeeping and the six Dependabot merges done 2026-10-30; W2 under way; W3 and the rest of
-W4 not started.
+3); W4 housekeeping and the six Dependabot merges done 2026-10-30; W2 done in #411 except W2-7,
+which waits on witforge 0.1.0; W3 and the rest of W4 not started.
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
@@ -215,7 +215,8 @@ All decided on 2026-10-30. Items 1, 5, 6, and 7 change the design and are record
 
 1. **The go/no-go verdict (W2-8).** GO on consistency; v0.21 ships. Phase 3 starts only if v0.22
    makes the IR path authoritative for `cross_file` `equals` and deletes the old code, keeps
-   that code within today's 190 non-comment lines with no calls into `cross_file::eval`, and
+   that code within today's 190 non-comment lines (134 `equals`-only lines, as ADR-0026
+   measures it from 2026-10-30) with no calls into `cross_file::eval`, and
    shows zero e2e and corpus differences with the budgets held (ADR-0025 decision 3).
 2. **S4 (W2-9).** Revision 4 with newline-terminated sources, plus a same-session kbench run of
    v0.20.1 against v0.21 on the revision-4 tree (100k and 1M), recorded in `r8-readiness.md`.

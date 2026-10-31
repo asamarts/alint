@@ -1,8 +1,11 @@
 //! `alint rules` - catalog discovery, config-independent.
 //!
 //! Unlike `alint list` / `alint explain` (which read THIS repo's effective
-//! config), `alint rules` browses the rule kinds alint ships, from the generated
-//! in-crate category bridge (`alint_rules::categories`). It never loads a config
+//! config), `alint rules` browses the rule kinds the registry can build: the
+//! built-in catalog, or the registry an embedder injected through
+//! `Cli::registry`. Categories and summaries come from the generated in-crate
+//! bridges (`alint_rules::categories`, `alint_rules::kind_docs`), so a kind they
+//! do not describe is listed by name with no category. It never loads a config
 //! and works anywhere, including outside a repo. See ADR-0009.
 
 use std::collections::BTreeMap;
@@ -12,7 +15,7 @@ use std::process::ExitCode;
 
 use alint_core::{
     Capability, CapabilityCondition, Category, GitOperation, KindMeta, OptionPredicate,
-    SelectorType,
+    RuleRegistry, SelectorType,
 };
 use alint_output::Format;
 use alint_rules::categories::{ALIAS_TO_CANONICAL, KIND_CATEGORIES};
@@ -23,10 +26,10 @@ use crate::{Cli, RulesCommand};
 
 /// A catalog row: a canonical kind, its category slugs (primary first), and its
 /// alias spellings.
-struct Row {
-    kind: &'static str,
+struct Row<'a> {
+    kind: &'a str,
     categories: Vec<&'static str>,
-    aliases: Vec<&'static str>,
+    aliases: Vec<&'a str>,
     summary: Option<&'static str>,
 }
 
@@ -238,13 +241,21 @@ pub(crate) fn run(command: &RulesCommand, cli: &Cli) -> Result<ExitCode> {
             cli.format
         );
     }
+    let registry = cli.registry();
+    let mut out = std::io::stdout().lock();
     match command {
-        RulesCommand::List { category, search } => {
-            list(category.as_deref(), search.as_deref(), format)
-        }
-        RulesCommand::Categories => categories(format),
-        RulesCommand::Show { kind } => show(kind, format, !cli.no_docs, cli),
+        RulesCommand::List { category, search } => list(
+            &mut out,
+            &registry,
+            category.as_deref(),
+            search.as_deref(),
+            format,
+        )?,
+        RulesCommand::Categories => categories(&mut out, &registry, format)?,
+        RulesCommand::Show { kind } => show(&mut out, &registry, kind, format, !cli.no_docs)?,
     }
+    out.flush().ok();
+    Ok(ExitCode::SUCCESS)
 }
 
 /// The category slugs of a rule KIND (resolving an alias to its canonical kind
@@ -294,10 +305,10 @@ pub(crate) fn canonical_kind(kind: &str) -> &str {
         .map_or(kind, |(_, canon)| canon)
 }
 
-/// canonical kind -> its alias spellings, sorted.
-fn aliases_by_canonical() -> BTreeMap<&'static str, Vec<&'static str>> {
-    let mut map: BTreeMap<&'static str, Vec<&'static str>> = BTreeMap::new();
-    for (alias, canon) in ALIAS_TO_CANONICAL {
+/// canonical kind -> its alias spellings in `registry`, sorted.
+fn aliases_by_canonical(registry: &RuleRegistry) -> BTreeMap<&str, Vec<&str>> {
+    let mut map: BTreeMap<&str, Vec<&str>> = BTreeMap::new();
+    for (alias, canon) in registry.aliases() {
         map.entry(canon).or_default().push(alias);
     }
     for aliases in map.values_mut() {
@@ -306,7 +317,31 @@ fn aliases_by_canonical() -> BTreeMap<&'static str, Vec<&'static str>> {
     map
 }
 
-fn list(category: Option<&str>, search: Option<&str>, format: Format) -> Result<ExitCode> {
+/// The registry's canonical kinds with their category slugs: the kinds the
+/// generated catalog describes, in its order, then any other registered kind
+/// (an embedder's own) by name, with no category.
+fn catalog_kinds(registry: &RuleRegistry) -> Vec<(&str, Vec<&'static str>)> {
+    let mut kinds: Vec<(&str, Vec<&'static str>)> = KIND_CATEGORIES
+        .iter()
+        .filter(|(kind, _)| registry.meta(kind).is_some())
+        .map(|(kind, cats)| (*kind, cats.iter().map(|c| c.slug()).collect()))
+        .collect();
+    let mut uncatalogued: Vec<&str> = registry
+        .canonical_kinds()
+        .filter(|kind| !KIND_CATEGORIES.iter().any(|(known, _)| known == kind))
+        .collect();
+    uncatalogued.sort_unstable();
+    kinds.extend(uncatalogued.into_iter().map(|kind| (kind, Vec::new())));
+    kinds
+}
+
+pub(crate) fn list(
+    out: &mut dyn Write,
+    registry: &RuleRegistry,
+    category: Option<&str>,
+    search: Option<&str>,
+    format: Format,
+) -> Result<()> {
     // Validate the category slug up front: a clear error beats a silent empty list.
     if let Some(slug) = category
         && Category::from_slug(slug).is_none()
@@ -318,11 +353,10 @@ fn list(category: Option<&str>, search: Option<&str>, format: Format) -> Result<
         );
     }
     let needle = search.map(str::to_lowercase);
-    let alias_map = aliases_by_canonical();
+    let alias_map = aliases_by_canonical(registry);
 
     let mut rows: Vec<Row> = Vec::new();
-    for (kind, cats) in KIND_CATEGORIES {
-        let slugs: Vec<&'static str> = cats.iter().map(|c| c.slug()).collect();
+    for (kind, slugs) in catalog_kinds(registry) {
         if let Some(slug) = category
             && !slugs.contains(&slug)
         {
@@ -346,7 +380,6 @@ fn list(category: Option<&str>, search: Option<&str>, format: Format) -> Result<
         });
     }
 
-    let mut out = std::io::stdout().lock();
     if format == Format::Json {
         let rules: Vec<_> = rows
             .iter()
@@ -389,39 +422,51 @@ fn list(category: Option<&str>, search: Option<&str>, format: Format) -> Result<
                 out,
                 "  {kind:<width$}  {cats}{alias_note}",
                 kind = r.kind,
-                cats = titles.join(", "),
+                cats = category_titles(&titles),
             )?;
             if let Some(s) = r.summary {
                 writeln!(out, "  {blank:<width$}  {s}", blank = "")?;
             }
         }
     }
-    out.flush().ok();
-    Ok(ExitCode::SUCCESS)
+    Ok(())
+}
+
+/// Category titles for human output; a kind the generated catalog does not
+/// describe has none.
+fn category_titles(titles: &[&str]) -> String {
+    if titles.is_empty() {
+        "uncategorized".to_string()
+    } else {
+        titles.join(", ")
+    }
 }
 
 /// `alint rules show <kind>`: one kind's summary, categories, aliases,
 /// capabilities, accepted selectors, fix operations, and docs link.
-/// Accepts an alias, resolving to its canonical kind.
-fn show(kind: &str, format: Format, show_docs: bool, cli: &Cli) -> Result<ExitCode> {
-    let cats = categories_for_kind(kind);
-    if cats.is_empty() {
+/// Accepts an alias, resolving to its canonical kind. The kind must be in
+/// `registry`; categories, the summary, and the docs link exist only for kinds
+/// the generated catalog describes.
+pub(crate) fn show(
+    out: &mut dyn Write,
+    registry: &RuleRegistry,
+    kind: &str,
+    format: Format,
+    show_docs: bool,
+) -> Result<()> {
+    let canonical = registry.canonical_kind(kind);
+    let Some(meta) = registry.meta(canonical) else {
         bail!("unknown rule kind {kind:?}. Run `alint rules list` for the catalog.");
-    }
-    let canonical = canonical_kind(kind);
-    let registry = cli.registry();
-    let meta = registry
-        .meta(canonical)
-        .expect("catalog kind must have registered capability metadata");
-    let summary = description_for_kind(kind);
-    let aliases = aliases_by_canonical()
-        .get(canonical)
-        .cloned()
+    };
+    let cats = categories_for_kind(canonical);
+    let summary = description_for_kind(canonical);
+    let aliases = aliases_by_canonical(registry)
+        .remove(canonical)
         .unwrap_or_default();
-    let family = cats.first().copied().unwrap_or_default();
-    let docs = format!("https://alint.org/docs/rules/{family}/{canonical}/");
+    let docs = cats
+        .first()
+        .map(|family| format!("https://alint.org/docs/rules/{family}/{canonical}/"));
 
-    let mut out = std::io::stdout().lock();
     if format == Format::Json {
         let doc = serde_json::json!({
             "schema_version": 1,
@@ -447,7 +492,7 @@ fn show(kind: &str, format: Format, show_docs: bool, cli: &Cli) -> Result<ExitCo
         if let Some(s) = summary {
             writeln!(out, "  {s}")?;
         }
-        writeln!(out, "  categories: {}", titles.join(", "))?;
+        writeln!(out, "  categories: {}", category_titles(&titles))?;
         if !aliases.is_empty() {
             writeln!(out, "  aliases:    {}", aliases.join(", "))?;
         }
@@ -455,24 +500,26 @@ fn show(kind: &str, format: Format, show_docs: bool, cli: &Cli) -> Result<ExitCo
         writeln!(out, "  selectors:    {}", selector_summary(meta))?;
         writeln!(out, "  fix_ops:      {}", fix_op_summary(meta))?;
         writeln!(out, "  trace:        {}", trace_summary(meta))?;
-        if show_docs {
+        if show_docs && let Some(docs) = &docs {
             writeln!(out, "  docs:       {docs}")?;
         }
     }
-    out.flush().ok();
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }
 
-fn categories(format: Format) -> Result<ExitCode> {
+pub(crate) fn categories(
+    out: &mut dyn Write,
+    registry: &RuleRegistry,
+    format: Format,
+) -> Result<()> {
     // Kinds per category (a kind counts once per category it belongs to).
     let mut counts: BTreeMap<&'static str, usize> = BTreeMap::new();
-    for (_kind, cats) in KIND_CATEGORIES {
-        for c in *cats {
-            *counts.entry(c.slug()).or_default() += 1;
+    for (_kind, cats) in catalog_kinds(registry) {
+        for slug in cats {
+            *counts.entry(slug).or_default() += 1;
         }
     }
 
-    let mut out = std::io::stdout().lock();
     if format == Format::Json {
         let cats: Vec<_> = Category::ALL
             .iter()
@@ -514,8 +561,7 @@ fn categories(format: Format) -> Result<ExitCode> {
             )?;
         }
     }
-    out.flush().ok();
-    Ok(ExitCode::SUCCESS)
+    Ok(())
 }
 
 #[cfg(test)]

@@ -572,4 +572,6 @@ fn cmd_init(path: &Path, monorepo: bool) -> Result<ExitCode> {
 }
 
 #[cfg(test)]
+mod registry_tests;
+#[cfg(test)]
 mod tests;

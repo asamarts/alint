@@ -310,13 +310,16 @@ impl FileIndex {
     ///
     /// The ordinary per-file path checks this once per file and reads directly
     /// when it is `None`; it allocates no cache entry or retained bytes, so a
-    /// relation-free run is unchanged.
+    /// relation-free run is unchanged. Hidden from the docs with the relation
+    /// layer it returns, as are the next two methods.
+    #[doc(hidden)]
     #[must_use]
     pub fn read_cache(&self) -> Option<&crate::relation::ReadCache> {
         self.reads.get().map(std::sync::Arc::as_ref)
     }
 
     /// The run-scoped relation decode cache, if a relation consumer enabled it.
+    #[doc(hidden)]
     #[must_use]
     pub fn decode_cache(&self) -> Option<&crate::relation::DecodeCache> {
         self.decodes.get().map(std::sync::Arc::as_ref)
@@ -326,6 +329,7 @@ impl FileIndex {
     /// pair, so two relation rules cannot decode one `(adapter, resource)` pair
     /// twice. The caches belong to this index's snapshot; a caller that
     /// re-walks a changed tree gets a fresh index and fresh caches.
+    #[doc(hidden)]
     pub fn enable_relation_caches(&self) {
         self.reads
             .get_or_init(|| std::sync::Arc::new(crate::relation::ReadCache::new()));
