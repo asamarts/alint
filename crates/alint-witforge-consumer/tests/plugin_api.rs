@@ -3,13 +3,14 @@
 //! destructures its input without `..` and builds its output with a full struct
 //! literal or an exhaustive match, and every enum converts both ways, so a
 //! field, case, or required trait method on one side without a counterpart on
-//! the other stops this file compiling.
+//! the other stops this file compiling. What no conversion names (a new type
+//! or interface, or a method with a default body) fails `inventory.rs`.
 //!
 //! The intended differences appear where they occur: the engine's `usize`
 //! against the wire's `u32`, borrowed inputs, `Resource` against
 //! `RepoResource`, a record field as a tuple, and named fields on the limit
-//! errors. `PluginInfo` has no hand-written counterpart yet; the handshake that
-//! carries it arrives with a plugin host.
+//! errors. `PluginInfo` has no hand-written counterpart yet (the handshake that
+//! carries it arrives with a plugin host), so `main.rs` round-trips it alone.
 
 use alint_core::plugin_api as api;
 use alint_witforge_consumer::glue::v0::types as glue;

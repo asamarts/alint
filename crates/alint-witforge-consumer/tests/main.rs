@@ -1,3 +1,4 @@
+mod inventory;
 mod plugin_api;
 
 use alint_witforge_consumer::glue::GlueError;
@@ -6,11 +7,13 @@ use alint_witforge_consumer::glue::v0::adapter_api::functions::{
 };
 use alint_witforge_consumer::glue::v0::analyzer_api::functions::{analyze, id as analyzer_id};
 use alint_witforge_consumer::glue::v0::types::{
-    adapter_error, adapter_input, adapter_output, finding, node, repo_resource, row, row_state,
+    adapter_error, adapter_input, adapter_output, finding, node, plugin_info, repo_resource, row,
+    row_state,
 };
 use alint_witforge_consumer::plain::v0_1::types::{
-    AdapterError, AdapterInput, AdapterOutput, AnalyzerError, AnalyzerInput, Finding, FlatValue,
-    LimitError, Node, PointerSegment, RecordField, RelatedLocation, RepoResource, Row, RowState,
+    AdapterError, AdapterInput, AdapterOutput, AnalyzerError, AnalyzerInput, Capabilities, Finding,
+    FlatValue, LimitError, Node, PluginInfo, PointerSegment, RecordField, RelatedLocation,
+    RepoResource, Row, RowState,
 };
 use alint_witforge_consumer::proto::v0 as p;
 
@@ -300,4 +303,23 @@ fn generated_contract_compiles_and_roundtrips() {
         format!("{}", GlueError::InvalidState { message: "x" }),
         "message `x` is invalid"
     );
+}
+
+/// `plugin-info` and `capabilities` have no `plugin_api` counterpart yet, so
+/// only this test exercises their glue.
+#[test]
+fn plugin_info_roundtrips() {
+    for (spawn_user_command, host_keyring) in [(true, false), (false, true)] {
+        let info = PluginInfo {
+            name: "example".to_string(),
+            version: "1.2.3".to_string(),
+            contract: ">=0.1, <0.2".to_string(),
+            capabilities: Capabilities {
+                spawn_user_command,
+                host_keyring,
+            },
+        };
+        let decoded = plugin_info::from_proto(roundtrip(&plugin_info::to_proto(&info))).unwrap();
+        assert_eq!(decoded, info);
+    }
 }
