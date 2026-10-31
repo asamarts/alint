@@ -23,6 +23,10 @@ prost = "0.14"
 prost-build = "0.14"
 protox = "0.10"
 
+[dev-dependencies]
+# tests/plugin_api.rs compares the hand-written contract with the generated one.
+alint-core.workspace = true
+
 [lints]
 workspace = true
 

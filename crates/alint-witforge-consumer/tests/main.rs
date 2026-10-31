@@ -1,3 +1,5 @@
+mod plugin_api;
+
 use alint_witforge_consumer::glue::GlueError;
 use alint_witforge_consumer::glue::v0::adapter_api::functions::{
     extract, id as adapter_id, redacts_by_default,

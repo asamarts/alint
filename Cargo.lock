@@ -242,6 +242,7 @@ dependencies = [
 name = "alint-witforge-consumer"
 version = "0.20.1"
 dependencies = [
+ "alint-core",
  "pbjson",
  "pbjson-build",
  "prost",
