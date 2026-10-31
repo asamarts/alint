@@ -207,7 +207,7 @@ impl Scenario {
     /// misreported as an engine regression.
     pub fn workload_revision(self) -> u32 {
         match self {
-            Self::S4 => 3,
+            Self::S4 => 4,
             Self::S1 | Self::S2 | Self::S3 | Self::Sfix => 2,
         }
     }
@@ -678,7 +678,7 @@ mod tests {
             (Scenario::S1, 2, 16),
             (Scenario::S2, 2, 20),
             (Scenario::S3, 2, 16),
-            (Scenario::S4, 3, 85),
+            (Scenario::S4, 4, 85),
             (Scenario::Sfix, 2, 24),
         ];
         let tmp = tempfile::tempdir().expect("tempdir");

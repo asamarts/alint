@@ -136,12 +136,7 @@ pub fn generate_monorepo(packages: usize, files_per_package: usize, seed: u64) -
             };
             let rel = pkg_rel.join("src").join(format!("{stem}.rs"));
             let size = rng.random_range(256usize..2048);
-            let mut content = lorem_bytes(size, &mut rng);
-            // Generated Rust sources are text files: terminate them so the
-            // final_newline benchmark rule does not fabricate one finding per
-            // file (which made the 1M RSS budget measure the findings vector).
-            content.push(b'\n');
-            std::fs::write(dir.path().join(&rel), content)?;
+            std::fs::write(dir.path().join(&rel), source_bytes(size, &mut rng))?;
             file_list.push(rel);
         }
     }
@@ -372,7 +367,7 @@ pub fn generate_nested_polyglot_monorepo(
             };
             let rel = pkg_rel.join("src").join(format!("{stem}.rs"));
             let size = rng.random_range(256usize..2048);
-            std::fs::write(dir.path().join(&rel), lorem_bytes(size, &mut rng))?;
+            std::fs::write(dir.path().join(&rel), source_bytes(size, &mut rng))?;
             file_list.push(rel);
         }
     }
@@ -404,7 +399,7 @@ pub fn generate_nested_polyglot_monorepo(
             };
             let rel = pkg_rel.join("src").join(format!("{stem}.js"));
             let size = rng.random_range(256usize..2048);
-            std::fs::write(dir.path().join(&rel), lorem_bytes(size, &mut rng))?;
+            std::fs::write(dir.path().join(&rel), source_bytes(size, &mut rng))?;
             file_list.push(rel);
         }
     }
@@ -436,7 +431,7 @@ pub fn generate_nested_polyglot_monorepo(
             };
             let rel = pkg_rel.join("src").join(format!("{stem}.py"));
             let size = rng.random_range(256usize..2048);
-            std::fs::write(dir.path().join(&rel), lorem_bytes(size, &mut rng))?;
+            std::fs::write(dir.path().join(&rel), source_bytes(size, &mut rng))?;
             file_list.push(rel);
         }
     }
@@ -500,6 +495,17 @@ pub fn select_subset(files: &[PathBuf], fraction: f64, seed: u64) -> Vec<&PathBu
     indices.truncate(target);
     indices.sort_unstable();
     indices.into_iter().map(|i| &files[i]).collect()
+}
+
+/// A generated source file: [`lorem_bytes`] terminated by a newline. Sources
+/// are text files, so the benchmark's `final_newline` rule must not fabricate
+/// one finding per file (which made the 1M RSS budget measure the findings
+/// vector). S2's tree uses it from workload revision 2 and S4's polyglot tree
+/// from revision 4.
+fn source_bytes(size: usize, rng: &mut impl Rng) -> Vec<u8> {
+    let mut content = lorem_bytes(size, rng);
+    content.push(b'\n');
+    content
 }
 
 /// Generate `size` bytes of pseudo-English ASCII with newlines every 72
@@ -644,6 +650,28 @@ mod tests {
                 assert!(!line.ends_with(' '), "{rel:?} has trailing whitespace");
             }
         }
+    }
+
+    #[test]
+    fn polyglot_sources_are_clean_text() {
+        let t = generate_nested_polyglot_monorepo(3, 3, 42).unwrap();
+        let mut checked = BTreeSet::new();
+        for rel in &t.files {
+            let Some(ext) = rel.extension().and_then(|e| e.to_str()) else {
+                continue;
+            };
+            if !matches!(ext, "rs" | "js" | "py") {
+                continue;
+            }
+            checked.insert(ext.to_string());
+            let text = std::fs::read_to_string(t.root().join(rel)).unwrap();
+            assert!(text.ends_with('\n'), "{rel:?} lacks a final newline");
+            for line in text.lines() {
+                assert!(!line.starts_with(' '), "{rel:?} has leading whitespace");
+                assert!(!line.ends_with(' '), "{rel:?} has trailing whitespace");
+            }
+        }
+        assert_eq!(checked.len(), 3, "every ecosystem's sources: {checked:?}");
     }
 
     #[test]

@@ -26,7 +26,7 @@ verdict is revisited once W1 and W2 land.
 | WIT draft | `witforge check wit/alint-plugin/0.1.0` (v2 wire lock), run by hand; no CI check (W2-7). The tag waits for witforge 0.1.0 and a CI regeneration check (ADR-0025 decision 4) | **blocked** |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
-| S4 workload | #399 changed the polyglot tree's content without a revision bump (W2-9) | **gap** |
+| S4 workload | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; the same-session kbench run of v0.20.1 against v0.21 on the revision-4 tree is pending (W2-9) | **gap** |
 | Go/no-go assessment of the port | verdict decided: GO on consistency, simplicity gated in v0.22 (ADR-0025 decision 3); the written assessment is W2-8 | **gap** |
 | Generated artifacts | preflight: schema, facts, architecture, docs export, roadmap | pass |
 | Formatting, clippy, workspace tests | preflight | pass |
@@ -53,7 +53,7 @@ verdict is revisited once W1 and W2 land.
   S2 −3.19%/−0.60%, S3 −3.24%/+2.15%.
 - Benchmark-generator correction: generated `.rs` sources now end with a
   newline, so S2 does not fabricate one `final_newline` finding per file.
-  S1-S3 carry workload revision 2; S4 stays at revision 3 (W2-9).
+  S1-S3 carry workload revision 2; S4 carries revision 4 (W2-9).
 - Clean-workload 1M S2 peak RSS: v0.18.2 118,044 KB; v0.20.1 119,420 KB;
   current 118,924 KB (+0.75% vs v0.18.2, below v0.20.1).
 - Clean-workload 1M S2 wall-clock: v0.20.1 5.861 s; current 5.357 s (−8.6%).
