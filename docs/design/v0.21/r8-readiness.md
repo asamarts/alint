@@ -22,7 +22,7 @@ remaining release work below is done.
 | Relation limits | defined with defaults and caps; adapters enforce `RowsPerExtractor`, the decode cache takes each fresh decode's rows from the run's `RunBudget` (`RowsPerRun`) and keys entries on the limits, set conversion enforces `DistinctValues`, and a test keeps the join limits reserved until Phase 3 adds joins; each limit has a test (W2-3) | pass |
 | Invariants 6-8: visibility, feature isolation, contract boundary | module visibility test, and a test that requires `#[doc(hidden)]` on every public function elsewhere in alint-core that names the relation layer or the contract (the three `FileIndex` cache methods, W2-5); `check-shadow-feature-tree.sh` reads `alint-rules`' resolved features for each shipped or benchmarked build on every target, and five injected leaks fail it (`test-check-shadow-feature-tree.sh`, W2-2); the `plugin_api` boundary test parses the module and checks every path, `use` tree, attribute, derive, and macro argument, with the escapes a line scan missed as negative samples (W2-4) | pass |
 | Registry injection | CLI (`check`, `test`, `rules list`/`show`/`categories`), LSP (session and hover), testkit (`Runner::with_registry`), DSL catalog; one test per surface registers a custom kind and observes it run or be described, and the built-in registry rejects it (W2-1) | pass |
-| WIT draft | `witforge check wit/alint-plugin/0.1.0` (v2 wire lock), run by hand; no CI check (W2-7). The tag waits for witforge 0.1.0 and a CI regeneration check (ADR-0025 decision 4) | **blocked** |
+| WIT draft | `wit/alint-plugin/v0.1`, a draft until plugins load (ADR-0027). `ci/scripts/witforge-consumer.sh` checks it and regenerates the committed `alint-witforge-consumer` output with `--check`, its controls fail on a changed, extra, or missing file and an unlocked member, and the crate's tests convert every `plugin_api` type to and from the generated ones; run by hand against the 0.1.0 candidate. The tag waits for witforge 0.1.0 and the CI job in [`witforge-adoption.md`](witforge-adoption.md) section 5 (W2-7, ADR-0025 decision 4) | **blocked** |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
 | S4 workload vs `v0.20.1` | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; same-session kbench run on the revision-4 tree, full and changed, 30 runs at 100k and three at 1M (W2-9) | pass (worst +2.12%, 1M changed) |
@@ -128,7 +128,7 @@ applies:
    preparation (version bump, generated artifacts, full release preflight, cross-platform
    checks, a fresh corpus replay).
 2. Wait for witforge 0.1.0 and run the contract's regeneration check in default CI (W2-7,
-   ADR-0025 decision 4).
+   ADR-0025 decision 4); [`witforge-adoption.md`](witforge-adoption.md) has the path.
 3. Tag only after those checks pass.
 
 ## Go/no-go

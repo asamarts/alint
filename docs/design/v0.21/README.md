@@ -6,6 +6,8 @@ review found are recorded in [ADR-0024](../../adr/0024-relation-ir-decisions-aft
 which supersedes it and which this document follows. The owner's pre-release decisions are
 recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly supersedes
 ADR-0024 decision 4; where this document disagrees with ADR-0025, the ADR applies.
+[ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md) keeps contract 0.1 a draft in
+v0.21.
 Decisions it builds on: [ADR-0019](../../adr/0019-general-linter-program-and-plugin-architecture.md)
 (DEC-2, DEC-5, DEC-7, DEC-8, DEC-10, DEC-13, DEC-14). Questions it decides: Q4, Q10, and Q13;
 the port's results feed Q8, which is decided per kind later.
@@ -635,6 +637,12 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   [`r8-readiness.md`](r8-readiness.md), and S4 workload revision 4 with a
   same-session kbench run against v0.20.1. W2-7, the WIT check in CI, waits on
   witforge 0.1.0.
+- **witforge consumer (#409).** The generated consumer crate, the regeneration
+  `--check` against its committed output with controls, and a test that
+  converts every `plugin_api` type to and from the generated ones; the review
+  that took it over, and the path to witforge 0.1.0 and the W2-7 CI job, are in
+  [`witforge-adoption.md`](witforge-adoption.md). ADR-0027 keeps contract 0.1 a
+  draft until the first release that loads plugins.
 - **Next:** W3's documentation and release preparation (version bump,
   changelog, generated artifacts, release preflight and cross-platform checks)
-  and, once witforge 0.1.0 is checked in CI, the tag.
+  and, once witforge 0.1.0 is published and checked in CI, the tag.
