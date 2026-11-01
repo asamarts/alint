@@ -104,7 +104,7 @@ fn worlds(source: &str) -> Result<BTreeMap<String, Items>, String> {
             "{" => depth += 1,
             "}" => depth = depth.saturating_sub(1),
             "world" if depth == 0 && tokens.get(at + 2).is_some_and(|t| t == "{") => {
-                let name = tokens[at + 1].clone();
+                let name = tokens[at + 1].trim_start_matches('%').to_string();
                 let mut items = Items::default();
                 at += 3;
                 loop {
@@ -161,6 +161,118 @@ fn worlds(source: &str) -> Result<BTreeMap<String, Items>, String> {
         at += 1;
     }
     Ok(out)
+}
+
+/// The one gate every item of contract 0.1 carries, as tokens.
+const GATE: &str = "@ since ( version = 0.1.0 )";
+
+/// What the contract's items and gates do that this test does not account
+/// for: a nested `package … { }` block (witforge 0.1.0 checked it but neither
+/// locked nor generated it; 0.1.1 refuses it, and this check does not depend
+/// on the pin), and any interface, world, interface item, or
+/// world item without exactly `@since(version = 0.1.0)`. Component tooling
+/// hides an `@unstable` item unless its feature is enabled, and witforge
+/// treats gates as metadata, so a changed gate would otherwise pass every
+/// check. A `use` carries no gate.
+fn item_problems(source: &str) -> Vec<String> {
+    let tokens = tokens(source);
+    let mut problems = Vec::new();
+    let mut at = 0;
+    items(&tokens, &mut at, None, &mut problems);
+    problems
+}
+
+/// The items from `at` to the `}` that closes `container`, or to the end of
+/// the file at the top level, each checked as `item_problems` describes.
+fn items(tokens: &[String], at: &mut usize, container: Option<&str>, problems: &mut Vec<String>) {
+    let end_of = |from: usize, stop: &[&str]| {
+        tokens[from..]
+            .iter()
+            .position(|t| stop.contains(&t.as_str()))
+            .map(|offset| from + offset)
+    };
+    // The index just past the `}` that closes the `{` at `open`.
+    let closing = |open: usize| {
+        let mut depth = 0usize;
+        for (index, token) in tokens.iter().enumerate().skip(open) {
+            match token.as_str() {
+                "{" => depth += 1,
+                "}" => {
+                    depth -= 1;
+                    if depth == 0 {
+                        return index + 1;
+                    }
+                }
+                _ => {}
+            }
+        }
+        tokens.len()
+    };
+    while *at < tokens.len() {
+        if tokens[*at] == "}" {
+            *at += 1;
+            return;
+        }
+        let mut gates = Vec::new();
+        while tokens.get(*at).is_some_and(|t| t == "@") {
+            let Some(close) = end_of(*at, &[")"]) else {
+                problems.push("an unclosed gate".to_string());
+                *at = tokens.len();
+                return;
+            };
+            gates.push(tokens[*at..=close].join(" "));
+            *at = close + 1;
+        }
+        let Some(keyword) = tokens.get(*at).map(String::as_str) else {
+            problems.push(format!("gates at the end of the file: {gates:?}"));
+            return;
+        };
+        // A `use` carries no gate, and its `{…}` list is not a body.
+        if keyword == "use" {
+            *at = end_of(*at, &[";"]).map_or(tokens.len(), |end| end + 1);
+            continue;
+        }
+        let Some(end) = end_of(*at, &[";", "{"]) else {
+            problems.push(format!("`{keyword}` has no end"));
+            return;
+        };
+        let opens = tokens[end] == "{";
+        if container.is_none() && keyword == "package" {
+            if opens {
+                problems.push(format!(
+                    "nested `package {}` block: a contract is one package",
+                    tokens[*at + 1..end].concat()
+                ));
+                *at = closing(end);
+            } else {
+                *at = end + 1;
+            }
+            continue;
+        }
+        let name = if tokens.get(*at + 1).is_some_and(|t| t == ":") {
+            keyword.to_string()
+        } else {
+            tokens[*at..(*at + 2).min(end)].join(" ")
+        };
+        let label =
+            container.map_or_else(|| name.clone(), |container| format!("{container}: {name}"));
+        if gates != [GATE] {
+            problems.push(format!(
+                "{label} carries {gates:?}, not exactly `@since(version = 0.1.0)`"
+            ));
+        }
+        let body = container.is_none() && matches!(keyword, "interface" | "world");
+        *at = if opens && body {
+            let name = format!("{keyword} {}", tokens[*at + 1]);
+            let mut inner = end + 1;
+            items(tokens, &mut inner, Some(&name), problems);
+            inner
+        } else if opens {
+            closing(end)
+        } else {
+            end + 1
+        };
+    }
 }
 
 /// The generated trait for interface `name`: `adapter-api` is
@@ -239,17 +351,8 @@ fn problems(
 /// The worlds in every `.wit` file of the contract version the consumer
 /// crate is generated from.
 fn contract_worlds() -> BTreeMap<String, Items> {
-    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit/alint-plugin/v0.1");
-    let mut paths: Vec<_> = std::fs::read_dir(&dir)
-        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
-        .map(|entry| entry.unwrap().path())
-        .filter(|path| path.extension().is_some_and(|ext| ext == "wit"))
-        .collect();
-    paths.sort();
-    assert!(!paths.is_empty(), "no .wit files in {}", dir.display());
     let mut out = BTreeMap::new();
-    for path in paths {
-        let source = std::fs::read_to_string(&path).unwrap();
+    for (path, source) in contract_sources() {
         let found = worlds(&source).unwrap_or_else(|e| panic!("{}: {e}", path.display()));
         for (name, items) in found {
             assert!(
@@ -259,6 +362,116 @@ fn contract_worlds() -> BTreeMap<String, Items> {
         }
     }
     out
+}
+
+/// Every `.wit` file of the contract version, with its source.
+fn contract_sources() -> Vec<(std::path::PathBuf, String)> {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../wit/alint-plugin/v0.1");
+    let mut paths: Vec<_> = std::fs::read_dir(&dir)
+        .unwrap_or_else(|e| panic!("{}: {e}", dir.display()))
+        .map(|entry| entry.unwrap().path())
+        .filter(|path| path.extension().is_some_and(|ext| ext == "wit"))
+        .collect();
+    paths.sort();
+    assert!(!paths.is_empty(), "no .wit files in {}", dir.display());
+    paths
+        .into_iter()
+        .map(|path| {
+            let source = std::fs::read_to_string(&path).unwrap();
+            (path, source)
+        })
+        .collect()
+}
+
+#[test]
+fn every_item_is_gated_at_0_1_0_in_one_package() {
+    let mut problems = Vec::new();
+    for (path, source) in contract_sources() {
+        problems.extend(
+            item_problems(&source)
+                .into_iter()
+                .map(|problem| format!("{}: {problem}", path.display())),
+        );
+    }
+    assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+/// Each way an item can leave the 0.1 gate, or the file hold another
+/// package, is reported; the gated contract shape is not.
+#[test]
+fn the_item_check_reports_every_changed_gate_and_a_nested_package() {
+    let gated = "
+        package a:b@0.1.0;
+        /// Types.
+        @since(version = 0.1.0)
+        interface types {
+            @since(version = 0.1.0)
+            record r { x: u32, y: option<list<u8>> }
+            @since(version = 0.1.0)
+            variant v { a, b(string) }
+            @since(version = 0.1.0)
+            type t = list<r>;
+            @since(version = 0.1.0)
+            f: func(x: r) -> result<v, string>;
+        }
+        @since(version = 0.1.0)
+        interface api {
+            use types.{r};
+            @since(version = 0.1.0)
+            g: func() -> r;
+        }
+        @since(version = 0.1.0)
+        world %w {
+            @since(version = 0.1.0)
+            import types;
+            @since(version = 0.1.0)
+            export api;
+        }
+    ";
+    assert_eq!(item_problems(gated), Vec::<String>::new());
+    for (from, to, expected) in [
+        (
+            "@since(version = 0.1.0)\n        world",
+            "@unstable(feature = later)\n        world",
+            "world %w carries",
+        ),
+        (
+            "@since(version = 0.1.0)\n        interface api",
+            "@unstable(feature = later)\n        interface api",
+            "interface api carries",
+        ),
+        (
+            "@since(version = 0.1.0)\n            record",
+            "@unstable(feature = later)\n            record",
+            "interface types: record r carries",
+        ),
+        (
+            "@since(version = 0.1.0)\n            g:",
+            "g:",
+            "interface api: g carries []",
+        ),
+        (
+            "@since(version = 0.1.0)\n            export",
+            "@since(version = 0.2.0)\n            export",
+            "world %w: export api carries",
+        ),
+        (
+            "@since(version = 0.1.0)\n            type",
+            "@since(version = 0.1.0)\n            @deprecated(version = 0.1.0)\n            type",
+            "interface types: type t carries",
+        ),
+        (
+            "export api;\n        }",
+            "export api;\n        }\n        package other:pkg { interface extra { f: func(); } }",
+            "nested `package other:pkg` block",
+        ),
+    ] {
+        let edited = gated.replacen(from, to, 1);
+        assert_ne!(edited, gated, "{from}");
+        let problems = item_problems(&edited);
+        assert_eq!(problems.len(), 1, "{to}: {problems:?}");
+        assert!(problems[0].contains(expected), "{to}: {problems:?}");
+    }
 }
 
 #[test]
@@ -287,9 +500,13 @@ fn the_world_parser_reads_worlds_and_refuses_the_rest() {
             export %adapter-api;
         }
         world empty {}
+        world %escaped { import types; }
     ";
     let found = worlds(source).unwrap();
-    assert_eq!(found.keys().collect::<Vec<_>>(), ["adapter", "empty"]);
+    assert_eq!(
+        found.keys().collect::<Vec<_>>(),
+        ["adapter", "empty", "escaped"]
+    );
     assert_eq!(
         found["adapter"],
         Items {

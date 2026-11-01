@@ -492,6 +492,39 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: ci/scripts/shell-tests.sh
 
+  # ── Plugin contract (audit item W2-7) ───────────────────────────
+  # The only CI check of the plugin contract's WIT against the consumer crate
+  # generated from it: `witforge check` on the WIT, then `rust`, `proto`, and
+  # `glue` regenerating the committed output with --check, then the check's
+  # controls with witforge required (elsewhere they skip without it). Installs
+  # the release witforge-consumer.sh pins into a fresh directory, so nothing
+  # is cached. Gated on `rust`, which detect-changes.sh raises for wit/, the
+  # consumer crate, plugin_api, and ci/; summary.sh fails a skip or a cancel
+  # while `rust` is true, since then the WIT went unchecked.
+  witforge:
+    name: Plugin contract (witforge)
+    needs: changes
+    if: >-
+      !cancelled() && !failure()
+      && needs.changes.outputs.rust == 'true'
+    runs-on: ${{ fromJSON(needs.changes.outputs.runner) }}
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - name: install the pinned witforge
+        run: |
+          ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"
+          echo "WITFORGE_BIN=$RUNNER_TEMP/witforge/bin/witforge" >> "$GITHUB_ENV"
+      - name: check the WIT and regenerate the consumer with --check
+        run: ci/scripts/witforge-consumer.sh
+      - name: controls
+        env:
+          WITFORGE_REQUIRED: "1"
+        run: ci/scripts/test-witforge-consumer.sh
+
   # ── Distribution packaging ───────────────────────────────────────
   # install.sh, npm/**, Dockerfile (+ .dockerignore) and .pre-commit-hooks.yaml
   # trigger no Rust/docs pipeline, so they get their own cheap hosted job:
@@ -573,6 +606,7 @@ jobs:
       - packaging
       - editors
       - perf-gate-reference
+      - witforge
     # Keep this bookkeeping job hosted even after local capacity returns. An
     # always-run summary must not remain queued on an unavailable local runner
     # and hold the workflow's concurrency slot indefinitely.
@@ -607,4 +641,5 @@ jobs:
           EDITORS_RESULT: ${{ needs.editors.result }}
           PACKAGING_RESULT: ${{ needs.packaging.result }}
           PERF_REFERENCE_RESULT: ${{ needs.perf-gate-reference.result }}
+          WITFORGE_RESULT: ${{ needs.witforge.result }}
         run: ci/scripts/summary.sh

@@ -35,7 +35,18 @@ EXEMPT = {
     'ci/scripts/check-secrets-inventory.sh': 'repo-config drift gate; ci.yml runs it unconditionally on the tag',
 }
 
-script_re = re.compile(r'ci/scripts/[A-Za-z0-9_.-]+\.(?:sh|py)')
+# A script counts as run only where a line of a step starts with it (after
+# `run:`, environment assignments, or `bash`/`python3`): a mention inside
+# another command, such as an install line's `$(ci/scripts/x.sh
+# --print-version)`, runs no gate.
+script_re = re.compile(
+    r'^\s*(?:-\s+)?(?:run:\s*(?:\|\s*)?)?(?:[A-Z_][A-Z0-9_]*=\S*\s+)*'
+    r'(?:(?:bash|python3|sh)\s+)?(ci/scripts/[A-Za-z0-9_.-]+\.(?:sh|py))\b',
+    re.MULTILINE,
+)
+assert script_re.findall('        run: ci/scripts/a.sh\n          X=1 bash ci/scripts/b.sh --x') \
+    == ['ci/scripts/a.sh', 'ci/scripts/b.sh']
+assert script_re.findall('        run: cargo install w --version "$(ci/scripts/c.sh --print-version)"') == []
 
 
 def code(path):

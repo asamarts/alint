@@ -112,6 +112,19 @@ jobs:
         run: ci/scripts/demo-drift.sh
       - name: examples-validate (every examples/*/.alint.yml)
         run: ci/scripts/examples-validate.sh
+      # WITFORGE_BIN is set on these steps only, so shell-tests below skips
+      # the controls they have just run.
+      - name: install the pinned witforge (plugin contract, W2-7)
+        run: ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"
+      - name: plugin contract (witforge check + regeneration --check)
+        env:
+          WITFORGE_BIN: ${{ runner.temp }}/witforge/bin/witforge
+        run: ci/scripts/witforge-consumer.sh
+      - name: plugin contract controls
+        env:
+          WITFORGE_BIN: ${{ runner.temp }}/witforge/bin/witforge
+          WITFORGE_REQUIRED: "1"
+        run: ci/scripts/test-witforge-consumer.sh
       - name: shell-tests (test-*.sh harnesses incl. homebrew golden)
         run: ci/scripts/shell-tests.sh
       - name: packaging (install.sh / npm shim / Dockerfile / pre-commit hooks)

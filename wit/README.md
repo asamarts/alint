@@ -12,9 +12,12 @@ The WIT is the source of truth for the contract. The hand-written traits in
 generated `alint-plugin-api` crate replaces them (slice P2). Until then, the
 tests in `crates/alint-witforge-consumer` convert every type and trait that
 `plugin_api` and the generated code share, account for every item on both
-sides, and pair each world with the `plugin_api` trait that implements it, and
-`ci/scripts/witforge-consumer.sh` checks the generated code against the WIT, so
-a change to either side must update the other in the same pull request.
+sides (a name two `plugin_api` files both declare is refused), pair each world
+with the `plugin_api` trait that implements it, and require the
+`@since(version = 0.1.0)` gate on every interface, world, and item, and
+`ci/scripts/witforge-consumer.sh` checks the generated code against the WIT in
+default CI (the `witforge` job), so a change to either side must update the
+other in the same pull request.
 
 ## Status: draft
 
@@ -63,9 +66,33 @@ ci/scripts/witforge-consumer.sh --write
 
 `ci/scripts/test-witforge-consumer.sh` runs the check's controls: the
 unmodified tree must pass, also with a relative `WITFORGE_BIN` from another
-directory; a changed, extra, or missing generated file, a WIT edit the
-committed output does not reflect, an unlocked member, a version directory the
-script does not check, or a witforge other than the pinned release must fail;
-and `--write` must restore a changed file. Without witforge the controls skip
+directory; a changed, extra, or missing generated file, a file in an output
+root that witforge did not write (no witforge header), a WIT edit the committed
+output does not reflect, an unlocked member, a version directory the script
+does not check, or a witforge other than the pinned release must fail; and
+`--write` must restore a changed file. Without witforge the controls skip
 (exit 77, which `ci/scripts/shell-tests.sh` reports as skipped), unless
 `WITFORGE_REQUIRED=1`.
+
+The `witforge` job in `.github/workflows/ci.yml` installs the pinned release
+with `ci/scripts/install-witforge.sh`, then runs the check and the controls
+with `WITFORGE_REQUIRED=1` whenever Rust, `wit/`, or `ci/` changes; the release
+preflight runs the same steps.
+
+## Upgrading witforge
+
+alint consumes only published witforge releases, so witforge's `main` can
+change without affecting alint. To move to a new release, set
+`WITFORGE_VERSION` in `ci/scripts/witforge-consumer.sh`, then install and
+regenerate:
+
+```sh
+root="$(mktemp -d)"   # a fresh root: cargo install refuses binaries it did not record
+ci/scripts/install-witforge.sh "$root"
+WITFORGE_BIN="$root/bin/witforge" ci/scripts/witforge-consumer.sh --write
+WITFORGE_BIN="$root/bin/witforge" ci/scripts/test-witforge-consumer.sh
+```
+
+Commit the script and any changed output in one pull request. A build of
+witforge's `main` reports the last release's version, so only a crates.io
+install identifies the release.
