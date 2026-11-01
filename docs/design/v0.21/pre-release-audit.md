@@ -8,7 +8,8 @@ in #417 (2026-11-01: the default-CI job against the pinned witforge 0.1.1,
 [`witforge-adoption.md`](witforge-adoption.md)); W3's documentation and code items done in
 #418 (2026-11-01); the release steps (section 5) are done up to the tag: the `RELEASE_RUST`
 bump (#419), the corpus replay (0 differences), the version bump, and v0.21.0 itself
-(2026-11-01, `d61e4c802`). The bench record, the alint.org updates, and the rest of W4 remain.
+(2026-11-01, `d61e4c802`), then the Action doc pin (#421), the bench record (#424), and the
+alint.org updates. The rest of W4 remains.
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
