@@ -88,6 +88,8 @@ mod tests {
         "f32",
         "f64",
     ];
+    /// Macros that splice in another file's contents.
+    const INCLUDES: &[&str] = &["include", "include_str", "include_bytes"];
     /// Built-in attributes; any other attribute is a macro from outside the
     /// module.
     const ATTRIBUTES: &[&str] = &[
@@ -136,13 +138,29 @@ mod tests {
         }
     }
 
-    /// The names the module declares or imports, and its generic
-    /// parameters: a path may start with any of them.
+    /// The names one module declares or imports, and its generic parameters:
+    /// a path in that module may start with any of them. `#[cfg(test)]` items
+    /// are left out, since they are not there in a build that ships, and a
+    /// nested module's items are its own scope, as they are for name
+    /// resolution.
     #[derive(Default)]
     struct Names(BTreeSet<String>);
 
+    impl Names {
+        fn of_items(items: &[syn::Item]) -> BTreeSet<String> {
+            let mut names = Self::default();
+            for item in items {
+                names.visit_item(item);
+            }
+            names.0
+        }
+    }
+
     impl<'ast> Visit<'ast> for Names {
         fn visit_item(&mut self, item: &'ast syn::Item) {
+            if is_cfg_test(item_attrs(item)) {
+                return;
+            }
             let ident = match item {
                 syn::Item::Const(i) => Some(&i.ident),
                 syn::Item::Enum(i) => Some(&i.ident),
@@ -159,6 +177,10 @@ mod tests {
             self.0.extend(ident.map(ToString::to_string));
             visit::visit_item(self, item);
         }
+
+        /// The module's own name is recorded above; its items are not
+        /// visible here without a path.
+        fn visit_item_mod(&mut self, _module: &'ast syn::ItemMod) {}
 
         fn visit_use_name(&mut self, name: &'ast syn::UseName) {
             self.0.insert(name.ident.to_string());
@@ -181,7 +203,8 @@ mod tests {
         file: &'a str,
         /// How many leading `super`s stay inside `plugin_api` here.
         depth: usize,
-        names: &'a BTreeSet<String>,
+        /// The current module's names.
+        names: BTreeSet<String>,
         /// The names the `use` item being checked introduces, which cannot
         /// vouch for its own path (`use serde;`).
         introducing: BTreeSet<String>,
@@ -308,9 +331,16 @@ mod tests {
         }
 
         fn visit_item_mod(&mut self, module: &'ast syn::ItemMod) {
+            let inner = module
+                .content
+                .as_ref()
+                .map(|(_, items)| Names::of_items(items))
+                .unwrap_or_default();
+            let outer = std::mem::replace(&mut self.names, inner);
             self.depth += 1;
             visit::visit_item_mod(self, module);
             self.depth -= 1;
+            self.names = outer;
         }
 
         fn visit_item_extern_crate(&mut self, item: &'ast syn::ItemExternCrate) {
@@ -368,25 +398,26 @@ mod tests {
         }
 
         fn visit_macro(&mut self, mac: &'ast syn::Macro) {
+            // Source pulled in from another file is never checked, so it
+            // cannot come in at all.
+            let name = mac.path.segments.last().map(|s| s.ident.to_string());
+            if let Some(name) = name.filter(|name| INCLUDES.contains(&name.as_str())) {
+                self.problems.push(format!("{}: {name}!", self.file));
+            }
             self.check_tokens(mac.tokens.clone());
             visit::visit_macro(self, mac);
         }
     }
 
-    fn problems(
-        file: &str,
-        source: &str,
-        depth: usize,
-        extra_names: &BTreeSet<String>,
-    ) -> Vec<String> {
+    /// The paths in one file of the module that leave it. Each file is
+    /// checked on its own: a name another file declares or imports never
+    /// vouches for a path here.
+    fn problems(file: &str, source: &str, depth: usize) -> Vec<String> {
         let syntax = syn::parse_file(source).expect("plugin_api source parses");
-        let mut names = Names::default();
-        names.visit_file(&syntax);
-        names.0.extend(extra_names.iter().cloned());
         let mut boundary = Boundary {
             file,
             depth,
-            names: &names.0,
+            names: Names::of_items(&syntax.items),
             introducing: BTreeSet::new(),
             problems: Vec::new(),
         };
@@ -466,13 +497,9 @@ mod tests {
     fn imports_nothing_but_std_and_itself() {
         let sources = module_sources();
         assert!(sources.len() >= 3, "plugin_api sources not found");
-        let mut names = Names::default();
-        for (_, _, source) in &sources {
-            names.visit_file(&syn::parse_file(source).unwrap());
-        }
         let mut found = Vec::new();
         for (file, depth, source) in &sources {
-            found.extend(problems(file, source, *depth, &names.0));
+            found.extend(problems(file, source, *depth));
         }
         assert!(
             found.is_empty(),
@@ -485,7 +512,6 @@ mod tests {
     /// module legitimately uses are not.
     #[test]
     fn the_boundary_check_sees_every_kind_of_path() {
-        let none = BTreeSet::new();
         let escapes = [
             "fn f() -> super::super::engine::Row { todo!() }",
             "#[derive(Clone, serde::Serialize)] struct A;",
@@ -501,15 +527,26 @@ mod tests {
             "extern crate serde;",
             "impl serde::Serialize for A {}",
             "mod inner { fn f() -> super::super::super::X { todo!() } }",
+            // A name only a `#[cfg(test)]` item brings in, or only a nested
+            // module declares, is not in scope in a build that ships, where
+            // the path resolves to the outside crate.
+            "#[cfg(test)] use regex; fn f() -> regex::Regex { todo!() }",
+            "#[cfg(test)] mod regex {} fn f() -> regex::Regex { todo!() }",
+            "mod inner { pub use std::fmt as regex; } fn f() -> regex::Regex { todo!() }",
+            "use std::fmt as serde; mod inner { fn f(x: serde::Value) {} }",
+            "include!(\"../relation.rs\");",
+            "fn f() { include!(\"row.rs\") }",
+            "const S: &str = include_str!(\"../lib.rs\");",
+            "const B: &[u8] = std::include_bytes!(\"../lib.rs\");",
         ];
         for source in escapes {
             assert!(
-                !problems("child.rs", source, 1, &none).is_empty(),
+                !problems("child.rs", source, 1).is_empty(),
                 "not caught: {source}"
             );
         }
         assert!(
-            !problems("mod.rs", "use super::relation::Row;", 0, &none).is_empty(),
+            !problems("mod.rs", "use super::relation::Row;", 0).is_empty(),
             "`super` from plugin_api itself is the crate root"
         );
         let allowed = "
@@ -535,10 +572,7 @@ mod tests {
             #[cfg(test)]
             mod tests { use serde::Serialize; }
         ";
-        assert_eq!(
-            problems("child.rs", allowed, 1, &none),
-            Vec::<String>::new()
-        );
+        assert_eq!(problems("child.rs", allowed, 1), Vec::<String>::new());
     }
 
     #[test]

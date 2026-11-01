@@ -560,8 +560,10 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md).
 - **R7, done.** `wit/alint-plugin/v0.1/plugin.wit` is the committed
   `alint:plugin@0.1.0` draft with shared types, `adapter` and `analyzer` worlds,
-  host-pushed inputs, no callbacks, and an append-only `wire.lock`. witforge's
-  subset checker accepts it (`witforge check wit/alint-plugin/v0.1`).
+  host-pushed inputs, no callbacks, and a `wire.lock` of protobuf numbers, which
+  becomes append-only when the contract is released (while 0.1 is a draft,
+  `witforge lock --first` rewrites it). witforge's subset checker accepts it
+  (`witforge check wit/alint-plugin/v0.1`).
 - **R6a and R6b, done.** `alint_core::plugin_api` now carries std-only `Adapter` and
   `Analyzer` traits over contract resources, rows, findings, related locations,
   capabilities, and limits. `relation::ContractAdapter` bridges a contract adapter
@@ -635,15 +637,15 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   injection, feature isolation, relation limits, the contract boundary, the
   bridge's path checks), the go/no-go assessment in
   [`r8-readiness.md`](r8-readiness.md), and S4 workload revision 4 with a
-  same-session kbench run against v0.20.1. W2-7, the WIT check in CI, waits on
-  witforge 0.1.0.
+  same-session kbench run against v0.20.1. W2-7, the WIT check in CI, is next:
+  witforge 0.1.0 was published on 2026-10-31.
 - **witforge consumer (#409).** The generated consumer crate, the regeneration
   `--check` against its committed output with controls, and tests that
-  convert every type the two sides share and account for every item on both
-  (#412); the review
-  that took it over, and the path to witforge 0.1.0 and the W2-7 CI job, are in
+  convert every type the two sides share, account for every item on both
+  (#412), and pair every world with its trait; the reviews, and the path to
+  witforge 0.1.0 and the W2-7 CI job, are in
   [`witforge-adoption.md`](witforge-adoption.md). ADR-0027 keeps contract 0.1 a
   draft until the first release that loads plugins.
-- **Next:** W3's documentation and release preparation (version bump,
-  changelog, generated artifacts, release preflight and cross-platform checks)
-  and, once witforge 0.1.0 is published and checked in CI, the tag.
+- **Next:** the W2-7 job, W3's documentation and release preparation (version
+  bump, changelog, generated artifacts, release preflight and cross-platform
+  checks), then the tag.

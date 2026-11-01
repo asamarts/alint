@@ -340,6 +340,12 @@ WIT has no field numbers, so the compiler keeps a committed, append-only `wire.l
 - the lockfile is designed to be replaced by in-source numbers if the WIT annotations proposal
   (component-model issue 695) lands with a suitable annotation.
 
+As built for v0.21 with witforge 0.1, `witforge check` validates the lockfile and `--check`
+regenerates the committed output (in default CI once audit item W2-7 lands). The merge-base
+comparison and `buf breaking` are P2 work, and witforge has no rename marker, since its names
+are identity, so a rename is a removal plus an addition
+([`v0.21/witforge-adoption.md`](v0.21/witforge-adoption.md) section 6).
+
 ### 8.3 Evolution policy
 
 1. A published contract version is frozen.
