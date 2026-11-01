@@ -1514,7 +1514,8 @@ Phase 2 of
 [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
 is specified by the accepted
 [`v0.21/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md)
-and [ADR-0023](https://github.com/asamarts/alint/blob/main/docs/adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md).
+and [ADR-0023](https://github.com/asamarts/alint/blob/main/docs/adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md),
+as corrected by [ADR-0024](https://github.com/asamarts/alint/blob/main/docs/adr/0024-relation-ir-decisions-after-review.md), which supersedes it.
 The only new user-facing surface is one rule kind.
 
 - **Measurement first.** Compare relation-layer changes with v0.18.2 on the deterministic
