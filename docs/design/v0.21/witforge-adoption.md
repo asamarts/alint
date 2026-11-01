@@ -1,7 +1,7 @@
 # v0.21: witforge adoption and the WIT gate (W2-7)
 
 Status: W2-7 done (2026-11-01). Steps 1 to 6 of section 4 are done: witforge is on crates.io,
-alint pins witforge 0.1.1, and the W2-7 job checks the contract against that release in default
+alint pins witforge 0.1.2, and the W2-7 job checks the contract against that release in default
 CI (#417). Step 7 (W3, then the v0.21.0 tag) is next.
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is

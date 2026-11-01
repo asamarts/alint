@@ -28,7 +28,7 @@
 # WITFORGE_VERSION, the release the committed output was generated with.
 set -euo pipefail
 
-WITFORGE_VERSION="0.1.1"
+WITFORGE_VERSION="0.1.2"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 WITFORGE_BIN="${WITFORGE_BIN:-witforge}"
 # A relative path names a file from the caller's directory, not the root's.
