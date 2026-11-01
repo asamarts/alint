@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance
+
+- Nested rules (`for_each_dir`, `for_each_file`, `every_matching_has`) look up
+  which of a nested rule's options are globs with a `match` instead of scanning
+  a table for every iterated entry. Adding `key_parity` to that table in v0.21.0
+  stopped the compiler unrolling the scan, which then cost about 300
+  instructions per entry and made `for_each_dir` 3% slower than v0.20.1 in the
+  release's deterministic micro-benchmark gate. It is now back within 0.5% of
+  v0.20.1.
+
 ## [0.21.0] - 2026-11-01
 
 The second general-linter phase. `key_parity` keeps locale and environment files in step with a

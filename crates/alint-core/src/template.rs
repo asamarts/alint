@@ -427,52 +427,53 @@ const NESTED_SPEC_LISTS: &[(&[&str], &str)] = &[(
     "require",
 )];
 
-/// Option keys (beyond `paths:`, which is rendered by [`render_paths_spec`])
-/// whose values are compiled as **globs**, per rule kind (aliases included).
-/// A dotted key is a path into nested mappings (sequence elements are walked
-/// through), e.g. `targets.files`. Every other string option is rendered
-/// LITERALLY: a regex (`for_each_match.select`, `pattern`), a literal path or
-/// template (`pair.partner`, `pair_hash.target`, `cross_file`'s `file`), a
-/// message. Glob-escaping a regex or a literal path would corrupt it.
-pub const NESTED_GLOB_OPTIONS: &[(&[&str], &[&str])] = &[
-    (&["dir_contains"], &["select", "require"]),
-    (&["dir_only_contains"], &["select", "allow"]),
-    (&["unique_by"], &["select"]),
-    (&["key_parity"], &["peers"]),
-    (
-        &["for_each_dir", "for_each_file", "every_matching_has"],
-        &["select"],
-    ),
-    (&["pair"], &["primary"]),
-    (&["pair_hash"], &["source"]),
-    (&["pair_changed_together"], &["if_changed", "then_changed"]),
-    (&["changeset_requires_path"], &["add_glob", "when_changed"]),
-    (&["generated_file_fresh"], &["outputs"]),
-    (&["git_no_denied_paths"], &["denied"]),
-    (&["import_gate"], &["allow"]),
-    (
-        &["file_graph"],
-        &[
-            "nodes",
-            "require.no_orphans.roots",
-            "require.forbidden_edges.from",
-            "require.forbidden_edges.to",
-        ],
-    ),
-    (
-        &["cross_file", "cross_file_value_equals"],
-        &["source.files", "targets.files"],
-    ),
-    (&["registry_paths_resolve"], &["source", "orphans.space"]),
-];
+/// Defines [`NESTED_GLOB_OPTIONS`] and [`nested_glob_options`] from one list.
+/// The lookup runs once per nested rule per iterated entry, so it is a `match`
+/// rather than a scan of the table: once the compiler stopped unrolling the
+/// scan, it cost ~300 instructions a call and `for_each_dir` 3% (v0.21.0).
+macro_rules! nested_glob_options_table {
+    ($([$($kind:literal),+ $(,)?] => [$($key:literal),* $(,)?]),* $(,)?) => {
+        /// Option keys (beyond `paths:`, which is rendered by [`render_paths_spec`])
+        /// whose values are compiled as **globs**, per rule kind (aliases included).
+        /// A dotted key is a path into nested mappings (sequence elements are walked
+        /// through), e.g. `targets.files`. Every other string option is rendered
+        /// LITERALLY: a regex (`for_each_match.select`, `pattern`), a literal path or
+        /// template (`pair.partner`, `pair_hash.target`, `cross_file`'s `file`), a
+        /// message. Glob-escaping a regex or a literal path would corrupt it.
+        pub const NESTED_GLOB_OPTIONS: &[(&[&str], &[&str])] = &[$((&[$($kind),+], &[$($key),*])),*];
 
-/// The glob-typed option keys of `kind` (see [`NESTED_GLOB_OPTIONS`]).
-#[must_use]
-pub fn nested_glob_options(kind: &str) -> &'static [&'static str] {
-    NESTED_GLOB_OPTIONS
-        .iter()
-        .find(|(kinds, _)| kinds.contains(&kind))
-        .map_or(&[], |(_, keys)| keys)
+        /// The glob-typed option keys of `kind` (see [`NESTED_GLOB_OPTIONS`]).
+        #[must_use]
+        pub fn nested_glob_options(kind: &str) -> &'static [&'static str] {
+            match kind {
+                $($($kind)|+ => &[$($key),*],)*
+                _ => &[],
+            }
+        }
+    };
+}
+
+nested_glob_options_table! {
+    ["dir_contains"] => ["select", "require"],
+    ["dir_only_contains"] => ["select", "allow"],
+    ["unique_by"] => ["select"],
+    ["key_parity"] => ["peers"],
+    ["for_each_dir", "for_each_file", "every_matching_has"] => ["select"],
+    ["pair"] => ["primary"],
+    ["pair_hash"] => ["source"],
+    ["pair_changed_together"] => ["if_changed", "then_changed"],
+    ["changeset_requires_path"] => ["add_glob", "when_changed"],
+    ["generated_file_fresh"] => ["outputs"],
+    ["git_no_denied_paths"] => ["denied"],
+    ["import_gate"] => ["allow"],
+    ["file_graph"] => [
+        "nodes",
+        "require.no_orphans.roots",
+        "require.forbidden_edges.from",
+        "require.forbidden_edges.to",
+    ],
+    ["cross_file", "cross_file_value_equals"] => ["source.files", "targets.files"],
+    ["registry_paths_resolve"] => ["source", "orphans.space"],
 }
 
 /// Render a nested rule's option mapping (`extra`) for one iteration. Like
@@ -614,6 +615,17 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn nested_glob_options_matches_its_table() {
+        for (kinds, keys) in NESTED_GLOB_OPTIONS {
+            for kind in *kinds {
+                assert_eq!(nested_glob_options(kind), *keys, "{kind}");
+            }
+        }
+        assert_eq!(nested_glob_options("file_exists"), [] as [&str; 0]);
+        assert_eq!(nested_glob_options(""), [] as [&str; 0]);
+    }
 
     /// The pre-fast-path algorithms, kept as the reference the fast paths must
     /// match exactly.
