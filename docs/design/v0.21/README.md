@@ -481,7 +481,7 @@ v0.21 is complete only when all of the following are observed:
 - Full workspace, cross-platform, shell, advisory, and preflight checks pass, and generated
   artifacts (schema, facts, docs export, roadmap) regenerate cleanly.
 - witforge 0.1.0 is published and pinned, and default CI checks the WIT draft and regenerates its
-  consumer with `--check` (ADR-0025 decision 4). Met: alint pins witforge 0.1.1, and the
+  consumer with `--check` (ADR-0025 decision 4). Met: alint pins witforge 0.1.2, and the
   `witforge` job runs in default CI (#417).
 
 ADR-0025 decision 3 settled the go/no-go assessment as a GO on consistency; the simplicity it
