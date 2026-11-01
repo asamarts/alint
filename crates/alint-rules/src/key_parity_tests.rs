@@ -424,6 +424,25 @@ fn missing_reference_parse_failure_and_empty_peers_fail_loudly() {
 }
 
 #[test]
+fn a_reference_that_is_a_directory_is_reported_without_an_absolute_path() {
+    // `locales/en.json/` is a directory, so the literal read refuses it. The
+    // finding names the repo-relative path only: an absolute one would make
+    // findings, fingerprints, and the corpus replay depend on the checkout.
+    let violations = run(
+        "id: t\nkind: key_parity\nreference: locales/en.json\npeers: 'locales/*.yml'\nlevel: error\n",
+        &[("locales/en.json/keep", b""), ("locales/fr.yml", b"a: 1\n")],
+    );
+    assert_eq!(
+        messages(&violations),
+        vec!["locales/en.json: could not read file: not a regular file".to_string()],
+    );
+    assert!(matches!(
+        violations[0].disposition,
+        FindingDisposition::AnalysisFailure(_)
+    ));
+}
+
+#[test]
 fn the_rule_declares_the_relation_cache_and_full_index() {
     let spec = spec_yaml(
         "id: t\nkind: key_parity\nreference: locales/en.json\npeers: 'locales/*.json'\nlevel: error\n",

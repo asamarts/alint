@@ -7,12 +7,12 @@ use std::path::Path;
 pub const TEXT_INSPECT_LEN: usize = 8 * 1024;
 
 /// The `InvalidInput` error a direct-read helper returns for a non-regular
-/// file, so the message is uniform across the three read helpers.
-fn not_regular_file(path: &Path) -> std::io::Error {
-    std::io::Error::new(
-        std::io::ErrorKind::InvalidInput,
-        format!("{} is not a regular file", path.display()),
-    )
+/// file, so the message is uniform across the three read helpers. Like an OS
+/// error, it names no path: callers attach the repo-relative one, and the
+/// helpers only see the absolute path, which would make findings depend on
+/// where the repository is checked out.
+fn not_regular_file() -> std::io::Error {
+    std::io::Error::new(std::io::ErrorKind::InvalidInput, "not a regular file")
 }
 
 /// Open `path` for reading, first refusing a non-regular file (FIFO / socket /
@@ -26,7 +26,7 @@ fn not_regular_file(path: &Path) -> std::io::Error {
 /// committed / planted special file, which the stat catches.)
 fn open_regular(path: &Path) -> std::io::Result<std::fs::File> {
     if !std::fs::metadata(path)?.is_file() {
-        return Err(not_regular_file(path));
+        return Err(not_regular_file());
     }
     std::fs::File::open(path)
 }
@@ -267,7 +267,7 @@ pub(crate) fn read_capped_with(path: &Path, max: u64) -> Result<Vec<u8>, ReadCap
         // a symlink the walker followed) would hang the run. The walker skips
         // these at index time; the direct-read helpers must too.
         Ok(m) if !m.is_file() => {
-            return Err(ReadCapError::Io(not_regular_file(path)));
+            return Err(ReadCapError::Io(not_regular_file()));
         }
         Ok(m) if m.len() > max => return Err(ReadCapError::TooLarge(m.len())),
         Ok(m) => m.len(),
@@ -466,12 +466,19 @@ mod tests {
         // real pipe here; the directory case covers the guard faithfully.
         let dir = tempfile::tempdir().unwrap();
         let d = dir.path();
+        // The message names no path: callers attach the repo-relative one, and an
+        // absolute path would make findings depend on the checkout location.
         let e = read_prefix_n(d, 16).expect_err("a directory is not a regular file");
         assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(e.to_string(), "not a regular file");
         let e = read_suffix_n(d, 16).expect_err("a directory is not a regular file");
         assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+        assert_eq!(e.to_string(), "not a regular file");
         match read_capped_with(d, 1024) {
-            Err(ReadCapError::Io(e)) => assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput),
+            Err(ReadCapError::Io(e)) => {
+                assert_eq!(e.kind(), std::io::ErrorKind::InvalidInput);
+                assert_eq!(e.to_string(), "not a regular file");
+            }
             _ => panic!("read_capped_with must reject a directory as an Io error"),
         }
     }
