@@ -1,6 +1,9 @@
 # Plugin architecture: one contract, three hosts
 
-Status: Accepted direction (2026-10-14), not yet implemented. The decisions are DEC-10 and
+Status: Accepted direction (2026-10-14). Slice P1 shipped in v0.21: the contract `0.x` traits
+and the relation bridge in the doc-hidden `alint_core::plugin_api` module (no semver promise),
+registry injection, and the `alint:plugin@0.1.0` WIT draft, checked against witforge in CI. No
+plugin host exists yet; slices P2 onward are not implemented. The decisions are DEC-10 and
 DEC-14 in [`general-linter.md`](general-linter.md) section 13.1, recorded in
 [ADR-0019](../adr/0019-general-linter-program-and-plugin-architecture.md). This is an arc
 document: each slice in section 10 graduates to its own `docs/design/vX.Y/` design document
@@ -448,7 +451,11 @@ Facts from the 2026-10-14 code map, each a work item for P1 to P3:
 - Every runtime build site uses `alint_rules::builtin_registry()` directly (the CLI's check, fix,
   and validate-config paths, the LSP, `alint test`'s runner, `rules`, `init`, `suggest`, and
   `export-agents-md`); there is no injection hook, though `Engine::new` already accepts any
-  `RuleRegistry`.
+  `RuleRegistry`. Done in P1 (v0.21): the CLI's runtime paths (check, fix, validate-config,
+  `alint test`, `rules`, `export-agents-md`, `lsp`), the LSP's config and sessions, and the
+  testkit (`Runner::with_registry`) take an injected registry, and tests register a custom kind
+  and observe it through the CLI, the LSP, and the testkit; `init` and `suggest` never consult a
+  registry at run time.
 - `RuleBuilder` is a plain function pointer; plugin kinds need closures or trait objects carrying
   plugin state.
 - `Format` is a closed enum with exhaustive matches and parity gates over `Format::ALL`;

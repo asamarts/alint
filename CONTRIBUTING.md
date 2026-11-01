@@ -52,7 +52,7 @@ cargo test --workspace            # ~5s
 cargo run -p alint -- check       # dogfood: alint lints itself
 ```
 
-Rust 1.88+ required (the workspace MSRV: `[workspace.package].rust-version` in `Cargo.toml`; `rust-toolchain.toml` pins the `stable` channel for development).
+Rust 1.88+ required (the workspace MSRV: `[workspace.package].rust-version` in `Cargo.toml`; `rust-toolchain.toml` pins the `stable` channel for development). The MSRV rises only when a dependency or language feature needs it, to a stable release at least six months old, in a minor release or a security patch, with a CHANGELOG line (the policy in [`RELEASING.md`](RELEASING.md#release-version-policy)).
 
 ### Pre-push checklist
 

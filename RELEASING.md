@@ -48,9 +48,10 @@ points are explicit.
 
    Move entries from `## [Unreleased]` to a new `## [<x.y.z>], YYYY-MM-DD`
    section. Add a one-paragraph summary at the top of the new section
-   capturing the headline change. Keep the per-section shape (`### Added /
-   Changed / Fixed / Removed / Deprecated / Security`) used throughout
-   the file.
+   capturing the headline change. Keep the section order 0.18.0 onward
+   uses: `### Security` first when present, then `Added`, `Changed`,
+   `Performance`, and `Fixed`, with `Deprecated` and `Removed` when a
+   release needs them. Each heading appears once per release.
 
 3. **Verify locally.**
 
@@ -58,8 +59,8 @@ points are explicit.
    bash ci/scripts/preflight.sh
    ```
 
-   Runs the full preflight bundle: fmt + clippy + test + doc +
-   version-pins + dep-floors + dogfood. The
+   Runs the full preflight bundle: fmt + clippy + shadow-feature + test +
+   doc + version-pins + dep-floors + secrets-inv + dogfood. The
    `release.yml` `preflight` job runs the same gates remotely; this
    is the pre-push sanity gate.
 
@@ -102,18 +103,33 @@ points are explicit.
    `alint-rules/shadow-ir`, so it also runs R4's shadow implementation; any
    shadow difference blocks the release.
 
-4. **Commit and tag.**
+4. **Commit, merge, and tag.**
+
+   `main` is protected by a repository ruleset that requires the `Summary`
+   check, so the bump lands through a pull request, and the tag goes on the
+   commit that lands on `main`:
 
    ```sh
+   git switch -c release/v<x.y.z>
    git add Cargo.toml Cargo.lock facts.json action.yml README.md SECURITY.md CHANGELOG.md \
-     npm/package.json npm/README.md editors/zed/Cargo.toml \
+     docs/design/ROADMAP.md npm/package.json npm/README.md editors/zed/Cargo.toml \
      editors/zed/extension.toml docs/site/getting-started/installation.md \
      docs/site/integrations/docker.md docs/site/integrations/pre-commit.md
    git commit -m "chore(release): bump workspace to <x.y.z>"
+   git push -u origin release/v<x.y.z>
+   gh pr create --fill
+   # once Summary passes, squash-merge the pull request, then:
+   git switch main && git pull --ff-only
    git tag v<x.y.z>
-   git push origin main
    git push origin v<x.y.z>
    ```
+
+   A second ruleset protects `v*.*.*` tags: once pushed, a release tag cannot
+   be moved or deleted except by a repository admin, the ruleset's only
+   bypass. The one tag move this file allows (a RustSec advisory that blocks
+   the preflight before anything publishes, under
+   [Recovering a partial release](#recovering-a-partial-release)) therefore
+   needs an admin.
 
    **Why `Cargo.lock` is in the stage list.** When
    `[workspace.package].version` bumps, the workspace internal-crate
@@ -193,7 +209,7 @@ checklist so the release-gated pieces land and nothing drifts:
 
 | Workflow | Triggered by | What it does | Time |
 |---|---|---|---|
-| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit + deny (both blocking on RustSec vulnerabilities), build, bench-smoke, examples, shell-tests, editors, and the advisory perf-gate. Self-hosted Linux. | ~5 min |
+| `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit + deny (both blocking on RustSec vulnerabilities), build, bench-smoke, examples, shell-tests, editors, the plugin-contract check against the pinned witforge, and the advisory perf-gate. GitHub-hosted `ubuntu-latest`. | ~5 min |
 | `release.yml` | tag push only | preflight gate → supply-chain (SBOM + license bundle) → cross-platform build matrix → GitHub Release (cosign-signed `SHA256SUMS` + build-provenance + SBOM attestations) → ghcr.io Docker (attested + cosign-signed by digest) → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
 | `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts alint.org's three install-pin sites reference the latest tag from this release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
@@ -623,7 +639,8 @@ contains a critical bug:
 
 1. Yank from crates.io via `cargo yank --version <x.y.z> -p alint`
    (and every published library crate, per `ci/scripts/publish-crates.sh`:
-   `alint-core`, `alint-rules`, `alint-output`, `alint-dsl`, `alint-lsp`).
+   `alint-core`, `alint-rules`, `alint-output`, `alint-dsl`, `alint-lsp`,
+   `alint-testkit`).
 2. Mark the npm package as `npm deprecate "@asamarts/alint@<x.y.z>"
    "Yanked: <reason>; upgrade to <x.y.z+1>"`.
 3. Delete the GitHub Release (the asset tarballs stay accessible via
@@ -659,8 +676,16 @@ Scope:
 - The contract covers the **observable product surface** only: the
   `.alint.yml` schema, the CLI (flags, subcommands, exit codes),
   and the machine-readable output formats. The `alint-core` public
-  API joins at v1.0 (pre-1.0 the engine API + `Rule` trait are
-  effectively crate-private; see the `publish = false` members).
+  API joins at v1.0: pre-1.0 the library crates are published so the
+  CLI and `alint-testkit` can depend on them, but the engine API and the
+  `Rule` trait carry no compatibility promise, and the plugin contract
+  modules (`alint_core::plugin_api`, `alint_core::relation`) are
+  `#[doc(hidden)]` until a release loads plugins.
+- The MSRV (`[workspace.package].rust-version`) rises only when a
+  dependency or a language feature needs it, only to a stable release at
+  least six months old, and only in a minor release or a security patch,
+  with a CHANGELOG line (decided 2026-10-30;
+  [`pre-release-audit.md`](docs/design/v0.21/pre-release-audit.md) section 7, item 8).
 - The GitHub Action wrapper (`action.yml`, incl. its input
   defaults and ref/binary-pin behaviour), `install.sh`, the
   npm / Homebrew / Docker shims, benchmark numbers, and the docs

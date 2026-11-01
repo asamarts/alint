@@ -485,3 +485,17 @@ rules:
       commit or digest. Pin Actions with `@<full-commit-sha>` and images with
       `@sha256:<64-hex-digest>` so a compromised tag cannot silently change
       what runs. Local `./` references are allowed.
+
+  # docs/design/README.md indexes every ADR. A new ADR that is not listed
+  # there fails here, so the index cannot fall behind docs/adr/.
+  - id: adr-index-lists-every-adr
+    kind: for_each_file
+    select:
+      - "docs/adr/[0-9][0-9][0-9][0-9]-*.md"
+      - "!docs/adr/0000-template.md"
+    require:
+      - kind: file_content_matches
+        paths: docs/design/README.md
+        pattern: "\\(\\.\\./adr/{basename}\\)"
+    level: error
+    message: "docs/design/README.md's ADR table does not link this ADR; add a row for it."

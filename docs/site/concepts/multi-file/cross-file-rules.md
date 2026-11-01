@@ -59,6 +59,12 @@ Edges resolve **as paths**, which is the point: a `from_content` regex captures 
 
 `cross_file` asserts a **relation** between one file's extracted value and one or more targets. Six relations: the value relations `equals`, `subset`, `superset`, and `set_equals`; `identical`, a whole-file byte match; and `resolves`, which requires each extracted path to exist on disk. It pulls values through the shared `extract:` extractor and an optional `normalize`, so `normalize: semver-minor` reconciles `4.36-dev`, `4.36.0`, and `>=4.36` to the same `4.36` band, letting the `engines.node` in every `package.json` be checked against the root without version-string noise. `allow_missing_target` tolerates an absent target, and `cross_file_value_equals` is a registered alias with `relation: equals`.
 
+<!-- alint:since=0.21 -->
+## key_parity
+
+`key_parity` keeps a **reference** file and a glob of **peers** declaring the same key set: `locales/en.json` against `locales/*.json`, or `.env.example` against `.env`. It compares keys, never values, across JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .NET `.resx`. Nested keys compare as leaf paths and a dotted flat key such as `app.title` is one key, so a flat `nav.home` never equals a `home` nested under `nav`. `direction` reports missing keys, extra keys, or both; `strip_root` compares below a Rails-style locale root; `plurals: cldr` treats a CLDR plural group as one key; and `ignore_keys` omits known gaps. The reference, and a peer named without glob characters, are read from disk even when gitignored, and a missing one fails loudly unless `allow_missing_peers: true` turns an absent peer into a note.
+<!-- /alint:since -->
+
 ## The `extract:` extractor
 
 `file_graph` and `cross_file` (plus `registry_paths_resolve` and `scope_filter`'s manifest predicates) share one extractor, which reads a value out of a file in exactly one of four ways: a **structured query** (an RFC 9535 JSONPath, keyed by format: `json`, `yaml`, `toml`, `xml`, `dotenv`, `properties`, `ini`, or `hcl`), a **`lines`** list, a **`regex`** capture, or **`whole_file`** (the entire content as one value, for byte comparisons). The structured form is the same machinery [structured queries](/docs/concepts/multi-file/structured-queries/) use standalone.
