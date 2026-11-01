@@ -623,8 +623,8 @@ mod tests {
                 assert_eq!(nested_glob_options(kind), *keys, "{kind}");
             }
         }
-        assert!(nested_glob_options("file_exists").is_empty());
-        assert!(nested_glob_options("").is_empty());
+        assert_eq!(nested_glob_options("file_exists"), [] as [&str; 0]);
+        assert_eq!(nested_glob_options(""), [] as [&str; 0]);
     }
 
     /// The pre-fast-path algorithms, kept as the reference the fast paths must
