@@ -146,7 +146,7 @@ In alint, fixed with the W2-7 job (#417):
 | 5 | Feature gates were invisible: `@unstable(feature = …)` on a world, an interface, or a record, or a function without `@since`, passed everything, though component tooling hides an `@unstable` item unless its feature is enabled. | `tests/worlds.rs` requires every interface, world, interface item, and world item to carry exactly `@since(version = 0.1.0)`. |
 | 6 | The inventory merged every `plugin_api` file into one map by name, so a same-named public item in another file hid the existing one. | A name two files declare is refused. |
 | 7 | The control that fakes another witforge hardcoded `witforge 0.1.1`, which became the release, so an upgrade needed a test edit. | The faked version is the pin with its patch number plus one. |
-| 8 | A hand-written file without witforge's header in an output root passed `--check`, which ignores such files. | `witforge-consumer.sh` refuses any file in the three output roots without the header; two controls cover a file and a directory. |
+| 8 | A hand-written file without witforge's header in an output root passed `--check`, which ignores such files. | `witforge-consumer.sh` refuses any entry in the three output roots without the header; controls cover a file and a directory (hidden ones since section 2.7). |
 | 9 | `world %adapter`, valid WIT, failed the worlds test: world names were not unescaped as interface names were. | The `%` is trimmed. |
 | 10 | The W2-7 plan in section 5 did not name the runner, the folded `if:` form the routing test reads, the absent `permissions:` block, the Summary's variable and default, or the cache action the other jobs use; its preflight parity counted a mention of a script as running it; and it claimed the routing test asserted every flag-fed job. | Section 5 now describes the job as built; the parity test counts only a step line that starts with the script. |
 
@@ -176,6 +176,26 @@ are marked where found, so an internal error exits `2`; `--check` reports every 
 generation refuses and reads only regular files; hints are shell-quoted; and the freeze check
 follows moves of the WIT root, requires an exact-case tracked `wire.lock`, and counts ignored
 files. alint's contract passes every new check unchanged.
+
+### 2.7 Review after the W2-7 job merged (2026-11-01)
+
+An independent review of #417 at `bdc83c157` probed each gate with an input that should fail.
+Each fix below has a negative sample, control, or mutant that passed before it, and landed with
+W3 (#W3PR).
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | The `plugin_api` boundary test missed four escapes that compile: a `macro_rules!` variable named after an allowed root (`$Option::Value`), `include!` called through a macro variable, `n > ::outside::X` inside macro arguments (any `>` was read as closing a turbofish), and syntax `syn` keeps as unparsed tokens (`unsafe extern "C" { pub safe fn … }`). | Only an allow-list of std macros may run (which refuses `macro_rules!` and any outside macro, also inside macro arguments); a `>` continues a path only when it closes a `::<…>`; and any `Verbatim` node is refused. |
+| 2 | The output-root ownership check globbed `"$out"/*`, which skips hidden entries, so `src/glue/.extra.rs` passed. | It lists entries with `find`; two controls add a hidden file and a hidden directory. |
+| 3 | Nothing checked that the job runs anything: `run: echo disabled  # ci/scripts/…` passed, since the routing test only looked for the script names anywhere in `ci.yml`. | The routing test parses the job body without comments: each script on a `run:` line of its steps, `WITFORGE_REQUIRED: "1"` on the controls step, no `continue-on-error`, no step `if:`; five mutated copies of `ci.yml` must each fail it. |
+| 4 | A gate on a `use` was dropped, so `@unstable(…)` above `use types.{…}` passed every check. | `worlds.rs` refuses any gate on a `use`. |
+| 5 | The stricter parity pattern, applied to `ci.yml` too, would miss a script `ci.yml` runs as `./ci/scripts/x.sh` or after `timeout`. | `ci.yml` keeps the loose pattern (any mention counts); the strict one applies to the preflight. |
+| 6 | The inventory kept the second of two same-named items in one file (a struct and a function share no namespace). | A name one file declares twice is refused. |
+| 7 | A cancelled job without a Rust change passed the Summary, though this section said a cancel fails it. | The Summary fails on a cancel whatever changed; `test-summary.sh` has all four results with and without a Rust change. |
+
+The review also found section 5 naming `detect-changes.sh` as the runner's source (the `changes`
+job's `route` step picks it) and overstating what the routing and Summary tests asserted; both
+are corrected below.
 
 ## 3. Decisions (2026-10-31)
 
@@ -207,9 +227,10 @@ W3 can proceed in parallel with step 6.
 
 ## 5. The W2-7 job
 
-As built in #417. The job `witforge` ("Plugin contract (witforge)") in `ci.yml` runs on the
-runner `detect-changes.sh` picks, gated on its `rust` output, which covers `wit/`, the consumer
-crate, `plugin_api`, and, through `ci/`, the scripts. Its steps:
+As built in #417, with the fixes of section 2.7. The job `witforge` ("Plugin contract
+(witforge)") in `ci.yml` runs on the runner the `changes` job's `route` step picks
+(GitHub-hosted `ubuntu-latest`), gated on `detect-changes.sh`'s `rust` output, which covers
+`wit/`, the consumer crate, `plugin_api`, and, through `ci/`, the scripts. Its steps:
 
 1. `ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"` installs the release the consumer
    script pins: `cargo install witforge-cli --version <pin> --locked --root <fresh directory>`,
@@ -218,8 +239,8 @@ crate, `plugin_api`, and, through `ci/`, the scripts. Its steps:
    `--print-version`. Nothing is cached, and the root is fresh, because `cargo install` refuses a
    binary in its destination that its install records do not list;
 2. `ci/scripts/witforge-consumer.sh` checks the WIT (`witforge check`), regenerates the committed
-   output with `--check`, and refuses any file in the three output roots that does not carry
-   witforge's header, since `--check` ignores such a file;
+   output with `--check`, and refuses any entry in the three output roots, hidden ones included,
+   that is not a regular file carrying witforge's header, since `--check` ignores such a file;
 3. `ci/scripts/test-witforge-consumer.sh` runs the controls with `WITFORGE_REQUIRED=1`, so a
    missing binary fails instead of skipping. Everywhere else `ci/scripts/shell-tests.sh` reports
    the controls as skipped.
@@ -228,16 +249,19 @@ The wiring around it, each with its own gate:
 
 - **The release preflight** runs the same three steps, because the release fires in parallel
   with CI on a tag push. `ci/scripts/test-release-preflight-parity.sh` requires every script
-  `ci.yml` runs to be run, at the start of a step's line, by the preflight; a mention inside
-  another command, such as the install line's `--print-version`, does not count. The preflight
+  `ci.yml` mentions to be run, at the start of a step's line, by the preflight; there, a mention
+  inside another command, such as the install line's `--print-version`, does not count. The preflight
   sets `WITFORGE_BIN` on its two steps only, so its shell-tests step does not run the controls a
   second time.
-- **The Summary** lists the job, fails on its `failure` or `cancelled` result, and, while
-  `RUST_CHANGED=true`, fails on any result but `success`: a skip or a cancel then means the WIT
-  went unchecked. `ci/scripts/test-summary.sh` has a case for each result with and without a
-  Rust change.
+- **The Summary** lists the job, fails on its `failure` or `cancelled` result whatever changed,
+  and, while `RUST_CHANGED=true`, fails on any result but `success`: a skip then means the WIT
+  went unchecked. `ci/scripts/test-summary.sh` has a case for each of the four results with and
+  without a Rust change.
 - **The routing.** The static half of `ci/scripts/test-detect-action-changes.sh` asserts that
-  the job gates on `rust`, runs the three scripts, and sets `WITFORGE_REQUIRED`.
+  the job gates on `rust` and, reading the job's body without comments, that each script runs
+  on a `run:` line of its steps, the controls step sets `WITFORGE_REQUIRED: "1"`, and nothing
+  skips a step or lets the job fail (`continue-on-error`, a step `if:`); five mutated copies of
+  `ci.yml` must each fail it.
 
 The consumer crate's tests (the protobuf and proto3-JSON round trips, the `plugin_api`
 conversions, the inventory, and the worlds and gates) run with the workspace tests on every

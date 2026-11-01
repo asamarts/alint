@@ -10,6 +10,9 @@
 #    committed in crates/alint-witforge-consumer, so a stale or hand-edited
 #    file fails. (The crate's build.rs generates the prost and proto3-JSON code
 #    from the checked schema, so none of that is committed.)
+# 3. Every entry in the three output roots, hidden ones included, must be a
+#    regular file that starts with witforge's header: --check ignores any
+#    other file, which lib.rs could still pull in with #[path].
 #
 # The crate's tests (round trips through protobuf and proto3-JSON, the
 # conversions to and from `alint_core::plugin_api`, the inventory of both
@@ -75,8 +78,8 @@ fi
 # ignore a file without witforge's header, so a hand-written file there, which
 # lib.rs could pull in with #[path], is refused here instead.
 for out in "${CRATE}/src/plain" "${CRATE}/proto" "${CRATE}/src/glue"; do
-  for path in "$out"/*; do
-    [[ -e "$path" || -L "$path" ]] || continue
+  # find lists hidden entries too, which a `"$out"/*` glob skips.
+  while IFS= read -r -d '' path; do
     first=""
     if [[ -f "$path" && ! -L "$path" ]]; then
       IFS= read -r first <"$path" || true
@@ -85,7 +88,7 @@ for out in "${CRATE}/src/plain" "${CRATE}/proto" "${CRATE}/src/glue"; do
       echo "::error title=witforge consumer::${path} is not witforge output; witforge owns every file in ${out}" >&2
       exit 1
     fi
-  done
+  done < <(find "$out" -mindepth 1 -maxdepth 1 -print0)
 done
 
 echo "$done_message"

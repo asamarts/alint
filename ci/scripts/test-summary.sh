@@ -57,6 +57,8 @@ expect "plugin contract skipped on a rust change" fail CHANGES_RESULT=success RU
 expect "plugin contract result missing on a rust change" fail CHANGES_RESULT=success RUST_CHANGED=true
 expect "plugin contract skipped, no rust change" pass CHANGES_RESULT=success WITFORGE_RESULT=skipped
 expect "plugin contract failed, no rust change"  fail CHANGES_RESULT=success WITFORGE_RESULT=failure
+expect "plugin contract passed, no rust change"  pass CHANGES_RESULT=success WITFORGE_RESULT=success
+expect "plugin contract cancelled, no rust change" fail CHANGES_RESULT=success WITFORGE_RESULT=cancelled
 
 # A shell-only route must render as a real result, not "(no changes)".
 row=$(env -i PATH="$PATH" CHANGES_RESULT=success RUST_CHANGED=false DOCS_CHANGED=false \

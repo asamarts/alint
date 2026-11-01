@@ -142,10 +142,11 @@ if [[ "${PERF_REFERENCE_RESULT:-skipped}" == "cancelled" ]]; then
 fi
 
 # The plugin contract job is the only CI check of the WIT against the generated
-# consumer (W2-7): whenever `rust` changed it must have run and passed. A skip
-# (an upstream failure, a runner problem) or a cancel (a timeout) means the WIT
-# went unchecked.
-if [[ "${RUST_CHANGED:-false}" == "true" && "${WITFORGE_RESULT:-skipped}" != "success" ]]; then
+# consumer (W2-7). A cancel (a timeout) never passed, whatever changed; and
+# whenever `rust` changed it must have run and passed, since a skip (an
+# upstream failure, a runner problem) means the WIT went unchecked.
+if [[ "${WITFORGE_RESULT:-skipped}" == "cancelled" ]] \
+  || [[ "${RUST_CHANGED:-false}" == "true" && "${WITFORGE_RESULT:-skipped}" != "success" ]]; then
   echo "==> The plugin contract check did not pass (result: ${WITFORGE_RESULT:-skipped}); the WIT went unchecked" >&2
   FAILED=true
 fi

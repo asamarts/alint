@@ -2,8 +2,10 @@
 # Controls for witforge-consumer.sh. In a copy of the contract and the
 # generated consumer crate, the unmodified copy must pass, also with a relative
 # WITFORGE_BIN run from another directory; a changed, extra, or missing
-# generated file must fail naming it; a WIT edit the committed output does not
-# reflect must fail naming the file it changes; a contract whose wire lock lost
+# generated file must fail naming it; a file or directory in an output root
+# that witforge did not write, hidden ones included, must fail; a WIT edit the
+# committed output does not reflect must fail naming the file it changes; a
+# contract whose wire lock lost
 # an entry must fail `witforge check`; a version directory the script does not
 # check must fail; a witforge other than the pinned release must fail;
 # `--print-version` must print the pin without running witforge; and `--write`
@@ -108,6 +110,11 @@ control unowned-file "is not witforge output" \
   "printf '// hand-written\\n' >$CRATE/src/glue/extra.rs"
 control unowned-proto "is not witforge output" \
   "mkdir $CRATE/proto/extra"
+# A `"$out"/*` glob skips hidden entries; the ownership check must not.
+control unowned-hidden-file "is not witforge output" \
+  "printf '// hand-written\\n' >$CRATE/src/glue/.extra.rs"
+control unowned-hidden-dir "is not witforge output" \
+  "mkdir -p $CRATE/proto/.extra && printf 'syntax = \"proto3\";\\n' >$CRATE/proto/.extra/x.proto"
 control unchecked-version "this script checks only v0.1" \
   "cp -R wit/alint-plugin/v0.1 wit/alint-plugin/v0.2"
 # The output is regenerated from the WIT, not only compared with itself: a doc

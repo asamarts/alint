@@ -12,9 +12,10 @@ The WIT is the source of truth for the contract. The hand-written traits in
 generated `alint-plugin-api` crate replaces them (slice P2). Until then, the
 tests in `crates/alint-witforge-consumer` convert every type and trait that
 `plugin_api` and the generated code share, account for every item on both
-sides (a name two `plugin_api` files both declare is refused), pair each world
-with the `plugin_api` trait that implements it, and require the
-`@since(version = 0.1.0)` gate on every interface, world, and item, and
+sides (a name declared twice is refused), pair each world with the
+`plugin_api` trait that implements it, and require the
+`@since(version = 0.1.0)` gate on every interface, world, and item (and none
+on a `use`), and
 `ci/scripts/witforge-consumer.sh` checks the generated code against the WIT in
 default CI (the `witforge` job), so a change to either side must update the
 other in the same pull request.
@@ -66,8 +67,9 @@ ci/scripts/witforge-consumer.sh --write
 
 `ci/scripts/test-witforge-consumer.sh` runs the check's controls: the
 unmodified tree must pass, also with a relative `WITFORGE_BIN` from another
-directory; a changed, extra, or missing generated file, a file in an output
-root that witforge did not write (no witforge header), a WIT edit the committed
+directory; a changed, extra, or missing generated file, a file or directory in
+an output root that witforge did not write (no witforge header, hidden ones
+included), a WIT edit the committed
 output does not reflect, an unlocked member, a version directory the script
 does not check, or a witforge other than the pinned release must fail; and
 `--write` must restore a changed file. Without witforge the controls skip
