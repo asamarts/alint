@@ -2,7 +2,7 @@
 
 Status: W2-7 done (2026-11-01). Steps 1 to 6 of section 4 are done: witforge is on crates.io,
 alint pins witforge 0.1.1, and the W2-7 job checks the contract against that release in default
-CI (#W27PR). Step 7 (W3, then the v0.21.0 tag) is next.
+CI (#417). Step 7 (W3, then the v0.21.0 tag) is next.
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is
 [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 4: v0.21.0 is not tagged until
@@ -135,7 +135,7 @@ A fourth review covered the consumer after #415, the W2-7 plan, and the document
 witforge's `main` ran beside it. Each fix below has a negative sample or control that passed
 before it.
 
-In alint, fixed with the W2-7 job (#W27PR):
+In alint, fixed with the W2-7 job (#417):
 
 | # | Problem | Fix |
 |---|---|---|
@@ -200,14 +200,14 @@ files. alint's contract passes every new check unchanged.
 | 3 | Make witforge public and enable Actions; run CI and confirm the hosted Linux, macOS, and Windows jobs are green; deregister the self-hosted runner from the repository it is registered on, as the release checklist says | witforge | step 2, owner confirmation | done (CI run 41240165506) |
 | 4 | Publish `witforge`, then `witforge-cli` (its registry dependency needs the library first). crates.io can trust a repository only for a crate that exists, so 0.1.0 is published with the owner's scoped, short-lived token; later versions publish from witforge's release workflow through trusted publishing | witforge | step 3 | done (2026-10-31, from `546cec1`) |
 | 5 | Tag `v0.1.0` and create the GitHub release | witforge | step 4 | done (release run 41261961612, which found nothing left to publish) |
-| 6 | Add the W2-7 job (section 5) to default CI and mark the readiness row passed | alint | step 4 (it installs from crates.io) | done (#W27PR) |
+| 6 | Add the W2-7 job (section 5) to default CI and mark the readiness row passed | alint | step 4 (it installs from crates.io) | done (#417) |
 | 7 | W3 of the pre-release audit (documentation and release preparation), then the v0.21.0 tag | alint | step 6 | |
 
 W3 can proceed in parallel with step 6.
 
 ## 5. The W2-7 job
 
-As built in #W27PR. The job `witforge` ("Plugin contract (witforge)") in `ci.yml` runs on the
+As built in #417. The job `witforge` ("Plugin contract (witforge)") in `ci.yml` runs on the
 runner `detect-changes.sh` picks, gated on its `rust` output, which covers `wit/`, the consumer
 crate, `plugin_api`, and, through `ci/`, the scripts. Its steps:
 

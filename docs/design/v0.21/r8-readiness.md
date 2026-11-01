@@ -4,7 +4,7 @@ Status: **HOLD** (2026-10-29). The pre-tag audit in [`pre-release-audit.md`](pre
 found that `key_parity` misses real differences (W1), that several "pass" rows below have no gate
 behind them (W2), and that the go/no-go assessment of the port was never written (W2-8). W1 has
 since been fixed (#407, merged 2026-10-30, and the review that followed it), and W2 is done (#411,
-and W2-7's default-CI job in #W27PR, 2026-11-01). The performance and memory evidence below still
+and W2-7's default-CI job in #417, 2026-11-01). The performance and memory evidence below still
 stands: the benchmark generator writes well-formed Rust text, the Rust import-gate literal
 prefilter removes the remaining S2 slowdown, clean-workload 1M S2 RSS is 118,924 KB (within
 v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. The status stays HOLD until the
@@ -22,7 +22,7 @@ remaining release work below is done.
 | Relation limits | defined with defaults and caps; adapters enforce `RowsPerExtractor`, the decode cache takes each fresh decode's rows from the run's `RunBudget` (`RowsPerRun`) and keys entries on the limits, set conversion enforces `DistinctValues`, and a test keeps the join limits reserved until Phase 3 adds joins; each limit has a test (W2-3) | pass |
 | Invariants 6-8: visibility, feature isolation, contract boundary | module visibility test, and a test that requires `#[doc(hidden)]` on every public function elsewhere in alint-core that names the relation layer or the contract (the three `FileIndex` cache methods, W2-5); `check-shadow-feature-tree.sh` reads `alint-rules`' resolved features for each shipped or benchmarked build on every target, and five injected leaks fail it (`test-check-shadow-feature-tree.sh`, W2-2); the `plugin_api` boundary test parses the module and checks every path, `use` tree, attribute, derive, and macro argument, with names scoped to the module that declares them, `#[cfg(test)]` items left out, and `include!` refused, and the escapes a line scan or a pooled name set missed as negative samples (W2-4) | pass |
 | Registry injection | CLI (`check`, `test`, `rules list`/`show`/`categories`), LSP (session and hover), testkit (`Runner::with_registry`), DSL catalog; one test per surface registers a custom kind and observes it run or be described, and the built-in registry rejects it (W2-1) | pass |
-| WIT draft | `wit/alint-plugin/v0.1`, a draft until plugins load (ADR-0027). `ci/scripts/witforge-consumer.sh` checks it and regenerates the committed `alint-witforge-consumer` output with `--check`; its controls fail on each changed generated file, an extra or missing file, a WIT edit the output does not reflect, an unlocked member, an unchecked version directory, and a witforge other than the pin, and `--write` restores a changed file; the crate's tests convert every type the two sides share, account for every item on both (`tests/inventory.rs`), and pair every world with its `plugin_api` trait (`tests/worlds.rs`); the script also refuses a file in an output root without witforge's header, and the inventory refuses a name two `plugin_api` files both declare. The `witforge` job in default CI (#W27PR) installs the pinned witforge 0.1.1 from crates.io and runs the check and the controls on every Rust change, and the Summary fails if it does not succeed ([`witforge-adoption.md`](witforge-adoption.md) section 5; W2-7, ADR-0025 decision 4) | pass |
+| WIT draft | `wit/alint-plugin/v0.1`, a draft until plugins load (ADR-0027). `ci/scripts/witforge-consumer.sh` checks it and regenerates the committed `alint-witforge-consumer` output with `--check`; its controls fail on each changed generated file, an extra or missing file, a WIT edit the output does not reflect, an unlocked member, an unchecked version directory, and a witforge other than the pin, and `--write` restores a changed file; the crate's tests convert every type the two sides share, account for every item on both (`tests/inventory.rs`), and pair every world with its `plugin_api` trait (`tests/worlds.rs`); the script also refuses a file in an output root without witforge's header, and the inventory refuses a name two `plugin_api` files both declare. The `witforge` job in default CI (#417) installs the pinned witforge 0.1.1 from crates.io and runs the check and the controls on every Rust change, and the Summary fails if it does not succeed ([`witforge-adoption.md`](witforge-adoption.md) section 5; W2-7, ADR-0025 decision 4) | pass |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
 | S4 workload vs `v0.20.1` | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; same-session kbench run on the revision-4 tree, full and changed, 30 runs at 100k and three at 1M (W2-9) | pass (worst +2.12%, 1M changed) |
@@ -128,7 +128,7 @@ applies:
    preparation (version bump, generated artifacts, full release preflight, cross-platform
    checks, a fresh corpus replay).
 2. Tag only after W3 is done and CI, including the `witforge` job that checks the contract
-   against the pinned witforge 0.1.1 (W2-7, done in #W27PR), passes on the release commit.
+   against the pinned witforge 0.1.1 (W2-7, done in #417), passes on the release commit.
 
 ## Go/no-go
 

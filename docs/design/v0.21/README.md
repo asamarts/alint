@@ -482,7 +482,7 @@ v0.21 is complete only when all of the following are observed:
   artifacts (schema, facts, docs export, roadmap) regenerate cleanly.
 - witforge 0.1.0 is published and pinned, and default CI checks the WIT draft and regenerates its
   consumer with `--check` (ADR-0025 decision 4). Met: alint pins witforge 0.1.1, and the
-  `witforge` job runs in default CI (#W27PR).
+  `witforge` job runs in default CI (#417).
 
 ADR-0025 decision 3 settled the go/no-go assessment as a GO on consistency; the simplicity it
 could not show moves to three gates v0.22 must pass before Phase 3 starts.
@@ -646,7 +646,7 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   bridge's path checks), the go/no-go assessment in
   [`r8-readiness.md`](r8-readiness.md), and S4 workload revision 4 with a
   same-session kbench run against v0.20.1. W2-7, the WIT check in CI, landed
-  with #W27PR (2026-11-01), against the pinned witforge 0.1.1.
+  with #417 (2026-11-01), against the pinned witforge 0.1.1.
 - **witforge consumer (#409).** The generated consumer crate, the regeneration
   `--check` against its committed output with controls, and tests that
   convert every type the two sides share, account for every item on both
