@@ -14,7 +14,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 /// What a generated item corresponds to in `plugin_api`.
-enum Generated {
+pub(crate) enum Generated {
     /// The `plugin_api` item of this name, with the same members.
     Pair(&'static str),
     /// No `plugin_api` item: why (completing "because ..."), and the members
@@ -24,7 +24,7 @@ enum Generated {
 
 use Generated::{Pair, Unpaired};
 
-const GENERATED: &[(&str, Generated)] = &[
+pub(crate) const GENERATED: &[(&str, Generated)] = &[
     ("types::RepoResource", Pair("Resource")),
     ("types::Node", Pair("Node")),
     (
@@ -77,10 +77,13 @@ const HOST_ONLY: &[(&str, &str)] = &[
     ("FlatValueError", "why the host rejected a flat value"),
 ];
 
-/// The public structs, enums, and traits in one parsed file, keyed by their
-/// module path, with their members: field, variant, or method names. Every
-/// field counts, public or not: a private one, like `FlatValue::nodes`, is
-/// still part of what crosses the contract.
+/// The public items in one parsed file, keyed by their module path, with their
+/// members: field, variant, or trait member names (none for a type alias,
+/// constant, static, or function). Every field counts, public or not: a
+/// private one, like `FlatValue::nodes`, is still part of what crosses the
+/// contract. Re-exports are not items of their own: `pub use`, and a
+/// `pub type` naming an item through `super::`, as each generated interface
+/// module does for the types it uses.
 fn items(file: &syn::File) -> BTreeMap<String, BTreeSet<String>> {
     fn walk(items: &[syn::Item], prefix: &str, out: &mut BTreeMap<String, BTreeSet<String>>) {
         let public = |vis: &syn::Visibility| matches!(vis, syn::Visibility::Public(_));
@@ -99,6 +102,32 @@ fn items(file: &syn::File) -> BTreeMap<String, BTreeSet<String>> {
                     }
                     continue;
                 }
+                syn::Item::Type(item) if public(&item.vis) => {
+                    let reexport = matches!(&*item.ty, syn::Type::Path(path)
+                        if path.qself.is_none()
+                            && path.path.segments.first().is_some_and(|s| s.ident == "super"));
+                    if reexport {
+                        continue;
+                    }
+                    (item.ident.to_string(), BTreeSet::new())
+                }
+                syn::Item::Const(item) if public(&item.vis) => {
+                    (item.ident.to_string(), BTreeSet::new())
+                }
+                syn::Item::Static(item) if public(&item.vis) => {
+                    (item.ident.to_string(), BTreeSet::new())
+                }
+                syn::Item::Fn(item) if public(&item.vis) => {
+                    (item.sig.ident.to_string(), BTreeSet::new())
+                }
+                syn::Item::Union(item) if public(&item.vis) => (
+                    item.ident.to_string(),
+                    item.fields
+                        .named
+                        .iter()
+                        .filter_map(|field| field.ident.as_ref().map(ToString::to_string))
+                        .collect(),
+                ),
                 syn::Item::Struct(item) if public(&item.vis) => (
                     item.ident.to_string(),
                     item.fields
@@ -116,6 +145,8 @@ fn items(file: &syn::File) -> BTreeMap<String, BTreeSet<String>> {
                         .iter()
                         .filter_map(|member| match member {
                             syn::TraitItem::Fn(method) => Some(method.sig.ident.to_string()),
+                            syn::TraitItem::Type(ty) => Some(ty.ident.to_string()),
+                            syn::TraitItem::Const(constant) => Some(constant.ident.to_string()),
                             _ => None,
                         })
                         .collect(),
@@ -367,4 +398,40 @@ fn the_inventory_sees_unnamed_items_and_members() {
         Some("limits, nodes")
     );
     assert!(!api.contains_key("tests::Ignored"));
+
+    // Items other than structs, enums, and traits count too; re-exports do
+    // not.
+    let generated = parsed(
+        "pub mod types { pub struct Row; pub type Alias = u32; }
+         pub mod adapter_api {
+             pub type Row = super::types::Row;
+             pub trait AdapterApi { type Out; const LIMIT: u32; fn run(&self); }
+         }
+         pub use adapter_api::AdapterApi;
+         pub const VERSION: &str = \"0.1\";
+         pub static NAME: &str = \"alint\";
+         pub fn helper() {}
+         pub union Bits { a: u32, b: f32 }
+         pub(crate) fn private() {}",
+    );
+    assert_eq!(
+        generated.keys().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "Bits",
+            "NAME",
+            "VERSION",
+            "adapter_api::AdapterApi",
+            "helper",
+            "types::Alias",
+            "types::Row",
+        ]
+    );
+    assert_eq!(
+        generated
+            .get("adapter_api::AdapterApi")
+            .map(names)
+            .as_deref(),
+        Some("LIMIT, Out, run")
+    );
+    assert_eq!(generated.get("Bits").map(names).as_deref(), Some("a, b"));
 }
