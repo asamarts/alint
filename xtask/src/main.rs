@@ -199,6 +199,11 @@ enum Commands {
         #[arg(long, default_value_t = 10.0)]
         threshold: f64,
     },
+    /// Deterministic instruction counts for the criterion micro suite, head
+    /// vs base (and the long-horizon anchor): each ref's benches compiled
+    /// against a counting criterion stand-in and run under Callgrind. Needs
+    /// valgrind. See `docs/benchmarks/METHODOLOGY.md`.
+    MicroDet(bench::micro_det::Args),
     /// Gate a macro `results.json` for publish. Quality: per-cell
     /// within-run CV ≤ 10 % on 100k/1m only (1k/10k advisory).
     /// Regression (with `--baseline`): `min_ms` delta vs the prior
@@ -208,11 +213,6 @@ enum Commands {
     /// `RELEASING.md`; thresholds validated against the full
     /// corpus — see
     /// `docs/benchmarks/investigations/2026-05-bench-runner-instability/`.
-    /// Deterministic instruction counts for the criterion micro suite, head
-    /// vs base (and the long-horizon anchor): each ref's benches compiled
-    /// against a counting criterion stand-in and run under Callgrind. Needs
-    /// valgrind. See `docs/benchmarks/METHODOLOGY.md`.
-    MicroDet(bench::micro_det::Args),
     BenchGate {
         /// The run to gate (a `bench-scale` `results.json`).
         #[arg(long)]
@@ -729,6 +729,37 @@ pub(crate) fn walkdir_plain(root: &Path) -> Result<Vec<PathBuf>> {
 #[cfg(test)]
 mod tests {
     use super::docs_export::{first_overview_sentence, render_overview_from_comments};
+
+    #[test]
+    fn every_subcommand_has_its_own_description() {
+        // A doc comment above the wrong variant leaves one subcommand blank in
+        // `--help` and gives another a description that is not its own.
+        use clap::CommandFactory as _;
+        let cli = super::Cli::command();
+        let mut abouts = std::collections::BTreeMap::new();
+        for sub in cli.get_subcommands() {
+            let about = sub.get_about().map(ToString::to_string).unwrap_or_default();
+            assert!(
+                !about.trim().is_empty(),
+                "`xtask {}` has no description",
+                sub.get_name()
+            );
+            if let Some(other) = abouts.insert(about.clone(), sub.get_name().to_string()) {
+                panic!(
+                    "`xtask {other}` and `xtask {}` share a description",
+                    sub.get_name()
+                );
+            }
+        }
+        // The two variants whose descriptions were swapped into one comment.
+        let about = |name: &str| {
+            cli.find_subcommand(name)
+                .and_then(|sub| sub.get_about().map(ToString::to_string))
+                .unwrap_or_default()
+        };
+        assert!(about("micro-det").starts_with("Deterministic instruction counts"));
+        assert!(about("bench-gate").starts_with("Gate a macro `results.json`"));
+    }
 
     #[test]
     fn overview_strips_uri_header_and_renders_paragraphs() {

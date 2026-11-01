@@ -35,10 +35,14 @@ EXEMPT = {
     'ci/scripts/check-secrets-inventory.sh': 'repo-config drift gate; ci.yml runs it unconditionally on the tag',
 }
 
-# A script counts as run only where a line of a step starts with it (after
-# `run:`, environment assignments, or `bash`/`python3`): a mention inside
-# another command, such as an install line's `$(ci/scripts/x.sh
-# --print-version)`, runs no gate.
+# On the preflight side, a script counts as run only where a line of a step
+# starts with it (after `run:`, environment assignments, or `bash`/`python3`):
+# a mention inside another command, such as an install line's
+# `$(ci/scripts/x.sh --print-version)`, runs no gate. On the ci.yml side any
+# mention counts, so a script ci.yml runs some other way (`./ci/scripts/x.sh`,
+# `timeout 600 ci/scripts/x.sh`) is still required of the preflight:
+# over-counting there only asks the preflight for more.
+any_script_re = re.compile(r'(ci/scripts/[A-Za-z0-9_.-]+\.(?:sh|py))\b')
 script_re = re.compile(
     r'^\s*(?:-\s+)?(?:run:\s*(?:\|\s*)?)?(?:[A-Z_][A-Z0-9_]*=\S*\s+)*'
     r'(?:(?:bash|python3|sh)\s+)?(ci/scripts/[A-Za-z0-9_.-]+\.(?:sh|py))\b',
@@ -47,6 +51,7 @@ script_re = re.compile(
 assert script_re.findall('        run: ci/scripts/a.sh\n          X=1 bash ci/scripts/b.sh --x') \
     == ['ci/scripts/a.sh', 'ci/scripts/b.sh']
 assert script_re.findall('        run: cargo install w --version "$(ci/scripts/c.sh --print-version)"') == []
+assert any_script_re.findall('        run: timeout 600 ./ci/scripts/d.sh') == ['ci/scripts/d.sh']
 
 
 def code(path):
@@ -68,7 +73,7 @@ preflight = job(release, 'preflight')
 if not preflight:
     failures.append('release.yml: preflight job not found')
 
-ci_scripts = set(script_re.findall(ci))
+ci_scripts = set(any_script_re.findall(ci))
 pre_scripts = set(script_re.findall(preflight))
 for script in sorted(ci_scripts - pre_scripts - set(EXEMPT)):
     failures.append(f'release.yml preflight does not run {script} (ci.yml does); '

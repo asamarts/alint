@@ -1,14 +1,15 @@
 # v0.21 R8 release-readiness report
 
-Status: **HOLD** (2026-10-29). The pre-tag audit in [`pre-release-audit.md`](pre-release-audit.md)
+Status: **GO** (2026-11-01), subject to the release steps below; it was **HOLD** from 2026-10-29.
+The pre-tag audit in [`pre-release-audit.md`](pre-release-audit.md)
 found that `key_parity` misses real differences (W1), that several "pass" rows below have no gate
 behind them (W2), and that the go/no-go assessment of the port was never written (W2-8). W1 has
 since been fixed (#407, merged 2026-10-30, and the review that followed it), and W2 is done (#411,
 and W2-7's default-CI job in #417, 2026-11-01). The performance and memory evidence below still
 stands: the benchmark generator writes well-formed Rust text, the Rust import-gate literal
 prefilter removes the remaining S2 slowdown, clean-workload 1M S2 RSS is 118,924 KB (within
-v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. The status stays HOLD until the
-remaining release work below is done.
+v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. W3's documentation is done
+(#418), so every row below passes; what remains are the release steps.
 
 ## Acceptance matrix
 
@@ -20,9 +21,9 @@ remaining release work below is done.
 | Corpus shadow replay | expanded-scope run 40912352842 vs `v0.20.1`: 106/110 replayed, 4 expected skips, 0 crashed, 0 differ | pass |
 | Contract traits and bridge | adapter/analyzer bridge tests; `key_parity` uses `ContractAnalyzer` and reports its errors (W1-1, W1-3, fixed in #407); the bridge refuses an adapter row for any resource but the one it was given (path, origin, and index position), a finding or related location outside the analysis's input resources or not normalized, and an unknown failure kind, each with a test (W2-6) | pass |
 | Relation limits | defined with defaults and caps; adapters enforce `RowsPerExtractor`, the decode cache takes each fresh decode's rows from the run's `RunBudget` (`RowsPerRun`) and keys entries on the limits, set conversion enforces `DistinctValues`, and a test keeps the join limits reserved until Phase 3 adds joins; each limit has a test (W2-3) | pass |
-| Invariants 6-8: visibility, feature isolation, contract boundary | module visibility test, and a test that requires `#[doc(hidden)]` on every public function elsewhere in alint-core that names the relation layer or the contract (the three `FileIndex` cache methods, W2-5); `check-shadow-feature-tree.sh` reads `alint-rules`' resolved features for each shipped or benchmarked build on every target, and five injected leaks fail it (`test-check-shadow-feature-tree.sh`, W2-2); the `plugin_api` boundary test parses the module and checks every path, `use` tree, attribute, derive, and macro argument, with names scoped to the module that declares them, `#[cfg(test)]` items left out, and `include!` refused, and the escapes a line scan or a pooled name set missed as negative samples (W2-4) | pass |
+| Invariants 6-8: visibility, feature isolation, contract boundary | module visibility test, and a test that requires `#[doc(hidden)]` on every public function elsewhere in alint-core that names the relation layer or the contract (the three `FileIndex` cache methods, W2-5); `check-shadow-feature-tree.sh` reads `alint-rules`' resolved features for each shipped or benchmarked build on every target, and five injected leaks fail it (`test-check-shadow-feature-tree.sh`, W2-2); the `plugin_api` boundary test parses the module and checks every path, `use` tree, attribute, derive, and macro argument, with names scoped as rustc scopes them (the type namespace, block scopes, per-item generics), `#[cfg(test)]` items left out, only an allow-list of std macros callable (so no `macro_rules!`), `include!` refused at any depth, and syntax `syn` leaves unparsed refused, and every escape found so far as a negative sample (W2-4; [`witforge-adoption.md`](witforge-adoption.md) sections 2.6 and 2.7) | pass |
 | Registry injection | CLI (`check`, `test`, `rules list`/`show`/`categories`), LSP (session and hover), testkit (`Runner::with_registry`), DSL catalog; one test per surface registers a custom kind and observes it run or be described, and the built-in registry rejects it (W2-1) | pass |
-| WIT draft | `wit/alint-plugin/v0.1`, a draft until plugins load (ADR-0027). `ci/scripts/witforge-consumer.sh` checks it and regenerates the committed `alint-witforge-consumer` output with `--check`; its controls fail on each changed generated file, an extra or missing file, a WIT edit the output does not reflect, an unlocked member, an unchecked version directory, and a witforge other than the pin, and `--write` restores a changed file; the crate's tests convert every type the two sides share, account for every item on both (`tests/inventory.rs`), and pair every world with its `plugin_api` trait (`tests/worlds.rs`); the script also refuses a file in an output root without witforge's header, and the inventory refuses a name two `plugin_api` files both declare. The `witforge` job in default CI (#417) installs the pinned witforge 0.1.1 from crates.io and runs the check and the controls on every Rust change, and the Summary fails if it does not succeed ([`witforge-adoption.md`](witforge-adoption.md) section 5; W2-7, ADR-0025 decision 4) | pass |
+| WIT draft | `wit/alint-plugin/v0.1`, a draft until plugins load (ADR-0027). `ci/scripts/witforge-consumer.sh` checks it and regenerates the committed `alint-witforge-consumer` output with `--check`; its controls fail on each changed generated file, an extra or missing file, a WIT edit the output does not reflect, an unlocked member, an unchecked version directory, and a witforge other than the pin, and `--write` restores a changed file; the crate's tests convert every type the two sides share, account for every item on both (`tests/inventory.rs`), and pair every world with its `plugin_api` trait (`tests/worlds.rs`); the script also refuses any entry in an output root, hidden ones included, without witforge's header; the inventory refuses a name declared twice, in one `plugin_api` file or two; and `worlds.rs` requires exactly `@since(version = 0.1.0)` on every interface, world, and item and refuses a gate on a `use`. The `witforge` job in default CI (#417) installs the pinned witforge 0.1.1 from crates.io and runs the check and the controls on every Rust change, and the Summary fails if it does not succeed ([`witforge-adoption.md`](witforge-adoption.md) section 5; W2-7, ADR-0025 decision 4) | pass |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
 | S4 workload vs `v0.20.1` | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; same-session kbench run on the revision-4 tree, full and changed, 30 runs at 100k and three at 1M (W2-9) | pass (worst +2.12%, 1M changed) |
@@ -124,19 +125,28 @@ applies:
 
 ## Remaining release work
 
-1. W3 of [`pre-release-audit.md`](pre-release-audit.md): changelog, documentation, and release
-   preparation (version bump, generated artifacts, full release preflight, cross-platform
-   checks, a fresh corpus replay).
-2. Tag only after W3 is done and CI, including the `witforge` job that checks the contract
-   against the pinned witforge 0.1.1 (W2-7, done in #417), passes on the release commit.
+W3's documentation landed in #418. The release steps of
+[`pre-release-audit.md`](pre-release-audit.md) section 5 remain:
+
+1. Bump `RELEASE_RUST` in its own pull request (section 7, item 8).
+2. Run a fresh corpus replay against v0.20.1 on `main`'s tip; every difference must be explained
+   by a changelog entry, and a crash or a shadow difference blocks the release.
+3. `bump-version.sh 0.21.0` with the changelog cut, in a pull request; the release preflight and
+   the MSRV check pass.
+4. Tag the merged commit only after CI, including the `witforge` job that checks the contract
+   against the pinned witforge 0.1.1 (W2-7, #417), passes on it.
+5. After the release: the bench record and the alint.org bench snapshot, the Action doc pin, and
+   the alint.org pins and `STATE.md`.
 
 ## Go/no-go
 
-**HOLD.** Memory passes the v0.18.2 +10% gate and is below v0.20.1; S2
+**GO** (2026-11-01). Memory passes the v0.18.2 +10% gate and is below v0.20.1; S2
 wall-clock is also below v0.20.1; the expanded-shadow corpus replay is
-zero-diff. Those results stand, but they cover performance and the replay
-only. The release acceptance also requires a correct `key_parity` and a
-written judgment of the port.
+zero-diff. Those results cover performance and the replay; the release
+acceptance also required a correct `key_parity` (W1, #407) and a written
+judgment of the port (W2-8, below), and both are done. The verdict holds
+only if the fresh corpus replay at the cut shows no unexplained difference
+and the preflight passes.
 
 The owner's verdict on the port (2026-10-30, ADR-0025 decision 3) is GO on
 consistency: v0.21 ships once W1, W2, and the witforge check are done, and

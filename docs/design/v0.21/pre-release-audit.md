@@ -5,7 +5,8 @@ Progress: W1 done (#407, merged 2026-10-30: all twelve items, the review's follo
 ADR-0025's `key_parity` changes, with tests), and a review of that increment fixed more (section
 3); W4 housekeeping and the six Dependabot merges done 2026-10-30; W2 done in #411, and W2-7
 in #417 (2026-11-01: the default-CI job against the pinned witforge 0.1.1,
-[`witforge-adoption.md`](witforge-adoption.md)); W3 and the rest of W4 not started.
+[`witforge-adoption.md`](witforge-adoption.md)); W3's documentation and code items done in
+#418 (2026-11-01); the release steps (section 5) and the rest of W4 remain.
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
@@ -167,6 +168,15 @@ build (W2-2 guards that).
   tag, the bench-record PR
   and the alint.org bench snapshot, the Action doc pin, and the alint.org pins and `STATE.md`
   (kinds 102 to 103, headline 113 to 114).
+
+Done in #418 (2026-11-01), each with its evidence: every item above except the release steps.
+The changelog is in release order with the plugin contract described as shipped; `RELEASING.md`
+also documents the repository rulesets (the bump lands through a pull request; only an admin can
+move a release tag) and the MSRV policy of section 7, item 8, which `CONTRIBUTING.md` repeats;
+the ADR index is a table in [`docs/design/README.md`](../README.md), which the dogfood rule
+`adr-index-lists-every-adr` keeps complete; and the read-error fix is pinned by an exact-message
+test in each helper, a `key_parity` finding test, and a `cross_file` shadow test with a directory
+source and target, each of which fails on the old code.
 
 ## 6. W4: CI, dependencies, and housekeeping
 

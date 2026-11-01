@@ -90,6 +90,28 @@ mod tests {
     ];
     /// Macros that splice in another file's contents.
     const INCLUDES: &[&str] = &["include", "include_str", "include_bytes"];
+    /// The only macros the module may call: std macros that expand to code
+    /// over their arguments and reach nothing else. Any other macro, including
+    /// `macro_rules!`, could name an outside item through a token this test
+    /// never sees as a path (a `$variable`, or a name it pastes together).
+    const MACROS: &[&str] = &[
+        "assert",
+        "assert_eq",
+        "assert_ne",
+        "debug_assert",
+        "debug_assert_eq",
+        "debug_assert_ne",
+        "format",
+        "format_args",
+        "matches",
+        "panic",
+        "todo",
+        "unimplemented",
+        "unreachable",
+        "vec",
+        "write",
+        "writeln",
+    ];
     /// Built-in attributes; any other attribute is a macro from outside the
     /// module.
     const ATTRIBUTES: &[&str] = &[
@@ -306,6 +328,11 @@ mod tests {
             }
         }
 
+        fn verbatim(&mut self) {
+            self.problems
+                .push(format!("{}: syntax `syn` leaves unparsed", self.file));
+        }
+
         /// The paths in a macro's argument tokens, which `syn` leaves
         /// unparsed: each `a::b` chain, and a leading `::a`.
         fn check_tokens(&mut self, tokens: TokenStream) {
@@ -317,17 +344,46 @@ mod tests {
                         if a.as_char() == ':' && a.spacing() == Spacing::Joint && b.as_char() == ':'
                 )
             };
+            // Which `>` tokens close a turbofish (`::<…>`): only after one of
+            // those does `::` continue a path (`Vec::<u8>::new`). After any
+            // other `>`, a comparison such as `n > ::outside::X`, it starts a
+            // new path at the crate root.
+            let mut closes_turbofish = vec![false; tokens.len()];
+            let mut open: Vec<bool> = Vec::new();
+            for (index, token) in tokens.iter().enumerate() {
+                let TokenTree::Punct(punct) = token else {
+                    continue;
+                };
+                match punct.as_char() {
+                    '<' if index >= 2 && colons_at(index - 2) => open.push(true),
+                    '<' if !open.is_empty() => open.push(false),
+                    '>' if !open.is_empty() => {
+                        let arrow = index >= 1
+                            && matches!(&tokens[index - 1], TokenTree::Punct(p)
+                                if matches!(p.as_char(), '-' | '=') && p.spacing() == Spacing::Joint);
+                        if !arrow {
+                            closes_turbofish[index] = open.pop().unwrap_or(false);
+                        }
+                    }
+                    _ => {}
+                }
+            }
             let mut at = 0;
             while at < tokens.len() {
-                // `include!` inside another macro's arguments or a
-                // `macro_rules!` body splices a file in as surely as one at
-                // the top level.
-                if let (Some(TokenTree::Ident(ident)), Some(TokenTree::Punct(bang))) =
-                    (tokens.get(at), tokens.get(at + 1))
+                // A macro call inside another macro's arguments (`name!(…)`):
+                // `syn` leaves it unparsed, so it is checked here. `include!`
+                // splices a file in as surely as one at the top level.
+                if let (
+                    Some(TokenTree::Ident(ident)),
+                    Some(TokenTree::Punct(bang)),
+                    Some(TokenTree::Group(_)),
+                ) = (tokens.get(at), tokens.get(at + 1), tokens.get(at + 2))
                     && bang.as_char() == '!'
-                    && INCLUDES.contains(&ident.to_string().as_str())
                 {
-                    self.problems.push(format!("{}: {ident}!", self.file));
+                    let name = ident.to_string();
+                    if INCLUDES.contains(&name.as_str()) || !MACROS.contains(&name.as_str()) {
+                        self.problems.push(format!("{}: {name}!", self.file));
+                    }
                 }
                 match &tokens[at] {
                     TokenTree::Group(group) => self.check_tokens(group.stream()),
@@ -337,7 +393,7 @@ mod tests {
                         let leading_colon = at >= 2
                             && colons_at(at - 2)
                             && !matches!(tokens.get(at.wrapping_sub(3)), Some(TokenTree::Ident(_)))
-                            && !matches!(tokens.get(at.wrapping_sub(3)), Some(TokenTree::Punct(p)) if p.as_char() == '>');
+                            && !(at >= 3 && closes_turbofish[at - 3]);
                         let continues = at >= 2 && colons_at(at - 2) && !leading_colon;
                         let mut segments = vec![ident.to_string()];
                         let mut next = at + 1;
@@ -365,6 +421,9 @@ mod tests {
         fn visit_item(&mut self, item: &'ast syn::Item) {
             if is_cfg_test(item_attrs(item)) {
                 return;
+            }
+            if matches!(item, syn::Item::Verbatim(_)) {
+                self.verbatim();
             }
             // An item sees its own generic parameters, not an enclosing
             // function's.
@@ -479,13 +538,69 @@ mod tests {
 
         fn visit_macro(&mut self, mac: &'ast syn::Macro) {
             // Source pulled in from another file is never checked, so it
-            // cannot come in at all.
-            let name = mac.path.segments.last().map(|s| s.ident.to_string());
-            if let Some(name) = name.filter(|name| INCLUDES.contains(&name.as_str())) {
+            // cannot come in at all; and only the allowed std macros may run.
+            let name = mac
+                .path
+                .segments
+                .last()
+                .map(|s| s.ident.to_string())
+                .unwrap_or_default();
+            if INCLUDES.contains(&name.as_str()) || !MACROS.contains(&name.as_str()) {
                 self.problems.push(format!("{}: {name}!", self.file));
             }
             self.check_tokens(mac.tokens.clone());
             visit::visit_macro(self, mac);
+        }
+
+        // `syn` keeps syntax it cannot represent as unparsed tokens, which
+        // the visitor never walks, so any of it is refused.
+        fn visit_foreign_item(&mut self, item: &'ast syn::ForeignItem) {
+            if matches!(item, syn::ForeignItem::Verbatim(_)) {
+                self.verbatim();
+            }
+            visit::visit_foreign_item(self, item);
+        }
+
+        fn visit_impl_item(&mut self, item: &'ast syn::ImplItem) {
+            if matches!(item, syn::ImplItem::Verbatim(_)) {
+                self.verbatim();
+            }
+            visit::visit_impl_item(self, item);
+        }
+
+        fn visit_trait_item(&mut self, item: &'ast syn::TraitItem) {
+            if matches!(item, syn::TraitItem::Verbatim(_)) {
+                self.verbatim();
+            }
+            visit::visit_trait_item(self, item);
+        }
+
+        fn visit_type(&mut self, ty: &'ast syn::Type) {
+            if matches!(ty, syn::Type::Verbatim(_)) {
+                self.verbatim();
+            }
+            visit::visit_type(self, ty);
+        }
+
+        fn visit_expr(&mut self, expr: &'ast syn::Expr) {
+            if matches!(expr, syn::Expr::Verbatim(_)) {
+                self.verbatim();
+            }
+            visit::visit_expr(self, expr);
+        }
+
+        fn visit_pat(&mut self, pat: &'ast syn::Pat) {
+            if matches!(pat, syn::Pat::Verbatim(_)) {
+                self.verbatim();
+            }
+            visit::visit_pat(self, pat);
+        }
+
+        fn visit_type_param_bound(&mut self, bound: &'ast syn::TypeParamBound) {
+            if matches!(bound, syn::TypeParamBound::Verbatim(_)) {
+                self.verbatim();
+            }
+            visit::visit_type_param_bound(self, bound);
         }
     }
 
@@ -639,6 +754,17 @@ mod tests {
             "macro_rules! sha2 { () => {} } fn f() -> sha2::Sha256 { todo!() }",
             "fn f<regex>() { fn g() -> regex::Regex { todo!() } }",
             "fn f() { struct regex; mod inner { fn g() -> regex::Regex { todo!() } } }",
+            // A macro variable named after an allowed root, and `include!`
+            // through a macro variable: only the allowed std macros may run,
+            // so neither `macro_rules!` nor its call is accepted.
+            "macro_rules! ext { ($Option:ident) => { $Option::Value } } fn f() -> ext!(outside) { todo!() }",
+            "macro_rules! inc { ($m:ident) => { $m!(\"../smuggled.rs\"); } } inc!(include);",
+            "fn f() { some_crate_macro!(1) }",
+            "fn f() { let _ = vec![outside_macro!()]; }",
+            // A comparison before a crate-root path inside macro arguments.
+            "fn f(n: u8) { assert!(n > ::outside::LIMIT); }",
+            // Syntax `syn` keeps as unparsed tokens.
+            "unsafe extern \"C\" { pub safe fn sv(x: outside::Value); }",
         ];
         for source in escapes {
             assert!(
@@ -662,6 +788,10 @@ mod tests {
                 fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
                     write!(f, \"{}\", Self::B as u8)?;
                     let _ = vec![E::B, std::mem::take(&mut E::B)];
+                    let n = 1u8;
+                    assert!(n > 0 && n != 2 && n < 3, \"{}\", n >= 1);
+                    let _ = vec![Vec::<u8>::new(), Vec::<Vec<u8>>::new().concat()];
+                    debug_assert!(matches!(Self::B, E::B));
                     let _: Option<FlatValue> = None;
                     let _ = u32::try_from(1usize);
                     Ok(())

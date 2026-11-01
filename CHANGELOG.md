@@ -6,10 +6,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
+  (exponential event growth with `ENABLE_WIKILINKS`).
+- The VS Code extension bundles `minimatch` 11.0.3 through an npm override,
+  because `vscode-languageclient` 11 still asks for 10. This fixes
+  GHSA-g3hv-75wg-m249, a pattern-expansion denial of service that only occurs
+  at `optimizationLevel` 2 or higher. The language client uses the default
+  level, so the extension was not exposed. Its development tools move to
+  `glob` 14.0.3 (GHSA-3g3m-2fjr-6pw4).
+
 ### Added
 
 - **`key_parity`** keeps a reference locale or environment file and a glob of peers in step. JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .NET `.resx` keys are compared as leaf paths, by identity (a dotted key such as `app.title` is one key, never a nested path); `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys` handle the common locale layouts. Findings show a dotenv, properties, or `.resx` key as written (`app.title`) and any other key as its path (`nav.home`, `nav['a.b']`), and `ignore_keys` matches that form. A `peers` value without glob metacharacters is read even when gitignored, so `reference: .env.example` with `peers: .env` checks a local `.env`; `allow_missing_peers: true` turns its absence (in CI, say) into an informational note. Missing references and literal peers, unparsable files, and a peer glob that matches nothing otherwise fail loudly, and findings quote keys only. Key-insertion fixes remain reserved for the generic edit plan.
-- The plugin contract `0.x` now has std-only adapter and analyzer traits, a bridge to the internal relation layer, CLI/LSP/testkit registry injection, and a committed `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`. `ci/scripts/witforge-consumer.sh` checks the draft with the pinned witforge release (0.1.1, installed from crates.io) and checks the consumer crate generated from it with `--check`, refusing any file in its output that witforge did not write; a `witforge` job runs it and its controls in default CI. The crate's tests convert every type and trait that `plugin_api` and the generated code share, account for every item on both sides (refusing a name two `plugin_api` files both declare), pair every world in the WIT with the `plugin_api` trait that implements it, and require the `@since(version = 0.1.0)` gate on every interface, world, and item. Contract 0.1 is a draft with no compatibility promise until the first release that loads plugins freezes it (ADR-0027).
+- The plugin contract `0.x`, internal for now: std-only adapter and analyzer traits and a bridge to the relation layer, in doc-hidden `alint-core` modules (`plugin_api`, `relation`) with no compatibility promise, and a committed `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, which CI checks against the code generated from it with a pinned witforge release. alint cannot load plugins yet. The public additions are `alint-testkit`'s `Runner::with_registry`, which runs policy tests against a custom rule registry, and the test-only `shadow-ir` feature below. Contract 0.1 stays a draft until the first release that loads plugins freezes it (ADR-0027).
 - `cross_file`'s `relation: equals` has a differential shadow implementation under the test-only `shadow-ir` feature, exercised by e2e properties and the corpus replay.
 
 ### Changed
@@ -25,17 +36,21 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - The VS Code extension uses `vscode-languageclient` 11 (still VS Code 1.91 or
   newer).
 
-### Fixed
+### Performance
 
 - `import_gate`'s Rust preset now checks for the literal `use` before running
   its per-line regex, avoiding a full regex scan of import-free source.
-- The benchmark tree generator now newline-terminates generated sources: the
-  Rust sources of the S1-S3 and SFIX tree, and the Rust, JavaScript, and Python
-  sources of S4's polyglot tree. S2's `final_newline` rule previously produced
-  one finding per file at 1M, so the 1M RSS budget measured the findings vector
-  rather than ordinary linter memory. S1-S3 and SFIX carry workload revision 2,
-  and S4 revision 4, which also covers the generator's earlier change to never
-  end a line with a space; compare S4 timings only within revision 4.
+
+### Fixed
+
+- The benchmark tree generator writes clean sources at every size. Generated
+  Rust sources (S1-S3 and SFIX) and S4's Rust, JavaScript, and Python sources
+  end with a newline, and generated text lines never start or end with a
+  space. Before, S2's `final_newline` rule reported one finding per generated
+  source and its whitespace rules tens of thousands more (about 86,000 at
+  100k), so S2's timings and its 1M RSS budget measured findings rather than
+  ordinary linter work. S1-S3 and SFIX carry workload revision 2, and S4
+  revision 4; compare timings only within a revision.
 - A development build's `alint --version` now reports the checked-out commit.
   The build script watched a fixed `.git/HEAD` path, so the SHA lagged commits
   on the current branch. It now asks git for the checkout's real files, watches
@@ -45,17 +60,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   integration tests on every build. `ci/scripts/test-build-script-freshness.sh`
   drives real cargo builds through each case. Release binaries were not
   affected.
-
-### Security
-
-- Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
-  (exponential event growth with `ENABLE_WIKILINKS`).
-- The VS Code extension bundles `minimatch` 11.0.3 through an npm override,
-  because `vscode-languageclient` 11 still asks for 10. This fixes
-  GHSA-g3hv-75wg-m249, a pattern-expansion denial of service that only occurs
-  at `optimizationLevel` 2 or higher. The language client uses the default
-  level, so the extension was not exposed. Its development tools move to
-  `glob` 14.0.3 (GHSA-3g3m-2fjr-6pw4).
+- A read error for a literal path that is a directory or another non-regular
+  file (a `key_parity` reference or peer, a `cross_file` source or target, and
+  the other direct reads) no longer names the file's absolute path, which made
+  findings and fingerprints depend on where the repository was checked out.
+  The finding carries the repo-relative path, as for every other read error.
 
 ## [0.20.1] - 2026-10-23
 

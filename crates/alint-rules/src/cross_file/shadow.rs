@@ -5,12 +5,13 @@
 //! caches), then compares the complete findings. It is compiled only under the
 //! test-only `shadow-ir` feature and never changes the returned verdict.
 //!
-//! Scope: successful reads of structured/lines/whole-file extracts. Reads or
-//! decodes that fail are skipped here because their user-facing diagnostics are
-//! produced by the authoritative path; regex extracts are skipped because the
-//! target-regex syntax filters are intentionally outside the generic adapter.
-//! Those paths remain covered by the existing `cross_file` tests and R5 corpus
-//! replay's zero-difference check.
+//! Scope: every source and target of a literal-source `equals` rule, including
+//! failed reads (missing, too large, unreadable) and decodes, whose findings are
+//! compared like any other, and regex extracts, whose target values go through
+//! the same target-syntax filter as the authoritative path. The one skip is a
+//! path that is not a valid [`RelPath`] (for example, not UTF-8), which the
+//! relation layer cannot name; the existing `cross_file` tests and the corpus
+//! replay cover it.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -24,8 +25,8 @@ use super::spec::{Target, apply_normalize};
 use super::{CrossFileRule, Relation, Targets};
 
 enum Skip {
-    /// The authoritative path will produce a read/decode diagnostic; leave the
-    /// comparison to the existing tests rather than inventing a second one.
+    /// The path is not a valid [`RelPath`], so the relation layer cannot read
+    /// it; leave the comparison to the existing tests.
     Unavailable,
 }
 
@@ -567,6 +568,66 @@ mod tests {
         let findings = rule.evaluate(&ctx).unwrap();
         assert_eq!(findings.len(), 1);
         assert!(findings[0].message.contains("source extract failed"));
+    }
+
+    #[test]
+    fn non_regular_paths_match_the_authoritative_path_without_absolute_paths() {
+        // A literal source and target that are directories: both paths refuse
+        // the read, the shadow panics if their findings differ, and neither
+        // message names the checkout's absolute path.
+        let dir = tempfile::tempdir().unwrap();
+        fs::create_dir(dir.path().join("source.json")).unwrap();
+        fs::create_dir(dir.path().join("target.json")).unwrap();
+        let extract = Extract::structured(Format::Json, "$.v").unwrap();
+        let rule = CrossFileRule {
+            id: "shadow-non-regular".into(),
+            level: Level::Error,
+            policy_url: None,
+            message: None,
+            source_file: "source.json".into(),
+            source_glob: None,
+            source_extract: Some(extract.clone()),
+            targets: Some(Targets::List(vec![Target {
+                file: "target.json".into(),
+                extract: Some(extract),
+                matches: None,
+            }])),
+            relation: Relation::Equals,
+            normalize: NormalizeSpec::default().into_list(),
+            allow_missing: false,
+            skip_header_lines: 0,
+            register_as: None,
+            fixer: None,
+        };
+        let index = FileIndex::from_entries(Vec::new());
+        let ctx = Context {
+            root: dir.path(),
+            index: &index,
+            registry: None,
+            facts: None,
+            vars: None,
+            git_tracked: None,
+            git_blame: None,
+            analysis_time: None,
+            process_environment: None,
+            trace: None,
+        };
+        let findings = rule.evaluate(&ctx).unwrap();
+        assert!(!findings.is_empty());
+        let root = dir.path().display().to_string();
+        for finding in &findings {
+            assert!(
+                !finding.message.contains(&root),
+                "absolute path in {:?}",
+                finding.message
+            );
+        }
+        assert!(
+            findings
+                .iter()
+                .any(|finding| finding.message.contains("not a regular file")),
+            "{findings:#?}"
+        );
     }
 
     #[test]

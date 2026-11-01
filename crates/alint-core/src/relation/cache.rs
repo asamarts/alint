@@ -202,11 +202,11 @@ fn read_once(root: &Path, relative: &Path, size_hint: u64, literal: bool) -> Res
         // Index entries are already regular files, so the per-file hot path
         // skips this extra stat.
         match std::fs::metadata(&absolute) {
+            // No path in the message: the finding carries the repo-relative
+            // one, and this must match `alint-rules`' direct-read helpers,
+            // which the `cross_file` shadow compares it with.
             Ok(metadata) if !metadata.is_file() => {
-                return ResourceRead::Unreadable(format!(
-                    "{} is not a regular file",
-                    absolute.display()
-                ));
+                return ResourceRead::Unreadable("not a regular file".to_string());
             }
             Ok(metadata) => size_hint = metadata.len(),
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
@@ -344,7 +344,7 @@ mod tests {
         let cache = ReadCache::new();
         let read = cache.read(dir.path(), &literal("a-directory"), 0);
         assert!(
-            matches!(read.as_ref(), ResourceRead::Unreadable(message) if message.contains("not a regular file")),
+            matches!(read.as_ref(), ResourceRead::Unreadable(message) if message == "not a regular file"),
             "{read:?}"
         );
         #[cfg(unix)]
@@ -353,7 +353,7 @@ mod tests {
                 .expect("bind a test socket");
             let read = cache.read(dir.path(), &literal("a-socket"), 0);
             assert!(
-                matches!(read.as_ref(), ResourceRead::Unreadable(message) if message.contains("not a regular file")),
+                matches!(read.as_ref(), ResourceRead::Unreadable(message) if message == "not a regular file"),
                 "{read:?}"
             );
         }
@@ -380,7 +380,7 @@ mod tests {
             .recv_timeout(std::time::Duration::from_secs(2))
             .expect("a FIFO must be rejected before it can block the read");
         assert!(
-            matches!(read.as_ref(), ResourceRead::Unreadable(message) if message.contains("not a regular file")),
+            matches!(read.as_ref(), ResourceRead::Unreadable(message) if message == "not a regular file"),
             "{read:?}"
         );
     }

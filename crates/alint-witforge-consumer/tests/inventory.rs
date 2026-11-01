@@ -153,7 +153,15 @@ fn items(file: &syn::File) -> BTreeMap<String, BTreeSet<String>> {
                 ),
                 _ => continue,
             };
-            out.insert(format!("{prefix}{name}"), members);
+            // Types and values have separate namespaces, so a module may
+            // declare a struct and a function of one name; the inventory keys
+            // items by name and would keep only the second.
+            let key = format!("{prefix}{name}");
+            assert!(
+                out.insert(key.clone(), members).is_none(),
+                "`{key}` is declared twice in one file; the inventory keys items by name, \
+                 so give one another name"
+            );
         }
     }
     let mut out = BTreeMap::new();
@@ -220,6 +228,14 @@ fn merge(files: impl IntoIterator<Item = (String, Items)>) -> Result<Items, Vec<
     } else {
         Err(duplicates)
     }
+}
+
+#[test]
+#[should_panic(expected = "`X` is declared twice in one file")]
+fn a_name_one_file_declares_twice_is_refused() {
+    let file = syn::parse_file("pub struct X { a: u8 }\n#[allow(non_snake_case)]\npub fn X() {}")
+        .expect("parses");
+    let _ = items(&file);
 }
 
 fn names(set: &BTreeSet<String>) -> String {

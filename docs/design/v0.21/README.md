@@ -507,39 +507,33 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
 
 ## Status and next steps
 
-- **R9, done.** The TOML row adapter uses the lossless `toml_edit` tree;
-  Android `<string>`/`<string-array>`/`<plurals>` and .NET `.resx` string
-  entries parse through the guarded XML path. `key_parity` now covers all eight
-  formats, with per-dialect key models, pass/fail scenarios, and eager key
-  spans.
-- **R4, done.** Regex targets and read/decode diagnostics are now inside the
-  differential comparison; the expanded-scope corpus replay remains zero-diff.
- The `shadow-ir` feature is defined on `alint-rules` and enabled
-  only from `alint-e2e`'s dev-dependency (and corpus replay). `cross_file`'s
-  `relation: equals` now runs through `ExtractAdapter` and the run-scoped
-  read/decode caches beside the authoritative implementation, and the complete
-  finding debug snapshots are compared. The property generator covers generated
-  source/target values and `normalize:` lists (including the non-literal note
-  path), and the full e2e suite runs with the shadow enabled: zero differences.
-  Regex targets use the same target-side syntax filter as the authoritative
-  path, and read/parse failures now emit and compare the same diagnostics
-  instead of being skipped. Regression tests cover both.
-  `ci/scripts/check-shadow-feature-tree.sh`, wired into Build and preflight,
-  is meant to prove the release, `-p alint -p xtask`, and criterion feature
-  trees exclude `shadow-ir`; the pre-tag audit found it passes with a leak
-  injected (W2-2 in [`pre-release-audit.md`](pre-release-audit.md)).
-- **R3, done.** `key_parity` is registered for JSON, YAML, TOML, dotenv, INI,
-  Java properties, Android string resources, and .NET `.resx`, with the
-  documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
-  options, fail-loud missing/parse/empty-peer outcomes, baseline keys, a
-  `--changed` path scope, a keys-only preview on the extraction trace stage,
-  unit tests, and firing/silent plus `--changed` policy scenarios. The relation
-  benchmark scenario is `relation_coalescing.yml`: with `key_parity` alone the 10k tree makes
-  839 read calls, with the per-file rule alone 441, and with both 839, so the two consumers share
-  the run-scoped cache. Its instruction and syscall counts are recorded in
-  [`REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md#relation-scenario).
-  The pre-tag audit found correctness gaps in the kind (W1 in
-  [`pre-release-audit.md`](pre-release-audit.md)), fixed by #407 and the review that followed it.
+- **R0, done.** On every S1-S3 cell, `main` at `fb9820f5e` uses no more instructions than v0.18.2
+  (S1 -7% to -8%, S2 about -3%, S3 -0.04% to -0.2%), and its read/stat-family syscall counts match
+  within fixed per-run probes, so the budget is not already spent. S3 has the least headroom, and
+  one rerun of the same binary moved S3 at 10k by 0.73% on a 24-thread host. The
+  `perf-gate-reference` job and `ci/scripts/reference-perf-gate.sh` implement the gate, which
+  passed on its own pull request in CI. A synthetic regression of +5.2% over v0.18.2 on S1 fails
+  it (a direct run of the gate's gungraun filter and limit), and a +4% change over `main` passes,
+  because S1 starts 7-8% under v0.18.2. Details and the recorded counts:
+  [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md).
+- **R1, done.** `alint_core::relation` holds the types: normalized paths that order like the
+  walked index; structural pointers with the one injective rendering; resources with origins (index
+  entry or literal path) and a read outcome that keeps "missing" distinct; selectors; values with
+  lexeme-preserving numbers; rows with an optional pointer, emission ordinal, optional span, the
+  three absence states, and the original value; relations in canonical order with explicit set
+  conversion and deterministic truncation; cardinality; every limit with its default and hard cap,
+  plus the shared run budget; and the internal `Adapter` trait. The flat contract form of a value
+  is in `alint_core::plugin_api`, which a test keeps free of engine imports, and `relation`
+  converts to and from it (iteratively, so value depth cannot exhaust the stack). Both modules are
+  `#[doc(hidden)] pub`, which tests check. Unit and property tests cover canonical order and its
+  independence from input order, the absence states, every limit, the nested-to-flat round trip,
+  and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
+  size and depth limits).
+- **Review round 2026-10-25.** A second audit corrected the replay (no false passes, no command
+  execution, fingerprints and proposed edits compared, expectations), the gate (the engine root
+  module, untraceable runs, frozen-source lints, attribution), and this design (resource origins,
+  row order, the module visibility, the R2/R3 cycle, the R6 split). ADR-0024 records the
+  decisions; it was accepted on 2026-10-25, including decision 6's measurement of the budget.
 - **R2 implementation notes:** [`r2-row-adapters.md`](r2-row-adapters.md) records
   the row/diagnostic model, the strict-versus-lossy decoding split, and the
   read/decode cache design that R2 implements.
@@ -556,22 +550,48 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   one decode alongside a per-file rule. The v0.18.2 reference gate is green on
   the audited code: S1 -5.85%/-8.34%, S2 -3.15%/-3.31%, S3 -0.18%/+0.65%, and
   the 10k syscall families are within two calls of the reference.
-
-- **R0, done.** On every S1-S3 cell, `main` at `fb9820f5e` uses no more instructions than v0.18.2
-  (S1 -7% to -8%, S2 about -3%, S3 -0.04% to -0.2%), and its read/stat-family syscall counts match
-  within fixed per-run probes, so the budget is not already spent. S3 has the least headroom, and
-  one rerun of the same binary moved S3 at 10k by 0.73% on a 24-thread host. The
-  `perf-gate-reference` job and `ci/scripts/reference-perf-gate.sh` implement the gate, which
-  passed on its own pull request in CI. A synthetic regression of +5.2% over v0.18.2 on S1 fails
-  it (a direct run of the gate's gungraun filter and limit), and a +4% change over `main` passes,
-  because S1 starts 7-8% under v0.18.2. Details and the recorded counts:
-  [`docs/benchmarks/REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md).
-- **R7, done.** `wit/alint-plugin/v0.1/plugin.wit` is the committed
-  `alint:plugin@0.1.0` draft with shared types, `adapter` and `analyzer` worlds,
-  host-pushed inputs, no callbacks, and a `wire.lock` of protobuf numbers, which
-  becomes append-only when the contract is released (while 0.1 is a draft,
-  `witforge lock --first` rewrites it). witforge's subset checker accepts it
-  (`witforge check wit/alint-plugin/v0.1`).
+- **R3, done.** `key_parity` is registered for JSON, YAML, TOML, dotenv, INI,
+  Java properties, Android string resources, and .NET `.resx`, with the
+  documented `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys`
+  options, fail-loud missing/parse/empty-peer outcomes, baseline keys, a
+  `--changed` path scope, a keys-only preview on the extraction trace stage,
+  unit tests, and firing/silent plus `--changed` policy scenarios. The relation
+  benchmark scenario is `relation_coalescing.yml`: with `key_parity` alone the 10k tree makes
+  839 read calls, with the per-file rule alone 441, and with both 839, so the two consumers share
+  the run-scoped cache. Its instruction and syscall counts are recorded in
+  [`REFERENCE-v0.18.2.md`](../../benchmarks/REFERENCE-v0.18.2.md#relation-scenario).
+  The pre-tag audit found correctness gaps in the kind (W1 in
+  [`pre-release-audit.md`](pre-release-audit.md)), fixed by #407 and the review that followed it.
+- **R4, done.** Regex targets and read/decode diagnostics are now inside the
+  differential comparison; the expanded-scope corpus replay remains zero-diff.
+  The `shadow-ir` feature is defined on `alint-rules` and enabled
+  only from `alint-e2e`'s dev-dependency (and corpus replay). `cross_file`'s
+  `relation: equals` now runs through `ExtractAdapter` and the run-scoped
+  read/decode caches beside the authoritative implementation, and the complete
+  finding debug snapshots are compared. The property generator covers generated
+  source/target values and `normalize:` lists (including the non-literal note
+  path), and the full e2e suite runs with the shadow enabled: zero differences.
+  Regex targets use the same target-side syntax filter as the authoritative
+  path, and read/parse failures now emit and compare the same diagnostics
+  instead of being skipped. Regression tests cover both.
+  `ci/scripts/check-shadow-feature-tree.sh`, wired into Build and preflight,
+  is meant to prove the release, `-p alint -p xtask`, and criterion feature
+  trees exclude `shadow-ir`; the pre-tag audit found it passes with a leak
+  injected (W2-2 in [`pre-release-audit.md`](pre-release-audit.md)).
+- **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
+  replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
+  removed from 20 configs. Four configs no longer load on the current release and are reported
+  as skipped: three override a bundled rule whose options changed (`gin-gonic/gin`,
+  `neovim/neovim`, `spring-projects/spring-boot`), and `facebook/react` sets
+  `scope_filter.changed_since` on `git_commit_no_fixup`, which takes `since` instead. Its error
+  reads only `<redacted>`: a rule with an env-interpolated field has every validation error
+  redacted, even one that quotes no value, which is a usability bug of its own. 49 of the
+  replayed configs carry 87 `equals`-path rules. R4's shadow is part of the
+  replay binary (`-p alint --features alint-rules/shadow-ir`), so any shadow
+  difference aborts the repository; `xtask` is built separately without the
+  feature. The shadow-enabled replay on 2026-10-27 (run 40601610148, compare
+  against `v0.20.1`) replayed 106/110 with 4 expected skips, 0 crashes, and
+  0 differences.
 - **R6a and R6b, done.** `alint_core::plugin_api` now carries std-only `Adapter` and
   `Analyzer` traits over contract resources, rows, findings, related locations,
   capabilities, and limits. `relation::ContractAdapter` bridges a contract adapter
@@ -591,39 +611,13 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   bridge change made the comparison miss dotted keys and empty peers and
   dropped analyzer errors (W1-1 to W1-3), and that registry injection skips
   several surfaces (W2-1).
-- **R5, done** (#362). The first full replay on the bench host (run 40144052081, 2026-10-24)
-  replayed 106 of the 110 configs at their pins in under ten minutes, with 83 spawning rules
-  removed from 20 configs. Four configs no longer load on the current release and are reported
-  as skipped: three override a bundled rule whose options changed (`gin-gonic/gin`,
-  `neovim/neovim`, `spring-projects/spring-boot`), and `facebook/react` sets
-  `scope_filter.changed_since` on `git_commit_no_fixup`, which takes `since` instead. Its error
-  reads only `<redacted>`: a rule with an env-interpolated field has every validation error
-  redacted, even one that quotes no value, which is a usability bug of its own. 49 of the
-  replayed configs carry 87 `equals`-path rules. R4's shadow is part of the
-  replay binary (`-p alint --features alint-rules/shadow-ir`), so any shadow
-  difference aborts the repository; `xtask` is built separately without the
-  feature. The shadow-enabled replay on 2026-10-27 (run 40601610148, compare
-  against `v0.20.1`) replayed 106/110 with 4 expected skips, 0 crashes, and
-  0 differences.
-- **Review round 2026-10-25.** A second audit corrected the replay (no false passes, no command
-  execution, fingerprints and proposed edits compared, expectations), the gate (the engine root
-  module, untraceable runs, frozen-source lints, attribution), and this design (resource origins,
-  row order, the module visibility, the R2/R3 cycle, the R6 split). ADR-0024 records the
-  decisions; it was accepted on 2026-10-25, including decision 6's measurement of the budget.
-- **R1, done.** `alint_core::relation` holds the types: normalized paths that order like the
-  walked index; structural pointers with the one injective rendering; resources with origins (index
-  entry or literal path) and a read outcome that keeps "missing" distinct; selectors; values with
-  lexeme-preserving numbers; rows with an optional pointer, emission ordinal, optional span, the
-  three absence states, and the original value; relations in canonical order with explicit set
-  conversion and deterministic truncation; cardinality; every limit with its default and hard cap,
-  plus the shared run budget; and the internal `Adapter` trait. The flat contract form of a value
-  is in `alint_core::plugin_api`, which a test keeps free of engine imports, and `relation`
-  converts to and from it (iteratively, so value depth cannot exhaust the stack). Both modules are
-  `#[doc(hidden)] pub`, which tests check. Unit and property tests cover canonical order and its
-  independence from input order, the absence states, every limit, the nested-to-flat round trip,
-  and rejection of malformed node lists (shared or backward children, cycles, unreachable nodes,
-  size and depth limits).
-- **R8, on hold.** [`r8-readiness.md`](r8-readiness.md) records the clean
+- **R7, done.** `wit/alint-plugin/v0.1/plugin.wit` is the committed
+  `alint:plugin@0.1.0` draft with shared types, `adapter` and `analyzer` worlds,
+  host-pushed inputs, no callbacks, and a `wire.lock` of protobuf numbers, which
+  becomes append-only when the contract is released (while 0.1 is a draft,
+  `witforge lock --first` rewrites it). witforge's subset checker accepts it
+  (`witforge check wit/alint-plugin/v0.1`).
+- **R8, GO (2026-11-01).** [`r8-readiness.md`](r8-readiness.md) records the clean
   benchmark workload and import-gate prefilter: RSS passes both the v0.18.2
   +10% gate and v0.20.1 (118,924 KB vs 118,044 / 119,420 KB), and 1M S2 is
   faster than v0.20.1 (5.357 s vs 5.861 s). The expanded-shadow corpus replay
@@ -631,8 +625,15 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   ([`pre-release-audit.md`](pre-release-audit.md), 2026-10-29) moved the
   verdict from GO to HOLD: `key_parity` misses dotted keys and empty peers
   since R6b's bridge change and cannot read a gitignored literal peer, several
-  readiness rows have no gate, and the go/no-go assessment is unwritten. W1 has since been fixed
-  (#407, merged 2026-10-30).
+  readiness rows have no gate, and the go/no-go assessment is unwritten. W1 (#407, merged 2026-10-30),
+  W2 (#411), and W2-7 (#417) closed those gaps, and W3 (#418) the documentation,
+  so the verdict is GO again, subject to the release steps' fresh corpus
+  replay and preflight.
+- **R9, done.** The TOML row adapter uses the lossless `toml_edit` tree;
+  Android `<string>`/`<string-array>`/`<plurals>` and .NET `.resx` string
+  entries parse through the guarded XML path. `key_parity` now covers all eight
+  formats, with per-dialect key models, pass/fail scenarios, and eager key
+  spans.
 - **Decisions (2026-10-30).** [ADR-0025](../../adr/0025-v021-pre-release-decisions.md)
   records the owner's calls from the audit: single-name keys shown as written,
   an opt-in `allow_missing_peers`, a GO on consistency with three simplicity
@@ -655,6 +656,13 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   job, are in
   [`witforge-adoption.md`](witforge-adoption.md). ADR-0027 keeps contract 0.1 a
   draft until the first release that loads plugins.
-- **Next:** W3's documentation and release preparation (version bump,
-  changelog, generated artifacts, release preflight and cross-platform checks),
-  then the tag.
+- **W3 (#418).** The changelog in its release order, the narrative
+  `key_parity` docs (cookbook, changed mode, cross-file concepts, README),
+  `RELEASING.md` (rulesets, preflight steps, yank list, MSRV policy), the
+  ADR index in [`../README.md`](../README.md), the stale ADR and design
+  citations, and two code fixes: read errors for a non-regular literal path
+  name no absolute path, and `xtask --help` describes `bench-gate`.
+- **Next:** the release steps of the audit's section 5: the `RELEASE_RUST`
+  bump, `bump-version.sh 0.21.0`, preflight and MSRV, a fresh corpus replay
+  against v0.20.1, the tag, then the bench record, the Action doc pin, and
+  the alint.org pins.

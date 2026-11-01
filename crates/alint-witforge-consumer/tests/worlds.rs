@@ -227,8 +227,16 @@ fn items(tokens: &[String], at: &mut usize, container: Option<&str>, problems: &
             problems.push(format!("gates at the end of the file: {gates:?}"));
             return;
         };
-        // A `use` carries no gate, and its `{…}` list is not a body.
+        // A `use` takes no gate (a gate there would be dropped silently
+        // otherwise), and its `{…}` list is not a body.
         if keyword == "use" {
+            if !gates.is_empty() {
+                let label = container.map_or_else(
+                    || "use".to_string(),
+                    |container| format!("{container}: use"),
+                );
+                problems.push(format!("{label} carries {gates:?}; a `use` takes no gate"));
+            }
             *at = end_of(*at, &[";"]).map_or(tokens.len(), |end| end + 1);
             continue;
         }
@@ -464,6 +472,11 @@ fn the_item_check_reports_every_changed_gate_and_a_nested_package() {
             "export api;\n        }",
             "export api;\n        }\n        package other:pkg { interface extra { f: func(); } }",
             "nested `package other:pkg` block",
+        ),
+        (
+            "use types.{r};",
+            "@unstable(feature = later)\n            use types.{r};",
+            "interface api: use carries",
         ),
     ] {
         let edited = gated.replacen(from, to, 1);
