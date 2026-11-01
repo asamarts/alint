@@ -138,8 +138,11 @@ W3's documentation landed in #418. The release steps of
 4. Done: `v0.21.0` tagged on `d61e4c802` (#420) after CI, including the `witforge` job against
    the pinned witforge 0.1.1 (W2-7, #417), passed on it; the release run and the post-publish
    smoke passed on every channel (2026-11-01).
-5. After the release: the Action doc pin (done), the bench record and the alint.org bench
-   snapshot, and the alint.org pins and `STATE.md`.
+5. Done after the release (2026-11-01): the Action doc pin (#421), the bench record (#424) and
+   the alint.org bench snapshot, and the alint.org pins and `STATE.md`. The record's
+   deterministic micro gate failed for `for_each_dir` (+3.14% at 1,000 directories against
+   v0.20.1); #422 fixes it on `main` for the next release ([`README.md`](README.md), "Status
+   and next steps").
 
 ## Go/no-go
 

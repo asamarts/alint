@@ -672,5 +672,17 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
 - **Released: v0.21.0 (2026-11-01).** Tagged on `d61e4c802` (#420). The
   release run published every channel and the post-publish smoke passed on
   all of them; the documented Action pin moved to the tag commit afterwards.
-- **Next:** the bench record and the alint.org bench snapshot, and the
-  alint.org pins.
+- **After the release (2026-11-01).** The documented Action pin (#421), the
+  alint.org pins, examples and `STATE.md`, the bench record (#424), and the
+  alint.org bench snapshot. The record's `bench-gate` passed: every scenario
+  starts a new workload revision, so each one resets. Its deterministic micro
+  gate failed against v0.20.1, with `for_each_dir` at +3.05% for 100
+  directories and +3.14% for 1,000, over the +3% budget. Bisecting led to
+  #368, which added `key_parity` to `template::NESTED_GLOB_OPTIONS`: the
+  lookup, a scan of that table run once per nested rule for every entry, then
+  compiled to a loop instead of unrolled comparisons. #422 generates the table
+  and a `match` lookup from one list (`for_each_dir/1000` at -3.10% in CI).
+  The fix ships in the next release; the owner decided against a v0.21.1.
+- **Next:** W4's remaining items ([`pre-release-audit.md`](pre-release-audit.md)
+  section 6), then v0.22, which must make the IR the only `cross_file`
+  `equals` path within ADR-0025's conditions as ADR-0026 measures them.
