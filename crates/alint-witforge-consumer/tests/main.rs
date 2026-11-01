@@ -305,8 +305,8 @@ fn generated_contract_compiles_and_roundtrips() {
     );
 }
 
-/// `plugin-info` and `capabilities` have no `plugin_api` counterpart yet, so
-/// only this test exercises their glue.
+/// `plugin-info` has no `plugin_api` counterpart yet, so only this test
+/// exercises its glue, and that of the `capabilities` inside it.
 #[test]
 fn plugin_info_roundtrips() {
     for (spawn_user_command, host_keyring) in [(true, false), (false, true)] {

@@ -92,7 +92,10 @@ fi
 # schema, facts.json, crate-graph.md), so a change to it can flip
 # `gen-*-check` / snapshot tests on a CRLF platform — run the rust suite
 # (and, via `rust || docs`, the docs gates) so that's validated.
-if echo "$CHANGED" | grep -qE '^(crates/|xtask/|schemas/|\.alint\.yml$|\.gitattributes$)'; then
+# `wit/` is the plugin contract: the consumer crate under crates/ is generated
+# from it, and the check that the two match runs with the rust pipeline, so a
+# WIT-only change must not skip it.
+if echo "$CHANGED" | grep -qE '^(crates/|xtask/|schemas/|wit/|\.alint\.yml$|\.gitattributes$)'; then
   RUST=true
 fi
 

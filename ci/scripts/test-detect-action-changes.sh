@@ -93,6 +93,8 @@ expect_routes "the gate's tree generator reaches it" crates/alint-bench/src/tree
 expect_routes "the relation scenario reaches the reference gate" \
   xtask/src/bench/scenarios/relation_coalescing.yml relation=true
 expect_routes "an ordinary kind does not reach the reference gate" crates/alint-rules/src/file_exists.rs relation=false
+expect_routes "the plugin contract WIT reaches the rust and shell pipelines" wit/alint-plugin/v0.1/plugin.wit rust=true shell=true
+expect_routes "the plugin contract README reaches the rust pipeline" wit/README.md rust=true
 expect_routes "a crate change reaches shell tests" crates/alint/src/main.rs shell=true
 
 # Static half: the jobs those flags feed must gate on them.

@@ -11,7 +11,7 @@
 //! conversions, follow it.
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 /// What a generated item corresponds to in `plugin_api`.
 enum Generated {
@@ -141,14 +141,28 @@ fn generated_items() -> BTreeMap<String, BTreeSet<String>> {
     items(&parse(&path))
 }
 
+/// Every `.rs` file under `dir`, at any depth, sorted.
+fn rust_files(dir: &Path) -> Vec<PathBuf> {
+    let mut out = Vec::new();
+    for entry in std::fs::read_dir(dir).unwrap() {
+        let path = entry.unwrap().path();
+        if path.is_dir() {
+            out.extend(rust_files(&path));
+        } else if path.extension().is_some_and(|ext| ext == "rs") {
+            out.push(path);
+        }
+    }
+    out.sort();
+    out
+}
+
+/// `plugin_api`'s items, from every file under it, so a submodule in a
+/// subdirectory is inventoried too.
 fn api_items() -> BTreeMap<String, BTreeSet<String>> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../alint-core/src/plugin_api");
     let mut out = BTreeMap::new();
-    for entry in std::fs::read_dir(&dir).unwrap() {
-        let path = entry.unwrap().path();
-        if path.extension().is_some_and(|ext| ext == "rs") {
-            out.extend(items(&parse(&path)));
-        }
+    for path in rust_files(&dir) {
+        out.extend(items(&parse(&path)));
     }
     out
 }
@@ -157,14 +171,19 @@ fn names(set: &BTreeSet<String>) -> String {
     set.iter().cloned().collect::<Vec<_>>().join(", ")
 }
 
-#[test]
-fn every_contract_item_is_accounted_for() {
-    let generated = generated_items();
-    let api = api_items();
-    assert!(generated.len() > 10 && api.len() > 10, "sources not found");
+type Items = BTreeMap<String, BTreeSet<String>>;
+
+/// Everything about `generated` and `api` that the tables above do not
+/// account for.
+fn problems(
+    generated: &Items,
+    api: &Items,
+    table: &[(&str, Generated)],
+    host_only: &[(&str, &str)],
+) -> Vec<String> {
     let mut problems = Vec::new();
 
-    let listed: BTreeSet<&str> = GENERATED.iter().map(|(path, _)| *path).collect();
+    let listed: BTreeSet<&str> = table.iter().map(|(path, _)| *path).collect();
     for path in generated.keys() {
         if !listed.contains(path.as_str()) {
             problems.push(format!(
@@ -174,7 +193,7 @@ fn every_contract_item_is_accounted_for() {
         }
     }
     let mut paired = BTreeSet::new();
-    for (path, counterpart) in GENERATED {
+    for (path, counterpart) in table {
         let Some(members) = generated.get(*path) else {
             problems.push(format!(
                 "GENERATED lists `{path}`, which witforge no longer generates"
@@ -210,7 +229,7 @@ fn every_contract_item_is_accounted_for() {
         }
     }
 
-    let host_only: BTreeSet<&str> = HOST_ONLY.iter().map(|(name, _)| *name).collect();
+    let host_only: BTreeSet<&str> = host_only.iter().map(|(name, _)| *name).collect();
     for name in api.keys() {
         if !paired.contains(name.as_str()) && !host_only.contains(name.as_str()) {
             problems.push(format!(
@@ -229,8 +248,96 @@ fn every_contract_item_is_accounted_for() {
             problems.push(format!("`{name}` is both paired and HOST_ONLY"));
         }
     }
+    problems
+}
 
-    assert!(problems.is_empty(), "{}", problems.join("\n"));
+#[test]
+fn every_contract_item_is_accounted_for() {
+    let generated = generated_items();
+    let api = api_items();
+    assert!(generated.len() > 10 && api.len() > 10, "sources not found");
+    let found = problems(&generated, &api, GENERATED, HOST_ONLY);
+    assert!(found.is_empty(), "{}", found.join("\n"));
+}
+
+/// Each check in `problems` fires on the input it exists for.
+#[test]
+fn every_kind_of_unaccounted_item_is_reported() {
+    let set = |members: &[&str]| members.iter().map(ToString::to_string).collect();
+    let generated: Items = [
+        ("types::Pair".to_string(), set(&["a", "b"])),
+        ("types::Unpaired".to_string(), set(&["x"])),
+    ]
+    .into();
+    let api: Items = [
+        ("Pair".to_string(), set(&["a", "b"])),
+        ("Host".to_string(), set(&[])),
+    ]
+    .into();
+    let table: &[(&str, Generated)] = &[
+        ("types::Pair", Pair("Pair")),
+        ("types::Unpaired", Unpaired("it has none", &["x"])),
+    ];
+    let host = &[("Host", "it stays on the host")];
+    assert_eq!(
+        problems(&generated, &api, table, host),
+        Vec::<String>::new()
+    );
+
+    let report = |generated: &Items, api: &Items, table, host| {
+        let found = problems(generated, api, table, host);
+        assert_eq!(found.len(), 1, "{found:?}");
+        found[0].clone()
+    };
+    let mut extra = generated.clone();
+    extra.insert("fixer_api::FixerApi".to_string(), set(&["fix"]));
+    assert!(report(&extra, &api, table, host).contains("`fixer_api::FixerApi` is not in"));
+    let mut gone = generated.clone();
+    gone.remove("types::Unpaired");
+    assert!(report(&gone, &api, table, host).contains("no longer generates"));
+    let mut grown = api.clone();
+    grown.insert("Pair".to_string(), set(&["a", "b", "c"]));
+    assert!(
+        report(&generated, &grown, table, host).contains("but plugin_api `Pair` has [a, b, c]")
+    );
+    let mut missing = api.clone();
+    missing.remove("Pair");
+    assert!(report(&generated, &missing, table, host).contains("which does not exist"));
+    let mut drifted = generated.clone();
+    drifted.insert("types::Unpaired".to_string(), set(&["x", "y"]));
+    assert!(report(&drifted, &api, table, host).contains("because it has none"));
+    let mut new_api = api.clone();
+    new_api.insert("Sneaky".to_string(), set(&[]));
+    assert!(report(&generated, &new_api, table, host).contains("`Sneaky` has no generated"));
+    let mut no_host = api.clone();
+    no_host.remove("Host");
+    assert!(report(&generated, &no_host, table, host).contains("HOST_ONLY lists `Host`"));
+    let both = &[("Host", "stays"), ("Pair", "both")];
+    assert!(report(&generated, &api, table, both).contains("both paired and HOST_ONLY"));
+}
+
+/// Files in a subdirectory are found as well as files beside `mod.rs`.
+#[test]
+fn every_file_under_plugin_api_is_inventoried() {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../alint-core/src/plugin_api");
+    let files = rust_files(&dir);
+    assert!(files.iter().any(|path| path.ends_with("mod.rs")));
+    let root = std::env::temp_dir().join(format!("alint-inventory-{}", std::process::id()));
+    std::fs::create_dir_all(root.join("x/z")).unwrap();
+    for file in ["mod.rs", "x/mod.rs", "x/y.rs", "x/z/w.rs", "x/notes.md"] {
+        std::fs::write(root.join(file), "").unwrap();
+    }
+    let found: Vec<String> = rust_files(&root)
+        .iter()
+        .map(|path| {
+            path.strip_prefix(&root)
+                .unwrap()
+                .to_string_lossy()
+                .replace('\\', "/")
+        })
+        .collect();
+    std::fs::remove_dir_all(&root).unwrap();
+    assert_eq!(found, ["mod.rs", "x/mod.rs", "x/y.rs", "x/z/w.rs"]);
 }
 
 /// The inventory sees each kind of drift the conversions cannot.
