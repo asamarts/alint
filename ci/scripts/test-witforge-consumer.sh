@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 # Controls for witforge-consumer.sh. In a copy of the contract and the
-# generated consumer crate, the unmodified copy must pass; a changed, extra, or
-# missing generated file must fail naming it; a contract whose wire lock lost
+# generated consumer crate, the unmodified copy must pass, also with a relative
+# WITFORGE_BIN run from another directory; a changed, extra, or missing
+# generated file must fail naming it; a WIT edit the committed output does not
+# reflect must fail naming the file it changes; a contract whose wire lock lost
 # an entry must fail `witforge check`; a version directory the script does not
-# check must fail; and `--write` must restore a changed file.
+# check must fail; a witforge other than the pinned release must fail;
+# `--print-version` must print the pin without running witforge; and `--write`
+# must restore a changed file.
 #
 # Needs witforge. Without it this harness skips (exit 77, which
 # shell-tests.sh reports as skipped), unless WITFORGE_REQUIRED=1 (set by the CI
@@ -102,6 +106,61 @@ open(path, 'w').write(''.join(lines))
 PY"
 control unchecked-version "this script checks only v0.1" \
   "cp -R wit/alint-plugin/v0.1 wit/alint-plugin/v0.2"
+# The output is regenerated from the WIT, not only compared with itself: a doc
+# comment edited in the contract changes the plain module that carries it.
+control wit-edit "changed generated file \`$CRATE/src/plain/v0_1.rs\`" \
+  "sed -i.bak 's|/// Stable adapter id\\.|/// Stable adapter id, edited.|' wit/alint-plugin/v0.1/plugin.wit \
+     && rm wit/alint-plugin/v0.1/plugin.wit.bak \
+     && grep -q 'Stable adapter id, edited' wit/alint-plugin/v0.1/plugin.wit"
+
+pinned=$(bash "$pristine/ci/scripts/witforge-consumer.sh" --print-version)
+real_bin=$(command -v "$WITFORGE_BIN")
+mkdir -p "$TMP_ROOT/bin"
+
+# A witforge other than the pinned release generates different output, so the
+# script refuses it before running it.
+cat >"$TMP_ROOT/bin/other-witforge" <<'SH'
+#!/usr/bin/env bash
+echo "witforge 0.1.1"
+SH
+chmod +x "$TMP_ROOT/bin/other-witforge"
+set +e
+out=$(WITFORGE_BIN="$TMP_ROOT/bin/other-witforge" bash "$pristine/ci/scripts/witforge-consumer.sh" 2>&1)
+rc=$?
+set -e
+if [[ $rc -eq 0 ]]; then
+  fail "other-version: the check passed with witforge 0.1.1"
+elif ! grep -qF "expected witforge ${pinned}, got: witforge 0.1.1" <<<"$out"; then
+  fail "other-version: the check failed without naming both versions (rc=$rc):"
+  printf '%s\n' "$out" >&2
+else
+  echo "ok: other-version fails the check"
+fi
+
+# --print-version needs no witforge at all.
+set +e
+out=$(WITFORGE_BIN="$TMP_ROOT/bin/missing" bash "$pristine/ci/scripts/witforge-consumer.sh" --print-version 2>&1)
+rc=$?
+set -e
+if [[ $rc -ne 0 || ! "$out" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  fail "--print-version printed \"$out\" (rc=$rc), not a version"
+else
+  echo "ok: --print-version prints $out without witforge"
+fi
+
+# A relative WITFORGE_BIN names a file from the caller's directory, although
+# the script runs from the repository root.
+ln -s "$real_bin" "$TMP_ROOT/bin/witforge"
+set +e
+out=$(cd "$TMP_ROOT" && WITFORGE_BIN=bin/witforge bash pristine/ci/scripts/witforge-consumer.sh 2>&1)
+rc=$?
+set -e
+if [[ $rc -ne 0 ]]; then
+  fail "relative-bin: the check fails with WITFORGE_BIN=bin/witforge (rc=$rc):"
+  printf '%s\n' "$out" >&2
+else
+  echo "ok: a relative WITFORGE_BIN passes from another directory"
+fi
 
 # --write regenerates a changed file, after which the check passes again.
 rewritten="$TMP_ROOT/write"

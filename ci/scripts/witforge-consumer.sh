@@ -12,12 +12,15 @@
 #    from the checked schema, so none of that is committed.)
 #
 # The crate's tests (round trips through protobuf and proto3-JSON, the
-# conversions to and from `alint_core::plugin_api`, and the inventory of both
-# sides) run with the workspace tests on every CI platform;
+# conversions to and from `alint_core::plugin_api`, the inventory of both
+# sides, and the worlds) run with the workspace tests on every CI platform;
 # test-witforge-consumer.sh holds this check's controls.
 #
 # Usage: WITFORGE_BIN=/path/to/witforge ci/scripts/witforge-consumer.sh [--write]
-#   --write   regenerate the committed copies instead of checking them
+#        ci/scripts/witforge-consumer.sh --print-version
+#   --write           regenerate the committed copies instead of checking them
+#   --print-version   print WITFORGE_VERSION and exit, without running
+#                     witforge: the version CI installs (the single source)
 # WITFORGE_BIN defaults to `witforge` on PATH; its version must be
 # WITFORGE_VERSION, the release the committed output was generated with.
 set -euo pipefail
@@ -41,7 +44,11 @@ case "${1:-}" in
     mode=()
     done_message="regenerated the plugin contract's consumer with witforge ${WITFORGE_VERSION}"
     ;;
-  *) echo "usage: $0 [--write]" >&2; exit 2 ;;
+  --print-version)
+    echo "$WITFORGE_VERSION"
+    exit 0
+    ;;
+  *) echo "usage: $0 [--write | --print-version]" >&2; exit 2 ;;
 esac
 
 if ! version="$("$WITFORGE_BIN" --version 2>/dev/null)"; then
