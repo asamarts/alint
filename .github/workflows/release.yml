@@ -23,7 +23,7 @@ env:
   # beats rust-toolchain.toml) and fails unless rustc really is this version.
   # test-release-toolchain-pin.sh enforces the wiring. Bump procedure:
   # RELEASING.md "Release toolchain".
-  RELEASE_RUST: "1.98.1"
+  RELEASE_RUST: "1.99.1"
 
 jobs:
   # ── Preflight gate ──────────────────────────────────────────────
