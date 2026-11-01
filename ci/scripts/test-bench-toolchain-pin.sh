@@ -54,6 +54,8 @@ tc = [i for i, u in enumerate(uses) if u.startswith('dtolnay/rust-toolchain@')]
 pins = [i for i, r in enumerate(runs) if r.strip() == 'ci/scripts/pin-release-toolchain.sh']
 if len(tc) != 1:
     failures.append(f'bench job: needs exactly one dtolnay/rust-toolchain step (found {len(tc)})')
+elif not any(re.match(r'^\s+toolchain:\s*\$\{\{ env\.BENCH_RUST \}\}\s*$', l) for l in steps[tc[0]]):
+    failures.append('bench job: the dtolnay/rust-toolchain step must install toolchain: ${{ env.BENCH_RUST }}')
 elif len(pins) != 1 or pins[0] != tc[0] + 1:
     failures.append('bench job: ci/scripts/pin-release-toolchain.sh must run right after dtolnay/rust-toolchain')
 else:

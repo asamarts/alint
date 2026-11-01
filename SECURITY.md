@@ -139,8 +139,9 @@ the filesystem, reads file contents, optionally calls `git` and `sh`-via-the-
   introduce a `command` rule).
 - **No telemetry.** alint sends nothing over the network except the
   user-explicit `extends:` URLs above.
-- **Reproducible builds.** `Cargo.lock` is committed. CI uses
-  `dtolnay/rust-toolchain@stable` with a pinned `rust-toolchain.toml`.
+- **Reproducible builds.** `Cargo.lock` is committed. CI installs toolchains
+  with `dtolnay/rust-toolchain` pinned to a commit on its `master` branch, and
+  release binaries build with the exact toolchain in `RELEASE_RUST`.
 
 If you find a way to exfiltrate data, escalate privileges, or compromise the
 host running alint via a malicious config or repo content, that's in scope and

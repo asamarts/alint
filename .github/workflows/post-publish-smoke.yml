@@ -96,7 +96,7 @@ jobs:
 
       - name: set up Rust (cargo + cargo-binstall channels)
         if: matrix.channel == 'cargo' || matrix.channel == 'cargo-binstall'
-        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+        uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
 

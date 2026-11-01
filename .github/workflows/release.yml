@@ -80,7 +80,7 @@ jobs:
         # bump-version.sh ships a split-brain release (crates.io no-ops on the
         # already-published version while npm/Docker/GH-Release ship the tag).
         run: bash ci/scripts/check-release-version.sh "$GITHUB_REF_NAME"
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ env.RELEASE_RUST }}
           components: rustfmt,clippy
@@ -162,7 +162,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ env.RELEASE_RUST }}
       - name: pin the release toolchain (overrides rust-toolchain.toml)
@@ -222,7 +222,7 @@ jobs:
       contents: read   # only checks out + uploads an artifact (runtime token)
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ env.RELEASE_RUST }}
       - name: pin the release toolchain (overrides rust-toolchain.toml)
@@ -633,7 +633,7 @@ jobs:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-      - uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ env.RELEASE_RUST }}
       - name: pin the release toolchain (overrides rust-toolchain.toml)
