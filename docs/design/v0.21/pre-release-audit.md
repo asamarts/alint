@@ -4,8 +4,8 @@ Status: Plan (2026-10-29). Audited `main` at `f4e5fa225`; version 0.20.1, v0.21.
 Progress: W1 done (#407, merged 2026-10-30: all twelve items, the review's follow-ups, and
 ADR-0025's `key_parity` changes, with tests), and a review of that increment fixed more (section
 3); W4 housekeeping and the six Dependabot merges done 2026-10-30; W2 done in #411 except W2-7,
-which waits on witforge 0.1.0 ([`witforge-adoption.md`](witforge-adoption.md)); W3 and the rest
-of W4 not started.
+whose CI job is next now that witforge 0.1.0 is published
+([`witforge-adoption.md`](witforge-adoption.md)); W3 and the rest of W4 not started.
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.

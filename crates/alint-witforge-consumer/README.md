@@ -11,15 +11,19 @@ contract (`wit/alint-plugin/v0.1`).
   `pbjson-build`; nothing generated from the schema is committed.
 - `tests/` round-trips requests and responses through protobuf binary and
   proto3-JSON, converts every type and trait that `alint_core::plugin_api` and
-  the generated code share (`plugin_api.rs`), and accounts for every item on
+  the generated code share (`plugin_api.rs`), accounts for every item on
   both sides, recording why each unpaired one has no counterpart
-  (`inventory.rs`). These tests compare `plugin_api` with the committed
-  output; `ci/scripts/witforge-consumer.sh` compares that output with the WIT.
+  (`inventory.rs`), and pairs each world in the WIT, which witforge generates
+  nothing from, with the `plugin_api` trait that implements it (`worlds.rs`).
+  These tests compare `plugin_api` with the committed output;
+  `ci/scripts/witforge-consumer.sh` compares that output with the WIT.
 
 Do not hand-edit the generated files. Check or regenerate them as
-[`wit/README.md`](../../wit/README.md) describes:
+[`wit/README.md`](../../wit/README.md) describes, with the witforge release the
+script pins:
 
 ```sh
+cargo install witforge-cli --version "$(ci/scripts/witforge-consumer.sh --print-version)" --locked
 ci/scripts/witforge-consumer.sh            # check
 ci/scripts/witforge-consumer.sh --write    # regenerate
 ```
