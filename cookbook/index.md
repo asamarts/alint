@@ -318,32 +318,26 @@ rules:
 
 ### Keep `.env` keys aligned with `.env.example`
 
-Use `cross_file` with `set_equals` when two flat files must declare the same keys. This rule
-makes `.env.example` authoritative, extracts only declaration names, and ignores declaration
-order and values:
+Use `key_parity` when files must declare the same keys as a reference. This rule makes
+`.env.example` authoritative and compares key names only, never values:
 
 ```yaml
 version: 1
 rules:
   - id: env-key-parity
-    kind: cross_file
-    source:
-      file: .env.example
-      extract:
-        regex: '(?m)^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*='
-    targets:
-      - file: .env
-        extract:
-          regex: '(?m)^[ \t]*(?:export[ \t]+)?([A-Za-z_][A-Za-z0-9_]*)[ \t]*='
-    relation: set_equals
+    kind: key_parity
+    reference: .env.example
+    peers: .env
+    allow_missing_peers: true
     level: error
 ```
 
-The line-start anchor excludes commented examples, and capture group 1 returns the key rather
-than its value. `set_equals` compares case-sensitive unique sets: declaration order does not
-matter, but duplicate declarations are not flagged. Keep the missing-target check strict when
-`.env` must exist; if CI does not materialize `.env`, run this rule only in the environment that
-does or point the target at a generated environment file.
+`.env` is usually gitignored, and a `peers` path without glob characters is read from disk
+anyway. `allow_missing_peers: true` turns an absent `.env` (in CI, say) into an informational
+note; drop it where `.env` must exist. `direction: missing` reports only keys `.env` lacks, for
+setups that allow local-only keys. Findings quote key names, never values. The same shape keeps
+locale files in step: `reference: locales/en.json` with `peers: "locales/*.json"`, plus
+`strip_root: true` for Rails-style files and `plurals: cldr` for plural groups.
 
 ## 13. Ban risky characters / files outright
 

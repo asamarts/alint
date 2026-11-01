@@ -6,7 +6,7 @@ sidebar:
   label: 'Index'
 ---
 
-alint ships 113 rule kinds across 13 families (102 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
+alint ships 114 rule kinds across 13 families (103 distinct rule behaviors plus 11 short-name aliases like `content_matches` → `file_content_matches`). Each rule is one entry in your `.alint.yml` under `rules:`.
 
 ## By family
 
@@ -21,7 +21,7 @@ alint ships 113 rule kinds across 13 families (102 distinct rule behaviors plus 
 - [Portable metadata](/docs/rules/portable-metadata/) — 4 rules
 - [Unix metadata](/docs/rules/unix-metadata/) — 5 rules
 - [Git hygiene](/docs/rules/git-hygiene/) — 13 rules
-- [Cross-file](/docs/rules/cross-file/) — 21 rules
+- [Cross-file](/docs/rules/cross-file/) — 22 rules
 - [Plugin (tier 1)](/docs/rules/plugin-tier-1/) — 1 rule
 
 ## Alphabetical
@@ -86,6 +86,7 @@ alint ships 113 rule kinds across 13 families (102 distinct rule behaviors plus 
 - [`json_path_equals`](/docs/rules/structured-query/json_path_equals/) — Query a structured document with a JSONPath expression and assert every match deep-equals the supplied value. _(Structured query)_
 - [`json_path_matches`](/docs/rules/structured-query/json_path_matches/) — Same shape as the `*_equals` variants, but the asserted value is a **regex** matched against string values. _(Structured query)_
 - [`json_schema_passes`](/docs/rules/structured-query/json_schema_passes/) — Validate every JSON / YAML / TOML / XML / dotenv / properties / INI / HCL file in `paths` against a JSON Schema document. _(Structured query)_
+- [`key_parity`](/docs/rules/cross-file/key_parity/) — One reference file and a glob of peers must declare the same key set. _(Cross-file)_
 - [`line_endings`](/docs/rules/text-hygiene/line_endings/) — Every line ending matches `target`: `lf` or `crlf`. _(Text hygiene)_
 - [`line_max_width`](/docs/rules/text-hygiene/line_max_width/) — Cap line length in characters (not bytes — code points). _(Text hygiene)_
 - [`markdown_fragments_resolve`](/docs/rules/cross-file/markdown_fragments_resolve/) — Require every live local Markdown link fragment to name a heading anchor in its resolved target document. _(Cross-file)_

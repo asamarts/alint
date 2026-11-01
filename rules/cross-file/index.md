@@ -30,4 +30,5 @@ Rule kinds in the **Cross-file** family. Each rule below links to its own page w
 | [`dir_contains`](/docs/rules/cross-file/dir_contains/) | Every directory matching `select:` must contain files matching every glob in `require:`. |
 | [`dir_only_contains`](/docs/rules/cross-file/dir_only_contains/) | Every direct-child file of a directory matching `select:` must match at least one glob in `allow:`. |
 | [`unique_by`](/docs/rules/cross-file/unique_by/) | No two files matching `select` may share the value of `key` (a path template; tokens `{path}`/`{dir}`/`{basename}`/`{stem}`/`{ext}`/`{parent_name}`). |
+| [`key_parity`](/docs/rules/cross-file/key_parity/) | One reference file and a glob of peers must declare the same key set. |
 | [`every_matching_has`](/docs/rules/cross-file/every_matching_has/) | For every file or directory matching `select:`, every nested rule under `require:` must be satisfied. |

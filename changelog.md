@@ -9,6 +9,78 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-01
+
+The second general-linter phase. `key_parity` keeps locale and environment files in step with a
+reference across eight formats (JSON, YAML, TOML, dotenv, INI, Java properties, Android string
+resources and .NET `.resx`), built on a new relation layer that later cross-file rules will
+share; `cross_file`'s `relation: equals` already has a differential shadow implementation on it.
+The first draft of the plugin contract (`alint:plugin@0.1.0`) ships as internal Rust traits and a
+WIT file that CI checks against witforge's generated code, though alint does not load plugins yet.
+The release also moves to `jsonschema` 0.60, makes `import_gate` cheaper on import-free Rust,
+fixes benchmark workloads that measured findings instead of linting, and stops read errors from
+naming absolute paths.
+
+### Security
+
+- Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
+  (exponential event growth with `ENABLE_WIKILINKS`).
+- The VS Code extension bundles `minimatch` 11.0.3 through an npm override,
+  because `vscode-languageclient` 11 still asks for 10. This fixes
+  GHSA-g3hv-75wg-m249, a pattern-expansion denial of service that only occurs
+  at `optimizationLevel` 2 or higher. The language client uses the default
+  level, so the extension was not exposed. Its development tools move to
+  `glob` 14.0.3 (GHSA-3g3m-2fjr-6pw4).
+
+### Added
+
+- **`key_parity`** keeps a reference locale or environment file and a glob of peers in step. JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .NET `.resx` keys are compared as leaf paths, by identity (a dotted key such as `app.title` is one key, never a nested path); `direction`, `strip_root`, `plurals: cldr`, and `ignore_keys` handle the common locale layouts. Findings show a dotenv, properties, or `.resx` key as written (`app.title`) and any other key as its path (`nav.home`, `nav['a.b']`), and `ignore_keys` matches that form. A `peers` value without glob metacharacters is read even when gitignored, so `reference: .env.example` with `peers: .env` checks a local `.env`; `allow_missing_peers: true` turns its absence (in CI, say) into an informational note. Missing references and literal peers, unparsable files, and a peer glob that matches nothing otherwise fail loudly, and findings quote keys only. Key-insertion fixes remain reserved for the generic edit plan.
+- The plugin contract `0.x`, internal for now: std-only adapter and analyzer traits and a bridge to the relation layer, in doc-hidden `alint-core` modules (`plugin_api`, `relation`) with no compatibility promise, and a committed `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, which CI checks against the code generated from it with a pinned witforge release. alint cannot load plugins yet. The public additions are `alint-testkit`'s `Runner::with_registry`, which runs policy tests against a custom rule registry, and the test-only `shadow-ir` feature below. Contract 0.1 stays a draft until the first release that loads plugins freezes it (ADR-0027).
+- `cross_file`'s `relation: equals` has a differential shadow implementation under the test-only `shadow-ir` feature, exercised by e2e properties and the corpus replay.
+
+### Changed
+
+- Updated the dotenv engine from `adotenv` 0.2.1 to 0.10.4. The lossless parser,
+  diagnostics, spans and verified-edit APIs used by alint remain compatible;
+  no source changes were required.
+- `json_schema_passes` uses `jsonschema` 0.60. A regex in a schema that
+  exceeds the backtracking limit no longer counts as a non-match, which could
+  let `not` or `patternProperties` accept an invalid document; the verdict now
+  holds only if it is the same either way, and otherwise the document gets a
+  backtracking-limit finding.
+- The VS Code extension uses `vscode-languageclient` 11 (still VS Code 1.91 or
+  newer).
+
+### Performance
+
+- `import_gate`'s Rust preset now checks for the literal `use` before running
+  its per-line regex, avoiding a full regex scan of import-free source.
+
+### Fixed
+
+- The benchmark tree generator writes clean sources at every size. Generated
+  Rust sources (S1-S3 and SFIX) and S4's Rust, JavaScript, and Python sources
+  end with a newline, and generated text lines never start or end with a
+  space. Before, S2's `final_newline` rule reported one finding per generated
+  source and its whitespace rules tens of thousands more (about 86,000 at
+  100k), so S2's timings and its 1M RSS budget measured findings rather than
+  ordinary linter work. S1-S3 and SFIX carry workload revision 2, and S4
+  revision 4; compare timings only within a revision.
+- A development build's `alint --version` now reports the checked-out commit.
+  The build script watched a fixed `.git/HEAD` path, so the SHA lagged commits
+  on the current branch. It now asks git for the checkout's real files, watches
+  only the ones that exist, and ignores repository variables such as `GIT_DIR`
+  inherited from another checkout's git hook. As a result, building in a linked
+  git worktree no longer recompiles the `alint` crate and relinks its
+  integration tests on every build. `ci/scripts/test-build-script-freshness.sh`
+  drives real cargo builds through each case. Release binaries were not
+  affected.
+- A read error for a literal path that is a directory or another non-regular
+  file (a `key_parity` reference or peer, a `cross_file` source or target, and
+  the other direct reads) no longer names the file's absolute path, which made
+  findings and fingerprints depend on where the repository was checked out.
+  The finding carries the repo-relative path, as for every other read error.
+
 ## [0.20.1] - 2026-10-23
 
 A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot
@@ -8225,7 +8297,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/asamarts/alint/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/asamarts/alint/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/asamarts/alint/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/asamarts/alint/compare/v0.18.4...v0.19.0

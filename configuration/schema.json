@@ -40,6 +40,14 @@
         }
       ]
     },
+    "Direction": {
+      "enum": [
+        "both",
+        "missing",
+        "extra"
+      ],
+      "type": "string"
+    },
     "Expect": {
       "enum": [
         "any",
@@ -374,6 +382,19 @@
         }
       ]
     },
+    "KeyFormat": {
+      "enum": [
+        "json",
+        "yaml",
+        "toml",
+        "dotenv",
+        "properties",
+        "ini",
+        "android-strings",
+        "resx"
+      ],
+      "type": "string"
+    },
     "Language": {
       "enum": [
         "auto",
@@ -490,6 +511,13 @@
         }
       ],
       "description": "`outputs:` accepts a single glob or a list (a `Scope`)."
+    },
+    "Plurals": {
+      "enum": [
+        "exact",
+        "cldr"
+      ],
+      "type": "string"
     },
     "RegistryOrphansSpec": {
       "additionalProperties": false,
@@ -5043,6 +5071,88 @@
       ],
       "type": "object"
     },
+    "rule_key_parity": {
+      "description": "One reference file and a glob of peers must declare the same key set. The reference is read literally even when ignored; peers come from the index. Supports JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources and .NET .resx; nested keys are leaf paths, arrays are values, and duplicate keys are not parity violations.",
+      "not": {
+        "anyOf": [
+          {
+            "required": [
+              "paths"
+            ]
+          },
+          {
+            "required": [
+              "scope_filter"
+            ]
+          },
+          {
+            "required": [
+              "fix"
+            ]
+          },
+          {
+            "required": [
+              "expect_matches"
+            ]
+          }
+        ]
+      },
+      "properties": {
+        "allow_missing_peers": {
+          "default": false,
+          "description": "Report an absent literal peer, or a `peers` glob that selects no file, as an informational note instead of an analysis failure. For a peer that exists only on developer machines, such as a gitignored `.env`.",
+          "type": "boolean"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction",
+          "description": "Which differences to report."
+        },
+        "format": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/KeyFormat"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "description": "Key format. Inferred from the extension when omitted; `.env` and `.env.*` infer dotenv and `.resx` infers resx, while an Android `.xml` file needs `android-strings`."
+        },
+        "ignore_keys": {
+          "default": [],
+          "description": "Keys to omit, written as they appear in findings. In dotenv, properties, and `.resx` files a pattern matches the key name, where `*` stops at a `.` and `**` crosses it; a name shown in bracket form (`['']`, `['[x']`) is written that way too. In every other format a pattern is a key path: `*` matches within one segment, a `**` segment matches any number of segments (at the end of a pattern, at least one), and `['a.b']` names a segment that contains a dot.",
+          "items": {
+            "type": "string"
+          },
+          "type": "array"
+        },
+        "kind": {
+          "const": "key_parity"
+        },
+        "peers": {
+          "description": "Glob selecting the peer files. The reference is excluded automatically. A value without glob metacharacters is a literal path, read even when gitignored (`peers: .env`).",
+          "type": "string"
+        },
+        "plurals": {
+          "$ref": "#/$defs/Plurals",
+          "description": "Treat a CLDR plural group (nested object or i18next `_other` siblings) as one key. Exact per-locale category checking is not part of v0.21."
+        },
+        "reference": {
+          "description": "The authoritative key file.",
+          "type": "string"
+        },
+        "strip_root": {
+          "default": false,
+          "description": "Compare below each file's single top-level key, as in Rails locale files (`en:`, `fr:`). JSON, YAML, and TOML only. A file with keys must have exactly one top-level key, an object, or it is an analysis failure.",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "reference",
+        "peers"
+      ],
+      "type": "object"
+    },
     "rule_kind_dispatch": {
       "description": "Dispatch on the `kind` discriminator. Each branch sets the required kind-specific fields.",
       "oneOf": [
@@ -5270,6 +5380,9 @@
         },
         {
           "$ref": "#/$defs/rule_unique_by"
+        },
+        {
+          "$ref": "#/$defs/rule_key_parity"
         },
         {
           "$ref": "#/$defs/rule_dir_contains"

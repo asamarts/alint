@@ -72,6 +72,7 @@ model {
       bench   = crate 'alint-bench'   'Criterion micro-benchmarks and the seeded deterministic tree generator.'
       testkit = crate 'alint-testkit' 'Public policy-test v1 model, validating hermetic runner, tree fixtures, and optional proptest strategies.'
       e2e     = crate 'alint-e2e'     'General policy tests plus coverage audits and cross-cutting invariant tests.'
+      consumer = crate 'alint-witforge-consumer' 'Generated compile and round-trip proof for the committed plugin contract.'
       xtask   = crate 'xtask'         'Build automation: bench-release, docs-export, gen-schema, gen-facts, gen-arch.'
     }
   }

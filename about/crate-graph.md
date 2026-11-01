@@ -24,6 +24,7 @@ Tier = longest runtime-dependency chain to the foundation (`alint-core` = 0); de
 |---|---|---|
 | 0 | `alint-core` | Core types and execution engine for the alint language-agnostic repository linter. |
 | 0 | `alint-e2e` | Internal: end-to-end scenario tests for alint. Not a library. |
+| 0 | `alint-witforge-consumer` | Generated compile/round-trip proof for the alint plugin contract. |
 | 1 | `alint-dsl` | Internal: YAML DSL loader for alint configuration files. Not a stable public API. |
 | 1 | `alint-output` | Internal: output formatters for alint reports (human, json, ...). Not a stable public API. |
 | 1 | `alint-rules` | Internal: built-in rule implementations for alint. Not a stable public API. |
