@@ -181,7 +181,7 @@ files. alint's contract passes every new check unchanged.
 
 An independent review of #417 at `bdc83c157` probed each gate with an input that should fail.
 Each fix below has a negative sample, control, or mutant that passed before it, and landed with
-W3 (#W3PR).
+W3 (#418).
 
 | # | Problem | Fix |
 |---|---|---|

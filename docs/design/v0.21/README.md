@@ -626,7 +626,7 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   verdict from GO to HOLD: `key_parity` misses dotted keys and empty peers
   since R6b's bridge change and cannot read a gitignored literal peer, several
   readiness rows have no gate, and the go/no-go assessment is unwritten. W1 (#407, merged 2026-10-30),
-  W2 (#411), and W2-7 (#417) closed those gaps, and W3 (#W3PR) the documentation,
+  W2 (#411), and W2-7 (#417) closed those gaps, and W3 (#418) the documentation,
   so the verdict is GO again, subject to the release steps' fresh corpus
   replay and preflight.
 - **R9, done.** The TOML row adapter uses the lossless `toml_edit` tree;
@@ -656,7 +656,7 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   job, are in
   [`witforge-adoption.md`](witforge-adoption.md). ADR-0027 keeps contract 0.1 a
   draft until the first release that loads plugins.
-- **W3 (#W3PR).** The changelog in its release order, the narrative
+- **W3 (#418).** The changelog in its release order, the narrative
   `key_parity` docs (cookbook, changed mode, cross-file concepts, README),
   `RELEASING.md` (rulesets, preflight steps, yank list, MSRV policy), the
   ADR index in [`../README.md`](../README.md), the stale ADR and design

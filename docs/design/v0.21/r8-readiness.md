@@ -9,7 +9,7 @@ and W2-7's default-CI job in #417, 2026-11-01). The performance and memory evide
 stands: the benchmark generator writes well-formed Rust text, the Rust import-gate literal
 prefilter removes the remaining S2 slowdown, clean-workload 1M S2 RSS is 118,924 KB (within
 v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. W3's documentation is done
-(#W3PR), so every row below passes; what remains are the release steps.
+(#418), so every row below passes; what remains are the release steps.
 
 ## Acceptance matrix
 
@@ -125,7 +125,7 @@ applies:
 
 ## Remaining release work
 
-W3's documentation landed in #W3PR. The release steps of
+W3's documentation landed in #418. The release steps of
 [`pre-release-audit.md`](pre-release-audit.md) section 5 remain:
 
 1. Bump `RELEASE_RUST` in its own pull request (section 7, item 8).
