@@ -48,7 +48,7 @@ dependencies = [
 
 [[package]]
 name = "alint"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -77,7 +77,7 @@ dependencies = [
 
 [[package]]
 name = "alint-bench"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -94,7 +94,7 @@ dependencies = [
 
 [[package]]
 name = "alint-core"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "adotenv",
  "encoding_rs",
@@ -128,7 +128,7 @@ dependencies = [
 
 [[package]]
 name = "alint-dsl"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "alint-rules",
@@ -146,7 +146,7 @@ dependencies = [
 
 [[package]]
 name = "alint-e2e"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -166,7 +166,7 @@ dependencies = [
 
 [[package]]
 name = "alint-lsp"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -181,7 +181,7 @@ dependencies = [
 
 [[package]]
 name = "alint-output"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "anstream",
@@ -195,7 +195,7 @@ dependencies = [
 
 [[package]]
 name = "alint-rules"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "content_inspector",
@@ -221,7 +221,7 @@ dependencies = [
 
 [[package]]
 name = "alint-testkit"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "alint-dsl",
@@ -240,7 +240,7 @@ dependencies = [
 
 [[package]]
 name = "alint-witforge-consumer"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-core",
  "pbjson",
@@ -3950,7 +3950,7 @@ checksum = "1ffae5123b2d3fc086436f8834ae3ab053a283cfac8fe0a0b8eaae044768a4c4"
 
 [[package]]
 name = "xtask"
-version = "0.20.1"
+version = "0.21.0"
 dependencies = [
  "alint-bench",
  "alint-core",

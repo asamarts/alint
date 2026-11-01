@@ -10,7 +10,13 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.20.1** (2026-10-23): a performance and diagnostics patch. Rule path checks,
+**Latest release: v0.21.0** (2026-11-01): the second general-linter phase. `key_parity` keeps
+locale and environment files in step with a reference across JSON, YAML, TOML, dotenv, INI, Java
+properties, Android string resources, and `.resx`, on an internal relation layer that a shadow
+port of `cross_file`'s `equals` relation also runs on, matching the existing implementation on
+the case-study corpus; and the plugin contract has a first draft (internal traits plus a WIT file
+CI checks against witforge), though alint does not load plugins yet. The prior v0.20.1
+(2026-10-23) was a performance and diagnostics patch. Rule path checks,
 nested-rule kinds, `pair`, `unique_by`, terminal output, YAML guards and `extends:` loading are
 cheaper, so structured-query and cross-file checks run 3-5% faster end to end; alint warns when a
 content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant

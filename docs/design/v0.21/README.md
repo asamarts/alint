@@ -662,7 +662,12 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   ADR index in [`../README.md`](../README.md), the stale ADR and design
   citations, and two code fixes: read errors for a non-regular literal path
   name no absolute path, and `xtask --help` describes `bench-gate`.
-- **Next:** the release steps of the audit's section 5: the `RELEASE_RUST`
-  bump, `bump-version.sh 0.21.0`, preflight and MSRV, a fresh corpus replay
-  against v0.20.1, the tag, then the bench record, the Action doc pin, and
-  the alint.org pins.
+- **Release cut (2026-11-01).** `RELEASE_RUST` 1.99.1 (#419). The corpus
+  replay of `main` at `c0ac8f7b0` against v0.20.1 (run 41328293994): 106
+  repositories replayed, 49 of them with `cross_file` `equals` rules, 0
+  differences, 0 shadow differences, 0 crashes; the 4 skipped are the known
+  case-study configs that no longer load. The bump to 0.21.0 with the
+  changelog cut, the release preflight, and the MSRV check passed in the
+  release pull request.
+- **Next:** tag the merged release commit, then the bench record and the
+  alint.org bench snapshot, the Action doc pin, and the alint.org pins.

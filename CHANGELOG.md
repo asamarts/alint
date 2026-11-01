@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.0] - 2026-11-01
+
+The second general-linter phase. `key_parity` keeps locale and environment files in step with a
+reference across eight formats (JSON, YAML, TOML, dotenv, INI, Java properties, Android string
+resources and .NET `.resx`), built on a new relation layer that later cross-file rules will
+share; `cross_file`'s `relation: equals` already has a differential shadow implementation on it.
+The first draft of the plugin contract (`alint:plugin@0.1.0`) ships as internal Rust traits and a
+WIT file that CI checks against witforge's generated code, though alint does not load plugins yet.
+The release also moves to `jsonschema` 0.60, makes `import_gate` cheaper on import-free Rust,
+fixes benchmark workloads that measured findings instead of linting, and stops read errors from
+naming absolute paths.
+
 ### Security
 
 - Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
@@ -8282,7 +8294,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.20.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.0...HEAD
+[0.21.0]: https://github.com/asamarts/alint/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/asamarts/alint/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/asamarts/alint/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/asamarts/alint/compare/v0.18.4...v0.19.0

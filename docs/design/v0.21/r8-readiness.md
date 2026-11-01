@@ -126,13 +126,15 @@ applies:
 ## Remaining release work
 
 W3's documentation landed in #418. The release steps of
-[`pre-release-audit.md`](pre-release-audit.md) section 5 remain:
+[`pre-release-audit.md`](pre-release-audit.md) section 5:
 
-1. Bump `RELEASE_RUST` in its own pull request (section 7, item 8).
-2. Run a fresh corpus replay against v0.20.1 on `main`'s tip; every difference must be explained
-   by a changelog entry, and a crash or a shadow difference blocks the release.
-3. `bump-version.sh 0.21.0` with the changelog cut, in a pull request; the release preflight and
-   the MSRV check pass.
+1. Done: `RELEASE_RUST` 1.99.1, in its own pull request (#419; section 7, item 8).
+2. Done: the corpus replay of `main` at `c0ac8f7b0` against v0.20.1 (run 41328293994) replayed
+   106 repositories, 49 with `cross_file` `equals` rules, with 0 differences, 0 shadow
+   differences, and 0 crashes; the 4 skipped are the known case-study configs that no longer
+   load.
+3. Done: `bump-version.sh 0.21.0` with the changelog cut, in the release pull request; the
+   release preflight and the MSRV check pass.
 4. Tag the merged commit only after CI, including the `witforge` job that checks the contract
    against the pinned witforge 0.1.1 (W2-7, #417), passes on it.
 5. After the release: the bench record and the alint.org bench snapshot, the Action doc pin, and

@@ -6,7 +6,9 @@ ADR-0025's `key_parity` changes, with tests), and a review of that increment fix
 3); W4 housekeeping and the six Dependabot merges done 2026-10-30; W2 done in #411, and W2-7
 in #417 (2026-11-01: the default-CI job against the pinned witforge 0.1.1,
 [`witforge-adoption.md`](witforge-adoption.md)); W3's documentation and code items done in
-#418 (2026-11-01); the release steps (section 5) and the rest of W4 remain.
+#418 (2026-11-01); of the release steps (section 5), the `RELEASE_RUST` bump (#419), the corpus
+replay (0 differences), and the version bump are done, the tag and what follows it remain, as
+does the rest of W4.
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
