@@ -1,5 +1,6 @@
 mod inventory;
 mod plugin_api;
+mod worlds;
 
 use alint_witforge_consumer::glue::GlueError;
 use alint_witforge_consumer::glue::v0::adapter_api::functions::{
