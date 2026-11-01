@@ -669,5 +669,8 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   case-study configs that no longer load. The bump to 0.21.0 with the
   changelog cut, the release preflight, and the MSRV check passed in the
   release pull request.
-- **Next:** tag the merged release commit, then the bench record and the
-  alint.org bench snapshot, the Action doc pin, and the alint.org pins.
+- **Released: v0.21.0 (2026-11-01).** Tagged on `d61e4c802` (#420). The
+  release run published every channel and the post-publish smoke passed on
+  all of them; the documented Action pin moved to the tag commit afterwards.
+- **Next:** the bench record and the alint.org bench snapshot, and the
+  alint.org pins.

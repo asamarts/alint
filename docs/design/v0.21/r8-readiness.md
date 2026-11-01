@@ -135,10 +135,11 @@ W3's documentation landed in #418. The release steps of
    load.
 3. Done: `bump-version.sh 0.21.0` with the changelog cut, in the release pull request; the
    release preflight and the MSRV check pass.
-4. Tag the merged commit only after CI, including the `witforge` job that checks the contract
-   against the pinned witforge 0.1.1 (W2-7, #417), passes on it.
-5. After the release: the bench record and the alint.org bench snapshot, the Action doc pin, and
-   the alint.org pins and `STATE.md`.
+4. Done: `v0.21.0` tagged on `d61e4c802` (#420) after CI, including the `witforge` job against
+   the pinned witforge 0.1.1 (W2-7, #417), passed on it; the release run and the post-publish
+   smoke passed on every channel (2026-11-01).
+5. After the release: the Action doc pin (done), the bench record and the alint.org bench
+   snapshot, and the alint.org pins and `STATE.md`.
 
 ## Go/no-go
 
