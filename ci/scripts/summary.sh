@@ -77,6 +77,7 @@ row() {
   # Shell tests route on their own `shell` flag (detect-changes.sh), which
   # also fires for packaging / docs / supply-chain / repo-config paths.
   row "Shell tests"  "$SHELL_TESTS_RESULT" "${SHELL_CHANGED:-false}"
+  row "Plugin contract (witforge)" "${WITFORGE_RESULT:-skipped}" "$RUST_CHANGED"
   row "Secrets inventory" "$SECRETS_INVENTORY_RESULT" "true"
   echo ""
 
@@ -127,7 +128,7 @@ for result in \
   "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
   "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \
   "$SHELL_TESTS_RESULT" "$EDITORS_RESULT" "${PACKAGING_RESULT:-skipped}" \
-  "${PERF_REFERENCE_RESULT:-skipped}"; do
+  "${PERF_REFERENCE_RESULT:-skipped}" "${WITFORGE_RESULT:-skipped}"; do
   if [[ "$result" == "failure" ]]; then
     FAILED=true
   fi
@@ -137,6 +138,15 @@ done
 # cancelled gate has not shown the budget holds.
 if [[ "${PERF_REFERENCE_RESULT:-skipped}" == "cancelled" ]]; then
   echo "==> The v0.18.2 reference perf gate was cancelled (a timeout?); it did not pass" >&2
+  FAILED=true
+fi
+
+# The plugin contract job is the only CI check of the WIT against the generated
+# consumer (W2-7): whenever `rust` changed it must have run and passed. A skip
+# (an upstream failure, a runner problem) or a cancel (a timeout) means the WIT
+# went unchecked.
+if [[ "${RUST_CHANGED:-false}" == "true" && "${WITFORGE_RESULT:-skipped}" != "success" ]]; then
+  echo "==> The plugin contract check did not pass (result: ${WITFORGE_RESULT:-skipped}); the WIT went unchecked" >&2
   FAILED=true
 fi
 

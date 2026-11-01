@@ -121,6 +121,14 @@ if 'ci/scripts/packaging-check.sh' not in ci:
     errors.append("ci.yml must run ci/scripts/packaging-check.sh")
 if 'packaging: ${{ steps.detect.outputs.packaging }}' not in ci:
     errors.append("changes job must export the packaging output")
+if "needs.changes.outputs.rust == 'true'" not in job_if('witforge'):
+    errors.append("Plugin contract (witforge) job must gate on needs.changes.outputs.rust")
+for script in ('ci/scripts/install-witforge.sh', 'ci/scripts/witforge-consumer.sh',
+               'ci/scripts/test-witforge-consumer.sh'):
+    if script not in ci:
+        errors.append(f"ci.yml must run {script} (the plugin contract job)")
+if 'WITFORGE_REQUIRED: "1"' not in ci:
+    errors.append("ci.yml's plugin contract job must run the controls with WITFORGE_REQUIRED=1")
 if "needs.changes.outputs.shell == 'true'" not in job_if('shell-tests'):
     errors.append("Shell Tests job must gate on needs.changes.outputs.shell")
 if 'shell: ${{ steps.detect.outputs.shell }}' not in ci:
