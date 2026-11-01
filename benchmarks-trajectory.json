@@ -3,6 +3,39 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.21.0",
+      "date": "2026-11-01",
+      "headline": "The second general-linter phase.",
+      "workload_revisions": {
+        "S1": 2,
+        "S2": 2,
+        "S3": 2,
+        "S4": 4
+      },
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4135.653119453333,
+          "stddev_ms": 99.40141974513702,
+          "display": "4.14 s ± 0.10"
+        },
+        "s2_1m_full": {
+          "mean_ms": 5302.46903676,
+          "stddev_ms": 40.02145284515895,
+          "display": "5.30 s ± 0.04"
+        },
+        "s3_1m_full": {
+          "mean_ms": 476396.0260366933,
+          "stddev_ms": 3559.5422456372175,
+          "display": "476.4 s ± 3.6"
+        },
+        "s4_1m_full": {
+          "mean_ms": 8606.141137766668,
+          "stddev_ms": 67.457505892023,
+          "display": "8.61 s ± 0.07"
+        }
+      }
+    },
+    {
       "version": "v0.20.1",
       "date": "2026-10-23",
       "headline": "A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot paths are cheaper, and alint now warns when a content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant (#343).",
