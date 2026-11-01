@@ -105,7 +105,10 @@ Checked against the code at `6a75eb4d1` and rechecked at `fb9820f5e` (2026-10-24
   no existing scenario exercises section 9.1's relation coalescing.
 - **Plugin groundwork.** `witforge` (`asamarts/witforge`, private) has its subset checker and
   wire lockfile (`6ce6076`, 2026-10-24). Its Rust and protobuf emitters, slice P0, are not
-  written. The contract subset forbids recursive types (`plugin-architecture.md` section 3.2).
+  written. (That was the starting point on 2026-10-24. witforge has since gone public and
+  published 0.1.0 and 0.1.1 with its Rust, protobuf, and glue emitters, and default CI checks
+  the contract against the pinned release: [`witforge-adoption.md`](witforge-adoption.md).)
+  The contract subset forbids recursive types (`plugin-architecture.md` section 3.2).
   Every runtime path calls `builtin_registry()` directly (check, fix and validate-config, the
   LSP, `alint test`'s runner, `rules`, `init`, `suggest`, and `export-agents-md`), `RuleBuilder` is a function
   pointer, `Format` is a closed enum, and `ExtractSpec` has one field per format
@@ -329,7 +332,9 @@ are the authoritative, non-IR implementation), so they cannot.
   `Runner::with_registry`. `Engine::new` already accepts any `RuleRegistry`.
 - **WIT draft:** `alint:plugin@0.1.0` is committed as a design artifact, with an `adapter` and
   an `analyzer` world (Q10; the `fixer` world follows with slice P2), host-pushed inputs, and no
-  host callbacks. Bindings are generated once witforge's emitters exist (decision V21-5).
+  host callbacks. Bindings are generated once witforge's emitters exist (decision V21-5); since
+  witforge 0.1.0 they are, into `crates/alint-witforge-consumer`
+  ([`witforge-adoption.md`](witforge-adoption.md)).
 - **Fixer role:** deferred to slice P2, with plugin fixers.
 
 ### Measurement (DEC-13)
@@ -425,7 +430,8 @@ v0.21 does not add:
 R0 and R5 can start immediately and in parallel. R1 waits for R0's baselines. R3, R4, R6a, and R9
 can run in parallel once R2 lands; `key_parity` is built and tested on the five row formats first,
 and gains the R9 formats as each adapter lands. R6 and R7 are part of v0.21 (ADR-0024 decision
-5); only R7's generated bindings wait for witforge's emitters.
+5); only R7's generated bindings wait for witforge's emitters, which witforge 0.1.0 delivered on
+2026-10-31.
 
 ## Cross-cutting invariants
 
@@ -475,7 +481,8 @@ v0.21 is complete only when all of the following are observed:
 - Full workspace, cross-platform, shell, advisory, and preflight checks pass, and generated
   artifacts (schema, facts, docs export, roadmap) regenerate cleanly.
 - witforge 0.1.0 is published and pinned, and default CI checks the WIT draft and regenerates its
-  consumer with `--check` (ADR-0025 decision 4).
+  consumer with `--check` (ADR-0025 decision 4). Met: alint pins witforge 0.1.1, and the
+  `witforge` job runs in default CI (#W27PR).
 
 ADR-0025 decision 3 settled the go/no-go assessment as a GO on consistency; the simplicity it
 could not show moves to three gates v0.22 must pass before Phase 3 starts.
@@ -483,6 +490,7 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
 ## Risks
 
 1. **witforge's emitters slip.** The hand-written traits (V21-5) keep v0.21 independent of them.
+   Retired: the emitters shipped in witforge 0.1.0 (2026-10-31).
 2. **Relation-major evaluation adds reads.** The relation scenario and the counting test catch
    the v0.14 S2 read-path class, which instruction counts cannot see, before any kind moves.
 3. **Corpus replay cost and safety.** It is cached and scheduled, not run per pull request.
@@ -637,15 +645,16 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   injection, feature isolation, relation limits, the contract boundary, the
   bridge's path checks), the go/no-go assessment in
   [`r8-readiness.md`](r8-readiness.md), and S4 workload revision 4 with a
-  same-session kbench run against v0.20.1. W2-7, the WIT check in CI, is next:
-  witforge 0.1.0 was published on 2026-10-31.
+  same-session kbench run against v0.20.1. W2-7, the WIT check in CI, landed
+  with #W27PR (2026-11-01), against the pinned witforge 0.1.1.
 - **witforge consumer (#409).** The generated consumer crate, the regeneration
   `--check` against its committed output with controls, and tests that
   convert every type the two sides share, account for every item on both
-  (#412), and pair every world with its trait; the reviews, and the path to
-  witforge 0.1.0 and the W2-7 CI job, are in
+  (#412), pair every world with its trait, and require the 0.1.0 gate on
+  every item; the reviews, and the path to witforge 0.1.0 and the W2-7 CI
+  job, are in
   [`witforge-adoption.md`](witforge-adoption.md). ADR-0027 keeps contract 0.1 a
   draft until the first release that loads plugins.
-- **Next:** the W2-7 job, W3's documentation and release preparation (version
-  bump, changelog, generated artifacts, release preflight and cross-platform
-  checks), then the tag.
+- **Next:** W3's documentation and release preparation (version bump,
+  changelog, generated artifacts, release preflight and cross-platform checks),
+  then the tag.

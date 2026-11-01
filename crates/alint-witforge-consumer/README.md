@@ -12,11 +12,14 @@ contract (`wit/alint-plugin/v0.1`).
 - `tests/` round-trips requests and responses through protobuf binary and
   proto3-JSON, converts every type and trait that `alint_core::plugin_api` and
   the generated code share (`plugin_api.rs`), accounts for every item on
-  both sides, recording why each unpaired one has no counterpart
-  (`inventory.rs`), and pairs each world in the WIT, which witforge generates
-  nothing from, with the `plugin_api` trait that implements it (`worlds.rs`).
+  both sides, recording why each unpaired one has no counterpart and refusing
+  a name two `plugin_api` files both declare (`inventory.rs`), and pairs each
+  world in the WIT, which witforge generates nothing from, with the
+  `plugin_api` trait that implements it and requires the 0.1.0 `@since` gate
+  on every item (`worlds.rs`).
   These tests compare `plugin_api` with the committed output;
-  `ci/scripts/witforge-consumer.sh` compares that output with the WIT.
+  `ci/scripts/witforge-consumer.sh`, run by the `witforge` job in default CI,
+  compares that output with the WIT.
 
 Do not hand-edit the generated files. Check or regenerate them as
 [`wit/README.md`](../../wit/README.md) describes, with the witforge release the

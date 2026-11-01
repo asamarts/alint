@@ -341,16 +341,19 @@ WIT has no field numbers, so the compiler keeps a committed, append-only `wire.l
   (component-model issue 695) lands with a suitable annotation.
 
 As built for v0.21 with witforge 0.1, `witforge check` validates the lockfile and `--check`
-regenerates the committed output (in default CI once audit item W2-7 lands). The merge-base
-comparison and `buf breaking` are P2 work, and witforge has no rename marker, since its names
-are identity, so a rename is a removal plus an addition
+regenerates the committed output, both in default CI through audit item W2-7. The rules above
+apply once a version is released. Contract 0.1 is still a draft (ADR-0027), developed with
+`witforge lock --first`, which treats every entry as a draft: a member removed from the draft
+loses its entry, and its number can be given to a later member. The merge-base comparison and
+`buf breaking` are P2 work, and witforge has no rename marker, since its names are identity, so
+a rename is a removal plus an addition
 ([`v0.21/witforge-adoption.md`](v0.21/witforge-adoption.md) section 6).
 
 ### 8.3 Evolution policy
 
 1. A published contract version is frozen.
 2. Changes ship as a new minor version (`0.x` while unstable), with the previous WIT kept in the
-   tree (`wit/v0.1/`, `wit/v0.2/`, and so on).
+   tree (`wit/alint-plugin/v0.1/`, `wit/alint-plugin/v0.2/`, and so on).
 3. New members must be defaulted (`option<T>` or `list<T>`), so the compiler can generate the
    old-to-new conversions; enum values and variant cases are append-only; reorders, renames, and
    type changes are forbidden.

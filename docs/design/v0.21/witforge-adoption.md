@@ -1,23 +1,25 @@
 # v0.21: witforge adoption and the WIT gate (W2-7)
 
-Status: In progress (2026-10-31). Steps 1 to 5 of section 4 are done: witforge 0.1.0 is on
-crates.io and tagged. Step 6, the W2-7 job, is next.
+Status: W2-7 done (2026-11-01). Steps 1 to 6 of section 4 are done: witforge is on crates.io,
+alint pins witforge 0.1.1, and the W2-7 job checks the contract against that release in default
+CI (#W27PR). Step 7 (W3, then the v0.21.0 tag) is next.
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is
 [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 4: v0.21.0 is not tagged until
 witforge 0.1.0 is published and pinned and the contract's check, generation, and regeneration
 `--check` run in default CI. It is audit item W2-7 in [`pre-release-audit.md`](pre-release-audit.md)
-and the one blocked row in [`r8-readiness.md`](r8-readiness.md).
+and the WIT draft row in [`r8-readiness.md`](r8-readiness.md), blocked until this job and passed since.
 
 ## 1. Where things stand
 
-- **witforge** (`asamarts/witforge`) 0.1.0 is published: `witforge` and `witforge-cli` went to
-  crates.io on 2026-10-31 from commit `546cec1`, which is tagged `v0.1.0` with a GitHub release
-  (steps 4 and 5). It has the subset checker, the wire lock, and the Rust, protobuf, and glue
-  emitters. Its history was cleaned (step 2), and it has been public since 2026-10-31 with CI
-  on GitHub-hosted Linux, macOS, and Windows runners and no self-hosted runner (step 3). Fixes
-  found reviewing it after publishing are on witforge's `main`, unreleased (section 2.5); none
-  changes the output generated for alint's contract.
+- **witforge** (`asamarts/witforge`) is published. 0.1.0 went to crates.io by hand on
+  2026-10-31 (local time; crates.io records 2026-11-01 00:51 UTC) from commit `546cec1`, tagged
+  `v0.1.0` (steps 4 and 5). 0.1.1, with the fixes from the reviews in sections 2.5 and 2.6, is
+  the first release its `release.yml` published through crates.io trusted publishing
+  (2026-11-01, tag `v0.1.1`); its output for alint's contract is byte-identical to 0.1.0's. It
+  has the subset checker, the wire lock, and the Rust, protobuf, and glue emitters. Its history
+  was cleaned (step 2), and it has been public since 2026-10-31 with CI on GitHub-hosted Linux,
+  macOS, and Windows runners and no self-hosted runner (step 3).
 - **alint** has the `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, the hand-written
   `alint_core::plugin_api` it describes, and, since #409, the consumer crate
   `crates/alint-witforge-consumer` with witforge's output for the draft.
@@ -103,7 +105,7 @@ In alint, fixed in the follow-up pull request:
 
 | # | Problem | Fix |
 |---|---|---|
-| 1 | witforge 0.1 checks a world's imports and exports but generates nothing from them, so a world added, removed, or made to export another interface passed every test. | `tests/worlds.rs` reads the worlds from `plugin.wit`, requires each to be listed with its imports and exports, and requires each exported interface's generated trait to be paired in `inventory.rs` with the `plugin_api` trait a plugin of that kind implements. It refuses world items it does not understand (an inline function or interface, `use`, `include`). Swapping an export or adding an import fails it. |
+| 1 | witforge 0.1 checks a world's imports and exports but generates nothing from them, so a world added, removed, or made to export another interface passed every test. | `tests/worlds.rs` reads the worlds from every `.wit` file in `v0.1`, requires each to be listed with its imports and exports, and requires each exported interface's generated trait to be paired in `inventory.rs` with the `plugin_api` trait a plugin of that kind implements. It refuses world items it does not understand (an inline function or interface, `use`, `include`). Swapping an export or adding an import fails it. |
 | 2 | The inventory saw structs, enums, and traits only: a public type alias, constant, static, function, or union on either side, or an associated type or constant in a trait, went unaccounted. | It records every public item kind and trait member, and skips only re-exports (`pub use`, and the `super::` aliases each generated interface module declares). |
 | 3 | The `plugin_api` boundary test pooled the names every file declared, `#[cfg(test)]` items and nested modules included, so `#[cfg(test)] use regex;` made a shipping `regex::Regex` path pass, and `include!` could splice in an unchecked file. | Names are scoped to the module that declares them, `#[cfg(test)]` items declare none, and `include!`, `include_str!`, and `include_bytes!` are refused. Each of the eight escapes is a negative sample, and each passed the old test. |
 | 4 | No control showed that the check regenerates from the WIT (rather than comparing the committed files with themselves), refuses a witforge other than the pinned release, or accepts a relative `WITFORGE_BIN` from another directory. | Controls edit a doc comment in `plugin.wit` (the plain module must be reported changed), run a fake `witforge 0.1.1` (refused, naming both versions), and run the check from another directory with a relative path (passes). Without the path handling the last one fails. |
@@ -112,7 +114,8 @@ In alint, fixed in the follow-up pull request:
 
 In witforge, fixed on its `main` after publishing, for 0.1.1: generation refuses to overwrite a
 file without witforge's header or to write through a symlink; version directory names must be
-canonical, and a symlinked version directory is followed; `lock` refuses a lockfile path inside
+canonical, and a symlinked version directory is followed (0.1.1 refuses one instead, section
+2.6); `lock` refuses a lockfile path inside
 a released directory, and refuses an entry from another package in every mode; an unchanged
 lockfile is not rewritten; the release workflow no longer hides a failing command inside an
 `echo`, and a CI job runs pinned actionlint and shellcheck over the workflows and scripts; the
@@ -125,6 +128,54 @@ every type the two sides share: `FlatValueLimits` and `FlatValueError` stay on t
 `PluginInfo` and the `types` interface's trait have no counterpart, and `FlatValue` converts
 through its accessor; `tests/inventory.rs` accounts for each of them. Accepted ADRs are not
 edited, so this is the correction.
+
+### 2.6 Fourth review (2026-11-01)
+
+A fourth review covered the consumer after #415, the W2-7 plan, and the documents; a review of
+witforge's `main` ran beside it. Each fix below has a negative sample or control that passed
+before it.
+
+In alint, fixed with the W2-7 job (#W27PR):
+
+| # | Problem | Fix |
+|---|---|---|
+| 1 | The boundary test refused `include!` only as the outermost macro, so one inside `vec![…]` or a `macro_rules!` body spliced in an unchecked file. | Any `include!`, `include_str!`, or `include_bytes!` token pair is refused at any depth of a macro's tokens. |
+| 2 | A path starting with `self` was always allowed, so `self::super::super::relation::Row` climbed out of the module. | A leading `self` is dropped and the `super` depth rule applies to the rest. |
+| 3 | Names vouched for paths outside their Rust scope: a generic parameter for the whole module (`fn g<regex>()`), an item or `use` inside a function body for the whole module, and a function, constant, static, or macro name for a type path (`fn sha2()` let `sha2::Sha256` pass). Section 2.5 row 3's "names are scoped to the module" was overstated. | Only type-namespace items and imports vouch for a path's first segment; a block's items and imports vouch inside that block, and an item's generic parameters inside that item. Thirteen of the fourteen new negative samples passed the old test; the fourteenth checks that a block's names do not leak into a nested module. |
+| 4 | A nested `package other:pkg { … }` block in `plugin.wit` passed `witforge check`, the regeneration, and every test, though nothing in it was locked or generated. | `tests/worlds.rs` refuses a nested package, and witforge 0.1.1's subset refuses another package in a version directory. |
+| 5 | Feature gates were invisible: `@unstable(feature = …)` on a world, an interface, or a record, or a function without `@since`, passed everything, though component tooling hides an `@unstable` item unless its feature is enabled. | `tests/worlds.rs` requires every interface, world, interface item, and world item to carry exactly `@since(version = 0.1.0)`. |
+| 6 | The inventory merged every `plugin_api` file into one map by name, so a same-named public item in another file hid the existing one. | A name two files declare is refused. |
+| 7 | The control that fakes another witforge hardcoded `witforge 0.1.1`, which became the release, so an upgrade needed a test edit. | The faked version is the pin with its patch number plus one. |
+| 8 | A hand-written file without witforge's header in an output root passed `--check`, which ignores such files. | `witforge-consumer.sh` refuses any file in the three output roots without the header; two controls cover a file and a directory. |
+| 9 | `world %adapter`, valid WIT, failed the worlds test: world names were not unescaped as interface names were. | The `%` is trimmed. |
+| 10 | The W2-7 plan in section 5 did not name the runner, the folded `if:` form the routing test reads, the absent `permissions:` block, the Summary's variable and default, or the cache action the other jobs use; its preflight parity counted a mention of a script as running it; and it claimed the routing test asserted every flag-fed job. | Section 5 now describes the job as built; the parity test counts only a step line that starts with the script. |
+
+The review also corrected these documents: `itertools` 0.14 comes through `pbjson-build`, not
+`prost-build` (section 6); `worlds.rs` reads every `.wit` file in `v0.1` (section 2.5);
+`plugin-architecture.md` section 8 now says that the draft's `lock --first` drops a removed
+member's number, and gives the real WIT path; the v0.21 README's plan-time statements about
+witforge are marked as such. Two statements in
+[ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md) need correcting here, since
+accepted ADRs are not edited:
+
+- Its context says witforge's freeze makes the generated per-version module immutable and that
+  its CI scripts fail a change. witforge's freeze check is a script in witforge's repository
+  that covers version directories under the WIT root it is given; it covers neither alint's
+  generated module nor anything in alint's CI. alint needs its own freeze check when P2 freezes
+  the contract (section 6).
+- Its consequences say `plugin_api` and the WIT cannot drift silently. That held only from the
+  W2-7 job on, and only with fixes 4 and 5 above: before them, a nested package or a changed
+  gate passed every check.
+
+In witforge, fixed for 0.1.1 (its W6-011): no command follows a symlinked version directory, and
+the freeze check refuses symlinks in released directories, since git compares a link by its
+target string; `lock` refuses a released lockfile whatever `--released` names and from any WIT
+root; lockfile entries of another package are refused even for a contract with no members;
+`check` requires the canonical lockfile; the subset refuses another package; contract violations
+are marked where found, so an internal error exits `2`; `--check` reports every expected path
+generation refuses and reads only regular files; hints are shell-quoted; and the freeze check
+follows moves of the WIT root, requires an exact-case tracked `wire.lock`, and counts ignored
+files. alint's contract passes every new check unchanged.
 
 ## 3. Decisions (2026-10-31)
 
@@ -149,54 +200,57 @@ edited, so this is the correction.
 | 3 | Make witforge public and enable Actions; run CI and confirm the hosted Linux, macOS, and Windows jobs are green; deregister the self-hosted runner from the repository it is registered on, as the release checklist says | witforge | step 2, owner confirmation | done (CI run 41240165506) |
 | 4 | Publish `witforge`, then `witforge-cli` (its registry dependency needs the library first). crates.io can trust a repository only for a crate that exists, so 0.1.0 is published with the owner's scoped, short-lived token; later versions publish from witforge's release workflow through trusted publishing | witforge | step 3 | done (2026-10-31, from `546cec1`) |
 | 5 | Tag `v0.1.0` and create the GitHub release | witforge | step 4 | done (release run 41261961612, which found nothing left to publish) |
-| 6 | Add the W2-7 job (section 5) to default CI and mark the readiness row passed | alint | step 4 (it installs from crates.io) | |
+| 6 | Add the W2-7 job (section 5) to default CI and mark the readiness row passed | alint | step 4 (it installs from crates.io) | done (#W27PR) |
 | 7 | W3 of the pre-release audit (documentation and release preparation), then the v0.21.0 tag | alint | step 6 | |
 
 W3 can proceed in parallel with step 6.
 
 ## 5. The W2-7 job
 
-A job in the default CI workflow, on Linux, gated on the `rust` output of
-`ci/scripts/detect-changes.sh` (which covers `wit/`, the consumer crate, `plugin_api`, and,
-through `ci/`, both scripts). Its steps:
+As built in #W27PR. The job `witforge` ("Plugin contract (witforge)") in `ci.yml` runs on the
+runner `detect-changes.sh` picks, gated on its `rust` output, which covers `wit/`, the consumer
+crate, `plugin_api`, and, through `ci/`, the scripts. Its steps:
 
-1. install the pinned release:
-   `cargo install witforge-cli --version "$(ci/scripts/witforge-consumer.sh --print-version)" --locked`.
-   A bare `--version X.Y.Z` installs exactly that version, and `--print-version` makes the
-   script's `WITFORGE_VERSION` the only place the pin is written;
-2. run `ci/scripts/witforge-consumer.sh`, which checks the WIT and regenerates the committed
-   output with `--check`;
-3. run `ci/scripts/test-witforge-consumer.sh` with `WITFORGE_REQUIRED=1`, so a missing binary
-   fails instead of skipping. Everywhere else `ci/scripts/shell-tests.sh` reports the controls
-   as skipped.
+1. `ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"` installs the release the consumer
+   script pins: `cargo install witforge-cli --version <pin> --locked --root <fresh directory>`,
+   then requires `witforge --version` to name the pin. The pin is written once, as
+   `WITFORGE_VERSION` in `ci/scripts/witforge-consumer.sh`, which prints it with
+   `--print-version`. Nothing is cached, and the root is fresh, because `cargo install` refuses a
+   binary in its destination that its install records do not list;
+2. `ci/scripts/witforge-consumer.sh` checks the WIT (`witforge check`), regenerates the committed
+   output with `--check`, and refuses any file in the three output roots that does not carry
+   witforge's header, since `--check` ignores such a file;
+3. `ci/scripts/test-witforge-consumer.sh` runs the controls with `WITFORGE_REQUIRED=1`, so a
+   missing binary fails instead of skipping. Everywhere else `ci/scripts/shell-tests.sh` reports
+   the controls as skipped.
 
-Wiring it like the jobs beside it takes four more changes, each with its own gate:
+The wiring around it, each with its own gate:
 
-- **The release preflight.** `release.yml`'s `preflight` job re-runs every correctness gate
-  `ci.yml` runs, because the release fires in parallel with CI on a tag push;
-  `ci/scripts/test-release-preflight-parity.sh` fails if a script `ci.yml` invokes is missing
-  from the preflight, so the job's steps go into the preflight as well.
-- **The Summary.** The job goes into the Summary job's `needs` and environment and into
-  `ci/scripts/summary.sh`. Its aggregate fails only on a `failure` result (and on a cancelled
-  reference perf gate), so the new job needs the same treatment as that gate and more: a
-  cancelled run, or a skip while `RUST_CHANGED=true`, means the WIT was not checked and must fail
-  the Summary. `ci/scripts/test-summary.sh` gets a case for each.
-- **The routing.** The static half of `ci/scripts/test-detect-action-changes.sh` asserts that the
-  new job gates on the `rust` flag, as it does for the other jobs that flags feed.
-- **The install cache.** Caching `~/.cargo/bin` without cargo's install records makes a later
-  `cargo install` refuse the binary it finds there. The job either restores the binary and skips
-  `cargo install` on a cache hit, keyed by the pinned version, or does not cache it; the script's
-  version check refuses a stale binary either way.
+- **The release preflight** runs the same three steps, because the release fires in parallel
+  with CI on a tag push. `ci/scripts/test-release-preflight-parity.sh` requires every script
+  `ci.yml` runs to be run, at the start of a step's line, by the preflight; a mention inside
+  another command, such as the install line's `--print-version`, does not count. The preflight
+  sets `WITFORGE_BIN` on its two steps only, so its shell-tests step does not run the controls a
+  second time.
+- **The Summary** lists the job, fails on its `failure` or `cancelled` result, and, while
+  `RUST_CHANGED=true`, fails on any result but `success`: a skip or a cancel then means the WIT
+  went unchecked. `ci/scripts/test-summary.sh` has a case for each result with and without a
+  Rust change.
+- **The routing.** The static half of `ci/scripts/test-detect-action-changes.sh` asserts that
+  the job gates on `rust`, runs the three scripts, and sets `WITFORGE_REQUIRED`.
 
 The consumer crate's tests (the protobuf and proto3-JSON round trips, the `plugin_api`
-conversions, the inventory, and the worlds) already run with the workspace tests on every
-platform, so the job does not repeat them. A witforge upgrade changes `WITFORGE_VERSION` in the
-script and the committed output in one pull request.
+conversions, the inventory, and the worlds and gates) run with the workspace tests on every
+platform, so the job does not repeat them.
 
-Until the job lands, CI does not compare the WIT with the committed output: the tests compare
-`plugin_api` with that output, not with the WIT, so a change to `plugin.wit` that is not
-regenerated passes CI. Run `ci/scripts/witforge-consumer.sh` locally for any change under
-`wit/` or the consumer crate.
+**Upgrading witforge.** alint consumes only published releases, so witforge's `main` can change
+without affecting alint. To move to a new release, set `WITFORGE_VERSION` in
+`ci/scripts/witforge-consumer.sh`, install that release with
+`ci/scripts/install-witforge.sh <dir>`, run `WITFORGE_BIN=<dir>/bin/witforge
+ci/scripts/witforge-consumer.sh --write`, and commit the script and any changed output in one
+pull request; the controls derive the version they fake from the pin. The version check compares
+version strings, and a build of witforge's `main` reports the last release's version, so only a
+crates.io install, which CI does, identifies the release.
 
 ## 6. Open items
 
@@ -223,7 +277,7 @@ regenerated passes CI. Run `ci/scripts/witforge-consumer.sh` locally for any cha
   W2-7 job move with it.
 - **Dependencies.** The consumer crate adds two duplicate crate versions to `cargo deny`'s
   warnings, both in an unpublished crate: `base64` 0.22 through the `pbjson` runtime and
-  `itertools` 0.14 through `prost-build`. Its build-time generators also use `foldhash` 0.1 and
+  `itertools` 0.14 through `pbjson-build` (`prost-build` and `prost-derive` use 0.13). Its build-time generators also use `foldhash` 0.1 and
   `hashbrown` 0.15, which were already duplicated.
 - **#409's branch.** A worktree still has it checked out, so it is left in place after the merge
   and deleted by name once that worktree is gone. The merged branches of the reviews that

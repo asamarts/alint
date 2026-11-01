@@ -191,11 +191,35 @@ fn rust_files(dir: &Path) -> Vec<PathBuf> {
 /// subdirectory is inventoried too.
 fn api_items() -> BTreeMap<String, BTreeSet<String>> {
     let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../alint-core/src/plugin_api");
-    let mut out = BTreeMap::new();
-    for path in rust_files(&dir) {
-        out.extend(items(&parse(&path)));
+    let files = rust_files(&dir)
+        .into_iter()
+        .map(|path| (path.display().to_string(), items(&parse(&path))));
+    merge(files).unwrap_or_else(|duplicates| panic!("{}", duplicates.join("\n")))
+}
+
+/// The items of several files in one map, keyed by name as the tables pair
+/// them. A name two files both declare is refused: one would hide the
+/// other, and the hidden item would go unchecked.
+fn merge(files: impl IntoIterator<Item = (String, Items)>) -> Result<Items, Vec<String>> {
+    let mut out = Items::new();
+    let mut declared_in: BTreeMap<String, String> = BTreeMap::new();
+    let mut duplicates = Vec::new();
+    for (file, items) in files {
+        for (name, members) in items {
+            if let Some(first) = declared_in.insert(name.clone(), file.clone()) {
+                duplicates.push(format!(
+                    "plugin_api `{name}` is declared in both {first} and {file}; the inventory \
+                     keys items by name, so give one another name"
+                ));
+            }
+            out.insert(name, members);
+        }
     }
-    out
+    if duplicates.is_empty() {
+        Ok(out)
+    } else {
+        Err(duplicates)
+    }
 }
 
 fn names(set: &BTreeSet<String>) -> String {
@@ -434,4 +458,31 @@ fn the_inventory_sees_unnamed_items_and_members() {
         Some("LIMIT, Out, run")
     );
     assert_eq!(generated.get("Bits").map(names).as_deref(), Some("a, b"));
+}
+
+#[test]
+fn a_name_two_plugin_api_files_declare_is_refused() {
+    let file = |name: &str, members: &[&str]| -> Items {
+        [(
+            name.to_string(),
+            members.iter().map(ToString::to_string).collect(),
+        )]
+        .into()
+    };
+    let merged = merge([
+        ("contract.rs".to_string(), file("Finding", &["message"])),
+        ("value.rs".to_string(), file("Node", &["Null"])),
+    ])
+    .unwrap();
+    assert_eq!(merged.keys().collect::<Vec<_>>(), ["Finding", "Node"]);
+    let duplicates = merge([
+        ("contract.rs".to_string(), file("Finding", &["message"])),
+        ("aaa.rs".to_string(), file("Finding", &["engine_only"])),
+    ])
+    .unwrap_err();
+    assert_eq!(duplicates.len(), 1, "{duplicates:?}");
+    assert!(
+        duplicates[0].contains("contract.rs and aaa.rs"),
+        "{duplicates:?}"
+    );
 }

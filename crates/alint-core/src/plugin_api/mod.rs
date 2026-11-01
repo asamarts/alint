@@ -138,11 +138,14 @@ mod tests {
         }
     }
 
-    /// The names one module declares or imports, and its generic parameters:
-    /// a path in that module may start with any of them. `#[cfg(test)]` items
-    /// are left out, since they are not there in a build that ships, and a
-    /// nested module's items are its own scope, as they are for name
-    /// resolution.
+    /// The names a list of items declares in the type namespace or imports:
+    /// a multi-segment path in their scope may start with any of them. A
+    /// function, constant, static, or macro name cannot start such a path,
+    /// so it vouches for nothing. `#[cfg(test)]` items are left out, since
+    /// they are not there in a build that ships; a nested module's items and
+    /// the items inside a function body or other block are their own scopes,
+    /// as they are for name resolution, and generic parameters belong to
+    /// their item (`Boundary` tracks both).
     #[derive(Default)]
     struct Names(BTreeSet<String>);
 
@@ -162,14 +165,11 @@ mod tests {
                 return;
             }
             let ident = match item {
-                syn::Item::Const(i) => Some(&i.ident),
                 syn::Item::Enum(i) => Some(&i.ident),
-                syn::Item::Fn(i) => Some(&i.sig.ident),
-                syn::Item::Macro(i) => i.ident.as_ref(),
                 syn::Item::Mod(i) => Some(&i.ident),
-                syn::Item::Static(i) => Some(&i.ident),
                 syn::Item::Struct(i) => Some(&i.ident),
                 syn::Item::Trait(i) => Some(&i.ident),
+                syn::Item::TraitAlias(i) => Some(&i.ident),
                 syn::Item::Type(i) => Some(&i.ident),
                 syn::Item::Union(i) => Some(&i.ident),
                 _ => None,
@@ -182,6 +182,9 @@ mod tests {
         /// visible here without a path.
         fn visit_item_mod(&mut self, _module: &'ast syn::ItemMod) {}
 
+        /// Items and imports inside a block are visible only in that block.
+        fn visit_block(&mut self, _block: &'ast syn::Block) {}
+
         fn visit_use_name(&mut self, name: &'ast syn::UseName) {
             self.0.insert(name.ident.to_string());
         }
@@ -189,10 +192,25 @@ mod tests {
         fn visit_use_rename(&mut self, rename: &'ast syn::UseRename) {
             self.0.insert(rename.rename.to_string());
         }
+    }
 
-        fn visit_type_param(&mut self, param: &'ast syn::TypeParam) {
-            self.0.insert(param.ident.to_string());
-            visit::visit_type_param(self, param);
+    /// The type parameters of `generics`.
+    fn type_params(generics: &syn::Generics) -> impl Iterator<Item = String> + '_ {
+        generics.type_params().map(|param| param.ident.to_string())
+    }
+
+    /// The generics an item declares for its whole body.
+    fn item_generics(item: &syn::Item) -> Option<&syn::Generics> {
+        match item {
+            syn::Item::Enum(i) => Some(&i.generics),
+            syn::Item::Fn(i) => Some(&i.sig.generics),
+            syn::Item::Impl(i) => Some(&i.generics),
+            syn::Item::Struct(i) => Some(&i.generics),
+            syn::Item::Trait(i) => Some(&i.generics),
+            syn::Item::TraitAlias(i) => Some(&i.generics),
+            syn::Item::Type(i) => Some(&i.generics),
+            syn::Item::Union(i) => Some(&i.generics),
+            _ => None,
         }
     }
 
@@ -205,6 +223,11 @@ mod tests {
         depth: usize,
         /// The current module's names.
         names: BTreeSet<String>,
+        /// The names declared in each enclosing block, innermost last.
+        blocks: Vec<BTreeSet<String>>,
+        /// The type parameters of the enclosing item and, in a method, the
+        /// method's own.
+        generics: BTreeSet<String>,
         /// The names the `use` item being checked introduces, which cannot
         /// vouch for its own path (`use serde;`).
         introducing: BTreeSet<String>,
@@ -219,14 +242,20 @@ mod tests {
             let allowed = if leading_colon {
                 STD_ROOTS.contains(&root)
             } else {
+                let supers = |rest: &[String]| rest.iter().take_while(|s| *s == "super").count();
                 match root {
                     "crate" => segments.get(1).is_some_and(|next| next == "plugin_api"),
-                    "super" => segments.iter().take_while(|s| *s == "super").count() <= self.depth,
-                    "self" | "Self" => true,
+                    "super" => supers(segments) <= self.depth,
+                    // `self::super::…` climbs as `super::…` does.
+                    "self" => supers(&segments[1..]) <= self.depth,
+                    "Self" => true,
                     _ => {
+                        let declared = self.names.contains(root)
+                            || self.generics.contains(root)
+                            || self.blocks.iter().any(|block| block.contains(root));
                         STD_ROOTS.contains(&root)
                             || PRELUDE.contains(&root)
-                            || (self.names.contains(root) && !self.introducing.contains(root))
+                            || (declared && !self.introducing.contains(root))
                     }
                 }
             };
@@ -290,6 +319,16 @@ mod tests {
             };
             let mut at = 0;
             while at < tokens.len() {
+                // `include!` inside another macro's arguments or a
+                // `macro_rules!` body splices a file in as surely as one at
+                // the top level.
+                if let (Some(TokenTree::Ident(ident)), Some(TokenTree::Punct(bang))) =
+                    (tokens.get(at), tokens.get(at + 1))
+                    && bang.as_char() == '!'
+                    && INCLUDES.contains(&ident.to_string().as_str())
+                {
+                    self.problems.push(format!("{}: {ident}!", self.file));
+                }
                 match &tokens[at] {
                     TokenTree::Group(group) => self.check_tokens(group.stream()),
                     TokenTree::Ident(ident)
@@ -327,7 +366,44 @@ mod tests {
             if is_cfg_test(item_attrs(item)) {
                 return;
             }
+            // An item sees its own generic parameters, not an enclosing
+            // function's.
+            let own = item_generics(item)
+                .map(type_params)
+                .into_iter()
+                .flatten()
+                .collect();
+            let outer = std::mem::replace(&mut self.generics, own);
             visit::visit_item(self, item);
+            self.generics = outer;
+        }
+
+        fn visit_impl_item_fn(&mut self, method: &'ast syn::ImplItemFn) {
+            let outer = self.generics.clone();
+            self.generics.extend(type_params(&method.sig.generics));
+            visit::visit_impl_item_fn(self, method);
+            self.generics = outer;
+        }
+
+        fn visit_trait_item_fn(&mut self, method: &'ast syn::TraitItemFn) {
+            let outer = self.generics.clone();
+            self.generics.extend(type_params(&method.sig.generics));
+            visit::visit_trait_item_fn(self, method);
+            self.generics = outer;
+        }
+
+        fn visit_block(&mut self, block: &'ast syn::Block) {
+            let items: Vec<syn::Item> = block
+                .stmts
+                .iter()
+                .filter_map(|stmt| match stmt {
+                    syn::Stmt::Item(item) => Some(item.clone()),
+                    _ => None,
+                })
+                .collect();
+            self.blocks.push(Names::of_items(&items));
+            visit::visit_block(self, block);
+            self.blocks.pop();
         }
 
         fn visit_item_mod(&mut self, module: &'ast syn::ItemMod) {
@@ -336,11 +412,15 @@ mod tests {
                 .as_ref()
                 .map(|(_, items)| Names::of_items(items))
                 .unwrap_or_default();
+            // A module is a new scope: the enclosing blocks' items are not
+            // visible in it.
             let outer = std::mem::replace(&mut self.names, inner);
+            let outer_blocks = std::mem::take(&mut self.blocks);
             self.depth += 1;
             visit::visit_item_mod(self, module);
             self.depth -= 1;
             self.names = outer;
+            self.blocks = outer_blocks;
         }
 
         fn visit_item_extern_crate(&mut self, item: &'ast syn::ItemExternCrate) {
@@ -418,6 +498,8 @@ mod tests {
             file,
             depth,
             names: Names::of_items(&syntax.items),
+            blocks: Vec::new(),
+            generics: BTreeSet::new(),
             introducing: BTreeSet::new(),
             problems: Vec::new(),
         };
@@ -538,6 +620,25 @@ mod tests {
             "fn f() { include!(\"row.rs\") }",
             "const S: &str = include_str!(\"../lib.rs\");",
             "const B: &[u8] = std::include_bytes!(\"../lib.rs\");",
+            // `include!` below the top level of a macro.
+            "macro_rules! m { () => { include!(\"../outside.rs\"); } } m!();",
+            "fn f() { let _ = vec![include!(\"../expr.rs\")]; }",
+            // `self::super` climbs out like `super`.
+            "fn f() -> Option<self::super::super::relation::Row> { None }",
+            "use self::super::super::engine::Engine as E;",
+            "fn f() { let _ = vec![self::super::super::Level::Error]; }",
+            // A generic parameter vouches only inside its item, a block's
+            // item only inside that block, and a function, constant, static,
+            // or macro name never.
+            "fn g<regex>() {} fn f() -> regex::Regex { todo!() }",
+            "fn h() { struct serde_json; } fn f() -> serde_json::Value { todo!() }",
+            "fn h() { use std::fmt as serde; } fn f() -> serde::Value { todo!() }",
+            "fn sha2() {} fn f() -> sha2::Sha256 { todo!() }",
+            "const regex: u8 = 0; fn f() -> regex::Regex { todo!() }",
+            "static regex: u8 = 0; fn f() -> regex::Regex { todo!() }",
+            "macro_rules! sha2 { () => {} } fn f() -> sha2::Sha256 { todo!() }",
+            "fn f<regex>() { fn g() -> regex::Regex { todo!() } }",
+            "fn f() { struct regex; mod inner { fn g() -> regex::Regex { todo!() } } }",
         ];
         for source in escapes {
             assert!(
@@ -568,6 +669,10 @@ mod tests {
             }
             impl std::error::Error for E {}
             fn g<T: Iterator>(t: T) -> Option<T::Item> { let _ = Node::Null; None }
+            fn h() { use std::fmt as local; let _ = local::Error; struct S; let _ = S; }
+            struct W<T>(T);
+            impl<T: Iterator> W<T> { fn m<U: Iterator>(&self) -> Option<(T::Item, U::Item)> { None } }
+            fn s() -> Option<self::super::FlatValue> { None }
             mod inner { use super::super::FlatValue; }
             #[cfg(test)]
             mod tests { use serde::Serialize; }
