@@ -165,7 +165,14 @@ fn expansion_budget_pass(text: &str, max: usize) -> bool {
         remaining: &remaining,
         exceeded: &exceeded,
     };
-    let _ = ayaml::from_str_seed(text, seed);
+    let result = ayaml::from_str_seed(text, seed);
+    // D28: ayaml enforces its own alias budget before the visitor sees every
+    // node. An ayaml limit error therefore means the document is over budget;
+    // treat it exactly like a NodeBudget overflow instead of letting the
+    // early error fall through as "within limit".
+    if result.is_err_and(|error| matches!(error.kind(), ayaml::ErrorKind::Limit)) {
+        exceeded.set(true);
+    }
     !exceeded.get()
 }
 
@@ -1257,9 +1264,11 @@ mod tests {
     /// `true` when the REAL parser sees a genuine alias token (an undefined
     /// `*undefined_zz` reference is reported as an unknown anchor).
     fn libyaml_sees_alias(doc: &str) -> bool {
-        ayaml::from_str::<ayaml::Value>(doc)
-            .err()
-            .is_some_and(|e| e.to_string().contains("unknown anchor"))
+        ayaml::from_str::<ayaml::Value>(doc).err().is_some_and(|e| {
+            let message = e.to_string();
+            message.contains("unknown anchor")
+                || (matches!(e.kind(), ayaml::ErrorKind::Limit) && message.contains("alias"))
+        })
     }
 
     fn bomb(n: usize) -> String {
@@ -1297,12 +1306,9 @@ mod tests {
             // `-"` / `?"` / `:"` with no space are plain scalars, not indicators.
             ("dash-quote", format!("a: -\"\nb: {b}\nc: \"\"\n")),
             ("colon-quote", format!("a: x:\"\nb: {b}\nc: \"\"\n")),
-            // NEL / LS are line breaks to libyaml, ending a comment.
-            ("nel-ends-comment", format!("# c \"\u{85}b: {b}\nc: \"\"\n")),
-            (
-                "ls-ends-comment",
-                format!("# c \"\u{2028}b: {b}\nc: \"\"\n"),
-            ),
+            // NEL and LS are content in YAML 1.2.2; libyaml treats them as
+            // line breaks, a deliberate D18 difference. They are covered by
+            // ayaml's own conformance tests, not this parity fixture.
             // A `#` WITHOUT preceding space is plain-scalar content (not a comment).
             ("hash-in-plain", format!("a: b#c\nb: {b}\n")),
             // Single-quoted `''` escape does not end the scalar early.
@@ -1356,7 +1362,6 @@ mod tests {
             "k: some text\n  \"more\nb: *undefined_zz\nz: \"x\"\n",
             "a: [x\"y, *undefined_zz, z\"w]\n",
             "a: -\"\nb: *undefined_zz\nc: \"\"\n",
-            "# c \"\u{85}b: *undefined_zz\nc: \"\"\n",
             "- k: >\n    \"\n  b: *undefined_zz\n  c: \"\"\n",
         ];
         for doc in fixtures {
@@ -1458,7 +1463,6 @@ mod tests {
         "*a ",
         "\\",
         "\t",
-        "\u{85}",
         "\r\n",
         "---\n",
         "a#b",
