@@ -1,121 +1,72 @@
-name: Mutants (nightly)
+name: Mutants
 
-# Nightly cargo-mutants run rotating through one workspace crate
-# per night. Surfaces unkilled mutants as actionable
-# test-coverage gaps without paying the workspace-wide ~hours
-# runtime each day.
+# Advisory mutation testing (owner decision in docs/design/v0.21/pre-release-audit.md,
+# section 7, item 3). On a pull request that changes Rust, cargo-mutants tests the
+# mutants in the lines the pull request changes and lists the ones no test caught in
+# the job summary and as warnings on those lines. A missed mutant never fails the job,
+# and the job is not in ci.yml's Summary, so it never blocks a merge.
 #
-# Manual rotation: trigger via workflow_dispatch with a `crate`
-# input to target a specific crate ad-hoc.
+# workflow_dispatch tests every mutant in one crate. alint-rules and alint-core have
+# thousands, more than the job's budget; ci/scripts/mutants.sh stops at the budget with
+# a partial report.
+#
+# This replaces a nightly rotation that targeted a self-hosted runner that is not
+# registered, so it last ran on 2026-09-18.
 on:
-  schedule:
-    - cron: "17 6 * * *"
+  pull_request:
+    paths:
+      - "**/*.rs"
+      - ".github/workflows/mutants.yml"
+      - "ci/scripts/mutants.sh"
   workflow_dispatch:
     inputs:
       crate:
-        description: "Crate to mutate (omit for daily rotation)"
-        required: false
-        default: ""
+        description: "Workspace crate to mutate in full (for example alint-output)"
+        required: true
 
 permissions:
   contents: read
 
 concurrency:
-  group: mutants
-  cancel-in-progress: false
+  group: mutants-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 env:
   CARGO_TERM_COLOR: always
-  CARGO_INCREMENTAL: "0"
 
 jobs:
   mutants:
-    name: cargo-mutants (rotated)
-    runs-on: [self-hosted, linux, alint]
-    timeout-minutes: 240
+    name: cargo-mutants (advisory)
+    runs-on: ubuntu-latest
+    # ci/scripts/mutants.sh stops cargo-mutants at 90 minutes; the rest is the
+    # toolchain, the install, and the baseline build.
+    timeout-minutes: 120
     steps:
+      # The pull_request checkout is the merge commit, so HEAD^1 is the base.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-
+        with:
+          fetch-depth: 2
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable
       - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
         with:
           key: mutants
-
-      - name: Pick crate (manual override or daily rotation)
-        id: pick
+      - name: mutants in the changed lines
+        if: github.event_name == 'pull_request'
+        run: |
+          git diff HEAD^1 HEAD -- '*.rs' > "$RUNNER_TEMP/pr.diff"
+          ci/scripts/mutants.sh --in-diff "$RUNNER_TEMP/pr.diff"
+      - name: mutants in one crate
+        if: github.event_name == 'workflow_dispatch'
         env:
-          MANUAL: ${{ github.event.inputs.crate }}
-        run: |
-          set -euo pipefail
-          CRATES=(alint-core alint-dsl alint-rules alint-output alint alint-lsp alint-bench alint-testkit alint-e2e)
-          if [ -n "${MANUAL:-}" ]; then
-            # Only an exact workspace crate name from the list above.
-            ok=0
-            for c in "${CRATES[@]}"; do [ "$c" = "$MANUAL" ] && ok=1; done
-            if [ "$ok" -ne 1 ]; then
-              echo "::error::unknown crate '${MANUAL}' (expected one of: ${CRATES[*]})" >&2
-              exit 1
-            fi
-            TARGET="$MANUAL"
-          else
-            DOY=$(date +%j)
-            IDX=$(( (10#$DOY - 1) % ${#CRATES[@]} ))
-            TARGET="${CRATES[$IDX]}"
-          fi
-          echo "target=$TARGET" >> "$GITHUB_OUTPUT"
-          echo "==> Mutating $TARGET"
-
-      - name: Install cargo-mutants
-        run: |
-          if ! command -v cargo-mutants >/dev/null 2>&1; then
-            cargo install cargo-mutants --locked
-          fi
-
-      - name: Run cargo-mutants
-        # cargo-mutants requires the parent of --output to exist
-        # already. Continue past unkilled mutants (the artifact is
-        # the signal we care about) but still surface infra
-        # failures (compile error, baseline-test error, etc.).
-        #
-        # cargo-mutants exit codes (upstream src/exit_code.rs and
-        # book/src/exit-codes.md):
-        #   0 = all mutants caught (or none generated) — OK
-        #   2 = some mutants escaped the test suite — OK, this
-        #       IS the signal we want surfaced via the artifact
-        #   1 = command-line / argument error — fail
-        #   3 = one or more tests timed out (a mutant looped, or
-        #       --timeout is too low) — fail
-        #   4 = baseline tests already fail in the unmutated tree,
-        #       so nothing was tested — fail (real infra)
-        #   5/6 = --in-diff mismatch / invalid (unused here) — fail
-        #   70 = internal cargo-mutants error — fail
-        #
-        # Treat 0 and 2 as success; anything else surfaces.
-        env:
-          TARGET: ${{ steps.pick.outputs.target }}
-        run: |
-          mkdir -p target/mutants
-          set +e
-          cargo mutants --package "$TARGET" \
-                       --no-shuffle \
-                       --output target/mutants \
-                       --timeout 300
-          rc=$?
-          set -e
-          case $rc in
-            0|2)
-              echo "cargo-mutants exited $rc — OK" ;;
-            *)
-              echo "cargo-mutants exited $rc — infra failure" >&2
-              exit $rc ;;
-          esac
-
-      - name: Upload report
+          CRATE: ${{ inputs.crate }}
+        run: ci/scripts/mutants.sh --package "$CRATE"
+      - name: upload the report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
-          name: mutants-${{ steps.pick.outputs.target }}-${{ github.run_id }}
+          name: mutants-${{ github.run_id }}
           path: target/mutants/
           retention-days: 30
+          if-no-files-found: ignore

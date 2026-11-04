@@ -1,0 +1,54 @@
+name: Advisories (scheduled)
+
+# A daily RustSec check of main's dependency graph. ci.yml runs Audit and Deny
+# only when a pull request or push changes Rust, the supply chain, .github/ or
+# ci/, so without this a new advisory against an unchanged dependency surfaces
+# on the next such pull request, as RUSTSEC-2026-0433 did on 2026-11-04. The same
+# scripts run here with the same blocking policy and the same deny.toml waivers;
+# a failure is a failed scheduled run, which GitHub reports to whoever last
+# changed the schedule. Daily rather
+# than the weekly run the v0.21 pre-release audit suggested: each run takes about
+# a minute on a hosted runner, and a day is the longest an advisory goes unseen.
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: advisories
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  audit:
+    name: Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ci-audit
+      - run: ci/scripts/audit.sh
+
+  deny:
+    name: Deny
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
+        with:
+          key: ci-deny
+      - run: ci/scripts/deny.sh

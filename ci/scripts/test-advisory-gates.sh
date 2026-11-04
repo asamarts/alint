@@ -6,7 +6,8 @@
 #     vulnerabilities), yanked crates warn (deny.toml);
 #   - waivers live in ONE place, deny.toml [advisories].ignore, which audit.sh
 #     turns into `cargo audit --ignore <id>` (ids with a reason only);
-#   - deny.sh runs the cargo-deny version its deny.toml schema is written for.
+#   - deny.sh runs the cargo-deny version its deny.toml schema is written for,
+#     and audit.sh the cargo-audit version it pins.
 # Behavioural: both scripts run from a scratch repo root against a stubbed
 # `cargo` that records argv and fails the advisory check on demand. The real
 # end-to-end check (a crate with RUSTSEC-2021-0003 fails both, the waiver
@@ -30,6 +31,8 @@ root="$sandbox/repo"
 mkdir -p "$root/ci/scripts" "$sandbox/bin"
 cp ci/scripts/deny.sh ci/scripts/audit.sh "$root/ci/scripts/"
 pinned=$(sed -n 's/^CARGO_DENY_VERSION="\(.*\)"$/\1/p' ci/scripts/deny.sh)
+audit_pinned=$(sed -n 's/^CARGO_AUDIT_VERSION="\(.*\)"$/\1/p' ci/scripts/audit.sh)
+[[ -n "$pinned" && -n "$audit_pinned" ]] || { echo "could not read the pinned cargo-deny / cargo-audit versions" >&2; exit 1; }
 
 cat > "$sandbox/bin/cargo" <<'STUB'
 #!/usr/bin/env bash
@@ -39,12 +42,12 @@ case "$1 $2" in
   "deny check")
     for a in "$@"; do [[ "$a" == advisories ]] && exit "${STUB_ADVISORIES_RC:-0}"; done
     exit 0 ;;
+  "audit --version") echo "cargo-audit-audit ${STUB_AUDIT_VERSION:?}"; exit 0 ;;
   "audit "*|"audit") exit "${STUB_ADVISORIES_RC:-0}" ;;
 esac
 exit 0
 STUB
-printf '#!/usr/bin/env bash\nexit 0\n' > "$sandbox/bin/cargo-audit"
-chmod +x "$sandbox/bin/cargo" "$sandbox/bin/cargo-audit"
+chmod +x "$sandbox/bin/cargo"
 
 # run <script> [VAR=value...] -> $rc
 run() {
@@ -52,7 +55,8 @@ run() {
   shift
   : > "$sandbox/log"
   rc=0
-  env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" STUB_DENY_VERSION="$pinned" "$@" \
+  env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" STUB_DENY_VERSION="$pinned" \
+    STUB_AUDIT_VERSION="$audit_pinned" "$@" \
     bash "$root/ci/scripts/$script" > "$sandbox/out" 2>&1 || rc=$?
 }
 logged() { grep -qE -- "$1" "$sandbox/log"; }
@@ -85,7 +89,17 @@ fi
 run audit.sh STUB_ADVISORIES_RC=1
 if [[ "$rc" -ne 0 ]]; then ok "audit.sh: a vulnerability fails the gate"; else bad "audit.sh: a vulnerability must fail the gate"; fi
 run audit.sh STUB_ADVISORIES_RC=0
-if [[ "$rc" -eq 0 ]] && logged '^cargo audit$'; then ok "audit.sh: clean graph passes (no waivers)"; else bad "audit.sh: clean run"; fi
+if [[ "$rc" -eq 0 ]] && logged '^cargo audit$' && ! logged '^cargo install'; then
+  ok "audit.sh: clean graph passes (no waivers), and the pinned cargo-audit is not reinstalled"
+else
+  bad "audit.sh: clean run"
+fi
+run audit.sh STUB_AUDIT_VERSION=0.0.1
+if logged "^cargo install cargo-audit --locked --version ${audit_pinned//./\\.}$"; then
+  ok "audit.sh: a different cargo-audit version gets the pinned ${audit_pinned} installed"
+else
+  bad "audit.sh: must install cargo-audit ${audit_pinned} when the runner has another version"
+fi
 
 # The waiver list is read from deny.toml, not duplicated in audit.sh.
 python3 - "$root/deny.toml" <<'PY'

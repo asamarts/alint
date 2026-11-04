@@ -9,7 +9,12 @@ in #417 (2026-11-01: the default-CI job against the pinned witforge 0.1.1,
 #418 (2026-11-01); the release steps (section 5) are done up to the tag: the `RELEASE_RUST`
 bump (#419), the corpus replay (0 differences), the version bump, and v0.21.0 itself
 (2026-11-01, `d61e4c802`), then the Action doc pin (#421), the bench record (#424), and the
-alint.org updates. The rest of W4 remains.
+alint.org updates. W4's remaining CI items were done after the release (2026-11-04, each marked
+in section 6), with two gaps a post-release review found: the Zed extension's lockfile still
+recorded 0.18.4 against its 0.21.0 manifest, since nothing refreshed or checked it (now
+`bump-version.sh` refreshes it, `check-version-pins.sh` checks it, and the editors job builds
+with `--locked`), and the witforge job check accepted a job that swallowed a failure (`|| true`,
+an `exit` before the script, or a disabled `if:`).
 Decisions: the owner decided every item in section 7 on 2026-10-30; the four that change the
 design are recorded in [ADR-0025](../../adr/0025-v021-pre-release-decisions.md), which partly
 supersedes [ADR-0024](../../adr/0024-relation-ir-decisions-after-review.md) decision 4.
@@ -193,18 +198,27 @@ source and target, each of which fails on the old code.
 - **Mutants nightly never runs.** `mutants.yml:34` targets the self-hosted `alint` runner, whose
   listener is held (`ci.yml` routes every job to `ubuntu-latest`). Every scheduled run since
   2026-09-22 was cancelled after about a day in the queue; the last success (2026-09-18) was a
-  tiny crate. Replace it with a pull-request `--in-diff` job (section 7, item 3).
+  tiny crate. Replace it with a pull-request `--in-diff` job (section 7, item 3). **Done after
+  the release:** `mutants.yml` runs `ci/scripts/mutants.sh --in-diff` on pull requests that
+  change Rust, on `ubuntu-latest`, and lists missed mutants in the job summary and as warnings on
+  their lines without failing; `workflow_dispatch` runs one crate. The diff run passes
+  `--workspace`, since the root manifest's `default-members` would otherwise limit the mutants to
+  the CLI crate and report none for a change anywhere else.
 - **No scheduled advisory check.** Deny and Audit run only when Rust, supply-chain, `.github/`,
   or `ci/` files change, and in the release preflight, so a new RustSec advisory surfaces on the
-  next such pull request. Add a weekly scheduled run.
+  next such pull request. Add a weekly scheduled run. **Done after the release:**
+  `advisories.yml` runs `audit.sh` and `deny.sh` on `main` daily rather than weekly, since a run
+  takes about a minute.
 - **Unpinned tools:** `ci/scripts/audit.sh` installs `cargo-audit` and `mutants.yml` installs
-  `cargo-mutants` without a version (`cargo-deny` is pinned).
+  `cargo-mutants` without a version (`cargo-deny` is pinned). **Done after the release:**
+  `audit.sh` pins `cargo-audit` 0.22.2 and `mutants.sh` pins `cargo-mutants` 27.1.0, each
+  installed whenever the runner carries another version, as `deny.sh` does.
 - **MSRV headroom is zero:** nine locked packages (`ignore`, `globset`, `encoding_rs`, `sha2`,
   `proptest`, and four `gungraun` crates) already require exactly 1.88, so the next dependency to
   raise it fails the MSRV job. Write the rolling policy into `CONTRIBUTING.md` and
-  `RELEASING.md` (section 7, item 8).
+  `RELEASING.md` (section 7, item 8). **Done** in #418 (`CONTRIBUTING.md`, `RELEASING.md`).
 - **Release toolchain:** `RELEASE_RUST` is 1.98.1 while stable is 1.99.1; bump it at the cut, in
-  its own pull request (section 7, item 8).
+  its own pull request (section 7, item 8). **Done** in #419 (1.99.1).
 - **Dependabot:** done 2026-10-30. #398 (similar, ureq), #378 (Gradle wrapper), #376
   (rust-cache), #377 (vscode-languageclient 11; no code change, the VS Code floor stays
   `^1.91.0`), #373 (jsonschema 0.60, a pre-1.0 minor that can change `json_schema_passes`
@@ -216,7 +230,11 @@ source and target, each of which fails on the old code.
   the six. None touches `roxmltree`, which stays at 0.20.
 - **Action pins can drift from their comments.** Nothing checks that a pinned commit is the one
   its `# vX.Y.Z` comment names; #376 showed that Dependabot can pin an untagged commit. Add a CI
-  check that resolves each commented tag and compares the commit.
+  check that resolves each commented tag and compares the commit. **Done after the release:**
+  `ci/scripts/check-action-pins.sh`, the Action Pins job in `ci.yml` (part of Summary), resolves
+  each comment with `git ls-remote` and fails when the commit is not that tag (or a release in its
+  series, for a moving major tag such as `v7`) or, for a branch comment such as
+  `dtolnay/rust-toolchain`'s `master`, not in that branch's history.
 - **Housekeeping:** 104 local branches, 63 fully merged; remote branches `feat/key-parity`,
   `feat/key-parity-formats`, `feat/relation-ir-r2` (merged) and `bench-record/v0.18.3` (PR
   closed); extra worktrees, one of which (an older benchmark worktree) holds staged changes;

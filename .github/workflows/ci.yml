@@ -116,6 +116,18 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: bash ci/scripts/check-secrets-inventory.sh
 
+  # Drift gate (a few seconds of `git ls-remote`): each pinned Action commit is
+  # the release its `# vX.Y.Z` comment names, so a reviewer reading the comment
+  # reads what runs (#376 pinned an untagged commit under a tag comment).
+  # Unconditional on ubuntu-latest, like Secrets Inventory: no toolchain, and a
+  # moved or deleted upstream tag matters whatever the PR changed.
+  action-pins:
+    name: Action Pins
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - run: bash ci/scripts/check-action-pins.sh
+
   # ── Rust pipeline ─────────────────────────────────────────────────
   fmt:
     name: Format
@@ -573,7 +585,7 @@ jobs:
           targets: wasm32-wasip1
       - name: Zed — wasm build
         working-directory: editors/zed
-        run: cargo build --release --target wasm32-wasip1
+        run: cargo build --release --locked --target wasm32-wasip1
       - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
         with:
           distribution: temurin
@@ -590,6 +602,7 @@ jobs:
     needs:
       - changes
       - secrets-inventory
+      - action-pins
       - fmt
       - msrv
       - clippy
@@ -625,6 +638,7 @@ jobs:
           SHELL_CHANGED: ${{ needs.changes.outputs.shell }}
           RELATION_CHANGED: ${{ needs.changes.outputs.relation }}
           SECRETS_INVENTORY_RESULT: ${{ needs.secrets-inventory.result }}
+          ACTION_PINS_RESULT: ${{ needs.action-pins.result }}
           FMT_RESULT: ${{ needs.fmt.result }}
           MSRV_RESULT: ${{ needs.msrv.result }}
           CLIPPY_RESULT: ${{ needs.clippy.result }}

@@ -121,30 +121,48 @@ if 'ci/scripts/packaging-check.sh' not in ci:
     errors.append("ci.yml must run ci/scripts/packaging-check.sh")
 if 'packaging: ${{ steps.detect.outputs.packaging }}' not in ci:
     errors.append("changes job must export the packaging output")
-if "needs.changes.outputs.rust == 'true'" not in job_if('witforge'):
-    errors.append("Plugin contract (witforge) job must gate on needs.changes.outputs.rust")
+WITFORGE_IF = "!cancelled() && !failure() && needs.changes.outputs.rust == 'true'"
+
+
+def first_command(step):
+    """The first command line of a step's `run:`, inline or as a block."""
+    m = re.search(r'^(?:\s+)?run:[ \t]*(?:[|>][-+]?|(?P<inline>\S.*?))?[ \t]*$', step, re.MULTILINE)
+    if not m:
+        return None
+    if m.group('inline'):
+        return m.group('inline').strip()
+    rest = step[m.end():].splitlines()
+    return next((line.strip() for line in rest if line.strip()), None)
 
 
 def witforge_job_errors(text):
-    """The plugin contract job must really run its three scripts: each on a
-    `run:` line of its own step (not in a comment or an echo), the controls
-    with WITFORGE_REQUIRED=1, and no step skipped or allowed to fail."""
+    """The plugin contract job must really run its three scripts: each as the
+    first command of its own step's `run:` (not in a comment or an echo, not
+    after an `exit`), followed by plain arguments only (no `||`, `&&`, `;`,
+    pipe or redirect), under the default `bash -e` shell, the controls with
+    WITFORGE_REQUIRED=1, no step skipped or allowed to fail, and the job's
+    own `if:` exactly the `rust` gate."""
     m = re.search(r'^  witforge:\n((?:    .*\n|\n)*)', text, re.MULTILINE)
     if not m:
         return ["ci.yml has no `witforge` job"]
     body = re.sub(r'(^|\s)#.*$', '', m.group(1), flags=re.MULTILINE)
     steps = re.split(r'^      - ', body, flags=re.MULTILINE)[1:]
     out = []
+    cond = re.search(r'^    if: >-\n(?P<cond>(?:      .*\n)+)', body, re.MULTILINE)
+    if not cond or ' '.join(cond.group('cond').split()) != WITFORGE_IF:
+        out.append(f"the witforge job's `if:` must be exactly `{WITFORGE_IF}`")
     if 'continue-on-error' in body:
         out.append("the witforge job must not set continue-on-error")
+    if re.search(r'^\s+(shell|defaults):', body, re.MULTILINE) or re.search(r'^defaults:', text, re.MULTILINE):
+        out.append("the witforge job must run under the default shell (no `shell:` or `defaults:`)")
     for step in steps:
         if re.search(r'^        if:', step, re.MULTILINE) or step.startswith('if:'):
             out.append("no step of the witforge job may carry an `if:`")
     for script in ('install-witforge.sh', 'witforge-consumer.sh', 'test-witforge-consumer.sh'):
-        line = re.compile(rf'^(?:run:|\s+run:|\s+)\s*ci/scripts/{re.escape(script)}(?:\s|$)', re.MULTILINE)
-        owners = [step for step in steps if line.search(step)]
+        whole = re.compile(rf'ci/scripts/{re.escape(script)}(?:\s+(?:"[^"]*"|[^\s;&|<>()`\'"]+))*')
+        owners = [step for step in steps if (first_command(step) or '') and whole.fullmatch(first_command(step))]
         if not owners:
-            out.append(f"the witforge job must run ci/scripts/{script} on a run: line")
+            out.append(f"the witforge job must run ci/scripts/{script} as the whole first command of a step's run:")
         elif script == 'test-witforge-consumer.sh' and not any(
                 re.search(r'^\s+WITFORGE_REQUIRED: "1"\s*$', step, re.MULTILINE) for step in owners):
             out.append("the witforge job must run the controls with WITFORGE_REQUIRED=1 on that step")
@@ -162,6 +180,17 @@ mutants = {
     'controls not required': ci.replace('          WITFORGE_REQUIRED: "1"\n', '          WITFORGE_REQUIRED: "0"\n', 1),
     'install in an echo': ci.replace('          ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"',
                                      '          echo ci/scripts/install-witforge.sh', 1),
+    'failure swallowed': ci.replace('run: ci/scripts/witforge-consumer.sh\n',
+                                    'run: ci/scripts/witforge-consumer.sh || true\n', 1),
+    'exit before the controls': ci.replace('        run: ci/scripts/test-witforge-consumer.sh\n',
+                                           '        run: |\n          exit 0\n          ci/scripts/test-witforge-consumer.sh\n', 1),
+    'job disabled': ci.replace("    name: Plugin contract (witforge)\n    needs: changes\n    if: >-\n      !cancelled()",
+                               "    name: Plugin contract (witforge)\n    needs: changes\n    if: >-\n      false && !cancelled()", 1),
+    'later command masks the install': ci.replace(
+        '          ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"\n',
+        '          ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"; true\n', 1),
+    'shell without -e': ci.replace('      - name: check the WIT and regenerate the consumer with --check\n',
+                                   '      - name: check the WIT and regenerate the consumer with --check\n        shell: bash {0}\n', 1),
 }
 for label, mutant in mutants.items():
     if mutant == ci:

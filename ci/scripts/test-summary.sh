@@ -46,6 +46,8 @@ expect "changes cancelled"           fail CHANGES_RESULT=cancelled
 expect "changes result missing"      fail
 expect "a job failed"                fail CHANGES_RESULT=success DENY_RESULT=failure
 expect "packaging failed"            fail CHANGES_RESULT=success PACKAGING_RESULT=failure
+expect "action pins failed"          fail CHANGES_RESULT=success ACTION_PINS_RESULT=failure
+expect "action pins passed"          pass CHANGES_RESULT=success ACTION_PINS_RESULT=success
 expect "shell-only route, harness failed" fail CHANGES_RESULT=success SHELL_CHANGED=true SHELL_TESTS_RESULT=failure
 expect "reference perf gate failed"   fail CHANGES_RESULT=success PERF_REFERENCE_RESULT=failure
 expect "reference perf gate cancelled" fail CHANGES_RESULT=success PERF_REFERENCE_RESULT=cancelled

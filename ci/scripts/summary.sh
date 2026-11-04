@@ -79,6 +79,7 @@ row() {
   row "Shell tests"  "$SHELL_TESTS_RESULT" "${SHELL_CHANGED:-false}"
   row "Plugin contract (witforge)" "${WITFORGE_RESULT:-skipped}" "$RUST_CHANGED"
   row "Secrets inventory" "$SECRETS_INVENTORY_RESULT" "true"
+  row "Action pins" "${ACTION_PINS_RESULT:-skipped}" "true"
   echo ""
 
   echo "### Bench Pipeline"
@@ -123,7 +124,7 @@ if [[ "${CHANGES_RESULT:-}" != "success" ]]; then
   FAILED=true
 fi
 for result in \
-  "$SECRETS_INVENTORY_RESULT" \
+  "$SECRETS_INVENTORY_RESULT" "${ACTION_PINS_RESULT:-skipped}" \
   "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
   "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
   "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \

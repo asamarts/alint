@@ -33,6 +33,7 @@ EXEMPT = {
     'ci/scripts/reference-perf-gate.sh': 'relation-layer perf gate against v0.18.2, run on the change itself; a release re-measures wall-clock on the bench host',
     'ci/scripts/supply-chain-artifacts.sh': 'release.yml runs it in its own supply-chain job',
     'ci/scripts/check-secrets-inventory.sh': 'repo-config drift gate; ci.yml runs it unconditionally on the tag',
+    'ci/scripts/check-action-pins.sh': 'repo-config drift gate; ci.yml runs it unconditionally on the tag',
 }
 
 # On the preflight side, a script counts as run only where a line of a step
