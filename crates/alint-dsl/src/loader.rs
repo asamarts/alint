@@ -254,7 +254,7 @@ fn remote_source_display(entry: &str) -> String {
 }
 
 pub(crate) fn reject_nonliteral_requirement(contents: &str, source: &str) -> Result<()> {
-    let value: ayaml::Value = ayaml::from_str(contents)?;
+    let value: ayaml::Value = ayaml::compat::from_str(contents)?;
     reject_nonliteral_requirement_in_value(contents, source, &value)
 }
 
@@ -303,7 +303,7 @@ fn yaml_value_contains_tag(value: &ayaml::Value) -> bool {
 }
 
 fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
-    match ayaml::from_str(contents) {
+    match ayaml::compat::from_str(contents) {
         Ok(config) => {
             let config: RawConfig = config;
             if config.requires.is_some() {
@@ -312,10 +312,18 @@ fn deserialize_raw_config(contents: &str, source: &str) -> Result<RawConfig> {
             Ok(config)
         }
         Err(parse_error) => {
+            if alint_core::yaml_depth::bom_alias_bomb(contents) {
+                return Err(Error::Other(format!(
+                    "{source}: YAML alias expansion exceeds the maximum supported size"
+                )));
+            }
             if let Err(error @ Error::Other(_)) = reject_nonliteral_requirement(contents, source) {
                 return Err(error);
             }
-            Err(Error::Yaml(parse_error))
+            Err(Error::Yaml(alint_core::yaml_depth::map_compat_error(
+                contents,
+                parse_error,
+            )))
         }
     }
 }
@@ -355,7 +363,8 @@ fn parse_config_interpolated_inner_with_environment(
     }
     let source = display_path(source);
     let config: RawConfig = if contents.contains("{{") {
-        let mut value: ayaml::Value = ayaml::from_str(contents)?;
+        let mut value: ayaml::Value = ayaml::compat::from_str(contents)
+            .map_err(|error| alint_core::yaml_depth::map_compat_error(contents, error))?;
         let has_sensitive_interpolation = value_reads_environment(&value);
         reject_nonliteral_requirement_in_value(contents, &source, &value)?;
         // Which vars take their value from the environment, read off the RAW
@@ -906,7 +915,7 @@ fn load_bundled(spec: &str) -> Result<RawConfig> {
 
     // Bundled rulesets are compiled-in and trusted (byte-identical every build), so
     // these guards are defense-in-depth, not an attack surface -- but keeping the
-    // checks uniform with the remote/local paths means no `ayaml::from_str`
+    // checks uniform with the remote/local paths means no `ayaml::compat::from_str`
     // in the loader is ever unguarded. A bundled ruleset tripping one is an alint bug.
     let yaml_guards = alint_core::yaml_depth::scan_guards(body);
     if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(body) {
@@ -1068,7 +1077,7 @@ mod tests {
 
     #[test]
     fn drop_in_inherits_omitted_version_and_records_compatibility() {
-        let mut config: RawConfig = ayaml::from_str("rules: []").unwrap();
+        let mut config: RawConfig = ayaml::compat::from_str("rules: []").unwrap();
         validate_source_compatibility(
             &mut config,
             ".alint.d/10-team.yml",
@@ -1085,7 +1094,7 @@ mod tests {
     #[test]
     fn drop_in_explicit_version_must_equal_root() {
         let running = RunningVersion::new(alint_core::StableVersion::new(0, 19, 0), false);
-        let mut matching: RawConfig = ayaml::from_str("version: 1\nrules: []").unwrap();
+        let mut matching: RawConfig = ayaml::compat::from_str("version: 1\nrules: []").unwrap();
         validate_source_compatibility(
             &mut matching,
             ".alint.d/10-team.yml",
@@ -1096,7 +1105,7 @@ mod tests {
         .unwrap();
         assert_eq!(matching.compatibility[0].consumer_version, Some(1));
 
-        let mut mismatching: RawConfig = ayaml::from_str("version: 2\nrules: []").unwrap();
+        let mut mismatching: RawConfig = ayaml::compat::from_str("version: 2\nrules: []").unwrap();
         let error = validate_source_compatibility(
             &mut mismatching,
             ".alint.d/10-team.yml",

@@ -254,7 +254,7 @@ struct Derived {
 }
 
 fn derive_config(source: &str, catalog: KindCatalog<'_>) -> Result<Derived> {
-    let mut doc: Yaml = ayaml::from_str(source).context("parse the config")?;
+    let mut doc: Yaml = ayaml::compat::from_str(source).context("parse the config")?;
     let custom_facts: Vec<String> = doc
         .get("facts")
         .and_then(Yaml::as_sequence)
@@ -1267,7 +1267,7 @@ rules:
             derived.dropped,
             ["fmt", "nested", "signed", "future", "fixed (fix)"]
         );
-        let doc: Yaml = ayaml::from_str(&derived.yaml).unwrap();
+        let doc: Yaml = ayaml::compat::from_str(&derived.yaml).unwrap();
         let rules = doc["rules"].as_sequence().unwrap();
         let ids: Vec<&str> = rules.iter().map(|r| r["id"].as_str().unwrap()).collect();
         assert_eq!(ids, ["keep", "fixed", "safe-fix"]);

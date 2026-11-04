@@ -54,7 +54,7 @@ fn kinds_in_scenario(scenario: &ayaml::Value) -> HashSet<String> {
     let Some(config) = given.get("config").and_then(|v| v.as_str()) else {
         return out;
     };
-    let Ok(parsed) = ayaml::from_str::<ayaml::Value>(config) else {
+    let Ok(parsed) = ayaml::compat::from_str::<ayaml::Value>(config) else {
         return out;
     };
     walk_kinds(&parsed, &mut out);
@@ -137,7 +137,7 @@ fn git_required_rules_have_in_repo_and_outside_repo_scenarios() {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(scenario) = ayaml::from_str::<ayaml::Value>(&text) else {
+        let Ok(scenario) = ayaml::compat::from_str::<ayaml::Value>(&text) else {
             continue;
         };
         let kinds = kinds_in_scenario(&scenario);

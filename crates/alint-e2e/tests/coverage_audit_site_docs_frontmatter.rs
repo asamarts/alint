@@ -1,5 +1,5 @@
 //! Hard audit: every `docs/site/**/*.md` page MUST have a YAML
-//! frontmatter block that parses cleanly via `ayaml::from_str`.
+//! frontmatter block that parses cleanly via `ayaml::compat::from_str`.
 //!
 //! Why this exists. The `docs/site/` subtree is copied verbatim into
 //! the docs-bundle artifact that alint.org pulls at build time. Each
@@ -134,7 +134,7 @@ fn every_site_doc_has_parseable_yaml_frontmatter() {
             ));
             continue;
         };
-        if let Err(e) = ayaml::from_str::<ayaml::Value>(fm) {
+        if let Err(e) = ayaml::compat::from_str::<ayaml::Value>(fm) {
             failures.push(format!(
                 "{}: YAML frontmatter rejected by yaml_serde: {}\n\
                  frontmatter source (between --- delimiters):\n{}",
@@ -178,7 +178,9 @@ fn every_site_doc_has_its_own_description() {
     for rel in collect_site_docs() {
         let src = std::fs::read_to_string(root.join(&rel)).unwrap();
         // A missing or unparseable block is reported by the test above.
-        let Some(Ok(front)) = extract_frontmatter(&src).map(ayaml::from_str::<ayaml::Value>) else {
+        let Some(Ok(front)) =
+            extract_frontmatter(&src).map(ayaml::compat::from_str::<ayaml::Value>)
+        else {
             continue;
         };
         let rel = rel.display().to_string();
@@ -247,7 +249,7 @@ fn extract_frontmatter_tolerates_crlf_line_endings() {
     let src = "---\r\ntitle: hello\r\nfoo: bar\r\n---\r\n\r\nbody\r\n";
     let fm = extract_frontmatter(src).expect("CRLF frontmatter should be found");
     assert_eq!(fm, "title: hello\r\nfoo: bar");
-    ayaml::from_str::<ayaml::Value>(fm).expect("CRLF frontmatter should parse");
+    ayaml::compat::from_str::<ayaml::Value>(fm).expect("CRLF frontmatter should parse");
 }
 
 /// Regression specifically for the `variable-interpolation.md` failure
@@ -260,7 +262,7 @@ fn unquoted_scalar_with_colon_space_is_rejected_by_yaml_parser() {
     // description: ... The when: language gains ...
     let fm = "title: ok\n\
               description: lead-in text. The when: language continues.\n";
-    let parsed: Result<ayaml::Value, _> = ayaml::from_str(fm);
+    let parsed: Result<ayaml::Value, _> = ayaml::compat::from_str(fm);
     assert!(
         parsed.is_err(),
         "yaml_serde started accepting unquoted scalars with embedded \

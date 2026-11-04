@@ -74,7 +74,7 @@ fn fixture_configs(root: &Path) -> Vec<(String, String)> {
             let Ok(text) = std::fs::read_to_string(&path) else {
                 continue;
             };
-            let Ok(v) = ayaml::from_str::<ayaml::Value>(&text) else {
+            let Ok(v) = ayaml::compat::from_str::<ayaml::Value>(&text) else {
                 continue;
             };
             if v.get("docs").is_none() {
@@ -229,7 +229,7 @@ fn to_config(body: &str) -> Option<String> {
 /// silently dropped. A config that doesn't parse here returns `false` so the
 /// loader still runs and reports the structural error.
 fn has_network_extends(config: &str) -> bool {
-    let Ok(doc) = ayaml::from_str::<ayaml::Value>(config) else {
+    let Ok(doc) = ayaml::compat::from_str::<ayaml::Value>(config) else {
         return false;
     };
     let entry_is_network = |e: &ayaml::Value| {
@@ -260,7 +260,7 @@ fn has_network_extends(config: &str) -> bool {
 /// map-vs-sequence `rules:` bug) won't parse here; we return it
 /// unchanged so the loader still reports the structural error.
 fn inject_default_levels(config: &str) -> String {
-    let Ok(mut doc) = ayaml::from_str::<ayaml::Value>(config) else {
+    let Ok(mut doc) = ayaml::compat::from_str::<ayaml::Value>(config) else {
         return config.to_string();
     };
     if let Some(rules) = doc.get_mut("rules").and_then(ayaml::Value::as_sequence_mut) {

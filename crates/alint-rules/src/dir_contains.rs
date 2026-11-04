@@ -333,7 +333,7 @@ mod tests {
 select: 'packages/*'
 require: 'README.md'
 ";
-        let opts: Options = ayaml::from_str(yaml).unwrap();
+        let opts: Options = ayaml::compat::from_str(yaml).unwrap();
         assert!(matches!(opts.require, RequireList::One(_)));
     }
 

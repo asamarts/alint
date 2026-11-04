@@ -22,7 +22,7 @@ use alint_rules::builtin_registry;
 /// Build a single-rule engine from a YAML spec snippet. The spec
 /// is parsed via `yaml_serde` exactly as the loader would.
 fn engine_from_yaml(yaml: &str) -> Engine {
-    let spec: Arc<alint_core::RuleSpec> = Arc::new(ayaml::from_str(yaml).unwrap());
+    let spec: Arc<alint_core::RuleSpec> = Arc::new(ayaml::compat::from_str(yaml).unwrap());
     let registry = builtin_registry();
     let rule = registry.build(&spec).unwrap();
     Engine::from_entries(vec![RuleEntry::new(rule).with_spec(spec)], registry)

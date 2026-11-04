@@ -97,7 +97,7 @@ fn full_index_stub(id: &str) -> Box<dyn Rule> {
     })
 }
 fn manifest_scope() -> Scope {
-    let spec: crate::RuleSpec = ayaml::from_str(
+    let spec: crate::RuleSpec = ayaml::compat::from_str(
         "id: a\nkind: x\nlevel: error\npaths: \"**/*.txt\"\n\
              scope_filter:\n  include_manifest_paths:\n    source: package.json\n    \
              extract: { json: \"$.files[*]\" }\n",
@@ -272,7 +272,7 @@ fn nested_registry() -> RuleRegistry {
 }
 
 fn nested_parent(yaml: &str) -> Box<dyn Rule> {
-    let spec: crate::NestedRuleSpec = ayaml::from_str(yaml).unwrap();
+    let spec: crate::NestedRuleSpec = ayaml::compat::from_str(yaml).unwrap();
     let compiled = crate::CompiledNestedSpec::compile(spec, "owner", 0).unwrap();
     Box::new(NestedDependencyParent {
         id: "owner",

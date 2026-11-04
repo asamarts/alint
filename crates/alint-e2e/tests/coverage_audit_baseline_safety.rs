@@ -78,7 +78,7 @@ fn id_to_kind(config: &str) -> BTreeMap<String, String> {
         }
     }
     let mut out = BTreeMap::new();
-    let Ok(v) = ayaml::from_str::<ayaml::Value>(config) else {
+    let Ok(v) = ayaml::compat::from_str::<ayaml::Value>(config) else {
         return out;
     };
     walk(&v, &mut out);

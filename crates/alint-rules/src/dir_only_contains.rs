@@ -335,7 +335,7 @@ mod tests {
 select: src/*
 allow: '*.rs'
 ";
-        let opts: super::Options = ayaml::from_str(yaml).unwrap();
+        let opts: super::Options = ayaml::compat::from_str(yaml).unwrap();
         assert!(matches!(opts.allow, super::AllowList::One(_)));
     }
 
@@ -345,7 +345,7 @@ allow: '*.rs'
 select: src/*
 allow: ["*.rs", "*.toml"]
 "#;
-        let opts: super::Options = ayaml::from_str(yaml).unwrap();
+        let opts: super::Options = ayaml::compat::from_str(yaml).unwrap();
         assert!(matches!(opts.allow, super::AllowList::Many(_)));
     }
 

@@ -322,7 +322,7 @@ fn retype_scalar(text: String) -> Value {
     if text.len() > 1024 {
         return Value::String(text);
     }
-    match ayaml::from_str::<Value>(&text) {
+    match ayaml::compat::from_str::<Value>(&text) {
         Ok(v @ (Value::Number(_) | Value::Bool(_))) => v,
         _ => Value::String(text),
     }
@@ -568,7 +568,7 @@ mod tests {
     #[test]
     fn walker_skips_id_kind_level_inside_rule_scope() {
         let env = fake_env(&[("X", "SUBBED")]);
-        let mut v: Value = ayaml::from_str(
+        let mut v: Value = ayaml::compat::from_str(
             "rules:\n  - id: \"{{env.X}}\"\n    kind: \"{{env.X}}\"\n    \
              level: \"{{env.X}}\"\n    paths: \"{{env.X}}\"",
         )
@@ -591,7 +591,7 @@ mod tests {
         // interpolate. Regression guard for the previously-global skip.
         let env = fake_env(&[("X", "prod")]);
         let mut v: Value =
-            ayaml::from_str("vars:\n  level: \"{{env.X}}\"\n  id: \"{{env.X}}\"").unwrap();
+            ayaml::compat::from_str("vars:\n  level: \"{{env.X}}\"\n  id: \"{{env.X}}\"").unwrap();
         interpolate_value(&mut v, &env).unwrap();
         let vars = v.as_mapping().unwrap()["vars"].as_mapping().unwrap();
         assert_eq!(vars["level"].as_str().unwrap(), "prod");
@@ -604,7 +604,7 @@ mod tests {
         // YAML list or mapping must stay a string, never silently
         // become a Sequence/Mapping in a string-typed field.
         let env = fake_env(&[("L", "[a, b]"), ("M", "{k: v}")]);
-        let mut v: Value = ayaml::from_str("a: \"{{env.L}}\"\nb: \"{{env.M}}\"").unwrap();
+        let mut v: Value = ayaml::compat::from_str("a: \"{{env.L}}\"\nb: \"{{env.M}}\"").unwrap();
         interpolate_value(&mut v, &env).unwrap();
         let map = v.as_mapping().unwrap();
         assert_eq!(map["a"].as_str().unwrap(), "[a, b]");
@@ -621,7 +621,7 @@ mod tests {
     fn walker_retypes_resolved_integer_field() {
         let env = fake_env(&[]);
         let mut v: Value =
-            ayaml::from_str("subject_max_length: \"{{env.MAX | default('72')}}\"").unwrap();
+            ayaml::compat::from_str("subject_max_length: \"{{env.MAX | default('72')}}\"").unwrap();
         interpolate_value(&mut v, &env).unwrap();
         let n = v.as_mapping().unwrap()["subject_max_length"]
             .as_u64()
@@ -632,7 +632,7 @@ mod tests {
     #[test]
     fn walker_retypes_resolved_bool_field() {
         let env = fake_env(&[("FLAG", "true")]);
-        let mut v: Value = ayaml::from_str("if_present: \"{{env.FLAG}}\"").unwrap();
+        let mut v: Value = ayaml::compat::from_str("if_present: \"{{env.FLAG}}\"").unwrap();
         interpolate_value(&mut v, &env).unwrap();
         assert_eq!(v.as_mapping().unwrap()["if_present"].as_bool(), Some(true));
     }
@@ -640,7 +640,7 @@ mod tests {
     #[test]
     fn walker_keeps_string_when_value_stays_templated() {
         let env = fake_env(&[]);
-        let mut v: Value = ayaml::from_str("message: \"{{vars.x}}\"").unwrap();
+        let mut v: Value = ayaml::compat::from_str("message: \"{{vars.x}}\"").unwrap();
         interpolate_value(&mut v, &env).unwrap();
         // Deferred vars span stays a string for the later pass.
         assert_eq!(
@@ -653,7 +653,8 @@ mod tests {
     fn walker_recurses_into_sequences() {
         let env = fake_env(&[("DIR", "pkgs")]);
         let mut v: Value =
-            ayaml::from_str("paths:\n  - \"{{env.DIR}}/a\"\n  - \"{{env.DIR}}/b\"").unwrap();
+            ayaml::compat::from_str("paths:\n  - \"{{env.DIR}}/a\"\n  - \"{{env.DIR}}/b\"")
+                .unwrap();
         interpolate_value(&mut v, &env).unwrap();
         let seq = v.as_mapping().unwrap()["paths"].as_sequence().unwrap();
         assert_eq!(seq[0].as_str().unwrap(), "pkgs/a");

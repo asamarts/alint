@@ -185,7 +185,7 @@ fn from_spec_accepts_canonical_manifests() {
 #[test]
 fn deserialize_single_string_form() {
     let yaml = "has_ancestor: Cargo.toml\n";
-    let spec: ScopeFilterSpec = ayaml::from_str(yaml).unwrap();
+    let spec: ScopeFilterSpec = ayaml::compat::from_str(yaml).unwrap();
     assert_eq!(spec.has_ancestor, Some(vec!["Cargo.toml".to_string()]));
     assert_eq!(spec.changed_since, None);
 }
@@ -193,7 +193,7 @@ fn deserialize_single_string_form() {
 #[test]
 fn deserialize_changed_since_only_form() {
     let yaml = "changed_since: origin/main\n";
-    let spec: ScopeFilterSpec = ayaml::from_str(yaml).unwrap();
+    let spec: ScopeFilterSpec = ayaml::compat::from_str(yaml).unwrap();
     assert_eq!(spec.has_ancestor, None);
     assert_eq!(spec.changed_since.as_deref(), Some("origin/main"));
 }
@@ -201,7 +201,7 @@ fn deserialize_changed_since_only_form() {
 #[test]
 fn deserialize_list_form() {
     let yaml = "has_ancestor:\n  - pom.xml\n  - build.gradle\n";
-    let spec: ScopeFilterSpec = ayaml::from_str(yaml).unwrap();
+    let spec: ScopeFilterSpec = ayaml::compat::from_str(yaml).unwrap();
     assert_eq!(
         spec.has_ancestor,
         Some(vec!["pom.xml".to_string(), "build.gradle".to_string()]),
@@ -211,7 +211,7 @@ fn deserialize_list_form() {
 #[test]
 fn deserialize_rejects_unknown_field() {
     let yaml = "has_ancestor: Cargo.toml\nunknown: x\n";
-    assert!(ayaml::from_str::<ScopeFilterSpec>(yaml).is_err());
+    assert!(ayaml::compat::from_str::<ScopeFilterSpec>(yaml).is_err());
 }
 
 // ── changed_since ─────────────────────────────────────────
@@ -301,7 +301,7 @@ fn from_spec_accepts_changed_since_only() {
 /// Build a filter from `scope_filter:` YAML (the real deserialise + validate
 /// path), so the manifest predicate is constructed exactly as production.
 fn manifest_filter(yaml: &str) -> ScopeFilter {
-    let spec: ScopeFilterSpec = ayaml::from_str(yaml).expect("scope_filter parses");
+    let spec: ScopeFilterSpec = ayaml::compat::from_str(yaml).expect("scope_filter parses");
     ScopeFilter::from_spec("r", spec).expect("from_spec ok")
 }
 
@@ -785,7 +785,7 @@ fn from_spec_accepts_manifest_only() {
 
 #[test]
 fn from_spec_rejects_source_escaping_root() {
-    let spec: ScopeFilterSpec = ayaml::from_str(
+    let spec: ScopeFilterSpec = ayaml::compat::from_str(
         "exclude_manifest_paths:\n  source: ../outside.json\n  extract: { json: \"$.x[*]\" }",
     )
     .unwrap();
@@ -832,7 +832,7 @@ fn distinct_derive_targets_do_not_share_a_cache_key() {
 fn from_spec_rejects_nul_in_derive_target() {
     // A double-quoted YAML `"a\0b"` decodes to a literal NUL, which would
     // break the NUL-delimited cache key's injectivity -> rejected at build.
-    let spec: ScopeFilterSpec = ayaml::from_str(
+    let spec: ScopeFilterSpec = ayaml::compat::from_str(
             "include_manifest_paths:\n  source: m.json\n  extract: { json: \"$.x[*]\" }\n  derive_target: { from: \"x\", to: \"a\\0b\" }",
         )
         .expect("scope_filter parses");

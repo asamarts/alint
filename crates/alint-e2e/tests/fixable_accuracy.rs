@@ -59,7 +59,7 @@ fn check_tags_only_the_convertible_stem_fixable() {
         .unwrap();
     let root = tmp.path();
     // Two .rs files that both violate `snake`: one convertible, one not.
-    let tree: TreeSpec = ayaml::from_str("myFile.rs: \"\"\ncafé.rs: \"\"\n").unwrap();
+    let tree: TreeSpec = ayaml::compat::from_str("myFile.rs: \"\"\ncafé.rs: \"\"\n").unwrap();
     materialize(&tree, root).unwrap();
 
     let report = run_check(root);
@@ -121,7 +121,7 @@ fn check_does_not_tag_an_unsafe_file_remove_auto_fixable() {
         .tempdir()
         .unwrap();
     let root = tmp.path();
-    let tree: TreeSpec = ayaml::from_str("stale.bak: \"junk\\n\"\n").unwrap();
+    let tree: TreeSpec = ayaml::compat::from_str("stale.bak: \"junk\\n\"\n").unwrap();
     materialize(&tree, root).unwrap();
 
     let report = run_check_with(
@@ -172,7 +172,8 @@ fn check_tags_only_the_sortable_ordered_block_violation_fixable() {
     // An UNCLOSED block (no `end`) whose entries are ALSO out of order: two
     // findings, exactly one of them sort-fixable.
     let tree: TreeSpec =
-        ayaml::from_str("deps.txt: \"# keep-sorted start\\ncharlie\\nalpha\\n\"\n").unwrap();
+        ayaml::compat::from_str("deps.txt: \"# keep-sorted start\\ncharlie\\nalpha\\n\"\n")
+            .unwrap();
     materialize(&tree, root).unwrap();
 
     let report = run_check_with(
@@ -236,7 +237,7 @@ fn check_tags_only_the_missing_require_line_fixable_under_insert_line() {
     let root = tmp.path();
     // Unsorted (charlie before alpha) AND missing `bravo`: two findings, exactly
     // one insert_line-fixable.
-    let tree: TreeSpec = ayaml::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
+    let tree: TreeSpec = ayaml::compat::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
     materialize(&tree, root).unwrap();
 
     let report = run_check_with(
@@ -289,7 +290,7 @@ fn check_tags_only_the_sortable_violation_fixable_under_sort_with_require() {
         .tempdir()
         .unwrap();
     let root = tmp.path();
-    let tree: TreeSpec = ayaml::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
+    let tree: TreeSpec = ayaml::compat::from_str("list.txt: \"charlie\\nalpha\\n\"\n").unwrap();
     materialize(&tree, root).unwrap();
 
     let report = run_check_with(
@@ -339,9 +340,10 @@ fn check_tags_only_the_reindentable_indent_style_violation_fixable() {
     let root = tmp.path();
     // `good_tab.py`: a pure-tab lead (fixable). `bad_width.py`: 3 spaces under
     // width 4, no tab (WidthMismatch, ambiguous -> not fixable). One finding each.
-    let tree: TreeSpec =
-        ayaml::from_str("good_tab.py: \"x:\\n\\ta()\\n\"\nbad_width.py: \"x:\\n   a()\\n\"\n")
-            .unwrap();
+    let tree: TreeSpec = ayaml::compat::from_str(
+        "good_tab.py: \"x:\\n\\ta()\\n\"\nbad_width.py: \"x:\\n   a()\\n\"\n",
+    )
+    .unwrap();
     materialize(&tree, root).unwrap();
 
     // `indent_style` defaults to Unsafe (so a bare fix tags nothing fixable, like

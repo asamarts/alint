@@ -26,7 +26,7 @@ use alint_core::Error;
 use alint_rules::builtin_registry;
 
 fn build_err(yaml: &str) -> String {
-    let spec: alint_core::RuleSpec = ayaml::from_str(yaml).unwrap();
+    let spec: alint_core::RuleSpec = ayaml::compat::from_str(yaml).unwrap();
     let registry = builtin_registry();
     match registry.build(&spec) {
         Err(Error::RuleConfig { message, .. }) => message,

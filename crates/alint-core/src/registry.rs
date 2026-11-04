@@ -838,7 +838,7 @@ mod tests {
     }
 
     fn parsed_spec(fields: &str) -> RuleSpec {
-        ayaml::from_str(&format!("id: t\nkind: test_kind\nlevel: error\n{fields}")).unwrap()
+        ayaml::compat::from_str(&format!("id: t\nkind: test_kind\nlevel: error\n{fields}")).unwrap()
     }
 
     #[derive(Debug)]
@@ -1100,7 +1100,7 @@ mod tests {
     /// an instantiation does not depend on the token values.
     #[test]
     fn nested_instantiation_field_set_is_token_independent() {
-        let nested: crate::config::NestedRuleSpec = ayaml::from_str(
+        let nested: crate::config::NestedRuleSpec = ayaml::compat::from_str(
             "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: \"{dir} needs a README\"\n\
              root_only: false\nscope_filter:\n  has_ancestor: Cargo.toml\n",
         )

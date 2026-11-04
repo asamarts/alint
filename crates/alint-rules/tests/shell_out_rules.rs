@@ -45,7 +45,7 @@ fn git_init(root: &Path) {
 
 fn build_engine_from_yaml(yaml: &str) -> Engine {
     let spec: Arc<alint_core::RuleSpec> =
-        Arc::new(ayaml::from_str(yaml).expect("rule spec parses"));
+        Arc::new(ayaml::compat::from_str(yaml).expect("rule spec parses"));
     let registry = builtin_registry();
     let rule = registry.build(&spec).expect("rule builds");
     Engine::from_entries(vec![RuleEntry::new(rule).with_spec(spec)], registry)

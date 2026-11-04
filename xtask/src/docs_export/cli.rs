@@ -202,7 +202,7 @@ pub(super) fn parse_cli_prose(text: &str) -> Result<CliProse> {
     {
         Some((front, body)) => {
             let yaml: ayaml::Mapping =
-                ayaml::from_str(front).context("parsing CLI prose frontmatter")?;
+                ayaml::compat::from_str(front).context("parsing CLI prose frontmatter")?;
             for key in yaml.keys() {
                 let key = key.as_str().unwrap_or_default();
                 if !PROSE_FRONTMATTER_KEYS.contains(&key) {

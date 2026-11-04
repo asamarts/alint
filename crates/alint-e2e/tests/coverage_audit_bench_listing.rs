@@ -15,7 +15,7 @@ use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 
 fn collect_kinds_from_yaml(yaml: &str, out: &mut HashSet<String>) {
-    let Ok(parsed) = ayaml::from_str::<ayaml::Value>(yaml) else {
+    let Ok(parsed) = ayaml::compat::from_str::<ayaml::Value>(yaml) else {
         return;
     };
     walk(&parsed, out);

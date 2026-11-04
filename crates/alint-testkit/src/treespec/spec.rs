@@ -78,7 +78,7 @@ impl TreeSpec {
 
     /// Parse a YAML tree spec.
     pub fn from_yaml(yaml: &str) -> Result<Self, ayaml::Error> {
-        ayaml::from_str(yaml)
+        ayaml::compat::from_str(yaml)
     }
 
     /// Emit the spec as YAML.

@@ -205,7 +205,7 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
         let Ok(text) = std::fs::read_to_string(&path) else {
             continue;
         };
-        let Ok(scn) = ayaml::from_str::<Value>(&text) else {
+        let Ok(scn) = ayaml::compat::from_str::<Value>(&text) else {
             continue;
         };
         let Some(config) = scn
@@ -215,7 +215,7 @@ fn every_fix_op_is_exercised_and_proven_convergent() {
         else {
             continue;
         };
-        let Ok(cfg) = ayaml::from_str::<Value>(config) else {
+        let Ok(cfg) = ayaml::compat::from_str::<Value>(config) else {
             continue;
         };
         let mut id_to_op = HashMap::new();
@@ -315,7 +315,7 @@ mod classify {
     fn exp(items: &[&str]) -> Vec<Value> {
         items
             .iter()
-            .map(|s| ayaml::from_str(s).expect("valid expect yaml"))
+            .map(|s| ayaml::compat::from_str(s).expect("valid expect yaml"))
             .collect()
     }
 

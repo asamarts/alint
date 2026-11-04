@@ -201,7 +201,7 @@ mod tests {
         for (name, rev) in catalog() {
             let spec = format!("{name}@{rev}");
             let body = resolve(&spec).unwrap();
-            let parsed: Result<alint_core::Config, _> = ayaml::from_str(body);
+            let parsed: Result<alint_core::Config, _> = ayaml::compat::from_str(body);
             assert!(
                 parsed.is_ok(),
                 "bundled ruleset '{spec}' failed to parse: {}",
@@ -218,7 +218,7 @@ mod tests {
         for (name, rev) in catalog() {
             let spec = format!("{name}@{rev}");
             let body = resolve(&spec).unwrap();
-            let parsed: alint_core::Config = ayaml::from_str(body).unwrap();
+            let parsed: alint_core::Config = ayaml::compat::from_str(body).unwrap();
             assert!(
                 parsed.extends.is_empty(),
                 "bundled ruleset '{spec}' declares `extends:`, which is not allowed"

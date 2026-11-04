@@ -60,7 +60,7 @@ mod tests {
     #[test]
     fn deserializes_from_lowercase_yaml_string() {
         let yaml = "level: warning\n";
-        let w: Wrap = ayaml::from_str(yaml).unwrap();
+        let w: Wrap = ayaml::compat::from_str(yaml).unwrap();
         assert_eq!(w.level, Level::Warning);
     }
 
@@ -71,6 +71,6 @@ mod tests {
         // `level: Error` get a clear deserialise error rather
         // than a silent default.
         let yaml = "level: Error\n";
-        assert!(ayaml::from_str::<Wrap>(yaml).is_err());
+        assert!(ayaml::compat::from_str::<Wrap>(yaml).is_err());
     }
 }

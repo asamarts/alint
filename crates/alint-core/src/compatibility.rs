@@ -88,7 +88,9 @@ impl<'de> Deserialize<'de> for StableVersion {
         D: Deserializer<'de>,
     {
         let input = String::deserialize(deserializer)?;
-        input.parse().map_err(serde::de::Error::custom)
+        input
+            .parse()
+            .map_err(|error| serde::de::Error::custom(format!("requires.alint: {error}")))
     }
 }
 
@@ -243,7 +245,7 @@ mod tests {
 
     #[test]
     fn requirements_are_closed_and_string_only() {
-        let parsed: ConfigRequirements = ayaml::from_str("alint: \"0.19.0\"").unwrap();
+        let parsed: ConfigRequirements = ayaml::compat::from_str("alint: \"0.19.0\"").unwrap();
         assert_eq!(parsed.alint, StableVersion::new(0, 19, 0));
         for invalid in [
             "{}",
@@ -254,7 +256,7 @@ mod tests {
             "alint: \"0.19.0\"\nalint: \"0.20.0\"",
         ] {
             assert!(
-                ayaml::from_str::<ConfigRequirements>(invalid).is_err(),
+                ayaml::compat::from_str::<ConfigRequirements>(invalid).is_err(),
                 "{invalid:?} should fail"
             );
         }

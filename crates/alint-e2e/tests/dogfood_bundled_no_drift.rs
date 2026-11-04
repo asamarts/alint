@@ -102,7 +102,7 @@ fn rules_by_id(path: &Path) -> BTreeMap<String, Value> {
     let Ok(text) = std::fs::read_to_string(path) else {
         return out;
     };
-    let Ok(doc) = ayaml::from_str::<Value>(&text) else {
+    let Ok(doc) = ayaml::compat::from_str::<Value>(&text) else {
         return out;
     };
     let Some(rules) = doc.get("rules").and_then(Value::as_sequence) else {

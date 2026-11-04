@@ -534,7 +534,7 @@ mod tests {
 
     #[test]
     fn facts_get_hints_only_when_they_search_whole_files() {
-        let facts: Vec<FactSpec> = ayaml::from_str(
+        let facts: Vec<FactSpec> = ayaml::compat::from_str(
             "- id: whole_file\n  file_content_matches:\n    paths: VERSION\n    pattern: '^[0-9]+[.][0-9]+$'\n\
              - id: extracted\n  file_content_matches:\n    paths: global.json\n    extract: { json: \"$.sdk.version\" }\n    pattern: '^9[.]0[.]306$'\n",
         )

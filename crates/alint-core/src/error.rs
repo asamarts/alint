@@ -152,7 +152,7 @@ mod tests {
         // The `#[from] ayaml::Error` derive lets `?` lift
         // a YAML parse failure into our Error type without
         // boilerplate. Sanity-check the impl is wired.
-        let parse: std::result::Result<i32, _> = ayaml::from_str("not: yaml: [");
+        let parse: std::result::Result<i32, _> = ayaml::compat::from_str("not: yaml: [");
         let yaml_err = parse.unwrap_err();
         let our_err: Error = yaml_err.into();
         assert!(matches!(our_err, Error::Yaml(_)));

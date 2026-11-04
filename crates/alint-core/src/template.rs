@@ -878,7 +878,7 @@ mod tests {
     }
 
     fn yaml(s: &str) -> ayaml::Mapping {
-        ayaml::from_str(s).unwrap()
+        ayaml::compat::from_str(s).unwrap()
     }
 
     fn get<'a>(m: &'a ayaml::Mapping, path: &[&str]) -> &'a ayaml::Value {

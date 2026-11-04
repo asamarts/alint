@@ -23,7 +23,7 @@ impl Rule for UnrelatedTraceRule {
 
 fn trace_spec(id: &str, level: &str, paths: &str, sensitive: bool) -> Arc<crate::RuleSpec> {
     Arc::new(
-        ayaml::from_str(&format!(
+        ayaml::compat::from_str(&format!(
             "id: {id}\nkind: nested_scope_fixture\nlevel: {level}\npaths: \"{paths}\"\n\
                  sensitive: {sensitive}\n"
         ))
@@ -240,7 +240,7 @@ fn trace_represents_changed_expect_manifest_git_and_time_gates() {
     );
 
     let expect_spec: Arc<crate::RuleSpec> = Arc::new(
-        ayaml::from_str(
+        ayaml::compat::from_str(
             "id: expect\nkind: nested_scope_fixture\nlevel: error\n\
                  paths: \"**/*.md\"\nexpect_matches: true\n",
         )
@@ -345,8 +345,10 @@ fn trace_represents_changed_expect_manifest_git_and_time_gates() {
             .any(|stage| stage.reason == TraceReason::GitUnavailable)
     );
     let git_spec: Arc<crate::RuleSpec> = Arc::new(
-        ayaml::from_str("id: git\nkind: nested_git_fixture\nlevel: error\npaths: \"**/*.txt\"\n")
-            .unwrap(),
+        ayaml::compat::from_str(
+            "id: git\nkind: nested_git_fixture\nlevel: error\npaths: \"**/*.txt\"\n",
+        )
+        .unwrap(),
     );
     let git = Engine::from_entries(
         vec![traced_entry(

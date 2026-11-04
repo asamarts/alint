@@ -1055,7 +1055,12 @@ pub fn parse(yaml: &str) -> Result<Config> {
             "YAML alias expansion exceeds the maximum supported size".to_string(),
         ));
     }
-    let mut config: Config = match ayaml::from_str(yaml) {
+    if alint_core::yaml_depth::bom_alias_bomb(yaml) {
+        return Err(Error::Other(
+            "YAML alias expansion exceeds the maximum supported size".to_string(),
+        ));
+    }
+    let mut config: Config = match ayaml::compat::from_str(yaml) {
         Ok(config) => config,
         Err(parse_error) => {
             if let Err(error @ Error::Other(_)) =
@@ -1063,7 +1068,10 @@ pub fn parse(yaml: &str) -> Result<Config> {
             {
                 return Err(error);
             }
-            return Err(Error::Yaml(parse_error));
+            return Err(Error::Yaml(alint_core::yaml_depth::map_compat_error(
+                yaml,
+                parse_error,
+            )));
         }
     };
     if config.requires.is_some() {

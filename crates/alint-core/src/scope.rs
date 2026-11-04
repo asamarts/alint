@@ -520,7 +520,7 @@ mod tests {
         let yaml = "id: t\nkind: filename_case\npaths: \"**/*.rs\"\n\
                     scope_filter:\n  has_ancestor: marker.lock\n\
                     case: snake\nlevel: error\n";
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let scope = Scope::from_spec(&spec).unwrap();
         let entries = vec![
             FileEntry {

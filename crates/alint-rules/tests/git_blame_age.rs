@@ -60,7 +60,7 @@ fn build_engine(pattern: &str, max_age_days: u64) -> Engine {
          max_age_days: {max_age_days}\n\
          level: warning\n",
     );
-    let spec: Arc<alint_core::RuleSpec> = Arc::new(ayaml::from_str(&yaml).unwrap());
+    let spec: Arc<alint_core::RuleSpec> = Arc::new(ayaml::compat::from_str(&yaml).unwrap());
     let registry = builtin_registry();
     let rule = registry.build(&spec).unwrap();
     Engine::from_entries(vec![RuleEntry::new(rule).with_spec(spec)], registry)
@@ -200,7 +200,7 @@ max_age_days: 180
 level: warning
 message: \"`{{ctx.match}}` marker is ancient — resolve or remove\"
 ";
-    let spec: alint_core::RuleSpec = ayaml::from_str(yaml).unwrap();
+    let spec: alint_core::RuleSpec = ayaml::compat::from_str(yaml).unwrap();
     let registry = builtin_registry();
     let rule = registry.build(&spec).unwrap();
     let engine = Engine::from_entries(vec![RuleEntry::new(rule)], registry)
@@ -249,7 +249,7 @@ fn nested_parent_message_preserves_analysis_date() {
     std::fs::write(root.join("pkg/src/a.rs"), "// TODO old marker\n").unwrap();
     commit_with_date(root, "pkg/src/a.rs", "ancient", "2000-01-01T00:00:00Z");
 
-    let spec: alint_core::RuleSpec = ayaml::from_str(
+    let spec: alint_core::RuleSpec = ayaml::compat::from_str(
         "id: per-package\n\
          kind: for_each_dir\n\
          select: pkg\n\
@@ -334,7 +334,7 @@ pattern: 'TODO'
 max_age_days: 180
 level: error
 ";
-    let spec: alint_core::RuleSpec = ayaml::from_str(yaml).unwrap();
+    let spec: alint_core::RuleSpec = ayaml::compat::from_str(yaml).unwrap();
     let registry = builtin_registry();
     let rule = registry.build(&spec).unwrap();
     let engine = Engine::from_entries(vec![RuleEntry::new(rule)], registry)

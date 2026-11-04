@@ -507,14 +507,14 @@ mod tests {
     fn untagged_enums_name_accepted_forms_not_internal_enum() {
         // A value matching no variant reports the accepted forms (via
         // `#[serde(expecting)]`), not the internal untagged-enum name.
-        let n = ayaml::from_str::<NormalizeSpec>("42")
+        let n = ayaml::compat::from_str::<NormalizeSpec>("42")
             .unwrap_err()
             .to_string();
         assert!(
             n.contains("a normalize transform") && !n.contains("NormalizeSpec"),
             "NormalizeSpec: {n}"
         );
-        let t = ayaml::from_str::<TargetsSpec>("42")
+        let t = ayaml::compat::from_str::<TargetsSpec>("42")
             .unwrap_err()
             .to_string();
         assert!(

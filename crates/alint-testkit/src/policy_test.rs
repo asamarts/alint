@@ -515,7 +515,7 @@ pub fn has_policy_test_discriminator(input: &str) -> bool {
     if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(input) {
         return false;
     }
-    ayaml::from_str::<ayaml::Value>(input).is_ok_and(|value| {
+    ayaml::compat::from_str::<ayaml::Value>(input).is_ok_and(|value| {
         value
             .as_mapping()
             .is_some_and(|mapping| mapping.contains_key("test_version"))
@@ -534,7 +534,7 @@ impl PolicyTest {
         if !yaml_guards.expansion_within_limit(input) {
             return Err(PolicyTestParseError::AliasExpansion);
         }
-        let value: ayaml::Value = ayaml::from_str(input)?;
+        let value: ayaml::Value = ayaml::compat::from_str(input)?;
         if contains_tag(&value) {
             return Err(PolicyTestParseError::ExplicitTag);
         }

@@ -594,7 +594,7 @@ level: error
 paths: "*.txt"
 command: []
 "#;
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let err = build(&spec).expect_err("empty argv must error");
         assert!(format!("{err}").contains("argv must not be empty"));
     }
@@ -607,7 +607,7 @@ kind: command
 level: error
 command: ["/bin/true"]
 "#;
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let err = build(&spec).expect_err("missing paths must error");
         assert!(format!("{err}").contains("requires a `paths` field"));
     }
@@ -624,7 +624,7 @@ command: ["/bin/true"]
 fix:
   file_remove: {}
 "#;
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let err = build(&spec).expect_err("an incompatible fix op must error");
         assert!(format!("{err}").contains("file_remove"), "{err}");
         assert!(
@@ -645,7 +645,7 @@ fix:
   command:
     run: ["eslint", "--fix", "{path}"]
 "#;
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let rule = build(&spec).expect("a command fix must build");
         assert!(rule.fixer().is_some(), "the command fix attaches a fixer");
     }
@@ -662,7 +662,7 @@ fix:
   command:
     run: []
 "#;
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let err = build(&spec).expect_err("an empty run argv must error");
         assert!(format!("{err}").contains("run"), "{err}");
     }
@@ -689,7 +689,7 @@ scope_filter:
   has_ancestor: marker.lock
 command: ["/bin/sh", "-c", "exit 1"]
 "#;
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let r = build(&spec).unwrap();
         let v = r.evaluate(&ctx(tmp.path(), &index)).unwrap();
         assert_eq!(v.len(), 1, "only in-scope file should fire: {v:?}");

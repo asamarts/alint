@@ -293,7 +293,7 @@ pattern: 'TODO'
 max_age_days: 0
 level: warning
 ";
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let err = build(&spec).unwrap_err();
         assert!(
             err.to_string().contains("max_age_days"),
@@ -311,7 +311,7 @@ pattern: '[unterminated'
 max_age_days: 7
 level: warning
 ";
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         assert!(build(&spec).is_err());
     }
 
@@ -327,7 +327,7 @@ level: warning
 fix:
   file_remove: {}
 ";
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let err = build(&spec).unwrap_err();
         assert!(err.to_string().contains("no fix"), "unexpected: {err}");
     }
@@ -341,7 +341,7 @@ pattern: 'TODO'
 max_age_days: 7
 level: warning
 ";
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let err = build(&spec).unwrap_err();
         assert!(err.to_string().contains("paths"), "unexpected: {err}");
     }
@@ -367,7 +367,7 @@ scope_filter:
   has_ancestor: marker.lock
 level: warning
 ";
-        let spec: RuleSpec = ayaml::from_str(yaml).unwrap();
+        let spec: RuleSpec = ayaml::compat::from_str(yaml).unwrap();
         let r = build(&spec).unwrap();
         assert!(
             r.path_scope()

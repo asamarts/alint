@@ -156,6 +156,49 @@ fn expansion_within_limit_with(text: &str, max: usize) -> bool {
     !contains_alias(text) || expansion_budget_pass(text, max)
 }
 
+/// Map a libyaml-compat parse error into the product-facing diagnostics that
+/// used to live in ayaml's compatibility layer.
+///
+/// ayaml's public compatibility module no longer carries product-specific
+/// error strings or the BOM alias-bomb heuristic; the consumer owns them.
+pub fn map_compat_error(input: &str, error: ayaml::Error) -> ayaml::Error {
+    let message = error.to_string();
+    if !message.starts_with("requires.alint:")
+        && (message.contains("ConfigRequirements") || message.contains("StableVersion"))
+    {
+        let mapped = ayaml::Error::new(
+            ayaml::ErrorKind::Serde,
+            format!("requires.alint: {message}"),
+        );
+        return if let Some(span) = error.span() {
+            mapped.with_span(span)
+        } else {
+            mapped
+        };
+    }
+    if bom_alias_bomb(input) {
+        return ayaml::Error::new(
+            ayaml::ErrorKind::Limit,
+            "alias expansion exceeds the maximum supported size",
+        );
+    }
+    error
+}
+
+/// Whether a BOM-prefixed document hides a large alias run behind the
+/// libyaml line-one desync that the lexer cannot see. The product keeps this
+/// guard even though the public parser no longer does.
+#[must_use]
+pub fn bom_alias_bomb(input: &str) -> bool {
+    let mut rest = input;
+    let mut boms = 0;
+    while let Some(after) = rest.strip_prefix('\u{feff}') {
+        rest = after;
+        boms += 1;
+    }
+    boms > 0 && rest.starts_with("--- ") && rest.bytes().filter(|byte| *byte == b'*').count() > 100
+}
+
 /// The discard-only counting pass of [`expansion_within_limit`], for text that
 /// holds an alias.
 fn expansion_budget_pass(text: &str, max: usize) -> bool {
@@ -165,7 +208,7 @@ fn expansion_budget_pass(text: &str, max: usize) -> bool {
         remaining: &remaining,
         exceeded: &exceeded,
     };
-    let result = ayaml::from_str_seed(text, seed);
+    let result = ayaml::compat::from_str_seed(text, seed);
     // D28: ayaml enforces its own alias budget before the visitor sees every
     // node. An ayaml limit error therefore means the document is over budget;
     // treat it exactly like a NodeBudget overflow instead of letting the
@@ -1122,17 +1165,17 @@ mod tests {
         let at = MAX_YAML_FLOW_DEPTH;
         let ok = bomb(at);
         assert!(flow_depth_within_limit(&ok));
-        let parsed = ayaml::from_str::<serde_json::Value>(&ok).unwrap();
+        let parsed = ayaml::compat::from_str::<serde_json::Value>(&ok).unwrap();
         assert_eq!(crate::Format::Yaml.parse(&ok).unwrap(), parsed);
         let over = bomb(at + 1);
-        assert!(ayaml::from_str::<serde_json::Value>(&over).is_err());
-        assert!(ayaml::from_str::<ayaml::Value>(&over).is_err());
+        assert!(ayaml::compat::from_str::<serde_json::Value>(&over).is_err());
+        assert!(ayaml::compat::from_str::<ayaml::Value>(&over).is_err());
         assert!(!flow_depth_within_limit(&over));
         // Curly flow maps count the same way.
         let maps = |n: usize| format!("{}1{}", "{a: ".repeat(n), "}".repeat(n));
-        assert!(ayaml::from_str::<serde_json::Value>(&maps(at)).is_ok());
+        assert!(ayaml::compat::from_str::<serde_json::Value>(&maps(at)).is_ok());
         assert!(flow_depth_within_limit(&maps(at)));
-        assert!(ayaml::from_str::<serde_json::Value>(&maps(at + 1)).is_err());
+        assert!(ayaml::compat::from_str::<serde_json::Value>(&maps(at + 1)).is_err());
         assert!(!flow_depth_within_limit(&maps(at + 1)));
     }
 
@@ -1165,7 +1208,7 @@ mod tests {
         ];
         for case in cases {
             // Sanity: each case is genuinely parseable YAML (so the bomb is real).
-            let parsed: Result<ayaml::Value, _> = ayaml::from_str(case);
+            let parsed: Result<ayaml::Value, _> = ayaml::compat::from_str(case);
             assert!(parsed.is_ok(), "case must be valid YAML: {case:?}");
             assert!(
                 contains_alias(case),
@@ -1233,7 +1276,7 @@ mod tests {
     /// its 128-level recursion limit -- i.e. the fixture's bracket run is genuine
     /// structure, not text hidden inside a scalar or comment.
     fn libyaml_sees_deep_nesting(doc: &str) -> bool {
-        ayaml::from_str::<ayaml::Value>(doc)
+        ayaml::compat::from_str::<ayaml::Value>(doc)
             .err()
             .is_some_and(|e| e.to_string().contains("recursion limit"))
     }
@@ -1264,11 +1307,13 @@ mod tests {
     /// `true` when the REAL parser sees a genuine alias token (an undefined
     /// `*undefined_zz` reference is reported as an unknown anchor).
     fn libyaml_sees_alias(doc: &str) -> bool {
-        ayaml::from_str::<ayaml::Value>(doc).err().is_some_and(|e| {
-            let message = e.to_string();
-            message.contains("unknown anchor")
-                || (matches!(e.kind(), ayaml::ErrorKind::Limit) && message.contains("alias"))
-        })
+        ayaml::compat::from_str::<ayaml::Value>(doc)
+            .err()
+            .is_some_and(|e| {
+                let message = e.to_string();
+                message.contains("unknown anchor")
+                    || (matches!(e.kind(), ayaml::ErrorKind::Limit) && message.contains("alias"))
+            })
     }
 
     fn bomb(n: usize) -> String {
@@ -1344,7 +1389,7 @@ mod tests {
         ];
         for doc in &ok {
             assert!(
-                ayaml::from_str::<ayaml::Value>(doc).is_ok(),
+                ayaml::compat::from_str::<ayaml::Value>(doc).is_ok(),
                 "fixture must be valid YAML: {doc:?}"
             );
             assert!(flow_depth_within_limit(doc), "false reject: {doc:?}");
@@ -1409,7 +1454,7 @@ mod tests {
         // ayaml rejects this BOM-desynced document before replaying aliases;
         // either an early parse error or the expansion budget is a safe outcome.
         assert!(
-            ayaml::from_str::<ayaml::Value>(&doc).is_err()
+            ayaml::compat::from_str::<ayaml::Value>(&doc).is_err()
                 || !expansion_within_limit_with(&doc, 10_000 * YAML_NODE_COST)
         );
         // A BOM before an ordinary document still scans like the document.
@@ -1630,7 +1675,7 @@ mod tests {
             )
         }));
         assert!(contains_alias(&doc));
-        assert!(ayaml::from_str::<ayaml::Value>(&doc).is_ok());
+        assert!(ayaml::compat::from_str::<ayaml::Value>(&doc).is_ok());
         assert!(expansion_within_limit_with(
             &doc,
             MAX_YAML_EXPANSION_BYTES / 10

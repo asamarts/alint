@@ -1194,7 +1194,7 @@ fn fused_extended_marking_matches_the_separate_passes() {
     let ordered = |m: &Mapping| ayaml::to_string(m).unwrap();
     for doc in docs {
         for classes in class_sets {
-            let base: Mapping = ayaml::from_str(doc).unwrap();
+            let base: Mapping = ayaml::compat::from_str(doc).unwrap();
             let mut separate = vec![base.clone()];
             let mut fused = vec![base];
             // Two levels of an `extends:` chain, then the same source again.

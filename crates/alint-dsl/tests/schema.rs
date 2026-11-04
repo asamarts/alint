@@ -14,7 +14,7 @@ fn compile_schema() -> jsonschema::Validator {
 }
 
 fn yaml_to_json(yaml: &str) -> serde_json::Value {
-    let value: ayaml::Value = ayaml::from_str(yaml).expect("yaml should parse");
+    let value: ayaml::Value = ayaml::compat::from_str(yaml).expect("yaml should parse");
     serde_json::to_value(value).expect("yaml → json should round-trip")
 }
 
@@ -117,7 +117,7 @@ fn requirement_schema_matches_the_runtime_literal_grammar() {
         let yaml = format!("version: 1\nrequires:\n  alint: '{accepted}'\nrules: []\n");
         let instance = yaml_to_json(&yaml);
         assert_valid(&validator, &instance, accepted);
-        ayaml::from_str::<alint_core::Config>(&yaml).unwrap_or_else(|error| {
+        ayaml::compat::from_str::<alint_core::Config>(&yaml).unwrap_or_else(|error| {
             panic!("runtime rejected schema-valid requirement {accepted:?}: {error}")
         });
     }
@@ -134,7 +134,7 @@ fn requirement_schema_matches_the_runtime_literal_grammar() {
         let instance = yaml_to_json(&yaml);
         assert_invalid(&validator, &instance, rejected);
         assert!(
-            ayaml::from_str::<alint_core::Config>(&yaml).is_err(),
+            ayaml::compat::from_str::<alint_core::Config>(&yaml).is_err(),
             "runtime accepted schema-invalid requirement {rejected:?}"
         );
     }
@@ -147,7 +147,7 @@ fn requirement_schema_matches_the_runtime_literal_grammar() {
         let instance = yaml_to_json(yaml);
         assert_invalid(&validator, &instance, yaml);
         assert!(
-            ayaml::from_str::<alint_core::Config>(yaml).is_err(),
+            ayaml::compat::from_str::<alint_core::Config>(yaml).is_err(),
             "runtime accepted {yaml:?}"
         );
     }
@@ -230,7 +230,7 @@ fn sensitive_rejects_non_boolean_values() {
 #[test]
 fn fixture_covers_every_registered_rule_kind() {
     let yaml = include_str!("fixtures/all_kinds.yaml");
-    let parsed: ayaml::Value = ayaml::from_str(yaml).expect("fixture parses");
+    let parsed: ayaml::Value = ayaml::compat::from_str(yaml).expect("fixture parses");
     let fixture_kinds: std::collections::HashSet<String> = parsed
         .as_mapping()
         .and_then(|m| m.get(ayaml::Value::String("rules".into())))
@@ -501,7 +501,7 @@ fn fix_schema_matches_every_fix_op() {
         ] {
             let body = format!("{base}{extra}");
             let fix_yaml = format!("{op}:\n{}", indent(&body));
-            let serde_ok = ayaml::from_str::<alint_core::FixSpec>(&fix_yaml).is_ok();
+            let serde_ok = ayaml::compat::from_str::<alint_core::FixSpec>(&fix_yaml).is_ok();
             let fix = yaml_to_json(&fix_yaml);
             assert_eq!(
                 validator.is_valid(&fix),

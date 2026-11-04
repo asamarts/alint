@@ -137,7 +137,7 @@ fn read_existing_extends(root: &Path) -> Vec<String> {
         if !yaml_guards.flow_within_limit() || !yaml_guards.expansion_within_limit(&body) {
             return Vec::new();
         }
-        let Ok(doc) = ayaml::from_str::<ayaml::Value>(&body) else {
+        let Ok(doc) = ayaml::compat::from_str::<ayaml::Value>(&body) else {
             return Vec::new();
         };
         return collect_extends(&doc);
