@@ -382,6 +382,37 @@ fn nested_when_reads_sensitive_input(
     })
 }
 
+/// A copy of an effective rule whose possibly secret values (see
+/// [`alint_core::configuration_field_may_be_secret`]) are masked, or `None`
+/// when the rule has none. The private markers stay as they are: they hold
+/// field names and sources, not values.
+pub(crate) fn masked_rule_mapping(mapping: &Mapping) -> Option<Mapping> {
+    let environment_fields: std::collections::BTreeSet<String> = sensitive_fields(mapping)
+        .into_iter()
+        .flatten()
+        .filter(|(_, marked)| marked.as_bool().unwrap_or(false))
+        .filter_map(|(field, _)| field.as_str().map(str::to_string))
+        .collect();
+    let sensitive = mapping
+        .get("sensitive")
+        .and_then(yaml_serde::Value::as_bool)
+        .unwrap_or(false);
+    if !sensitive && environment_fields.is_empty() {
+        return None;
+    }
+    let mut masked = mapping.clone();
+    for (field, value) in &mut masked {
+        let secret = !is_internal_field(field)
+            && field.as_str().is_some_and(|field| {
+                alint_core::configuration_field_may_be_secret(sensitive, &environment_fields, field)
+            });
+        if secret {
+            alint_core::mask_configuration_strings(value);
+        }
+    }
+    Some(masked)
+}
+
 /// Consume the private sparse marker before typed rule deserialization.
 pub(crate) fn take_sensitive_fields(mapping: &mut Mapping) -> std::collections::BTreeSet<String> {
     mapping

@@ -332,7 +332,8 @@ fn parse_config_interpolated_inner_with_environment(
 ) -> Result<RawConfig> {
     fn redact_interpolated_error(source: &str) -> Error {
         Error::Other(format!(
-            "{source}: could not deserialize interpolated config: <redacted>"
+            "{source}: could not deserialize interpolated config: <redacted> (the error \
+             could quote a value read from the environment)"
         ))
     }
 
@@ -378,13 +379,23 @@ fn parse_config_interpolated_inner_with_environment(
                     .collect()
             })
             .unwrap_or_default();
+        // The same document with every environment value masked: an error it
+        // reproduces exactly cannot quote one of those values.
+        let masked = has_sensitive_interpolation.then(|| value.clone());
         crate::interp::interpolate_value(&mut value, &|name| environment.get(name))
             .map_err(|error| Error::Other(format!("{source}: interpolation error: {error}")))?;
         let mut config: RawConfig = yaml_serde::from_value(value).map_err(|error| {
-            if has_sensitive_interpolation {
-                redact_interpolated_error(&source)
-            } else {
+            let reproduced = masked.is_none_or(|mut masked| {
+                let mask = |_: &str| Some(alint_core::CONFIGURATION_MASK.to_string());
+                crate::interp::interpolate_value(&mut masked, &mask).is_ok()
+                    && yaml_serde::from_value::<RawConfig>(masked)
+                        .err()
+                        .is_some_and(|masked_error| masked_error.to_string() == error.to_string())
+            });
+            if reproduced {
                 error.into()
+            } else {
+                redact_interpolated_error(&source)
             }
         })?;
         // Reject user-authored private markers before adding the loader's own
@@ -1395,7 +1406,7 @@ rules:
     #[test]
     fn sensitive_typed_and_builder_errors_never_echo_interpolated_values() {
         let typed = parse_config_interpolated_inner_with_environment(
-            "version: 1\nrules:\n  - id: typed\n    kind: file_exists\n    paths: README.md\n    expect_matches: '{{env.SECRET}}'\n    level: warning\n",
+            "version: 1\nrules:\n  - id: typed\n    kind: file_content_forbidden\n    paths: '**/*.txt'\n    pattern: x\n    expect_matches: '{{env.SECRET}}'\n    level: warning\n",
             Path::new(".alint.yml"),
             &SensitiveFieldEnvironment,
         )
@@ -1418,6 +1429,94 @@ rules:
         let error = registry.build(&config.rules[0]).unwrap_err().to_string();
         assert!(error.contains("<redacted>"), "{error}");
         assert!(!error.contains("builder-canary"), "{error}");
+    }
+
+    /// The first error loading `yaml` (read with `environment`), finalizing it,
+    /// and building each rule with its nested rules, as `alint check` does.
+    fn first_configuration_error(
+        yaml: &str,
+        environment: &dyn crate::EnvironmentProvider,
+    ) -> String {
+        let registry = alint_rules::builtin_registry();
+        parse_config_interpolated_inner_with_environment(yaml, Path::new(".alint.yml"), environment)
+            .and_then(|raw| raw.finalize(Some(registry.catalog())))
+            .and_then(|config| {
+                for spec in &config.rules {
+                    let rule = registry.build(spec)?;
+                    registry.validate_nested(spec, rule.as_ref())?;
+                }
+                Ok(())
+            })
+            .unwrap_err()
+            .to_string()
+    }
+
+    #[test]
+    fn structural_errors_stay_readable_beside_a_secret() {
+        // Each error names only fields, kinds or option keys, never a value, so
+        // a rule that also reads the environment or sets `sensitive: true` must
+        // not hide it.
+        for (yaml, expected) in [
+            (
+                // The facebook/react shape: an unsupported `scope_filter`
+                // predicate on a rule whose message reads the environment.
+                "version: 1\nrules:\n  - id: fixups\n    kind: git_commit_no_fixup\n    level: error\n    message: 'fixup ({{env.SECRET}})'\n    scope_filter: {changed_since: main}\n",
+                "`scope_filter.changed_since` is not supported by `git_commit_no_fixup`",
+            ),
+            (
+                "version: 1\nrules:\n  - id: exists\n    kind: file_exists\n    paths: README.md\n    level: error\n    sensitive: true\n    expect_matches: true\n",
+                "`expect_matches` is not supported by `file_exists`",
+            ),
+            (
+                // An unknown option, caught by the rule builder.
+                "version: 1\nrules:\n  - id: scan\n    kind: file_content_forbidden\n    paths: '**/*.txt'\n    pattern: '{{env.SECRET}}'\n    colour: red\n    level: warning\n",
+                "unknown field `colour`",
+            ),
+            (
+                // A nested rule's unknown option, beside a secret in the parent.
+                "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    select: 'crates/*'\n    message: '{{env.SECRET}}'\n    level: error\n    require:\n      - kind: file_exists\n        paths: '{path}/Cargo.toml'\n        colour: red\n",
+                "unknown field `colour`",
+            ),
+            (
+                // A top-level key error in a file that reads the environment.
+                "version: 1\nrulez: []\nrules:\n  - id: r\n    kind: file_exists\n    paths: '{{env.SECRET}}'\n    level: error\n",
+                "unknown field `rulez`",
+            ),
+        ] {
+            let error = first_configuration_error(yaml, &SensitiveFieldEnvironment);
+            assert!(error.contains(expected), "{yaml}\n=> {error}");
+            assert!(!error.contains("<redacted>"), "{error}");
+            assert!(!error.contains("canary-secret"), "{error}");
+        }
+    }
+
+    #[test]
+    fn errors_that_quote_a_secret_stay_redacted() {
+        for (yaml, environment, secret) in [
+            (
+                // A literal regex in a rule marked sensitive.
+                "version: 1\nrules:\n  - id: scan\n    kind: file_content_forbidden\n    paths: '**/*.txt'\n    pattern: '[literal-canary'\n    sensitive: true\n    level: warning\n",
+                &SensitiveFieldEnvironment as &dyn crate::EnvironmentProvider,
+                "literal-canary",
+            ),
+            (
+                // A nested rule's invalid regex read from the environment.
+                "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    select: 'crates/*'\n    level: error\n    require:\n      - kind: file_content_forbidden\n        paths: '{path}/*.txt'\n        pattern: '{{env.SECRET}}'\n",
+                &InvalidRegexEnvironment,
+                "builder-canary",
+            ),
+            (
+                // A typed value read from the environment, beside a key error
+                // the masked copy would reach first.
+                "version: '{{env.SECRET}}'\nrulez: []\n",
+                &SensitiveFieldEnvironment,
+                "canary-secret",
+            ),
+        ] {
+            let error = first_configuration_error(yaml, environment);
+            assert!(error.contains("<redacted>"), "{yaml}\n=> {error}");
+            assert!(!error.contains(secret), "{error}");
+        }
     }
 
     #[test]

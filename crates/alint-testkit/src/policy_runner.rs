@@ -393,8 +393,7 @@ impl Runner {
                     return Ok(prepared_configuration_error(&error.to_string(), context));
                 }
             };
-            if let Err(error) = rule.validate_nested(&registry) {
-                let error = spec.redact_configuration_error(error);
+            if let Err(error) = registry.validate_nested(spec, rule.as_ref()) {
                 return Ok(prepared_configuration_error(&error.to_string(), context));
             }
             let mut entry = RuleEntry::new(rule).with_spec(Arc::new(spec.clone()));
@@ -402,7 +401,7 @@ impl Runner {
                 let expression = match alint_core::when::parse(source) {
                     Ok(expression) => expression,
                     Err(error) => {
-                        let message = spec.redact_configuration_message(error);
+                        let message = spec.redact_when_error(error);
                         return Ok(prepared_configuration_error(&message, context));
                     }
                 };

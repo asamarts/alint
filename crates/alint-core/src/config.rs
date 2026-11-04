@@ -379,6 +379,44 @@ where
     }
 }
 
+/// The placeholder that replaces a possibly secret configuration value.
+#[doc(hidden)]
+pub const CONFIGURATION_MASK: &str = "<redacted>";
+
+/// The message of a configuration error that could quote a secret value.
+#[doc(hidden)]
+pub const REDACTED_CONFIGURATION_ERROR: &str = "<redacted> (the error could quote a value read \
+     from the environment or set in a `sensitive: true` rule)";
+
+/// Whether a rule field's value may be secret in a configuration error: it was
+/// read from the environment (`environment_fields`), or the rule sets
+/// `sensitive: true` and the field is not part of the rule's identity.
+#[doc(hidden)]
+#[must_use]
+pub fn configuration_field_may_be_secret(
+    sensitive: bool,
+    environment_fields: &std::collections::BTreeSet<String>,
+    field: &str,
+) -> bool {
+    environment_fields.contains(field)
+        || (sensitive && !matches!(field, "id" | "kind" | "level" | "sensitive"))
+}
+
+/// Replace every string in `value`, at any depth, with [`CONFIGURATION_MASK`].
+/// Mapping keys are names, not values, and stay as written.
+#[doc(hidden)]
+pub fn mask_configuration_strings(value: &mut yaml_serde::Value) {
+    match value {
+        yaml_serde::Value::String(text) => *text = CONFIGURATION_MASK.to_string(),
+        yaml_serde::Value::Sequence(items) => items.iter_mut().for_each(mask_configuration_strings),
+        yaml_serde::Value::Mapping(mapping) => mapping
+            .iter_mut()
+            .for_each(|(_, item)| mask_configuration_strings(item)),
+        yaml_serde::Value::Tagged(tagged) => mask_configuration_strings(&mut tagged.value),
+        yaml_serde::Value::Null | yaml_serde::Value::Bool(_) | yaml_serde::Value::Number(_) => {}
+    }
+}
+
 /// YAML-level description of a rule before it is instantiated into a `Box<dyn Rule>`
 /// by a [`RuleBuilder`](crate::registry::RuleBuilder).
 #[derive(Debug, Clone, Deserialize)]
@@ -1224,28 +1262,103 @@ impl RuleSpec {
     }
 
     /// Fail closed when an error may quote environment-derived or explicitly
-    /// sensitive configuration. Structural rule identity remains visible.
+    /// sensitive configuration. `rerun` repeats the failed step on
+    /// [`Self::masked_configuration`]; the error stays readable only when that
+    /// copy fails with the identical message, which therefore cannot depend on
+    /// a masked value. Structural rule identity remains visible either way.
     #[doc(hidden)]
-    pub fn redact_configuration_error(&self, error: crate::Error) -> crate::Error {
+    pub fn redact_configuration_error(
+        &self,
+        error: crate::Error,
+        rerun: impl FnOnce(&Self) -> crate::Result<()>,
+    ) -> crate::Error {
         if !self.has_sensitive_configuration() {
             return error;
         }
+        let message = error.to_string();
+        let reproduced = self
+            .masked_configuration()
+            .and_then(|masked| rerun(&masked).err())
+            .is_some_and(|masked_error| masked_error.to_string() == message);
+        if reproduced {
+            return error;
+        }
         if error.is_internal() {
-            crate::Error::internal("<redacted>")
+            crate::Error::internal(REDACTED_CONFIGURATION_ERROR)
         } else {
-            crate::Error::rule_config(&self.id, "<redacted>")
+            crate::Error::rule_config(&self.id, REDACTED_CONFIGURATION_ERROR)
         }
     }
 
-    /// Remove potentially sensitive detail from an error type not owned by
-    /// `alint-core::Error`, such as a condition parser diagnostic.
+    /// Remove potentially sensitive detail from a `when` parser diagnostic: it
+    /// quotes the condition, so it is hidden when the condition may be secret.
     #[doc(hidden)]
-    pub fn redact_configuration_message(&self, error: impl std::fmt::Display) -> String {
-        if self.has_sensitive_configuration() {
-            "<redacted>".to_string()
+    pub fn redact_when_error(&self, error: impl std::fmt::Display) -> String {
+        if configuration_field_may_be_secret(self.sensitive, &self.sensitive_fields, "when") {
+            REDACTED_CONFIGURATION_ERROR.to_string()
         } else {
             error.to_string()
         }
+    }
+
+    /// A copy whose possibly secret strings (see
+    /// [`configuration_field_may_be_secret`]) are replaced by `<redacted>`, so a
+    /// step repeated on it cannot quote them. `None` when such a value sits in a
+    /// typed field this cannot rewrite (`fix`, or a manifest-path
+    /// `scope_filter`); the caller then fails closed.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn masked_configuration(&self) -> Option<Self> {
+        let secret = |field: &str| {
+            configuration_field_may_be_secret(self.sensitive, &self.sensitive_fields, field)
+        };
+        let mask = || CONFIGURATION_MASK.to_string();
+        let mut masked = self.clone();
+        if secret("paths") {
+            masked.paths = masked.paths.map(|paths| match paths {
+                PathsSpec::Single(_) => PathsSpec::Single(mask()),
+                PathsSpec::Many(patterns) => {
+                    PathsSpec::Many(patterns.iter().map(|_| mask()).collect())
+                }
+                PathsSpec::IncludeExclude { include, exclude } => PathsSpec::IncludeExclude {
+                    include: include.iter().map(|_| mask()).collect(),
+                    exclude: exclude.iter().map(|_| mask()).collect(),
+                },
+            });
+        }
+        for (field, value) in [
+            ("message", &mut masked.message),
+            ("policy_url", &mut masked.policy_url),
+            ("when", &mut masked.when),
+        ] {
+            if secret(field) && value.is_some() {
+                *value = Some(mask());
+            }
+        }
+        if secret("fix") && masked.fix.is_some() {
+            return None;
+        }
+        if secret("scope_filter")
+            && let Some(scope) = &mut masked.scope_filter
+        {
+            if scope.include_manifest_paths.is_some() || scope.exclude_manifest_paths.is_some() {
+                return None;
+            }
+            if let Some(globs) = &mut scope.has_ancestor {
+                for glob in globs {
+                    *glob = mask();
+                }
+            }
+            if scope.changed_since.is_some() {
+                scope.changed_since = Some(mask());
+            }
+        }
+        for (field, value) in &mut masked.extra {
+            if field.as_str().is_some_and(secret) {
+                mask_configuration_strings(value);
+            }
+        }
+        Some(masked)
     }
 
     /// Reject any leftover option key on this spec — for rule kinds that take
@@ -1847,3 +1960,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "config_redaction_tests.rs"]
+mod redaction_tests;

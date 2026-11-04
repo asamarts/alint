@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- A configuration error is no longer replaced with `<redacted>` just because the
+  rule reads a value from the environment or sets `sensitive: true`. alint now
+  repeats the failed step with those values masked and shows the error when the
+  masked run fails the same way, so the message cannot quote one of them: an
+  unsupported field, an unknown option or a misplaced `scope_filter` predicate
+  is readable again, in `alint check`, `validate-config`, the language server
+  and `alint test`. An error that could quote a secret, such as an invalid
+  regex read from the environment, stays redacted and now says why. The same
+  applies to a whole configuration file that reads the environment.
+
 ### Performance
 
 - Nested rules (`for_each_dir`, `for_each_file`, `every_matching_has`) look up
