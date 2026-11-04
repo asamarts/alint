@@ -805,6 +805,8 @@ fn would_walk_skip_matches_the_walk_on_every_entry() {
         ".env",
         "a.log",
         "build/out.txt",
+        // A file named like a directory-only pattern (`build/`) is walked.
+        "tools/build",
         "scratch.txt",
         "excluded.txt",
         "reincluded.txt",
@@ -838,6 +840,8 @@ fn would_walk_skip_matches_the_walk_on_every_entry() {
             ("reincluded.txt", false),
             ("kept.txt", false),
             ("a.log", true),
+            ("build", true),
+            ("tools/build", false),
             ("d/e/keep.log", false),
             ("logs", false),
             ("logs/keep.txt", false),

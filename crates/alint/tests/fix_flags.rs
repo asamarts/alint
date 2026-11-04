@@ -221,6 +221,43 @@ fn dry_run_agrees_with_fix_when_a_create_would_not_stick() {
     assert_eq!(real.status.code(), Some(1));
 }
 
+// The walk also leaves out what git's global excludes file lists, so the dry
+// run predicts the same. Unix only: `ignore` expands every `~` in the
+// configured path, which mangles a Windows short temp path (`RUNNER~1`).
+#[cfg(unix)]
+#[test]
+fn dry_run_agrees_with_fix_under_the_global_excludes_file() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join(".alint.yml"), create_config(".env", ".env")).unwrap();
+    let excludes = tmp.path().join("global-ignore");
+    std::fs::write(&excludes, ".env\n").unwrap();
+    let gitconfig = tmp.path().join("gitconfig");
+    std::fs::write(
+        &gitconfig,
+        format!("[core]\n\texcludesFile = {}\n", excludes.display()),
+    )
+    .unwrap();
+
+    for args in [
+        &["fix", "--dry-run", "--format", "json"][..],
+        &["fix", "--format", "json"],
+    ] {
+        let output = Command::new(alint())
+            .args(args)
+            .current_dir(&root)
+            .env("GIT_CONFIG_GLOBAL", &gitconfig)
+            .output()
+            .expect("spawn alint");
+        let item = only_item(&output);
+        assert_eq!(item["status"], "skipped", "{args:?}: {item}");
+        assert_eq!(item["skip_kind"], "unresolved", "{args:?}: {item}");
+        assert_eq!(output.status.code(), Some(1), "{args:?}");
+    }
+    assert!(root.join(".env").exists(), "the real fix creates the file");
+}
+
 #[test]
 fn dry_run_flags_a_create_outside_the_rules_paths() {
     let tmp = tempfile::tempdir().unwrap();

@@ -880,10 +880,7 @@ pub fn would_walk_skip(root: &Path, opts: &WalkOptions, rel: &Path, is_dir: bool
     // nearest first, matched against absolute paths as the walk does.
     let (in_tree, canonical_root, parents, global) = if opts.respect_gitignore {
         let in_tree: Vec<DirIgnores> = (0..parts.len())
-            .map(|k| match k {
-                0 => DirIgnores::read(root),
-                _ => DirIgnores::read(&root.join(parts[..k].iter().collect::<PathBuf>())),
-            })
+            .map(|k| DirIgnores::read(&root.join(parts[..k].iter().collect::<PathBuf>())))
             .collect();
         let canonical_root = root.canonicalize().ok();
         let parents: Vec<DirIgnores> = canonical_root
@@ -933,12 +930,7 @@ pub fn would_walk_skip(root: &Path, opts: &WalkOptions, rel: &Path, is_dir: bool
         let found = nearest(|d| d.dot_ignore.as_ref())
             .or_else(|| nearest(|d| d.git_ignore.as_ref()))
             .or_else(|| nearest(|d| d.exclude.as_ref()))
-            .or_else(|| {
-                global
-                    .as_ref()
-                    .map(|gi| gi.matched(&path, is_dir))
-                    .filter(|m| !m.is_none())
-            });
+            .or_else(|| global.as_ref().map(|gi| gi.matched(&path, is_dir)));
         matches!(found, Some(Match::Ignore(_)))
     };
     // The path itself, and every ancestor directory (an excluded directory is
