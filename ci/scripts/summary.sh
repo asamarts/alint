@@ -78,8 +78,8 @@ row() {
   # also fires for packaging / docs / supply-chain / repo-config paths.
   row "Shell tests"  "$SHELL_TESTS_RESULT" "${SHELL_CHANGED:-false}"
   row "Plugin contract (witforge)" "${WITFORGE_RESULT:-skipped}" "$RUST_CHANGED"
-  row "Secrets inventory" "$SECRETS_INVENTORY_RESULT" "true"
-  row "Action pins" "${ACTION_PINS_RESULT:-skipped}" "true"
+  row "Secrets inventory" "${SECRETS_INVENTORY_RESULT:-}" "true"
+  row "Action pins" "${ACTION_PINS_RESULT:-}" "true"
   echo ""
 
   echo "### Bench Pipeline"
@@ -123,8 +123,16 @@ if [[ "${CHANGES_RESULT:-}" != "success" ]]; then
   echo "==> Detect Changes did not succeed (result: ${CHANGES_RESULT:-unset}); downstream skips are not passes" >&2
   FAILED=true
 fi
+# Secrets Inventory and Action Pins run on every event (no `needs`, no `if:`),
+# so anything but success failed to show the check holds: a cancel (a timeout,
+# a stalled `git ls-remote`), a skip, or a result missing from the env.
+for check in "Secrets inventory=${SECRETS_INVENTORY_RESULT:-}" "Action pins=${ACTION_PINS_RESULT:-}"; do
+  if [[ "${check#*=}" != "success" ]]; then
+    echo "==> ${check%%=*} did not succeed (result: ${check#*=}); it runs on every event" >&2
+    FAILED=true
+  fi
+done
 for result in \
-  "$SECRETS_INVENTORY_RESULT" "${ACTION_PINS_RESULT:-skipped}" \
   "$FMT_RESULT" "$MSRV_RESULT" "$CLIPPY_RESULT" "$TEST_RESULT" "$AUDIT_RESULT" \
   "$DENY_RESULT" "$SUPPLY_CHAIN_RESULT" "$BUILD_RESULT" "$DOCS_JOB_RESULT" \
   "$DOGFOOD_RESULT" "$BENCH_SMOKE_RESULT" "$EXAMPLES_RESULT" \

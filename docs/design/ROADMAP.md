@@ -828,9 +828,9 @@ impossible to ship.
   upload opt-in via `CODECOV_TOKEN`.
 - ✅ **`cargo mutants` nightly**:
   `.github/workflows/mutants.yml` rotated one crate per
-  night. Since v0.21 it runs on pull requests instead,
-  on the lines each one changes (`--in-diff`), as an
-  advisory job.
+  night. Since 2026-11-04 (#432, after v0.21.0) it
+  runs on pull requests instead, on the lines each one
+  changes (`--in-diff`), as an advisory job.
 - ✅ **Cross-platform CI**:
   `.github/workflows/cross-platform.yml` runs
   `cargo test --workspace --locked` on macOS-arm64 +
@@ -1709,7 +1709,7 @@ The only new user-facing surface is one rule kind.
   and `key_parity` implement, an injectable rule registry, and a draft WIT contract.
 
 ## v0.22: Completing the relation-layer port
-<!-- roadmap-public: blurb="The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus and the performance budgets held. The next general-linter phase starts only if this release meets those gates." -->
+<!-- roadmap-public: blurb="The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus, the performance budgets held, and the code only the new equals runs within a fixed line budget. The next general-linter phase starts only if this release meets those gates." -->
 
 Closes Phase 2 of
 [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)

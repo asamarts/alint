@@ -684,6 +684,7 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   compiled to a loop instead of unrolled comparisons. #422 generates the table
   and a `match` lookup from one list (`for_each_dir/1000` at -3.10% in CI).
   The fix ships in the next release; the owner decided against a v0.21.1.
-- **Next:** W4's remaining items ([`pre-release-audit.md`](pre-release-audit.md)
-  section 6), then v0.22, which must make the IR the only `cross_file`
-  `equals` path within ADR-0025's conditions as ADR-0026 measures them.
+- **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
+  within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
+  ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on
+  2026-11-04.

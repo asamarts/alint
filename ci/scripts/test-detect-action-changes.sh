@@ -125,8 +125,11 @@ WITFORGE_IF = "!cancelled() && !failure() && needs.changes.outputs.rust == 'true
 
 
 def first_command(step):
-    """The first command line of a step's `run:`, inline or as a block."""
-    m = re.search(r'^(?:\s+)?run:[ \t]*(?:[|>][-+]?|(?P<inline>\S.*?))?[ \t]*$', step, re.MULTILINE)
+    """The first command line of a step's `run:`, inline or as a literal (`|`)
+    block. A folded (`>`) block joins its lines into one command, so its first
+    line is not the whole command: it reads as the inline command `>` and fails
+    the check."""
+    m = re.search(r'^(?:\s+)?run:[ \t]*(?:\|[-+]?|(?P<inline>\S.*?))?[ \t]*$', step, re.MULTILINE)
     if not m:
         return None
     if m.group('inline'):
@@ -139,7 +142,8 @@ def witforge_job_errors(text):
     """The plugin contract job must really run its three scripts: each as the
     first command of its own step's `run:` (not in a comment or an echo, not
     after an `exit`), followed by plain arguments only (no `||`, `&&`, `;`,
-    pipe or redirect), under the default `bash -e` shell, the controls with
+    pipe, redirect or `\\` continuation), under the default `bash -e` shell with
+    no `BASH_ENV` and from the checkout root (no `working-directory:`), the controls with
     WITFORGE_REQUIRED=1, no step skipped or allowed to fail, and the job's
     own `if:` exactly the `rust` gate."""
     m = re.search(r'^  witforge:\n((?:    .*\n|\n)*)', text, re.MULTILINE)
@@ -155,11 +159,15 @@ def witforge_job_errors(text):
         out.append("the witforge job must not set continue-on-error")
     if re.search(r'^\s+(shell|defaults):', body, re.MULTILINE) or re.search(r'^defaults:', text, re.MULTILINE):
         out.append("the witforge job must run under the default shell (no `shell:` or `defaults:`)")
+    if re.search(r'^\s+working-directory:', body, re.MULTILINE):
+        out.append("the witforge job must run its scripts from the checkout root (no `working-directory:`)")
+    if re.search(r'\bBASH_ENV\b', text):
+        out.append("ci.yml must not set BASH_ENV, which runs a script before every bash step")
     for step in steps:
         if re.search(r'^        if:', step, re.MULTILINE) or step.startswith('if:'):
             out.append("no step of the witforge job may carry an `if:`")
     for script in ('install-witforge.sh', 'witforge-consumer.sh', 'test-witforge-consumer.sh'):
-        whole = re.compile(rf'ci/scripts/{re.escape(script)}(?:\s+(?:"[^"]*"|[^\s;&|<>()`\'"]+))*')
+        whole = re.compile(rf'ci/scripts/{re.escape(script)}(?:\s+(?:"[^"\\]*"|[^\s;&|<>()`\'"\\]+))*')
         owners = [step for step in steps if (first_command(step) or '') and whole.fullmatch(first_command(step))]
         if not owners:
             out.append(f"the witforge job must run ci/scripts/{script} as the whole first command of a step's run:")
@@ -189,6 +197,14 @@ mutants = {
     'later command masks the install': ci.replace(
         '          ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"\n',
         '          ci/scripts/install-witforge.sh "$RUNNER_TEMP/witforge"; true\n', 1),
+    'folded run block': ci.replace('        run: ci/scripts/witforge-consumer.sh\n',
+                                   '        run: >\n          ci/scripts/witforge-consumer.sh\n          || true\n', 1),
+    'backslash continuation': ci.replace('        run: ci/scripts/witforge-consumer.sh\n',
+                                         '        run: |\n          ci/scripts/witforge-consumer.sh \\\n            || true\n', 1),
+    'changed working directory': ci.replace('        run: ci/scripts/witforge-consumer.sh\n',
+                                            '        working-directory: editors\n        run: ci/scripts/witforge-consumer.sh\n', 1),
+    'BASH_ENV': ci.replace('          WITFORGE_REQUIRED: "1"\n',
+                           '          WITFORGE_REQUIRED: "1"\n          BASH_ENV: ci/scripts/noop.sh\n', 1),
     'shell without -e': ci.replace('      - name: check the WIT and regenerate the consumer with --check\n',
                                    '      - name: check the WIT and regenerate the consumer with --check\n        shell: bash {0}\n', 1),
 }

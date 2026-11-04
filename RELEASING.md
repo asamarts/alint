@@ -15,7 +15,8 @@ points are explicit.
    The script edits `Cargo.toml [workspace.package].version`, the private
    `ALINT_BAKED_VERSION` in `action.yml`, every workspace-version-coupled
    install snippet (README, SECURITY, and the installation, Docker, and
-   pre-commit guides), the npm and Zed manifests, and the npm README. It also
+   pre-commit guides), the npm and Zed manifests, the Zed lockfile's own
+   `alint-zed` entry, and the npm README. It also
    inserts a CHANGELOG stub, refreshes `Cargo.lock` via
    `cargo metadata --offline` (so the workspace internal-crate
    version entries in the lockfile track the bump), and regenerates the
@@ -113,7 +114,8 @@ points are explicit.
    git switch -c release/v<x.y.z>
    git add Cargo.toml Cargo.lock facts.json action.yml README.md SECURITY.md CHANGELOG.md \
      docs/design/ROADMAP.md npm/package.json npm/README.md editors/zed/Cargo.toml \
-     editors/zed/extension.toml docs/site/getting-started/installation.md \
+     editors/zed/Cargo.lock editors/zed/extension.toml \
+     docs/site/getting-started/installation.md \
      docs/site/integrations/docker.md docs/site/integrations/pre-commit.md
    git commit -m "chore(release): bump workspace to <x.y.z>"
    git push -u origin release/v<x.y.z>

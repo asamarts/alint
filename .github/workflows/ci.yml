@@ -124,6 +124,9 @@ jobs:
   action-pins:
     name: Action Pins
     runs-on: ubuntu-latest
+    # Seconds normally; a hung transfer must not hold the job for hours (and a
+    # timeout's cancel fails Summary, like any non-success here).
+    timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - run: bash ci/scripts/check-action-pins.sh
@@ -572,13 +575,17 @@ jobs:
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: "22"
-      - name: VS Code — install, typecheck, bundle
+      - name: VS Code — install, typecheck, bundle, package
         working-directory: editors/vscode
+        # The release publishes with `vsce publish --no-dependencies`; packaging
+        # the same way here makes a vsce update or a manifest problem fail on
+        # the pull request instead of at release time.
         run: |
           npm ci
           npm run audit
           npm run check-types
           npm run build
+          npx --no-install vsce package --no-dependencies --out "$RUNNER_TEMP/alint.vsix"
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: stable

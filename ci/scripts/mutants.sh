@@ -7,8 +7,10 @@
 #   ci/scripts/mutants.sh --package <crate>       # every mutant in one workspace crate
 #
 # Advisory: a missed or timed-out mutant is reported, never failed. The report goes to
-# $GITHUB_STEP_SUMMARY (when set), as a warning on each missed mutant's line, and to
-# target/mutants/mutants.out. cargo-mutants' exit codes (upstream src/exit_code.rs):
+# $GITHUB_STEP_SUMMARY (when set), as a warning on the line of each of the first 10
+# missed mutants (GitHub keeps 10 warnings per step), and to target/mutants/mutants.out.
+# cargo-mutants runs the mutated crate's own tests, so a mutant another crate's tests
+# would catch is still reported as missed. cargo-mutants' exit codes (upstream src/exit_code.rs):
 #   0  every mutant caught, or none to test (an empty diff, or no Rust in it)  reported
 #   2  some mutants missed                                                     reported
 #   3  some mutants timed out (often a mutant that loops forever)              reported
@@ -90,33 +92,52 @@ summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
 {
   echo "### cargo-mutants (advisory)"
   echo
-  if (( caught + missed + timeouts + unviable == 0 )); then
+  if (( caught + missed + timeouts + unviable == 0 )) && [[ "$status" == complete ]]; then
     echo "No mutants in ${scope}."
+  elif (( caught + missed + timeouts + unviable == 0 )); then
+    echo "No mutant in ${scope} finished: the run ${status%%;*}."
   else
     echo "Mutants in ${scope}: ${caught} caught, ${missed} missed, ${timeouts} timed out, ${unviable} did not build (${status})."
     if (( missed > 0 )); then
       echo
-      echo "Each missed mutant is a change to the code that no test noticed:"
+      echo "Each missed mutant is a change to the code that none of its crate's tests noticed:"
       echo
-      # shellcheck disable=SC2016 # literal backticks: each line becomes inline code
-      sed 's/^/- `/; s/$/`/' "$REPORT/missed.txt"
+      # shellcheck disable=SC2016 # literal backticks: each line becomes inline code,
+      # fenced with two so a backtick in the text cannot end it
+      sed 's/^/- `` /; s/$/ ``/' "$REPORT/missed.txt"
     fi
     if (( timeouts > 0 )); then
       echo
       echo "Timed out (usually a mutant that makes a loop run forever, which counts as caught):"
       echo
-      # shellcheck disable=SC2016 # literal backticks: each line becomes inline code
-      sed 's/^/- `/; s/$/`/' "$REPORT/timeout.txt"
+      # shellcheck disable=SC2016 # literal backticks, as above
+      sed 's/^/- `` /; s/$/ ``/' "$REPORT/timeout.txt"
     fi
   fi
 } >> "$summary"
 
-# One warning per missed mutant on its line (GitHub shows up to 50 per job).
+# Workflow-command escaping: the message escapes % CR LF, and a property (the file)
+# also `:` and `,`, which would otherwise end it or start another property.
+escape_data() {
+  local text=${1//%/%25}
+  text=${text//$'\r'/%0D}
+  printf '%s' "${text//$'\n'/%0A}"
+}
+escape_property() {
+  local text
+  text=$(escape_data "$1")
+  text=${text//:/%3A}
+  printf '%s' "${text//,/%2C}"
+}
+
+# A warning on the line of each of the first 10 missed mutants: GitHub keeps 10
+# warnings per step, and the summary above lists them all.
 if (( missed > 0 )); then
-  head -n 50 "$REPORT/missed.txt" | while IFS= read -r line; do
-    if [[ "$line" =~ ^([^:]+):([0-9]+):([0-9]+):[[:space:]]*(.*)$ ]]; then
-      message=${BASH_REMATCH[4]//%/%25}
-      echo "::warning file=${BASH_REMATCH[1]},line=${BASH_REMATCH[2]},col=${BASH_REMATCH[3]},title=Missed mutant::${message}"
+  head -n 10 "$REPORT/missed.txt" | while IFS= read -r line; do
+    if [[ "$line" =~ ^([^:]+):([0-9]+):([0-9]+):(.*)$ ]]; then
+      message=${BASH_REMATCH[4]}
+      message=${message#"${message%%[![:space:]]*}"}
+      echo "::warning file=$(escape_property "${BASH_REMATCH[1]}"),line=${BASH_REMATCH[2]},col=${BASH_REMATCH[3]},title=Missed mutant::$(escape_data "$message")"
     fi
   done
 fi
