@@ -22,6 +22,7 @@ PERMISSION_KEYS = {
 
 EXPECTED_TOP = {
     'action-selftest.yml': {'contents': 'read'},
+    'advisories.yml': {'contents': 'read'},
     'bench-docker.yml': {},
     'bench-record.yml': {},
     'ci.yml': {'contents': 'read'},
@@ -196,6 +197,7 @@ def effective_permissions(workflow: str, job: str) -> dict[str, str]:
 
 ORDINARY_READ_ONLY_WORKFLOWS = {
     'action-selftest.yml',
+    'advisories.yml',
     'ci.yml',
     'corpus-replay.yml',
     'coverage.yml',

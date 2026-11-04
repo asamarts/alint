@@ -53,18 +53,19 @@ if [[ "${1:-}" == "--print-waivers" ]]; then
   exit 0
 fi
 
-# cargo-audit may not be on the runner. It is on the self-hosted CI runner
-# but NOT on a fresh GitHub-hosted ubuntu-latest (the fork-PR lane — see
-# docs/design/v0.14/ci-fork-pr-isolation.md). Install on demand, pinned with
-# --locked, so the gate is portable across both. Swatinem/rust-cache persists
-# ~/.cargo/bin so the install only pays once per cache window. (Mirrors
-# deny.sh.)
-if ! command -v cargo-audit >/dev/null 2>&1; then
-    echo "==> cargo-audit not found; installing (cargo install --locked)"
+# cargo-audit is not on a fresh GitHub-hosted ubuntu-latest. Install the pinned
+# version on demand with --locked, and replace any other version a runner or a
+# restored ~/.cargo/bin carries, so every run uses the same tool. Swatinem/rust-cache
+# persists ~/.cargo/bin, so the install only pays once per cache window. (Mirrors
+# deny.sh.) `cargo audit --version` prints "cargo-audit-audit X.Y.Z", so compare
+# the last word only.
+CARGO_AUDIT_VERSION="0.22.2"
+if [[ "$(cargo audit --version 2>/dev/null | awk '{ print $NF }' || true)" != "${CARGO_AUDIT_VERSION}" ]]; then
+    echo "==> cargo-audit ${CARGO_AUDIT_VERSION} not found; installing (cargo install --locked)"
     # Clear RUSTFLAGS for the tool build only: CI sets `-D warnings` for
     # *alint's* code, but applying it while compiling a third-party tool
     # would fail the install on any upstream warning.
-    RUSTFLAGS='' cargo install cargo-audit --locked
+    RUSTFLAGS='' cargo install cargo-audit --locked --version "${CARGO_AUDIT_VERSION}"
 fi
 
 ignore_args=()

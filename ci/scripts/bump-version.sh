@@ -146,6 +146,12 @@ fi
 for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
   [[ -f "$zf" ]] && sed -i -E "s/^(version = )\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" "$zf"
 done
+# The extension's own lockfile entry follows its Cargo.toml; the editors job
+# builds with --locked, so a stale entry fails it. Set it to NEW whatever it
+# held, since this entry lagged the manifest before the gate existed.
+if [[ -f editors/zed/Cargo.lock ]]; then
+  sed -i -E "/^name = \"alint-zed\"\$/{n;s/^version = \"[^\"]*\"\$/version = \"${NEW}\"/}" editors/zed/Cargo.lock
+fi
 
 # 2d. npm README version example (@asamarts/alint@X.Y.Z + "alint vX.Y.Z").
 #     Illustrative, and not in the SCOPE files (its @-prefixed pin wouldn't match the
