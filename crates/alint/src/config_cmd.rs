@@ -216,8 +216,8 @@ fn validate_config_inner(
         // Structurally validate any nested `require:` sub-rules (unknown
         // kind / option / missing field) — the cross-file iteration rules
         // build these lazily, so without this they slip past validate-config.
-        rule.validate_nested(&registry)
-            .map_err(|error| spec.redact_configuration_error(error))
+        registry
+            .validate_nested(spec, rule.as_ref())
             .with_context(|| format!("building rule {:?}", spec.id))?;
         hints.extend(alint_core::pattern_hints::rule_tree_hints(
             &registry,
@@ -226,7 +226,7 @@ fn validate_config_inner(
         ));
         if let Some(when_src) = &spec.when {
             alint_core::when::parse(when_src)
-                .map_err(|error| anyhow::anyhow!(spec.redact_configuration_message(error)))
+                .map_err(|error| anyhow::anyhow!(spec.redact_when_error(error)))
                 .with_context(|| format!("rule {:?}: parsing `when`", spec.id))?;
         }
         count += 1;
@@ -372,8 +372,8 @@ pub(super) fn load_rules_for_explain(
         // Structurally validate nested `require:` sub-rules at load, so a
         // typo'd nested kind/option fails here rather than lazily mid-walk
         // (or never, when the selector matches no entries).
-        rule.validate_nested(&registry)
-            .map_err(|error| spec.redact_configuration_error(error))
+        registry
+            .validate_nested(spec, rule.as_ref())
             .with_context(|| format!("building rule {:?}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (parsed from
         // the user's own config only — never from `extends:`). A rule
@@ -390,7 +390,7 @@ pub(super) fn load_rules_for_explain(
             .with_allow_out_of_root(allow_out_of_root);
         if let Some(when_src) = &spec.when {
             let expr = alint_core::when::parse(when_src)
-                .map_err(|error| anyhow::anyhow!(spec.redact_configuration_message(error)))
+                .map_err(|error| anyhow::anyhow!(spec.redact_when_error(error)))
                 .with_context(|| format!("rule {:?}: parsing `when`", spec.id))?;
             entry = entry.with_when(expr);
         }

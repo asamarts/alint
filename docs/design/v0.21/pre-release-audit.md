@@ -189,7 +189,11 @@ source and target, each of which fails on the old code.
   quotes no value. It hid the message of `facebook/react`'s own configuration error during R5
   (its `scope_filter.changed_since` is invalid; the redaction did not cause the failure). It is
   pre-existing, tracked nowhere, and behind no readiness row, so it does not block the tag:
-  redact only errors that can quote a value, and keep structural errors readable.
+  redact only errors that can quote a value, and keep structural errors readable. **Done after
+  the release:** each redacting step (the file loader, rule finalization, the rule builder and
+  nested-rule validation) now repeats itself on a copy with the possibly secret values masked
+  and keeps the error when that copy fails with the identical message; a `when` diagnostic is
+  hidden only when the condition itself may be secret.
 - **Mutants nightly never runs.** `mutants.yml:34` targets the self-hosted `alint` runner, whose
   listener is held (`ci.yml` routes every job to `ubuntu-latest`). Every scheduled run since
   2026-09-22 was cancelled after about a day in the queue; the last success (2026-09-18) was a

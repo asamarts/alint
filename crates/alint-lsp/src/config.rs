@@ -257,8 +257,8 @@ fn build_session_for_config(
         // Match the CLI's load contract: nested `require:` specs must fail at
         // session construction, not only if a later full run happens to select
         // a parent entry and builds them lazily.
-        rule.validate_nested(registry)
-            .map_err(|error| spec.redact_configuration_error(error))
+        registry
+            .validate_nested(spec, rule.as_ref())
             .map_err(|error| format!("building rule {:?}: {error}", spec.id))?;
         // Apply the top-level `allow_out_of_root:` policy (top-level
         // config only; never via `extends:`). No-op for kinds that
@@ -273,7 +273,7 @@ fn build_session_for_config(
                 format!(
                     "rule {:?}: parsing `when`: {}",
                     spec.id,
-                    spec.redact_configuration_message(error)
+                    spec.redact_when_error(error)
                 )
             })?;
             entry = entry.with_when(expr);

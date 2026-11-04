@@ -239,18 +239,16 @@ impl RuleRegistry {
             .kinds
             .get(canonical)
             .ok_or_else(|| Error::UnknownRuleKind(spec.kind.clone()))?;
-        validate_configured_fields(
-            &ConfiguredFields::from_rule_spec(spec),
-            &spec.kind,
-            registration.metadata.as_ref(),
-        )
-        .map_err(|violation| Error::rule_config(&spec.id, violation.message))
-        .map_err(|error| spec.redact_configuration_error(error))?;
-        let rule = registration
-            .builder
-            .build(spec)
-            .map_err(|error| enrich_error(error, &spec.kind))
-            .map_err(|error| spec.redact_configuration_error(error))?;
+        let validate = |spec: &RuleSpec| {
+            validate_configured_fields(
+                &ConfiguredFields::from_rule_spec(spec),
+                &spec.kind,
+                registration.metadata.as_ref(),
+            )
+            .map_err(|violation| Error::rule_config(&spec.id, violation.message))
+        };
+        validate(spec).map_err(|error| spec.redact_configuration_error(error, validate))?;
+        let rule = build_rule(registration, spec)?;
         #[cfg(debug_assertions)]
         assert_instance_conformance(
             canonical,
@@ -270,11 +268,17 @@ impl RuleRegistry {
             .kinds
             .get(canonical)
             .ok_or_else(|| Error::UnknownRuleKind(spec.kind.clone()))?;
-        registration
-            .builder
-            .build(spec)
-            .map_err(|error| enrich_error(error, &spec.kind))
-            .map_err(|error| spec.redact_configuration_error(error))
+        build_rule(registration, spec)
+    }
+
+    /// Validate `rule`'s nested `require:` rules (see [`Rule::validate_nested`]),
+    /// with the configuration-error redaction [`Self::build`] applies.
+    pub fn validate_nested(&self, spec: &RuleSpec, rule: &dyn Rule) -> Result<()> {
+        rule.validate_nested(self).map_err(|error| {
+            spec.redact_configuration_error(error, |masked| {
+                self.build(masked)?.validate_nested(self)
+            })
+        })
     }
 
     pub fn known_kinds(&self) -> impl Iterator<Item = &str> {
@@ -770,6 +774,19 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
             "{kind}: configured fix operation `{op}` produced no fixer"
         );
     }
+}
+
+/// Run `registration`'s builder on `spec`, redacting an error that could quote
+/// a sensitive value (see [`RuleSpec::redact_configuration_error`]).
+fn build_rule(registration: &RegisteredKind, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+    let build = |spec: &RuleSpec| {
+        registration
+            .builder
+            .build(spec)
+            .map_err(|error| enrich_error(error, &spec.kind))
+    };
+    build(spec)
+        .map_err(|error| spec.redact_configuration_error(error, |masked| build(masked).map(drop)))
 }
 
 /// Apply [`did_you_mean::enrich`] to the message of a `RuleConfig`

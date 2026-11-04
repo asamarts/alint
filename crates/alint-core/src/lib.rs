@@ -55,12 +55,13 @@ pub use compatibility::{
     RunningVersion, StableVersion,
 };
 pub use config::{
-    AllowOutOfRoot, CompiledNestedSpec, Config, ContentSourceSpec, ExtendsEntry,
-    FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
+    AllowOutOfRoot, CONFIGURATION_MASK, CompiledNestedSpec, Config, ContentSourceSpec,
+    ExtendsEntry, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
     FileCreateFixSpec, FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
     FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
-    FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec, RuleSpec,
-    resolve_content_source,
+    FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec,
+    REDACTED_CONFIGURATION_ERROR, RuleSpec, configuration_field_may_be_secret,
+    mask_configuration_strings, resolve_content_source,
 };
 pub use engine::{Engine, RuleEntry, StagedFix, StagedKind};
 pub use error::{Error, Result};

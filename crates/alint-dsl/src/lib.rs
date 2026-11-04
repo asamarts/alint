@@ -43,11 +43,12 @@ pub(crate) use trust::{
     find_spawning_kind, find_template_placeholder_in_guarded_field, has_untrusted_fix_source,
     mark_field_sources_in, mark_provenance_in, mark_sensitive_conditions,
     mark_template_sensitive_fields, mark_unattributed_field_sources, mark_untrusted_fix_sources_in,
-    merge_field_sources, merge_mapping_fields, merge_sensitive_fields, reject_ambiguous_yaml_in,
-    reject_env_expansion_in, reject_env_reads_in_when, reject_remote_assembled_env_refs,
-    reject_untrusted_assembled_when, reject_untrusted_env_instance_vars,
-    reject_untrusted_env_var_reads, strip_fix_promotions_in_rule, take_sensitive_fields,
-    take_untrusted_fix_source, union_provenance,
+    masked_rule_mapping, merge_field_sources, merge_mapping_fields, merge_sensitive_fields,
+    reject_ambiguous_yaml_in, reject_env_expansion_in, reject_env_reads_in_when,
+    reject_remote_assembled_env_refs, reject_untrusted_assembled_when,
+    reject_untrusted_env_instance_vars, reject_untrusted_env_var_reads,
+    strip_fix_promotions_in_rule, take_sensitive_fields, take_untrusted_fix_source,
+    union_provenance,
 };
 pub use trust::{
     SPAWNING_FIX_OPS, SPAWNING_RULE_KINDS, reject_allow_out_of_root_in, reject_baseline_in,
@@ -528,40 +529,58 @@ fn deserialize_effective_rule(
     catalog: Option<alint_core::KindCatalog<'_>>,
     id_hint: &str,
 ) -> Result<alint_core::RuleSpec> {
-    let sensitive_configuration = expanded
-        .get(SENSITIVE_FIELDS_MARKER)
-        .and_then(yaml_serde::Value::as_mapping)
-        .is_some_and(|fields| !fields.is_empty())
-        || expanded
-            .get("sensitive")
-            .and_then(yaml_serde::Value::as_bool)
-            .unwrap_or(false);
-    validate_effective_rule_fields(&expanded, catalog, id_hint, None, None).map_err(|error| {
-        if sensitive_configuration {
-            if error.is_internal() {
-                Error::internal("<redacted>")
-            } else {
-                Error::rule_config(id_hint, "<redacted>")
-            }
-        } else {
-            error
-        }
-    })?;
-    expanded.remove(FIELD_SOURCES_MARKER);
-    let sensitive_fields = take_sensitive_fields(&mut expanded);
-    let mut spec: alint_core::RuleSpec =
-        yaml_serde::from_value(yaml_serde::Value::Mapping(expanded)).map_err(|error| {
-            if sensitive_configuration {
-                Error::rule_config(id_hint, "<redacted>")
-            } else {
+    let masked = masked_rule_mapping(&expanded);
+    let validate =
+        |mapping: &Mapping| validate_effective_rule_fields(mapping, catalog, id_hint, None, None);
+    validate(&expanded)
+        .map_err(|error| redact_rule_error(error, masked.as_ref(), id_hint, validate))?;
+    let deserialize = |mut mapping: Mapping| {
+        mapping.remove(FIELD_SOURCES_MARKER);
+        let sensitive_fields = take_sensitive_fields(&mut mapping);
+        yaml_serde::from_value::<alint_core::RuleSpec>(yaml_serde::Value::Mapping(mapping))
+            .map(|spec| (spec, sensitive_fields))
+            .map_err(|error| {
                 Error::rule_config(
                     id_hint,
                     format!("could not deserialize merged rule: {error}"),
                 )
-            }
+            })
+    };
+    let (mut spec, sensitive_fields) =
+        deserialize(std::mem::take(&mut expanded)).map_err(|error| {
+            redact_rule_error(error, masked.as_ref(), id_hint, |masked| {
+                deserialize(masked.clone()).map(drop)
+            })
         })?;
     spec.set_sensitive_fields(sensitive_fields);
     Ok(spec)
+}
+
+/// Keep a configuration error of a rule with possibly secret values readable
+/// only when `rerun` on the masked copy fails with the identical message, which
+/// therefore cannot quote one of them; otherwise redact it. A rule without such
+/// values (`masked` is `None`) keeps every error.
+fn redact_rule_error(
+    error: Error,
+    masked: Option<&Mapping>,
+    id_hint: &str,
+    rerun: impl FnOnce(&Mapping) -> Result<()>,
+) -> Error {
+    let Some(masked) = masked else {
+        return error;
+    };
+    let message = error.to_string();
+    if rerun(masked)
+        .err()
+        .is_some_and(|masked_error| masked_error.to_string() == message)
+    {
+        return error;
+    }
+    if error.is_internal() {
+        Error::internal(alint_core::REDACTED_CONFIGURATION_ERROR)
+    } else {
+        Error::rule_config(id_hint, alint_core::REDACTED_CONFIGURATION_ERROR)
+    }
 }
 
 fn effective_requirements(compatibility: &[ConfigCompatibility]) -> Option<ConfigRequirements> {
