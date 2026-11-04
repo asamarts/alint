@@ -823,9 +823,9 @@ impossible to ship.
   upload opt-in via `CODECOV_TOKEN`.
 - ✅ **`cargo mutants` nightly**:
   `.github/workflows/mutants.yml` rotated one crate per
-  night. Since v0.21 it runs on pull requests instead,
-  on the lines each one changes (`--in-diff`), as an
-  advisory job.
+  night. Since 2026-11-04 (#432, after v0.21.0) it
+  runs on pull requests instead, on the lines each one
+  changes (`--in-diff`), as an advisory job.
 - ✅ **Cross-platform CI**:
   `.github/workflows/cross-platform.yml` runs
   `cargo test --workspace --locked` on macOS-arm64 +
