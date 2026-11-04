@@ -64,8 +64,10 @@ rm -rf "$OUTPUT"
 mkdir -p "$OUTPUT"
 echo "==> cargo mutants ${filter[*]} (budget ${BUDGET_SECONDS} s)"
 rc=0
+started=$SECONDS
 RUSTFLAGS='' timeout --signal=INT --kill-after=60 "$BUDGET_SECONDS" \
   cargo mutants "${filter[@]}" --in-place --no-shuffle --output "$OUTPUT" || rc=$?
+elapsed=$((SECONDS - started))
 
 count() { [[ -s "$REPORT/$1" ]] && wc -l < "$REPORT/$1" | tr -d ' ' || echo 0; }
 caught=$(count caught.txt)
@@ -73,14 +75,16 @@ missed=$(count missed.txt)
 timeouts=$(count timeout.txt)
 unviable=$(count unviable.txt)
 
-case "$rc" in
-  0 | 2 | 3) status="complete" ;;
-  124) status="stopped at the ${BUDGET_SECONDS}-second budget; the counts cover the mutants tested by then" ;;
-  *)
-    echo "[mutants] cargo-mutants exited $rc: nothing was tested (see its output above)" >&2
-    exit "$rc"
-    ;;
-esac
+# A budget stop is decided by the clock, not the exit code: timeout reports 124,
+# but on a GitHub-hosted runner the stopped command has also come back as 137.
+if [[ "$rc" == 0 || "$rc" == 2 || "$rc" == 3 ]]; then
+  status="complete"
+elif (( elapsed >= BUDGET_SECONDS )); then
+  status="stopped at the ${BUDGET_SECONDS}-second budget; the counts cover the mutants tested by then"
+else
+  echo "[mutants] cargo-mutants exited $rc: nothing was tested (see its output above)" >&2
+  exit "$rc"
+fi
 
 summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
 {

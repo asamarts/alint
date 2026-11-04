@@ -113,6 +113,13 @@ else
   bad "a budget stop must pass with a partial report"
 fi
 
+run STUB_RC=137 -- --in-diff "$sandbox/pr.diff"
+if [[ "$rc" -eq 137 ]] && said 'nothing was tested'; then
+  ok "a killed cargo-mutants before the budget fails the job"
+else
+  bad "a cargo-mutants killed before the budget must fail the job"
+fi
+
 run STUB_VERSION=0.0.1 -- --in-diff "$sandbox/pr.diff"
 if logged "^cargo install cargo-mutants --locked --version ${pinned//./\\.}$"; then
   ok "a different cargo-mutants version gets the pinned ${pinned} installed"
