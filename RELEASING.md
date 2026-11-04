@@ -198,9 +198,10 @@ checklist so the release-gated pieces land and nothing drifts:
    follow-up also refreshes alint.org's published snippets without waiting for
    another release.
 
-5. **Reconcile the trackers.** Bump `alint.org`'s pins (four install sites plus
-   prose claims), and reconcile `alint.org` `marketing/STATE.md` to the new
-   version and counts so it never drifts weeks behind again (P5.2).
+5. **Reconcile the trackers.** Bump `alint.org`'s pins (the five version-pin
+   sites its `scripts/check-version-pins.sh` checks, plus prose claims), and
+   reconcile `alint.org` `marketing/STATE.md` to the new version and counts so
+   it never drifts weeks behind again (P5.2).
 6. **Confirm the gates are green.** `gen-schema` / `gen-facts` / `docs-export`
    `--check` and the `docs/adr@v1` dogfood here; the `check-counts.mjs` count
    gate and `check-version-pins.sh` pin gate on the alint.org side.
@@ -211,7 +212,7 @@ checklist so the release-gated pieces land and nothing drifts:
 |---|---|---|---|
 | `ci.yml` | tag + main pushes | fmt + clippy + test + doc + dogfood, plus audit + deny (both blocking on RustSec vulnerabilities), build, bench-smoke, examples, shell-tests, editors, the plugin-contract check against the pinned witforge, and the advisory perf-gate. GitHub-hosted `ubuntu-latest`. | ~5 min |
 | `release.yml` | tag push only | preflight gate → supply-chain (SBOM + license bundle) → cross-platform build matrix → GitHub Release (cosign-signed `SHA256SUMS` + build-provenance + SBOM attestations) → ghcr.io Docker (attested + cosign-signed by digest) → npm → Homebrew tap → crates.io → VS Code Marketplace + Open VSX → JetBrains Marketplace. | ~15-25 min |
-| `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts alint.org's three install-pin sites reference the latest tag from this release; fires automatically. | ~3-5 min |
+| `docs-bundle.yml` | tag + main pushes | `xtask docs-export` → push refreshed bundle to `docs-bundle` branch → Cloudflare deploy hook → alint.org rebuilds. The sibling `check-pins.yml` workflow in the alint.org repo (PR + push + daily cron) asserts that alint.org's five version-pin sites agree and are not older than the latest release; fires automatically. | ~3-5 min |
 | `bench-docker.yml` | tag pushes | Build + push `ghcr.io/asamarts/alint-bench:<tag>` (the reproducible competitive-bench environment). | ~5 min |
 | **`bench-record.yml`** | tag push only | **Self-hosted full publish-grade `xtask bench-scale` matrix (S1-S4 check × {1k, 10k, 100k, 1m} × {full, changed} + the SFIX auto-fix scenario × {fix}) at `--warmup 3 --runs 10`. Opens a PR adding the new per-version macro/results dir + criterion micro snapshot.** | **~3.5 hr** |
 | `post-publish-smoke.yml` | dispatched by `release.yml` after the CLI channels publish (+ weekly cron) | Install alint from each CLI channel (install.sh, cargo, cargo-binstall, npm, Docker, Homebrew, PyPI), assert `alint --version` matches the tag, and execute a fresh downstream policy-test package through every installed command. Advisory (`MP-M5`): a red run flags a broken, stale, or behaviorally incomplete publish; it blocks nothing. | ~5-10 min |
@@ -535,7 +536,13 @@ Review checklist:
    the PR body shows exit 0, and the run's `micro-det (deterministic)` job is
    green. A gate that fails because of a deliberate cost (a new feature, a
    security check) is accepted by bumping `docs/benchmarks/ANCHOR` in a
-   reviewed commit whose `reason` says why, never by ignoring the gate. The
+   reviewed commit whose `reason` says why, never by ignoring the gate. One
+   narrow exception applies to `micro-det`: the results PR may merge with that
+   job red only when every regression it reports is already fixed on `main` by
+   a merged pull request, and the PR body names that pull request and lists
+   each reported benchmark with its delta. The fix then ships in the next
+   release. v0.21.0's record (#424) merged this way: `cross_file/for_each_dir`
+   was +3.05% (100) and +3.14% (1000) over v0.20.1, already fixed by #422. The
    macro gate below is characterization and quiescence-sensitive.
    `xtask bench-gate` records absolute throughput. It supersedes the old "skim
    the PR body for any cell with `stddev_ms / mean_ms > 0.10`" eyeball: that flat

@@ -316,7 +316,13 @@ At release, `bench-record.yml` runs three more checks on the tagged commit:
 - **`micro-det` job** (GitHub-hosted, in parallel): the full criterion suite
   in instructions, vs the previous release (+3% per gated bench) and the
   anchor (+10%). A regression fails the job; the results PR's checklist
-  requires it to be green.
+  requires it to be green. One narrow exception: the results PR may merge
+  with this job red only when every regression it reports is already fixed
+  on `main` by a merged pull request, and the PR body names that pull
+  request and lists each reported benchmark with its delta. The fix then
+  ships in the next release. v0.21.0's record (#424) merged this way:
+  `cross_file/for_each_dir` was +3.05% (100) and +3.14% (1000) over v0.20.1,
+  already fixed by #422. See [`RELEASING.md`](../../RELEASING.md).
 - **Same-session micro A/B** (report-only): the previous release's criterion
   suite runs first on the bench host as baseline `prev`, then the new
   ref's with `--baseline-lenient prev`, so the PR shows each benchmark's

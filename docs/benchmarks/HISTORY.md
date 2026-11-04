@@ -6,8 +6,8 @@ see [`METHODOLOGY.md`](METHODOLOGY.md) for the hardware contract and why
 cross-machine comparisons need like-for-like.
 
 This is the consolidated 5-scenario series (S1 layout / S2 content /
-S3 relational-graph / S4 workspace; the fix-mode SFIX scenario has no
-published data until the v0.17 fix engine ships). The pre-consolidation
+S3 relational-graph / S4 workspace, plus the fix-mode SFIX scenario,
+published from v0.17.0 when the fix engine shipped). The pre-consolidation
 14-scenario history is frozen at [`legacy/HISTORY.md`](legacy/HISTORY.md).
 
 > **Invalid historical competitor rows.** The v0.5.7 ls-lint rows never loaded
@@ -44,33 +44,33 @@ before merging — see [`../../RELEASING.md`](../../RELEASING.md).
 ## Cross-version headline trajectory
 
 1M/full cells across all four check scenarios. S4 (workspace bundle) is the
-realistic-monorepo release anchor every publish captures. Its explicit workload
-column marks revision resets; timings on opposite sides of a reset are
-incomparable. S3 is the heaviest, graph-dominated scenario; S1/S2 track the
-walk-bound and per-file-content paths.
+realistic-monorepo release anchor every publish captures. S3 is the heaviest,
+graph-dominated scenario; S1/S2 track the walk-bound and per-file-content paths.
+Each scenario's workload column marks its revision resets with a bold
+`rN ← reset from rM`; timings on opposite sides of a reset are incomparable.
 
-| Version | Date | 1M S1 full | 1M S2 full | 1M S3 full | S4 workload | 1M S4 full | Headline change |
-|---|---|---:|---:|---:|---|---:|---|
-| **v0.21.0** | 2026-11-01 | 4.14 s ± 0.10 | 5.30 s ± 0.04 | 476.4 s ± 3.6 | **r4 ← reset from r3** | 8.61 s ± 0.07 | The second general-linter phase. |
-| v0.20.1 | 2026-10-23 | 4.08 s ± 0.06 | 18.16 s ± 0.63 | 480.6 s ± 8.4 | r3 | 15.55 s ± 0.32 | A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot paths are cheaper, and alint now warns when a content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant (#343). |
-| v0.20.0 | 2026-10-21 | 4.22 s ± 0.08 | 18.95 s ± 0.81 | 474.7 s ± 2.7 | **r3 ← reset from r2** | 16.28 s ± 0.33 | General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test runner, selected-rule production traces with bounded redaction-safe previews, and per-source configuration compatibility requirements. |
-| v0.19.0 | 2026-10-18 | 4.11 s ± 0.03 | 18.80 s ± 0.12 | 475.6 s ± 3.6 | **r2 ← reset from r1** | 18.73 s ± 0.66 | General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles. |
-| v0.18.4 | 2026-10-15 | 4.01 s ± 0.07 | 18.38 s ± 0.04 | 475.2 s ± 2.0 | r1 | 16.17 s ± 0.03 | A performance and correctness patch. |
-| v0.18.2 | 2026-10-13 | 4.02 s ± 0.03 | 18.43 s ± 0.04 | 474.8 s ± 1.2 | r1 | 16.28 s ± 0.10 | A security and correctness patch: alint's terminal output now escapes every invisible character its own rules flag, `.env` parsing and editing moves to the new `adotenv` crate (fixing a `set_value` edit that silently never applied), and a leading BOM no longer shifts columns or widths. |
-| v0.18.1 | 2026-10-12 | 4.12 s ± 0.06 | 18.12 s ± 0.02 | 475.3 s ± 1.3 | r1 | 16.07 s ± 0.02 | A performance and installer patch. |
-| v0.18.0 | 2026-10-11 | 4.03 s ± 0.08 | 19.51 s ± 0.07 | 475.1 s ± 1.7 | r1 | 16.60 s ± 0.01 | A security and correctness release from a whole-repository audit and an adversarial re-review of its fixes. |
-| v0.17.0 | 2026-10-01 | 4.07 s ± 0.05 | 18.75 s ± 0.06 | 475.3 s ± 3.0 | r1 | 16.56 s ± 0.23 | This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations. |
-| v0.16.0 | 2026-09-02 | 4.05 s ± 0.07 | 18.33 s ± 0.03 | 474.7 s ± 0.8 | r1 | 16.46 s ± 0.17 | This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service. |
-| v0.15.0 | 2026-08-16 | 4.18 s ± 0.09 | 18.51 s ± 0.08 | 474.4 s ± 1.4 | r1 | 16.47 s ± 0.04 | v0.15 makes rules legible and monorepos first-class. |
-| v0.14.2 | 2026-08-06 | 4.13 s ± 0.05 | 19.10 s ± 0.41 | 473.6 s ± 1.5 | r1 | 16.34 s ± 0.01 | A fixes-and-hardening patch on top of 0.14.1. |
-| v0.14.1 | 2026-07-24 | 4.22 s ± 0.09 | 21.40 s ± 3.62 | 473.7 s ± 2.2 | r1 | 16.44 s ± 0.04 | A performance patch. |
-| v0.14.0 | 2026-07-18 | 4.14 s ± 0.05 | 23.01 s ± 3.17 | 477.0 s ± 0.6 | r1 | 18.15 s ± 0.72 | The adoption release. **Baseline mode** (`alint baseline` + `alint check --baseline`) grandfathers a repo's existing violations behind a content-fingerprinted snapshot, so `alint check` reports and gates only on *new* findings — alint becomes a blocking merge gate on an established codebase without a flag-day cleanup, and for SARIF the suppressed findings are *marked, not deleted*, so GitHub Code Scanning dismisses them instead of flapping fixed-then-reopened. |
-| v0.13.0 | 2026-06-17 | 4.14 s ± 0.05 | 25.04 s ± 1.53 | 486.5 s ± 2.0 | r1 | 19.26 s ± 0.46 | This release turns the documented surface into generated, drift-proof contracts. |
-| v0.12.0 | 2026-06-07 | 4.61 s ± 0.40 | 25.44 s ± 2.67 | 488.6 s ± 1.5 | r1 | 21.99 s ± 0.65 | The case-study-driven rule-kind expansion, paired with a security cycle that hardens path handling into a real boundary. |
-| v0.11.0 | 2026-05-28 | 4.27 s ± 0.15 | 26.53 s ± 1.19 | n/a | r1 | 23.38 s ± 0.18 | The LSP + editor-integration release. |
-| v0.10.2 | 2026-05-21 | 4.07 s ± 0.08 | 17.93 s ± 0.40 | n/a | r1 | 15.82 s ± 0.24 | Targeted follow-up to v0.10.1. |
-| v0.10.1 | 2026-05-20 | 4.03 s ± 0.04 | 17.64 s ± 0.04 | n/a | r1 | 15.96 s ± 0.03 | Small post-release follow-up to v0.10.0. |
-| v0.10.0 | 2026-05-20 | 4.06 s ± 0.08 | 17.75 s ± 0.02 | n/a | r1 | 16.03 s ± 0.05 | The "case-study coverage push" minor. |
+| Version | Date | S1 workload | 1M S1 full | S2 workload | 1M S2 full | S3 workload | 1M S3 full | S4 workload | 1M S4 full | Headline change |
+|---|---|---|---:|---|---:|---|---:|---|---:|---|
+| **v0.21.0** | 2026-11-01 | **r2 ← reset from r1** | 4.14 s ± 0.10 | **r2 ← reset from r1** | 5.30 s ± 0.04 | **r2 ← reset from r1** | 476.4 s ± 3.6 | **r4 ← reset from r3** | 8.61 s ± 0.07 | The second general-linter phase. |
+| v0.20.1 | 2026-10-23 | r1 | 4.08 s ± 0.06 | r1 | 18.16 s ± 0.63 | r1 | 480.6 s ± 8.4 | r3 | 15.55 s ± 0.32 | A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot paths are cheaper, and alint now warns when a content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant (#343). |
+| v0.20.0 | 2026-10-21 | r1 | 4.22 s ± 0.08 | r1 | 18.95 s ± 0.81 | r1 | 474.7 s ± 2.7 | **r3 ← reset from r2** | 16.28 s ± 0.33 | General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test runner, selected-rule production traces with bounded redaction-safe previews, and per-source configuration compatibility requirements. |
+| v0.19.0 | 2026-10-18 | r1 | 4.11 s ± 0.03 | r1 | 18.80 s ± 0.12 | r1 | 475.6 s ± 3.6 | **r2 ← reset from r1** | 18.73 s ± 0.66 | General-linter phase 0/1a makes the rule registry authoritative for capabilities and generated schemas, fails incomplete analysis loudly, preserves source relationships and duplicate structured rows, and adds seven standalone policy kinds plus opt-in versioning and toolchain bundles. |
+| v0.18.4 | 2026-10-15 | r1 | 4.01 s ± 0.07 | r1 | 18.38 s ± 0.04 | r1 | 475.2 s ± 2.0 | r1 | 16.17 s ± 0.03 | A performance and correctness patch. |
+| v0.18.2 | 2026-10-13 | r1 | 4.02 s ± 0.03 | r1 | 18.43 s ± 0.04 | r1 | 474.8 s ± 1.2 | r1 | 16.28 s ± 0.10 | A security and correctness patch: alint's terminal output now escapes every invisible character its own rules flag, `.env` parsing and editing moves to the new `adotenv` crate (fixing a `set_value` edit that silently never applied), and a leading BOM no longer shifts columns or widths. |
+| v0.18.1 | 2026-10-12 | r1 | 4.12 s ± 0.06 | r1 | 18.12 s ± 0.02 | r1 | 475.3 s ± 1.3 | r1 | 16.07 s ± 0.02 | A performance and installer patch. |
+| v0.18.0 | 2026-10-11 | r1 | 4.03 s ± 0.08 | r1 | 19.51 s ± 0.07 | r1 | 475.1 s ± 1.7 | r1 | 16.60 s ± 0.01 | A security and correctness release from a whole-repository audit and an adversarial re-review of its fixes. |
+| v0.17.0 | 2026-10-01 | r1 | 4.07 s ± 0.05 | r1 | 18.75 s ± 0.06 | r1 | 475.3 s ± 3.0 | r1 | 16.56 s ± 0.23 | This release adds `alint fix`, an auto-fix engine that applies or suggests edits across 26 fix operations. |
+| v0.16.0 | 2026-09-02 | r1 | 4.05 s ± 0.07 | r1 | 18.33 s ± 0.03 | r1 | 474.7 s ± 0.8 | r1 | 16.46 s ± 0.17 | This release completes the config-format coverage arc and hardens every config parser against crafted-file denial-of-service. |
+| v0.15.0 | 2026-08-16 | r1 | 4.18 s ± 0.09 | r1 | 18.51 s ± 0.08 | r1 | 474.4 s ± 1.4 | r1 | 16.47 s ± 0.04 | v0.15 makes rules legible and monorepos first-class. |
+| v0.14.2 | 2026-08-06 | r1 | 4.13 s ± 0.05 | r1 | 19.10 s ± 0.41 | r1 | 473.6 s ± 1.5 | r1 | 16.34 s ± 0.01 | A fixes-and-hardening patch on top of 0.14.1. |
+| v0.14.1 | 2026-07-24 | r1 | 4.22 s ± 0.09 | r1 | 21.40 s ± 3.62 | r1 | 473.7 s ± 2.2 | r1 | 16.44 s ± 0.04 | A performance patch. |
+| v0.14.0 | 2026-07-18 | r1 | 4.14 s ± 0.05 | r1 | 23.01 s ± 3.17 | r1 | 477.0 s ± 0.6 | r1 | 18.15 s ± 0.72 | The adoption release. **Baseline mode** (`alint baseline` + `alint check --baseline`) grandfathers a repo's existing violations behind a content-fingerprinted snapshot, so `alint check` reports and gates only on *new* findings — alint becomes a blocking merge gate on an established codebase without a flag-day cleanup, and for SARIF the suppressed findings are *marked, not deleted*, so GitHub Code Scanning dismisses them instead of flapping fixed-then-reopened. |
+| v0.13.0 | 2026-06-17 | r1 | 4.14 s ± 0.05 | r1 | 25.04 s ± 1.53 | r1 | 486.5 s ± 2.0 | r1 | 19.26 s ± 0.46 | This release turns the documented surface into generated, drift-proof contracts. |
+| v0.12.0 | 2026-06-07 | r1 | 4.61 s ± 0.40 | r1 | 25.44 s ± 2.67 | r1 | 488.6 s ± 1.5 | r1 | 21.99 s ± 0.65 | The case-study-driven rule-kind expansion, paired with a security cycle that hardens path handling into a real boundary. |
+| v0.11.0 | 2026-05-28 | r1 | 4.27 s ± 0.15 | r1 | 26.53 s ± 1.19 | n/a | n/a | r1 | 23.38 s ± 0.18 | The LSP + editor-integration release. |
+| v0.10.2 | 2026-05-21 | r1 | 4.07 s ± 0.08 | r1 | 17.93 s ± 0.40 | n/a | n/a | r1 | 15.82 s ± 0.24 | Targeted follow-up to v0.10.1. |
+| v0.10.1 | 2026-05-20 | r1 | 4.03 s ± 0.04 | r1 | 17.64 s ± 0.04 | n/a | n/a | r1 | 15.96 s ± 0.03 | Small post-release follow-up to v0.10.0. |
+| v0.10.0 | 2026-05-20 | r1 | 4.06 s ± 0.08 | r1 | 17.75 s ± 0.02 | n/a | n/a | r1 | 16.03 s ± 0.05 | The "case-study coverage push" minor. |
 
 Pre-consolidation history (the 14-scenario bench-host series v0.10.0-v0.16.0, and
 the retired 3900X series before it) lives in
@@ -81,7 +81,7 @@ the retired 3900X series before it) lives in
 
 ## S1 — Layout & path
 
-Walker + `GlobSet` + path/metadata rules with little or no content read — the cheapest dispatch path and the `ls-lint` / shell (`find` + GNU grep) competitive anchor. Consolidates the old filename-hygiene, `scope_filter`-shape, and existence/size scenarios; a subset carries `scope_filter: { has_ancestor }` so the non-per-file-rule scope_filter dispatch shape stays covered. Catches walker / glob / scope-match regressions.
+Walker + `GlobSet` + path/metadata rules with little or no content read — the cheapest dispatch path and the `ls-lint` / shell (`find` + GNU grep) competitive anchor. Consolidates the old filename-hygiene, `scope_filter`-shape, and existence/size scenarios; a subset carries `scope_filter: { has_ancestor }` so the non-per-file-rule scope_filter dispatch shape stays covered. Catches walker / glob / scope-match regressions. Workload revision 2 in v0.21.0 keeps the rules and regenerates the tree's Rust sources as clean text: each ends with a newline and no line starts or ends with a space. Revision 1 (v0.10.0 through v0.20.1) generated them without either guarantee; compare timings only within one revision.
 
 ### S1 — full
 
@@ -135,7 +135,7 @@ Walker + `GlobSet` + path/metadata rules with little or no content read — the 
 
 ## S2 — Per-file content
 
-Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whole content mix — per-line kinds, forbidden-pattern scans, `ordered_block` / `import_gate`, and structured XML against a single `.csproj` overlay. Consolidates the old dense content-fan-out and v0.10 per-file scenarios. The perf signal is how flat the per-rule cost stays as the mix grows.
+Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whole content mix — per-line kinds, forbidden-pattern scans, `ordered_block` / `import_gate`, and structured XML against a single `.csproj` overlay. Consolidates the old dense content-fan-out and v0.10 per-file scenarios. The perf signal is how flat the per-rule cost stays as the mix grows. Workload revision 2 in v0.21.0 keeps the rules and regenerates the tree's Rust sources as clean text: each ends with a newline and no line starts or ends with a space. Under revision 1 (v0.10.0 through v0.20.1), `final_newline` reported one finding per source and the whitespace rules tens of thousands more (about 86,000 at 100k), so those timings measured findings rather than ordinary linting. Compare timings only within one revision.
 
 ### S2 — full
 
@@ -189,7 +189,7 @@ Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whol
 
 ## S3 — Cross-file, relational & graph
 
-Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for_each_*` / `dir_only_contains` / `every_matching_has`) + `file_graph` build/traversal ×3 + `for_each_match` + `cross_file` set-union + single-shot spawn (`command: ["true"]`). Consolidates the old cross-file, v0.10 cross-file, single-shot, and v0.12 graph/featureset scenarios. The heaviest scenario; the index/graph build is the perf signal, so `changed` mode is ~as costly as `full`. **New at v0.12.0** (the graph kinds land at v0.12).
+Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for_each_*` / `dir_only_contains` / `every_matching_has`) + `file_graph` build/traversal ×3 + `for_each_match` + `cross_file` set-union + single-shot spawn (`command: ["true"]`). Consolidates the old cross-file, v0.10 cross-file, single-shot, and v0.12 graph/featureset scenarios. The heaviest scenario; the index/graph build is the perf signal, so `changed` mode is ~as costly as `full`. **New at v0.12.0** (the graph kinds land at v0.12). Workload revision 2 in v0.21.0 keeps the rules and regenerates the tree's Rust sources as clean text: each ends with a newline and no line starts or ends with a space. Revision 1 (v0.12.0 through v0.20.1) generated them without either guarantee; compare timings only within one revision.
 
 ### S3 — full
 
@@ -297,7 +297,7 @@ The realistic mixed workload and the release anchor: `extends:` eight bundled ru
 
 ## SFIX — Auto-fix
 
-The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `command` / `git_untrack`), run as `alint fix --unsafe-fixes --dry-run` so every op's compute + compose path runs while nothing is written. The only fix-mode scenario -- closes the historical zero-macro-fix-coverage gap. Rendered as a `fix`-mode table (not `full`/`changed`); `n/a` for every tag before the v0.17 fix engine. **New at v0.17.0.**
+The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `command` / `git_untrack`), run as `alint fix --unsafe-fixes --dry-run` so every op's compute + compose path runs while nothing is written. The only fix-mode scenario -- closes the historical zero-macro-fix-coverage gap. Rendered as a `fix`-mode table (not `full`/`changed`); `n/a` for every tag before the v0.17 fix engine. **New at v0.17.0.** The `sfix/` fixture is planted in the same generated tree as S1-S3, so workload revision 2 in v0.21.0 applies here too: the rules and the fixture are unchanged, and the tree's Rust sources end with a newline and have no line that starts or ends with a space. Revision 1 (v0.17.0 through v0.20.1) generated them without either guarantee; compare timings only within one revision.
 
 ### SFIX — fix
 
