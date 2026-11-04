@@ -792,10 +792,39 @@ fn build_overrides(root: &Path, opts: &WalkOptions) -> Result<ignore::overrides:
         .map_err(|e| Error::Other(format!("failed to build overrides: {e}")))
 }
 
+/// The `info/exclude` file the walk reads for the repository at `root`:
+/// `<root>/.git/info/exclude` when `.git` is a directory, or, when it is a
+/// linked worktree's `.git` file (`gitdir: <dir>`), `info/exclude` in the
+/// common git directory `<dir>/commondir` names, since a worktree shares its
+/// repository's excludes. Mirrors `ignore`'s `resolve_git_commondir` (0.4.34,
+/// which began applying it with `require_git(false)`), including reading no
+/// environment variables and a relative `gitdir:` resolving against the
+/// working directory. `None` when the walk would read no exclude file.
+fn git_exclude_file(root: &Path) -> Option<PathBuf> {
+    use std::io::BufRead as _;
+    let first_line = |path: &Path| -> Option<String> {
+        let file = std::fs::File::open(path).ok()?;
+        std::io::BufReader::new(file).lines().next()?.ok()
+    };
+    let dot_git = root.join(".git");
+    if !std::fs::metadata(&dot_git).is_ok_and(|meta| meta.is_file()) {
+        return Some(dot_git.join("info/exclude"));
+    }
+    let git_dir = PathBuf::from(first_line(&dot_git)?.strip_prefix("gitdir: ")?);
+    let common = first_line(&git_dir.join("commondir"))?;
+    let common = if common.starts_with('.') {
+        git_dir.join(common)
+    } else {
+        PathBuf::from(common)
+    };
+    Some(common.join("info/exclude"))
+}
+
 /// Whether [`walk`] would leave the repo-relative path `rel` out of the index
 /// if it existed (as a directory when `is_dir`): excluded by the config's
 /// `ignore:` / `.git`, or (with `respect_gitignore`) by a `.ignore` /
-/// `.gitignore` in `rel`'s ancestors, `.git/info/exclude`, or the global git
+/// `.gitignore` in `rel`'s ancestors, the repository's `info/exclude` (in a
+/// linked worktree, the shared one: `git_exclude_file`), or the global git
 /// excludes file -- itself or through an excluded ancestor directory, which
 /// the walk never descends into. `fix --dry-run` uses it to predict that a
 /// file a fix would create stays invisible to the rule, as the real `fix`
@@ -844,14 +873,13 @@ pub fn would_walk_skip(root: &Path, opts: &WalkOptions, rel: &Path, is_dir: bool
     } else {
         (Vec::new(), Vec::new())
     };
-    let exclude_file = root.join(".git/info/exclude");
-    let exclude = if opts.respect_gitignore && exclude_file.is_file() {
-        let mut b = GitignoreBuilder::new(root);
-        b.add(&exclude_file);
-        b.build().ok()
-    } else {
-        None
-    };
+    let exclude = git_exclude_file(root)
+        .filter(|file| opts.respect_gitignore && file.is_file())
+        .and_then(|file| {
+            let mut b = GitignoreBuilder::new(root);
+            b.add(&file);
+            b.build().ok()
+        });
     let global = opts.respect_gitignore.then(|| Gitignore::global().0);
 
     let ignored = |abs: &Path, is_dir: bool| -> bool {
@@ -1791,6 +1819,67 @@ mod tests {
             root,
             &opts,
             Path::new(".git/config"),
+            false
+        ));
+    }
+
+    #[test]
+    fn would_walk_skip_reads_a_linked_worktrees_shared_exclude() {
+        // A linked worktree's `.git` is a file naming its private git dir,
+        // whose `commondir` leads to the repository's shared `info/exclude`.
+        // `walk` (ignore 0.4.34) honors that file, so `fix --dry-run` must too.
+        let tmp = td();
+        let repo_git = tmp.path().join("main/.git");
+        std::fs::create_dir_all(repo_git.join("info")).unwrap();
+        std::fs::write(repo_git.join("info/exclude"), "secret.txt\nscratch/\n").unwrap();
+        let private = repo_git.join("worktrees/wt");
+        std::fs::create_dir_all(&private).unwrap();
+        let root = tmp.path().join("wt");
+        std::fs::create_dir_all(root.join("scratch")).unwrap();
+        std::fs::write(
+            root.join(".git"),
+            format!("gitdir: {}\n", private.display()),
+        )
+        .unwrap();
+        for rel in ["secret.txt", "scratch/notes.md", "kept.txt"] {
+            std::fs::write(root.join(rel), b"x").unwrap();
+        }
+        let opts = WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        };
+        // An absolute and a relative `commondir` both name the shared dir.
+        for commondir in [repo_git.display().to_string(), "../..".to_string()] {
+            std::fs::write(private.join("commondir"), format!("{commondir}\n")).unwrap();
+            let idx = walk(&root, &opts).unwrap();
+            for (rel, skipped) in [
+                ("secret.txt", true),
+                ("scratch/notes.md", true),
+                ("kept.txt", false),
+            ] {
+                assert_eq!(
+                    idx.contains_file(Path::new(rel)),
+                    !skipped,
+                    "walk, {rel}, commondir {commondir}"
+                );
+                assert_eq!(
+                    would_walk_skip(&root, &opts, Path::new(rel), false),
+                    skipped,
+                    "would_walk_skip, {rel}, commondir {commondir}"
+                );
+            }
+        }
+        // A `.git` file without a `commondir` (a submodule) reads no exclude.
+        std::fs::remove_file(private.join("commondir")).unwrap();
+        assert!(
+            walk(&root, &opts)
+                .unwrap()
+                .contains_file(Path::new("secret.txt"))
+        );
+        assert!(!would_walk_skip(
+            &root,
+            &opts,
+            Path::new("secret.txt"),
             false
         ));
     }
