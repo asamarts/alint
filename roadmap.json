@@ -128,6 +128,12 @@
       "blurb": "The groundwork for cross-file constraints: an internal relation layer with typed values and source locations, a new key_parity rule that keeps locale and environment files in step across JSON, YAML, TOML, dotenv, INI, Java properties, Android string resources, and .resx, a second implementation of one existing check that must match it exactly, and a first draft of the plugin contract."
     },
     {
+      "version": "0.22",
+      "title": "Completing the relation-layer port",
+      "kind": "release",
+      "blurb": "The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus and the performance budgets held. The next general-linter phase starts only if this release meets those gates."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",

@@ -13,7 +13,7 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.21.0** (2026-11-01): the second general-linter phase. `key_parity` keeps
+**Latest release: v0.21.0** (2026-11-01): general-linter phase 2. `key_parity` keeps
 locale and environment files in step with a reference across JSON, YAML, TOML, dotenv, INI, Java
 properties, Android string resources, and `.resx`, on an internal relation layer that a shadow
 port of `cross_file`'s `equals` relation also runs on, matching the existing implementation on
@@ -294,9 +294,11 @@ on it for adoption, they can lint without it.
   and the versioning and toolchain consistency bundles. The accepted
   [`v0.20` authoring-loop design](https://github.com/asamarts/alint/blob/main/docs/design/v0.20/README.md) shipped `alint test`,
   selected-rule `explain --trace`, and per-source compatibility requirements;
-  the internal relation layer with the `key_parity` pilot and the plugin
-  contract follow in the accepted [`v0.21` design](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md), then `version: 2` selectors and constraints, with
-  plugin hosts as a parallel track. Staged in
+  v0.21 shipped the internal relation layer with the `key_parity` pilot and a
+  draft plugin contract, per the accepted [`v0.21` design](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md).
+  v0.22 must make the relation layer the only `cross_file` `equals` path
+  before `version: 2` selectors and constraints follow, with plugin hosts as
+  a parallel track. Staged in
   [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
   section 11, decided in
   [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md),
@@ -1524,6 +1526,13 @@ is specified by the accepted
 [`v0.21/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md)
 and [ADR-0023](https://github.com/asamarts/alint/blob/main/docs/adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md),
 as corrected by [ADR-0024](https://github.com/asamarts/alint/blob/main/docs/adr/0024-relation-ir-decisions-after-review.md), which supersedes it.
+The pre-release decisions are in
+[ADR-0025](https://github.com/asamarts/alint/blob/main/docs/adr/0025-v021-pre-release-decisions.md)
+(among them the go/no-go verdict and the v0.22 gates),
+[ADR-0026](https://github.com/asamarts/alint/blob/main/docs/adr/0026-measuring-the-v022-simplicity-gate.md)
+(how the v0.22 line bound is counted), and
+[ADR-0027](https://github.com/asamarts/alint/blob/main/docs/adr/0027-plugin-contract-0-1-stays-a-draft.md)
+(plugin contract 0.1 stays a draft until plugins load).
 The only new user-facing surface is one rule kind.
 
 - **Measurement first.** Compare relation-layer changes with v0.18.2 on the deterministic
@@ -1542,6 +1551,25 @@ The only new user-facing surface is one rule kind.
   release.
 - **Plugin contract 0.x.** Internal adapter and analyzer traits that the built-in row adapters
   and `key_parity` implement, an injectable rule registry, and a draft WIT contract.
+
+## v0.22: Completing the relation-layer port
+
+Closes Phase 2 of
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+(section 11.1, "Phase 2 outcome"). v0.21 was a GO on consistency only; these are the three gates of
+[ADR-0025](https://github.com/asamarts/alint/blob/main/docs/adr/0025-v021-pre-release-decisions.md)
+decision 3, with the second counted as
+[ADR-0026](https://github.com/asamarts/alint/blob/main/docs/adr/0026-measuring-the-v022-simplicity-gate.md)
+defines. Phase 3 (`version: 2` selectors and report-only constraints) starts only if v0.22 meets
+all three; otherwise the program's stop rule applies.
+
+- **One `equals` implementation.** The relation layer becomes the authoritative `cross_file`
+  `equals` (including the `cross_file_value_equals` alias), and the old `equals` code is deleted.
+- **Simplicity bound.** The code only the new `equals` executes is at most 134 non-comment lines,
+  counted on both sides as ADR-0026 defines, and calls nothing in `cross_file::eval`.
+- **Zero differences, budgets held.** The e2e suite and the case-study corpus replay show zero
+  differences against v0.21, and the performance budgets of `general-linter.md` section 9.6 hold
+  as ADR-0024 decision 6 measures them.
 
 ## v1.0: Stability
 
