@@ -121,5 +121,35 @@ cp "$REPO_ROOT/ci/scripts/bump-version.sh" ci/scripts/bump-version.sh
 PATH="$TMP_ROOT/fake-bin:$PATH" bash ci/scripts/bump-version.sh "$NEXT" >/dev/null
 expect_ok "bump-version updates workspace and Action together" "v$NEXT"
 
+zed_lock=$(awk -F'"' '/^name = "alint-zed"$/ { want = 1; next } want && /^version = / { print $2; exit }' \
+  editors/zed/Cargo.lock)
+if [[ "$zed_lock" == "$NEXT" ]]; then
+  echo "  ok: bump-version refreshes the Zed lockfile's alint-zed entry"
+  pass=$((pass + 1))
+else
+  echo "  FAIL: the Zed lockfile's alint-zed entry is ${zed_lock:-missing}, not $NEXT" >&2
+  fail=$((fail + 1))
+fi
+
+# Every file the bump edits must be in RELEASING.md's `git add` list, or the
+# release commit made by following it leaves that edit behind (the Zed lockfile
+# did, until 2026-11-04). Cargo is stubbed, so Cargo.lock and facts.json do not
+# change here; they are listed anyway.
+listed=$(awk '/^ *git add / { on = 1 }
+  on {
+    more = /\\$/
+    gsub(/\\/, "")
+    for (i = 1; i <= NF; i++) if ($i != "git" && $i != "add") print $i
+    if (!more) exit
+  }' "$REPO_ROOT/RELEASING.md" | LC_ALL=C sort -u)
+unlisted=$(git diff --name-only | LC_ALL=C sort -u | LC_ALL=C comm -23 - <(printf '%s\n' "$listed"))
+if [[ -n "$listed" && -z "$unlisted" ]]; then
+  echo "  ok: RELEASING.md's git add list covers every file bump-version edits"
+  pass=$((pass + 1))
+else
+  echo "  FAIL: bump-version edits files RELEASING.md's git add list leaves out: ${unlisted:-<could not read the list>}" >&2
+  fail=$((fail + 1))
+fi
+
 echo "[test-release-version] $pass passed, $fail failed"
 [[ "$fail" -eq 0 ]]

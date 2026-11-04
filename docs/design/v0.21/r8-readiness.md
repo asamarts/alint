@@ -79,8 +79,9 @@ v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. W3's documentati
   S1 remains at parity (4.15 s).
 - The Rust import-gate default pattern now prechecks for the literal `use`
   before running the per-line regex; generated source without imports skips
-  the scan. Full S2 100k drops from 567 ms to 521 ms; 1M from 5.861 s to
-  5.357 s.
+  the scan. Full S2 100k drops from 567 ms to 521 ms. At 1M, `main` ran about
+  6.04 s just before the change (+3.1% against v0.20.1's 5.861 s) and 5.357 s
+  with it (-8.6% against v0.20.1).
 
 ## Assessment of the port (W2-8)
 

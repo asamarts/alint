@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Regression tests for check-action-pins.sh against local fixture repositories
 # (ACTION_PINS_GIT_BASE), so no network is needed: exact, annotated and series
-# tags, a branch comment, sub-path Actions, and every way a pin can disagree with
-# its comment.
+# tags, a branch comment, sub-path Actions, every way a pin can disagree with
+# its comment, and every `uses` form the line-based scan cannot read.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -48,7 +48,7 @@ cp "$REPO_ROOT/ci/scripts/check-action-pins.sh" "$sandbox/check.sh"
 check() {
   local name=$1 want=$2
   shift 2
-  rm -f "$root/action.yml"
+  rm -rf "$root/action.yml" "$root/.github/actions"
   {
     echo "on: push"
     echo "jobs:"
@@ -94,11 +94,42 @@ check "a comment naming no tag or branch" rejected "uses: acme/tagged@$c1 # v9"
 check "an unreadable repository" rejected "uses: acme/missing@$c1 # v1.0.0"
 check "one bad pin among good ones" rejected "uses: acme/tagged@$c1 # v1.0.0" "uses: acme/tagged@$c1 # v2.0.0"
 
+# A `uses` key in any other form fails closed instead of being skipped.
+check "a flow-mapping step" rejected "{uses: acme/tagged@$c1}"
+check "a flow mapping with other keys" rejected "{ name: x, uses: acme/tagged@$c1 # v1.0.0 }"
+check "the value on the next line" rejected "uses:"$'\n'"          acme/tagged@$c1 # v1.0.0"
+check "a quoted key" rejected "\"uses\": acme/tagged@$c1 # v1.0.0"
+check "a space before the colon" rejected "uses : acme/tagged@$c1 # v1.0.0"
+# A block scalar's text is a script, not YAML structure; the scan resumes at the
+# next key at or left of the scalar's own key.
+check "a run block mentioning uses: is skipped" ok "run: |"$'\n'"          echo \"uses: not/an@action {uses: x}\"" \
+  "uses: acme/tagged@$c1 # v1.0.0"
+check "a key after a run block is scanned" rejected "run: |"$'\n'"          echo hi"$'\n'"        uses: acme/tagged@$c1 # v2.0.0"
+
 # action.yml is checked too.
 check "setup for action.yml" ok "uses: acme/tagged@$c1 # v1.0.0"
 printf 'runs:\n  using: composite\n  steps:\n    - uses: acme/tagged@%s # v1.1.0\n' "$c1" > "$root/action.yml"
 want=rejected
 name="a bad pin in action.yml"
+verdict
+
+# So are composite actions under .github/actions/.
+check "setup for a composite action" ok "uses: acme/tagged@$c1 # v1.0.0"
+mkdir -p "$root/.github/actions/build"
+printf 'runs:\n  using: composite\n  steps:\n    - uses: acme/tagged@%s # v1.0.0\n' "$c1" > "$root/.github/actions/build/action.yml"
+want=ok
+name="a good pin in a composite action"
+verdict
+printf 'runs:\n  using: composite\n  steps:\n    - uses: acme/tagged@v1.0.0 # v1.0.0\n' > "$root/.github/actions/build/action.yml"
+want=rejected
+name="an unpinned Action in a composite action"
+verdict
+
+# Nothing to check is a failure, not a vacuous pass.
+rm -rf "$root/.github" "$root/action.yml"
+mkdir -p "$root/.github/workflows"
+want=rejected
+name="no workflow or action file"
 verdict
 
 echo "[test-check-action-pins] $pass passed, $fail failed"

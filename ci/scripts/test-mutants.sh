@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Pin the advisory policy of ci/scripts/mutants.sh against a stubbed `cargo`:
 #   - a missed or timed-out mutant, an empty diff and a budget stop pass and are
-#     reported (job summary, one warning per missed mutant's line);
+#     reported (job summary, a warning on the first 10 missed mutants' lines, with
+#     their text escaped for the workflow command and the markdown);
 #   - a usage error, failing baseline tests or a diff that does not match the
 #     tree fail, since then nothing was tested;
 #   - the pinned cargo-mutants is installed when the runner has another version;
@@ -68,7 +69,7 @@ missed='crates/a/src/lib.rs:12:5: replace f -> u8 with 0\ncrates/a/src/lib.rs:30
 
 run STUB_RC=2 STUB_CAUGHT='c1\nc2\nc3\n' STUB_MISSED="$missed" -- --in-diff "$sandbox/pr.diff"
 if [[ "$rc" -eq 0 ]] && summarised '3 caught, 2 missed, 0 timed out' &&
-   summarised '- `crates/a/src/lib.rs:12:5: replace f -> u8 with 0`' &&
+   summarised '- `` crates/a/src/lib.rs:12:5: replace f -> u8 with 0 ``' &&
    said '::warning file=crates/a/src/lib.rs,line=12,col=5,title=Missed mutant::replace f -> u8 with 0' &&
    said '::warning file=crates/a/src/lib.rs,line=30,col=9,title=Missed mutant::replace %25 with / in g'; then
   ok "missed mutants pass, listed in the summary and as warnings on their lines"
@@ -111,6 +112,33 @@ if [[ "$rc" -eq 0 ]] && summarised 'stopped at the 1-second budget'; then
   ok "the budget stops the run with a partial report"
 else
   bad "a budget stop must pass with a partial report"
+fi
+
+run MUTANTS_BUDGET_SECONDS=1 STUB_SLEEP=30 -- --in-diff "$sandbox/pr.diff"
+if [[ "$rc" -eq 0 ]] && summarised 'finished: the run stopped at the 1-second budget' &&
+   ! summarised 'No mutants in'; then
+  ok "a budget stop before any mutant finished says so, not 'no mutants'"
+else
+  bad "a budget stop with nothing finished must not read as 'no mutants'"
+fi
+
+many=''
+for n in $(seq 1 12); do many+="crates/a/src/lib.rs:$n:1: replace f$n\n"; done
+run STUB_RC=2 STUB_MISSED="$many" -- --in-diff "$sandbox/pr.diff"
+if [[ "$rc" -eq 0 ]] && [[ "$(grep -c '^::warning ' "$sandbox/out")" -eq 10 ]] &&
+   summarised 'replace f12 ``'; then
+  ok "12 missed mutants: 10 warnings (GitHub's per-step limit), all 12 in the summary"
+else
+  bad "expected 10 warnings and 12 summary entries"
+fi
+
+run STUB_RC=2 STUB_MISSED='crates/a,title=x/src/lib.rs:3:1: replace `a` with %\r b\n' -- --in-diff "$sandbox/pr.diff"
+if [[ "$rc" -eq 0 ]] &&
+   said '::warning file=crates/a%2Ctitle=x/src/lib.rs,line=3,col=1,title=Missed mutant::replace `a` with %25%0D b' &&
+   summarised '- `` crates/a,title=x/src/lib.rs:3:1: replace `a` with %'; then
+  ok "a comma in the path and a backtick in the text cannot inject a property or end the code span"
+else
+  bad "the warning's file property and the summary entry must be escaped"
 fi
 
 run STUB_RC=137 -- --in-diff "$sandbox/pr.diff"

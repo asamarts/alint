@@ -140,6 +140,9 @@ restore
 sed -i -E '/^name = "alint-zed"$/{n;s/^version = "[^"]*"$/version = "0.0.1"/}' editors/zed/Cargo.lock
 expect_rejected "a stale Zed lockfile entry"
 git checkout -q -- editors/zed/Cargo.lock
+rm editors/zed/Cargo.lock
+expect_rejected "a missing Zed lockfile"
+git checkout -q -- editors/zed/Cargo.lock
 
 expect_rejected "unknown option is rejected" --unknown
 

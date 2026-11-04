@@ -238,8 +238,12 @@ for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
   fi
 done
 # Its lockfile records the extension's own version too; the editors job builds
-# with --locked, so a stale entry would fail there instead of here.
-if [[ -f editors/zed/Cargo.lock ]]; then
+# with --locked, so a stale entry would fail there instead of here. The file is
+# committed; a missing one is a failure, not a skip.
+if [[ ! -f editors/zed/Cargo.lock ]]; then
+  echo "[version-pin] editors/zed/Cargo.lock is missing" >&2
+  failed=1
+else
   ZED_LOCK_VER=$(awk -F'"' '/^name = "alint-zed"$/ { want = 1; next } want && /^version = / { print $2; exit }' \
     editors/zed/Cargo.lock)
   if [[ "$ZED_LOCK_VER" != "$WORKSPACE_VER" ]]; then

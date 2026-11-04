@@ -6,9 +6,9 @@ name: Advisories (scheduled)
 # on the next such pull request, as RUSTSEC-2026-0433 did on 2026-11-04. The same
 # scripts run here with the same blocking policy and the same deny.toml waivers;
 # a failure is a failed scheduled run, which GitHub reports to whoever last
-# changed the schedule. Daily rather
-# than the weekly run the v0.21 pre-release audit suggested: each run takes about
-# a minute on a hosted runner, and a day is the longest an advisory goes unseen.
+# changed the schedule. Daily rather than the weekly run the v0.21 pre-release
+# audit suggested: a run takes two to three minutes on a hosted runner, and a day
+# is the longest an advisory goes unseen.
 on:
   schedule:
     - cron: "23 5 * * *"

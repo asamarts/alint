@@ -17,7 +17,8 @@ run_summary() {
     RUST_CHANGED=false DOCS_CHANGED=false BENCH_CHANGED=false \
     EXAMPLES_CHANGED=false EDITORS_CHANGED=false SUPPLY_CHAIN_CHANGED=false \
     PACKAGING_CHANGED=false SHELL_CHANGED=false \
-    SECRETS_INVENTORY_RESULT=success FMT_RESULT=skipped MSRV_RESULT=skipped \
+    SECRETS_INVENTORY_RESULT=success ACTION_PINS_RESULT=success \
+    FMT_RESULT=skipped MSRV_RESULT=skipped \
     CLIPPY_RESULT=skipped TEST_RESULT=skipped AUDIT_RESULT=skipped \
     DENY_RESULT=skipped SUPPLY_CHAIN_RESULT=skipped BUILD_RESULT=skipped \
     DOCS_JOB_RESULT=skipped DOGFOOD_RESULT=skipped BENCH_SMOKE_RESULT=skipped \
@@ -48,6 +49,13 @@ expect "a job failed"                fail CHANGES_RESULT=success DENY_RESULT=fai
 expect "packaging failed"            fail CHANGES_RESULT=success PACKAGING_RESULT=failure
 expect "action pins failed"          fail CHANGES_RESULT=success ACTION_PINS_RESULT=failure
 expect "action pins passed"          pass CHANGES_RESULT=success ACTION_PINS_RESULT=success
+# The two unconditional checks pass only on success.
+expect "action pins cancelled"       fail CHANGES_RESULT=success ACTION_PINS_RESULT=cancelled
+expect "action pins skipped"         fail CHANGES_RESULT=success ACTION_PINS_RESULT=skipped
+expect "action pins result missing"  fail CHANGES_RESULT=success ACTION_PINS_RESULT=
+expect "secrets inventory failed"    fail CHANGES_RESULT=success SECRETS_INVENTORY_RESULT=failure
+expect "secrets inventory cancelled" fail CHANGES_RESULT=success SECRETS_INVENTORY_RESULT=cancelled
+expect "secrets inventory result missing" fail CHANGES_RESULT=success SECRETS_INVENTORY_RESULT=
 expect "shell-only route, harness failed" fail CHANGES_RESULT=success SHELL_CHANGED=true SHELL_TESTS_RESULT=failure
 expect "reference perf gate failed"   fail CHANGES_RESULT=success PERF_REFERENCE_RESULT=failure
 expect "reference perf gate cancelled" fail CHANGES_RESULT=success PERF_REFERENCE_RESULT=cancelled
@@ -66,7 +74,8 @@ expect "plugin contract cancelled, no rust change" fail CHANGES_RESULT=success W
 row=$(env -i PATH="$PATH" CHANGES_RESULT=success RUST_CHANGED=false DOCS_CHANGED=false \
   BENCH_CHANGED=false EXAMPLES_CHANGED=false EDITORS_CHANGED=false \
   SUPPLY_CHAIN_CHANGED=false PACKAGING_CHANGED=false SHELL_CHANGED=true \
-  SECRETS_INVENTORY_RESULT=success FMT_RESULT=skipped MSRV_RESULT=skipped \
+  SECRETS_INVENTORY_RESULT=success ACTION_PINS_RESULT=success \
+  FMT_RESULT=skipped MSRV_RESULT=skipped \
   CLIPPY_RESULT=skipped TEST_RESULT=skipped AUDIT_RESULT=skipped DENY_RESULT=skipped \
   SUPPLY_CHAIN_RESULT=skipped BUILD_RESULT=skipped DOCS_JOB_RESULT=skipped \
   DOGFOOD_RESULT=skipped BENCH_SMOKE_RESULT=skipped EXAMPLES_RESULT=skipped \

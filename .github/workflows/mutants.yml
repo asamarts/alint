@@ -27,8 +27,10 @@ on:
 permissions:
   contents: read
 
+# A new push to a pull request cancels its older run; a dispatch per crate gets its
+# own group, so dispatching a second crate does not cancel the first.
 concurrency:
-  group: mutants-${{ github.event.pull_request.number || github.ref }}
+  group: mutants-${{ github.event.pull_request.number || github.ref }}-${{ inputs.crate }}
   cancel-in-progress: true
 
 env:
