@@ -105,11 +105,11 @@ per fact.
 
 ```
 results/
-└── linux-x86_64/
-    ├── v0.7.0/criterion/      ← bench-compare floor (every later release gates against this)
-    ├── v0.8.4/criterion/      ← v0.8 publication-grade snapshot
-    ├── v0.9.4/criterion/      ← latest v0.9.x intermediate
-    └── v0.9.5/criterion/      ← latest published
+├── linux-x86_64/                 ← the bench host (i7-6700HQ), canonical since 2026-07-15
+│   ├── v0.10.0/criterion/        ← oldest release in this series
+│   ├── …                         ← one directory per published release
+│   └── v0.21.0/criterion/        ← latest published
+└── linux-x86_64-ryzen-3900x/     ← retired 3900X dev-box series, v0.7.0 to v0.13.0
 ```
 
 Per-version subdirs follow criterion's native format

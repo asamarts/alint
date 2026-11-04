@@ -16,8 +16,7 @@ of date with the published bench corpus.
 
 This renders the CONSOLIDATED 5-scenario series (S1 layout / S2
 content / S3 relational-graph / S4 workspace, plus the fix-mode
-SFIX scenario which has no published data until the v0.17 fix
-engine ships). The pre-consolidation 14-scenario bench-host series is
+SFIX scenario, published from v0.17.0 when the fix engine shipped). The pre-consolidation 14-scenario bench-host series is
 FROZEN at `docs/benchmarks/legacy/` and rendered from
 `docs/benchmarks/macro/results/legacy/` with this script's
 git-history predecessor; it is not re-rendered.
@@ -188,23 +187,24 @@ def modes_for(sid: str) -> List[str]:
 #
 # SFIX is the dedicated fix-mode scenario: it runs `fix` mode (not
 # `full`/`changed`), so render() gives it a fix-mode table via
-# modes_for(). It has no published data until the v0.17 fix engine
-# ships, so FIRST_VERSION gates it to `n/a` for every earlier tag.
-# It is INCLUDED here (not deferred) so bench-record's render-history
-# does not hard-fail the recurrence guard -- and truncate HISTORY.md
-# via `> HISTORY.md` -- the first time a real SFIX row lands.
+# modes_for(). Its data starts at v0.17.0 (the fix engine), so
+# FIRST_VERSION gates it to `n/a` for every earlier tag.
+#
+# Each intro states the scenario's workload revisions, because
+# timings are comparable only within one revision (the tables mark
+# every reset; see workload_label()).
 SCENARIOS = [
     (
         "S1", "Layout & path",
-        "Walker + `GlobSet` + path/metadata rules with little or no content read — the cheapest dispatch path and the `ls-lint` / shell (`find` + GNU grep) competitive anchor. Consolidates the old filename-hygiene, `scope_filter`-shape, and existence/size scenarios; a subset carries `scope_filter: { has_ancestor }` so the non-per-file-rule scope_filter dispatch shape stays covered. Catches walker / glob / scope-match regressions.",
+        "Walker + `GlobSet` + path/metadata rules with little or no content read — the cheapest dispatch path and the `ls-lint` / shell (`find` + GNU grep) competitive anchor. Consolidates the old filename-hygiene, `scope_filter`-shape, and existence/size scenarios; a subset carries `scope_filter: { has_ancestor }` so the non-per-file-rule scope_filter dispatch shape stays covered. Catches walker / glob / scope-match regressions. Workload revision 2 in v0.21.0 keeps the rules and regenerates the tree's Rust sources as clean text: each ends with a newline and no line starts or ends with a space. Revision 1 (v0.10.0 through v0.20.1) generated them without either guarantee; compare timings only within one revision.",
     ),
     (
         "S2", "Per-file content",
-        "Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whole content mix — per-line kinds, forbidden-pattern scans, `ordered_block` / `import_gate`, and structured XML against a single `.csproj` overlay. Consolidates the old dense content-fan-out and v0.10 per-file scenarios. The perf signal is how flat the per-rule cost stays as the mix grows.",
+        "Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whole content mix — per-line kinds, forbidden-pattern scans, `ordered_block` / `import_gate`, and structured XML against a single `.csproj` overlay. Consolidates the old dense content-fan-out and v0.10 per-file scenarios. The perf signal is how flat the per-rule cost stays as the mix grows. Workload revision 2 in v0.21.0 keeps the rules and regenerates the tree's Rust sources as clean text: each ends with a newline and no line starts or ends with a space. Under revision 1 (v0.10.0 through v0.20.1), `final_newline` reported one finding per source and the whitespace rules tens of thousands more (about 86,000 at 100k), so those timings measured findings rather than ordinary linting. Compare timings only within one revision.",
     ),
     (
         "S3", "Cross-file, relational & graph",
-        "Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for_each_*` / `dir_only_contains` / `every_matching_has`) + `file_graph` build/traversal ×3 + `for_each_match` + `cross_file` set-union + single-shot spawn (`command: [\"true\"]`). Consolidates the old cross-file, v0.10 cross-file, single-shot, and v0.12 graph/featureset scenarios. The heaviest scenario; the index/graph build is the perf signal, so `changed` mode is ~as costly as `full`. **New at v0.12.0** (the graph kinds land at v0.12).",
+        "Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for_each_*` / `dir_only_contains` / `every_matching_has`) + `file_graph` build/traversal ×3 + `for_each_match` + `cross_file` set-union + single-shot spawn (`command: [\"true\"]`). Consolidates the old cross-file, v0.10 cross-file, single-shot, and v0.12 graph/featureset scenarios. The heaviest scenario; the index/graph build is the perf signal, so `changed` mode is ~as costly as `full`. **New at v0.12.0** (the graph kinds land at v0.12). Workload revision 2 in v0.21.0 keeps the rules and regenerates the tree's Rust sources as clean text: each ends with a newline and no line starts or ends with a space. Revision 1 (v0.12.0 through v0.20.1) generated them without either guarantee; compare timings only within one revision.",
     ),
     (
         "S4", "Workspace bundle",
@@ -212,7 +212,7 @@ SCENARIOS = [
     ),
     (
         "SFIX", "Auto-fix",
-        "The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `command` / `git_untrack`), run as `alint fix --unsafe-fixes --dry-run` so every op's compute + compose path runs while nothing is written. The only fix-mode scenario -- closes the historical zero-macro-fix-coverage gap. Rendered as a `fix`-mode table (not `full`/`changed`); `n/a` for every tag before the v0.17 fix engine. **New at v0.17.0.**",
+        "The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `command` / `git_untrack`), run as `alint fix --unsafe-fixes --dry-run` so every op's compute + compose path runs while nothing is written. The only fix-mode scenario -- closes the historical zero-macro-fix-coverage gap. Rendered as a `fix`-mode table (not `full`/`changed`); `n/a` for every tag before the v0.17 fix engine. **New at v0.17.0.** The `sfix/` fixture is planted in the same generated tree as S1-S3, so workload revision 2 in v0.21.0 applies here too: the rules and the fixture are unchanged, and the tree's Rust sources end with a newline and have no line that starts or ends with a space. Revision 1 (v0.17.0 through v0.20.1) generated them without either guarantee; compare timings only within one revision.",
     ),
 ]
 
@@ -364,8 +364,7 @@ def render(
     # measured in the corpus MUST have a SCENARIOS entry, else its section is
     # skipped and HISTORY.md under-reports the matrix while nothing complains.
     # Fail loudly so bench-record.yml's re-render surfaces a new scenario that
-    # needs a hand-written intro here. (A future SFIX/fix-mode row trips this
-    # on purpose — see the SCENARIOS note.)
+    # needs a hand-written intro here.
     known = {sid for sid, _title, _intro in SCENARIOS}
     measured = {k[1] for k in data}
     missing = sorted(measured - known, key=lambda s: int(s[1:]) if s[1:].isdigit() else 0)
@@ -387,8 +386,8 @@ def render(
         "cross-machine comparisons need like-for-like.",
         "",
         "This is the consolidated 5-scenario series (S1 layout / S2 content /",
-        "S3 relational-graph / S4 workspace; the fix-mode SFIX scenario has no",
-        "published data until the v0.17 fix engine ships). The pre-consolidation",
+        "S3 relational-graph / S4 workspace, plus the fix-mode SFIX scenario,",
+        "published from v0.17.0 when the fix engine shipped). The pre-consolidation",
         "14-scenario history is frozen at [`legacy/HISTORY.md`](legacy/HISTORY.md).",
         "",
         "> **Invalid historical competitor rows.** The v0.5.7 ls-lint rows never loaded",
@@ -425,13 +424,13 @@ def render(
         "## Cross-version headline trajectory",
         "",
         "1M/full cells across all four check scenarios. S4 (workspace bundle) is the",
-        "realistic-monorepo release anchor every publish captures. Its explicit workload",
-        "column marks revision resets; timings on opposite sides of a reset are",
-        "incomparable. S3 is the heaviest, graph-dominated scenario; S1/S2 track the",
-        "walk-bound and per-file-content paths.",
+        "realistic-monorepo release anchor every publish captures. S3 is the heaviest,",
+        "graph-dominated scenario; S1/S2 track the walk-bound and per-file-content paths.",
+        "Each scenario's workload column marks its revision resets with a bold",
+        "`rN ← reset from rM`; timings on opposite sides of a reset are incomparable.",
         "",
-        "| Version | Date | 1M S1 full | 1M S2 full | 1M S3 full | S4 workload | 1M S4 full | Headline change |",
-        "|---|---|---:|---:|---:|---|---:|---|",
+        "| Version | Date | S1 workload | 1M S1 full | S2 workload | 1M S2 full | S3 workload | 1M S3 full | S4 workload | 1M S4 full | Headline change |",
+        "|---|---|---|---:|---|---:|---|---:|---|---:|---|",
     ]
     # Date table — one row per version present on disk. CHANGELOG-parsed
     # headlines win when defined, so new releases need no script edit.
@@ -440,12 +439,16 @@ def render(
         headlines.update(changelog_headlines)
     for v in versions_present:
         date, headline = headlines.get(v, ("?", "—"))
-        cells = [fmt(data, v, sx, "1m", "full") for sx in ("S1", "S2", "S3", "S4")]
-        s4_revision = workload_label(revisions, versions_present, v, "S4")
+        # Each 1M cell follows its own workload label, so a reset in any
+        # scenario (not only S4) is visible in the headline row.
+        cells = [
+            f"{workload_label(revisions, versions_present, v, sx)} | "
+            f"{fmt(data, v, sx, '1m', 'full')}"
+            for _json_key, sx in HEADLINE_CELLS
+        ]
         marker = "**" if v == versions_present[0] else ""
         out.append(
-            f"| {marker}{v}{marker} | {date} | {' | '.join(cells[:3])} | "
-            f"{s4_revision} | {cells[3]} | {headline} |"
+            f"| {marker}{v}{marker} | {date} | {' | '.join(cells)} | {headline} |"
         )
     out += [
         "",

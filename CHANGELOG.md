@@ -6,6 +6,29 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- The locked `pulldown-cmark` is now 0.13.6, fixing RUSTSEC-2026-0433
+  (quadratic parsing of nested image wikilinks with `ENABLE_WIKILINKS`). alint
+  does not enable wikilinks, so it was not exposed.
+
+### Changed
+
+- The walker uses `ignore` 0.4.34. In a linked git worktree
+  (`git worktree add`), alint now honors the repository's `.git/info/exclude`,
+  as it already did in the main checkout; before, files excluded only there
+  were linted.
+
+### Performance
+
+- Nested rules (`for_each_dir`, `for_each_file`, `every_matching_has`) look up
+  which of a nested rule's options are globs with a `match` instead of scanning
+  a table for every iterated entry. Adding `key_parity` to that table in v0.21.0
+  stopped the compiler unrolling the scan, which then cost about 300
+  instructions per entry and made `for_each_dir` 3% slower than v0.20.1 in the
+  release's deterministic micro-benchmark gate. It is now back within 0.5% of
+  v0.20.1.
+
 ### Fixed
 
 - A configuration error is no longer replaced with `<redacted>` just because the
@@ -18,22 +41,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   regex read from the environment, stays redacted and now says why. The same
   applies to a whole configuration file that reads the environment.
 
-### Performance
-
-- Nested rules (`for_each_dir`, `for_each_file`, `every_matching_has`) look up
-  which of a nested rule's options are globs with a `match` instead of scanning
-  a table for every iterated entry. Adding `key_parity` to that table in v0.21.0
-  stopped the compiler unrolling the scan, which then cost about 300
-  instructions per entry and made `for_each_dir` 3% slower than v0.20.1 in the
-  release's deterministic micro-benchmark gate. It is now back within 0.5% of
-  v0.20.1.
-
 ## [0.21.0] - 2026-11-01
 
-The second general-linter phase. `key_parity` keeps locale and environment files in step with a
-reference across eight formats (JSON, YAML, TOML, dotenv, INI, Java properties, Android string
-resources and .NET `.resx`), built on a new relation layer that later cross-file rules will
-share; `cross_file`'s `relation: equals` already has a differential shadow implementation on it.
+General-linter phase 2 adds `key_parity` on a new internal relation layer. It keeps locale and
+environment files in step with a reference across eight formats (JSON, YAML, TOML, dotenv, INI,
+Java properties, Android string resources and .NET `.resx`), and later cross-file rules will
+share the relation layer; `cross_file`'s `relation: equals` already has a differential shadow
+implementation on it.
 The first draft of the plugin contract (`alint:plugin@0.1.0`) ships as internal Rust traits and a
 WIT file that CI checks against witforge's generated code, though alint does not load plugins yet.
 The release also moves to `jsonschema` 0.60, makes `import_gate` cheaper on import-free Rust,
@@ -43,7 +57,8 @@ naming absolute paths.
 ### Security
 
 - Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
-  (exponential event growth with `ENABLE_WIKILINKS`).
+  (exponential event growth with `ENABLE_WIKILINKS`). alint does not enable
+  wikilinks, so it was not exposed.
 - The VS Code extension bundles `minimatch` 11.0.3 through an npm override,
   because `vscode-languageclient` 11 still asks for 10. This fixes
   GHSA-g3hv-75wg-m249, a pattern-expansion denial of service that only occurs
@@ -69,6 +84,7 @@ naming absolute paths.
   backtracking-limit finding.
 - The VS Code extension uses `vscode-languageclient` 11 (still VS Code 1.91 or
   newer).
+- Release binaries are built with Rust 1.99.1 (was 1.98.1).
 
 ### Performance
 
