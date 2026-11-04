@@ -1483,8 +1483,9 @@ expressiveness:
 This is intentionally staged. Publishing the generic YAML first would freeze the weakest
 part of the design before provenance, testing, and planning are ready. Each phase has a proposed
 target release, a size, the substrates it delivers, and an exit criterion. DEC-1 adopted these
-targets; the roadmap records Phases 0 and 1a under v0.19, and the accepted Phase 1b design under
-v0.20. Later targets stay provisional until each phase's design document.
+targets; the roadmap records Phases 0 and 1a under v0.19, the accepted Phase 1b design under
+v0.20, Phase 2 under v0.21, and the gates that close Phase 2 under v0.22. Later targets stay
+provisional until each phase's design document.
 
 ### 11.1 Phase summary
 
@@ -1494,7 +1495,7 @@ v0.20. Later targets stay provisional until each phase's design document.
 | 1a. Fail-loud and finding foundations | v0.19 | L | every row of section 4.12 closed or explicitly recorded as accepted, each with a gate asserting its invariant |
 | 1b. Authoring loop | v0.20 | M | `alint test` public with a published schema; selected-rule `explain --trace`; bundled rulesets own tests; each composed config source validates `version` and optional `requires.alint` before merge |
 | 2. Internal relation IR (go / no-go) | v0.21 | L | the IR pilot ships as a v1 kind, one existing kind is ported with zero shadow diffs over one release, and the section 9.6 budgets hold (as measured per ADR-0024 decision 6) |
-| 3. Selectors, report-only constraints, and `version: 2` | v0.22 or later | L | the section 12.1 measures met on the Phase 3 conformance policies (locale key parity, dependency version consistency, toolchain-pin consistency; stale exceptions are measured at Phase 4); the version-boundary ADR accepted |
+| 3. Selectors, report-only constraints, and `version: 2` | after v0.22 (v0.23 or later), and only if v0.22 meets Phase 2's three gates | L | the section 12.1 measures met on the Phase 3 conformance policies (locale key parity, dependency version consistency, toolchain-pin consistency; stale exceptions are measured at Phase 4); the version-boundary ADR accepted |
 | 4. Typed modules and exception data | unscheduled | M | decided after Phase 3 by measured reuse pressure |
 | 5. Snapshot views | unscheduled | L | the LSP overlay part first; Git index and tree views only with demand |
 | 6. Plugin hosts (parallel track, DEC-14) | contract with Phase 2 (v0.21); native Rust and `alint build` next (about v0.22); process host and Rust SDK (about v0.23); WASM host and other-language SDKs after | L (about 33-53 engineer-weeks in all, including the contract compiler; a first real plugin after about 12-18) | one adapter and one analyzer plugin validated end to end before any registry |
@@ -1504,6 +1505,26 @@ v0.20. Later targets stay provisional until each phase's design document.
 **Stop rule.** If the Phase 2 pilot does not make the ported kind simpler and more consistent,
 or if after Phase 3 the share of new demand that is expressible by configuration (section 12.3)
 does not move, the program stops there. Phases 0 to 2 have standalone value either way.
+
+**Phase 2 outcome (v0.21.0, 2026-11-01).** `key_parity` shipped as the IR pilot, and the shadow
+of `cross_file` `equals` matched the old implementation with zero differences on the e2e suite,
+its property generator, and the corpus replay. The go/no-go assessment
+([`v0.21/r8-readiness.md`](v0.21/r8-readiness.md)) found consistency shown, but simplicity could
+not be measured while production `equals` still ran the old code.
+[ADR-0025](../adr/0025-v021-pre-release-decisions.md) decision 3 recorded a GO on consistency and
+moved simplicity to three gates for v0.22:
+
+1. the IR path becomes the authoritative `cross_file` `equals`, and the old `equals` code is
+   deleted;
+2. the code only the new `equals` executes is at most 134 non-comment lines, counted as
+   [ADR-0026](../adr/0026-measuring-the-v022-simplicity-gate.md) defines (it replaces
+   ADR-0025's 190), and calls nothing in `cross_file::eval`;
+3. the e2e suite and the corpus replay show zero differences against v0.21, with the section 9.6
+   budgets held as ADR-0024 decision 6 measures them.
+
+Phase 3 starts only if v0.22 meets all three; otherwise the stop rule applies.
+[ADR-0027](../adr/0027-plugin-contract-0-1-stays-a-draft.md) keeps plugin contract 0.1 a draft
+until the first release that loads plugins.
 
 ### 11.2 Phase 0: terminology and capability inventory
 
@@ -1563,6 +1584,10 @@ The accepted v0.21 design, with its starting point checked against the code, is
 [`v0.21/README.md`](v0.21/README.md); its decisions are recorded in
 [ADR-0023](../adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md), with the corrections
 review found recorded in [ADR-0024](../adr/0024-relation-ir-decisions-after-review.md), which supersedes it.
+The pre-release decisions are [ADR-0025](../adr/0025-v021-pre-release-decisions.md) (including the
+go/no-go verdict), [ADR-0026](../adr/0026-measuring-the-v022-simplicity-gate.md) (how the v0.22
+simplicity gate is counted), and [ADR-0027](../adr/0027-plugin-contract-0-1-stays-a-draft.md)
+(contract 0.1 stays a draft).
 
 - Implement internal resource, selector, adapter, and relation types, with lazy spans (section
   6.2) and file-major read coalescing (section 9.1). Constraint types arrive with Phase 3.
@@ -1586,6 +1611,12 @@ review found recorded in [ADR-0024](../adr/0024-relation-ir-decisions-after-revi
 
 This is the go/no-go proof. If several real kinds do not become simpler and more consistent,
 do not expose a generic DSL.
+
+**Outcome.** v0.21.0 (2026-11-01) shipped `key_parity` and the zero-difference shadow of
+`cross_file` `equals`. The verdict was GO on consistency, with simplicity gated in v0.22
+(section 11.1, "Phase 2 outcome"): v0.22 makes the IR path the only `equals`, deletes the old
+code, and must meet the ADR-0026 line bound and the zero-difference and budget checks before
+Phase 3 starts.
 
 ### 11.6 Phase 3: selectors and report-only constraints
 

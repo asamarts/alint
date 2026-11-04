@@ -481,8 +481,9 @@ v0.21 is complete only when all of the following are observed:
 - Full workspace, cross-platform, shell, advisory, and preflight checks pass, and generated
   artifacts (schema, facts, docs export, roadmap) regenerate cleanly.
 - witforge 0.1.0 is published and pinned, and default CI checks the WIT draft and regenerates its
-  consumer with `--check` (ADR-0025 decision 4). Met: alint pins witforge 0.1.2, and the
-  `witforge` job runs in default CI (#417).
+  consumer with `--check` (ADR-0025 decision 4). Met at the tag against witforge 0.1.1: the
+  `witforge` job runs in default CI (#417). `main` pins 0.1.2 since #423 (validation fixes,
+  generated output unchanged).
 
 ADR-0025 decision 3 settled the go/no-go assessment as a GO on consistency; the simplicity it
 could not show moves to three gates v0.22 must pass before Phase 3 starts.
@@ -627,8 +628,8 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   since R6b's bridge change and cannot read a gitignored literal peer, several
   readiness rows have no gate, and the go/no-go assessment is unwritten. W1 (#407, merged 2026-10-30),
   W2 (#411), and W2-7 (#417) closed those gaps, and W3 (#418) the documentation,
-  so the verdict is GO again, subject to the release steps' fresh corpus
-  replay and preflight.
+  so the verdict is GO again, and the release steps' corpus replay and
+  preflight passed (see "Release cut").
 - **R9, done.** The TOML row adapter uses the lossless `toml_edit` tree;
   Android `<string>`/`<string-array>`/`<plurals>` and .NET `.resx` string
   entries parse through the guarded XML path. `key_parity` now covers all eight

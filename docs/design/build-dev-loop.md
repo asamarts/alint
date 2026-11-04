@@ -1,6 +1,6 @@
 # Build and dev-loop hygiene
 
-Status: Section 1 implemented in #356 and section 2 in #360 (both 2026-10-24, unreleased). Drafted 2026-10-21, rechecked at `61edcde97` on 2026-10-23.
+Status: Section 1 implemented in #356 and section 2 in #360 (both 2026-10-24, released in v0.21.0). Drafted 2026-10-21, rechecked at `61edcde97` on 2026-10-23.
 Decisions: none
 Roadmap: [`ROADMAP.md`](ROADMAP.md), "Future / backlog", "Build and dev-loop hygiene".
 

@@ -1,8 +1,9 @@
 # v0.21: witforge adoption and the WIT gate (W2-7)
 
-Status: W2-7 done (2026-11-01). Steps 1 to 6 of section 4 are done: witforge is on crates.io,
-alint pins witforge 0.1.2, and the W2-7 job checks the contract against that release in default
-CI (#417). Step 7 (W3, then the v0.21.0 tag) is next.
+Status: done (2026-11-01). All seven steps of section 4 are done: witforge is on crates.io, the
+W2-7 job checks the contract against the pinned release in default CI (#417, against witforge
+0.1.1 at the tag), and W3 (#418) and the v0.21.0 tag (#420) followed. `main` pins witforge 0.1.2
+since #423 (validation fixes, generated output unchanged).
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is
 [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 4: v0.21.0 is not tagged until
@@ -20,6 +21,9 @@ and the WIT draft row in [`r8-readiness.md`](r8-readiness.md), blocked until thi
   has the subset checker, the wire lock, and the Rust, protobuf, and glue emitters. Its history
   was cleaned (step 2), and it has been public since 2026-10-31 with CI on GitHub-hosted Linux,
   macOS, and Windows runners and no self-hosted runner (step 3).
+- **witforge 0.1.2** followed on 2026-11-01, after alint's v0.21.0 tag. Its changes are
+  validation, refusal, and `--check` behavior; its generated output is unchanged for every
+  contract 0.1.1 accepts. alint pins it since #423, which changed no generated file.
 - **alint** has the `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, the hand-written
   `alint_core::plugin_api` it describes, and, since #409, the consumer crate
   `crates/alint-witforge-consumer` with witforge's output for the draft.
@@ -221,7 +225,7 @@ are corrected below.
 | 4 | Publish `witforge`, then `witforge-cli` (its registry dependency needs the library first). crates.io can trust a repository only for a crate that exists, so 0.1.0 is published with the owner's scoped, short-lived token; later versions publish from witforge's release workflow through trusted publishing | witforge | step 3 | done (2026-10-31, from `546cec1`) |
 | 5 | Tag `v0.1.0` and create the GitHub release | witforge | step 4 | done (release run 41261961612, which found nothing left to publish) |
 | 6 | Add the W2-7 job (section 5) to default CI and mark the readiness row passed | alint | step 4 (it installs from crates.io) | done (#417) |
-| 7 | W3 of the pre-release audit (documentation and release preparation), then the v0.21.0 tag | alint | step 6 | |
+| 7 | W3 of the pre-release audit (documentation and release preparation), then the v0.21.0 tag | alint | step 6 | done (W3 #418, tag #420) |
 
 W3 can proceed in parallel with step 6.
 

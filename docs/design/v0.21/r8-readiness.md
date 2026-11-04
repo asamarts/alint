@@ -1,6 +1,7 @@
 # v0.21 R8 release-readiness report
 
-Status: **GO** (2026-11-01), subject to the release steps below; it was **HOLD** from 2026-10-29.
+Status: **GO** (2026-11-01), and v0.21.0 shipped that day after the release steps below; it was
+**HOLD** from 2026-10-29.
 The pre-tag audit in [`pre-release-audit.md`](pre-release-audit.md)
 found that `key_parity` misses real differences (W1), that several "pass" rows below have no gate
 behind them (W2), and that the go/no-go assessment of the port was never written (W2-8). W1 has
@@ -9,7 +10,7 @@ and W2-7's default-CI job in #417, 2026-11-01). The performance and memory evide
 stands: the benchmark generator writes well-formed Rust text, the Rust import-gate literal
 prefilter removes the remaining S2 slowdown, clean-workload 1M S2 RSS is 118,924 KB (within
 v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. W3's documentation is done
-(#418), so every row below passes; what remains are the release steps.
+(#418), so every row below passes, and the release steps below are done.
 
 ## Acceptance matrix
 
@@ -23,7 +24,7 @@ v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. W3's documentati
 | Relation limits | defined with defaults and caps; adapters enforce `RowsPerExtractor`, the decode cache takes each fresh decode's rows from the run's `RunBudget` (`RowsPerRun`) and keys entries on the limits, set conversion enforces `DistinctValues`, and a test keeps the join limits reserved until Phase 3 adds joins; each limit has a test (W2-3) | pass |
 | Invariants 6-8: visibility, feature isolation, contract boundary | module visibility test, and a test that requires `#[doc(hidden)]` on every public function elsewhere in alint-core that names the relation layer or the contract (the three `FileIndex` cache methods, W2-5); `check-shadow-feature-tree.sh` reads `alint-rules`' resolved features for each shipped or benchmarked build on every target, and five injected leaks fail it (`test-check-shadow-feature-tree.sh`, W2-2); the `plugin_api` boundary test parses the module and checks every path, `use` tree, attribute, derive, and macro argument, with names scoped as rustc scopes them (the type namespace, block scopes, per-item generics), `#[cfg(test)]` items left out, only an allow-list of std macros callable (so no `macro_rules!`), `include!` refused at any depth, and syntax `syn` leaves unparsed refused, and every escape found so far as a negative sample (W2-4; [`witforge-adoption.md`](witforge-adoption.md) sections 2.6 and 2.7) | pass |
 | Registry injection | CLI (`check`, `test`, `rules list`/`show`/`categories`), LSP (session and hover), testkit (`Runner::with_registry`), DSL catalog; one test per surface registers a custom kind and observes it run or be described, and the built-in registry rejects it (W2-1) | pass |
-| WIT draft | `wit/alint-plugin/v0.1`, a draft until plugins load (ADR-0027). `ci/scripts/witforge-consumer.sh` checks it and regenerates the committed `alint-witforge-consumer` output with `--check`; its controls fail on each changed generated file, an extra or missing file, a WIT edit the output does not reflect, an unlocked member, an unchecked version directory, and a witforge other than the pin, and `--write` restores a changed file; the crate's tests convert every type the two sides share, account for every item on both (`tests/inventory.rs`), and pair every world with its `plugin_api` trait (`tests/worlds.rs`); the script also refuses any entry in an output root, hidden ones included, without witforge's header; the inventory refuses a name declared twice, in one `plugin_api` file or two; and `worlds.rs` requires exactly `@since(version = 0.1.0)` on every interface, world, and item and refuses a gate on a `use`. The `witforge` job in default CI (#417) installs the pinned witforge 0.1.2 from crates.io and runs the check and the controls on every Rust change, and the Summary fails if it does not succeed ([`witforge-adoption.md`](witforge-adoption.md) section 5; W2-7, ADR-0025 decision 4) | pass |
+| WIT draft | `wit/alint-plugin/v0.1`, a draft until plugins load (ADR-0027). `ci/scripts/witforge-consumer.sh` checks it and regenerates the committed `alint-witforge-consumer` output with `--check`; its controls fail on each changed generated file, an extra or missing file, a WIT edit the output does not reflect, an unlocked member, an unchecked version directory, and a witforge other than the pin, and `--write` restores a changed file; the crate's tests convert every type the two sides share, account for every item on both (`tests/inventory.rs`), and pair every world with its `plugin_api` trait (`tests/worlds.rs`); the script also refuses any entry in an output root, hidden ones included, without witforge's header; the inventory refuses a name declared twice, in one `plugin_api` file or two; and `worlds.rs` requires exactly `@since(version = 0.1.0)` on every interface, world, and item and refuses a gate on a `use`. The `witforge` job in default CI (#417) installs the pinned witforge from crates.io (0.1.1 at the tag; 0.1.2 since #423, with validation fixes and unchanged generated output) and runs the check and the controls on every Rust change, and the Summary fails if it does not succeed ([`witforge-adoption.md`](witforge-adoption.md) section 5; W2-7, ADR-0025 decision 4) | pass |
 | Instruction reference S1-S3 | deterministic + v0.18.2 reference gates green on `main`/PRs | pass |
 | Relation scenario | `relation_coalescing.yml` 1k/10k recorded | pass |
 | S4 workload vs `v0.20.1` | revision 4: newline-terminated sources (and #399's whitespace change), with a generator test; same-session kbench run on the revision-4 tree, full and changed, 30 runs at 100k and three at 1M (W2-9) | pass (worst +2.12%, 1M changed) |
@@ -53,7 +54,7 @@ v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. W3's documentati
   S2 −3.19%/−0.60%, S3 −3.24%/+2.15%.
 - Benchmark-generator correction: generated `.rs` sources now end with a
   newline, so S2 does not fabricate one `final_newline` finding per file.
-  S1-S3 carry workload revision 2; S4 carries revision 4 (W2-9).
+  S1-S3 and SFIX carry workload revision 2; S4 carries revision 4 (W2-9).
 - S4 revision 4, kbench, caches dropped, one session (2026-10-30), in ABBA
   order: v0.21 at 100k, v0.20.1 at 100k, v0.20.1 at 1M, then v0.21 at 1M.
   v0.21 (built from #411's `crates/`, unchanged through its merge) against
@@ -66,9 +67,12 @@ v0.18.2 +10% and below v0.20.1), and S2 is faster than v0.20.1. W3's documentati
 - Revision 4 removes the per-file findings that dominated S4's full runs
   (v0.20.1 at 1M: 15.55 s recorded under revision 3, 9.03 s here). Changed runs
   did not get faster (v0.20.1 at 100k: 884 ms recorded, 876 ms here; at 1M,
-  9.12 s and 10.28 s, from different sessions). So on this workload a changed
-  run is now no faster than a full one in either version: level at 100k, about
-  14% slower at 1M. That cost comes from `--changed` itself, not from v0.21.
+  9.12 s and 10.28 s, from different sessions). So in this session a changed
+  run was no faster than a full one in either version: level at 100k, and slower
+  at 1M (v0.20.1 by about 14%, 10.279 vs 9.030 s; v0.21 by about 18%, 10.497 vs
+  8.920 s). Since v0.20.1 shows it too, that cost comes from `--changed` itself,
+  not from v0.21. The published v0.21.0 record, from another session, has 1M
+  changed at 8.83 s against full at 8.61 s (+2.6%).
 - Clean-workload 1M S2 peak RSS: v0.18.2 118,044 KB; v0.20.1 119,420 KB;
   current 118,924 KB (+0.75% vs v0.18.2, below v0.20.1).
 - Clean-workload 1M S2 wall-clock: v0.20.1 5.861 s; current 5.357 s (−8.6%).
@@ -86,8 +90,9 @@ R4 shadow), and `key_parity`, the first kind built on the IR (R6-R9).
 
 **Consistency is shown.**
 
-- *Same results.* The shadow finds zero differences on the 17 e2e scenarios that use
-  `relation: equals`, on its property generator, and on 106 of 110 corpus configurations (49 of
+- *Same results.* The shadow finds zero differences on the 19 e2e scenarios that evaluate
+  `equals` (17 with `relation: equals`, two through the `cross_file_value_equals` alias), on its
+  property generator, and on 106 of 110 corpus configurations (49 of
   them with `equals`; four expected skips; run 40912352842).
 - *One model.* The shadow and `key_parity` read through the run's one read cache and decode
   cache (with `key_parity` alone the 10k relation scenario makes 839 reads, and with a per-file
@@ -113,9 +118,9 @@ R4 shadow), and `key_parity`, the first kind built on the IR (R6-R9).
   `eval::read_rel` for a missing source's message. A shadow must reproduce the old output, so
   this is expected, but it is not evidence that the IR path is simpler.
 
-**Verdict: GO on consistency** (ADR-0025 decision 3). v0.21 ships once the remaining release
-work below is done. Phase 3 starts only if v0.22 meets all three gates; otherwise the stop rule
-applies:
+**Verdict: GO on consistency** (ADR-0025 decision 3). v0.21 shipped on 2026-11-01, once the
+release work below was done. Phase 3 starts only if v0.22 meets all three gates; otherwise the
+stop rule applies:
 
 1. the IR path becomes the authoritative `equals`, and the old `equals` code is deleted;
 2. the code only the new `equals` executes is at most 134 lines, counted as ADR-0026 defines,
@@ -123,7 +128,7 @@ applies:
 3. the e2e suite and the corpus replay show zero differences against v0.21, with the section
    9.6 budgets held as ADR-0024 decision 6 measures them.
 
-## Remaining release work
+## Release work
 
 W3's documentation landed in #418. The release steps of
 [`pre-release-audit.md`](pre-release-audit.md) section 5:
@@ -150,13 +155,14 @@ W3's documentation landed in #418. The release steps of
 wall-clock is also below v0.20.1; the expanded-shadow corpus replay is
 zero-diff. Those results cover performance and the replay; the release
 acceptance also required a correct `key_parity` (W1, #407) and a written
-judgment of the port (W2-8, below), and both are done. The verdict holds
-only if the fresh corpus replay at the cut shows no unexplained difference
-and the preflight passes.
+judgment of the port (W2-8, above), and both are done. The fresh corpus
+replay at the cut showed no difference and the preflight passed (Release
+work, steps 2 and 3).
 
 The owner's verdict on the port (2026-10-30, ADR-0025 decision 3) is GO on
-consistency: v0.21 ships once W1, W2, and the witforge check are done, and
-Phase 3 starts only if v0.22 deletes the old `equals` code, keeps its
-replacement within today's 134 `equals`-only lines (ADR-0026, which replaces
-ADR-0025's 190) with no calls into `cross_file::eval`, and shows zero
-differences with the budgets held. The assessment above records the evidence.
+consistency: v0.21 was to ship once W1, W2, and the witforge check were done
+(it shipped on 2026-11-01), and Phase 3 starts only if v0.22 deletes the old
+`equals` code, keeps its replacement within 134 `equals`-only lines (the old
+code's count; ADR-0026, which replaces ADR-0025's 190) with no calls into
+`cross_file::eval`, and shows zero differences with the budgets held. The
+assessment above records the evidence.
