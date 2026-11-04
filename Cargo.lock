@@ -353,7 +353,6 @@ version = "0.1.0-alpha.1"
 dependencies = [
  "indexmap",
  "serde",
- "thiserror 2.0.21",
 ]
 
 [[package]]
