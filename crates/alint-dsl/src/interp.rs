@@ -205,6 +205,19 @@ pub(crate) fn reads_env(input: &str) -> bool {
     read.get()
 }
 
+/// The names `input` reads from the environment, in order. Runs the real span
+/// resolver with a probe lookup, like [`reads_env`], so it agrees with
+/// [`interpolate_scalar`] on every boundary.
+pub(crate) fn env_names(input: &str) -> Vec<String> {
+    let names = std::cell::RefCell::new(Vec::new());
+    let probe = |name: &str| {
+        names.borrow_mut().push(name.to_owned());
+        Some("x".to_owned())
+    };
+    let _ = interpolate_scalar(input, &probe);
+    names.into_inner()
+}
+
 enum SpanResult {
     /// An `env.X` span resolved to a value.
     Resolved(String),
@@ -658,6 +671,18 @@ mod tests {
         let seq = v.as_mapping().unwrap()["paths"].as_sequence().unwrap();
         assert_eq!(seq[0].as_str().unwrap(), "pkgs/a");
         assert_eq!(seq[1].as_str().unwrap(), "pkgs/b");
+    }
+
+    #[test]
+    fn env_names_lists_each_name_the_resolver_reads() {
+        assert_eq!(
+            env_names("{{env.A}}-{{ env.B | default('x') }}{{vars.C}}{{env.A}}"),
+            ["A", "B", "A"]
+        );
+        assert_eq!(
+            env_names("plain {{vars.X}} {{ctx.Y}}"),
+            Vec::<String>::new()
+        );
     }
 
     #[test]

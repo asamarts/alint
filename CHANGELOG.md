@@ -37,9 +37,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   masked run fails the same way, so the message cannot quote one of them: an
   unsupported field, an unknown option or a misplaced `scope_filter` predicate
   is readable again, in `alint check`, `validate-config`, the language server
-  and `alint test`. An error that could quote a secret, such as an invalid
-  regex read from the environment, stays redacted and now says why. The same
-  applies to a whole configuration file that reads the environment.
+  and `alint test`, including inside a nested rule (`require:`). Numbers and
+  booleans are masked as well as strings, because interpolation turns a value
+  that reads as one (a 12-digit account id) into a number or a boolean. An
+  error that could quote a secret, such as an invalid regex read from the
+  environment, stays redacted and now says why. The same applies to a whole
+  configuration file that reads the environment. A rule with a `fix:` block,
+  or with a `scope_filter` that reads manifest paths, cannot be masked, so its
+  errors stay redacted.
+- A value read from the environment into a top-level field (`extends:`,
+  `ignore:`, `facts:`, `baseline:`, `version:`) is no longer printed when the
+  field causes an error, such as an invalid `ignore:` glob or a missing
+  `extends:` target. alint and the language server now show `<redacted>` in its
+  place. The same holds for a nested config's rule whose `paths:` from the
+  environment is rejected for leaving its directory.
 
 ## [0.21.0] - 2026-11-01
 

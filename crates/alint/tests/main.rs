@@ -24,6 +24,7 @@ mod cli_flag_inventory;
 mod cli_format_contract;
 mod config_compatibility;
 mod config_discovery;
+mod config_error_redaction;
 mod evidence_redaction;
 mod expect_matches;
 mod explain_trace;

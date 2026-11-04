@@ -164,9 +164,18 @@ struct Session {
     kinds: HashMap<String, String>,
     /// Load-time pattern hints, shown as warnings on the config file.
     pattern_hints: Vec<alint_core::pattern_hints::ConfigHint>,
+    /// The config's [`alint_core::Config::environment_values`], removed from
+    /// any error the session reports (a rule run that fails on an `ignore:`
+    /// or `facts:` value read from the environment).
+    environment_values: Vec<String>,
 }
 
 impl Session {
+    /// `message` without the config's environment values.
+    fn redact(&self, message: &str) -> String {
+        alint_core::redact_environment_values(message, &self.environment_values).into_owned()
+    }
+
     fn group_ctx(&self) -> GroupCtx<'_> {
         GroupCtx {
             root: &self.root,

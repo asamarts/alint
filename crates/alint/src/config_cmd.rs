@@ -8,7 +8,10 @@ use alint_core::RuleRegistry;
 use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions, sanitize_terminal as term};
 use anyhow::{Context, Result, bail};
 
-use super::{Cli, error_is_internal, print_stdout_line, terminal_error};
+use super::{
+    Cli, error_is_internal, print_stdout_line, redact_environment_values,
+    remember_environment_values, terminal_error,
+};
 
 /// Build the stdout writer + human-format options from the
 /// user's `--color` / `--ascii` flags.
@@ -204,6 +207,7 @@ fn validate_config_inner(
         config_path,
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
     )?;
+    remember_environment_values(&config);
     let mut count = 0usize;
     let mut hints = Vec::new();
     for spec in &config.rules {
@@ -276,7 +280,7 @@ fn emit_validate_failure(
     if format == "json" {
         // Render the error chain as a single string so editors get
         // the full context including did-you-mean hints.
-        let chain = format!("{err:#}");
+        let chain = redact_environment_values(&format!("{err:#}")).into_owned();
         let envelope = serde_json::json!({
             "valid": false,
             "rule_count": 0,
@@ -358,6 +362,7 @@ pub(super) fn load_rules_for_explain(
         &config_path,
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
     )?;
+    remember_environment_values(&config);
 
     let mut entries: Vec<alint_core::RuleEntry> = Vec::with_capacity(config.rules.len());
     for spec in &config.rules {

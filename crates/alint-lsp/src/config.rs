@@ -130,7 +130,7 @@ fn run_config(
     let report = session
         .engine
         .run(&session.root, &session.index)
-        .map_err(|e| format!("running rules: {e}"))?;
+        .map_err(|e| session.redact(&format!("running rules: {e}")))?;
     let notes: Vec<String> = report
         .results
         .iter()
@@ -184,10 +184,12 @@ pub(crate) fn eval_buffer(
     rel: &Path,
     text: String,
 ) -> alint_core::Result<Vec<Finding>> {
-    let results =
-        session
-            .engine
-            .run_for_file(&session.root, &session.index, rel, text.as_bytes())?;
+    let results = session
+        .engine
+        .run_for_file(&session.root, &session.index, rel, text.as_bytes())
+        .map_err(|error| {
+            alint_core::redact_environment_values_in_error(error, &session.environment_values)
+        })?;
     let results = apply_baseline(session, results, Some((rel, text.as_bytes())));
     let mut texts = TextSource::with_overlays(HashMap::from([(abs.to_path_buf(), text)]));
     let mut by_path = group_findings(&session.group_ctx(), &results, &mut texts);
@@ -245,6 +247,12 @@ fn build_session_for_config(
         &alint_dsl::LoadOptions::with_catalog(registry.catalog()),
     )
     .map_err(|e| format!("loading config: {e}"))?;
+    // A top-level value read from the environment can reach an error below
+    // (an unreadable `baseline:`, an invalid `ignore:` glob in the walk).
+    let environment_values = config.environment_values.clone();
+    let redact = |message: String| {
+        alint_core::redact_environment_values(&message, &environment_values).into_owned()
+    };
     let mut entries: Vec<RuleEntry> = Vec::with_capacity(config.rules.len());
     let mut kinds: HashMap<String, String> = HashMap::new();
     for spec in &config.rules {
@@ -305,7 +313,7 @@ fn build_session_for_config(
     // "suppress nothing".
     let baseline_path = config.baseline.as_ref().map(|b| effective_root.join(b));
     let baseline = match &baseline_path {
-        Some(path) => Some(load_baseline(path)?),
+        Some(path) => Some(load_baseline(path).map_err(redact)?),
         None => None,
     };
     let mut extra_ignores = config.ignore;
@@ -319,8 +327,8 @@ fn build_session_for_config(
         respect_gitignore: config.respect_gitignore,
         extra_ignores,
     };
-    let index =
-        walk(&effective_root, &walk_opts).map_err(|e| format!("walking repository: {e}"))?;
+    let index = walk(&effective_root, &walk_opts)
+        .map_err(|e| redact(format!("walking repository: {e}")))?;
 
     Ok(Session {
         root: effective_root,
@@ -330,6 +338,7 @@ fn build_session_for_config(
         baseline,
         kinds,
         pattern_hints,
+        environment_values,
     })
 }
 

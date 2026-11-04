@@ -35,6 +35,10 @@ pub(crate) struct LoadState {
     /// a diamond still loads each shared file at most twice.
     memo: std::collections::HashMap<MemoKey, Option<RawConfig>>,
     running_version: RunningVersion,
+    /// Every [`RawConfig::environment_values`] parsed so far, so an error the
+    /// resolution returns before the configs merge (an unreadable `extends:`
+    /// target named by the environment) can still be scrubbed of them.
+    pub(crate) environment_values: Vec<String>,
 }
 
 impl Default for LoadState {
@@ -43,6 +47,7 @@ impl Default for LoadState {
             visiting: std::collections::HashSet::new(),
             memo: std::collections::HashMap::new(),
             running_version: RunningVersion::current(),
+            environment_values: Vec::new(),
         }
     }
 }
@@ -379,11 +384,31 @@ fn parse_config_interpolated_inner_with_environment(
                     .collect()
             })
             .unwrap_or_default();
+        // The names the top-level fields other than rules, templates and vars
+        // read (`extends:`, `ignore:`, `facts:`, `baseline:` and the rest). The
+        // code that consumes those fields can quote a value in an error, and no
+        // rule-level redaction covers it, so their values are recorded below
+        // for the embedder to remove from any error it shows.
+        let top_level_names = top_level_environment_names(&value);
         // The same document with every environment value masked: an error it
         // reproduces exactly cannot quote one of those values.
         let masked = has_sensitive_interpolation.then(|| value.clone());
-        crate::interp::interpolate_value(&mut value, &|name| environment.get(name))
-            .map_err(|error| Error::Other(format!("{source}: interpolation error: {error}")))?;
+        let read = std::cell::RefCell::new(std::collections::HashMap::new());
+        crate::interp::interpolate_value(&mut value, &|name| {
+            let found = environment.get(name);
+            if let Some(found) = &found {
+                read.borrow_mut().insert(name.to_string(), found.clone());
+            }
+            found
+        })
+        .map_err(|error| Error::Other(format!("{source}: interpolation error: {error}")))?;
+        let read = read.into_inner();
+        let mut environment_values = Vec::new();
+        for name in &top_level_names {
+            if let Some(value) = read.get(name) {
+                add_environment_values(&mut environment_values, std::slice::from_ref(value));
+            }
+        }
         let mut config: RawConfig = yaml_serde::from_value(value).map_err(|error| {
             let reproduced = masked.is_none_or(|mut masked| {
                 let mask = |_: &str| Some(alint_core::CONFIGURATION_MASK.to_string());
@@ -402,6 +427,7 @@ fn parse_config_interpolated_inner_with_environment(
         // env-provenance marker below.
         crate::reject_ambiguous_yaml_in(&config, &source)?;
         config.env_vars = env_vars;
+        config.environment_values = environment_values;
         for (rule, marks) in config.rules.iter_mut().zip(rule_env_vars) {
             if !marks.is_empty() {
                 rule.insert(crate::ENV_VARS_MARKER.into(), marks.into());
@@ -447,6 +473,45 @@ fn value_reads_environment(value: &yaml_serde::Value) -> bool {
         yaml_serde::Value::Mapping(mapping) => mapping.values().any(value_reads_environment),
         _ => false,
     }
+}
+
+/// Append each of `values` that `into` does not hold yet.
+pub(crate) fn add_environment_values(into: &mut Vec<String>, values: &[String]) {
+    for value in values {
+        if !into.contains(value) {
+            into.push(value.clone());
+        }
+    }
+}
+
+/// The environment names read by the top-level fields of a raw
+/// (pre-interpolation) document, other than `rules:`, `templates:` and `vars:`.
+fn top_level_environment_names(document: &yaml_serde::Value) -> Vec<String> {
+    fn collect(value: &yaml_serde::Value, names: &mut Vec<String>) {
+        match value {
+            yaml_serde::Value::String(text) => names.extend(crate::interp::env_names(text)),
+            yaml_serde::Value::Sequence(values) => {
+                for value in values {
+                    collect(value, names);
+                }
+            }
+            yaml_serde::Value::Mapping(mapping) => {
+                for value in mapping.values() {
+                    collect(value, names);
+                }
+            }
+            // Interpolation leaves a tagged value as written, so it reads no name.
+            _ => {}
+        }
+    }
+
+    let mut names = Vec::new();
+    for (key, value) in document.as_mapping().into_iter().flatten() {
+        if !matches!(key.as_str(), Some("rules" | "templates" | "vars")) {
+            collect(value, &mut names);
+        }
+    }
+    names
 }
 
 /// Sparse top-level fields containing at least one environment interpolation.
@@ -549,6 +614,7 @@ pub(crate) fn load_recursive(
         &canonical,
         opts.environment.as_ref(),
     )?;
+    add_environment_values(&mut state.environment_values, &config.environment_values);
     validate_source_compatibility(
         &mut config,
         &local_source_display(&canonical, confine),
@@ -1344,6 +1410,33 @@ mod tests {
             (name == "SECRET").then(|| "canary-secret".to_string())
         }
     }
+    /// Values interpolation re-types as numbers, which an error quotes as one.
+    #[derive(Debug)]
+    struct NumericEnvironment;
+    impl crate::EnvironmentProvider for NumericEnvironment {
+        fn get(&self, name: &str) -> Option<String> {
+            match name {
+                "SECRET" => Some("123456789012".to_string()),
+                "HEX" => Some("0xDEADBEEF".to_string()),
+                _ => None,
+            }
+        }
+    }
+    #[derive(Debug)]
+    struct InvalidGlobEnvironment;
+    impl crate::EnvironmentProvider for InvalidGlobEnvironment {
+        fn get(&self, name: &str) -> Option<String> {
+            (name == "SECRET").then(|| "canary-secret[".to_string())
+        }
+    }
+    /// A distinct value per name, so a test can tell which were recorded.
+    #[derive(Debug)]
+    struct NamedEnvironment;
+    impl crate::EnvironmentProvider for NamedEnvironment {
+        fn get(&self, name: &str) -> Option<String> {
+            Some(format!("value-of-{}", name.to_lowercase()))
+        }
+    }
     #[derive(Debug)]
     struct InvalidRegexEnvironment;
     impl crate::EnvironmentProvider for InvalidRegexEnvironment {
@@ -1482,6 +1575,23 @@ rules:
                 "version: 1\nrulez: []\nrules:\n  - id: r\n    kind: file_exists\n    paths: '{{env.SECRET}}'\n    level: error\n",
                 "unknown field `rulez`",
             ),
+            (
+                // A nested rule's unknown option under a parent marked
+                // sensitive: masking keeps the nested `kind`, so the rerun
+                // reaches the same error.
+                "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    select: 'crates/*'\n    level: error\n    sensitive: true\n    require:\n      - kind: file_exists\n        paths: '{path}/Cargo.toml'\n        colour: red\n",
+                "unknown field `colour`",
+            ),
+            (
+                // The same, with the secret in the nested rule itself.
+                "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    select: 'crates/*'\n    level: error\n    require:\n      - kind: file_exists\n        paths: '{path}/{{env.SECRET}}'\n        colour: red\n",
+                "unknown field `colour`",
+            ),
+            (
+                // A nested rule's unknown kind under a parent marked sensitive.
+                "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    select: 'crates/*'\n    level: error\n    sensitive: true\n    require:\n      - kind: file_exits\n        paths: '{path}/Cargo.toml'\n",
+                "file_exits",
+            ),
         ] {
             let error = first_configuration_error(yaml, &SensitiveFieldEnvironment);
             assert!(error.contains(expected), "{yaml}\n=> {error}");
@@ -1512,10 +1622,132 @@ rules:
                 &SensitiveFieldEnvironment,
                 "canary-secret",
             ),
+            (
+                // A single `paths:` glob read from the environment.
+                "version: 1\nrules:\n  - id: exists\n    kind: file_exists\n    paths: '{{env.SECRET}}'\n    level: error\n",
+                &InvalidGlobEnvironment,
+                "canary-secret",
+            ),
         ] {
             let error = first_configuration_error(yaml, environment);
             assert!(error.contains("<redacted>"), "{yaml}\n=> {error}");
             assert!(!error.contains(secret), "{error}");
+        }
+    }
+
+    #[test]
+    fn a_numeric_value_never_reaches_an_error() {
+        // Interpolation re-types a numeric value, so masking only strings would
+        // let the masked copy fail with the same error, quoting the number.
+        for yaml in [
+            // Rejected by the rule builder.
+            "version: 1\nrules:\n  - id: scan\n    kind: file_content_forbidden\n    paths: '**/*'\n    pattern: '{{env.SECRET}}'\n    level: error\n",
+            // Rejected when the merged rule is deserialized.
+            "version: 1\nrules:\n  - id: exists\n    kind: file_exists\n    paths: README.md\n    message: '{{env.SECRET}}'\n    level: error\n",
+            // A bool field given a number.
+            "version: 1\nrules:\n  - id: scan\n    kind: file_content_forbidden\n    paths: '**/*'\n    pattern: x\n    expect_matches: '{{env.SECRET}}'\n    level: error\n",
+            // A hex value, which an error prints in decimal.
+            "version: 1\nrules:\n  - id: exists\n    kind: file_exists\n    paths: README.md\n    message: '{{env.HEX}}'\n    level: error\n",
+            // A literal number in a rule marked sensitive.
+            "version: 1\nrules:\n  - id: scan\n    kind: file_content_forbidden\n    paths: '**/*'\n    pattern: 123456789012\n    sensitive: true\n    level: error\n",
+        ] {
+            let error = first_configuration_error(yaml, &NumericEnvironment);
+            assert!(error.contains("<redacted>"), "{yaml}\n=> {error}");
+            for secret in ["123456789012", "3735928559", "DEADBEEF"] {
+                assert!(!error.contains(secret), "{yaml}\n=> {error}");
+            }
+        }
+    }
+
+    #[test]
+    fn top_level_environment_values_are_recorded_and_scrubbed_from_load_errors() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::create_dir(root.path().join(".alint.d")).unwrap();
+        std::fs::write(
+            root.path().join(".alint.yml"),
+            "version: 1\nignore: ['{{env.IGNORED}}']\nfacts:\n  - id: f\n    any_file_exists: ['{{env.FACT}}']\nvars:\n  v: '{{env.VAR}}'\nrules:\n  - id: r\n    kind: file_exists\n    paths: '{{env.RULE}}'\n    level: error\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join(".alint.d/10-extra.yml"),
+            "version: 1\nbaseline: '{{env.BASELINE}}'\n",
+        )
+        .unwrap();
+        let registry = alint_rules::builtin_registry();
+        let mut options = crate::LoadOptions::with_catalog(registry.catalog());
+        options.environment = std::sync::Arc::new(NamedEnvironment);
+        let config = crate::load_with(&root.path().join(".alint.yml"), &options).unwrap();
+        // Rules, templates and vars are redacted per rule, so only the other
+        // top-level fields are recorded, including a drop-in's.
+        assert_eq!(
+            config.environment_values,
+            ["value-of-ignored", "value-of-fact", "value-of-baseline"]
+        );
+        assert_eq!(
+            config.redact_environment_values("bad glob value-of-fact"),
+            "bad glob <redacted>"
+        );
+
+        std::fs::remove_dir_all(root.path().join(".alint.d")).unwrap();
+
+        // An error met while resolving `extends:` (before the configs merge) is
+        // scrubbed too.
+        std::fs::write(
+            root.path().join(".alint.yml"),
+            "version: 1\nextends: ['./{{env.MISSING}}.yml']\nrules: []\n",
+        )
+        .unwrap();
+        let error = crate::load_with(&root.path().join(".alint.yml"), &options)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("<redacted>"), "{error}");
+        assert!(!error.contains("value-of-missing"), "{error}");
+
+        // So is one met before the merge that is not about `extends:` (a
+        // version check runs per source)...
+        std::fs::write(
+            root.path().join(".alint.yml"),
+            "version: '{{env.VALUE}}'\nrules: []\n",
+        )
+        .unwrap();
+        let error = crate::load_with(&root.path().join(".alint.yml"), &value_options("987654"))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("unsupported config version <redacted>"),
+            "{error}"
+        );
+        assert!(!error.contains("987654"), "{error}");
+
+        // ...and one met after it: nested-config discovery walks the tree with
+        // the top-level `ignore:` patterns.
+        std::fs::write(
+            root.path().join(".alint.yml"),
+            "version: 1\nnested_configs: true\nignore: ['{{env.VALUE}}']\nrules: []\n",
+        )
+        .unwrap();
+        let error = crate::load_with(
+            &root.path().join(".alint.yml"),
+            &value_options("canary-secret["),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("<redacted>"), "{error}");
+        assert!(!error.contains("canary-secret"), "{error}");
+    }
+
+    /// Options whose environment gives `VALUE` the value `value`.
+    fn value_options(value: &'static str) -> crate::LoadOptions<'static> {
+        #[derive(Debug)]
+        struct ValueEnvironment(&'static str);
+        impl crate::EnvironmentProvider for ValueEnvironment {
+            fn get(&self, name: &str) -> Option<String> {
+                (name == "VALUE").then(|| self.0.to_string())
+            }
+        }
+        crate::LoadOptions {
+            environment: std::sync::Arc::new(ValueEnvironment(value)),
+            ..Default::default()
         }
     }
 

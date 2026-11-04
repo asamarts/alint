@@ -110,9 +110,20 @@ pub fn load(path: &Path) -> Result<Config> {
 }
 
 /// Load with explicit cache, fetcher, and kind-catalog options.
+///
+/// An error is scrubbed of the values the environment supplied to the
+/// configs' top-level fields (see [`Config::environment_values`]); the loaded
+/// config carries them so an embedder can scrub a later error the same way.
 pub fn load_with(path: &Path, opts: &LoadOptions<'_>) -> Result<Config> {
-    let mut raw = load_top_level_raw(path, opts)?;
+    let raw = load_top_level_raw(path, opts)?;
+    let environment_values = raw.environment_values.clone();
+    load_resolved(path, opts, raw)
+        .map_err(|error| alint_core::redact_environment_values_in_error(error, &environment_values))
+}
 
+/// Discover the nested configs of the resolved top-level `raw`, then finalise
+/// and validate the whole.
+fn load_resolved(path: &Path, opts: &LoadOptions<'_>, mut raw: RawConfig) -> Result<Config> {
     // Nested `.alint.yml` discovery (opt-in via `nested_configs:
     // true` on the root config). Walks from the root config's
     // directory, finds any sub-directory configs, scopes their
@@ -165,9 +176,20 @@ pub fn nested_configs_enabled_with(path: &Path, opts: &LoadOptions<'_>) -> Resul
 }
 
 /// The top-level config plus its `extends:` chain and `.alint.d/`
-/// drop-ins, merged but not yet finalised (and without nested configs).
+/// drop-ins, merged but not yet finalised (and without nested configs). An
+/// error is scrubbed of the environment values the configs read so far.
 fn load_top_level_raw(path: &Path, opts: &LoadOptions<'_>) -> Result<RawConfig> {
     let mut state = loader::LoadState::default();
+    resolve_top_level(path, opts, &mut state).map_err(|error| {
+        alint_core::redact_environment_values_in_error(error, &state.environment_values)
+    })
+}
+
+fn resolve_top_level(
+    path: &Path,
+    opts: &LoadOptions<'_>,
+    state: &mut loader::LoadState,
+) -> Result<RawConfig> {
     // Confinement boundary for local `extends:` targets — the top-level
     // config's directory. A local extends chain (e.g. a shared ruleset
     // committed to the repo) may not escape this tree to read arbitrary
@@ -186,7 +208,7 @@ fn load_top_level_raw(path: &Path, opts: &LoadOptions<'_>) -> Result<RawConfig> 
     // `load_recursive` (is_top), so the seed list is empty.
     let mut raw = loader::load_recursive(
         path,
-        &mut state,
+        state,
         opts,
         Some(&confine_root),
         true,
@@ -218,7 +240,7 @@ fn load_top_level_raw(path: &Path, opts: &LoadOptions<'_>) -> Result<RawConfig> 
         // user-controlled), so `is_top: true` — they may open the escape hatch.
         let drop_in = loader::load_recursive(
             &drop_in_path,
-            &mut state,
+            state,
             opts,
             Some(&confine_root),
             true,
@@ -326,6 +348,12 @@ pub(crate) struct RawConfig {
     /// Validated per-source compatibility records retained through composition.
     #[serde(skip)]
     compatibility: Vec<ConfigCompatibility>,
+    /// Values the environment supplied to this config's top-level fields other
+    /// than `rules:`, `templates:` and `vars:`, recorded by the local-config
+    /// parser and carried to [`Config::environment_values`]. Not part of the
+    /// schema.
+    #[serde(skip)]
+    environment_values: Vec<String>,
 }
 
 const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
@@ -458,7 +486,14 @@ impl RawConfig {
             // A nested-config rule is confined to its subtree here, on the effective
             // rule, so fields and the kind a root template contributes are re-rooted
             // and kind-checked too (not only the instance's own fields).
-            nested::apply_nested_scope(&mut expanded, catalog)?;
+            // Scoping quotes a field it rejects (an absolute `paths:`), so its
+            // error is redacted like the later steps' when that field may be secret.
+            let masked = masked_rule_mapping(&expanded);
+            nested::apply_nested_scope(&mut expanded, catalog).map_err(|error| {
+                redact_rule_error(error, masked.as_ref(), &id_hint, |masked| {
+                    nested::apply_nested_scope(&mut masked.clone(), catalog)
+                })
+            })?;
             // A source-local cap is not enough: an untrusted rule can instantiate
             // a fixer-bearing trusted template, and a trusted rule can instantiate
             // a template partly defined by an untrusted source. Carry one bit of
@@ -520,6 +555,7 @@ impl RawConfig {
             allow_out_of_root: self.allow_out_of_root,
             baseline: self.baseline,
             compatibility: self.compatibility,
+            environment_values: self.environment_values,
         })
     }
 }
@@ -1253,6 +1289,24 @@ fn merged_compatibility(
     current
 }
 
+/// Facts merged by id: a later fact replaces an earlier one with its id, in
+/// the earlier one's place.
+fn merge_facts(a: Vec<FactSpec>, b: Vec<FactSpec>) -> Vec<FactSpec> {
+    let mut facts_by_id: std::collections::BTreeMap<String, FactSpec> =
+        std::collections::BTreeMap::new();
+    let mut fact_order: Vec<String> = Vec::new();
+    for f in a.into_iter().chain(b) {
+        if !facts_by_id.contains_key(&f.id) {
+            fact_order.push(f.id.clone());
+        }
+        facts_by_id.insert(f.id.clone(), f);
+    }
+    fact_order
+        .into_iter()
+        .map(|id| facts_by_id.remove(&id).unwrap())
+        .collect()
+}
+
 pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     let version = b.version.or(a.version);
     let respect_gitignore = b.respect_gitignore.or(a.respect_gitignore);
@@ -1290,20 +1344,9 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
     let mut untrusted_when_var_reads = a.untrusted_when_var_reads;
     untrusted_when_var_reads.extend(b.untrusted_when_var_reads);
     let compatibility = merged_compatibility(a.compatibility, b.compatibility);
-
-    let mut facts_by_id: std::collections::BTreeMap<String, FactSpec> =
-        std::collections::BTreeMap::new();
-    let mut fact_order: Vec<String> = Vec::new();
-    for f in a.facts.into_iter().chain(b.facts) {
-        if !facts_by_id.contains_key(&f.id) {
-            fact_order.push(f.id.clone());
-        }
-        facts_by_id.insert(f.id.clone(), f);
-    }
-    let facts: Vec<FactSpec> = fact_order
-        .into_iter()
-        .map(|id| facts_by_id.remove(&id).unwrap())
-        .collect();
+    let mut environment_values = a.environment_values;
+    loader::add_environment_values(&mut environment_values, &b.environment_values);
+    let facts = merge_facts(a.facts, b.facts);
 
     // Templates merge by id, same shape as rules — later wins
     // on field-level conflict. A child config can replace an
@@ -1386,6 +1429,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         env_vars,
         untrusted_when_var_reads,
         compatibility,
+        environment_values,
     }
 }
 

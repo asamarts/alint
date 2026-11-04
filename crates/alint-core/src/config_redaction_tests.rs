@@ -34,15 +34,97 @@ fn only_environment_fields_or_a_sensitive_rules_values_may_be_secret() {
 }
 
 #[test]
-fn masking_replaces_every_string_but_keeps_names_and_other_scalars() {
-    let mut value: yaml_serde::Value =
-        yaml_serde::from_str("a: secret\nb: [one, {c: two, d: 3, e: true}]\nf: ~\n").unwrap();
-    mask_configuration_strings(&mut value);
+fn masking_changes_every_value_but_keeps_names_types_and_nested_rule_identity() {
+    let mut value: yaml_serde::Value = yaml_serde::from_str(
+        "a: secret\nb: [one, {c: two, d: 123456789012, e: true, g: 0, h: 1.5}]\nf: ~\n\
+         i: <redacted>\nrequire: [{id: n, kind: file_exists, level: error, paths: x}]\n\
+         data: {id: literal, level: high}\n",
+    )
+    .unwrap();
+    mask_configuration_values(&mut value);
     let expected: yaml_serde::Value = yaml_serde::from_str(
-        "a: <redacted>\nb: [<redacted>, {c: <redacted>, d: 3, e: true}]\nf: ~\n",
+        "a: <redacted>\nb: [<redacted>, {c: <redacted>, d: 0, e: false, g: 1, h: 0.0}]\nf: ~\n\
+         i: <masked>\nrequire: [{id: n, kind: file_exists, level: error, paths: <redacted>}]\n\
+         data: {id: <redacted>, level: <redacted>}\n",
     )
     .unwrap();
     assert_eq!(value, expected);
+}
+
+#[test]
+fn environment_values_are_removed_in_every_form_an_error_prints() {
+    let values = [
+        "canary-secret".to_string(),
+        "0xDEADBEEF".to_string(),
+        "say \"hi\"".to_string(),
+        "true".to_string(),
+        "abc".to_string(),
+    ];
+    let text = "glob \"canary-secret[\", number 3735928559, quoted \"say \\\"hi\\\"\", \
+                flag true, short abc";
+    let redacted = redact_environment_values(text, &values);
+    assert_eq!(
+        redacted,
+        "glob \"<redacted>[\", number <redacted>, quoted \"<redacted>\", flag true, short abc"
+    );
+    // A path is printed joined to a directory, without its `./`, and on
+    // Windows with backslashes (doubled by `{:?}`).
+    let paths = [
+        "./canary-secret.yml".to_string(),
+        "conf/canary/x.yml".to_string(),
+    ];
+    assert_eq!(
+        redact_environment_values(
+            "I/O error at \\\\?\\C:\\T\\canary-secret.yml; \"C:\\\\conf\\\\canary\\\\x.yml\"",
+            &paths
+        ),
+        "I/O error at \\\\?\\C:\\T\\<redacted>; \"C:\\\\<redacted>\""
+    );
+    // A value that contains another is removed whole.
+    let nested = ["secret".to_string(), "secret-token".to_string()];
+    assert_eq!(
+        redact_environment_values("x secret-token y secret", &nested),
+        "x <redacted> y <redacted>"
+    );
+    assert!(matches!(
+        redact_environment_values("nothing to hide", &values),
+        std::borrow::Cow::Borrowed(_)
+    ));
+}
+
+#[test]
+fn an_error_keeps_its_kind_when_an_environment_value_is_removed() {
+    let values = ["canary-secret".to_string()];
+    // `Internal` is an alint bug (exit 3), not a configuration error.
+    let internal =
+        redact_environment_values_in_error(crate::Error::internal("bad canary-secret"), &values);
+    assert!(matches!(internal, crate::Error::Internal(ref m) if m == "bad <redacted>"));
+    let rule = redact_environment_values_in_error(
+        crate::Error::rule_config("canary-secret", "glob canary-secret["),
+        &values,
+    );
+    assert!(matches!(
+        rule,
+        crate::Error::RuleConfig { ref rule_id, ref message }
+            if rule_id == "<redacted>" && message == "glob <redacted>["
+    ));
+    let other = redact_environment_values_in_error(
+        crate::Error::Other("missing canary-secret.yml".into()),
+        &values,
+    );
+    assert!(matches!(other, crate::Error::Other(ref m) if m == "missing <redacted>.yml"));
+    // An error that quotes no value, and `FileNotInIndex`, come back as they are.
+    let untouched =
+        redact_environment_values_in_error(crate::Error::internal("nothing to hide"), &values);
+    assert!(matches!(untouched, crate::Error::Internal(ref m) if m == "nothing to hide"));
+    let not_in_index = redact_environment_values_in_error(
+        crate::Error::file_not_in_index(std::path::Path::new("canary-secret.md")),
+        &values,
+    );
+    assert!(matches!(
+        not_in_index,
+        crate::Error::FileNotInIndex { ref path } if path.as_os_str() == "canary-secret.md"
+    ));
 }
 
 #[test]
@@ -50,7 +132,8 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     let mut rule = spec(
         "id: r\nkind: file_content_forbidden\nlevel: error\npaths: ['src/**', '!src/gen/**']\n\
          message: token {{vars.x}}\nwhen: env.CI == \"yes\"\npattern: secret\nlimit: 3\n\
-         ignore: plain\nscope_filter: {has_ancestor: Cargo.toml, changed_since: main}\n",
+         ignore: plain\npolicy_url: https://docs\n\
+         scope_filter: {has_ancestor: Cargo.toml, changed_since: main}\n",
     );
     rule.set_sensitive_fields(environment_fields(&[
         "paths",
@@ -70,15 +153,24 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     assert_eq!(masked.message.as_deref(), Some(CONFIGURATION_MASK));
     assert_eq!(masked.when.as_deref(), Some(CONFIGURATION_MASK));
     assert_eq!(masked.extra["pattern"], CONFIGURATION_MASK);
-    // A number cannot quote text, and a field not read from the environment stays.
-    assert_eq!(masked.extra["limit"], 3);
+    // A number read from the environment can be a secret (an account id) and
+    // is masked by another number; a field not read from the environment stays.
+    assert_eq!(masked.extra["limit"], 0);
     assert_eq!(masked.extra["ignore"], "plain");
+    assert_eq!(masked.policy_url.as_deref(), Some("https://docs"));
     let scope = masked.scope_filter.unwrap();
     assert_eq!(
         scope.has_ancestor,
         Some(vec![CONFIGURATION_MASK.to_string()])
     );
     assert_eq!(scope.changed_since.as_deref(), Some(CONFIGURATION_MASK));
+
+    let mut single = spec("id: r\nkind: k\nlevel: error\npaths: 'canary-secret['\n");
+    single.set_sensitive_fields(environment_fields(&["paths"]));
+    assert!(matches!(
+        single.masked_configuration().unwrap().paths,
+        Some(PathsSpec::Single(ref pattern)) if pattern == CONFIGURATION_MASK
+    ));
 }
 
 #[test]
@@ -100,6 +192,9 @@ fn a_sensitive_rule_masks_every_value_but_its_identity() {
     ));
     assert_eq!(masked.extra["pattern"], CONFIGURATION_MASK);
     assert_eq!(masked.policy_url.as_deref(), Some(CONFIGURATION_MASK));
+    // A field the rule leaves out stays out: a masked `when:` would gate the
+    // copy on a condition the rule does not have.
+    assert_eq!((masked.message, masked.when), (None, None));
 }
 
 #[test]
@@ -121,6 +216,13 @@ fn a_secret_in_a_typed_field_this_cannot_mask_fails_closed() {
     );
     manifest.set_sensitive_fields(environment_fields(&["scope_filter"]));
     assert!(manifest.masked_configuration().is_none());
+
+    let mut excluded = spec(
+        "id: r\nkind: file_content_forbidden\nlevel: error\npaths: '**'\npattern: x\n\
+         scope_filter: {exclude_manifest_paths: {source: Cargo.toml, extract: {toml: '$.a'}}}\n",
+    );
+    excluded.set_sensitive_fields(environment_fields(&["scope_filter"]));
+    assert!(excluded.masked_configuration().is_none());
 }
 
 #[test]

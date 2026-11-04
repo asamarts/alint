@@ -333,6 +333,7 @@ mod tests {
             allow_out_of_root: alint_core::AllowOutOfRoot::default(),
             baseline: None,
             compatibility: Vec::new(),
+            environment_values: Vec::new(),
         }
     }
 

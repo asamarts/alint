@@ -133,9 +133,15 @@ impl Drop for Server {
 /// Spawn `target/release|debug` `alint lsp` with `root` as the working
 /// directory, stdin/stdout piped and stderr discarded.
 pub fn spawn_server(root: &Path) -> Server {
+    spawn_server_with_env(root, &[])
+}
+
+/// [`spawn_server`] with `env` added to the server's environment.
+pub fn spawn_server_with_env(root: &Path, env: &[(&str, &str)]) -> Server {
     let child = Command::new(env!("CARGO_BIN_EXE_alint"))
         .arg("lsp")
         .current_dir(root)
+        .envs(env.iter().copied())
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::null())

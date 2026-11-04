@@ -51,7 +51,7 @@ A value that is *fully* resolved by interpolation is re-typed, so an env-driven 
 subject_max_length: "{{env.MAX_SUBJECT | default('72')}}"   # validates as the integer 72
 ```
 
-A consequence: a string-typed field whose env value is bare-numeric (`"72"`) or bare-bool (`"true"`) re-types too; if the field truly wants those characters as a string, the subsequent validation surfaces a clear type error.
+A consequence: a string-typed field whose env value is bare-numeric (`"72"`) or bare-bool (`"true"`) re-types too, and validation then rejects it with a type error. alint shows that error as `<redacted>`, because it would quote the value, which may be a secret.
 
 ## `env.X` in `when:` expressions
 

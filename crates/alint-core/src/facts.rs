@@ -1041,6 +1041,7 @@ mod tests {
             allow_out_of_root: crate::AllowOutOfRoot::default(),
             baseline: None,
             compatibility: Vec::new(),
+            environment_values: Vec::new(),
         };
         let err = reject_custom_facts(&config, "./base.yml").unwrap_err();
         assert!(err.to_string().contains("custom"), "{err}");
@@ -1064,6 +1065,7 @@ mod tests {
             allow_out_of_root: crate::AllowOutOfRoot::default(),
             baseline: None,
             compatibility: Vec::new(),
+            environment_values: Vec::new(),
         };
         assert!(reject_custom_facts(&config, "./base.yml").is_ok());
     }

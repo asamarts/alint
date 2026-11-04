@@ -80,14 +80,44 @@ fn error_is_internal(err: &anyhow::Error) -> bool {
     })
 }
 
+/// The values the environment supplied to the loaded config's top-level
+/// fields ([`alint_core::Config::environment_values`]). An error met after the
+/// load (an invalid `ignore:` glob in the walk, a fact that cannot be
+/// evaluated) can quote one, so [`terminal_error`] removes them.
+static ENVIRONMENT_VALUES: std::sync::Mutex<Vec<String>> = std::sync::Mutex::new(Vec::new());
+
+/// Record `config`'s environment values for [`redact_environment_values`].
+fn remember_environment_values(config: &alint_core::Config) {
+    let mut known = ENVIRONMENT_VALUES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    for value in &config.environment_values {
+        if !known.contains(value) {
+            known.push(value.clone());
+        }
+    }
+}
+
+/// `message` without the environment values of any config loaded so far.
+fn redact_environment_values(message: &str) -> std::borrow::Cow<'_, str> {
+    let known = ENVIRONMENT_VALUES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    match alint_core::redact_environment_values(message, &known) {
+        std::borrow::Cow::Borrowed(_) => std::borrow::Cow::Borrowed(message),
+        std::borrow::Cow::Owned(redacted) => std::borrow::Cow::Owned(redacted),
+    }
+}
+
 /// Render a multi-line top-level error without letting an untrusted newline
-/// escape the CLI's `alint:` record prefix.
+/// escape the CLI's `alint:` record prefix, and without the environment values
+/// of the loaded config ([`redact_environment_values`]).
 fn terminal_error(message: &str) -> impl std::fmt::Display + '_ {
-    struct Prefixed<'a>(&'a str);
+    struct Prefixed<'a>(std::borrow::Cow<'a, str>);
 
     impl std::fmt::Display for Prefixed<'_> {
         fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            let safe = term_multiline(self.0);
+            let safe = term_multiline(&self.0);
             for (index, line) in safe.split('\n').enumerate() {
                 if index > 0 {
                     formatter.write_str("\nalint: ")?;
@@ -98,7 +128,7 @@ fn terminal_error(message: &str) -> impl std::fmt::Display + '_ {
         }
     }
 
-    Prefixed(message)
+    Prefixed(redact_environment_values(message))
 }
 
 /// Whether the error chain carries an EPIPE: stdout's reader went away.
