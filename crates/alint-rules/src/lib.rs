@@ -1655,6 +1655,23 @@ mod registry_tests {
             declared, transition,
             "typed selector records and the one-release transition table must agree"
         );
+
+        // The renderer looks options up by the spelling a nested rule uses.
+        // The table maps every spelling to its canonical kind above, so a
+        // missing alias (`cross_file_value_equals`) would pass that check while
+        // a nested rule spelled that way rendered its globs unescaped.
+        for spelling in registry.known_kinds() {
+            let looked_up: BTreeSet<String> = alint_core::template::nested_glob_options(spelling)
+                .iter()
+                .map(|field| (*field).to_string())
+                .collect();
+            let canonical = registry.canonical_kind(spelling);
+            assert_eq!(
+                looked_up,
+                declared.get(canonical).cloned().unwrap_or_default(),
+                "nested glob options of `{spelling}` (canonical `{canonical}`)"
+            );
+        }
     }
 
     #[test]
