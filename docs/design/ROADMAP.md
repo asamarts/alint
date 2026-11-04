@@ -10,7 +10,7 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.21.0** (2026-11-01): the second general-linter phase. `key_parity` keeps
+**Latest release: v0.21.0** (2026-11-01): general-linter phase 2. `key_parity` keeps
 locale and environment files in step with a reference across JSON, YAML, TOML, dotenv, INI, Java
 properties, Android string resources, and `.resx`, on an internal relation layer that a shadow
 port of `cross_file`'s `equals` relation also runs on, matching the existing implementation on
@@ -291,9 +291,11 @@ on it for adoption, they can lint without it.
   and the versioning and toolchain consistency bundles. The accepted
   [`v0.20` authoring-loop design](https://github.com/asamarts/alint/blob/main/docs/design/v0.20/README.md) shipped `alint test`,
   selected-rule `explain --trace`, and per-source compatibility requirements;
-  the internal relation layer with the `key_parity` pilot and the plugin
-  contract follow in the accepted [`v0.21` design](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md), then `version: 2` selectors and constraints, with
-  plugin hosts as a parallel track. Staged in
+  v0.21 shipped the internal relation layer with the `key_parity` pilot and a
+  draft plugin contract, per the accepted [`v0.21` design](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md).
+  v0.22 must make the relation layer the only `cross_file` `equals` path
+  before `version: 2` selectors and constraints follow, with plugin hosts as
+  a parallel track. Staged in
   [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
   section 11, decided in
   [ADR-0019](https://github.com/asamarts/alint/blob/main/docs/adr/0019-general-linter-program-and-plugin-architecture.md),
@@ -1680,6 +1682,13 @@ is specified by the accepted
 [`v0.21/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.21/README.md)
 and [ADR-0023](https://github.com/asamarts/alint/blob/main/docs/adr/0023-relation-ir-key-parity-and-plugin-contract-0x.md),
 as corrected by [ADR-0024](https://github.com/asamarts/alint/blob/main/docs/adr/0024-relation-ir-decisions-after-review.md), which supersedes it.
+The pre-release decisions are in
+[ADR-0025](https://github.com/asamarts/alint/blob/main/docs/adr/0025-v021-pre-release-decisions.md)
+(among them the go/no-go verdict and the v0.22 gates),
+[ADR-0026](https://github.com/asamarts/alint/blob/main/docs/adr/0026-measuring-the-v022-simplicity-gate.md)
+(how the v0.22 line bound is counted), and
+[ADR-0027](https://github.com/asamarts/alint/blob/main/docs/adr/0027-plugin-contract-0-1-stays-a-draft.md)
+(plugin contract 0.1 stays a draft until plugins load).
 The only new user-facing surface is one rule kind.
 
 - **Measurement first.** Compare relation-layer changes with v0.18.2 on the deterministic
@@ -1698,6 +1707,26 @@ The only new user-facing surface is one rule kind.
   release.
 - **Plugin contract 0.x.** Internal adapter and analyzer traits that the built-in row adapters
   and `key_parity` implement, an injectable rule registry, and a draft WIT contract.
+
+## v0.22: Completing the relation-layer port
+<!-- roadmap-public: blurb="The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus and the performance budgets held. The next general-linter phase starts only if this release meets those gates." -->
+
+Closes Phase 2 of
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+(section 11.1, "Phase 2 outcome"). v0.21 was a GO on consistency only; these are the three gates of
+[ADR-0025](https://github.com/asamarts/alint/blob/main/docs/adr/0025-v021-pre-release-decisions.md)
+decision 3, with the second counted as
+[ADR-0026](https://github.com/asamarts/alint/blob/main/docs/adr/0026-measuring-the-v022-simplicity-gate.md)
+defines. Phase 3 (`version: 2` selectors and report-only constraints) starts only if v0.22 meets
+all three; otherwise the program's stop rule applies.
+
+- **One `equals` implementation.** The relation layer becomes the authoritative `cross_file`
+  `equals` (including the `cross_file_value_equals` alias), and the old `equals` code is deleted.
+- **Simplicity bound.** The code only the new `equals` executes is at most 134 non-comment lines,
+  counted on both sides as ADR-0026 defines, and calls nothing in `cross_file::eval`.
+- **Zero differences, budgets held.** The e2e suite and the case-study corpus replay show zero
+  differences against v0.21, and the performance budgets of `general-linter.md` section 9.6 hold
+  as ADR-0024 decision 6 measures them.
 
 ## v1.0: Stability
 <!-- roadmap-public: blurb="A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site." -->
@@ -1773,7 +1802,7 @@ edit, build, and test cycle recompile or relink work it does not need to.
 Evidence, fix directions, and acceptance criteria are in
 [`build-dev-loop.md`](https://github.com/asamarts/alint/blob/main/docs/design/build-dev-loop.md).
 
-- **Build-script rerun in git worktrees.** Fixed in #356 (unreleased).
+- **Build-script rerun in git worktrees.** Fixed in #356 (released in v0.21.0).
   `crates/alint/build.rs` emitted `cargo:rerun-if-changed=../../.git/HEAD`.
   In a git worktree `.git` is a file, so the path was missing and cargo
   treated the build script as stale on every build: the `alint` crate
@@ -1781,7 +1810,7 @@ Evidence, fix directions, and acceptance criteria are in
   script now resolves the real git dir and watches only paths that exist,
   as aplan did (A1-629); `ci/scripts/test-build-script-freshness.sh` gates
   it with real cargo builds.
-- **One integration-test binary per crate.** Done in #360 (unreleased).
+- **One integration-test binary per crate.** Done in #360 (released in v0.21.0).
   The 87 top-level `tests/*.rs` binaries (alint 39, alint-e2e 33, rules 6,
   core 2, dsl 2, output 2, xtask 2, testkit 1) now build as one `it`
   binary per crate, rooted at `tests/main.rs`, and xtask's `test_layout`
