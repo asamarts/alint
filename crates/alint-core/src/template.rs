@@ -323,12 +323,6 @@ pub fn render_path_argv(template: &str, t: &PathTokens) -> String {
     }
 }
 
-/// Substitute `{{namespace.key}}` placeholders in a message template. The
-/// caller-supplied `resolve` closure returns the substituted value, or
-/// `None` to leave the placeholder literal.
-///
-/// Whitespace inside the braces (`{{ ctx.primary }}`) is ignored so users
-/// can format their messages for readability.
 /// Apply path-template substitution to every string inside a YAML mapping,
 /// recursively into nested mappings and sequences. Non-string values pass
 /// through unchanged. Used by nested-rule specs (e.g. `for_each_dir`) so that
@@ -581,6 +575,12 @@ fn render_nested_spec_list(v: yaml_serde::Value, tokens: &PathTokens) -> yaml_se
     )
 }
 
+/// Substitute `{{namespace.key}}` placeholders in a message template. The
+/// caller-supplied `resolve` closure returns the substituted value, or
+/// `None` to leave the placeholder literal.
+///
+/// Whitespace inside the braces (`{{ ctx.primary }}`) is ignored so users
+/// can format their messages for readability.
 pub fn render_message<F>(template: &str, resolve: F) -> String
 where
     F: Fn(&str, &str) -> Option<String>,
@@ -617,12 +617,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn nested_glob_options_matches_its_table() {
-        for (kinds, keys) in NESTED_GLOB_OPTIONS {
-            for kind in *kinds {
-                assert_eq!(nested_glob_options(kind), *keys, "{kind}");
-            }
-        }
+    fn kinds_outside_the_table_have_no_nested_glob_options() {
+        // alint-rules' glob_selector_metadata_matches_the_transition_table pins
+        // the lookup for every registered spelling, aliases included.
         assert_eq!(nested_glob_options("file_exists"), [] as [&str; 0]);
         assert_eq!(nested_glob_options(""), [] as [&str; 0]);
     }

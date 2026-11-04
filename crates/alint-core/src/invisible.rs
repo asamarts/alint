@@ -102,6 +102,17 @@ mod tests {
     }
 
     #[test]
+    fn the_rule_flags_each_zero_width_character_and_nothing_else() {
+        for c in ['\u{200B}', '\u{200C}', '\u{200D}', '\u{2060}', '\u{180E}'] {
+            assert!(is_flagged_zero_width(c, false), "{:04X}", c as u32);
+            assert!(is_flagged_zero_width(c, true), "{:04X}", c as u32);
+        }
+        for c in ['a', ' ', '\u{00AD}', '\u{200E}', '\u{FE0F}'] {
+            assert!(!is_flagged_zero_width(c, false), "{:04X}", c as u32);
+        }
+    }
+
+    #[test]
     fn leading_bom_is_only_exempt_in_the_rule() {
         assert!(!is_flagged_zero_width('\u{FEFF}', true));
         assert!(is_flagged_zero_width('\u{FEFF}', false));
