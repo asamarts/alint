@@ -1,0 +1,270 @@
+//! Keeping secrets out of configuration errors. A rule field read from the
+//! environment, or any value of a `sensitive: true` rule, may be secret; an
+//! error that could quote one is shown only when a rerun on a masked copy
+//! fails the same way. Values the environment supplied to the top-level
+//! fields are removed from an error's text instead.
+
+use super::{Config, PathsSpec, RuleSpec};
+
+/// The placeholder that replaces a possibly secret configuration value.
+#[doc(hidden)]
+pub const CONFIGURATION_MASK: &str = "<redacted>";
+
+/// The message of a configuration error that could quote a secret value.
+#[doc(hidden)]
+pub const REDACTED_CONFIGURATION_ERROR: &str = "<redacted> (the error could quote a value read \
+     from the environment or set in a `sensitive: true` rule)";
+
+/// Whether a rule field's value may be secret in a configuration error: it was
+/// read from the environment (`environment_fields`), or the rule sets
+/// `sensitive: true` and the field is not part of the rule's identity.
+#[doc(hidden)]
+#[must_use]
+pub fn configuration_field_may_be_secret(
+    sensitive: bool,
+    environment_fields: &std::collections::BTreeSet<String>,
+    field: &str,
+) -> bool {
+    environment_fields.contains(field)
+        || (sensitive && !matches!(field, "id" | "kind" | "level" | "sensitive"))
+}
+
+/// Replace every scalar in `value`, at any depth, with one that differs from
+/// it, so an error quoting the original cannot recur on the masked copy: a
+/// string becomes [`CONFIGURATION_MASK`], a number another number of the same
+/// kind, and a bool its negation. Interpolation re-types an environment value
+/// that reads as a number or a bool, so those can be secret too (a 12-digit
+/// account id). Numbers and bools keep their type, so an error about a type
+/// that does not quote the value still recurs and stays readable. Mapping keys
+/// are names, not values, and the `id`, `kind` and `level` of a nested rule (a
+/// mapping with a string `kind`) are never interpolated (they are its
+/// identity), so both stay as written.
+#[doc(hidden)]
+pub fn mask_configuration_values(value: &mut yaml_serde::Value) {
+    match value {
+        yaml_serde::Value::String(text) => {
+            *text = if text == CONFIGURATION_MASK {
+                "<masked>".to_string()
+            } else {
+                CONFIGURATION_MASK.to_string()
+            };
+        }
+        yaml_serde::Value::Number(number) => *number = differing_number(number),
+        yaml_serde::Value::Bool(flag) => *flag = !*flag,
+        yaml_serde::Value::Sequence(items) => items.iter_mut().for_each(mask_configuration_values),
+        yaml_serde::Value::Mapping(mapping) => {
+            // A nested rule (a mapping with a `kind`) keeps its identity.
+            let rule = mapping
+                .get("kind")
+                .is_some_and(yaml_serde::Value::is_string);
+            mapping
+                .iter_mut()
+                .filter(|(key, _)| !(rule && matches!(key.as_str(), Some("id" | "kind" | "level"))))
+                .for_each(|(_, item)| mask_configuration_values(item));
+        }
+        yaml_serde::Value::Tagged(tagged) => mask_configuration_values(&mut tagged.value),
+        yaml_serde::Value::Null => {}
+    }
+}
+
+/// A number of the same kind (float or integer) that differs from `number`.
+fn differing_number(number: &yaml_serde::Number) -> yaml_serde::Number {
+    if number.is_f64() {
+        let mask = if number.as_f64() == Some(0.0) {
+            1.0
+        } else {
+            0.0
+        };
+        yaml_serde::Number::from(mask)
+    } else if number.as_u64() == Some(0) {
+        yaml_serde::Number::from(1_u64)
+    } else {
+        yaml_serde::Number::from(0_u64)
+    }
+}
+
+impl Config {
+    /// `text` with [`Self::environment_values`] removed
+    /// ([`redact_environment_values`]).
+    #[doc(hidden)]
+    #[must_use]
+    pub fn redact_environment_values<'a>(&self, text: &'a str) -> std::borrow::Cow<'a, str> {
+        redact_environment_values(text, &self.environment_values)
+    }
+}
+
+/// The shortest environment value [`redact_environment_values`] removes. A
+/// shorter one is too common a substring to remove without garbling the rest
+/// of the message, and too short to be much of a secret.
+const MIN_REDACTED_ENVIRONMENT_VALUE: usize = 4;
+
+/// `text` with each of `values` replaced by [`CONFIGURATION_MASK`], in each
+/// form an error may print it: as written, escaped by `{:?}`, or (for a
+/// numeric value, which interpolation re-types) as the number. A boolean
+/// carries no secret and is left alone, and so is a value shorter than four
+/// characters.
+#[doc(hidden)]
+#[must_use]
+pub fn redact_environment_values<'a>(
+    text: &'a str,
+    values: &[String],
+) -> std::borrow::Cow<'a, str> {
+    let mut forms: Vec<String> = Vec::new();
+    for value in values {
+        if matches!(value.trim(), "true" | "false") {
+            continue;
+        }
+        forms.push(value.clone());
+        let debug = format!("{value:?}");
+        forms.push(debug[1..debug.len() - 1].to_string());
+        if value.len() <= 64
+            && let Ok(yaml_serde::Value::Number(number)) = yaml_serde::from_str(value)
+        {
+            forms.push(number.to_string());
+        }
+    }
+    forms.retain(|form| form.chars().count() >= MIN_REDACTED_ENVIRONMENT_VALUE);
+    // Longest first, so a value that contains another is removed whole.
+    forms.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
+    forms.dedup();
+    if !forms.iter().any(|form| text.contains(form.as_str())) {
+        return std::borrow::Cow::Borrowed(text);
+    }
+    let mut redacted = text.to_string();
+    for form in &forms {
+        if redacted.contains(form.as_str()) {
+            redacted = redacted.replace(form.as_str(), CONFIGURATION_MASK);
+        }
+    }
+    std::borrow::Cow::Owned(redacted)
+}
+
+/// `error` with each of `values` removed from its message
+/// ([`redact_environment_values`]). An error that quotes none is returned as it
+/// is, and so is `FileNotInIndex`, which names only the path its caller asked
+/// about; one that does keeps its kind where the kind carries the message
+/// (`Internal`, `RuleConfig`) and becomes `Other` otherwise.
+#[doc(hidden)]
+#[must_use]
+pub fn redact_environment_values_in_error(error: crate::Error, values: &[String]) -> crate::Error {
+    if matches!(error, crate::Error::FileNotInIndex { .. }) {
+        return error;
+    }
+    let message = error.to_string();
+    let std::borrow::Cow::Owned(redacted) = redact_environment_values(&message, values) else {
+        return error;
+    };
+    match error {
+        crate::Error::Internal(inner) => {
+            crate::Error::internal(redact_environment_values(&inner, values))
+        }
+        crate::Error::RuleConfig { rule_id, message } => crate::Error::rule_config(
+            redact_environment_values(&rule_id, values),
+            redact_environment_values(&message, values),
+        ),
+        _ => crate::Error::Other(redacted),
+    }
+}
+
+impl RuleSpec {
+    /// Fail closed when an error may quote environment-derived or explicitly
+    /// sensitive configuration. `rerun` repeats the failed step on
+    /// [`Self::masked_configuration`]; the error stays readable only when that
+    /// copy fails with the identical message, which therefore cannot depend on
+    /// a masked value. Structural rule identity remains visible either way.
+    #[doc(hidden)]
+    pub fn redact_configuration_error(
+        &self,
+        error: crate::Error,
+        rerun: impl FnOnce(&Self) -> crate::Result<()>,
+    ) -> crate::Error {
+        if !self.has_sensitive_configuration() {
+            return error;
+        }
+        let message = error.to_string();
+        let reproduced = self
+            .masked_configuration()
+            .and_then(|masked| rerun(&masked).err())
+            .is_some_and(|masked_error| masked_error.to_string() == message);
+        if reproduced {
+            return error;
+        }
+        if error.is_internal() {
+            crate::Error::internal(REDACTED_CONFIGURATION_ERROR)
+        } else {
+            crate::Error::rule_config(&self.id, REDACTED_CONFIGURATION_ERROR)
+        }
+    }
+
+    /// Remove potentially sensitive detail from a `when` parser diagnostic: it
+    /// quotes the condition, so it is hidden when the condition may be secret.
+    #[doc(hidden)]
+    pub fn redact_when_error(&self, error: impl std::fmt::Display) -> String {
+        if configuration_field_may_be_secret(self.sensitive, &self.sensitive_fields, "when") {
+            REDACTED_CONFIGURATION_ERROR.to_string()
+        } else {
+            error.to_string()
+        }
+    }
+
+    /// A copy whose possibly secret values (see
+    /// [`configuration_field_may_be_secret`]) are masked
+    /// ([`mask_configuration_values`]), so a step repeated on it cannot quote
+    /// them. `None` when such a value sits in a
+    /// typed field this cannot rewrite (`fix`, or a manifest-path
+    /// `scope_filter`); the caller then fails closed.
+    #[doc(hidden)]
+    #[must_use]
+    pub fn masked_configuration(&self) -> Option<Self> {
+        let secret = |field: &str| {
+            configuration_field_may_be_secret(self.sensitive, &self.sensitive_fields, field)
+        };
+        let mask = || CONFIGURATION_MASK.to_string();
+        let mut masked = self.clone();
+        if secret("paths") {
+            masked.paths = masked.paths.map(|paths| match paths {
+                PathsSpec::Single(_) => PathsSpec::Single(mask()),
+                PathsSpec::Many(patterns) => {
+                    PathsSpec::Many(patterns.iter().map(|_| mask()).collect())
+                }
+                PathsSpec::IncludeExclude { include, exclude } => PathsSpec::IncludeExclude {
+                    include: include.iter().map(|_| mask()).collect(),
+                    exclude: exclude.iter().map(|_| mask()).collect(),
+                },
+            });
+        }
+        for (field, value) in [
+            ("message", &mut masked.message),
+            ("policy_url", &mut masked.policy_url),
+            ("when", &mut masked.when),
+        ] {
+            if secret(field) && value.is_some() {
+                *value = Some(mask());
+            }
+        }
+        if secret("fix") && masked.fix.is_some() {
+            return None;
+        }
+        if secret("scope_filter")
+            && let Some(scope) = &mut masked.scope_filter
+        {
+            if scope.include_manifest_paths.is_some() || scope.exclude_manifest_paths.is_some() {
+                return None;
+            }
+            if let Some(globs) = &mut scope.has_ancestor {
+                for glob in globs {
+                    *glob = mask();
+                }
+            }
+            if scope.changed_since.is_some() {
+                scope.changed_since = Some(mask());
+            }
+        }
+        for (field, value) in &mut masked.extra {
+            if field.as_str().is_some_and(secret) {
+                mask_configuration_values(value);
+            }
+        }
+        Some(masked)
+    }
+}

@@ -61,7 +61,8 @@ pub use config::{
     FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
     FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec,
     REDACTED_CONFIGURATION_ERROR, RuleSpec, configuration_field_may_be_secret,
-    mask_configuration_strings, resolve_content_source,
+    mask_configuration_values, redact_environment_values, redact_environment_values_in_error,
+    resolve_content_source,
 };
 pub use engine::{Engine, RuleEntry, StagedFix, StagedKind};
 pub use error::{Error, Result};

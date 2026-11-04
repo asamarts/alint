@@ -407,7 +407,7 @@ pub(crate) fn masked_rule_mapping(mapping: &Mapping) -> Option<Mapping> {
                 alint_core::configuration_field_may_be_secret(sensitive, &environment_fields, field)
             });
         if secret {
-            alint_core::mask_configuration_strings(value);
+            alint_core::mask_configuration_values(value);
         }
     }
     Some(masked)

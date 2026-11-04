@@ -34,15 +34,49 @@ fn only_environment_fields_or_a_sensitive_rules_values_may_be_secret() {
 }
 
 #[test]
-fn masking_replaces_every_string_but_keeps_names_and_other_scalars() {
-    let mut value: yaml_serde::Value =
-        yaml_serde::from_str("a: secret\nb: [one, {c: two, d: 3, e: true}]\nf: ~\n").unwrap();
-    mask_configuration_strings(&mut value);
+fn masking_changes_every_value_but_keeps_names_types_and_nested_rule_identity() {
+    let mut value: yaml_serde::Value = yaml_serde::from_str(
+        "a: secret\nb: [one, {c: two, d: 123456789012, e: true, g: 0, h: 1.5}]\nf: ~\n\
+         i: <redacted>\nrequire: [{id: n, kind: file_exists, level: error, paths: x}]\n\
+         data: {id: literal, level: high}\n",
+    )
+    .unwrap();
+    mask_configuration_values(&mut value);
     let expected: yaml_serde::Value = yaml_serde::from_str(
-        "a: <redacted>\nb: [<redacted>, {c: <redacted>, d: 3, e: true}]\nf: ~\n",
+        "a: <redacted>\nb: [<redacted>, {c: <redacted>, d: 0, e: false, g: 1, h: 0.0}]\nf: ~\n\
+         i: <masked>\nrequire: [{id: n, kind: file_exists, level: error, paths: <redacted>}]\n\
+         data: {id: <redacted>, level: <redacted>}\n",
     )
     .unwrap();
     assert_eq!(value, expected);
+}
+
+#[test]
+fn environment_values_are_removed_in_every_form_an_error_prints() {
+    let values = [
+        "canary-secret".to_string(),
+        "0xDEADBEEF".to_string(),
+        "say \"hi\"".to_string(),
+        "true".to_string(),
+        "abc".to_string(),
+    ];
+    let text = "glob \"canary-secret[\", number 3735928559, quoted \"say \\\"hi\\\"\", \
+                flag true, short abc";
+    let redacted = redact_environment_values(text, &values);
+    assert_eq!(
+        redacted,
+        "glob \"<redacted>[\", number <redacted>, quoted \"<redacted>\", flag true, short abc"
+    );
+    // A value that contains another is removed whole.
+    let nested = ["secret".to_string(), "secret-token".to_string()];
+    assert_eq!(
+        redact_environment_values("x secret-token y secret", &nested),
+        "x <redacted> y <redacted>"
+    );
+    assert!(matches!(
+        redact_environment_values("nothing to hide", &values),
+        std::borrow::Cow::Borrowed(_)
+    ));
 }
 
 #[test]
@@ -70,8 +104,9 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     assert_eq!(masked.message.as_deref(), Some(CONFIGURATION_MASK));
     assert_eq!(masked.when.as_deref(), Some(CONFIGURATION_MASK));
     assert_eq!(masked.extra["pattern"], CONFIGURATION_MASK);
-    // A number cannot quote text, and a field not read from the environment stays.
-    assert_eq!(masked.extra["limit"], 3);
+    // A number read from the environment can be a secret (an account id) and
+    // is masked by another number; a field not read from the environment stays.
+    assert_eq!(masked.extra["limit"], 0);
     assert_eq!(masked.extra["ignore"], "plain");
     let scope = masked.scope_filter.unwrap();
     assert_eq!(
@@ -79,6 +114,13 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
         Some(vec![CONFIGURATION_MASK.to_string()])
     );
     assert_eq!(scope.changed_since.as_deref(), Some(CONFIGURATION_MASK));
+
+    let mut single = spec("id: r\nkind: k\nlevel: error\npaths: 'canary-secret['\n");
+    single.set_sensitive_fields(environment_fields(&["paths"]));
+    assert!(matches!(
+        single.masked_configuration().unwrap().paths,
+        Some(PathsSpec::Single(ref pattern)) if pattern == CONFIGURATION_MASK
+    ));
 }
 
 #[test]
@@ -121,6 +163,13 @@ fn a_secret_in_a_typed_field_this_cannot_mask_fails_closed() {
     );
     manifest.set_sensitive_fields(environment_fields(&["scope_filter"]));
     assert!(manifest.masked_configuration().is_none());
+
+    let mut excluded = spec(
+        "id: r\nkind: file_content_forbidden\nlevel: error\npaths: '**'\npattern: x\n\
+         scope_filter: {exclude_manifest_paths: {source: Cargo.toml, extract: {toml: '$.a'}}}\n",
+    );
+    excluded.set_sensitive_fields(environment_fields(&["scope_filter"]));
+    assert!(excluded.masked_configuration().is_none());
 }
 
 #[test]
