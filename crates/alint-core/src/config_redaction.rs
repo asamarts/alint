@@ -99,10 +99,11 @@ impl Config {
 const MIN_REDACTED_ENVIRONMENT_VALUE: usize = 4;
 
 /// `text` with each of `values` replaced by [`CONFIGURATION_MASK`], in each
-/// form an error may print it: as written, escaped by `{:?}`, or (for a
-/// numeric value, which interpolation re-types) as the number. A boolean
-/// carries no secret and is left alone, and so is a value shorter than four
-/// characters.
+/// form an error may print it: as written; as a path is printed once joined
+/// or on Windows (without a leading `./`, with either separator); escaped by
+/// `{:?}`; or (for a numeric value, which interpolation re-types) as the
+/// number. A boolean carries no secret and is left alone, and so is a value
+/// shorter than four characters.
 #[doc(hidden)]
 #[must_use]
 pub fn redact_environment_values<'a>(
@@ -114,9 +115,21 @@ pub fn redact_environment_values<'a>(
         if matches!(value.trim(), "true" | "false") {
             continue;
         }
-        forms.push(value.clone());
-        let debug = format!("{value:?}");
-        forms.push(debug[1..debug.len() - 1].to_string());
+        let mut bare = value.as_str();
+        while let Some(rest) = bare.strip_prefix("./").or_else(|| bare.strip_prefix(".\\")) {
+            bare = rest;
+        }
+        for path in [value.as_str(), bare] {
+            for written in [
+                path.to_string(),
+                path.replace('/', "\\"),
+                path.replace('\\', "/"),
+            ] {
+                let debug = format!("{written:?}");
+                forms.push(debug[1..debug.len() - 1].to_string());
+                forms.push(written);
+            }
+        }
         if value.len() <= 64
             && let Ok(yaml_serde::Value::Number(number)) = yaml_serde::from_str(value)
         {

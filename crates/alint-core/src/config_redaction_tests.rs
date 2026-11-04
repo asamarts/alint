@@ -67,6 +67,19 @@ fn environment_values_are_removed_in_every_form_an_error_prints() {
         redacted,
         "glob \"<redacted>[\", number <redacted>, quoted \"<redacted>\", flag true, short abc"
     );
+    // A path is printed joined to a directory, without its `./`, and on
+    // Windows with backslashes (doubled by `{:?}`).
+    let paths = [
+        "./canary-secret.yml".to_string(),
+        "conf/canary/x.yml".to_string(),
+    ];
+    assert_eq!(
+        redact_environment_values(
+            "I/O error at \\\\?\\C:\\T\\canary-secret.yml; \"C:\\\\conf\\\\canary\\\\x.yml\"",
+            &paths
+        ),
+        "I/O error at \\\\?\\C:\\T\\<redacted>; \"C:\\\\<redacted>\""
+    );
     // A value that contains another is removed whole.
     let nested = ["secret".to_string(), "secret-token".to_string()];
     assert_eq!(
