@@ -93,11 +93,47 @@ fn environment_values_are_removed_in_every_form_an_error_prints() {
 }
 
 #[test]
+fn an_error_keeps_its_kind_when_an_environment_value_is_removed() {
+    let values = ["canary-secret".to_string()];
+    // `Internal` is an alint bug (exit 3), not a configuration error.
+    let internal =
+        redact_environment_values_in_error(crate::Error::internal("bad canary-secret"), &values);
+    assert!(matches!(internal, crate::Error::Internal(ref m) if m == "bad <redacted>"));
+    let rule = redact_environment_values_in_error(
+        crate::Error::rule_config("canary-secret", "glob canary-secret["),
+        &values,
+    );
+    assert!(matches!(
+        rule,
+        crate::Error::RuleConfig { ref rule_id, ref message }
+            if rule_id == "<redacted>" && message == "glob <redacted>["
+    ));
+    let other = redact_environment_values_in_error(
+        crate::Error::Other("missing canary-secret.yml".into()),
+        &values,
+    );
+    assert!(matches!(other, crate::Error::Other(ref m) if m == "missing <redacted>.yml"));
+    // An error that quotes no value, and `FileNotInIndex`, come back as they are.
+    let untouched =
+        redact_environment_values_in_error(crate::Error::internal("nothing to hide"), &values);
+    assert!(matches!(untouched, crate::Error::Internal(ref m) if m == "nothing to hide"));
+    let not_in_index = redact_environment_values_in_error(
+        crate::Error::file_not_in_index(std::path::Path::new("canary-secret.md")),
+        &values,
+    );
+    assert!(matches!(
+        not_in_index,
+        crate::Error::FileNotInIndex { ref path } if path.as_os_str() == "canary-secret.md"
+    ));
+}
+
+#[test]
 fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     let mut rule = spec(
         "id: r\nkind: file_content_forbidden\nlevel: error\npaths: ['src/**', '!src/gen/**']\n\
          message: token {{vars.x}}\nwhen: env.CI == \"yes\"\npattern: secret\nlimit: 3\n\
-         ignore: plain\nscope_filter: {has_ancestor: Cargo.toml, changed_since: main}\n",
+         ignore: plain\npolicy_url: https://docs\n\
+         scope_filter: {has_ancestor: Cargo.toml, changed_since: main}\n",
     );
     rule.set_sensitive_fields(environment_fields(&[
         "paths",
@@ -121,6 +157,7 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     // is masked by another number; a field not read from the environment stays.
     assert_eq!(masked.extra["limit"], 0);
     assert_eq!(masked.extra["ignore"], "plain");
+    assert_eq!(masked.policy_url.as_deref(), Some("https://docs"));
     let scope = masked.scope_filter.unwrap();
     assert_eq!(
         scope.has_ancestor,
@@ -155,6 +192,9 @@ fn a_sensitive_rule_masks_every_value_but_its_identity() {
     ));
     assert_eq!(masked.extra["pattern"], CONFIGURATION_MASK);
     assert_eq!(masked.policy_url.as_deref(), Some(CONFIGURATION_MASK));
+    // A field the rule leaves out stays out: a masked `when:` would gate the
+    // copy on a condition the rule does not have.
+    assert_eq!((masked.message, masked.when), (None, None));
 }
 
 #[test]

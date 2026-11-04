@@ -500,7 +500,7 @@ fn top_level_environment_names(document: &yaml_serde::Value) -> Vec<String> {
                     collect(value, names);
                 }
             }
-            yaml_serde::Value::Tagged(tagged) => collect(&tagged.value, names),
+            // Interpolation leaves a tagged value as written, so it reads no name.
             _ => {}
         }
     }

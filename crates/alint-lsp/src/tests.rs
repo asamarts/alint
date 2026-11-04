@@ -457,6 +457,67 @@ rules:
 }
 
 #[test]
+fn eval_buffer_lints_the_editor_text_not_the_file_on_disk() {
+    let dir = tempfile::tempdir().unwrap();
+    let file_path = dir.path().join("notes.md");
+    std::fs::write(&file_path, "clean\n").unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nrules:\n  - id: no-todo\n    kind: file_content_forbidden\n    \
+         paths: notes.md\n    pattern: TODO\n    level: error\n",
+    )
+    .unwrap();
+    let session = build_session(dir.path()).unwrap().unwrap();
+
+    let findings = eval_buffer(
+        &session,
+        &file_path,
+        Path::new("notes.md"),
+        "a\nTODO\n".into(),
+    )
+    .unwrap();
+    assert_eq!(findings.len(), 1);
+    assert_eq!(findings[0].rule_id, "no-todo");
+    assert_eq!(findings[0].line, Some(2));
+    // A file the walk did not index is reported as excluded, not linted.
+    let error = eval_buffer(
+        &session,
+        &dir.path().join("new.md"),
+        Path::new("new.md"),
+        "TODO\n".into(),
+    )
+    .unwrap_err();
+    assert!(matches!(error, alint_core::Error::FileNotInIndex { .. }));
+}
+
+#[test]
+fn a_run_error_leaves_out_a_top_level_value_read_from_the_environment() {
+    // Cargo sets `CARGO_PKG_NAME` for the test process, so the config reads a
+    // known value from the real environment.
+    let value = std::env::var("CARGO_PKG_NAME").unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(dir.path().join("README.md"), "hi\n").unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        "version: 1\nfacts:\n  - id: f\n    any_file_exists: ['{{env.CARGO_PKG_NAME}}[']\n\
+         rules:\n  - id: readme\n    kind: file_exists\n    paths: README.md\n    level: error\n",
+    )
+    .unwrap();
+    let check = check_workspace(
+        &[dir.path().to_path_buf()],
+        &[],
+        None,
+        &alint_rules::builtin_registry(),
+    );
+    let [(_, Err(error))] = check.runs.as_slice() else {
+        panic!("expected one failed run");
+    };
+    assert!(error.starts_with("running rules: "), "{error}");
+    assert!(error.contains("<redacted>["), "{error}");
+    assert!(!error.contains(&value), "{error}");
+}
+
+#[test]
 fn build_session_rejects_invalid_deeply_nested_rule() {
     let dir = tempfile::tempdir().unwrap();
     std::fs::write(
