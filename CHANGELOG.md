@@ -15,9 +15,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ### Changed
 
 - The walker uses `ignore` 0.4.34. In a linked git worktree
-  (`git worktree add`), alint now honors the repository's `.git/info/exclude`,
-  as it already did in the main checkout; before, files excluded only there
-  were linted.
+  (`git worktree add`), alint now honors the repository's shared
+  `.git/info/exclude`, as it does in the main checkout; before, files excluded
+  only there were linted. The same applies to a linked worktree nested inside
+  the linted tree. A worktree made with `--relative-paths` is honored only when
+  alint runs from the worktree's root. A checkout whose `.git` file names no
+  common directory, such as a submodule or one made with
+  `git init --separate-git-dir`, still has its exclude file ignored.
 
 ### Performance
 
@@ -31,6 +35,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- `alint fix --dry-run` agrees with `alint fix` on whether a file a fix would
+  create is walked in more layouts. It reported such a fix as unresolved when
+  the file's directory has an ignore file that excludes all but a few entries
+  (`*`, `!.gitkeep`), because it applied that file to the directory itself,
+  which the walk does not. It also missed exclusions the walk applies: ignore
+  files in directories above the linted root (a monorepo package linted from
+  its own directory) and the `info/exclude` of a repository or linked worktree
+  nested inside the tree.
 - A configuration error is no longer replaced with `<redacted>` just because the
   rule reads a value from the environment or sets `sensitive: true`. alint now
   repeats the failed step with those values masked and shows the error when the
