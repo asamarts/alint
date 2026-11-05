@@ -3,6 +3,39 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.21.1",
+      "date": "2026-11-05",
+      "headline": "A fix release.",
+      "workload_revisions": {
+        "S1": 2,
+        "S2": 2,
+        "S3": 2,
+        "S4": 4
+      },
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4054.684364006666,
+          "stddev_ms": 25.352923831158073,
+          "display": "4.05 s ± 0.03"
+        },
+        "s2_1m_full": {
+          "mean_ms": 5202.10423972,
+          "stddev_ms": 0.5981018610176081,
+          "display": "5.20 s ± 0.00"
+        },
+        "s3_1m_full": {
+          "mean_ms": 477531.6088874467,
+          "stddev_ms": 2068.6246920079484,
+          "display": "477.5 s ± 2.1"
+        },
+        "s4_1m_full": {
+          "mean_ms": 8351.835385733335,
+          "stddev_ms": 31.993791717123617,
+          "display": "8.35 s ± 0.03"
+        }
+      }
+    },
+    {
       "version": "v0.21.0",
       "date": "2026-11-01",
       "headline": "General-linter phase 2 adds `key_parity` on a new internal relation layer.",
