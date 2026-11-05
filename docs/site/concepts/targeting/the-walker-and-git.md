@@ -60,6 +60,10 @@ Every run begins by walking your repository once into a sorted in-memory index, 
 
 Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** paths matched by any of: the repo's `.gitignore` files (root, per-directory, and any in directories above the walk root), `.git/info/exclude`, your global gitignore (`core.excludesFile`), `.ignore` files (the same syntax, honored by the [`ignore`](https://docs.rs/ignore/) crate that powers `ripgrep` and the walker), the `.git/` directory itself, and anything in the config's `ignore:` list.
 
+<!-- alint:since=0.21.1 -->
+Ignore files stop at the repository boundary, as git's do. Inside a repository, `.gitignore` and `.git/info/exclude` apply from the walk root up to the repository's top and no further, and a repository's files stop at a nested repository or submodule below it. A `.gitignore` in a directory above the repository, such as a home directory kept in git, therefore cannot hide files from alint. Outside any repository, alint reads no ignore file above the walk root. `.ignore` files are the exception: inside a repository they apply from every directory above the root, as they do for ripgrep.
+<!-- /alint:since -->
+
 Hidden files **are** included: alint walks `.github/`, `.editorconfig`, and `.cargo/` by default. In-tree symlinks are followed, but a symlink whose target escapes the repo root, or that dangles, is pruned from the walk. No git repo is required, and the ignore rules do not need one either: a directory that is not a git repo still honors any `.gitignore` and `.ignore` files it contains, so filtering happens with or without a `.git/`. Only a directory with no ignore files at all shows literally every file.
 
 Two config fields shape the filtering. `respect_gitignore` (default `true`) toggles every gitignore source at once; the CLI's `--no-gitignore` forces it off for one run. `ignore:` adds gitignore-style patterns on top, and applies regardless of `respect_gitignore`, for exclusions that are an alint concern rather than a git one:

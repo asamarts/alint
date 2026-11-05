@@ -14,6 +14,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Ignore files stop at the repository boundary, as git's do. A `.gitignore` or
+  `info/exclude` in a directory above the repository, such as a home directory
+  kept in git, no longer applies, so a `*` there can no longer hide the whole
+  tree and make every rule pass. A repository's `.gitignore` also stops at a
+  nested repository or submodule below it, as in git: files there that only
+  the outer file excluded are now linted, so give the nested repository its
+  own patterns or list them under the config's `ignore:`. A root linted from a
+  subdirectory still reads its repository's ignore files above it. Outside any
+  repository, no ignore file above the linted root is read. `.ignore` files
+  above the repository still apply, as they do for ripgrep. `fix --dry-run`
+  predicts the same walk. See ADR-0028.
 - The walker uses `ignore` 0.4.34. In a linked git worktree
   (`git worktree add`), alint now honors the repository's shared
   `.git/info/exclude`, as it does in the main checkout; before, files excluded

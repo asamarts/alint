@@ -611,7 +611,7 @@ impl Engine {
                     .components()
                     .filter(|c| !matches!(c, std::path::Component::CurDir))
                     .collect();
-                let why = if crate::walker::would_walk_skip(root, walk_opts, &target, false) {
+                let why = if crate::walker::would_walk_skip(root, walk_opts, &target, false, &[]) {
                     format!(
                         "{} is excluded from the walk (.gitignore / `ignore:`), so the rule \
                          would never see it",
