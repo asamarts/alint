@@ -16,6 +16,8 @@ directory directly at the repository root, not nested.
 
 **One match is enough**: a glob such as `packages/*/src` passes as soon as one package has a `src/`; it fails only when nothing matches at all. To require a `src/` in *every* package, iterate with [`for_each_dir`](/docs/rules/cross-file/for_each_dir/) and nest a `dir_exists` per directory.
 
+**With `fix: {dir_create: {}}`**, `paths` must name one directory in normal form, such as `docs/adr`: no glob, no `.` or `..`, and no leading, trailing or doubled `/`. The rule matches `paths` against the walked tree, which names the directory `docs/adr`, so `docs/` or `./docs` would never pass, and the configuration fails to load instead.
+
 ## Options
 
 | Option | Type | Required | Default | Description |
