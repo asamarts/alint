@@ -34,7 +34,9 @@ points are explicit.
      same-major release. The script advances every floor automatically when
      Cargo's caret compatibility line changes (every pre-1.0 minor and every
      major); otherwise bump a floor by hand only when an inter-crate API break
-     requires it. Preflight asserts each floor is
+     requires it, or when a crate in this release calls an API that its
+     floor version of a sibling lacks (Cargo could otherwise pair the new
+     crate with the old sibling). Preflight asserts each floor is
      `<= workspace.package.version` via
      `ci/scripts/check-workspace-dep-floors.sh`; an over-pinned floor would
      publish-fail, so the check catches it before push.
@@ -47,7 +49,7 @@ points are explicit.
 
 2. **Update CHANGELOG.md.**
 
-   Move entries from `## [Unreleased]` to a new `## [<x.y.z>], YYYY-MM-DD`
+   Move entries from `## [Unreleased]` to a new `## [<x.y.z>] - YYYY-MM-DD`
    section. Add a one-paragraph summary at the top of the new section
    capturing the headline change. Keep the section order 0.18.0 onward
    uses: `### Security` first when present, then `Added`, `Changed`,
@@ -64,6 +66,16 @@ points are explicit.
    doc + version-pins + dep-floors + secrets-inv + dogfood. The
    `release.yml` `preflight` job runs the same gates remotely; this
    is the pre-push sanity gate.
+
+   For a patch release (`x.y.z` with `z > 0`), also run
+   `ci/scripts/check-patch-compat.sh <previous x.y.z>` (it needs network
+   access). crates.io resolves the previous release's `^x.y.0` sibling
+   requirements to this release's libraries, so
+   `cargo install alint --version <previous>` builds the previous CLI
+   against them. The script compiles the previous `alint`, `alint-lsp` and
+   `alint-testkit` that way. A failure means a public API they call
+   changed: keep the old form as a `#[deprecated]` shim instead of shipping
+   the break.
 
    Recurrence guards bundled into `test` / `dep-floors` (plus the MSRV leg):
    - README-count claims (rule kinds, families, bundled rulesets,

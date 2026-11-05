@@ -64,7 +64,7 @@ impl Fixer for ReplaceFixer {
 
     fn collect_edits(
         &self,
-        _violations: &[Violation],
+        violations: &[Violation],
         file: &Path,
         bytes: &[u8],
         _root: &Path,
@@ -124,12 +124,13 @@ impl Fixer for ReplaceFixer {
             .collect();
         if nonconverging > 0 {
             // Surface the skip (the file otherwise silently keeps its violation),
-            // matching the `fix_size_limit` over-cap warning's style.
+            // matching the `fix_size_limit` over-cap warning's style. A path the
+            // rule's configuration reads from the environment is `<redacted>` in
+            // reports; the engine marks the findings so.
+            let hidden = violations.iter().any(Violation::path_is_sensitive);
             eprintln!(
-                "alint: warning: {}: {nonconverging} `replace` match(es) left unfixed \
-                 because the replacement still matches the pattern (a non-convergent \
-                 config; the forbidden pattern would remain)",
-                file.display()
+                "alint: warning: {}",
+                nonconvergence_warning(file, hidden, nonconverging)
             );
         }
         edits
@@ -150,9 +151,38 @@ impl Fixer for ReplaceFixer {
     }
 }
 
+/// The warning for `count` matches in `file` left unfixed because the
+/// replacement still matches; `<redacted>` in place of a `hidden` path.
+fn nonconvergence_warning(file: &Path, hidden: bool, count: usize) -> String {
+    let shown = if hidden {
+        alint_core::CONFIGURATION_MASK.into()
+    } else {
+        file.to_string_lossy()
+    };
+    format!(
+        "{shown}: {count} `replace` match(es) left unfixed because the replacement still \
+         matches the pattern (a non-convergent config; the forbidden pattern would remain)"
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_nonconvergence_warning_hides_a_redacted_path() {
+        let file = Path::new("dir/canary.txt");
+        let shown = nonconvergence_warning(file, false, 2);
+        assert!(
+            shown.starts_with("dir/canary.txt: 2 `replace` match(es)"),
+            "{shown}"
+        );
+        let hidden = nonconvergence_warning(file, true, 2);
+        assert!(
+            hidden.starts_with("<redacted>: 2 `replace` match(es)") && !hidden.contains("canary"),
+            "{hidden}"
+        );
+    }
 
     fn ranges(edits: &[CollectedEdit]) -> Vec<(usize, usize, String)> {
         edits

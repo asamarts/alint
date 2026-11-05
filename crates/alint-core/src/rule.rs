@@ -1373,9 +1373,24 @@ pub struct FixContext<'a> {
     pub stage_ops: Option<&'a RefCell<Vec<FixEdit>>>,
     /// Complete child-process environment; see [`Context::process_environment`].
     pub process_environment: Option<&'a std::collections::BTreeMap<String, String>>,
+    /// The rule's path selection reads the environment, so its findings show
+    /// `<redacted>` for the path. A fixer's warning on stderr, which no
+    /// embedder scrubs, shows the same ([`Self::shown_path`]).
+    pub paths_sensitive: bool,
 }
 
 impl FixContext<'_> {
+    /// `path` as a fixer's stderr warning may print it: `<redacted>` when
+    /// [`Self::paths_sensitive`].
+    #[must_use]
+    pub fn shown_path<'p>(&self, path: &'p Path) -> std::borrow::Cow<'p, str> {
+        if self.paths_sensitive {
+            std::borrow::Cow::Borrowed(crate::CONFIGURATION_MASK)
+        } else {
+            path.to_string_lossy()
+        }
+    }
+
     /// Persist a whole-file write of `bytes` for the file whose absolute path
     /// is `abs`. In compose mode the bytes are buffered for the engine's single
     /// per-file flush; otherwise they are written atomically now — byte-for-byte
@@ -1786,12 +1801,13 @@ pub fn check_fix_size(
     })?;
     if metadata.len() > limit {
         // The limit is left out: it can come from the environment, and this
-        // warning reaches stderr without the embedder's scrubbing.
+        // warning reaches stderr without the embedder's scrubbing. So is a
+        // path the rule's configuration reads from it.
         let reason = format!(
             "{} is {} bytes; exceeds fix_size_limit. Raise \
              `fix_size_limit` in .alint.yml (or set it to `null` to disable) \
              to fix files this large.",
-            display_path.display(),
+            ctx.shown_path(display_path),
             metadata.len(),
         );
         eprintln!("alint: warning: {reason}");

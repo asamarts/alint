@@ -464,6 +464,30 @@ fn rule_trait_defaults_are_safe_no_ops() {
 }
 
 #[test]
+fn fix_context_shows_a_sensitive_path_as_redacted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = FixContext {
+        root: dir.path(),
+        dry_run: false,
+        fix_size_limit: None,
+        allow_out_of_root: false,
+        compose: None,
+        stage_ops: None,
+        process_environment: None,
+        paths_sensitive: false,
+    };
+    assert_eq!(
+        ctx.shown_path(Path::new("dir/canary.txt")),
+        "dir/canary.txt"
+    );
+    ctx.paths_sensitive = true;
+    assert_eq!(
+        ctx.shown_path(Path::new("dir/canary.txt")),
+        crate::CONFIGURATION_MASK
+    );
+}
+
+#[test]
 fn check_fix_size_returns_none_when_limit_disabled() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("a.txt");
@@ -476,6 +500,7 @@ fn check_fix_size_returns_none_when_limit_disabled() {
         compose: None,
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     let outcome = check_fix_size(&f, Path::new("a.txt"), &ctx).unwrap();
     assert!(outcome.is_none());
@@ -494,6 +519,7 @@ fn check_fix_size_skips_over_limit_files() {
         compose: None,
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     let outcome = check_fix_size(&f, Path::new("big.txt"), &ctx).unwrap();
     match outcome {
@@ -520,6 +546,7 @@ fn read_for_fix_returns_bytes_when_in_limit() {
         compose: None,
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     match read_for_fix(&f, Path::new("a.txt"), &ctx).unwrap() {
         ReadForFix::Bytes(b) => assert_eq!(b, b"hello"),
@@ -540,6 +567,7 @@ fn read_for_fix_returns_skipped_when_over_limit() {
         compose: None,
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     match read_for_fix(&f, Path::new("big.txt"), &ctx).unwrap() {
         ReadForFix::Skipped(FixOutcome::Skipped(_)) => {}
@@ -570,6 +598,7 @@ fn read_for_fix_refuses_a_non_regular_file() {
         compose: None,
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     match read_for_fix(&subdir, Path::new("adir"), &ctx).unwrap() {
         ReadForFix::Skipped(FixOutcome::Skipped(r)) => {
@@ -602,6 +631,7 @@ fn commit_write_asserts_against_a_dry_run_write() {
         compose: None,
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     let _ = ctx.commit_write(&dir.path().join("x"), b"nope");
 }
@@ -620,6 +650,7 @@ fn compose_buffer_captures_writes_and_reads_them_back() {
         compose: Some(&buf),
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     let rel = Path::new("a.txt");
     // Compose mode: commit_write buffers; disk stays untouched.
@@ -657,6 +688,7 @@ fn commit_write_direct_mode_writes_through_to_disk() {
         compose: None,
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     // No compose buffer: commit_write is a direct atomic write, identical
     // to calling write_atomic.
@@ -687,6 +719,7 @@ fn compose_buffer_coalesces_symlink_and_target() {
         compose: Some(&buf),
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     // Write through the LINK; read through the TARGET must see the write.
     ctx.commit_write(&link, b"composed").unwrap();
@@ -718,6 +751,7 @@ fn compose_buffer_coalesces_through_a_symlinked_dir() {
         compose: Some(&buf),
         stage_ops: None,
         process_environment: None,
+        paths_sensitive: false,
     };
     // Write through the symlinked dir; read through the real dir -> hit.
     ctx.commit_write(&dir.path().join("link/file.txt"), b"composed")

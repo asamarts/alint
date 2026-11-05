@@ -281,7 +281,7 @@ impl RuleSpec {
     /// with the identical message, which therefore does not quote a masked
     /// value. Structural rule identity remains visible either way.
     #[doc(hidden)]
-    pub fn redact_configuration_error(
+    pub fn redact_unless_reproduced(
         &self,
         error: crate::Error,
         mut rerun: impl FnMut(&Self) -> crate::Result<()>,
@@ -310,6 +310,36 @@ impl RuleSpec {
     #[doc(hidden)]
     pub fn redact_when_error(&self, error: impl std::fmt::Display) -> String {
         if configuration_field_may_be_secret(self.sensitive, &self.sensitive_fields, "when") {
+            REDACTED_CONFIGURATION_ERROR.to_string()
+        } else {
+            error.to_string()
+        }
+    }
+
+    /// alint-core 0.21.0's form of [`Self::redact_unless_reproduced`], kept
+    /// so the 0.21.0 `alint`, `alint-lsp` and `alint-testkit` crates still
+    /// build against this release: it redacts every error of a rule with
+    /// possibly secret configuration, without a rerun.
+    #[doc(hidden)]
+    #[deprecated(since = "0.21.1", note = "use `redact_unless_reproduced`")]
+    pub fn redact_configuration_error(&self, error: crate::Error) -> crate::Error {
+        if !self.has_sensitive_configuration() {
+            return error;
+        }
+        if error.is_internal() {
+            crate::Error::internal(REDACTED_CONFIGURATION_ERROR)
+        } else {
+            crate::Error::rule_config(&self.id, REDACTED_CONFIGURATION_ERROR)
+        }
+    }
+
+    /// alint-core 0.21.0's message redaction, kept for the same crates as
+    /// [`Self::redact_configuration_error`]: the whole message is hidden when
+    /// any field may be secret.
+    #[doc(hidden)]
+    #[deprecated(since = "0.21.1", note = "use `redact_when_error`")]
+    pub fn redact_configuration_message(&self, error: impl std::fmt::Display) -> String {
+        if self.has_sensitive_configuration() {
             REDACTED_CONFIGURATION_ERROR.to_string()
         } else {
             error.to_string()

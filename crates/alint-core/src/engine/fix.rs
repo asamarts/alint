@@ -5,6 +5,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
+use crate::CONFIGURATION_MASK;
 use crate::error::{Error, Result};
 use crate::facts::evaluate_facts_with_environment;
 use crate::located_fix::{self, LocatedEdit};
@@ -845,6 +846,16 @@ impl Engine {
         crate::rule::resolve_write_target(&absolute)
     }
 
+    /// `file` as the engine's stderr warnings print it: `<redacted>` when it
+    /// is one of `hidden` (resolved as [`Self::normalized_write_target`]).
+    pub(super) fn shown_path(root: &Path, hidden: &HashSet<PathBuf>, file: &Path) -> String {
+        if hidden.contains(&Self::normalized_write_target(root, file)) {
+            CONFIGURATION_MASK.to_string()
+        } else {
+            file.display().to_string()
+        }
+    }
+
     pub(super) fn has_sensitive_manifest_scope(rule: &dyn Rule) -> bool {
         rule.path_scope()
             .or_else(|| rule.as_per_file().map(PerFileRule::path_scope))
@@ -1049,6 +1060,7 @@ impl Engine {
             compose: compose_buf.as_ref(),
             stage_ops,
             process_environment: self.process_environment.as_ref(),
+            paths_sensitive: false,
         };
 
         // Same dependency resolution as `run`, so a fix pass respects per-rule
@@ -1098,6 +1110,10 @@ impl Engine {
         // notes that never enter a fix report. A staged diff omits these files
         // so unchanged secret bytes cannot leak through a sibling edit.
         let mut sensitive_paths = HashSet::new();
+        // The resolved files of findings whose path is `<redacted>` in reports
+        // (`paths_sensitive` below): the engine's stderr warnings leave them
+        // out the same way.
+        let mut hidden_paths: HashSet<PathBuf> = HashSet::new();
         // Accumulator for the located-edit regime, filled by fixers that opt in
         // via `collects_located_edits` and applied once per file after the loop.
         // Phase 0 stays empty (no shipped fixer opts in), so the located pass is
@@ -1268,7 +1284,21 @@ impl Engine {
             if stage_ops.is_some() {
                 Self::record_sensitive_result_paths(entry, &evaluated, root, &mut sensitive_paths);
             }
-            let violations = evaluated.violations;
+            // A path the rule's configuration reads from the environment is
+            // `<redacted>` in every report, so the fixers' stderr warnings must
+            // not print it either. Mark the findings now (the report pass below
+            // marks them again) so a located fixer, which gets no context, sees
+            // it on them, and note the files for the engine's own warnings.
+            let paths_sensitive = self.has_sensitive_path_selection(entry);
+            let mut violations = evaluated.violations;
+            if paths_sensitive {
+                for violation in &mut violations {
+                    violation.mark_path_sensitive();
+                    if let Some(path) = violation.path.as_deref() {
+                        hidden_paths.insert(Self::normalized_write_target(root, path));
+                    }
+                }
+            }
             if !evaluated.analysis_failures.is_empty() {
                 push_fix_result(
                     &mut results,
@@ -1365,6 +1395,7 @@ impl Engine {
                 entry.rule.fixer()
             };
             fix_ctx.allow_out_of_root = entry.allow_out_of_root;
+            fix_ctx.paths_sensitive = paths_sensitive;
             // Located-edit fixers (Phase 1+) route through the batched
             // located_fix path instead of `apply`: collect their byte-range
             // edits per file (size-guarded via read_for_fix -- invariant 4 on
@@ -1657,7 +1688,7 @@ impl Engine {
                              that a later fix pass would apply (a whole-file fix changed the \
                              file first); run `alint fix` to apply them.",
                             batch.len(),
-                            file.display()
+                            Self::shown_path(root, &hidden_paths, &file)
                         );
                     }
                     continue;
@@ -1673,7 +1704,15 @@ impl Engine {
                     && batch_changed
                     && let Err(source) = fix_ctx.commit_write(&abs, &new_bytes)
                 {
-                    eprintln!("alint: could not stage {}: {source}", file.display());
+                    if hidden_paths.contains(&Self::normalized_write_target(root, &file)) {
+                        // The I/O error names the file as well.
+                        eprintln!(
+                            "alint: could not stage {CONFIGURATION_MASK}: {}",
+                            source.kind()
+                        );
+                    } else {
+                        eprintln!("alint: could not stage {}: {source}", file.display());
+                    }
                 }
                 for (edit, outcome) in outcomes {
                     let status = located_status(
@@ -1771,7 +1810,15 @@ impl Engine {
             for (target, bytes) in buf.borrow().iter() {
                 if let Err(source) = write_atomic(target, bytes) {
                     if reported.borrow_mut().insert(target.clone()) {
-                        eprintln!("alint: could not write {}: {source}", target.display());
+                        if hidden_paths.contains(target) {
+                            // The I/O error names the file as well.
+                            eprintln!(
+                                "alint: could not write {CONFIGURATION_MASK}: {}",
+                                source.kind()
+                            );
+                        } else {
+                            eprintln!("alint: could not write {}: {source}", target.display());
+                        }
                     }
                     failed.push(target.clone());
                 }

@@ -769,6 +769,7 @@ mod tests {
             compose: None,
             stage_ops: None,
             process_environment: None,
+            paths_sensitive: false,
         }
     }
 
@@ -1297,6 +1298,7 @@ mod tests {
             compose: None,
             stage_ops: Some(sink),
             process_environment: None,
+            paths_sensitive: false,
         }
     }
 
@@ -1458,6 +1460,7 @@ mod tests {
             compose: None,
             stage_ops: None,
             process_environment: None,
+            paths_sensitive: false,
         };
         let out = DirCreateFixer::new(abs_target.clone(), Applicability::Safe)
             .apply(&Violation::new("x"), &ctx)
@@ -1500,6 +1503,7 @@ mod tests {
             compose: None,
             stage_ops: Some(&sink),
             process_environment: None,
+            paths_sensitive: false,
         };
         let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
             .apply(&Violation::new("x"), &ctx)
@@ -1837,6 +1841,7 @@ mod tests {
             compose: Some(&buf),
             stage_ops: None,
             process_environment: None,
+            paths_sensitive: false,
         };
         let out = RelocateFixer::new(Applicability::Unsafe)
             .apply(

@@ -834,6 +834,27 @@ fn env_derived_var_mark_follows_the_effective_value_across_sources() {
 }
 
 #[test]
+fn untrusted_remote_template_error_leaves_out_a_template_id_read_from_the_environment() {
+    // The same refusal, with the instance's `extends_template` read from the
+    // environment: the error says "a template" instead of quoting the id.
+    let raw = "{{env.ALINT_TEST_UNSET_TOKEN | default('s3cret')}}";
+    let top = format!(
+        "templates:\n  - id: canary-template\n    kind: file_exists\n    \
+         paths: README.md\n    level: warning\nrules:\n  - id: r\n    \
+         extends_template: \"{{{{env.ALINT_TEST_UNSET_TPL | default('canary-template')}}}}\"\n    \
+         vars:\n      token: \"{raw}\"\n"
+    );
+    let remote = "version: 1\ntemplates:\n  - id: canary-template\n    \
+        message: \"leaked {{ vars.token }}\"\nrules: []\n";
+    let err = try_load_extending(remote, &top).unwrap_err().to_string();
+    assert!(
+        err.contains("a template substitutes `{{vars.token}}`"),
+        "{err}"
+    );
+    assert!(!err.contains("canary-template"), "{err}");
+}
+
+#[test]
 fn untrusted_remote_template_cannot_splice_an_env_derived_instance_var() {
     // The user's own instance passes an env-derived var to the user's own
     // template; a remote template sharing the id adds a field that echoes it.
@@ -1138,4 +1159,87 @@ fn direct_parse_enforces_literal_requirement_and_records_inline_source() {
             "{error}"
         );
     }
+}
+
+/// A distinct value per name, so a test can tell which were recorded.
+#[derive(Debug)]
+struct NamedEnvironment;
+impl crate::EnvironmentProvider for NamedEnvironment {
+    fn get(&self, name: &str) -> Option<String> {
+        Some(format!("value-of-{}", name.to_lowercase()))
+    }
+}
+
+#[test]
+fn raw_config_rerun_keeps_the_type_interpolation_gave_each_value() {
+    #[derive(Debug)]
+    struct TypedEnvironment;
+    impl crate::EnvironmentProvider for TypedEnvironment {
+        fn get(&self, name: &str) -> Option<String> {
+            Some(
+                match name {
+                    "NUMBER" => "123456789012",
+                    "FLAG" => "true",
+                    // `version`'s maximum: the rerun moving it up fails.
+                    "MAX" => "4294967295",
+                    "NEGATIVE" => "-5",
+                    _ => return None,
+                }
+                .to_string(),
+            )
+        }
+    }
+    let parse = |document: &str| {
+        crate::loader::parse_config_interpolated_with_environment(
+            document,
+            Path::new(".alint.yml"),
+            &TypedEnvironment,
+        )
+        .map(|_| ())
+        .unwrap_err()
+        .to_string()
+    };
+    // A number, a bool or a number at the edge of its range before an
+    // unrelated error: the error does not quote them, so it stays readable.
+    for value in [
+        "fix_size_limit: '{{env.NUMBER}}'",
+        "respect_gitignore: '{{env.FLAG}}'",
+        "version: '{{env.MAX}}'",
+    ] {
+        let error = parse(&format!("{value}\nnested_configs: maybe\nrules: []\n"));
+        assert!(
+            error.contains("maybe") && !error.contains("<redacted>"),
+            "{value}: {error}"
+        );
+    }
+    // An error that quotes the value stays redacted.
+    let error = parse("fix_size_limit: '{{env.NEGATIVE}}'\nrules: []\n");
+    assert!(
+        error.contains("<redacted>") && !error.contains("-5"),
+        "{error}"
+    );
+    let error = parse("nested_configs: '{{env.NUMBER}}'\nrules: []\n");
+    assert!(
+        error.contains("<redacted>") && !error.contains("123456789012"),
+        "{error}"
+    );
+}
+
+#[test]
+fn an_extends_filter_read_from_the_environment_leaves_the_url_readable() {
+    let raw = crate::loader::parse_config_interpolated_with_environment(
+        "version: 1\nextends:\n  - url: ./base.yml\n    only: ['{{env.VALUE}}']\n  \
+         - url: './{{env.VALUE}}.yml'\n  - '{{env.VALUE}}'\n  - ./plain.yml\nrules: []\n",
+        Path::new(".alint.yml"),
+        &NamedEnvironment,
+    )
+    .unwrap();
+    assert_eq!(raw.extends_environment, [false, true, true, false]);
+    // The filter's value is still removed from errors.
+    assert!(
+        raw.environment_values
+            .contains(&"value-of-value".to_string()),
+        "{:?}",
+        raw.environment_values
+    );
 }

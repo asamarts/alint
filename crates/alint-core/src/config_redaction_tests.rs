@@ -326,17 +326,17 @@ fn an_error_stays_readable_only_when_the_masked_copy_reproduces_it() {
     let mut rule = spec("id: r\nkind: k\nlevel: error\npattern: secret\n");
     let structural = || crate::Error::rule_config("r", "unknown field `patern`");
     // Without a secret every error is kept, and the rerun is not consulted.
-    let kept = rule.redact_configuration_error(structural(), |_| unreachable!());
+    let kept = rule.redact_unless_reproduced(structural(), |_| unreachable!());
     assert_eq!(kept.to_string(), structural().to_string());
 
     rule.set_sensitive_fields(environment_fields(&["pattern"]));
-    let kept = rule.redact_configuration_error(structural(), |_| Err(structural()));
+    let kept = rule.redact_unless_reproduced(structural(), |_| Err(structural()));
     assert_eq!(kept.to_string(), structural().to_string());
 
     let quoting = || crate::Error::rule_config("r", "invalid regex `secret`");
     for fails in [true, false] {
         let mut reruns = 0;
-        let redacted = rule.redact_configuration_error(quoting(), |masked| {
+        let redacted = rule.redact_unless_reproduced(quoting(), |masked| {
             assert_eq!(masked.extra["pattern"], CONFIGURATION_MASK);
             reruns += 1;
             if fails {
@@ -357,7 +357,7 @@ fn an_error_stays_readable_only_when_the_masked_copy_reproduces_it() {
     // unrelated error recurs with it moved down.
     let mut limited = spec("id: r\nkind: k\nlevel: error\nlimit: 100\n");
     limited.set_sensitive_fields(environment_fields(&["limit"]));
-    let kept = limited.redact_configuration_error(structural(), |masked| {
+    let kept = limited.redact_unless_reproduced(structural(), |masked| {
         if masked.extra["limit"].as_u64() > Some(100) {
             Err(crate::Error::rule_config(
                 "r",
@@ -370,9 +370,42 @@ fn an_error_stays_readable_only_when_the_masked_copy_reproduces_it() {
     assert_eq!(kept.to_string(), structural().to_string());
 
     // An internal error keeps its kind when it is redacted.
-    let internal = rule.redact_configuration_error(crate::Error::internal("secret"), |_| Ok(()));
+    let internal = rule.redact_unless_reproduced(crate::Error::internal("secret"), |_| Ok(()));
     assert!(internal.is_internal());
     assert!(!internal.to_string().contains("secret"), "{internal}");
+}
+
+#[test]
+#[allow(deprecated)]
+fn the_0_21_0_redaction_methods_still_fail_closed() {
+    // The published 0.21.0 `alint`, `alint-lsp` and `alint-testkit` call
+    // these with the 0.21.0 signatures; a patch release must keep them
+    // building, and keep the secret out as they expect.
+    let mut rule = spec("id: r\nkind: k\nlevel: error\npattern: secret\n");
+    let quoting = || crate::Error::rule_config("r", "invalid regex `secret`");
+    assert_eq!(
+        rule.redact_configuration_error(quoting()).to_string(),
+        quoting().to_string()
+    );
+    assert_eq!(rule.redact_configuration_message("`secret`"), "`secret`");
+    rule.set_sensitive_fields(environment_fields(&["pattern"]));
+    let redacted = rule.redact_configuration_error(quoting()).to_string();
+    assert!(
+        redacted.contains(REDACTED_CONFIGURATION_ERROR),
+        "{redacted}"
+    );
+    assert!(
+        redacted.contains("\"r\""),
+        "the rule's id stays: {redacted}"
+    );
+    assert!(
+        rule.redact_configuration_error(crate::Error::internal("secret"))
+            .is_internal()
+    );
+    assert_eq!(
+        rule.redact_configuration_message("`secret`"),
+        REDACTED_CONFIGURATION_ERROR
+    );
 }
 
 #[test]

@@ -788,10 +788,17 @@ pub(crate) fn reject_untrusted_env_instance_vars(
         .get(name.as_str())
         .and_then(|v| v.as_str())
         .unwrap_or_default();
+    // A template id read from the environment stays out, as in the loader's
+    // attribution of a field a template supplies.
+    let template = if field_reads_environment(rule, "extends_template") {
+        "a template".to_string()
+    } else {
+        format!("template `{template_id}`")
+    };
     Err(Error::rule_config(
         id,
         format!(
-            "template `{template_id}` substitutes `{{{{vars.{name}}}}}`, whose value comes \
+            "{template} substitutes `{{{{vars.{name}}}}}`, whose value comes \
              from the environment (`{raw}`), but an untrusted extends source ({source}) \
              shapes this rule or its template; an untrusted extends source may not read \
              the environment. Add the URL to `trusted_extends:` to allow it"

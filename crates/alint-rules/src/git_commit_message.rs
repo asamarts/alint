@@ -435,14 +435,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if let Some(raw) = &opts.since
         && raw.contains("${")
     {
-        eprintln!(
-            "alint: warning: rule {:?}: `since: {raw}` uses the deprecated v0.9.21 \
-             `${{VAR}}` interpolation syntax. The canonical v0.11+ form is `{}`; \
-             the `${{VAR}}` form will be removed in v1.0. \
-             See https://alint.org/docs/configuration/variable-interpolation/.",
-            spec.id,
-            posix_to_env_template(raw),
-        );
+        eprintln!("alint: warning: {}", legacy_since_warning(spec, raw));
     }
 
     let pattern = opts
@@ -466,6 +459,26 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
         since_raw: opts.since,
         include_merges: opts.include_merges,
     }))
+}
+
+/// The deprecation warning for a `since:` written with `${VAR}`. A `since:`
+/// read from the environment, or set in a `sensitive: true` rule, may be
+/// secret: the warning names the field without its value.
+fn legacy_since_warning(spec: &RuleSpec, raw: &str) -> String {
+    let (written, canonical) = if spec.field_is_sensitive("since") {
+        ("`since:`".to_string(), "`{{env.VAR}}`".to_string())
+    } else {
+        (
+            format!("`since: {raw}`"),
+            format!("`{}`", posix_to_env_template(raw)),
+        )
+    };
+    format!(
+        "rule {:?}: {written} uses the deprecated v0.9.21 `${{VAR}}` interpolation \
+         syntax. The canonical v0.11+ form is {canonical}; the `${{VAR}}` form will be \
+         removed in v1.0. See https://alint.org/docs/configuration/variable-interpolation/.",
+        spec.id,
+    )
 }
 
 #[cfg(test)]
@@ -644,6 +657,26 @@ mod tests {
             String::from("id = \"test-rule\"\nkind = \"git_commit_message\"\nlevel = \"error\"\n");
         full.push_str(toml);
         toml::from_str(&full).unwrap()
+    }
+
+    #[test]
+    fn the_legacy_since_warning_quotes_only_a_value_that_is_not_secret() {
+        let raw = "canary-${REF}";
+        let mut s = spec("since = \"canary-${REF}\"\n");
+        let shown = legacy_since_warning(&s, raw);
+        assert!(
+            shown.contains("`since: canary-${REF}`") && shown.contains("`canary-{{env.REF}}`"),
+            "{shown}"
+        );
+        s.sensitive_fields.insert("since".to_string());
+        let hidden = legacy_since_warning(&s, raw);
+        assert!(
+            hidden.contains("`since:` uses") && !hidden.contains("canary"),
+            "{hidden}"
+        );
+        s.sensitive_fields.clear();
+        s.sensitive = true;
+        assert!(!legacy_since_warning(&s, raw).contains("canary"));
     }
 
     #[test]

@@ -101,12 +101,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `alint test`, including inside a nested rule (`require:`). Numbers and
   booleans are masked as well as strings, because interpolation turns a value
   that reads as one (a 12-digit account id) into a number or a boolean. A
-  number is masked by moving it one step, up and then down, so a value at the
+  number is masked by moving it one step, up and then down, so a value at one
   end of its range (a `threshold` of `1.0`) still passes its range check and
-  leaves an unrelated error readable. An error that quotes a possibly secret
+  leaves an unrelated error readable; numbers at opposite ends of their ranges
+  in one rule leave it redacted, as does a value for an option with a fixed
+  set of choices (`style: tabs`) placed before the error. An error that quotes a possibly secret
   value, such as an invalid regex read from the environment, stays redacted
-  and now says why. The same applies to a whole configuration file that reads
-  the environment. A rule whose `fix:` block or manifest-path `scope_filter`
+  and now says why. The same applies, with the same masks, to a whole
+  configuration file that reads the environment. A rule whose `fix:` block or manifest-path `scope_filter`
   may hold such a value cannot be masked, so its errors stay redacted. An
   `extends_template:` read from the environment no longer appears in the
   unknown-template error, and an error about a field the template supplies
@@ -117,8 +119,9 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `extends:` target. alint and the language server now show `<redacted>` in its
   place, also where the error prints the value trimmed, normalized as a path,
   as a remote `extends:` URL without its credentials, query and fragment, or
-  one line at a time, and in the warnings that name it (a pattern hint on a
-  fact, an empty manifest set). `alint facts` shows a fact id read from the
+  one line at a time, and in the warnings that name it (an empty manifest
+  set). A fact whose pattern holds one raises no pattern hint. An `only:` or
+  `except:` read from the environment leaves its entry's URL readable. `alint facts` shows a fact id read from the
   environment as `<redacted>`, and the message for a file over
   `fix_size_limit` no longer prints the limit. A value inside a longer word
   takes the word with it. The same holds for a nested config's `version:` and
@@ -134,6 +137,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`a:b` is "invalid object name 'a'"). A nested rule's manifest path read
   from the environment is left out of the empty-manifest warning too, and a
   `policy_url` read from the environment is `<redacted>` in `alint list`.
+- A rule whose `paths:`, `scope_filter:`, selector or `require:` is read from
+  the environment shows `<redacted>` for the paths in its findings, and now
+  `alint fix` does the same in the warnings it prints for those files: a file
+  over `fix_size_limit`, a `replace` match left unfixed because the
+  replacement still matches, a write that fails, and the `--diff` notice of
+  edits left to a later pass. A `pattern:` read from the environment, or in a
+  `sensitive: true` rule, raises no warning about its `^` or `$` anchors,
+  which would tell how the pattern starts or ends. The deprecation warning for
+  a `${VAR}` in `git_commit_message`'s `since:` leaves out a value read from
+  the environment or set in a `sensitive: true` rule, and the error for an
+  untrusted remote `extends:` that substitutes an environment-derived var
+  names "a template" when the rule's `extends_template:` is read from the
+  environment.
 - A `baseline:` file whose name holds a glob character (`base[1].json`) is
   kept out of the walk. Its name was read as a pattern, so alint linted the
   baseline and could leave out another file (`base1.json`) instead.

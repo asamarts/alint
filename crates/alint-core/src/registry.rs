@@ -247,7 +247,7 @@ impl RuleRegistry {
             )
             .map_err(|violation| Error::rule_config(&spec.id, violation.message))
         };
-        validate(spec).map_err(|error| spec.redact_configuration_error(error, validate))?;
+        validate(spec).map_err(|error| spec.redact_unless_reproduced(error, validate))?;
         let rule = build_rule(registration, spec)?;
         #[cfg(debug_assertions)]
         assert_instance_conformance(
@@ -275,9 +275,7 @@ impl RuleRegistry {
     /// with the configuration-error redaction [`Self::build`] applies.
     pub fn validate_nested(&self, spec: &RuleSpec, rule: &dyn Rule) -> Result<()> {
         rule.validate_nested(self).map_err(|error| {
-            spec.redact_configuration_error(error, |masked| {
-                self.build(masked)?.validate_nested(self)
-            })
+            spec.redact_unless_reproduced(error, |masked| self.build(masked)?.validate_nested(self))
         })
     }
 
@@ -777,7 +775,7 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
 }
 
 /// Run `registration`'s builder on `spec`, redacting an error that could quote
-/// a sensitive value (see [`RuleSpec::redact_configuration_error`]).
+/// a sensitive value (see [`RuleSpec::redact_unless_reproduced`]).
 fn build_rule(registration: &RegisteredKind, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let build = |spec: &RuleSpec| {
         registration
@@ -786,7 +784,7 @@ fn build_rule(registration: &RegisteredKind, spec: &RuleSpec) -> Result<Box<dyn 
             .map_err(|error| enrich_error(error, &spec.kind))
     };
     build(spec)
-        .map_err(|error| spec.redact_configuration_error(error, |masked| build(masked).map(drop)))
+        .map_err(|error| spec.redact_unless_reproduced(error, |masked| build(masked).map(drop)))
 }
 
 /// Apply [`did_you_mean::enrich`] to the message of a `RuleConfig`

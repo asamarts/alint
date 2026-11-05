@@ -96,14 +96,21 @@ pub fn rule_tree_hints(
     spec: Option<&crate::RuleSpec>,
 ) -> Vec<ConfigHint> {
     let mut hints = Vec::new();
-    let _ = crate::engine::visit_rule_tree_with_registry(registry, rule, spec, &mut |rule, _| {
-        hints.extend(rule.pattern_hints().into_iter().map(|hint| ConfigHint {
-            id: rule.id().to_string(),
-            fact: false,
-            hint,
-        }));
-        Ok(())
-    });
+    let _ =
+        crate::engine::visit_rule_tree_with_registry(registry, rule, spec, &mut |rule, spec| {
+            // A hint says what a pattern starts or ends with, so a pattern that
+            // may be secret (read from the environment, or in a `sensitive: true`
+            // rule) raises none.
+            if spec.is_some_and(|spec| spec.field_is_sensitive("pattern")) {
+                return Ok(());
+            }
+            hints.extend(rule.pattern_hints().into_iter().map(|hint| ConfigHint {
+                id: rule.id().to_string(),
+                fact: false,
+                hint,
+            }));
+            Ok(())
+        });
     hints
 }
 
@@ -112,6 +119,18 @@ pub fn rule_tree_hints(
 /// each extracted value, where `^` and `$` mean what they say.
 #[must_use]
 pub fn fact_hints(facts: &[FactSpec]) -> Vec<ConfigHint> {
+    environment_fact_hints(facts, &[])
+}
+
+/// [`fact_hints`], leaving out a pattern that holds one of
+/// `environment_values` (a configuration's [`crate::Config::environment_values`])
+/// as the output scrubber finds it: a hint says what the pattern starts or
+/// ends with.
+#[must_use]
+pub fn environment_fact_hints(
+    facts: &[FactSpec],
+    environment_values: &[String],
+) -> Vec<ConfigHint> {
     facts
         .iter()
         .filter_map(|fact| match &fact.kind {
@@ -121,6 +140,12 @@ pub fn fact_hints(facts: &[FactSpec]) -> Vec<ConfigHint> {
                 Some((fact, &file_content_matches.pattern))
             }
             _ => None,
+        })
+        .filter(|(_, pattern)| {
+            matches!(
+                crate::redact_environment_values(pattern, environment_values),
+                std::borrow::Cow::Borrowed(_)
+            )
         })
         .flat_map(|(fact, pattern)| {
             pattern_hints(pattern, PatternTarget::File)
@@ -553,6 +578,62 @@ mod tests {
                 .to_string()
                 .starts_with("fact `whole_file`: `$` matches")
         );
+    }
+
+    /// A rule whose pattern always raises [`PatternHint::LeadingStart`].
+    #[derive(Debug)]
+    struct HintingRule;
+
+    impl Rule for HintingRule {
+        fn id(&self) -> &'static str {
+            "anchored"
+        }
+
+        fn level(&self) -> crate::Level {
+            crate::Level::Error
+        }
+
+        fn pattern_hints(&self) -> Vec<PatternHint> {
+            vec![PatternHint::LeadingStart]
+        }
+
+        fn evaluate(
+            &self,
+            _ctx: &crate::Context<'_>,
+        ) -> crate::error::Result<Vec<crate::Violation>> {
+            Ok(Vec::new())
+        }
+    }
+
+    #[test]
+    fn a_rule_pattern_that_may_be_secret_raises_no_hint() {
+        let registry = RuleRegistry::new();
+        let hints = |spec: &crate::RuleSpec| rule_tree_hints(&registry, &HintingRule, Some(spec));
+        let mut spec: crate::RuleSpec =
+            yaml_serde::from_str("id: anchored\nkind: anchored\nlevel: error\npattern: '^x'\n")
+                .unwrap();
+        assert_eq!(hints(&spec).len(), 1);
+        // Another field read from the environment leaves the hint.
+        spec.sensitive_fields.insert("message".to_string());
+        assert_eq!(hints(&spec).len(), 1);
+        spec.sensitive_fields.insert("pattern".to_string());
+        assert_eq!(hints(&spec), Vec::new());
+        spec.sensitive_fields.clear();
+        spec.sensitive = true;
+        assert_eq!(hints(&spec), Vec::new());
+    }
+
+    #[test]
+    fn a_fact_pattern_holding_an_environment_value_raises_no_hint() {
+        let facts: Vec<FactSpec> = yaml_serde::from_str(
+            "- id: secret\n  file_content_matches:\n    paths: VERSION\n    pattern: 'v-canary-value$'\n\
+             - id: plain\n  file_content_matches:\n    paths: VERSION\n    pattern: 'plain$'\n",
+        )
+        .unwrap();
+        assert_eq!(fact_hints(&facts).len(), 2);
+        let hints = environment_fact_hints(&facts, &["canary-value".to_string()]);
+        let ids: Vec<_> = hints.iter().map(|hint| hint.id.as_str()).collect();
+        assert_eq!(ids, ["plain"]);
     }
 
     #[test]
