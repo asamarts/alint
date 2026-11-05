@@ -8,13 +8,14 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.21.1] - 2026-11-05
 
-A fix release. Ignore files stop at the repository boundary, as git's do, so a `.gitignore` in a
-directory above the repository (a home directory kept in git) can no longer hide the tree and make
-every rule pass, and a linked worktree honors the repository's shared `info/exclude`.
-`fix --dry-run` agrees with `fix` on whether a created file resolves its rule in many more
-layouts. A configuration error is readable again unless it could quote a value read from the
+A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees
+with `fix` in many more layouts, configuration errors are readable again without showing values
+read from the environment, and nested rules are back within 0.5% of v0.20.1's speed. A
+`.gitignore` in a directory above the repository (a home directory kept in git) can no longer hide
+the tree and make every rule pass, and a linked worktree honors the repository's shared
+`info/exclude`. A configuration error is shown unless it could quote a value read from the
 environment or set in a `sensitive: true` rule, and such values stay out of the errors, warnings
-and listings that printed them. Nested rules are back within 0.5% of v0.20.1's speed.
+and listings that printed them.
 
 ### Security
 
