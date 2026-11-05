@@ -131,7 +131,7 @@
       "version": "0.22",
       "title": "Completing the relation-layer port",
       "kind": "release",
-      "blurb": "The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus, the performance budgets held, and the code only the new equals runs within a fixed line budget. The next general-linter phase starts only if this release meets those gates."
+      "blurb": "The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus, the performance budgets held, and the code that only the new equals runs kept within a fixed line budget. The next general-linter phase starts only if this release meets those gates."
     },
     {
       "version": "1.0",
