@@ -9,12 +9,171 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-11-05
+
+A fix release. Ignore files stop at the repository boundary, as git's do, so a `.gitignore` in a
+directory above the repository (a home directory kept in git) can no longer hide the tree and make
+every rule pass, and a linked worktree honors the repository's shared `info/exclude`.
+`fix --dry-run` agrees with `fix` on whether a created file resolves its rule in many more
+layouts. A configuration error is readable again unless it could quote a value read from the
+environment or set in a `sensitive: true` rule, and such values stay out of the errors, warnings
+and listings that printed them. Nested rules are back within 0.5% of v0.20.1's speed.
+
+### Security
+
+- The locked `pulldown-cmark` is now 0.13.6, fixing RUSTSEC-2026-0433
+  (quadratic parsing of nested image wikilinks with `ENABLE_WIKILINKS`). alint
+  does not enable wikilinks, so it was not exposed.
+
+### Changed
+
+- Ignore files stop at the repository boundary, as git's do; a directory holding
+  `.git` or `.jj` is a repository. A `.gitignore` or
+  `info/exclude` in a directory above the repository, such as a home directory
+  kept in git, no longer applies, so a `*` there can no longer hide the whole
+  tree and make every rule pass. A repository's `.gitignore` also stops at a
+  nested repository or submodule below it, as in git: files there that only
+  the outer file excluded are now linted, so give the nested repository its
+  own patterns or list them under the config's `ignore:`. A root linted from a
+  subdirectory still reads its repository's ignore files above it. Outside any
+  repository, no ignore file above the linted root applies, and a repository
+  nested below the root is not a boundary. `.ignore` files above the
+  repository still apply, as they do for ripgrep. `fix --dry-run` predicts the
+  same walk. See ADR-0028 and ADR-0029, which lists where the walk still
+  differs from git: a submodule's `info/exclude`, anchored patterns in the
+  global excludes file, and a linted root inside an ignored directory.
+- `dir_create` requires the directory in `paths:` in normal form, such as
+  `docs/adr`. A configuration with `docs/`, `./docs`, `docs//adr` or `/docs`
+  now fails to load. The rule never matched those forms, so `check` failed
+  even with the directory present and `fix` could not resolve it.
+- The walker uses `ignore` 0.4.34. In a linked git worktree
+  (`git worktree add`), alint now honors the repository's shared
+  `.git/info/exclude`, as it does in the main checkout; before, files excluded
+  only there were linted. The same applies to a linked worktree nested inside
+  the linted tree. A worktree made with `--relative-paths` is honored only when
+  alint runs from the worktree's root. A checkout whose `.git` file names no
+  common directory, such as a submodule or one made with
+  `git init --separate-git-dir`, still has its exclude file ignored.
+
+### Performance
+
+- Nested rules (`for_each_dir`, `for_each_file`, `every_matching_has`) look up
+  which of a nested rule's options are globs with a `match` instead of scanning
+  a table for every iterated entry. Adding `key_parity` to that table in v0.21.0
+  stopped the compiler unrolling the scan, which then cost about 300
+  instructions per entry and made `for_each_dir` 3% slower than v0.20.1 in the
+  release's deterministic micro-benchmark gate. It is now back within 0.5% of
+  v0.20.1.
+
+### Fixed
+
+- `alint fix --dry-run` agrees with `alint fix` on whether a file a fix would
+  create is walked in more layouts. It reported such a fix as unresolved when
+  the file's directory has an ignore file that excludes all but a few entries
+  (`*`, `!.gitkeep`), because it applied that file to the directory itself,
+  which the walk does not. It also missed exclusions the walk applies: ignore
+  files in directories above the linted root (a monorepo package linted from
+  its own directory) and the `info/exclude` of a repository or linked worktree
+  nested inside the tree. It now also predicts that the walk leaves out a
+  directory `dir_create` makes in an ignored path, a created ignore file that
+  excludes itself (a `cache/.gitignore` of `*`) or a file another fix in the
+  same run creates, and a file created below a symlink the walk does not
+  follow (a loop, or one that leads out of the root). A `file_create` path
+  with `..` is checked where the file is written (`out/../README.md` is
+  `README.md`), not through each component. A create the walk leaves out
+  still counts as resolving a `file_exists` rule with `respect_gitignore:
+  false`, which looks for its literal path on disk (the `.bazelversion`
+  pattern); the dry run used to report it unresolved. It now predicts that a
+  created file does not resolve a `git_tracked_only` rule unless git tracks
+  the path, and that a file `file_create` or `create_and_register` writes
+  outside the root, which `allow_out_of_root` permits, is never linted. A
+  create is judged by where the file lands as well as by its path as written,
+  so one through an in-tree symlink (`sub/up/x.txt` with `sub/up -> ..`), or by
+  an absolute or `..` path that leads back into the root, resolves the rule
+  as the real run finds. An ignore file created through a symlinked directory
+  applies where it lands, its content is read under `allow_out_of_root` as
+  the real fix reads it (a `content_from` outside the root), and of two fixes
+  that create the same ignore file the first one's content counts. For a
+  sensitive rule (`sensitive: true`, or any field other than `policy_url` read
+  from the environment) the reason a create would not resolve the violation
+  says "the target" instead of printing the path, which its redacted summary
+  already leaves out. `fix --diff` makes none of these predictions, and its
+  help no longer says its exit code matches a real `fix`.
+- A line that cannot be parsed in an ignore file above the linted root (`a\`
+  in a home directory's `.gitignore`), or a `.git` file there that alint
+  cannot read, no longer stops `alint check` and `alint fix` with a walk error
+  (exit 2). The line is skipped, as git skips a pattern it cannot parse (and
+  above the repository git reads no ignore file at all), and as the same line
+  in the linted root's own `.gitignore` already was.
+- A configuration error is no longer replaced with `<redacted>` just because the
+  rule reads a value from the environment or sets `sensitive: true`. alint now
+  repeats the failed step with those values masked and shows the error when the
+  masked run fails the same way, so the message cannot quote one of them: an
+  unsupported field, an unknown option or a misplaced `scope_filter` predicate
+  is readable again, in `alint check`, `validate-config`, the language server
+  and `alint test`, including inside a nested rule (`require:`). Numbers and
+  booleans are masked as well as strings, because interpolation turns a value
+  that reads as one (a 12-digit account id) into a number or a boolean. A
+  number is masked by moving it one step, up and then down, so a value at one
+  end of its range (a `threshold` of `1.0`) still passes its range check and
+  leaves an unrelated error readable; numbers at opposite ends of their ranges
+  in one rule leave it redacted, as does a value for an option with a fixed
+  set of choices (`style: tabs`) placed before the error. An error that quotes a possibly secret
+  value, such as an invalid regex read from the environment, stays redacted
+  and now says why. The same applies, with the same masks, to a whole
+  configuration file that reads the environment. A rule whose `fix:` block or manifest-path `scope_filter`
+  may hold such a value cannot be masked, so its errors stay redacted. An
+  `extends_template:` read from the environment no longer appears in the
+  unknown-template error, and an error about a field the template supplies
+  names "a template" instead of its id.
+- A value read from the environment into a top-level field (`extends:`,
+  `ignore:`, `facts:`, `baseline:`, `version:`) is no longer printed when the
+  field causes an error, such as an invalid `ignore:` glob or a missing
+  `extends:` target. alint and the language server now show `<redacted>` in its
+  place, also where the error prints the value trimmed, normalized as a path,
+  as a remote `extends:` URL without its credentials, query and fragment, or
+  one line at a time, and in the warnings that name it (an empty manifest
+  set). A fact whose pattern holds one raises no pattern hint. An `only:` or
+  `except:` read from the environment leaves its entry's URL readable. `alint facts` shows a fact id read from the
+  environment as `<redacted>`, and the message for a file over
+  `fix_size_limit` no longer prints the limit. A value inside a longer word
+  takes the word with it. The same holds for a nested config's `version:` and
+  for a nested config's rule whose `paths:` from the environment is rejected
+  for leaving its directory. A boolean, or a value that an error prints in
+  fewer than four characters, is still printed: removing every occurrence
+  would garble the message, and it is too short to be much of a secret.
+- A git ref read from the environment into `scope_filter.changed_since`,
+  including a nested rule's (`require:`), or into `git_commit_message`'s
+  `since:` with the deprecated `${VAR}` syntax, is no longer printed when git
+  cannot resolve it. The error shows `<redacted>` (or the `${VAR}` reference
+  as written) and leaves out git's message, which can quote part of the ref
+  (`a:b` is "invalid object name 'a'"). A nested rule's manifest path read
+  from the environment is left out of the empty-manifest warning too, and a
+  `policy_url` read from the environment is `<redacted>` in `alint list`.
+- A rule whose `paths:`, `scope_filter:`, selector or `require:` is read from
+  the environment shows `<redacted>` for the paths in its findings, and now
+  `alint fix` does the same in the warnings it prints for those files: a file
+  over `fix_size_limit`, a `replace` match left unfixed because the
+  replacement still matches, a write that fails, and the `--diff` notice of
+  edits left to a later pass. A `pattern:` read from the environment, or in a
+  `sensitive: true` rule, raises no warning about its `^` or `$` anchors,
+  which would tell how the pattern starts or ends. The deprecation warning for
+  a `${VAR}` in `git_commit_message`'s `since:` leaves out a value read from
+  the environment or set in a `sensitive: true` rule, and the error for an
+  untrusted remote `extends:` that substitutes an environment-derived var
+  names "a template" when the rule's `extends_template:` is read from the
+  environment.
+- A `baseline:` file whose name holds a glob character (`base[1].json`) is
+  kept out of the walk. Its name was read as a pattern, so alint linted the
+  baseline and could leave out another file (`base1.json`) instead.
+
 ## [0.21.0] - 2026-11-01
 
-The second general-linter phase. `key_parity` keeps locale and environment files in step with a
-reference across eight formats (JSON, YAML, TOML, dotenv, INI, Java properties, Android string
-resources and .NET `.resx`), built on a new relation layer that later cross-file rules will
-share; `cross_file`'s `relation: equals` already has a differential shadow implementation on it.
+General-linter phase 2 adds `key_parity` on a new internal relation layer. It keeps locale and
+environment files in step with a reference across eight formats (JSON, YAML, TOML, dotenv, INI,
+Java properties, Android string resources and .NET `.resx`), and later cross-file rules will
+share the relation layer; `cross_file`'s `relation: equals` already has a differential shadow
+implementation on it.
 The first draft of the plugin contract (`alint:plugin@0.1.0`) ships as internal Rust traits and a
 WIT file that CI checks against witforge's generated code, though alint does not load plugins yet.
 The release also moves to `jsonschema` 0.60, makes `import_gate` cheaper on import-free Rust,
@@ -24,7 +183,8 @@ naming absolute paths.
 ### Security
 
 - Upgraded `pulldown-cmark` to 0.13.5, fixing RUSTSEC-2026-0414
-  (exponential event growth with `ENABLE_WIKILINKS`).
+  (exponential event growth with `ENABLE_WIKILINKS`). alint does not enable
+  wikilinks, so it was not exposed.
 - The VS Code extension bundles `minimatch` 11.0.3 through an npm override,
   because `vscode-languageclient` 11 still asks for 10. This fixes
   GHSA-g3hv-75wg-m249, a pattern-expansion denial of service that only occurs
@@ -50,6 +210,7 @@ naming absolute paths.
   backtracking-limit finding.
 - The VS Code extension uses `vscode-languageclient` 11 (still VS Code 1.91 or
   newer).
+- Release binaries are built with Rust 1.99.1 (was 1.98.1).
 
 ### Performance
 
@@ -8297,7 +8458,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/asamarts/alint/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/asamarts/alint/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/asamarts/alint/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/asamarts/alint/compare/v0.19.0...v0.20.0
