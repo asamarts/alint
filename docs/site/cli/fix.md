@@ -23,12 +23,14 @@ field; treat that as `false`.
 A dry run is a single pass over the current tree. A real `fix` writes, re-walks
 and re-checks until nothing changes, and a fix that ran but left its violation
 standing is reported `skipped` (`skip_kind: "unresolved"` in JSON) with a
-nonzero exit. The dry run predicts the common case of that: a `file_create` or
-`dir_create` whose target the walk never indexes (gitignored, including by an
-ignore file another fix in the same run creates, matched by `ignore:`, or
-below a symlink the walk does not follow), a target outside the root or the
-rule's `paths:`, or a created file a `git_tracked_only` rule cannot see because
-git does not track it, is reported the same way, not as applied. A
+nonzero exit. The dry run predicts the common case of that: a `file_create`,
+`dir_create` or `create_and_register` member that the walk would index under
+no name, neither the path as written nor where the file lands once symlinks
+resolve (gitignored, including by an ignore file another fix in the same run
+creates, matched by `ignore:`, or below a symlink the walk does not follow), a
+target outside the rule's `paths:` or landing outside the root, or a created
+file a `git_tracked_only` rule cannot see because git does not track it, is
+reported the same way, not as applied. A
 `file_exists` rule with `respect_gitignore: false` looks for its literal path
 on disk itself, so a create the walk leaves out still resolves it, in the dry
 run as in the real one. Anything else only
@@ -36,7 +38,9 @@ the real run's re-check can reveal, so a dry-run `applied` item means "the
 first pass would apply this", not "this resolves the violation": a fix that
 only makes progress on a later pass, a cascade where one rule's fix creates or
 resolves another's violation, an edit to an existing ignore file, or content a
-fix writes that the rule still rejects.
+fix writes that the rule still rejects. `--diff` shows that first pass's edits
+without the prediction, so its exit code can be `0` where a real `fix` exits
+`1`.
 
 If alint cannot obtain a policy verdict, the fix report carries a typed
 `analysis_failure` instead of a fix item. It is never passed to a fixer and

@@ -168,9 +168,10 @@ the walk, whatever `parents` and `require_git` say; those decide only what appli
 directory's entry. So a bad line in a home directory's `.gitignore` ended every run below it
 with exit 2. `is_ignore_file_error` now skips a walk error whose every part names a path outside
 the root (every entry the walk yields is under the root), and the walk goes on with the file's
-good lines, as git does with a pattern it cannot parse. An error from the walk itself carries
-its depth and is never skipped this way, so a directory in the tree that cannot be listed still
-stops the run.
+good lines, as git does with a pattern it cannot parse. An error from the walk itself names an
+entry under the root and is never skipped this way, so a directory in the tree that cannot be
+listed still stops the run. The path decides, not the depth: most walk errors carry one, but a
+failed stat on a followed symlink arrives as a path-tagged error around it.
 
 **Where the walk differs from git.** These come from `ignore` 0.4.34, predate ADR-0028, and are
 documented rather than fixed:
@@ -193,9 +194,17 @@ documented rather than fixed:
   the rule's stat does;
 - predicts a create unresolved for a rule with a `git_tracked_only` mode unless `git ls-files`
   lists the path, running it once and only when such a rule creates a file;
-- falls back to `Fixer::created_file` when `fix_edit` declines, which `file_create` does for a
-  target outside the root that `allow_out_of_root` lets the real fix write, and reads an
-  absolute target inside the root as root-relative;
+- reads each created file and its content from `Fixer::created_file(violation, root,
+  allow_out_of_root)`, resolved as `apply` resolves them under the rule's permission (`fix_edit`
+  is the editor form, which never leaves the root for the target or a `content_from`), so a
+  target outside the root and an ignore file whose content comes from outside it are predicted
+  like the real run; `file_create` and `create_and_register` (a missing member) implement it;
+- judges a create by every name the walk could list it under (`created_names`): the path as
+  written, when it reads as one inside the root (an absolute path stripped of the root as given
+  or of its canonical form), and where the file lands once symlinks resolve. It is resolved
+  when the rule sees it under either, and outside the root when it lands there, so a create
+  through `sub/up -> ..`, through an ignored symlinked directory, or by an absolute or `..`
+  path that leads back into the root is predicted applied, as the real run finds it;
 - keeps the first create of each ignore file, keyed by its resolved path, since the real fix
   skips a file that is already there; and `DirIgnores::with_created` compares directories
   resolved (`pathsafe::resolve_existing_prefix`), so an ignore file created through an in-tree
@@ -223,3 +232,16 @@ created through a symlink with two creates of one file, and `git_tracked_only`.
 files now point git's global and system config, `XDG_CONFIG_HOME` and `HOME` at an empty
 directory, so a developer's global excludes file (`.env` is a common entry) cannot change their
 results. Each new test except the control fails on the walker and fixer before this change.
+
+**Second review (2026-11-05).** A differential review of `fix --dry-run` against `fix` on
+adversarial layouts found the cases the two bullets above now cover: a created `.gitignore` whose
+`content_from` lies outside the root was missed (the editor form declined it, so no content was
+known), a `create_and_register` member outside the root had no create to check, and a create was
+judged only by its written path, so one through an in-tree symlink, or an absolute or `..` path
+landing inside the root, was predicted unresolved although the real run resolves it. Tests:
+`engine/tests/fix.rs` `dry_run_judges_a_create_by_where_it_lands` and
+`dry_run_names_an_absolute_create_through_the_canonical_root`, `fix_flags.rs`
+`dry_run_agrees_with_fix_for_an_ignore_file_read_from_outside_the_root` and
+`dry_run_agrees_with_fix_for_a_member_created_outside_the_root`, and unit tests for both fixers'
+`created_file`. `fix --diff` does not make the prediction; its help no longer claims its exit
+code matches a real `fix`.

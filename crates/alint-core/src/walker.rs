@@ -1194,8 +1194,10 @@ fn is_skippable_walk_error(root: &Path, err: &ignore::Error) -> bool {
 /// (several make a `Partial`), where an ignore file in the tree only marks its
 /// directory's entry. A bad line is dropped from its matcher either way, so
 /// the walk goes on as git does: git skips a pattern it cannot parse and never
-/// reads outside the repository. An error from the walk itself carries its
-/// depth (`WithDepth`) and is not one of these.
+/// reads outside the repository. An error from the walk itself names an entry
+/// under the root, so it is not one of these. The path decides, not the depth
+/// most walk errors carry: a failed stat on a followed symlink arrives as a
+/// `WithPath` around the `WithDepth`.
 fn is_ignore_file_error(root: &Path, err: &ignore::Error) -> bool {
     match err {
         // Every entry the walk yields is under the root, so a path outside it

@@ -1186,8 +1186,13 @@ impl crate::rule::Fixer for CreateRule {
     fn created_dir(&self) -> Option<&Path> {
         self.dir.then_some(self.path.as_path())
     }
-    fn created_file(&self) -> Option<&Path> {
-        (!self.dir).then_some(self.path.as_path())
+    fn created_file(
+        &self,
+        _v: &Violation,
+        _root: &Path,
+        _allow_out_of_root: bool,
+    ) -> Option<(PathBuf, Vec<u8>)> {
+        (!self.dir).then(|| (self.path.clone(), self.content.to_vec()))
     }
 }
 
@@ -1441,4 +1446,123 @@ fn dry_run_resolves_a_tracked_only_rule_only_with_a_tracked_path() {
             ("walked-new".to_string(), true),
         ]
     );
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_judges_a_create_by_where_it_lands() {
+    // A create through a symlink, or by an absolute or `..` path, lands where
+    // the filesystem resolves it; the walk lists it there, and under the path
+    // as written when the walk enters that name.
+    use std::os::unix::fs::symlink;
+    let outcomes = |dry_run: bool| -> Vec<(String, bool)> {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        let root = &base.join("root");
+        std::fs::create_dir_all(root.join("sub")).unwrap();
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(root.join("hidden")).unwrap();
+        std::fs::create_dir_all(base.join("outside")).unwrap();
+        std::fs::write(root.join(".gitignore"), "alias\nhidden\nveiled\n").unwrap();
+        // A loop the walk does not enter, but which leads back into the root.
+        symlink("..", root.join("sub/up")).unwrap();
+        // Ignored names for directories the walk does or does not list.
+        symlink("real", root.join("alias")).unwrap();
+        symlink("hidden", root.join("veiled")).unwrap();
+        // A name for the root from outside it, and a way out of it.
+        symlink("root", base.join("root-link")).unwrap();
+        symlink("../outside", root.join("out")).unwrap();
+        let path = |p: &Path| p.to_string_lossy().into_owned();
+        let rules = vec![
+            create_rule("loop", "x.txt", "sub/up/x.txt", b"x", false),
+            create_rule("ignored-alias", "real/y.txt", "alias/y.txt", b"x", false),
+            create_rule("dotted-alias", "real/z.txt", "./alias/z.txt", b"x", false),
+            create_rule("ignored-both", "hidden/n.txt", "veiled/n.txt", b"x", false),
+            create_rule(
+                "absolute-via-link",
+                "w.txt",
+                &path(&base.join("root-link/w.txt")),
+                b"x",
+                false,
+            ),
+            create_rule(
+                "absolute-dotdot",
+                "v.txt",
+                &path(&base.join("root/../root/v.txt")),
+                b"x",
+                false,
+            ),
+            create_rule("relative-dotdot", "u.txt", "../root/u.txt", b"x", false),
+            create_rule("lands-outside", "out/o.txt", "out/o.txt", b"x", false),
+        ];
+        let opts = crate::WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        };
+        let index = crate::walk(root, &opts).unwrap();
+        let report = Engine::new(rules, RuleRegistry::new())
+            .fix(root, &index, &opts, dry_run, Applicability::Safe)
+            .unwrap();
+        report
+            .results
+            .iter()
+            .map(|result| {
+                assert_eq!(result.items.len(), 1, "{result:?}");
+                let applied = matches!(result.items[0].status, FixStatus::Applied(_));
+                (result.rule_id.to_string(), applied)
+            })
+            .collect()
+    };
+    let expected: Vec<(String, bool)> = [
+        ("loop", true),
+        ("ignored-alias", true),
+        ("dotted-alias", true),
+        ("ignored-both", false),
+        ("absolute-via-link", true),
+        ("absolute-dotdot", true),
+        ("relative-dotdot", true),
+        ("lands-outside", false),
+    ]
+    .into_iter()
+    .map(|(id, applied)| (id.to_string(), applied))
+    .collect();
+    assert_eq!(outcomes(true), expected, "dry run");
+    assert_eq!(outcomes(false), expected, "real fix");
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_names_an_absolute_create_through_the_canonical_root() {
+    // The root given through a symlink, and an absolute target written from
+    // its canonical form through an in-tree symlink the walk follows: the walk
+    // lists the file under the symlink's name, which only the canonical form
+    // of the written path gives.
+    use std::os::unix::fs::symlink;
+    let outcome = |dry_run: bool| -> bool {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(base.join("root/real")).unwrap();
+        symlink("real", base.join("root/alias")).unwrap();
+        symlink("root", base.join("root-link")).unwrap();
+        let root = &base.join("root-link");
+        let target = base.join("root/alias/x.txt").to_string_lossy().into_owned();
+        let rules = vec![create_rule(
+            "canonical",
+            "alias/x.txt",
+            &target,
+            b"x",
+            false,
+        )];
+        let opts = crate::WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        };
+        let index = crate::walk(root, &opts).unwrap();
+        let report = Engine::new(rules, RuleRegistry::new())
+            .fix(root, &index, &opts, dry_run, Applicability::Safe)
+            .unwrap();
+        matches!(report.results[0].items[0].status, FixStatus::Applied(_))
+    };
+    assert!(outcome(false), "real fix");
+    assert!(outcome(true), "dry run");
 }

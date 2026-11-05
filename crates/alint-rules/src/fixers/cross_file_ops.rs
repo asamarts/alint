@@ -1175,6 +1175,25 @@ impl Fixer for CreateAndRegisterFixer {
             content,
         })
     }
+
+    /// The missing member an existence finding creates, under the rule's
+    /// `allow_out_of_root` as `create_member` reads it (`fix_edit` declines a
+    /// member outside the root).
+    fn created_file(
+        &self,
+        violation: &Violation,
+        root: &Path,
+        allow_out_of_root: bool,
+    ) -> Option<(PathBuf, Vec<u8>)> {
+        let member = Self::existence_member(violation)?;
+        let content = crate::fixers::creators::resolve_source_bytes(
+            self.content.as_ref()?,
+            root,
+            allow_out_of_root,
+        )
+        .ok()?;
+        Some((member, content))
+    }
 }
 
 /// The locator string for a value-propagation target's extract, for messages: the

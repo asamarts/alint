@@ -1143,3 +1143,27 @@ fn create_and_register_can_fix_gates_existence_on_content() {
         "no content -> not fixable"
     );
 }
+
+#[test]
+fn create_and_register_names_the_member_it_creates_for_the_dry_run() {
+    // `fix --dry-run` checks the created member against the walk; `fix_edit`
+    // declines a member outside the root that `allow_out_of_root` lets
+    // `create_member` write.
+    let tmp = TempDir::new().unwrap();
+    let fixer = register_fixer(Some("x"));
+    let outside = existence_viol("../shared/member.toml");
+    assert_eq!(
+        fixer.created_file(&outside, tmp.path(), true),
+        Some((PathBuf::from("../shared/member.toml"), b"x".to_vec()))
+    );
+    assert!(fixer.fix_edit(&outside, &[], tmp.path()).is_none());
+    // A registration finding creates nothing, and neither does a rule
+    // without content.
+    let reg =
+        Violation::new("x").with_baseline_key("registered\u{0}member\u{0}Cargo.toml\u{0}crates/d");
+    assert_eq!(fixer.created_file(&reg, tmp.path(), true), None);
+    assert_eq!(
+        register_fixer(None).created_file(&outside, tmp.path(), true),
+        None
+    );
+}
