@@ -58,7 +58,7 @@ Every run begins by walking your repository once into a sorted in-memory index, 
 
 ## What the walker sees
 
-Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** paths matched by any of: the repo's `.gitignore` files (root, per-directory, and any in directories above the walk root), `.git/info/exclude`, your global gitignore (`core.excludesFile`), `.ignore` files (the same syntax, honored by the [`ignore`](https://docs.rs/ignore/) crate that powers `ripgrep` and the walker), the `.git/` directory itself, and anything in the config's `ignore:` list.
+Starting at the path you pass to `alint check` (or the current directory), the walker yields every regular file under that root, **except** paths matched by any of: the repo's `.gitignore` files (root, per-directory, and those between a walk root in a subdirectory and the repository's top), `.git/info/exclude`, your global gitignore (`core.excludesFile`), `.ignore` files (the same syntax, honored by the [`ignore`](https://docs.rs/ignore/) crate that powers `ripgrep` and the walker), the `.git/` directory itself, and anything in the config's `ignore:` list.
 
 
 Hidden files **are** included: alint walks `.github/`, `.editorconfig`, and `.cargo/` by default. In-tree symlinks are followed, but a symlink whose target escapes the repo root, or that dangles, is pruned from the walk. No git repo is required, and the ignore rules do not need one either: a directory that is not a git repo still honors any `.gitignore` and `.ignore` files it contains, so filtering happens with or without a `.git/`. Only a directory with no ignore files at all shows literally every file.
