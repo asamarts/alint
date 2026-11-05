@@ -175,8 +175,14 @@ impl Fixer for FileCreateFixer {
         })
     }
 
-    fn created_file(&self) -> Option<&Path> {
-        Some(&self.path)
+    fn created_file(
+        &self,
+        _violation: &Violation,
+        root: &Path,
+        allow_out_of_root: bool,
+    ) -> Option<(PathBuf, Vec<u8>)> {
+        let content = resolve_source_bytes(&self.source, root, allow_out_of_root).ok()?;
+        Some((self.path.clone(), content))
     }
 }
 
@@ -923,15 +929,40 @@ mod tests {
 
     #[test]
     fn file_create_names_its_target_for_the_dry_run() {
-        // `fix --dry-run` falls back to this when `fix_edit` declines, as it
-        // does for a target outside the root.
+        // `fix --dry-run` reads this, not `fix_edit`, which declines a target
+        // outside the root that `allow_out_of_root` still lets it write.
         let fixer = FileCreateFixer::new(PathBuf::from("../x.txt"), "x\n".into(), false);
-        assert_eq!(fixer.created_file(), Some(Path::new("../x.txt")));
         let tmp = TempDir::new().unwrap();
+        assert_eq!(
+            fixer.created_file(&Violation::new("x"), tmp.path(), false),
+            Some((PathBuf::from("../x.txt"), b"x\n".to_vec()))
+        );
         assert!(
             fixer
                 .fix_edit(&Violation::new("x"), &[], tmp.path())
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn file_create_reads_an_out_of_root_template_for_the_dry_run_only_when_allowed() {
+        // A created `.gitignore` excludes what its content says, so the dry
+        // run needs the content `apply` would write, read under the rule's
+        // permission.
+        let tmp = TempDir::new().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(tmp.path().join("template"), "*\n").unwrap();
+        let fixer = FileCreateFixer::new(
+            PathBuf::from("cache/.gitignore"),
+            ContentSourceSpec::File(PathBuf::from("../template")),
+            true,
+        );
+        let violation = Violation::new("x");
+        assert_eq!(fixer.created_file(&violation, &root, false), None);
+        assert_eq!(
+            fixer.created_file(&violation, &root, true),
+            Some((PathBuf::from("cache/.gitignore"), b"*\n".to_vec()))
         );
     }
 

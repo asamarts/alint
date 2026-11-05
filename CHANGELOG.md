@@ -14,7 +14,8 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
-- Ignore files stop at the repository boundary, as git's do. A `.gitignore` or
+- Ignore files stop at the repository boundary, as git's do; a directory holding
+  `.git` or `.jj` is a repository. A `.gitignore` or
   `info/exclude` in a directory above the repository, such as a home directory
   kept in git, no longer applies, so a `*` there can no longer hide the whole
   tree and make every rule pass. A repository's `.gitignore` also stops at a
@@ -71,19 +72,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   false`, which looks for its literal path on disk (the `.bazelversion`
   pattern); the dry run used to report it unresolved. It now predicts that a
   created file does not resolve a `git_tracked_only` rule unless git tracks
-  the path, and that a `file_create` target outside the root, which
-  `allow_out_of_root` permits, is never linted. An ignore file created through
-  a symlinked directory applies where it lands, and of two fixes that create
-  the same ignore file the first one's content counts, as in the real run.
-  For a sensitive rule (`sensitive: true`, or a `fix:` read from the
-  environment) the reason a create would not resolve the violation says "the
-  target" instead of printing the path, which its redacted summary already
-  leaves out.
+  the path, and that a file `file_create` or `create_and_register` writes
+  outside the root, which `allow_out_of_root` permits, is never linted. A
+  create is judged by where the file lands as well as by its path as written,
+  so one through an in-tree symlink (`sub/up/x.txt` with `sub/up -> ..`), or by
+  an absolute or `..` path that leads back into the root, resolves the rule
+  as the real run finds. An ignore file created through a symlinked directory
+  applies where it lands, its content is read under `allow_out_of_root` as
+  the real fix reads it (a `content_from` outside the root), and of two fixes
+  that create the same ignore file the first one's content counts. For a
+  sensitive rule (`sensitive: true`, or any field other than `policy_url` read
+  from the environment) the reason a create would not resolve the violation
+  says "the target" instead of printing the path, which its redacted summary
+  already leaves out. `fix --diff` makes none of these predictions, and its
+  help no longer says its exit code matches a real `fix`.
 - A line that cannot be parsed in an ignore file above the linted root (`a\`
   in a home directory's `.gitignore`), or a `.git` file there that alint
   cannot read, no longer stops `alint check` and `alint fix` with a walk error
-  (exit 2). git never reads those files, and the same line in the
-  repository's own `.gitignore` was already skipped.
+  (exit 2). The line is skipped, as git skips a pattern it cannot parse (and
+  above the repository git reads no ignore file at all), and as the same line
+  in the linted root's own `.gitignore` already was.
 - A configuration error is no longer replaced with `<redacted>` just because the
   rule reads a value from the environment or sets `sensitive: true`. alint now
   repeats the failed step with those values masked and shows the error when the

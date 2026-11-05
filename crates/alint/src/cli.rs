@@ -291,9 +291,9 @@ pub(crate) enum Command {
         #[arg(long)]
         fix_only: bool,
         /// Show a unified diff of the fixes that would be applied, writing
-        /// nothing. Reflects the composed result at the chosen tier; the exit
-        /// code matches a real `fix`. Output is a unified diff regardless of
-        /// `--format`.
+        /// nothing. Reflects the composed result of one pass at the chosen
+        /// tier; a real `fix` can still exit nonzero where this exits 0. Output
+        /// is a unified diff regardless of `--format`.
         #[arg(long)]
         diff: bool,
     },

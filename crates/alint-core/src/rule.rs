@@ -1731,12 +1731,20 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
         None
     }
 
-    /// The file this fixer creates, as configured, for a fixer that creates
-    /// one (`file_create`). `fix --dry-run` falls back to it when
-    /// [`fix_edit`](Self::fix_edit) declines, as `file_create` does for a
-    /// target outside the root that `allow_out_of_root` still lets it write.
-    /// Default `None`.
-    fn created_file(&self) -> Option<&Path> {
+    /// The file this fixer creates for `violation` and its content, resolved
+    /// as [`apply`](Self::apply) resolves them under the owning rule's
+    /// `allow_out_of_root`, for a fixer that creates one (`file_create`,
+    /// `create_and_register`'s missing member). `fix --dry-run` checks it
+    /// against the walk, and reads a created ignore file's content from it.
+    /// [`fix_edit`](Self::fix_edit) cannot serve: the editor form never leaves
+    /// the root, for the target or for a `content_from`. Default `None`.
+    fn created_file(
+        &self,
+        violation: &Violation,
+        root: &Path,
+        allow_out_of_root: bool,
+    ) -> Option<(PathBuf, Vec<u8>)> {
+        let _ = (violation, root, allow_out_of_root);
         None
     }
 }

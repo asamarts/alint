@@ -578,17 +578,18 @@ impl Engine {
 
     /// `--dry-run` has no re-walk to discover that a fix will not stick, so
     /// predict the known cases the real `fix` demotes after its re-check: a
-    /// would-be-`Applied` create (`file_create`, `dir_create`) whose target
-    /// the walk would not index (gitignored, `ignore:`d, including by an
-    /// ignore file another create in the same pass writes, or below a
-    /// symlinked directory the walk does not enter) and the rule does not look
-    /// for on disk itself, a target outside the rule's `paths:` or the root, or
-    /// a created file a `git_tracked_only` rule would not see as tracked.
-    /// Those become the same unresolved skip the real run reports. Other ways a
-    /// fix can fail its re-check (a cascade through another rule, content a
-    /// fixer writes that the rule still rejects, an edit to an existing ignore
-    /// file) are only found by running it; `docs/site/cli/fix.md` documents the
-    /// limit.
+    /// would-be-`Applied` create (`file_create`, `dir_create`,
+    /// `create_and_register`'s member) that the walk would list under no name,
+    /// neither the path as written nor where it lands once symlinks resolve
+    /// (gitignored, `ignore:`d, including by an ignore file another create in
+    /// the same pass writes, or below a symlinked directory the walk does not
+    /// enter), and the rule does not look for on disk itself; a target outside
+    /// the rule's `paths:` or landing outside the root; or a created file a
+    /// `git_tracked_only` rule would not see as tracked. Those become the same
+    /// unresolved skip the real run reports. Other ways a fix can fail its
+    /// re-check (a cascade through another rule, content a fixer writes that
+    /// the rule still rejects, an edit to an existing ignore file) are only
+    /// found by running it; `docs/site/cli/fix.md` documents the limit.
     pub(super) fn predict_unresolved_creates(
         &self,
         root: &Path,
@@ -597,8 +598,9 @@ impl Engine {
         report: &mut FixReport,
     ) {
         // Each would-be-applied create: where its result and item sit in the
-        // report, its rule, the target, whether it is a directory and, for a
-        // file whose fixer has an editor form, its content.
+        // report, its rule, the names the walk could list it under (or the path
+        // as written when it lands outside the root), whether it is a directory
+        // and, for a file, its content.
         let mut creates = Vec::new();
         for (result, rr) in report.results.iter().enumerate() {
             let Some(entry) = self.entries.iter().find(|e| e.rule.id() == &*rr.rule_id) else {
@@ -611,47 +613,39 @@ impl Engine {
                 if !matches!(it.status, FixStatus::Applied(_)) {
                     continue;
                 }
-                // `file_create` declines an editor form for a target outside
-                // the root, which `allow_out_of_root` still lets it write.
-                let (path, is_dir, content) = match fixer.fix_edit(&it.violation, &[], root) {
-                    Some(FixEdit::CreateFile { path, content }) => (path, false, Some(content)),
-                    _ => match (fixer.created_file(), fixer.created_dir()) {
-                        (Some(file), _) => (file.to_path_buf(), false, None),
-                        (None, Some(dir)) => (dir.to_path_buf(), true, None),
-                        (None, None) => continue,
-                    },
-                };
-                let target = Self::created_target(root, &path).ok_or(path);
-                creates.push((result, item, entry, target, is_dir, content));
+                let (path, is_dir, content) =
+                    match fixer.created_file(&it.violation, root, entry.allow_out_of_root) {
+                        Some((path, content)) => (path, false, Some(content)),
+                        None => match fixer.created_dir() {
+                            Some(dir) => (dir.to_path_buf(), true, None),
+                            None => continue,
+                        },
+                    };
+                let names = Self::created_names(root, &path).ok_or(path);
+                creates.push((result, item, entry, names, is_dir, content));
             }
         }
-        // The walk after the fix reads the ignore files those creates write. A
-        // create skips a file that is already there, so the first create of a
-        // path wins, whichever name (through an in-tree symlink) it uses.
-        let mut created_ignores: Vec<(&Path, &[u8], PathBuf)> = Vec::new();
-        for (_, _, _, target, _, content) in &creates {
-            let (Ok(target), Some(content)) = (target, content.as_deref()) else {
+        // The walk after the fix reads the ignore files those creates write,
+        // where they land. A create skips a file that is already there, so the
+        // first create of a path wins, whichever name (through an in-tree
+        // symlink) it uses.
+        let mut created_ignores: Vec<(&Path, &[u8])> = Vec::new();
+        for (_, _, _, names, _, content) in &creates {
+            let (Ok(names), Some(content)) = (names, content.as_deref()) else {
                 continue;
             };
-            if !matches!(
-                target.file_name().and_then(std::ffi::OsStr::to_str),
+            let landed = names.last().expect("a create lands somewhere");
+            if matches!(
+                landed.file_name().and_then(std::ffi::OsStr::to_str),
                 Some(".gitignore" | ".ignore")
-            ) {
-                continue;
-            }
-            let file = root.join(target);
-            let resolved = crate::pathsafe::resolve_existing_prefix(&file).unwrap_or(file);
-            if !created_ignores.iter().any(|(_, _, r)| *r == resolved) {
-                created_ignores.push((target.as_path(), content, resolved));
+            ) && !created_ignores.iter().any(|(path, _)| path == landed)
+            {
+                created_ignores.push((landed.as_path(), content));
             }
         }
-        let created_ignores: Vec<(&Path, &[u8])> = created_ignores
-            .into_iter()
-            .map(|(target, content, _)| (target, content))
-            .collect();
         // `git ls-files`, once, when a `git_tracked_only` rule creates a file.
         let tracked = std::cell::OnceCell::new();
-        for (result, item, entry, target, is_dir, _) in &creates {
+        for (result, item, entry, names, is_dir, _) in &creates {
             // A sensitive item's reason leaves the target out: its rule's
             // configuration or evidence can hold it, as the redacted summary
             // already does.
@@ -665,22 +659,30 @@ impl Engine {
                     path.display().to_string()
                 }
             };
-            let why = match target {
+            let why = match names {
                 Err(path) => Some(format!(
                     "{} is outside the root, so the rule would never see it",
                     shown(path)
                 )),
-                Ok(target) => Self::predicted_unresolved(
-                    root,
-                    index,
-                    walk_opts,
-                    entry,
-                    target,
-                    &shown(target),
-                    *is_dir,
-                    &created_ignores,
-                    &tracked,
-                ),
+                // Resolved when the rule sees the file under any of its names;
+                // otherwise the reason for the first, the path as written.
+                Ok(names) => {
+                    let mut reasons = names.iter().map(|name| {
+                        Self::predicted_unresolved(
+                            root,
+                            index,
+                            walk_opts,
+                            entry,
+                            name,
+                            &shown(name),
+                            *is_dir,
+                            &created_ignores,
+                            &tracked,
+                        )
+                    });
+                    let first = reasons.next().flatten();
+                    first.filter(|_| reasons.all(|reason| reason.is_some()))
+                }
             };
             let it = &mut report.results[*result].items[*item];
             if let (Some(why), FixStatus::Applied(summary)) = (why, &it.status) {
@@ -691,21 +693,31 @@ impl Engine {
         }
     }
 
-    /// The root-relative path a create of `path` writes, or `None` when it
-    /// writes outside the root. A fixer joins the path to the root after
-    /// normalizing it lexically (`a/../b` is `b`), and an absolute path (only
-    /// `allow_out_of_root` permits one) replaces the root.
-    fn created_target(root: &Path, path: &Path) -> Option<PathBuf> {
-        if path.is_absolute() {
-            let canonical = root.canonicalize().ok();
-            let relative = path.strip_prefix(root).ok().or_else(|| {
-                canonical
-                    .as_deref()
-                    .and_then(|root| path.strip_prefix(root).ok())
-            })?;
-            return crate::pathsafe::normalize_confined(relative);
-        }
-        crate::pathsafe::normalize_confined(path)
+    /// The root-relative names the walk could list a create of `path` under:
+    /// the path as written, when it reads as one inside the root, then where
+    /// the file lands once symlinks resolve (last, and once when the two
+    /// agree). `None` when it lands outside the root. A fixer joins the path
+    /// to the root after normalizing it lexically (`a/../b` is `b`) when it
+    /// stays inside, and as written otherwise (only `allow_out_of_root`
+    /// permits that): an absolute path replaces the root, and `..` steps up
+    /// from the root's real location, which can lead back into it.
+    pub(super) fn created_names(root: &Path, path: &Path) -> Option<Vec<PathBuf>> {
+        let canonical = root.canonicalize().ok()?;
+        let written = if path.is_absolute() {
+            path.strip_prefix(root)
+                .or_else(|_| path.strip_prefix(&canonical))
+                .ok()
+                .and_then(crate::pathsafe::normalize_confined)
+        } else {
+            crate::pathsafe::normalize_confined(path)
+        };
+        let joined = root.join(written.as_deref().unwrap_or(path));
+        let landed = crate::pathsafe::resolve_existing_prefix(&joined)?;
+        let landed = crate::pathsafe::normalize_confined(landed.strip_prefix(&canonical).ok()?)?;
+        Some(match written {
+            Some(written) if written != landed => vec![written, landed],
+            _ => vec![landed],
+        })
     }
 
     /// Why a create of `target` (root-relative, a directory when `is_dir`,

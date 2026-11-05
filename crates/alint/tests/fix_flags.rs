@@ -610,10 +610,78 @@ fn dry_run_agrees_with_fix_for_an_ignore_file_created_through_a_symlink() {
     }
 }
 
+#[test]
+fn dry_run_agrees_with_fix_for_an_ignore_file_read_from_outside_the_root() {
+    // `allow_out_of_root` lets `file_create` take its content from
+    // `../template`; the created `cache/.gitignore` of `*` then leaves out
+    // itself and the `cache/README.md` another rule creates. The dry run read
+    // the content as an editor would, which never leaves the root, so it saw
+    // no ignore file at all.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir_all(root.join("cache")).unwrap();
+    std::fs::write(tmp.path().join("template"), "*\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nrules:\n\
+         - {id: cache-ignore, kind: file_exists, paths: cache/.gitignore, level: error, \
+         fix: {file_create: {content_from: ../template}}}\n\
+         - {id: cache-readme, kind: file_exists, paths: cache/README.md, level: error, \
+         fix: {file_create: {content: \"x\\n\"}}}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[
+        ("cache-ignore", "unresolved"),
+        ("cache-readme", "unresolved"),
+    ]);
+    let [dry, real] = dry_and_real(&root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+}
+
+#[test]
+fn dry_run_agrees_with_fix_for_a_member_created_outside_the_root() {
+    // `allow_out_of_root` lets `create_and_register` create a named member
+    // outside the root, which no walk of the root reaches.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nrules:\n\
+         - id: member\n\
+         \x20 kind: cross_file\n\
+         \x20 relation: registered\n\
+         \x20 source: {file: ../shared/Cargo.toml}\n\
+         \x20 register_as: \"{dir}\"\n\
+         \x20 targets:\n\
+         \x20   - {file: Cargo.toml, extract: {toml: \"$.workspace.members[*]\"}}\n\
+         \x20 level: error\n\
+         \x20 fix:\n\
+         \x20   create_and_register: {content: \"[package]\\n\", applicability: safe}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("member", "unresolved")]);
+    let [dry, real] = dry_and_real(&root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+    assert!(
+        tmp.path().join("shared/Cargo.toml").is_file(),
+        "the real fix creates it"
+    );
+}
+
+/// `git` with an empty global and system config, so a developer's settings
+/// (commit signing, hooks) cannot fail or change the setup.
 fn git(dir: &Path, args: &[&str]) {
+    let config = tempfile::NamedTempFile::new().unwrap();
     let status = Command::new("git")
+        .args(["-c", "commit.gpgsign=false"])
         .args(args)
         .current_dir(dir)
+        .env("GIT_CONFIG_GLOBAL", config.path())
+        .env("GIT_CONFIG_SYSTEM", config.path())
         .env("GIT_AUTHOR_NAME", "t")
         .env("GIT_AUTHOR_EMAIL", "t@t")
         .env("GIT_COMMITTER_NAME", "t")
