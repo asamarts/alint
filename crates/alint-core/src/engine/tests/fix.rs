@@ -1566,3 +1566,27 @@ fn dry_run_names_an_absolute_create_through_the_canonical_root() {
     assert!(outcome(false), "real fix");
     assert!(outcome(true), "dry run");
 }
+
+#[test]
+#[cfg(unix)]
+fn a_create_has_one_name_when_it_lands_where_it_is_written() {
+    use std::os::unix::fs::symlink;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("real")).unwrap();
+    symlink("real", root.join("alias")).unwrap();
+    let names = |path: &str| Engine::created_names(root, Path::new(path));
+    assert_eq!(names("real/x.txt"), Some(vec![PathBuf::from("real/x.txt")]));
+    assert_eq!(
+        names("./real/x.txt"),
+        Some(vec![PathBuf::from("real/x.txt")])
+    );
+    assert_eq!(
+        names("alias/x.txt"),
+        Some(vec![
+            PathBuf::from("alias/x.txt"),
+            PathBuf::from("real/x.txt")
+        ])
+    );
+    assert_eq!(names("../outside.txt"), None);
+}

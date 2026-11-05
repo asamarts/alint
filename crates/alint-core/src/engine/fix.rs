@@ -701,7 +701,7 @@ impl Engine {
     /// stays inside, and as written otherwise (only `allow_out_of_root`
     /// permits that): an absolute path replaces the root, and `..` steps up
     /// from the root's real location, which can lead back into it.
-    fn created_names(root: &Path, path: &Path) -> Option<Vec<PathBuf>> {
+    pub(super) fn created_names(root: &Path, path: &Path) -> Option<Vec<PathBuf>> {
         let canonical = root.canonicalize().ok()?;
         let written = if path.is_absolute() {
             path.strip_prefix(root)

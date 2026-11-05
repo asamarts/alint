@@ -40,7 +40,10 @@ only makes progress on a later pass, a cascade where one rule's fix creates or
 resolves another's violation, an edit to an existing ignore file, or content a
 fix writes that the rule still rejects. `--diff` shows that first pass's edits
 without the prediction, so its exit code can be `0` where a real `fix` exits
-`1`.
+`1`. It also leaves out every file a rule with redacted findings would change
+([`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019), or a field
+read from the environment), so the diff cannot show a secret beside an edit;
+`alint fix` still applies those fixes.
 
 If alint cannot obtain a policy verdict, the fix report carries a typed
 `analysis_failure` instead of a fix item. It is never passed to a fixer and
