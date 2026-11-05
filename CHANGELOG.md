@@ -53,7 +53,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which the walk does not. It also missed exclusions the walk applies: ignore
   files in directories above the linted root (a monorepo package linted from
   its own directory) and the `info/exclude` of a repository or linked worktree
-  nested inside the tree.
+  nested inside the tree. It now also predicts that the walk leaves out a
+  directory `dir_create` makes in an ignored path, a created ignore file that
+  excludes itself (a `cache/.gitignore` of `*`) or a file another fix in the
+  same run creates, and a file created below a symlink the walk does not
+  follow (a loop, or one that leads out of the root). A `file_create` path
+  with `..` is checked where the file is written (`out/../README.md` is
+  `README.md`), not through each component.
 - A configuration error is no longer replaced with `<redacted>` just because the
   rule reads a value from the environment or sets `sensitive: true`. alint now
   repeats the failed step with those values masked and shows the error when the

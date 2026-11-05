@@ -1091,3 +1091,156 @@ fn reconciliation_drops_a_moot_fix_error_when_the_file_is_removed() {
         "no residual on the clean tree"
     );
 }
+
+// ---- `fix --dry-run` predicts the creates a real fix demotes ----
+
+/// Requires `checks` and creates `path` (a file with `content`, or a directory
+/// when `dir`), as `file_create` and `dir_create` do: under the root joined
+/// with the lexically normalized path, and only when nothing is there yet.
+#[derive(Debug)]
+struct CreateRule {
+    id: &'static str,
+    checks: PathBuf,
+    path: PathBuf,
+    content: &'static [u8],
+    dir: bool,
+    scope: Scope,
+}
+
+fn create_rule(
+    id: &'static str,
+    checks: &str,
+    path: &str,
+    content: &'static [u8],
+    dir: bool,
+) -> Box<dyn Rule> {
+    Box::new(CreateRule {
+        id,
+        checks: PathBuf::from(checks),
+        path: PathBuf::from(path),
+        content,
+        dir,
+        scope: Scope::from_patterns(&[checks.to_string()]).unwrap(),
+    })
+}
+
+impl crate::rule::Fixer for CreateRule {
+    fn describe(&self) -> String {
+        format!("create {}", self.path.display())
+    }
+    fn apply(&self, _v: &Violation, ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+        let target = ctx.root.join(
+            crate::pathsafe::normalize_confined(&self.path).unwrap_or_else(|| self.path.clone()),
+        );
+        if target.exists() {
+            return Ok(FixOutcome::Skipped("already there".to_string()));
+        }
+        if !ctx.dry_run {
+            if self.dir {
+                std::fs::create_dir_all(&target).unwrap();
+            } else {
+                std::fs::create_dir_all(target.parent().unwrap()).unwrap();
+                std::fs::write(&target, self.content).unwrap();
+            }
+        }
+        Ok(FixOutcome::Applied(format!(
+            "create {}",
+            self.path.display()
+        )))
+    }
+    fn fix_edit(&self, _v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+        (!self.dir).then(|| FixEdit::CreateFile {
+            path: self.path.clone(),
+            content: self.content.to_vec(),
+        })
+    }
+    fn created_dir(&self) -> Option<&Path> {
+        self.dir.then_some(self.path.as_path())
+    }
+}
+
+impl Rule for CreateRule {
+    fn id(&self) -> &str {
+        self.id
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn path_scope(&self) -> Option<&Scope> {
+        Some(&self.scope)
+    }
+    fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+        Ok(if ctx.index.contains_path(&self.checks) {
+            Vec::new()
+        } else {
+            vec![Violation::new("missing")]
+        })
+    }
+    fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+        Some(self)
+    }
+}
+
+#[test]
+fn dry_run_predicts_each_create_the_real_fix_finds_unresolved() {
+    // Each rule's dry-run outcome (applied or not) is the real fix's.
+    let outcomes = |dry_run: bool| -> Vec<(String, bool)> {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = &tmp.path().join("root");
+        std::fs::create_dir_all(root.join("cache")).unwrap();
+        std::fs::write(root.join(".gitignore"), "build/\nout/\n").unwrap();
+        let rules = vec![
+            // A created ignore file that leaves itself out.
+            create_rule(
+                "self-ignoring",
+                "cache/.gitignore",
+                "cache/.gitignore",
+                b"*\n",
+                false,
+            ),
+            // One that does not, and leaves out another create of the pass.
+            create_rule("logs-ignore", ".ignore", ".ignore", b"*.log\n", false),
+            create_rule("log", "x.log", "x.log", b"x", false),
+            // A directory the root `.gitignore` leaves out.
+            create_rule("build-dir", "build", "build", b"", true),
+            // Written to `README.md`, though `out/` is ignored.
+            create_rule("normalized", "README.md", "out/../README.md", b"x", false),
+            create_rule("outside-paths", "b.txt", "a.txt", b"x", false),
+            // Written outside the root, as `allow_out_of_root` permits.
+            create_rule("outside-root", "escaped.txt", "../escaped.txt", b"x", false),
+            create_rule("plain", "keep.txt", "keep.txt", b"x", false),
+        ];
+        let opts = crate::WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        };
+        let index = crate::walk(root, &opts).unwrap();
+        let report = Engine::new(rules, RuleRegistry::new())
+            .fix(root, &index, &opts, dry_run, Applicability::Safe)
+            .unwrap();
+        report
+            .results
+            .iter()
+            .map(|result| {
+                assert_eq!(result.items.len(), 1, "{result:?}");
+                let applied = matches!(result.items[0].status, FixStatus::Applied(_));
+                (result.rule_id.to_string(), applied)
+            })
+            .collect()
+    };
+    let expected: Vec<(String, bool)> = [
+        ("self-ignoring", false),
+        ("logs-ignore", true),
+        ("log", false),
+        ("build-dir", false),
+        ("normalized", true),
+        ("outside-paths", false),
+        ("outside-root", false),
+        ("plain", true),
+    ]
+    .into_iter()
+    .map(|(id, applied)| (id.to_string(), applied))
+    .collect();
+    assert_eq!(outcomes(true), expected, "dry run");
+    assert_eq!(outcomes(false), expected, "real fix");
+}

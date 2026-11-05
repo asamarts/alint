@@ -222,8 +222,9 @@ fn dry_run_agrees_with_fix_when_a_create_would_not_stick() {
 }
 
 // The walk also leaves out what git's global excludes file lists, so the dry
-// run predicts the same. Unix only: `ignore` expands every `~` in the
-// configured path, which mangles a Windows short temp path (`RUNNER~1`).
+// run predicts the same. This guards behavior the prediction already had.
+// Unix only: `ignore` expands every `~` in the configured path, which mangles
+// a Windows short temp path (`RUNNER~1`).
 #[cfg(unix)]
 #[test]
 fn dry_run_agrees_with_fix_under_the_global_excludes_file() {
@@ -279,4 +280,140 @@ fn dry_run_flags_a_create_outside_the_rules_paths() {
     let dry = run(root, &["fix", "--dry-run", "--format", "json"]);
     assert_eq!(only_item(&dry)["status"], "applied");
     assert_eq!(dry.status.code(), Some(0));
+}
+
+/// One run's outcome per rule, `(rule id, "applied" or the skip kind)`, and
+/// its exit code.
+type RunOutcome = (Vec<(String, String)>, Option<i32>);
+
+/// The outcome of `fix --dry-run` and then of `fix` in `root` (JSON, with
+/// `env` set).
+fn dry_and_real(root: &Path, env: &[(&str, &Path)]) -> [RunOutcome; 2] {
+    let outcome = |args: &[&str]| {
+        let output = Command::new(alint())
+            .args(args)
+            .current_dir(root)
+            .envs(env.iter().copied())
+            .output()
+            .expect("spawn alint");
+        let v: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        let items = v["results"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|result| {
+                let item = &result["items"][0];
+                let outcome = if item["status"] == "applied" {
+                    "applied"
+                } else {
+                    item["skip_kind"].as_str().unwrap()
+                };
+                (
+                    result["id"].as_str().unwrap().to_string(),
+                    outcome.to_string(),
+                )
+            })
+            .collect();
+        (items, output.status.code())
+    };
+    [
+        outcome(&["fix", "--dry-run", "--format", "json"]),
+        outcome(&["fix", "--format", "json"]),
+    ]
+}
+
+fn outcomes(expected: &[(&str, &str)]) -> Vec<(String, String)> {
+    expected
+        .iter()
+        .map(|(id, outcome)| (id.to_string(), outcome.to_string()))
+        .collect()
+}
+
+#[test]
+fn dry_run_agrees_with_fix_when_a_create_is_an_ignore_file_or_a_directory() {
+    // A created `.gitignore` of `*` leaves itself out; a created `.ignore`
+    // leaves out a file another rule creates in the same pass; `dir_create`
+    // makes a gitignored directory; a `file_create` path with `..` is written
+    // where it normalizes to, which is not ignored although `out/` is.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".gitignore"), "build/\nout/\n").unwrap();
+    std::fs::create_dir(root.join("cache")).unwrap();
+    std::fs::write(root.join("cache/data.bin"), "x").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n\
+         - {id: cache-ignore, kind: file_exists, paths: cache/.gitignore, level: error, \
+         fix: {file_create: {content: \"*\\n\"}}}\n\
+         - {id: logs-ignore, kind: file_exists, paths: .ignore, level: error, \
+         fix: {file_create: {content: \"*.log\\n\"}}}\n\
+         - {id: log, kind: file_exists, paths: x.log, level: error, \
+         fix: {file_create: {content: \"x\\n\"}}}\n\
+         - {id: build, kind: dir_exists, paths: build, level: error, fix: {dir_create: {}}}\n\
+         - {id: readme, kind: file_exists, paths: README.md, level: error, \
+         fix: {file_create: {path: out/../README.md, content: \"hi\\n\"}}}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[
+        ("cache-ignore", "unresolved"),
+        ("logs-ignore", "applied"),
+        ("log", "unresolved"),
+        ("build", "unresolved"),
+        ("readme", "applied"),
+    ]);
+    let [dry, real] = dry_and_real(root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+    assert!(root.join("README.md").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_agrees_with_fix_below_a_symlink_loop() {
+    // `loop/.env` is written to `./.env`; the walk does not enter `loop`.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::os::unix::fs::symlink(".", root.join("loop")).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        create_config("loop/.env", "loop/.env"),
+    )
+    .unwrap();
+    let expected = outcomes(&[("env", "unresolved")]);
+    let [dry, real] = dry_and_real(root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+}
+
+// Unix only, as `dry_run_agrees_with_fix_under_the_global_excludes_file`.
+#[cfg(unix)]
+#[test]
+fn info_exclude_outranks_the_global_excludes_file() {
+    // The global excludes file leaves out `*.md`; the repository's
+    // `info/exclude` takes `keep.md` back, and wins.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir_all(root.join(".git/info")).unwrap();
+    std::fs::write(root.join(".git/info/exclude"), "!keep.md\n").unwrap();
+    let excludes = tmp.path().join("global-ignore");
+    std::fs::write(&excludes, "*.md\n").unwrap();
+    let gitconfig = tmp.path().join("gitconfig");
+    std::fs::write(
+        &gitconfig,
+        format!("[core]\n\texcludesFile = {}\n", excludes.display()),
+    )
+    .unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n\
+         - {id: keep, kind: file_exists, paths: keep.md, level: error, \
+         fix: {file_create: {content: \"x\\n\"}}}\n\
+         - {id: other, kind: file_exists, paths: other.md, level: error, \
+         fix: {file_create: {content: \"x\\n\"}}}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("keep", "applied"), ("other", "unresolved")]);
+    let [dry, real] = dry_and_real(&root, &[("GIT_CONFIG_GLOBAL", &gitconfig)]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
 }
