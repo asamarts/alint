@@ -94,26 +94,30 @@ pub fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
     let Ok(root_real) = root.canonicalize() else {
         return false;
     };
+    resolve_existing_prefix(candidate).is_some_and(|real| real.starts_with(&root_real))
+}
+
+/// `path` with its deepest existing ancestor canonicalized and the rest
+/// re-attached, or `None` when no ancestor resolves. A component that does not
+/// exist cannot be a symlink, so two names for one location (through an
+/// in-repo symlinked directory) resolve alike before the location exists.
+pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     let mut tail = PathBuf::new();
-    let mut cur = candidate.to_path_buf();
+    let mut cur = path.to_path_buf();
     loop {
         if let Ok(real) = cur.canonicalize() {
-            let full = if tail.as_os_str().is_empty() {
+            return Some(if tail.as_os_str().is_empty() {
                 real
             } else {
                 real.join(&tail)
-            };
-            return full.starts_with(&root_real);
+            });
         }
         // `cur` doesn't resolve yet; fold its last component into `tail`
-        // and retry against the parent. A component that doesn't exist
-        // can't be a symlink, so it cannot introduce an escape.
-        let Some(name) = cur.file_name().map(std::ffi::OsString::from) else {
-            return false;
-        };
+        // and retry against the parent.
+        let name = std::ffi::OsString::from(cur.file_name()?);
         tail = Path::new(&name).join(&tail);
         if !cur.pop() {
-            return false;
+            return None;
         }
     }
 }

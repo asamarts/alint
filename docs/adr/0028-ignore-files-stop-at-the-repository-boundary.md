@@ -8,7 +8,8 @@ decision-makers: asamarts
 
 ## Status
 
-Accepted (2026-11-04).
+Accepted (2026-11-04). [ADR-0029](0029-ignore-file-boundary-corrections-after-review.md)
+(2026-11-04) corrects decisions 1, 3, 5 and 6 and two consequences; the rest stands.
 
 ## Context
 

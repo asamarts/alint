@@ -9,8 +9,25 @@ fn alint() -> PathBuf {
     PathBuf::from(env!("CARGO_BIN_EXE_alint"))
 }
 
+/// `alint` with git's global and system config, and the excludes files
+/// `ignore` falls back to, pointed into an empty `home`, so a developer's
+/// global excludes file (`.env` is a common entry) cannot change the walk.
+fn isolated_alint(home: &Path) -> Command {
+    let config = home.join("gitconfig");
+    std::fs::write(&config, "").unwrap();
+    let mut command = Command::new(alint());
+    command
+        .env("GIT_CONFIG_GLOBAL", &config)
+        .env("GIT_CONFIG_SYSTEM", &config)
+        .env("XDG_CONFIG_HOME", home.join("config"))
+        .env("HOME", home)
+        .env("USERPROFILE", home);
+    command
+}
+
 fn run(dir: &Path, args: &[&str]) -> Output {
-    Command::new(alint())
+    let home = tempfile::tempdir().unwrap();
+    isolated_alint(home.path())
         .args(args)
         .current_dir(dir)
         .output()
@@ -245,7 +262,8 @@ fn dry_run_agrees_with_fix_under_the_global_excludes_file() {
         &["fix", "--dry-run", "--format", "json"][..],
         &["fix", "--format", "json"],
     ] {
-        let output = Command::new(alint())
+        let home = tempfile::tempdir().unwrap();
+        let output = isolated_alint(home.path())
             .args(args)
             .current_dir(&root)
             .env("GIT_CONFIG_GLOBAL", &gitconfig)
@@ -290,7 +308,8 @@ type RunOutcome = (Vec<(String, String)>, Option<i32>);
 /// `env` set).
 fn dry_and_real(root: &Path, env: &[(&str, &Path)]) -> [RunOutcome; 2] {
     let outcome = |args: &[&str]| {
-        let output = Command::new(alint())
+        let home = tempfile::tempdir().unwrap();
+        let output = isolated_alint(home.path())
             .args(args)
             .current_dir(root)
             .envs(env.iter().copied())
@@ -414,6 +433,152 @@ fn info_exclude_outranks_the_global_excludes_file() {
     .unwrap();
     let expected = outcomes(&[("keep", "applied"), ("other", "unresolved")]);
     let [dry, real] = dry_and_real(&root, &[("GIT_CONFIG_GLOBAL", &gitconfig)]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+}
+
+#[test]
+fn dry_run_agrees_with_fix_when_the_rule_looks_past_the_walk() {
+    // `respect_gitignore: false` on a literal `file_exists` path stats the file
+    // itself, so a create the walk leaves out still resolves it (the
+    // `.bazelversion` pattern). The dry run used to call it unresolved.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join(".gitignore"), ".bazelversion\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n\
+         - {id: bazel, kind: file_exists, paths: .bazelversion, level: error, \
+         respect_gitignore: false, fix: {file_create: {content: \"7.0.0\\n\"}}}\n\
+         - {id: walked, kind: file_exists, paths: .other, level: error, \
+         fix: {file_create: {path: .bazelversion, content: \"7.0.0\\n\"}}}\n",
+    )
+    .unwrap();
+    // `walked` creates the same ignored file for a rule that only sees the
+    // walk; it is skipped once `bazel` has written it.
+    let expected = outcomes(&[("bazel", "applied"), ("walked", "unresolved")]);
+    let [dry, real] = dry_and_real(root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real.0[0], expected[0], "real fix");
+    assert!(root.join(".bazelversion").is_file());
+}
+
+#[test]
+fn dry_run_agrees_with_fix_for_a_create_outside_the_root() {
+    // `allow_out_of_root` lets `file_create` write `../x.txt`, which no walk
+    // of the root reaches. The dry run used to call it applied.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nrules:\n\
+         - {id: up, kind: file_exists, paths: x.txt, level: error, \
+         fix: {file_create: {path: ../x.txt, content: \"x\\n\"}}}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("up", "unresolved")]);
+    let [dry, real] = dry_and_real(&root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+    assert!(tmp.path().join("x.txt").is_file(), "the real fix writes it");
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_agrees_with_fix_below_a_symlink_out_of_the_root() {
+    // `out` leads out of the root; `allow_out_of_root` lets a create through
+    // it, which the walk (pruning `out`) and the rule's own stat both miss.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir_all(tmp.path().join("elsewhere")).unwrap();
+    std::fs::create_dir(&root).unwrap();
+    std::os::unix::fs::symlink(tmp.path().join("elsewhere"), root.join("out")).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nrules:\n\
+         - {id: walked, kind: file_exists, paths: out/a.txt, level: error, \
+         fix: {file_create: {content: \"x\\n\"}}}\n\
+         - {id: stat, kind: file_exists, paths: out/b.txt, level: error, \
+         respect_gitignore: false, fix: {file_create: {content: \"x\\n\"}}}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("walked", "unresolved"), ("stat", "unresolved")]);
+    let [dry, real] = dry_and_real(&root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+}
+
+#[cfg(unix)]
+#[test]
+fn dry_run_agrees_with_fix_for_an_ignore_file_created_through_a_symlink() {
+    // `alias` leads to `real`. `alias/.gitignore` lands in `real/`, where it
+    // leaves out the `real/x.txt` another rule creates. Of two creates of one
+    // ignore file, the first is written and the second skipped.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("real")).unwrap();
+    std::os::unix::fs::symlink("real", root.join("alias")).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n\
+         - {id: ignore, kind: file_exists, paths: alias/.gitignore, level: error, \
+         fix: {file_create: {content: \"x.txt\\n\"}}}\n\
+         - {id: x, kind: file_exists, paths: real/x.txt, level: error, \
+         fix: {file_create: {content: \"x\\n\"}}}\n\
+         - {id: first, kind: file_exists, paths: .gitignore, level: error, \
+         fix: {file_create: {content: \"other\\n\"}}}\n\
+         - {id: second, kind: file_exists, paths: .ignore, level: error, \
+         fix: {file_create: {path: .gitignore, content: \"y.txt\\n\"}}}\n\
+         - {id: y, kind: file_exists, paths: y.txt, level: error, \
+         fix: {file_create: {content: \"y\\n\"}}}\n",
+    )
+    .unwrap();
+    let [dry, real] = dry_and_real(root, &[]);
+    for (id, outcome) in [("ignore", "applied"), ("x", "unresolved"), ("y", "applied")] {
+        let expected = (id.to_string(), outcome.to_string());
+        assert!(dry.0.contains(&expected), "dry run: {dry:?}");
+        assert!(real.0.contains(&expected), "real fix: {real:?}");
+    }
+}
+
+fn git(dir: &Path, args: &[&str]) {
+    let status = Command::new("git")
+        .args(args)
+        .current_dir(dir)
+        .env("GIT_AUTHOR_NAME", "t")
+        .env("GIT_AUTHOR_EMAIL", "t@t")
+        .env("GIT_COMMITTER_NAME", "t")
+        .env("GIT_COMMITTER_EMAIL", "t@t")
+        .output()
+        .expect("run git")
+        .status;
+    assert!(status.success(), "git {args:?} failed");
+}
+
+#[test]
+fn dry_run_agrees_with_fix_for_a_git_tracked_only_rule() {
+    // A `git_tracked_only` rule sees only tracked files: a created file is
+    // untracked and never resolves it, unless git still tracks the path (a
+    // tracked file deleted from the worktree).
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    git(root, &["init", "-q"]);
+    std::fs::write(root.join("gone.txt"), "x\n").unwrap();
+    git(root, &["add", "gone.txt"]);
+    git(root, &["commit", "-qm", "base"]);
+    std::fs::remove_file(root.join("gone.txt")).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n\
+         - {id: new, kind: file_exists, paths: new.txt, level: error, \
+         git_tracked_only: true, fix: {file_create: {content: \"x\\n\"}}}\n\
+         - {id: gone, kind: file_exists, paths: gone.txt, level: error, \
+         git_tracked_only: true, fix: {file_create: {content: \"x\\n\"}}}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("new", "unresolved"), ("gone", "applied")]);
+    let [dry, real] = dry_and_real(root, &[]);
     assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
     assert_eq!(real, (expected, Some(1)), "real fix");
 }

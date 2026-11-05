@@ -43,3 +43,4 @@ in `docs/adr/` is missing from this table.
 | [0026](../adr/0026-measuring-the-v022-simplicity-gate.md) | Measuring the v0.22 simplicity gate | accepted |
 | [0027](../adr/0027-plugin-contract-0-1-stays-a-draft.md) | Plugin contract 0.1 stays a draft until plugins load | accepted |
 | [0028](../adr/0028-ignore-files-stop-at-the-repository-boundary.md) | Ignore files stop at the repository boundary | accepted |
+| [0029](../adr/0029-ignore-file-boundary-corrections-after-review.md) | Ignore-file boundary corrections after review | accepted |

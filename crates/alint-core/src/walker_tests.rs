@@ -995,6 +995,143 @@ fn ignore_files_outside_a_repository_stop_at_the_root() {
 }
 
 #[test]
+fn only_errors_naming_files_above_the_root_are_ignore_file_errors() {
+    use ignore::Error;
+    let root = Path::new("/home/repo");
+    let io = || Error::Io(std::io::Error::from(std::io::ErrorKind::PermissionDenied));
+    let glob = || Error::Glob {
+        glob: Some("[z-a]".to_string()),
+        err: "invalid range".to_string(),
+    };
+    let above = || Error::WithPath {
+        path: PathBuf::from("/home/.gitignore"),
+        err: Box::new(Error::WithLineNumber {
+            line: 1,
+            err: Box::new(glob()),
+        }),
+    };
+    let unreadable_above = || Error::WithPath {
+        path: PathBuf::from("/home/.git"),
+        err: Box::new(io()),
+    };
+    let inside = || Error::WithPath {
+        path: PathBuf::from("/home/repo/sub"),
+        err: Box::new(io()),
+    };
+    assert!(is_ignore_file_error(root, &above()));
+    assert!(is_ignore_file_error(root, &unreadable_above()));
+    assert!(is_ignore_file_error(
+        root,
+        &Error::Partial(vec![above(), Error::Partial(vec![unreadable_above()])])
+    ));
+    assert!(!is_ignore_file_error(root, &inside()));
+    assert!(!is_ignore_file_error(
+        root,
+        &Error::Partial(vec![above(), inside()])
+    ));
+    assert!(!is_ignore_file_error(root, &Error::Partial(Vec::new())));
+    // An error from the walk carries its depth, even for the root itself.
+    assert!(!is_ignore_file_error(
+        root,
+        &Error::WithDepth {
+            depth: 0,
+            err: Box::new(unreadable_above()),
+        }
+    ));
+    assert!(!is_ignore_file_error(root, &glob()));
+    assert!(!is_ignore_file_error(root, &io()));
+}
+
+#[test]
+fn a_bad_ignore_file_above_the_root_does_not_stop_the_walk() {
+    // `ignore` reads the ignore files above the root whether or not it applies
+    // them, and reports a bad line in one as a walk error. git never reads them
+    // and skips a line it cannot parse, so the walk goes on: above a
+    // repository, above a tree outside one, and in an enclosing repository's
+    // exclude file. A bad line in the tree's own `.gitignore` already was
+    // tolerated.
+    let tmp = td();
+    let home = tmp.path().join("home");
+    touch(&home, ".gitignore", b"a\\\n");
+    touch(&home, ".git/info/exclude", b"x{\n");
+    let repo = home.join("repo");
+    touch(&repo, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&repo, ".gitignore", b"b\\\n*.log\n");
+    touch(&repo, "README.md", b"x");
+    touch(&repo, "a.log", b"x");
+    let outer = tmp.path().join("downloads");
+    touch(&outer, ".gitignore", b"[z-a]\n");
+    let tree = outer.join("tree");
+    touch(&tree, "README.md", b"x");
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    assert_prediction_matches_walk(&repo, &opts, &[("README.md", false), ("a.log", true)]);
+    assert_prediction_matches_walk(&tree, &opts, &[("README.md", false)]);
+    // A `.ignore` above the repository applies; its good lines still do.
+    touch(&home, ".ignore", b"c\\\n*.md\n");
+    assert_prediction_matches_walk(&repo, &opts, &[("README.md", true)]);
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_file_above_the_root_does_not_stop_the_walk() {
+    // An unreadable `.git` file (a linked worktree's) or `.gitignore` above
+    // the repository: git reads neither, and the walk goes on.
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = td();
+    let home = tmp.path().join("home");
+    touch(&home, ".git", b"gitdir: elsewhere\n");
+    touch(&home, ".gitignore", b"*\n");
+    let repo = home.join("repo");
+    touch(&repo, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&repo, "README.md", b"x");
+    for name in [".git", ".gitignore"] {
+        let file = home.join(name);
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o000)).unwrap();
+    }
+    if std::fs::read(home.join(".git")).is_ok() {
+        // Running as root: nothing is unreadable.
+        return;
+    }
+    let index = walk(
+        &repo,
+        &WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert!(index.contains_file(Path::new("README.md")));
+}
+
+#[cfg(unix)]
+#[test]
+fn an_unreadable_directory_still_stops_the_walk() {
+    // The walk goes on past a bad ignore file, but not past a directory in
+    // the tree it cannot list: every rule would pass on what it never saw.
+    use std::os::unix::fs::PermissionsExt as _;
+    let tmp = td();
+    let root = tmp.path().join("tree");
+    touch(&root, "locked/secret.txt", b"x");
+    let locked = root.join("locked");
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o000)).unwrap();
+    let readable = std::fs::read_dir(&locked).is_ok();
+    let result = walk(
+        &root,
+        &WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        },
+    );
+    std::fs::set_permissions(&locked, std::fs::Permissions::from_mode(0o755)).unwrap();
+    if !readable {
+        assert!(result.is_err(), "{:?}", result.map(|index| paths(&index)));
+    }
+}
+
+#[test]
 fn a_dot_ignore_above_the_repository_still_applies() {
     // `.ignore` is ripgrep's convention, not git's: `ignore` reads it from
     // every directory above a root in a repository, as ripgrep does.
@@ -1150,6 +1287,50 @@ fn would_walk_skip_reads_the_ignore_files_a_fix_creates() {
     // The prediction made before the files existed is the walk's after.
     assert_prediction_matches_walk(&root, &opts, &predicted);
     assert_eq!(predicted, cases);
+}
+
+#[cfg(unix)]
+#[test]
+fn would_walk_skip_reads_an_ignore_file_created_through_a_symlink() {
+    // `alias` leads to `real`, which the walk lists under both names. An
+    // ignore file a fix creates as `alias/.gitignore` lands in `real/`, and
+    // leaves `x.txt` out under either name.
+    let tmp = td();
+    let root = tmp.path().join("repo");
+    touch(&root, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&root, "real/y.txt", b"x");
+    std::os::unix::fs::symlink("real", root.join("alias")).unwrap();
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    for created in ["alias/.gitignore", "real/.gitignore"] {
+        let created: [(&Path, &[u8]); 1] = [(Path::new(created), b"x.txt\n")];
+        for rel in ["alias/x.txt", "real/x.txt"] {
+            assert!(
+                would_walk_skip(&root, &opts, Path::new(rel), false, &created),
+                "{rel} after a create of {}",
+                created[0].0.display()
+            );
+        }
+        assert!(!would_walk_skip(
+            &root,
+            &opts,
+            Path::new("alias/y.txt"),
+            false,
+            &created
+        ));
+    }
+    touch(&root, "real/.gitignore", b"x.txt\n");
+    touch(&root, "real/x.txt", b"x");
+    let index = walk(&root, &opts).unwrap();
+    assert!(
+        index.contains_file(Path::new("alias/y.txt")),
+        "{:?}",
+        paths(&index)
+    );
+    assert!(!index.contains_file(Path::new("alias/x.txt")));
+    assert!(!index.contains_file(Path::new("real/x.txt")));
 }
 
 #[cfg(unix)]

@@ -124,6 +124,17 @@ impl Rule for FileExistsRule {
         false
     }
 
+    fn sees_path_past_walk(&self, path: &Path) -> bool {
+        // The pitfall #18 stat below, which finds a literal the walk left out.
+        self.respect_gitignore == Some(false)
+            && self.literal_paths.as_ref().is_some_and(|literals| {
+                literals.iter().any(|p| {
+                    !(self.root_only && literal_is_nested(p))
+                        && crate::pathsafe::normalize_confined(p).as_deref() == Some(path)
+                })
+            })
+    }
+
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         let found = if let Some(literals) = self.literal_paths.as_ref() {
             // Fast path: each pattern is a literal relative
@@ -494,6 +505,39 @@ mod tests {
             .evaluate(&ctx(Path::new("/fake"), &idx_only_nested))
             .unwrap();
         assert_eq!(v.len(), 1, "nested match shouldn't satisfy root_only");
+    }
+
+    #[test]
+    fn sees_past_the_walk_only_for_a_literal_with_respect_gitignore_false() {
+        // `fix --dry-run` trusts the rule's own stat for exactly the paths it
+        // makes: a literal (normalized), with `respect_gitignore: false`, and
+        // not one `root_only` reads as nested (`evaluate` counts the `./` too).
+        let rule = |extra: &str| {
+            build(&spec_yaml(&format!(
+                "id: t\nkind: file_exists\npaths: [\"./.bazelversion\", \".nvmrc\", \"pkg/x\"]\n\
+                 level: error\n{extra}"
+            )))
+            .unwrap()
+        };
+        let stats = rule("respect_gitignore: false\n");
+        assert!(stats.sees_path_past_walk(Path::new(".bazelversion")));
+        assert!(stats.sees_path_past_walk(Path::new("pkg/x")));
+        assert!(!stats.sees_path_past_walk(Path::new("other")));
+        for extra in ["", "respect_gitignore: true\n"] {
+            assert!(
+                !rule(extra).sees_path_past_walk(Path::new(".bazelversion")),
+                "{extra}"
+            );
+        }
+        let root_only = rule("respect_gitignore: false\nroot_only: true\n");
+        assert!(root_only.sees_path_past_walk(Path::new(".nvmrc")));
+        assert!(!root_only.sees_path_past_walk(Path::new("pkg/x")));
+        let glob = build(&spec_yaml(
+            "id: t\nkind: file_exists\npaths: \"*.txt\"\nlevel: error\n\
+             respect_gitignore: false\n",
+        ))
+        .unwrap();
+        assert!(!glob.sees_path_past_walk(Path::new("a.txt")));
     }
 
     #[test]

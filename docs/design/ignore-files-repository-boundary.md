@@ -1,7 +1,8 @@
 # Design doc: ignore files stop at the repository boundary
 
 Status: Implemented (see the pull request that adds this document).
-Decisions: [ADR-0028](../adr/0028-ignore-files-stop-at-the-repository-boundary.md).
+Decisions: [ADR-0028](../adr/0028-ignore-files-stop-at-the-repository-boundary.md), corrected by
+[ADR-0029](../adr/0029-ignore-file-boundary-corrections-after-review.md) (section 8).
 
 ## 1. Problem
 
@@ -41,15 +42,16 @@ when it or a directory above it holds one.
 | Source | Root in a repository | Root outside any repository |
 |---|---|---|
 | `.gitignore`, `info/exclude` in the root and below | apply, up to and including the nearest directory holding a repository | apply |
-| `.gitignore`, `info/exclude` above the root | apply up to and including the repository's top | not read |
+| `.gitignore`, `info/exclude` above the root | apply up to and including the repository's top | do not apply |
 | `.ignore` in the root and below | apply | apply |
-| `.ignore` above the root | apply (ripgrep semantics) | not read |
+| `.ignore` above the root | apply (ripgrep semantics) | do not apply |
 | global excludes file | applies | applies |
 | config `ignore:` | applies first | applies first |
 
 In a repository this is `require_git(true)` with `parents(true)`; outside one,
 `require_git(false)` with `parents(false)`. The nearest match of each kind still wins, and the
-kinds still rank `.ignore`, `.gitignore`, `info/exclude`, then global.
+kinds still rank `.ignore`, `.gitignore`, `info/exclude`, then global. "Do not apply" is not "not
+read": `ignore` reads the ignore files of every directory above the root either way (section 8).
 
 Outside a repository nothing below the root is a boundary either: `ignore` reads repository
 markers only under `require_git`, so the root's `.gitignore` also applies inside a repository
@@ -101,7 +103,8 @@ A `.ignore` above the repository still applies, so it can still hide files (sect
 ## 5. Implementation notes
 
 `crates/alint-core/src/walker.rs`: `holds_repository(dir, names)` and `in_repository(root)` (a
-listing of the root, one canonicalization and up to two `stat` calls per directory above it),
+listing of the root, one canonicalization and up to two `stat` calls per directory above it, on
+top of the up to three files per directory above the root `ignore` opens anyway),
 used by `build_walk_builder` to set `require_git` and `parents`, and by `would_walk_skip`, whose
 per-directory `DirIgnores` records whether the directory holds a repository and reads a listed
 directory's files by exact name. `would_walk_skip` takes the ignore files a fix creates and
@@ -132,7 +135,8 @@ No new dependency.
   directory outside any repository and `.ignore`; elsewhere only agreement with the walk is
   checked (`neutral_environment`).
 
-The first two unit tests and both CLI tests fail on the previous walker.
+The first two unit tests and both CLI tests fail on the previous walker. The ADR-0029 tests are
+listed in section 8.
 
 ## 7. Open questions
 
@@ -142,4 +146,80 @@ The first two unit tests and both CLI tests fail on the previous walker.
   `ignore`'s per-directory chain. Deferred: `.ignore` files outside a repository are rare.
 - **Warning on an empty walk.** A warning when ignore files exclude every entry under the root
   would catch the remaining silent passes (a parent `.ignore`, or a repository whose own
-  `.gitignore` is `*`). Follow-up.
+  `.gitignore` is `*`). Follow-up. A bad ignore file above the root, now skipped silently
+  (section 8), could be reported through the same channel.
+- **Finding the git directory and global excludes as git does.** Section 8 lists the three
+  places the walk follows `ignore` rather than git. Each needs its own resolution of the git
+  directory (`gitdir:` without `commondir`, relative to the `.git` file) or of the global
+  excludes file (anchored at the repository's top, no `~/.gitconfig` fallback under
+  `GIT_CONFIG_GLOBAL`), applied outside `ignore`'s matcher. Follow-up.
+
+## 8. Review follow-ups (ADR-0029)
+
+A review of the implementation against git (real repositories, submodules, worktrees, and a
+fuzz harness comparing `would_walk_skip` with the walk) found no regression. It found where this
+document and ADR-0028 claimed more than the walk does, and more dry-run disagreements.
+
+**What `ignore` reads above the root.** `Ignore::add_parents` reads the `.gitignore`, `.ignore`
+and `info/exclude` of every directory above the root whenever git ignore files are on, before
+the walk, whatever `parents` and `require_git` say; those decide only what applies. Its errors
+(a bad line, or a `.git` file it cannot read) reach the visitor as a walk error naming the file
+(several make a `Partial`), with no depth, where an ignore file in the tree only marks its
+directory's entry. So a bad line in a home directory's `.gitignore` ended every run below it
+with exit 2. `is_ignore_file_error` now skips a walk error whose every part names a path outside
+the root (every entry the walk yields is under the root), and the walk goes on with the file's
+good lines, as git does with a pattern it cannot parse. An error from the walk itself carries
+its depth and is never skipped this way, so a directory in the tree that cannot be listed still
+stops the run.
+
+**Where the walk differs from git.** These come from `ignore` 0.4.34, predate ADR-0028, and are
+documented rather than fixed:
+
+- `info/exclude` is found through a `.git` directory, or a linked worktree's `.git` file whose
+  git directory has a `commondir` file. A submodule (`.git/modules/<name>`) and a
+  `--separate-git-dir` repository have no `commondir`, so their exclude file is not read; a
+  worktree made with `--relative-paths` resolves its `gitdir:` against the process's working
+  directory. `git_exclude_file` mirrors this so the dry run agrees.
+- The global excludes file is matched from the process's working directory, so its anchored
+  patterns are anchored there and not at the repository's top. With `GIT_CONFIG_GLOBAL` set to
+  a file without `core.excludesFile`, `ignore` still falls back to `~/.gitconfig`.
+- A root inside an ignored directory is linted: `ignore` matches entries below the root only.
+
+**Dry-run predictions.** `predict_unresolved_creates` now:
+
+- skips the walk check for a create the rule looks for on disk itself
+  (`Rule::sees_path_past_walk`, implemented by `file_exists` for a literal path with
+  `respect_gitignore: false`), checking only that the path does not resolve out of the root, as
+  the rule's stat does;
+- predicts a create unresolved for a rule with a `git_tracked_only` mode unless `git ls-files`
+  lists the path, running it once and only when such a rule creates a file;
+- falls back to `Fixer::created_file` when `fix_edit` declines, which `file_create` does for a
+  target outside the root that `allow_out_of_root` lets the real fix write, and reads an
+  absolute target inside the root as root-relative;
+- keeps the first create of each ignore file, keyed by its resolved path, since the real fix
+  skips a file that is already there; and `DirIgnores::with_created` compares directories
+  resolved (`pathsafe::resolve_existing_prefix`), so an ignore file created through an in-tree
+  symlinked directory applies under every name the walk lists it by;
+- checks a created directory against the rule's `paths:` as it does a file. `dir_create` now
+  requires a normal-form directory (`single_literal_dir`), so its target always matches.
+
+**`dir_create` in normal form.** The rule matches `paths` against the walk's `docs/adr`, so
+`docs/`, `./docs`, `docs//adr`, `docs/./adr` and `/docs` never passed `check`, and `dir_create`
+could not converge. `dir_exists` now refuses them with `dir_create` when the configuration loads.
+
+**Tests.** `walker_tests.rs`: `a_bad_ignore_file_above_the_root_does_not_stop_the_walk`,
+`an_unreadable_file_above_the_root_does_not_stop_the_walk`, the control
+`an_unreadable_directory_still_stops_the_walk`, and
+`would_walk_skip_reads_an_ignore_file_created_through_a_symlink`. `engine/tests/fix.rs`:
+`dry_run_takes_the_first_of_two_creates_of_one_ignore_file`,
+`dry_run_reads_an_absolute_create_inside_the_root_as_relative`,
+`dry_run_trusts_a_rule_that_looks_past_the_walk` and
+`dry_run_resolves_a_tracked_only_rule_only_with_a_tracked_path`; its mock fixer now declines an
+editor form outside the root, as `file_create` does. `crates/alint/tests/fix_flags.rs`: a rule
+that looks past the walk, a create outside the root and below a symlink out of it, an ignore file
+created through a symlink with two creates of one file, and `git_tracked_only`.
+`crates/alint/tests/walk_boundary.rs`: `a_bad_ignore_file_above_the_root_does_not_stop_the_run`.
+`dir_exists.rs`: `build_rejects_dir_create_on_a_directory_not_in_normal_form`. Both CLI test
+files now point git's global and system config, `XDG_CONFIG_HOME` and `HOME` at an empty
+directory, so a developer's global excludes file (`.env` is a common entry) cannot change their
+results. Each new test except the control fails on the walker and fixer before this change.

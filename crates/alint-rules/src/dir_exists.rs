@@ -155,8 +155,9 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
             let dir = single_literal_dir(paths).ok_or_else(|| {
                 Error::rule_config(
                     &spec.id,
-                    "dir_create requires `paths` to be a single literal directory \
-                 (no glob metacharacters, no `..`)",
+                    "dir_create requires `paths` to be a single literal directory in \
+                 normal form, like `docs/adr` (no glob metacharacters, no `.` or `..`, no \
+                 leading, trailing or doubled `/`)",
                 )
             })?;
             // Reject combos an EMPTY directory can never satisfy, else `check` tags
@@ -209,17 +210,28 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 }
 
 /// The single, literal directory `paths` names, or `None` if it is a glob,
-/// multiple patterns, or contains a `..` component -- any of which makes
-/// "the directory to create" ambiguous or out-of-tree, so `dir_create` rejects it.
+/// multiple patterns, or not in normal form -- any of which makes "the
+/// directory to create" ambiguous, out-of-tree or unmatchable, so `dir_create`
+/// rejects it. The rule matches `paths` against the walk's `docs/adr`, so
+/// `docs/`, `./docs` or `docs//adr` would never match the directory the fix
+/// creates, and `..` or an absolute path leaves the tree.
 fn single_literal_dir(paths: &PathsSpec) -> Option<std::path::PathBuf> {
     let PathsSpec::Single(s) = paths else {
         return None;
     };
     // Escapes resolved (a `\` is a glob escape on non-Windows); `None` for a
     // real glob.
-    let p = std::path::PathBuf::from(alint_core::template::literal_glob_path(s)?);
-    if p.components()
-        .any(|c| matches!(c, std::path::Component::ParentDir))
+    let literal = alint_core::template::literal_glob_path(s)?;
+    let p = std::path::PathBuf::from(&literal);
+    // `components()` hides a trailing or doubled separator and an inner `.`,
+    // so split the text too. An empty segment is a leading, trailing or
+    // doubled separator.
+    if literal
+        .split(std::path::is_separator)
+        .any(|segment| matches!(segment, "" | "." | ".."))
+        || !p
+            .components()
+            .all(|c| matches!(c, std::path::Component::Normal(_)))
     {
         return None;
     }
@@ -412,6 +424,22 @@ scope_filter:
             let err = build(&spec).unwrap_err().to_string();
             assert!(
                 err.contains("single literal"),
+                "{paths} must be rejected: {err}"
+            );
+        }
+    }
+
+    #[test]
+    fn build_rejects_dir_create_on_a_directory_not_in_normal_form() {
+        // The rule matches `paths` against the walk's `docs/adr`, so these never
+        // match the directory `dir_create` makes and the fix never converges.
+        for paths in ["docs/", "./docs", "docs//adr", "docs/./adr", "/docs"] {
+            let spec = spec_yaml(&format!(
+                "id: t\nkind: dir_exists\npaths: \"{paths}\"\nlevel: error\nfix:\n  dir_create: {{}}\n",
+            ));
+            let err = build(&spec).unwrap_err().to_string();
+            assert!(
+                err.contains("normal form"),
                 "{paths} must be rejected: {err}"
             );
         }
