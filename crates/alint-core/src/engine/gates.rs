@@ -478,7 +478,10 @@ impl Engine {
             return Ok(());
         }
         let mut refs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-        self.visit_active_rules(index, when_env, &mut |rule, _spec| {
+        // Refs read from the environment or set in a `sensitive: true` rule;
+        // an error leaves them out.
+        let mut secret_refs: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+        self.visit_active_rules(index, when_env, &mut |rule, spec| {
             // Per-file rules expose their scope via `PerFileRule::path_scope`
             // (the `Rule::path_scope` default is `None`); rule-major rules
             // expose it via `Rule::path_scope`. changed_since is a per-file
@@ -493,6 +496,9 @@ impl Engine {
                 && let Some(since) = filter.changed_since()
             {
                 refs.insert(since.to_string());
+                if spec.is_some_and(|spec| spec.field_is_sensitive("scope_filter")) {
+                    secret_refs.insert(since.to_string());
+                }
             }
             Ok(())
         })?;
@@ -508,7 +514,15 @@ impl Engine {
                 Ok(None) => {
                     map.insert(since, std::collections::HashSet::new());
                 }
-                Err(crate::git::CommitRangeError::BadRange { stderr }) => {
+                Err(crate::git::CommitRangeError::BadRange { mut stderr }) => {
+                    let mut since = since;
+                    if secret_refs.contains(&since) {
+                        // Git quotes the ref as given.
+                        if !since.is_empty() {
+                            stderr = stderr.replace(&since, crate::CONFIGURATION_MASK);
+                        }
+                        since = crate::CONFIGURATION_MASK.to_string();
+                    }
                     return Err(crate::error::Error::Other(format!(
                         "scope_filter.changed_since: could not resolve `{since}...HEAD`: \
                          {stderr}. Common cause: shallow clone. In a GitHub Actions PR \
@@ -579,6 +593,10 @@ impl Engine {
             String,
             Vec<crate::scope_filter::ManifestPredicate>,
         > = std::collections::BTreeMap::new();
+        // Groups a rule reads from the environment or marks `sensitive: true`;
+        // a warning leaves their manifest out.
+        let mut secret_groups: std::collections::BTreeSet<String> =
+            std::collections::BTreeSet::new();
         for entry in &self.entries {
             if entry
                 .when
@@ -596,11 +614,16 @@ impl Engine {
                 entry.spec.as_deref(),
                 index,
                 when_env,
-                &mut |rule, _spec| {
+                &mut |rule, spec| {
                     if let Some(scope) = effective_path_scope(rule)
                         && let Some(filter) = scope.scope_filter()
                     {
+                        let secret =
+                            spec.is_some_and(|spec| spec.field_is_sensitive("scope_filter"));
                         for pred in filter.manifest_predicates() {
+                            if secret {
+                                secret_groups.insert(pred.cache_key().to_string());
+                            }
                             groups
                                 .entry(pred.cache_key().to_string())
                                 .or_default()
@@ -642,11 +665,15 @@ impl Engine {
                     .iter()
                     .any(crate::scope_filter::ManifestPredicate::warns_on_empty)
             {
+                let source = if secret_groups.contains(&key) {
+                    crate::CONFIGURATION_MASK.to_string()
+                } else {
+                    rep.source().display().to_string()
+                };
                 tracing::warn!(
-                    "scope_filter.include_manifest_paths: `{}` resolved to no paths (the manifest \
-                     declares none), so the rule matches nothing. Set `expect_nonempty: false` if \
-                     that is intended.",
-                    rep.source().display()
+                    "scope_filter.include_manifest_paths: `{source}` resolved to no paths (the \
+                     manifest declares none), so the rule matches nothing. Set \
+                     `expect_nonempty: false` if that is intended."
                 );
             }
             paths.insert(key, set);

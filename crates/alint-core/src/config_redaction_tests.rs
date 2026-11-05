@@ -36,14 +36,17 @@ fn only_environment_fields_or_a_sensitive_rules_values_may_be_secret() {
 #[test]
 fn masking_changes_every_value_but_keeps_names_types_and_nested_rule_identity() {
     let mut value: yaml_serde::Value = yaml_serde::from_str(
-        "a: secret\nb: [one, {c: two, d: 123456789012, e: true, g: 0, h: 1.5}]\nf: ~\n\
+        "a: secret\nb: [one, {c: two, d: 123456789012, e: true, g: 0, h: 1.5, j: -7, \
+         k: 18446744073709551615, l: 1.0e300, m: 9007199254740991.0, n: 9007199254740992.0}]\nf: ~\n\
          i: <redacted>\nrequire: [{id: n, kind: file_exists, level: error, paths: x}]\n\
          data: {id: literal, level: high}\n",
     )
     .unwrap();
     mask_configuration_values(&mut value);
     let expected: yaml_serde::Value = yaml_serde::from_str(
-        "a: <redacted>\nb: [<redacted>, {c: <redacted>, d: 0, e: false, g: 1, h: 0.0}]\nf: ~\n\
+        "a: <redacted>\nb: [<redacted>, {c: <redacted>, d: 123456789013, e: false, g: 1, h: 2.5, \
+         j: -6, k: 18446744073709551614, l: -1.0e300, m: 9007199254740992.0, \
+         n: -9007199254740992.0}]\nf: ~\n\
          i: <masked>\nrequire: [{id: n, kind: file_exists, level: error, paths: <redacted>}]\n\
          data: {id: <redacted>, level: <redacted>}\n",
     )
@@ -85,6 +88,26 @@ fn environment_values_are_removed_in_every_form_an_error_prints() {
     assert_eq!(
         redact_environment_values("x secret-token y secret", &nested),
         "x <redacted> y <redacted>"
+    );
+    // A value inside a longer word takes the word with it, so neither the
+    // value nor a fragment of the word is left.
+    let word = ["build".to_string(), "canary-secret".to_string()];
+    assert_eq!(
+        redact_environment_values(
+            "build, building rebuild_x; \"xcanary-secret_tmp\" -build- é_build",
+            &word
+        ),
+        "<redacted>, <redacted> <redacted>; \"<redacted>\" -<redacted>- <redacted>"
+    );
+    // A value written with surrounding whitespace or over several lines is
+    // printed trimmed, or (a regex error) one line at a time.
+    let spaced = [
+        "  spaced-canary \n".to_string(),
+        "first-line\n  second-line".to_string(),
+    ];
+    assert_eq!(
+        redact_environment_values("glob spaced-canary; at second-line and first-line", &spaced),
+        "glob <redacted>; at <redacted> and <redacted>"
     );
     assert!(matches!(
         redact_environment_values("nothing to hide", &values),
@@ -154,8 +177,8 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     assert_eq!(masked.when.as_deref(), Some(CONFIGURATION_MASK));
     assert_eq!(masked.extra["pattern"], CONFIGURATION_MASK);
     // A number read from the environment can be a secret (an account id) and
-    // is masked by another number; a field not read from the environment stays.
-    assert_eq!(masked.extra["limit"], 0);
+    // is masked by the next number; a field not read from the environment stays.
+    assert_eq!(masked.extra["limit"], 4);
     assert_eq!(masked.extra["ignore"], "plain");
     assert_eq!(masked.policy_url.as_deref(), Some("https://docs"));
     let scope = masked.scope_filter.unwrap();

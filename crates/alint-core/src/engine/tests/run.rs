@@ -816,3 +816,55 @@ fn relation_consumer_and_per_file_rule_share_one_read_and_decode() {
         "the document must be decoded once"
     );
 }
+
+#[test]
+fn an_unresolvable_changed_since_ref_that_may_be_secret_is_left_out_of_the_error() {
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    std::fs::write(root.join("a.txt"), "a\n").unwrap();
+    git(&["add", "a.txt"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "one",
+    ]);
+    let index = crate::walk(root, &crate::WalkOptions::default()).unwrap();
+    let error = |sensitive: &str, environment_fields: &[&str]| {
+        let mut spec: crate::RuleSpec = yaml_serde::from_str(&format!(
+            "id: scoped\nkind: nested_scope_fixture\npaths: '**/*.txt'\nscope_filter:\n  \
+             changed_since: canary-missing-ref\n{sensitive}level: error\n"
+        ))
+        .unwrap();
+        spec.set_sensitive_fields(environment_fields.iter().map(ToString::to_string).collect());
+        let rule = nested_leaf_builder(&spec).unwrap();
+        let entry = RuleEntry::new(rule).with_spec(std::sync::Arc::new(spec));
+        Engine::from_entries(vec![entry], nested_registry())
+            .run(root, &index)
+            .unwrap_err()
+            .to_string()
+    };
+
+    let plain = error("", &[]);
+    assert!(plain.contains("`canary-missing-ref...HEAD`"), "{plain}");
+    for secret in [
+        error("", &["scope_filter"]),
+        error("sensitive: true\n", &[]),
+    ] {
+        assert!(!secret.contains("canary-missing-ref"), "{secret}");
+        assert!(secret.contains("`<redacted>...HEAD`"), "{secret}");
+    }
+}

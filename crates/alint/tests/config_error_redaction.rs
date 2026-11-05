@@ -29,14 +29,20 @@ fn run(root: &Path, args: &[&str], env: &[(&str, &str)]) -> Output {
 /// `output` failed with a redacted configuration error that never quotes any
 /// of `secrets`.
 fn assert_redacted(surface: &str, output: &Output, secrets: &[&str]) {
+    assert!(
+        !output.status.success(),
+        "{surface}: expected a configuration error:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_left_out(surface, output, secrets);
+}
+
+/// `output` says `<redacted>` and never quotes any of `secrets`.
+fn assert_left_out(surface: &str, output: &Output, secrets: &[&str]) {
     let text = format!(
         "{}{}",
         String::from_utf8_lossy(&output.stdout),
         String::from_utf8_lossy(&output.stderr)
-    );
-    assert!(
-        !output.status.success(),
-        "{surface}: expected a configuration error:\n{text}"
     );
     for secret in secrets {
         assert!(!text.contains(secret), "{surface} leaked {secret}:\n{text}");
@@ -109,6 +115,21 @@ fn a_top_level_value_read_from_the_environment_stays_redacted() {
             None,
             "./canary-secret.yml",
         ),
+        // A glob parser trims the pattern before quoting it.
+        (
+            "ignore with trailing whitespace",
+            "ignore: ['{{env.VALUE}}']\n",
+            None,
+            "!canary-secret[  \n",
+        ),
+        // A regex error quotes a multi-line pattern one line at a time.
+        (
+            "multi-line fact pattern",
+            "facts:\n  - id: f\n    file_content_matches:\n      paths: README.md\n      \
+             pattern: '{{env.VALUE}}'\n",
+            None,
+            "canary-secret-line\n(canary-secret",
+        ),
         (
             "nested absolute path",
             "nested_configs: true\n",
@@ -136,6 +157,21 @@ fn a_top_level_value_read_from_the_environment_stays_redacted() {
         assert_redacted(case, &output, &["canary-secret"]);
     }
 
+    // A parse error in an extended file names it by its normalized path,
+    // which does not contain the entry as written.
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "sub/README.md", "hi\n");
+    write(root.path(), "canary-secret.yml", "version: 1\nrules: [\n");
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nextends: ['{{env.VALUE}}']\nrules: []\n",
+    );
+    for entry in ["sub/../canary-secret.yml", ".//canary-secret.yml"] {
+        let output = run(root.path(), &["check"], &[("VALUE", entry)]);
+        assert_redacted(entry, &output, &["canary-secret"]);
+    }
+
     let root = tempfile::tempdir().unwrap();
     write(
         root.path(),
@@ -144,6 +180,119 @@ fn a_top_level_value_read_from_the_environment_stays_redacted() {
     );
     let output = run(root.path(), &["check"], &[("VALUE", "987654")]);
     assert_redacted("version", &output, &["987654"]);
+
+    // A nested config's environment values are its own.
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nnested_configs: true\nrules: []\n",
+    );
+    write(
+        root.path(),
+        "sub/.alint.yml",
+        "version: '{{env.VALUE}}'\nrules: []\n",
+    );
+    let output = run(root.path(), &["check"], &[("VALUE", "987654")]);
+    assert_redacted("nested version", &output, &["987654"]);
+}
+
+#[test]
+fn a_value_read_from_the_environment_stays_out_of_warnings_and_run_errors() {
+    const README: &str = "rules:\n  - id: readme\n    kind: file_exists\n    \
+                          paths: README.md\n    level: error\n";
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+
+    // A pattern hint names the fact.
+    write(
+        root.path(),
+        ".alint.yml",
+        &format!(
+            "version: 1\nfacts:\n  - id: '{{{{env.VALUE}}}}'\n    file_content_matches:\n      \
+             paths: README.md\n      pattern: 'hi$'\n{README}"
+        ),
+    );
+    for args in [
+        &["check"][..],
+        &["validate-config"],
+        &["validate-config", "--format", "json"],
+    ] {
+        let output = run(root.path(), args, &[("VALUE", "canary-fact")]);
+        assert!(output.status.success(), "{args:?}");
+        assert_left_out(&args.join(" "), &output, &["canary-fact"]);
+    }
+
+    // An empty manifest set warns, naming the manifest.
+    write(
+        root.path(),
+        "canary-manifest.toml",
+        "[workspace]\nmembers = []\n",
+    );
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: scoped\n    kind: file_content_forbidden\n    \
+         paths: '**/*'\n    pattern: zzz\n    scope_filter:\n      include_manifest_paths:\n        \
+         source: '{{env.VALUE}}'\n        extract: { toml: '$.workspace.members[*]' }\n    \
+         level: error\n",
+    );
+    let output = run(
+        root.path(),
+        &["check"],
+        &[("VALUE", "canary-manifest.toml")],
+    );
+    assert!(output.status.success());
+    assert_left_out("manifest warning", &output, &["canary-manifest"]);
+
+    // An unknown template is quoted by its error.
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\ntemplates:\n  - id: has-readme\n    kind: file_exists\n    \
+         paths: README.md\n    level: error\nrules:\n  - id: instance\n    \
+         extends_template: '{{env.VALUE}}'\n",
+    );
+    let output = run(root.path(), &["check"], &[("VALUE", "canary-template")]);
+    assert_redacted("extends_template", &output, &["canary-template"]);
+
+    // Git quotes a ref it cannot resolve.
+    let git = |args: &[&str]| {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(root.path())
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    git(&["add", "README.md"]);
+    git(&[
+        "-c",
+        "user.name=Test",
+        "-c",
+        "user.email=test@example.com",
+        "commit",
+        "-qm",
+        "one",
+    ]);
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: scoped\n    kind: file_content_forbidden\n    \
+         paths: '*.md'\n    pattern: zzz\n    scope_filter:\n      \
+         changed_since: '{{env.VALUE}}'\n    level: error\n",
+    );
+    let output = run(root.path(), &["check"], &[("VALUE", "canary-ref")]);
+    assert_redacted("changed_since", &output, &["canary-ref"]);
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: message\n    kind: git_commit_message\n    \
+         requires_body: true\n    since: '${VALUE}'\n    level: error\n",
+    );
+    let output = run(root.path(), &["check"], &[("VALUE", "canary-ref")]);
+    assert_left_out("legacy since", &output, &["canary-ref"]);
 }
 
 #[test]
@@ -217,10 +366,16 @@ fn the_language_server_reports_configuration_errors_redacted() {
     let facts = format!(
         "version: 1\nfacts:\n  - id: f\n    any_file_exists: ['{{{{env.VALUE}}}}']\n{README}"
     );
+    // A valid config whose pattern hint names a fact read from the environment.
+    let fact_hint = format!(
+        "version: 1\nfacts:\n  - id: '{{{{env.VALUE}}}}'\n    file_content_matches:\n      \
+         paths: README.md\n      pattern: 'hi$'\n{README}"
+    );
     for (config, env, secret) in [
         (baseline.as_str(), "canary-secret.jsonl", "canary-secret"),
         (ignore.as_str(), "!canary-secret[", "canary-secret"),
         (facts.as_str(), "canary-secret[", "canary-secret"),
+        (fact_hint.as_str(), "canary-fact", "canary-fact"),
         (
             "version: 1\nrules:\n  - id: scan\n    kind: file_content_forbidden\n    \
              paths: '**/*'\n    pattern: '{{env.VALUE}}'\n    level: error\n",

@@ -54,15 +54,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   that reads as one (a 12-digit account id) into a number or a boolean. An
   error that could quote a secret, such as an invalid regex read from the
   environment, stays redacted and now says why. The same applies to a whole
-  configuration file that reads the environment. A rule with a `fix:` block,
-  or with a `scope_filter` that reads manifest paths, cannot be masked, so its
-  errors stay redacted.
+  configuration file that reads the environment. A rule whose `fix:` block, or
+  whose `scope_filter` that reads manifest paths, may hold such a value cannot
+  be masked, so its errors stay redacted. An `extends_template:` read from the
+  environment no longer appears in the unknown-template error.
 - A value read from the environment into a top-level field (`extends:`,
   `ignore:`, `facts:`, `baseline:`, `version:`) is no longer printed when the
   field causes an error, such as an invalid `ignore:` glob or a missing
   `extends:` target. alint and the language server now show `<redacted>` in its
-  place. The same holds for a nested config's rule whose `paths:` from the
-  environment is rejected for leaving its directory.
+  place, also where the error prints the value trimmed, normalized as a path or
+  one line at a time, and in the warnings that name it (a pattern hint on a
+  fact, an empty manifest set). A value inside a longer word takes the word
+  with it. The same holds for a nested config's `version:` and for a nested
+  config's rule whose `paths:` from the environment is rejected for leaving its
+  directory. A value shorter than four characters, or a boolean, is still
+  printed: removing every occurrence would garble the message, and it is too
+  short to be much of a secret.
+- A git ref read from the environment into `scope_filter.changed_since`, or
+  into `git_commit_message`'s `since:` with the deprecated `${VAR}` syntax, is
+  no longer printed when git cannot resolve it; the error shows `<redacted>`
+  (or the `${VAR}` reference as written) and leaves it out of git's message.
 
 ## [0.21.0] - 2026-11-01
 

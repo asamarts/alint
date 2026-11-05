@@ -116,14 +116,20 @@ pub fn load(path: &Path) -> Result<Config> {
 /// config carries them so an embedder can scrub a later error the same way.
 pub fn load_with(path: &Path, opts: &LoadOptions<'_>) -> Result<Config> {
     let raw = load_top_level_raw(path, opts)?;
-    let environment_values = raw.environment_values.clone();
-    load_resolved(path, opts, raw)
+    let mut environment_values = raw.environment_values.clone();
+    load_resolved(path, opts, raw, &mut environment_values)
         .map_err(|error| alint_core::redact_environment_values_in_error(error, &environment_values))
 }
 
 /// Discover the nested configs of the resolved top-level `raw`, then finalise
-/// and validate the whole.
-fn load_resolved(path: &Path, opts: &LoadOptions<'_>, mut raw: RawConfig) -> Result<Config> {
+/// and validate the whole. The nested configs' environment values are added to
+/// `environment_values` too, so a later error is scrubbed of them.
+fn load_resolved(
+    path: &Path,
+    opts: &LoadOptions<'_>,
+    mut raw: RawConfig,
+    environment_values: &mut Vec<String>,
+) -> Result<Config> {
     // Nested `.alint.yml` discovery (opt-in via `nested_configs:
     // true` on the root config). Walks from the root config's
     // directory, finds any sub-directory configs, scopes their
@@ -144,16 +150,19 @@ fn load_resolved(path: &Path, opts: &LoadOptions<'_>, mut raw: RawConfig) -> Res
                     path: path.to_path_buf(),
                     source,
                 })?;
-        let (discovered_rules, discovered_compatibility) = nested::discover_nested(
-            &root_dir,
-            &canonical_root_cfg,
-            &raw,
-            opts.kind_catalog,
-            RunningVersion::current(),
-            opts.environment.as_ref(),
-        )?;
+        let (discovered_rules, discovered_compatibility, discovered_environment_values) =
+            nested::discover_nested(
+                &root_dir,
+                &canonical_root_cfg,
+                &raw,
+                opts.kind_catalog,
+                RunningVersion::current(),
+                opts.environment.as_ref(),
+            )?;
         raw.rules.extend(discovered_rules);
         extend_compatibility(&mut raw.compatibility, discovered_compatibility);
+        loader::add_environment_values(environment_values, &discovered_environment_values);
+        loader::add_environment_values(&mut raw.environment_values, &discovered_environment_values);
     }
 
     let merged = raw.finalize(opts.kind_catalog)?;
@@ -397,18 +406,10 @@ impl RawConfig {
 }
 
 impl RawConfig {
-    /// Deserialize each rule mapping into a [`RuleSpec`]. This is
-    /// where kind-specific validation fires: a rule that never
-    /// received a `kind` anywhere in its extends chain produces a
-    /// serde error here, referencing the offending rule's id.
-    /// Also where `extends_template:` instances expand against
-    /// the `templates:` block: the template body is cloned, its
-    /// `{{vars.<name>}}` placeholders substituted from the
-    /// instance's `vars:` map, and the instance's own
-    /// non-template fields field-merge on top.
-    fn finalize(self, catalog: Option<alint_core::KindCatalog<'_>>) -> Result<Config> {
+    /// Reject a template that could smuggle a process past the spawn gate.
+    fn reject_unsafe_templates(&self, catalog: Option<alint_core::KindCatalog<'_>>) -> Result<()> {
         // A process-spawning kind must never hide inside a `templates:`
-        // block. Templates are expanded here, *after* the extends/nested
+        // block. Templates are expanded in `finalize`, *after* the extends/nested
         // spawn gate (`reject_command_rules_in`) has run — and an
         // `extends_template:` instance carries no `kind` of its own — so a
         // spawning template would smuggle code execution straight past the
@@ -457,6 +458,20 @@ impl RawConfig {
                 )));
             }
         }
+        Ok(())
+    }
+
+    /// Deserialize each rule mapping into a [`RuleSpec`]. This is
+    /// where kind-specific validation fires: a rule that never
+    /// received a `kind` anywhere in its extends chain produces a
+    /// serde error here, referencing the offending rule's id.
+    /// Also where `extends_template:` instances expand against
+    /// the `templates:` block: the template body is cloned, its
+    /// `{{vars.<name>}}` placeholders substituted from the
+    /// instance's `vars:` map, and the instance's own
+    /// non-template fields field-merge on top.
+    fn finalize(self, catalog: Option<alint_core::KindCatalog<'_>>) -> Result<Config> {
+        self.reject_unsafe_templates(catalog)?;
         // An untrusted remote's `when` may read ordinary vars, but not one the
         // user's config interpolated from the environment; that set is final only
         // now, after every local config has merged.
@@ -480,7 +495,14 @@ impl RawConfig {
             reject_remote_assembled_env_refs(m, &templates_by_id, &id_hint)?;
             reject_untrusted_assembled_when(m, &templates_by_id, &id_hint, &self.env_vars)?;
             reject_untrusted_env_instance_vars(m, &templates_by_id, &id_hint)?;
-            let mut expanded = expand_template(m, &templates_by_id)?;
+            // An unknown template's error quotes `extends_template:`, which may
+            // be read from the environment.
+            let masked_instance = masked_rule_mapping(m);
+            let mut expanded = expand_template(m, &templates_by_id).map_err(|error| {
+                redact_rule_error(error, masked_instance.as_ref(), &id_hint, |masked| {
+                    expand_template(masked, &templates_by_id).map(drop)
+                })
+            })?;
             mark_sensitive_conditions(&mut expanded, &self.env_vars);
             expanded.remove(ENV_VARS_MARKER);
             // A nested-config rule is confined to its subtree here, on the effective
