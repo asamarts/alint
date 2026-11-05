@@ -742,12 +742,23 @@ impl Fixer for DirCreateFixer {
     }
 
     // No `fix_edit`: an empty directory has no editor/worktree-edit form.
+
+    fn created_dir(&self) -> Option<&Path> {
+        Some(&self.dir)
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use tempfile::TempDir;
+
+    #[test]
+    fn dir_create_names_the_directory_it_creates() {
+        // `fix --dry-run` checks this directory against the walk.
+        let fixer = DirCreateFixer::new(PathBuf::from("build/out"), Applicability::Safe);
+        assert_eq!(fixer.created_dir(), Some(Path::new("build/out")));
+    }
 
     fn make_ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
         FixContext {

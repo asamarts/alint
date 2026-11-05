@@ -1713,6 +1713,14 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
         let _ = violation;
         true
     }
+
+    /// The directory this fixer creates, as configured (root-relative), for a
+    /// fixer that creates one (`dir_create`) and so has no [`FixEdit`] form.
+    /// `fix --dry-run` checks it against the walk, as it checks a
+    /// [`FixEdit::CreateFile`]. Default `None`.
+    fn created_dir(&self) -> Option<&Path> {
+        None
+    }
 }
 
 /// Result of [`read_for_fix`] — either the bytes of the file,

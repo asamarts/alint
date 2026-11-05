@@ -619,34 +619,31 @@ fn would_walk_skip_agrees_with_the_walk() {
             .components()
             .filter(|c| !matches!(c, std::path::Component::CurDir))
             .collect();
-        assert_eq!(
-            idx.contains_file(&clean),
-            !skipped,
-            "walk disagrees with the expectation for {rel}"
-        );
-        assert_eq!(
-            would_walk_skip(root, &opts, Path::new(rel), false),
-            skipped,
-            "{rel}"
-        );
+        let predicted = would_walk_skip(root, &opts, Path::new(rel), false, &[]);
+        assert_eq!(predicted, !idx.contains_file(&clean), "{rel}");
+        if neutral_environment() {
+            assert_eq!(predicted, skipped, "{rel}");
+        }
     }
     // Without `respect_gitignore`, only `ignore:` (and `.git`) exclude.
     let opts = WalkOptions {
         respect_gitignore: false,
         extra_ignores: vec!["vendor/**".into()],
     };
-    assert!(!would_walk_skip(root, &opts, Path::new(".env"), false));
+    assert!(!would_walk_skip(root, &opts, Path::new(".env"), false, &[]));
     assert!(would_walk_skip(
         root,
         &opts,
         Path::new("vendor/x.rs"),
-        false
+        false,
+        &[],
     ));
     assert!(would_walk_skip(
         root,
         &opts,
         Path::new(".git/config"),
-        false
+        false,
+        &[],
     ));
 }
 
@@ -684,16 +681,15 @@ fn would_walk_skip_reads_a_linked_worktrees_shared_exclude() {
             ("scratch/notes.md", true),
             ("kept.txt", false),
         ] {
+            let predicted = would_walk_skip(&root, &opts, Path::new(rel), false, &[]);
             assert_eq!(
-                idx.contains_file(Path::new(rel)),
-                !skipped,
-                "walk, {rel}, commondir {commondir}"
+                predicted,
+                !idx.contains_file(Path::new(rel)),
+                "{rel}, commondir {commondir}"
             );
-            assert_eq!(
-                would_walk_skip(&root, &opts, Path::new(rel), false),
-                skipped,
-                "would_walk_skip, {rel}, commondir {commondir}"
-            );
+            if neutral_environment() {
+                assert_eq!(predicted, skipped, "{rel}, commondir {commondir}");
+            }
         }
     }
     // A `.git` file without a `commondir` (a submodule) reads no exclude.
@@ -707,8 +703,21 @@ fn would_walk_skip_reads_a_linked_worktrees_shared_exclude() {
         &root,
         &opts,
         Path::new("secret.txt"),
-        false
+        false,
+        &[],
     ));
+}
+
+/// Whether the expected results in these tests hold here. They assume no git
+/// global excludes file, and a temporary directory that is in no repository
+/// and below no `.ignore` (a fixture repository still reads one above it).
+/// Agreement with the walk is checked either way.
+fn neutral_environment() -> bool {
+    let temp = std::env::temp_dir();
+    let temp = temp.canonicalize().unwrap_or(temp);
+    ignore::gitignore::Gitignore::global().0.is_empty()
+        && !in_repository(&temp)
+        && !temp.ancestors().any(|dir| dir.join(".ignore").exists())
 }
 
 /// Every file and directory below `root`, root-relative, with whether it is
@@ -733,7 +742,8 @@ fn tree_entries(root: &Path) -> Vec<(PathBuf, bool)> {
 
 /// `would_walk_skip` agrees with `walk` on every file and directory below
 /// `root`, and gives `expected` for the listed paths (so a fixture that
-/// excluded nothing could not pass by agreeing on nothing).
+/// excluded nothing could not pass by agreeing on nothing) where the
+/// environment adds no ignore rules of its own ([`neutral_environment`]).
 fn assert_prediction_matches_walk(root: &Path, opts: &WalkOptions, expected: &[(&str, bool)]) {
     let index = walk(root, opts).unwrap();
     let indexed: std::collections::HashSet<(PathBuf, bool)> = index
@@ -745,19 +755,22 @@ fn assert_prediction_matches_walk(root: &Path, opts: &WalkOptions, expected: &[(
     for (rel, is_dir) in &entries {
         let walked = indexed.contains(&(rel.clone(), *is_dir));
         assert_eq!(
-            would_walk_skip(root, opts, rel, *is_dir),
+            would_walk_skip(root, opts, rel, *is_dir, &[]),
             !walked,
             "would_walk_skip disagrees with the walk on {} (respect_gitignore: {})",
             rel.display(),
             opts.respect_gitignore,
         );
     }
+    if !neutral_environment() {
+        return;
+    }
     for (rel, skipped) in expected {
         let is_dir = entries
             .iter()
             .any(|(path, is_dir)| *is_dir && path == Path::new(rel));
         assert_eq!(
-            would_walk_skip(root, opts, Path::new(rel), is_dir),
+            would_walk_skip(root, opts, Path::new(rel), is_dir, &[]),
             *skipped,
             "{rel} (respect_gitignore: {})",
             opts.respect_gitignore,
@@ -903,11 +916,297 @@ fn would_walk_skip_reads_the_ignore_files_above_the_root() {
     );
 }
 
+#[test]
+fn ignore_files_stop_at_the_repository_boundary() {
+    // A home directory kept in git, with a `*` `.gitignore` and an exclude
+    // file: git applies neither inside a repository of its own below it, and
+    // neither does the walk. The outer repository's rules do not reach into a
+    // nested repository or a submodule (a `.git` file) either.
+    let tmp = td();
+    let home = tmp.path().join("home");
+    touch(&home, ".gitignore", b"*\n");
+    touch(&home, ".git/info/exclude", b"*.md\n");
+    let root = home.join("repo");
+    touch(&root, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&root, ".gitignore", b"*.log\n");
+    touch(&root, "nested/.git/HEAD", b"ref: refs/heads/main\n");
+    touch(&root, "nested/.gitignore", b"*.tmp\n");
+    touch(&root, "sub/.git", b"gitdir: ../.git/modules/sub\n");
+    for rel in [
+        "README.md",
+        "a.log",
+        "src/main.rs",
+        "nested/b.log",
+        "nested/c.tmp",
+        "sub/d.log",
+    ] {
+        touch(&root, rel, b"x");
+    }
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    assert_prediction_matches_walk(
+        &root,
+        &opts,
+        &[
+            ("README.md", false),
+            ("src/main.rs", false),
+            ("a.log", true),
+            ("nested/b.log", false),
+            ("nested/c.tmp", true),
+            ("sub/d.log", false),
+        ],
+    );
+    // Linted from a subdirectory, the repository's own `.gitignore` above the
+    // root still applies; the home directory's still does not.
+    assert_prediction_matches_walk(&root.join("src"), &opts, &[("main.rs", false)]);
+    touch(&root, "src/e.log", b"x");
+    assert_prediction_matches_walk(&root.join("src"), &opts, &[("e.log", true)]);
+}
+
+#[test]
+fn ignore_files_outside_a_repository_stop_at_the_root() {
+    // Without a repository the root is the boundary: its own `.gitignore`
+    // applies without git, and nothing above it does. A `.jj` directory marks a
+    // repository as `.git` does.
+    let tmp = td();
+    let outer = tmp.path().join("downloads");
+    touch(&outer, ".gitignore", b"*\n");
+    touch(&outer, ".ignore", b"*\n");
+    let tree = outer.join("tree");
+    touch(&tree, ".gitignore", b"*.log\n");
+    let jj = outer.join("jj");
+    touch(&jj, ".jj/repo/store/type", b"git\n");
+    for root in [&tree, &jj] {
+        touch(root, "README.md", b"x");
+        touch(root, "a.log", b"x");
+    }
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    assert_prediction_matches_walk(&tree, &opts, &[("README.md", false), ("a.log", true)]);
+    // In the `.jj` repository the outer `.gitignore` stops at its top, but the
+    // outer `.ignore` still applies (see below).
+    assert_prediction_matches_walk(&jj, &opts, &[("README.md", true)]);
+    std::fs::remove_file(outer.join(".ignore")).unwrap();
+    assert_prediction_matches_walk(&jj, &opts, &[("README.md", false), ("a.log", false)]);
+}
+
+#[test]
+fn a_dot_ignore_above_the_repository_still_applies() {
+    // `.ignore` is ripgrep's convention, not git's: `ignore` reads it from
+    // every directory above a root in a repository, as ripgrep does.
+    let tmp = td();
+    touch(tmp.path(), "outer/.ignore", b"*.rs\n");
+    let root = tmp.path().join("outer/repo");
+    touch(&root, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&root, "src/main.rs", b"x");
+    touch(&root, "README.md", b"x");
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    assert_prediction_matches_walk(&root, &opts, &[("src/main.rs", true), ("README.md", false)]);
+}
+
+#[test]
+fn a_nearer_ignore_file_above_the_root_outranks_a_farther_one() {
+    // Two directories above the root: the nearer re-includes what the farther
+    // excludes, so the order the prediction visits them in decides.
+    let tmp = td();
+    let repo = tmp.path().join("repo");
+    touch(&repo, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&repo, ".gitignore", b"*.tmp\n");
+    touch(&repo, "a/.gitignore", b"!keep.tmp\n");
+    let root = repo.join("a/b");
+    touch(&root, "keep.tmp", b"x");
+    touch(&root, "other.tmp", b"x");
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    assert_prediction_matches_walk(&root, &opts, &[("keep.tmp", false), ("other.tmp", true)]);
+}
+
+#[cfg(unix)]
+#[test]
+fn ignore_files_above_the_root_match_the_canonical_root() {
+    // The root is reached through a symlink from outside the repository; the
+    // walk matches the repository's anchored pattern against the canonical path.
+    let tmp = td();
+    let repo = tmp.path().join("repo");
+    touch(&repo, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&repo, ".gitignore", b"/pkg/secret.txt\n");
+    touch(&repo, "pkg/secret.txt", b"x");
+    touch(&repo, "pkg/other.txt", b"x");
+    let link = tmp.path().join("link");
+    std::os::unix::fs::symlink(repo.join("pkg"), &link).unwrap();
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    assert_prediction_matches_walk(&link, &opts, &[("secret.txt", true), ("other.txt", false)]);
+}
+
+#[test]
+fn a_repository_marker_counts_only_under_its_exact_name_when_listed() {
+    let tmp = td();
+    let dir = tmp.path();
+    touch(dir, ".git/HEAD", b"ref: refs/heads/main\n");
+    assert!(holds_repository(dir, None));
+    assert!(holds_repository(dir, Some(&listed_names(dir))));
+    // A listing without the exact name (`.GIT` on a case-insensitive
+    // filesystem) does not count, as in `ignore`.
+    assert!(!holds_repository(dir, Some(&HashSet::new())));
+    // A listed marker must also exist: a dangling `.git` symlink is none.
+    #[cfg(unix)]
+    {
+        let other = td();
+        let dangling = other.path();
+        std::os::unix::fs::symlink("missing", dangling.join(".git")).unwrap();
+        assert!(!holds_repository(dangling, Some(&listed_names(dangling))));
+        // It leaves the answer to whatever holds the temporary directory.
+        assert_eq!(
+            in_repository(dangling),
+            in_repository(dangling.parent().unwrap())
+        );
+    }
+}
+
+#[test]
+fn ignore_files_count_only_under_their_exact_name() {
+    // On a case-insensitive filesystem (macOS, Windows) `.GITIGNORE` and
+    // `.IGNORE` would answer a probe for `.gitignore`; the walk reads neither.
+    let tmp = td();
+    let root = tmp.path().join("tree");
+    touch(&root, ".GITIGNORE", b"*.log\n");
+    touch(&root, "sub/.IGNORE", b"*.txt\n");
+    touch(&root, "a.log", b"x");
+    touch(&root, "sub/b.txt", b"x");
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    assert_prediction_matches_walk(&root, &opts, &[("a.log", false), ("sub/b.txt", false)]);
+}
+
+#[test]
+fn would_walk_skip_reads_the_ignore_files_a_fix_creates() {
+    // Each created ignore file applies in its own directory, to itself too,
+    // as the walk after the fix reads it; created where nothing exists yet.
+    let tmp = td();
+    let root = tmp.path().join("repo");
+    touch(&root, ".git/HEAD", b"ref: refs/heads/main\n");
+    touch(&root, "cache/data.bin", b"x");
+    // A UTF-8 BOM before the first line is dropped; reading stops at a line
+    // that is not UTF-8, so `late.txt` stays walked.
+    let created: [(&Path, &[u8]); 3] = [
+        (Path::new(".gitignore"), b"\xef\xbb\xbf*.log\n"),
+        (Path::new("cache/.gitignore"), b"*\n!keep.txt\n"),
+        (Path::new("sub/.ignore"), b"early.txt\n\xff\nlate.txt\n"),
+    ];
+    let cases = [
+        ("a.log", true),
+        ("cache/.gitignore", true),
+        ("cache/data.bin", true),
+        ("cache/keep.txt", false),
+        ("sub/.ignore", false),
+        ("sub/early.txt", true),
+        ("sub/late.txt", false),
+        ("sub/c.log", true),
+        ("README.md", false),
+    ];
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    let predicted: Vec<(&str, bool)> = cases
+        .iter()
+        .map(|(rel, _)| {
+            (
+                *rel,
+                would_walk_skip(&root, &opts, Path::new(rel), false, &created),
+            )
+        })
+        .collect();
+    // Nothing is excluded before the files exist.
+    for (rel, _) in cases {
+        assert!(
+            !would_walk_skip(&root, &opts, Path::new(rel), false, &[]),
+            "{rel}"
+        );
+    }
+    for (path, content) in created {
+        std::fs::create_dir_all(root.join(path).parent().unwrap()).unwrap();
+        std::fs::write(root.join(path), content).unwrap();
+    }
+    for (rel, _) in cases {
+        if !root.join(rel).exists() {
+            touch(&root, rel, b"x");
+        }
+    }
+    // The prediction made before the files existed is the walk's after.
+    assert_prediction_matches_walk(&root, &opts, &predicted);
+    assert_eq!(predicted, cases);
+}
+
+#[cfg(unix)]
+#[test]
+fn would_walk_skip_stops_at_a_symlink_the_walk_does_not_enter() {
+    // The walk reports a loop back to a directory on its own path and prunes
+    // a broken symlink or one that leads out of the root; nothing below any of
+    // them is indexed. A symlink to a directory inside the root is followed.
+    let tmp = td();
+    let root = tmp.path().join("repo");
+    touch(&root, "real/a.txt", b"x");
+    touch(&root, "real/deep/b.txt", b"x");
+    touch(tmp.path(), "outside/c.txt", b"x");
+    let link = |target: &Path, name: &str| {
+        std::os::unix::fs::symlink(target, root.join(name)).unwrap();
+    };
+    link(Path::new("."), "loop");
+    link(Path::new(".."), "real/deep/up");
+    link(&tmp.path().join("outside"), "out");
+    link(Path::new("missing"), "broken");
+    link(Path::new("real"), "alias");
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    let index = walk(&root, &opts).unwrap();
+    for (rel, skipped) in [
+        ("loop/a.txt", true),
+        ("loop", true),
+        ("real/deep/up/a.txt", true),
+        ("out/c.txt", true),
+        ("out", true),
+        ("broken/x.txt", true),
+        ("alias/a.txt", false),
+        ("alias/deep/b.txt", false),
+        ("real/a.txt", false),
+        // Not there yet: nothing on the way is a symlink.
+        ("new/dir/x.txt", false),
+    ] {
+        let predicted = would_walk_skip(&root, &opts, Path::new(rel), false, &[]);
+        assert_eq!(predicted, skipped, "{rel}");
+        if root.join(rel).exists() {
+            assert_eq!(
+                predicted,
+                !index.contains_path(Path::new(rel)),
+                "walk, {rel}"
+            );
+        }
+    }
+}
+
 #[cfg(unix)]
 #[test]
 fn would_walk_skip_matches_the_walk_from_a_relative_root() {
-    // `ignore` drops a leading `./` from an ignore file's directory but not
-    // from the path checked against it; the prediction must not depend on it.
+    // `ignore` drops a leading `./` from both an ignore file's directory and
+    // the path it checks. An earlier prediction compared the two itself and
+    // dropped it from only one; the prediction must not depend on the form.
     let tmp = td();
     let root = tmp.path().canonicalize().unwrap();
     touch(&root, ".gitignore", b"*.log\n");

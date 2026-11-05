@@ -23,14 +23,16 @@ field; treat that as `false`.
 A dry run is a single pass over the current tree. A real `fix` writes, re-walks
 and re-checks until nothing changes, and a fix that ran but left its violation
 standing is reported `skipped` (`skip_kind: "unresolved"` in JSON) with a
-nonzero exit. The dry run predicts the common case of that: a `file_create`
-whose target is gitignored or matched by `ignore:` (the walk never indexes it)
-or lies outside the rule's `paths:` is reported the same way, not as applied.
-Anything else only the real run's re-check can reveal, so a dry-run `applied`
-item means "the first pass would apply this", not "this resolves the
-violation": a fix that only makes progress on a later pass, a cascade where
-one rule's fix creates or resolves another's violation, or content a fix
-writes that the rule still rejects.
+nonzero exit. The dry run predicts the common case of that: a `file_create` or
+`dir_create` whose target the walk never indexes (gitignored, including by an
+ignore file another fix in the same run creates, matched by `ignore:`, or
+below a symlink the walk does not follow), or a created file outside the
+rule's `paths:`, is reported the same way, not as applied. Anything else only
+the real run's re-check can reveal, so a dry-run `applied` item means "the
+first pass would apply this", not "this resolves the violation": a fix that
+only makes progress on a later pass, a cascade where one rule's fix creates or
+resolves another's violation, an edit to an existing ignore file, or content a
+fix writes that the rule still rejects.
 
 If alint cannot obtain a policy verdict, the fix report carries a typed
 `analysis_failure` instead of a fix item. It is never passed to a fixer and

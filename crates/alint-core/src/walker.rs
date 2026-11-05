@@ -797,9 +797,9 @@ fn build_overrides(root: &Path, opts: &WalkOptions) -> Result<ignore::overrides:
 /// it is a linked worktree's `.git` file (`gitdir: <dir>`), `info/exclude` in
 /// the common git directory `<dir>/commondir` names, since a worktree shares
 /// its repository's excludes. Mirrors `ignore`'s `resolve_git_commondir`
-/// (0.4.34, which began applying it with `require_git(false)`), including
-/// reading no environment variables and a relative `gitdir:` resolving against
-/// the working directory. `None` when the walk would read no exclude file.
+/// (0.4.34), including reading no environment variables and a relative
+/// `gitdir:` resolving against the working directory. `None` when the walk
+/// would read no exclude file.
 fn git_exclude_file(dir: &Path) -> Option<PathBuf> {
     use std::io::BufRead as _;
     let first_line = |path: &Path| -> Option<String> {
@@ -820,16 +820,90 @@ fn git_exclude_file(dir: &Path) -> Option<PathBuf> {
     Some(common.join("info/exclude"))
 }
 
+/// The names in `dir`'s listing. The walk finds the ignore files and
+/// repository markers of a directory it lists (the root and every directory
+/// below it) by exact name in that listing, as `ignore`'s
+/// `collect_ignore_files` does, so on a case-insensitive filesystem
+/// `.GITIGNORE` is not a `.gitignore`. Empty when `dir` cannot be listed or
+/// does not exist yet.
+fn listed_names(dir: &Path) -> HashSet<std::ffi::OsString> {
+    std::fs::read_dir(dir)
+        .map(|entries| {
+            entries
+                .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                .collect()
+        })
+        .unwrap_or_default()
+}
+
+/// Whether `dir` holds a repository: a `.git` directory, the `.git` file of a
+/// linked worktree or submodule, or a `.jj` directory, the markers `ignore`
+/// looks for under `require_git`. In a listed directory (`names`, from
+/// [`listed_names`]) the marker must also appear under its exact name.
+fn holds_repository(dir: &Path, names: Option<&HashSet<std::ffi::OsString>>) -> bool {
+    let holds = |marker: &str| {
+        names.is_none_or(|names| names.contains(std::ffi::OsStr::new(marker)))
+            && dir.join(marker).exists()
+    };
+    holds(".git") || holds(".jj")
+}
+
+/// Whether `root` lies in a repository: it, or a directory above it, holds one
+/// ([`holds_repository`]; the root is listed, those above it are not). The
+/// walk then reads ignore files up to that repository's top and no further;
+/// outside a repository, the root is the boundary.
+fn in_repository(root: &Path) -> bool {
+    holds_repository(root, Some(&listed_names(root)))
+        || root.canonicalize().is_ok_and(|root| {
+            root.ancestors()
+                .skip(1)
+                .any(|dir| holds_repository(dir, None))
+        })
+}
+
+/// An ignore matcher anchored at `dir` built from `content` as `ignore` builds
+/// one from the file `file` (`GitignoreBuilder::add`): line by line, without
+/// a UTF-8 BOM on the first line, stopping at a line that is not UTF-8 and
+/// skipping one that is not a valid glob.
+fn gitignore_from(dir: &Path, file: &Path, content: &[u8]) -> Option<ignore::gitignore::Gitignore> {
+    use std::io::BufRead as _;
+    let mut builder = ignore::gitignore::GitignoreBuilder::new(dir);
+    for (number, line) in content.lines().enumerate() {
+        let Ok(line) = line else {
+            break;
+        };
+        let line = if number == 0 {
+            line.trim_start_matches('\u{feff}')
+        } else {
+            &line
+        };
+        // A line that is not a valid glob is left out, as `ignore` does.
+        let _ = builder.add_line(Some(file.to_path_buf()), line);
+    }
+    builder.build().ok()
+}
+
 /// The ignore files the walk reads in one directory, each anchored there.
 struct DirIgnores {
     dot_ignore: Option<ignore::gitignore::Gitignore>,
     git_ignore: Option<ignore::gitignore::Gitignore>,
     /// The repository's `info/exclude`, when `dir` holds one (`.git`).
     exclude: Option<ignore::gitignore::Gitignore>,
+    /// Whether `dir` holds a repository ([`holds_repository`]).
+    repository: bool,
 }
 
 impl DirIgnores {
-    fn read(dir: &Path) -> Self {
+    /// The ignore files of `dir`. In a directory the walk lists (`listed`: the
+    /// root and those below it) a file counts only under its exact name
+    /// ([`listed_names`]); above the root `ignore` probes each path.
+    fn read(dir: &Path, listed: bool) -> Self {
+        let names = listed.then(|| listed_names(dir));
+        let has = |name: &str| {
+            names
+                .as_ref()
+                .is_none_or(|names| names.contains(std::ffi::OsStr::new(name)))
+        };
         let load = |file: Option<PathBuf>| {
             let file = file.filter(|file| file.is_file())?;
             let mut builder = ignore::gitignore::GitignoreBuilder::new(dir);
@@ -837,11 +911,65 @@ impl DirIgnores {
             builder.build().ok()
         };
         Self {
-            dot_ignore: load(Some(dir.join(".ignore"))),
-            git_ignore: load(Some(dir.join(".gitignore"))),
-            exclude: load(git_exclude_file(dir)),
+            dot_ignore: load(has(".ignore").then(|| dir.join(".ignore"))),
+            git_ignore: load(has(".gitignore").then(|| dir.join(".gitignore"))),
+            exclude: load(has(".git").then(|| git_exclude_file(dir)).flatten()),
+            repository: holds_repository(dir, names.as_ref()),
         }
     }
+
+    /// Take the ignore files among `created` that a fix will write in this
+    /// directory (`rel`, root-relative) in place of what is there now.
+    fn with_created(mut self, root: &Path, rel: &Path, created: &[(&Path, &[u8])]) -> Self {
+        let dir = root.join(rel);
+        for (path, content) in created {
+            if path.parent() != Some(rel) {
+                continue;
+            }
+            let slot = match path.file_name().and_then(std::ffi::OsStr::to_str) {
+                Some(".ignore") => &mut self.dot_ignore,
+                Some(".gitignore") => &mut self.git_ignore,
+                _ => continue,
+            };
+            *slot = gitignore_from(&dir, &root.join(path), content);
+        }
+        self
+    }
+}
+
+/// Whether the walk stops at a symlink on the way to `parts` (root-relative)
+/// or at `parts` itself: one that leads back to a directory on its own path, a
+/// loop `ignore` reports and does not descend, or one that is broken or leads
+/// out of the root, which the walk prunes (`build_walk_builder`). Only paths
+/// that exist count; one that does not exist yet cannot be a symlink.
+fn symlink_stops_the_walk(root: &Path, parts: &[std::path::Component<'_>]) -> bool {
+    let canonical_root = root.canonicalize().ok();
+    // The directories the walk has entered on the way, canonical.
+    let mut entered: Vec<PathBuf> = canonical_root.iter().cloned().collect();
+    for k in 1..=parts.len() {
+        let dir = root.join(parts[..k].iter().collect::<PathBuf>());
+        let Ok(metadata) = dir.symlink_metadata() else {
+            return false;
+        };
+        let canonical = dir.canonicalize().ok();
+        if metadata.file_type().is_symlink() {
+            let Some(target) = &canonical else {
+                return true;
+            };
+            if canonical_root
+                .as_ref()
+                .is_none_or(|root| !target.starts_with(root))
+                || entered.contains(target)
+            {
+                return true;
+            }
+        }
+        let Some(canonical) = canonical else {
+            return false;
+        };
+        entered.push(canonical);
+    }
+    false
 }
 
 /// Whether [`walk`] would leave the repo-relative path `rel` out of the index
@@ -855,16 +983,32 @@ impl DirIgnores {
 /// Mirrors `ignore` 0.4.34 as the walk configures it. Overrides come first.
 /// Then each entry on the way to `rel` is matched against the ignore files of
 /// the directories the walk passed through to reach it (never its own, which
-/// apply only below it), nearest first, then those of every directory above
-/// the root, up to the filesystem root. Each directory contributes its
-/// `.ignore`, its `.gitignore` and, when it holds a repository (a nested one
-/// or a linked worktree too), that repository's `info/exclude`
-/// (`git_exclude_file`). The nearest match of each kind is taken, and the
-/// kinds rank `.ignore`, `.gitignore`, `info/exclude`, then the global
-/// excludes file. A file that does not exist yet has no other walk filter to
-/// consult. Errors building a matcher read as "not ignored".
+/// apply only below it), nearest first, then, when the root lies in a
+/// repository, those of every directory above the root, up to the filesystem
+/// root. Each directory contributes its `.ignore`, its `.gitignore` and, when
+/// it holds a repository (a nested one or a linked worktree too), that
+/// repository's `info/exclude` (`git_exclude_file`). In a repository,
+/// `.gitignore` and `info/exclude` stop at the nearest directory that holds
+/// one, as git's do; `.ignore` files do not. The nearest match of each kind is
+/// taken, and the kinds rank `.ignore`, `.gitignore`, `info/exclude`, then the
+/// global excludes file. In a directory the walk lists (the root and below)
+/// an ignore file or repository marker counts only under its exact name.
+/// Separately, the walk stops at a symlinked directory that loops back, is
+/// broken or leads out of the root (`symlink_stops_the_walk`). Errors building
+/// a matcher read as "not ignored".
+///
+/// `created` lists the files the fix is about to create (root-relative path
+/// and content). An ignore file among them (`.gitignore`, `.ignore`) is read
+/// in its directory as the walk after the fix will read it, so a created
+/// `.gitignore` of `*` leaves itself out.
 #[must_use]
-pub fn would_walk_skip(root: &Path, opts: &WalkOptions, rel: &Path, is_dir: bool) -> bool {
+pub fn would_walk_skip(
+    root: &Path,
+    opts: &WalkOptions,
+    rel: &Path,
+    is_dir: bool,
+    created: &[(&Path, &[u8])],
+) -> bool {
     use ignore::Match;
     use ignore::gitignore::Gitignore;
     let parts: Vec<_> = rel
@@ -877,25 +1021,32 @@ pub fn would_walk_skip(root: &Path, opts: &WalkOptions, rel: &Path, is_dir: bool
     let overrides = build_overrides(root, opts).ok();
     // `in_tree[k]` holds the ignore files of the directory `parts[..k]` below
     // the root; `parents`, those of each directory above the (canonical) root,
-    // nearest first, matched against absolute paths as the walk does.
-    let (in_tree, canonical_root, parents, global) = if opts.respect_gitignore {
+    // nearest first, matched against absolute paths as the walk does. The walk
+    // reads directories above the root only inside a repository (`bounded`).
+    let (in_tree, canonical_root, parents, global, bounded) = if opts.respect_gitignore {
+        let bounded = in_repository(root);
         let in_tree: Vec<DirIgnores> = (0..parts.len())
-            .map(|k| DirIgnores::read(&root.join(parts[..k].iter().collect::<PathBuf>())))
+            .map(|k| {
+                let dir: PathBuf = parts[..k].iter().collect();
+                DirIgnores::read(&root.join(&dir), true).with_created(root, &dir, created)
+            })
             .collect();
         let canonical_root = root.canonicalize().ok();
         let parents: Vec<DirIgnores> = canonical_root
             .iter()
+            .filter(|_| bounded)
             .flat_map(|root| root.ancestors().skip(1))
-            .map(DirIgnores::read)
+            .map(|dir| DirIgnores::read(dir, false))
             .collect();
         (
             in_tree,
             canonical_root,
             parents,
             Some(Gitignore::global().0),
+            bounded,
         )
     } else {
-        (Vec::new(), None, Vec::new(), None)
+        (Vec::new(), None, Vec::new(), None, false)
     };
 
     // The entry `parts[..=i]`: the ignore files of `parts[..k]` for `k <= i`
@@ -911,31 +1062,40 @@ pub fn would_walk_skip(root: &Path, opts: &WalkOptions, rel: &Path, is_dir: bool
             }
         }
         let absolute = canonical_root.as_ref().map(|root| root.join(&prefix));
-        let nearest = |kind: fn(&DirIgnores) -> Option<&Gitignore>| {
+        // The nearest match of one kind. A kind that `stops` is not read past
+        // the nearest directory holding a repository (that directory's own
+        // files still count).
+        let nearest = |kind: fn(&DirIgnores) -> Option<&Gitignore>, stops: bool| {
             let in_tree = in_tree
                 .get(..=i)
                 .unwrap_or_default()
                 .iter()
                 .rev()
-                .filter_map(kind)
-                .map(|gi| gi.matched(&path, is_dir));
-            let above = absolute.iter().flat_map(|absolute| {
-                parents
-                    .iter()
-                    .filter_map(kind)
-                    .map(move |gi| gi.matched(absolute, is_dir))
-            });
-            in_tree.chain(above).find(|m| !m.is_none())
+                .map(|dir| (dir, path.as_path()));
+            let above = absolute
+                .iter()
+                .flat_map(|absolute| parents.iter().map(move |dir| (dir, absolute.as_path())));
+            for (dir, candidate) in in_tree.chain(above) {
+                let found = kind(dir).map(|gi| gi.matched(candidate, is_dir));
+                if let Some(found) = found.filter(|m| !m.is_none()) {
+                    return Some(found);
+                }
+                if stops && dir.repository {
+                    break;
+                }
+            }
+            None
         };
-        let found = nearest(|d| d.dot_ignore.as_ref())
-            .or_else(|| nearest(|d| d.git_ignore.as_ref()))
-            .or_else(|| nearest(|d| d.exclude.as_ref()))
+        let found = nearest(|d| d.dot_ignore.as_ref(), false)
+            .or_else(|| nearest(|d| d.git_ignore.as_ref(), bounded))
+            .or_else(|| nearest(|d| d.exclude.as_ref(), bounded))
             .or_else(|| global.as_ref().map(|gi| gi.matched(&path, is_dir)));
         matches!(found, Some(Match::Ignore(_)))
     };
     // The path itself, and every ancestor directory (an excluded directory is
     // never descended into, so nothing below it is indexed).
-    (0..parts.len()).any(|i| ignored(i, if i + 1 == parts.len() { is_dir } else { true }))
+    symlink_stops_the_walk(root, &parts)
+        || (0..parts.len()).any(|i| ignored(i, if i + 1 == parts.len() { is_dir } else { true }))
 }
 
 fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, EscapingSink)> {
@@ -943,16 +1103,24 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
     builder
         .standard_filters(opts.respect_gitignore)
         .hidden(false)
-        .follow_links(true)
-        .require_git(false);
+        .follow_links(true);
+    // Ignore files stop at the repository boundary, as git's do (ADR-0028). In
+    // a repository, `require_git` makes `.gitignore` and `info/exclude` stop at
+    // the nearest directory holding one (the repository's top, or a nested
+    // repository's), and `parents` reads the in-repository directories above
+    // a root linted from a subdirectory. Outside a repository the root is the
+    // boundary, and the root's own ignore files apply without git.
+    if opts.respect_gitignore {
+        let bounded = in_repository(root);
+        builder.require_git(bounded).parents(bounded);
+    }
 
     // Always exclude `.git/` — descending into git's internal
     // packfiles + loose objects is wasted work for every alint
     // rule (none of them target `.git/objects/*`), and it races
     // git's auto-gc / pack-rewrite on large repos. We set
-    // `hidden(false)` and `require_git(false)` so the `ignore`
-    // crate doesn't apply its own implicit `.git/` exclusion;
-    // this override puts it back.
+    // `hidden(false)`, which would otherwise skip `.git/` with
+    // every other dot-directory; this override puts it back.
     builder.overrides(build_overrides(root, opts)?);
 
     // Prune symlinks whose target escapes the repo root. With

@@ -14,6 +14,17 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- Ignore files stop at the repository boundary, as git's do. A `.gitignore` or
+  `info/exclude` in a directory above the repository, such as a home directory
+  kept in git, no longer applies, so a `*` there can no longer hide the whole
+  tree and make every rule pass. A repository's `.gitignore` also stops at a
+  nested repository or submodule below it, as in git: files there that only
+  the outer file excluded are now linted, so give the nested repository its
+  own patterns or list them under the config's `ignore:`. A root linted from a
+  subdirectory still reads its repository's ignore files above it. Outside any
+  repository, no ignore file above the linted root is read. `.ignore` files
+  above the repository still apply, as they do for ripgrep. `fix --dry-run`
+  predicts the same walk. See ADR-0028.
 - The walker uses `ignore` 0.4.34. In a linked git worktree
   (`git worktree add`), alint now honors the repository's shared
   `.git/info/exclude`, as it does in the main checkout; before, files excluded
@@ -42,7 +53,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which the walk does not. It also missed exclusions the walk applies: ignore
   files in directories above the linted root (a monorepo package linted from
   its own directory) and the `info/exclude` of a repository or linked worktree
-  nested inside the tree.
+  nested inside the tree. It now also predicts that the walk leaves out a
+  directory `dir_create` makes in an ignored path, a created ignore file that
+  excludes itself (a `cache/.gitignore` of `*`) or a file another fix in the
+  same run creates, and a file created below a symlink the walk does not
+  follow (a loop, or one that leads out of the root). A `file_create` path
+  with `..` is checked where the file is written (`out/../README.md` is
+  `README.md`), not through each component.
 - A configuration error is no longer replaced with `<redacted>` just because the
   rule reads a value from the environment or sets `sensitive: true`. alint now
   repeats the failed step with those values masked and shows the error when the

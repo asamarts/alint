@@ -578,12 +578,15 @@ impl Engine {
 
     /// `--dry-run` has no re-walk to discover that a fix will not stick, so
     /// predict the known cases the real `fix` demotes after its re-check: a
-    /// would-be-`Applied` create (`file_create`) whose target the walk would
-    /// not index (gitignored, `ignore:`d) or that lies outside the rule's
-    /// `paths:`. Those become the same unresolved skip the real run reports.
-    /// Other ways a fix can fail its re-check (a cascade through another
-    /// rule, content a fixer writes that the rule still rejects) are only
-    /// found by running it; `docs/site/cli/fix.md` documents the limit.
+    /// would-be-`Applied` create (`file_create`, `dir_create`) whose target
+    /// the walk would not index (gitignored, `ignore:`d, including by an
+    /// ignore file another create in the same pass writes, or below a
+    /// symlinked directory the walk does not enter), or a created file outside
+    /// the rule's `paths:`. Those become the same unresolved skip the real run
+    /// reports. Other ways a fix can fail its re-check (a cascade through
+    /// another rule, content a fixer writes that the rule still rejects, an
+    /// edit to an existing ignore file) are only found by running it;
+    /// `docs/site/cli/fix.md` documents the limit.
     pub(super) fn predict_unresolved_creates(
         &self,
         root: &Path,
@@ -591,45 +594,100 @@ impl Engine {
         walk_opts: &crate::WalkOptions,
         report: &mut FixReport,
     ) {
-        for rr in &mut report.results {
+        // Each would-be-applied create: where its result and item sit in the
+        // report, its rule, the target and, for a file, its content.
+        let mut creates = Vec::new();
+        for (result, rr) in report.results.iter().enumerate() {
             let Some(entry) = self.entries.iter().find(|e| e.rule.id() == &*rr.rule_id) else {
                 continue;
             };
             let Some(fixer) = entry.rule.fixer() else {
                 continue;
             };
-            for it in &mut rr.items {
-                let FixStatus::Applied(summary) = &it.status else {
+            for (item, it) in rr.items.iter().enumerate() {
+                if !matches!(it.status, FixStatus::Applied(_)) {
                     continue;
+                }
+                let (path, content) = match fixer.fix_edit(&it.violation, &[], root) {
+                    Some(FixEdit::CreateFile { path, content }) => (path, Some(content)),
+                    _ => match fixer.created_dir() {
+                        Some(dir) => (dir.to_path_buf(), None),
+                        None => continue,
+                    },
                 };
-                let Some(FixEdit::CreateFile { path, .. }) =
-                    fixer.fix_edit(&it.violation, &[], root)
-                else {
-                    continue;
-                };
-                let target: PathBuf = path
-                    .components()
-                    .filter(|c| !matches!(c, std::path::Component::CurDir))
-                    .collect();
-                let why = if crate::walker::would_walk_skip(root, walk_opts, &target, false) {
-                    format!(
-                        "{} is excluded from the walk (.gitignore / `ignore:`), so the rule \
-                         would never see it",
-                        target.display()
-                    )
-                } else if entry
-                    .rule
-                    .path_scope()
-                    .is_some_and(|scope| !scope.matches(&target, index))
-                {
-                    format!("{} is outside the rule's `paths:`", target.display())
-                } else {
-                    continue;
-                };
+                // The fixer writes to the root joined with the lexically
+                // normalized path (`a/../b` is `b`). `Err` for a path that
+                // leaves the root (`../x`), which only `allow_out_of_root`
+                // lets a fixer write, where no walk reaches.
+                let target = crate::pathsafe::normalize_confined(&path).ok_or(path);
+                creates.push((result, item, entry, target, content));
+            }
+        }
+        // The walk after the fix reads the ignore files those creates write.
+        let created_ignores: Vec<(&Path, &[u8])> = creates
+            .iter()
+            .filter_map(|(_, _, _, target, content)| {
+                let (target, content) = (target.as_ref().ok()?, content.as_deref()?);
+                matches!(target.file_name()?.to_str()?, ".gitignore" | ".ignore")
+                    .then_some((target.as_path(), content))
+            })
+            .collect();
+        for (result, item, entry, target, content) in &creates {
+            let why = match target {
+                Err(path) => Some(format!(
+                    "{} is outside the root, so the rule would never see it",
+                    path.display()
+                )),
+                Ok(target) => Self::predicted_unresolved(
+                    root,
+                    index,
+                    walk_opts,
+                    entry,
+                    target,
+                    content.is_none(),
+                    &created_ignores,
+                ),
+            };
+            let it = &mut report.results[*result].items[*item];
+            if let (Some(why), FixStatus::Applied(summary)) = (why, &it.status) {
                 it.status = FixStatus::unresolved(format!(
                     "fix would run ({summary}) but would not resolve the violation: {why}"
                 ));
             }
+        }
+    }
+
+    /// Why a create of `target` (root-relative, a directory when `is_dir`)
+    /// would not resolve `entry`'s violation, or `None` when it would: the walk
+    /// would leave it out (counting the ignore files the pass creates), or a
+    /// created file lies outside the rule's `paths:`.
+    fn predicted_unresolved(
+        root: &Path,
+        index: &FileIndex,
+        walk_opts: &crate::WalkOptions,
+        entry: &RuleEntry,
+        target: &Path,
+        is_dir: bool,
+        created_ignores: &[(&Path, &[u8])],
+    ) -> Option<String> {
+        if crate::walker::would_walk_skip(root, walk_opts, target, is_dir, created_ignores) {
+            Some(format!(
+                "{} is excluded from the walk (an ignore file, `ignore:`, or a symlink the \
+                 walk does not enter), so the rule would never see it",
+                target.display()
+            ))
+        } else if !is_dir
+            && entry
+                .rule
+                .path_scope()
+                .is_some_and(|scope| !scope.matches(target, index))
+        {
+            Some(format!(
+                "{} is outside the rule's `paths:`",
+                target.display()
+            ))
+        } else {
+            None
         }
     }
 
