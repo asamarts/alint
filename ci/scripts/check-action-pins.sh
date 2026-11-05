@@ -50,8 +50,9 @@ if not FILES:
 # The one form a pin is read in: `uses: <ref> # <comment>` on one line.
 USES = re.compile(r'^\s*(?:-\s+)?uses:\s*(?P<ref>[^\s#]+)\s*(?:#\s*(?P<comment>.*?))?\s*$')
 # Any other line holding a `uses` key: `uses :`, a quoted key, `uses:` with the
-# value on the next line, or an entry of a flow mapping (`{uses: ...}`).
-USES_KEY = re.compile(r'''^\s*(?:-\s+)?["']?uses["']?\s*:|(?<!\$)\{\s*["']?uses["']?\s*:|,\s*["']?uses["']?\s*:''')
+# value on the next line, an explicit key (`? uses`, its value on a `:` line), or
+# an entry of a flow mapping (`{uses: ...}`).
+USES_KEY = re.compile(r'''^\s*(?:-\s+)?(?:\?\s+["']?uses["']?\s*(?:#.*)?$|["']?uses["']?\s*:)|(?<!\$)\{\s*["']?uses["']?\s*:|,\s*["']?uses["']?\s*:''')
 # A key whose value is a block scalar (`run: |`, `script: >-`); `lead` ends at
 # the key, and the scalar's lines are indented past it.
 BLOCK_START = re.compile(r'''^(?P<lead>\s*(?:-\s+)?)[^#\s][^#]*:\s*[|>][-+0-9]*\s*(?:#.*)?$''')

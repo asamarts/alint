@@ -77,9 +77,10 @@ jobs:
                 contains(fromJSON('["11239806"]'), format('{0}', github.actor_id))
               )
             }}
-          # PR capacity switch, not an authorization boundary. Keep false while
-          # the fixed-label listener is held; a later change may replace this only
-          # after base-controlled disposable admission passes its canaries.
+          # PR capacity switch, not an authorization boundary. Keep false: no
+          # runner carries the self-hosted labels any more, so an admitted pull
+          # request would wait for one forever. A later change may replace this
+          # only after base-controlled disposable admission passes its canaries.
           LOCAL_PR_CAPACITY_ENABLED: "false"
         run: |
           if [ "$EVENT_NAME" != "pull_request" ]; then

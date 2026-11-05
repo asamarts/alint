@@ -205,15 +205,15 @@ source and target, each of which fails on the old code.
   2026-09-22 was cancelled after about a day in the queue; the last success (2026-09-18) was a
   tiny crate. Replace it with a pull-request `--in-diff` job (section 7, item 3). **Done after
   the release:** `mutants.yml` runs `ci/scripts/mutants.sh --in-diff` on pull requests that
-  change Rust, on `ubuntu-latest`, and lists missed mutants in the job summary and as warnings on
-  their lines without failing; `workflow_dispatch` runs one crate. The diff run passes
+  change Rust, on `ubuntu-latest`, and lists missed mutants in the job summary, and the first ten
+  as warnings on their lines, without failing; `workflow_dispatch` runs one crate. The diff run passes
   `--workspace`, since the root manifest's `default-members` would otherwise limit the mutants to
   the CLI crate and report none for a change anywhere else.
 - **No scheduled advisory check.** Deny and Audit run only when Rust, supply-chain, `.github/`,
   or `ci/` files change, and in the release preflight, so a new RustSec advisory surfaces on the
   next such pull request. Add a weekly scheduled run. **Done after the release:**
   `advisories.yml` runs `audit.sh` and `deny.sh` on `main` daily rather than weekly, since a run
-  takes about a minute.
+  takes under three minutes.
 - **Unpinned tools:** `ci/scripts/audit.sh` installs `cargo-audit` and `mutants.yml` installs
   `cargo-mutants` without a version (`cargo-deny` is pinned). **Done after the release:**
   `audit.sh` pins `cargo-audit` 0.22.2 and `mutants.sh` pins `cargo-mutants` 27.1.0, each

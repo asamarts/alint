@@ -83,8 +83,9 @@ else
   bad "expected 'cargo mutants --workspace --in-diff <file> --in-place --no-shuffle --output target/mutants'"
 fi
 
-run STUB_RC=3 STUB_CAUGHT='c1\n' STUB_TIMEOUT='crates/a/src/lib.rs:7:1: replace loop body\n' -- --package alint-output
+run STUB_RC=3 STUB_CAUGHT='c1\n' STUB_TIMEOUT='crates/a/src/lib.rs:7:1: replace `loop` body\n' -- --package alint-output
 if [[ "$rc" -eq 0 ]] && summarised '1 caught, 0 missed, 1 timed out' && summarised 'Timed out' &&
+   summarised '- `` crates/a/src/lib.rs:7:1: replace `loop` body ``' &&
    logged '^cargo mutants --package alint-output --in-place'; then
   ok "timed-out mutants pass and are reported; --package reaches cargo mutants"
 else

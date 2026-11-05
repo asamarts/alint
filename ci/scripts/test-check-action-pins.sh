@@ -100,6 +100,8 @@ check "a flow mapping with other keys" rejected "{ name: x, uses: acme/tagged@$c
 check "the value on the next line" rejected "uses:"$'\n'"          acme/tagged@$c1 # v1.0.0"
 check "a quoted key" rejected "\"uses\": acme/tagged@$c1 # v1.0.0"
 check "a space before the colon" rejected "uses : acme/tagged@$c1 # v1.0.0"
+check "an explicit key" rejected "? uses"$'\n'"        : acme/tagged@$c1 # v1.0.0"
+check "an explicit quoted key" rejected "? 'uses' # the action"$'\n'"        : acme/tagged@$c1 # v1.0.0"
 # A block scalar's text is a script, not YAML structure; the scan resumes at the
 # next key at or left of the scalar's own key.
 check "a run block mentioning uses: is skipped" ok "run: |"$'\n'"          echo \"uses: not/an@action {uses: x}\"" \
