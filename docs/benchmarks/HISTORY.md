@@ -51,7 +51,7 @@ Each scenario's workload column marks its revision resets with a bold
 
 | Version | Date | S1 workload | 1M S1 full | S2 workload | 1M S2 full | S3 workload | 1M S3 full | S4 workload | 1M S4 full | Headline change |
 |---|---|---|---:|---|---:|---|---:|---|---:|---|
-| **v0.21.1** | 2026-11-05 | r2 | 4.05 s ± 0.03 | r2 | 5.20 s ± 0.00 | r2 | 477.5 s ± 2.1 | r4 | 8.35 s ± 0.03 | A fix release. |
+| **v0.21.1** | 2026-11-05 | r2 | 4.05 s ± 0.03 | r2 | 5.20 s ± 0.00 | r2 | 477.5 s ± 2.1 | r4 | 8.35 s ± 0.03 | A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees with `fix` in many more layouts, configuration errors are readable again without showing values read from the environment, and nested rules are back within 0.5% of v0.20.1's speed. |
 | v0.21.0 | 2026-11-01 | **r2 ← reset from r1** | 4.14 s ± 0.10 | **r2 ← reset from r1** | 5.30 s ± 0.04 | **r2 ← reset from r1** | 476.4 s ± 3.6 | **r4 ← reset from r3** | 8.61 s ± 0.07 | General-linter phase 2 adds `key_parity` on a new internal relation layer. |
 | v0.20.1 | 2026-10-23 | r1 | 4.08 s ± 0.06 | r1 | 18.16 s ± 0.63 | r1 | 480.6 s ± 8.4 | r3 | 15.55 s ± 0.32 | A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot paths are cheaper, and alint now warns when a content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant (#343). |
 | v0.20.0 | 2026-10-21 | r1 | 4.22 s ± 0.08 | r1 | 18.95 s ± 0.81 | r1 | 474.7 s ± 2.7 | **r3 ← reset from r2** | 16.28 s ± 0.33 | General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test runner, selected-rule production traces with bounded redaction-safe previews, and per-source configuration compatibility requirements. |
