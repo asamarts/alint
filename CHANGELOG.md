@@ -75,6 +75,10 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `allow_out_of_root` permits, is never linted. An ignore file created through
   a symlinked directory applies where it lands, and of two fixes that create
   the same ignore file the first one's content counts, as in the real run.
+  For a sensitive rule (`sensitive: true`, or a `fix:` read from the
+  environment) the reason a create would not resolve the violation says "the
+  target" instead of printing the path, which its redacted summary already
+  leaves out.
 - A line that cannot be parsed in an ignore file above the linted root (`a\`
   in a home directory's `.gitignore`), or a `.git` file there that alint
   cannot read, no longer stops `alint check` and `alint fix` with a walk error
@@ -88,29 +92,43 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is readable again, in `alint check`, `validate-config`, the language server
   and `alint test`, including inside a nested rule (`require:`). Numbers and
   booleans are masked as well as strings, because interpolation turns a value
-  that reads as one (a 12-digit account id) into a number or a boolean. An
-  error that could quote a secret, such as an invalid regex read from the
-  environment, stays redacted and now says why. The same applies to a whole
-  configuration file that reads the environment. A rule whose `fix:` block, or
-  whose `scope_filter` that reads manifest paths, may hold such a value cannot
-  be masked, so its errors stay redacted. An `extends_template:` read from the
-  environment no longer appears in the unknown-template error.
+  that reads as one (a 12-digit account id) into a number or a boolean. A
+  number is masked by moving it one step, up and then down, so a value at the
+  end of its range (a `threshold` of `1.0`) still passes its range check and
+  leaves an unrelated error readable. An error that quotes a possibly secret
+  value, such as an invalid regex read from the environment, stays redacted
+  and now says why. The same applies to a whole configuration file that reads
+  the environment. A rule whose `fix:` block or manifest-path `scope_filter`
+  may hold such a value cannot be masked, so its errors stay redacted. An
+  `extends_template:` read from the environment no longer appears in the
+  unknown-template error, and an error about a field the template supplies
+  names "a template" instead of its id.
 - A value read from the environment into a top-level field (`extends:`,
   `ignore:`, `facts:`, `baseline:`, `version:`) is no longer printed when the
   field causes an error, such as an invalid `ignore:` glob or a missing
   `extends:` target. alint and the language server now show `<redacted>` in its
-  place, also where the error prints the value trimmed, normalized as a path or
+  place, also where the error prints the value trimmed, normalized as a path,
+  as a remote `extends:` URL without its credentials, query and fragment, or
   one line at a time, and in the warnings that name it (a pattern hint on a
-  fact, an empty manifest set). A value inside a longer word takes the word
-  with it. The same holds for a nested config's `version:` and for a nested
-  config's rule whose `paths:` from the environment is rejected for leaving its
-  directory. A value shorter than four characters, or a boolean, is still
-  printed: removing every occurrence would garble the message, and it is too
-  short to be much of a secret.
-- A git ref read from the environment into `scope_filter.changed_since`, or
-  into `git_commit_message`'s `since:` with the deprecated `${VAR}` syntax, is
-  no longer printed when git cannot resolve it; the error shows `<redacted>`
-  (or the `${VAR}` reference as written) and leaves it out of git's message.
+  fact, an empty manifest set). `alint facts` shows a fact id read from the
+  environment as `<redacted>`, and the message for a file over
+  `fix_size_limit` no longer prints the limit. A value inside a longer word
+  takes the word with it. The same holds for a nested config's `version:` and
+  for a nested config's rule whose `paths:` from the environment is rejected
+  for leaving its directory. A boolean, or a value that an error prints in
+  fewer than four characters, is still printed: removing every occurrence
+  would garble the message, and it is too short to be much of a secret.
+- A git ref read from the environment into `scope_filter.changed_since`,
+  including a nested rule's (`require:`), or into `git_commit_message`'s
+  `since:` with the deprecated `${VAR}` syntax, is no longer printed when git
+  cannot resolve it. The error shows `<redacted>` (or the `${VAR}` reference
+  as written) and leaves out git's message, which can quote part of the ref
+  (`a:b` is "invalid object name 'a'"). A nested rule's manifest path read
+  from the environment is left out of the empty-manifest warning too, and a
+  `policy_url` read from the environment is `<redacted>` in `alint list`.
+- A `baseline:` file whose name holds a glob character (`base[1].json`) is
+  kept out of the walk. Its name was read as a pattern, so alint linted the
+  baseline and could leave out another file (`base1.json`) instead.
 
 ## [0.21.0] - 2026-11-01
 

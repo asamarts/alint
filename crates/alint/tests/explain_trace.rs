@@ -460,6 +460,9 @@ fn environment_derived_policy_urls_are_redacted_across_consumers() {
         vec!["explain", "secret-url", "--format", "json"],
         vec!["explain", "secret-url", "--trace", "--format", "json"],
         vec!["check", "--only", "secret-url", "--format", "json"],
+        vec!["explain", "secret-url"],
+        vec!["list"],
+        vec!["list", "--format", "json"],
     ] {
         let output = run(root.path(), &args);
         let stdout = String::from_utf8_lossy(&output.stdout);

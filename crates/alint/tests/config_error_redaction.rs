@@ -216,6 +216,8 @@ fn a_value_read_from_the_environment_stays_out_of_warnings_and_run_errors() {
         &["check"][..],
         &["validate-config"],
         &["validate-config", "--format", "json"],
+        &["facts"],
+        &["facts", "--format", "json"],
     ] {
         let output = run(root.path(), args, &[("VALUE", "canary-fact")]);
         assert!(output.status.success(), "{args:?}");
@@ -254,6 +256,22 @@ fn a_value_read_from_the_environment_stays_out_of_warnings_and_run_errors() {
     );
     let output = run(root.path(), &["check"], &[("VALUE", "canary-template")]);
     assert_redacted("extends_template", &output, &["canary-template"]);
+    // A known template is named as the source of a field it supplies.
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\ntemplates:\n  - id: canary-template\n    kind: git_commit_no_fixup\n    \
+         paths: README.md\n    level: error\nrules:\n  - id: instance\n    \
+         extends_template: '{{env.VALUE}}'\n",
+    );
+    let output = run(root.path(), &["check"], &[("VALUE", "canary-template")]);
+    let text = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        !output.status.success()
+            && !text.contains("canary-template")
+            && text.contains("supplied by a template"),
+        "template attribution:\n{text}"
+    );
 
     // Git quotes a ref it cannot resolve.
     let git = |args: &[&str]| {
@@ -272,6 +290,8 @@ fn a_value_read_from_the_environment_stays_out_of_warnings_and_run_errors() {
         "user.name=Test",
         "-c",
         "user.email=test@example.com",
+        "-c",
+        "commit.gpgsign=false",
         "commit",
         "-qm",
         "one",
@@ -283,16 +303,111 @@ fn a_value_read_from_the_environment_stays_out_of_warnings_and_run_errors() {
          paths: '*.md'\n    pattern: zzz\n    scope_filter:\n      \
          changed_since: '{{env.VALUE}}'\n    level: error\n",
     );
-    let output = run(root.path(), &["check"], &[("VALUE", "canary-ref")]);
-    assert_redacted("changed_since", &output, &["canary-ref"]);
+    // `a:b` is a path in a tree, and git's error names only `a`.
+    for value in ["canary-ref", "canary-ref:part"] {
+        let output = run(root.path(), &["check"], &[("VALUE", value)]);
+        assert_redacted("changed_since", &output, &["canary-ref"]);
+    }
     write(
         root.path(),
         ".alint.yml",
         "version: 1\nrules:\n  - id: message\n    kind: git_commit_message\n    \
          requires_body: true\n    since: '${VALUE}'\n    level: error\n",
     );
-    let output = run(root.path(), &["check"], &[("VALUE", "canary-ref")]);
-    assert_left_out("legacy since", &output, &["canary-ref"]);
+    // The reference is shown as written, and git's message left out.
+    for value in ["canary-ref", "canary-ref:part"] {
+        let output = run(root.path(), &["check"], &[("VALUE", value)]);
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(
+            !text.contains("canary-ref")
+                && text.contains("`${VALUE}..HEAD`: git's message is left out"),
+            "legacy since:\n{text}"
+        );
+    }
+}
+
+#[test]
+fn a_nested_rule_value_read_from_the_environment_stays_out_of_warnings_and_run_errors() {
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "pkg/a/README.md", "hi\n");
+    let nested = |rule: &str| {
+        format!(
+            "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    select: 'pkg/*'\n    \
+             level: error\n{rule}"
+        )
+    };
+
+    // An empty manifest set warns, naming the manifest.
+    write(
+        root.path(),
+        "canary-manifest.toml",
+        "[workspace]\nmembers = []\n",
+    );
+    write(
+        root.path(),
+        ".alint.yml",
+        &nested(
+            "    require:\n      - kind: file_content_forbidden\n        paths: '{path}/*.md'\n        \
+             pattern: zzz\n        scope_filter:\n          include_manifest_paths:\n            \
+             source: '{{env.VALUE}}'\n            extract: { toml: '$.workspace.members[*]' }\n",
+        ),
+    );
+    let output = run(
+        root.path(),
+        &["check"],
+        &[("VALUE", "canary-manifest.toml")],
+    );
+    assert!(output.status.success(), "{output:?}");
+    assert_left_out("nested manifest warning", &output, &["canary-manifest"]);
+
+    // Git quotes a ref it cannot resolve.
+    for args in [
+        &["init", "-q"][..],
+        &["add", "pkg"],
+        &[
+            "-c",
+            "user.name=Test",
+            "-c",
+            "user.email=test@example.com",
+            "-c",
+            "commit.gpgsign=false",
+            "commit",
+            "-qm",
+            "one",
+        ],
+    ] {
+        let status = Command::new("git")
+            .arg("-C")
+            .arg(root.path())
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    }
+    let changed_since = |since: &str, parent: &str| {
+        nested(&format!(
+            "{parent}    require:\n      - kind: file_content_forbidden\n        \
+             paths: '{{path}}/*.md'\n        pattern: zzz\n        scope_filter:\n          \
+             changed_since: '{since}'\n"
+        ))
+    };
+    write(
+        root.path(),
+        ".alint.yml",
+        &changed_since("{{env.VALUE}}", ""),
+    );
+    for value in ["canary-ref", "canary-ref:part"] {
+        let output = run(root.path(), &["check"], &[("VALUE", value)]);
+        assert_redacted("nested changed_since", &output, &["canary-ref"]);
+    }
+    // A `sensitive: true` parent's nested ref is secret as written.
+    write(
+        root.path(),
+        ".alint.yml",
+        &changed_since("canary-ref", "    sensitive: true\n"),
+    );
+    let output = run(root.path(), &["check"], &[]);
+    assert_redacted("sensitive parent", &output, &["canary-ref"]);
 }
 
 #[test]

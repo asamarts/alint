@@ -157,7 +157,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }
     let select_scope = resolve_select(opts.select, &spec.id)?;
     let when_iter = parse_when_iter(spec, opts.when_iter.as_deref())?;
-    let require = compile_nested_require(&spec.id, opts.require)?;
+    let require = compile_nested_require(spec, opts.require)?;
     Ok(Box::new(ForEachFileRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -196,7 +196,11 @@ mod tests {
     fn passes_when_every_file_has_required_sibling() {
         let require: Vec<NestedRuleSpec> =
             vec![yaml_serde::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap()];
-        let require = compile_nested_require("t", require).unwrap();
+        let require = compile_nested_require(
+            &crate::test_support::spec_yaml("id: t\nkind: for_each_dir\nlevel: error\n"),
+            require,
+        )
+        .unwrap();
         let r = ForEachFileRule {
             id: "t".into(),
             level: Level::Error,
@@ -233,7 +237,11 @@ mod tests {
     fn violates_per_missing_sibling() {
         let require: Vec<NestedRuleSpec> =
             vec![yaml_serde::from_str("kind: file_exists\npaths: \"{dir}/{stem}.h\"\n").unwrap()];
-        let require = compile_nested_require("t", require).unwrap();
+        let require = compile_nested_require(
+            &crate::test_support::spec_yaml("id: t\nkind: for_each_dir\nlevel: error\n"),
+            require,
+        )
+        .unwrap();
         let r = ForEachFileRule {
             id: "t".into(),
             level: Level::Error,

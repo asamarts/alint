@@ -123,26 +123,9 @@ pub(super) fn require_directory(path: &Path) -> Result<()> {
     Ok(())
 }
 
-/// The baseline file's path relative to the lint `root`, as a walk-exclude
-/// pattern — so a broad-glob content rule can't lint alint's own committed
-/// JSON-Lines baseline artifact as a spurious "new" violation. Returns `None`
-/// when the baseline lives outside the lint root (then it isn't walked anyway)
-/// or doesn't exist yet (the missing-baseline error surfaces at load time).
-fn baseline_walk_exclude(root: &Path, baseline: &Path) -> Option<String> {
-    let root_abs = root.canonicalize().ok()?;
-    let base_abs = baseline.canonicalize().ok()?;
-    let rel = base_abs.strip_prefix(&root_abs).ok()?;
-    // Root-anchored (leading `/`): the walker turns this into an override
-    // `!/…` that matches ONLY the baseline at the repo root, never a same-named
-    // file in a subdirectory. Without the anchor a separator-less pattern
-    // matches at any depth, silently dropping a real violation in e.g.
-    // `sub/.alint-baseline.json`.
-    Some(format!("/{}", rel.to_string_lossy().replace('\\', "/")))
-}
-
-/// Append the [`baseline_walk_exclude`] pattern for `baseline` (when set) to
-/// `extra_ignores`, so `check` / `baseline` / `fix` all keep alint's own
-/// committed JSON-Lines artifact out of the walk. A broad-glob content rule
+/// Append the [`alint_core::baseline::walk_exclude`] pattern for `baseline`
+/// (when set) to `extra_ignores`, so `check` / `baseline` / `fix` all keep
+/// alint's own committed JSON-Lines artifact out of the walk. A broad-glob content rule
 /// (`**/*.json`, `line_max_width`, `no_trailing_whitespace`, …) would otherwise
 /// flag it — breaking the adopt-flow for `check`, making `baseline`
 /// regeneration see the artifact as fresh debt, and letting `fix` rewrite it.
@@ -152,7 +135,7 @@ pub(super) fn exclude_baseline_from_walk(
     baseline: Option<&Path>,
 ) {
     if let Some(bp) = baseline
-        && let Some(rel) = baseline_walk_exclude(root, bp)
+        && let Some(rel) = alint_core::baseline::walk_exclude(root, bp)
     {
         extra_ignores.push(rel);
     }

@@ -204,7 +204,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }
     let select_scope = resolve_select(opts.select, &spec.id)?;
     let when_iter = parse_when_iter(spec, opts.when_iter.as_deref())?;
-    let require = compile_nested_require(&spec.id, opts.require)?;
+    let require = compile_nested_require(spec, opts.require)?;
     Ok(Box::new(ForEachDirRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -224,14 +224,21 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
 /// parsed the source per iteration. This helper is the single
 /// place new cross-file iteration rules thread their require
 /// list through.
+/// The parent's `require:` may hold a secret when `parent` reports it
+/// sensitive ([`RuleSpec::field_is_sensitive`]).
 pub(crate) fn compile_nested_require(
-    parent_id: &str,
+    parent: &RuleSpec,
     require: Vec<NestedRuleSpec>,
 ) -> Result<Vec<CompiledNestedSpec>> {
+    let sensitive_configuration = parent.field_is_sensitive("require");
     require
         .into_iter()
         .enumerate()
-        .map(|(idx, spec)| CompiledNestedSpec::compile(spec, parent_id, idx))
+        .map(|(idx, spec)| {
+            let mut compiled = CompiledNestedSpec::compile(spec, &parent.id, idx)?;
+            compiled.sensitive_configuration = sensitive_configuration;
+            Ok(compiled)
+        })
         .collect()
 }
 
@@ -275,7 +282,7 @@ pub(crate) fn validate_nested_require(
                 ));
             }
         }
-        let synthesized = compiled.spec.instantiate(parent_id, idx, level, &tokens);
+        let synthesized = compiled.instantiate(parent_id, idx, level, &tokens);
         let nested_rule = registry.build(&synthesized).map_err(|e| {
             Error::rule_config(
                 parent_id,
@@ -420,7 +427,7 @@ pub(crate) fn visit_sensitive_for_each(
                     continue;
                 }
             }
-            let spec = nested.spec.instantiate(parent_id, index, level, &tokens);
+            let spec = nested.instantiate(parent_id, index, level, &tokens);
             let Ok(rule) = registry.build_instantiated(&spec) else {
                 continue;
             };
@@ -634,7 +641,7 @@ fn evaluate_for_each_inner<const TRACE: bool>(
                     }
                 }
             }
-            let nested_spec = nested.spec.instantiate(parent_id, i, level, &tokens);
+            let nested_spec = nested.instantiate(parent_id, i, level, &tokens);
             let nested_rule = match registry.build_instantiated(&nested_spec) {
                 Ok(r) => r,
                 Err(e) => {
@@ -1100,7 +1107,11 @@ mod tests {
     }
 
     fn rule(select: &str, require: Vec<NestedRuleSpec>) -> ForEachDirRule {
-        let require = compile_nested_require("t", require).unwrap();
+        let require = compile_nested_require(
+            &crate::test_support::spec_yaml("id: t\nkind: for_each_dir\nlevel: error\n"),
+            require,
+        )
+        .unwrap();
         ForEachDirRule {
             id: "t".into(),
             level: Level::Error,
@@ -1423,6 +1434,25 @@ mod tests {
             "{}",
             v[0].message
         );
+    }
+
+    #[test]
+    fn nested_specs_take_their_parents_sensitive_require() {
+        let require = || {
+            vec![
+                yaml_serde::from_str::<NestedRuleSpec>("kind: file_exists\npaths: \"{path}/x\"\n")
+                    .unwrap(),
+            ]
+        };
+        let parent = |extra: &str| {
+            crate::test_support::spec_yaml(&format!(
+                "id: t\nkind: for_each_dir\nlevel: error\n{extra}"
+            ))
+        };
+        let plain = compile_nested_require(&parent(""), require()).unwrap();
+        assert!(!plain[0].sensitive_configuration);
+        let sensitive = compile_nested_require(&parent("sensitive: true\n"), require()).unwrap();
+        assert!(sensitive[0].sensitive_configuration);
     }
 
     #[test]

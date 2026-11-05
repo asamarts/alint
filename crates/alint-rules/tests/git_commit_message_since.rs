@@ -67,9 +67,17 @@ fn a_bad_range_from_a_legacy_reference_is_shown_as_written() {
     let legacy = bad_range_failure(root, "${CARGO_PKG_NAME}");
     assert!(legacy.contains("`${CARGO_PKG_NAME}..HEAD`"), "{legacy}");
     assert!(!legacy.contains(env!("CARGO_PKG_NAME")), "{legacy}");
-    assert!(legacy.contains("<redacted>"), "{legacy}");
+    // Git can quote only part of the ref, so its message is left out.
+    assert!(
+        legacy.contains("`${CARGO_PKG_NAME}..HEAD`: git's message is left out"),
+        "{legacy}"
+    );
 
     let literal = bad_range_failure(root, "no-such-base");
     assert!(literal.contains("`no-such-base..HEAD`"), "{literal}");
-    assert!(!literal.contains("<redacted>"), "{literal}");
+    assert!(
+        literal.contains("no-such-base..HEAD'"),
+        "git's message stays: {literal}"
+    );
+    assert!(!literal.contains("left out"), "{literal}");
 }

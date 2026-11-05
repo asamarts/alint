@@ -323,7 +323,7 @@ fn build_session_for_config(
     };
     let mut extra_ignores = config.ignore;
     if let Some(path) = &baseline_path
-        && let Some(pattern) = baseline_walk_exclude(&effective_root, path)
+        && let Some(pattern) = alint_core::baseline::walk_exclude(&effective_root, path)
     {
         extra_ignores.push(pattern);
     }
@@ -356,16 +356,6 @@ fn load_baseline(path: &Path) -> Result<Baseline, String> {
         )
     })?;
     Baseline::load(&text).map_err(|e| format!("invalid baseline file {}: {e}", path.display()))
-}
-
-/// The baseline file as a root-anchored walk-exclude pattern, so a
-/// broad content rule doesn't lint alint's own artifact (mirrors the
-/// CLI's `baseline_walk_exclude`).
-fn baseline_walk_exclude(root: &Path, baseline: &Path) -> Option<String> {
-    let root_abs = root.canonicalize().ok()?;
-    let base_abs = baseline.canonicalize().ok()?;
-    let rel = base_abs.strip_prefix(&root_abs).ok()?;
-    Some(format!("/{}", rel.to_string_lossy().replace('\\', "/")))
 }
 
 /// Drop baseline-grandfathered violations from `results` (no-op without

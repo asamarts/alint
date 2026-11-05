@@ -561,6 +561,11 @@ pub struct CommitRecord {
     pub author_email: String,
 }
 
+/// What a [`CommitRangeError::BadRange`] carries in place of git's message
+/// when the ref may be secret: git quotes the ref, or only part of it.
+pub const BAD_RANGE_MESSAGE_LEFT_OUT: &str =
+    "git's message is left out because the ref may be secret";
+
 /// Errors that distinguish an invalid range from an unavailable repository.
 /// The engine gates repository availability from capability metadata; the rule
 /// layer uses `BadRange` to preserve the specific shallow-clone migration hint.

@@ -184,6 +184,8 @@ pub(crate) enum ValueTargetMatches {
 }
 /// Hard ceilings remain active when users disable `fix_size_limit`: a bounded
 /// checker must not expand one small target into unbounded edit metadata/output.
+/// The messages name the limit without its value, which `fix_size_limit` can
+/// take from the environment.
 const MAX_PROPAGATED_FIX_BYTES: usize = 32 * 1024 * 1024;
 
 fn propagated_output_limit(configured: Option<u64>) -> usize {
@@ -336,7 +338,9 @@ impl CrossFileValueFixer {
     ) -> std::result::Result<Vec<u8>, String> {
         if target_bytes.len() > output_limit || source_value.len() > output_limit {
             return Err(format!(
-                "value propagation would exceed the {output_limit}-byte output safety limit"
+                "value propagation would exceed the output safety limit (`fix_size_limit`, \
+                 at most {} MiB)",
+                MAX_PROPAGATED_FIX_BYTES >> 20
             ));
         }
         if let Some(matches) = matches
@@ -369,8 +373,10 @@ impl CrossFileValueFixer {
         };
         if new_bytes.len() > output_limit {
             return Err(format!(
-                "value propagation would produce {} bytes; safety limit is {output_limit}",
-                new_bytes.len()
+                "value propagation would produce {} bytes, over the output safety limit \
+                 (`fix_size_limit`, at most {} MiB)",
+                new_bytes.len(),
+                MAX_PROPAGATED_FIX_BYTES >> 20
             ));
         }
         Ok(new_bytes)
@@ -492,7 +498,9 @@ impl CrossFileValueFixer {
             .ok_or_else(|| "regex propagation output size overflowed".to_string())?;
         if source_value.len() > output_limit || projected_bytes > output_limit {
             return Err(format!(
-                "regex propagation would exceed the {output_limit}-byte output safety limit"
+                "regex propagation would exceed the output safety limit (`fix_size_limit`, \
+                 at most {} MiB)",
+                MAX_PROPAGATED_FIX_BYTES >> 20
             ));
         }
         let ranges = vec![capture];

@@ -1777,13 +1777,14 @@ pub fn check_fix_size(
         source,
     })?;
     if metadata.len() > limit {
+        // The limit is left out: it can come from the environment, and this
+        // warning reaches stderr without the embedder's scrubbing.
         let reason = format!(
-            "{} is {} bytes; exceeds fix_size_limit ({}). Raise \
+            "{} is {} bytes; exceeds fix_size_limit. Raise \
              `fix_size_limit` in .alint.yml (or set it to `null` to disable) \
              to fix files this large.",
             display_path.display(),
             metadata.len(),
-            limit,
         );
         eprintln!("alint: warning: {reason}");
         return Ok(Some(FixOutcome::Skipped(reason)));

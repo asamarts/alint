@@ -160,7 +160,7 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     }
     let select_scope = resolve_select(opts.select, &spec.id)?;
     let when_iter = parse_when_iter(spec, opts.when_iter.as_deref())?;
-    let require = compile_nested_require(&spec.id, opts.require)?;
+    let require = compile_nested_require(spec, opts.require)?;
     Ok(Box::new(EveryMatchingHasRule {
         id: spec.id.clone(),
         level: spec.level,
@@ -202,7 +202,11 @@ mod tests {
         // both.
         let require: Vec<NestedRuleSpec> =
             vec![yaml_serde::from_str("kind: file_exists\npaths: \"{path}\"\n").unwrap()];
-        let require = compile_nested_require("t", require).unwrap();
+        let require = compile_nested_require(
+            &crate::test_support::spec_yaml("id: t\nkind: for_each_dir\nlevel: error\n"),
+            require,
+        )
+        .unwrap();
         let r = EveryMatchingHasRule {
             id: "t".into(),
             level: Level::Error,

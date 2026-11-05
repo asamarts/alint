@@ -59,7 +59,7 @@ pub use config::{
     ExtendsEntry, FileAppendFinalNewlineFixSpec, FileAppendFixSpec, FileCollapseBlankLinesFixSpec,
     FileCreateFixSpec, FileNormalizeLineEndingsFixSpec, FilePrependFixSpec, FileRemoveFixSpec,
     FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
-    FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, PathsSpec,
+    FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, NumberMask, PathsSpec,
     REDACTED_CONFIGURATION_ERROR, RuleSpec, configuration_field_may_be_secret,
     mask_configuration_values, redact_environment_values, redact_environment_values_in_error,
     resolve_content_source,

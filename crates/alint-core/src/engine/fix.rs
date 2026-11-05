@@ -652,10 +652,23 @@ impl Engine {
         // `git ls-files`, once, when a `git_tracked_only` rule creates a file.
         let tracked = std::cell::OnceCell::new();
         for (result, item, entry, target, is_dir, _) in &creates {
+            // A sensitive item's reason leaves the target out: its rule's
+            // configuration or evidence can hold it, as the redacted summary
+            // already does.
+            let sensitive = report.results[*result].items[*item]
+                .violation
+                .is_sensitive();
+            let shown = |path: &Path| {
+                if sensitive {
+                    "the target".to_string()
+                } else {
+                    path.display().to_string()
+                }
+            };
             let why = match target {
                 Err(path) => Some(format!(
                     "{} is outside the root, so the rule would never see it",
-                    path.display()
+                    shown(path)
                 )),
                 Ok(target) => Self::predicted_unresolved(
                     root,
@@ -663,6 +676,7 @@ impl Engine {
                     walk_opts,
                     entry,
                     target,
+                    &shown(target),
                     *is_dir,
                     &created_ignores,
                     &tracked,
@@ -694,8 +708,9 @@ impl Engine {
         crate::pathsafe::normalize_confined(path)
     }
 
-    /// Why a create of `target` (root-relative, a directory when `is_dir`)
-    /// would not resolve `entry`'s violation, or `None` when it would: the
+    /// Why a create of `target` (root-relative, a directory when `is_dir`,
+    /// named `shown` in the reason) would not resolve `entry`'s violation, or
+    /// `None` when it would: the
     /// rule sees only tracked files and the target is not one, the walk would
     /// leave it out (counting the ignore files the pass creates) and the rule
     /// does not look for it on disk, or it lies outside the rule's `paths:`.
@@ -706,6 +721,7 @@ impl Engine {
         walk_opts: &crate::WalkOptions,
         entry: &RuleEntry,
         target: &Path,
+        shown: &str,
         is_dir: bool,
         created_ignores: &[(&Path, &[u8])],
         tracked: &std::cell::OnceCell<Option<HashSet<PathBuf>>>,
@@ -718,36 +734,30 @@ impl Engine {
                 .is_some_and(|t| t.contains(target))
         {
             return Some(format!(
-                "{} is not tracked in git, and the rule (`git_tracked_only`) sees only tracked \
-                 files",
-                target.display()
+                "{shown} is not tracked in git, and the rule (`git_tracked_only`) sees only \
+                 tracked files"
             ));
         }
         if !is_dir && entry.rule.sees_path_past_walk(target) {
             // The rule's own stat refuses a path that resolves out of the root.
             return (!crate::pathsafe::resolved_within_root(&root.join(target), root)).then(|| {
                 format!(
-                    "{} resolves outside the root through a symlink, so the rule would never \
-                     see it",
-                    target.display()
+                    "{shown} resolves outside the root through a symlink, so the rule would \
+                     never see it"
                 )
             });
         }
         if crate::walker::would_walk_skip(root, walk_opts, target, is_dir, created_ignores) {
             Some(format!(
-                "{} is excluded from the walk (an ignore file, `ignore:`, or a symlink the \
-                 walk does not enter), so the rule would never see it",
-                target.display()
+                "{shown} is excluded from the walk (an ignore file, `ignore:`, or a symlink \
+                 the walk does not enter), so the rule would never see it"
             ))
         } else if entry
             .rule
             .path_scope()
             .is_some_and(|scope| !scope.matches(target, index))
         {
-            Some(format!(
-                "{} is outside the rule's `paths:`",
-                target.display()
-            ))
+            Some(format!("{shown} is outside the rule's `paths:`"))
         } else {
             None
         }

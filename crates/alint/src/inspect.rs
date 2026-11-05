@@ -110,6 +110,11 @@ pub(super) fn cmd_list(category: Option<&str>, cli: &Cli) -> Result<ExitCode> {
         if opts.show_docs
             && let Some(url) = rule.policy_url()
         {
+            let url = if explain_field_is_sensitive(entry, "policy_url") {
+                "<redacted>"
+            } else {
+                url
+            };
             let url = term(url);
             write!(out, "  {dim}({dim:#}{docs}{url}{docs:#}{dim}){dim:#}")?;
         }
@@ -135,7 +140,13 @@ fn list_json(loaded: &LoadedConfig) -> Result<ExitCode> {
                 "kind": entry.kind(),
                 "categories": rules::categories_for_kind(entry.kind()),
                 "level": entry.rule.level().as_str(),
-                "policy_url": entry.rule.policy_url(),
+                "policy_url": entry.rule.policy_url().map(|url| {
+                    if explain_field_is_sensitive(entry, "policy_url") {
+                        "<redacted>"
+                    } else {
+                        url
+                    }
+                }),
                 "conditional": entry.when.is_some(),
                 "expect_matches": entry.expect_matches(),
                 "fixable": entry.rule.fixer().is_some(),
@@ -210,10 +221,15 @@ pub(super) fn render_facts_human(
         writeln!(out, "(no facts declared in config)")?;
         return Ok(());
     }
-    let id_width = facts.iter().map(|f| f.id.len()).max().unwrap_or(0);
+    // A fact id can come from the environment.
+    let ids: Vec<_> = facts
+        .iter()
+        .map(|f| super::redact_environment_values(&f.id))
+        .collect();
+    let id_width = ids.iter().map(|id| id.len()).max().unwrap_or(0);
     let kind_width = facts.iter().map(|f| f.kind.name().len()).max().unwrap_or(0);
     let dim = style::DIM;
-    for spec in facts {
+    for (spec, id) in facts.iter().zip(&ids) {
         let value_str = values
             .get(&spec.id)
             .map_or_else(|| "(unresolved)".to_string(), fact_value_display);
@@ -230,7 +246,7 @@ pub(super) fn render_facts_human(
         writeln!(
             out,
             "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{}{value_style:#}",
-            term(&spec.id),
+            term(id),
             // A fact value can come from repo content or a `custom:` command.
             term(&value_str),
         )?;
@@ -250,7 +266,8 @@ pub(super) fn render_facts_json(
                 .get(&spec.id)
                 .map_or(serde_json::Value::Null, fact_value_json);
             serde_json::json!({
-                "id": spec.id,
+                // A fact id can come from the environment.
+                "id": super::redact_environment_values(&spec.id),
                 "kind": spec.kind.name(),
                 "value": value,
             })

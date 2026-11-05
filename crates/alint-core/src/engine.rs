@@ -739,9 +739,7 @@ pub(crate) fn visit_rule_tree_with_registry(
 
     let tokens = crate::template::PathTokens::from_path(Path::new("_"));
     for (idx, compiled) in rule.nested_rule_specs().iter().enumerate() {
-        let nested_spec = compiled
-            .spec
-            .instantiate(rule.id(), idx, rule.level(), &tokens);
+        let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
         let nested_rule = registry.build(&nested_spec).map_err(|error| {
             Error::rule_config(
                 rule.id(),
@@ -901,9 +899,7 @@ fn visit_active_rule_tree_with_registry(
         ) {
             continue;
         }
-        let nested_spec = compiled
-            .spec
-            .instantiate(rule.id(), idx, rule.level(), &tokens);
+        let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
         let nested_rule = registry.build(&nested_spec).map_err(|error| {
             Error::rule_config(
                 rule.id(),

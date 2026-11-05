@@ -39,11 +39,11 @@ mod trust;
 pub(crate) use trust::{
     ENV_VARS_MARKER, FIELD_SOURCES_MARKER, PROVENANCE_MARKER, Provenance, SENSITIVE_FIELDS_MARKER,
     SourceClass, UNTRUSTED_FIX_SOURCE_MARKER, UntrustedWhenVarRead, configured_field_source,
-    demote_content_fixers_in, demote_content_fixers_in_rule, find_spawning_fix_op,
-    find_spawning_kind, find_template_placeholder_in_guarded_field, has_untrusted_fix_source,
-    mark_field_sources_in, mark_provenance_in, mark_sensitive_conditions,
+    demote_content_fixers_in, demote_content_fixers_in_rule, field_reads_environment,
+    find_spawning_fix_op, find_spawning_kind, find_template_placeholder_in_guarded_field,
+    has_untrusted_fix_source, mark_field_sources_in, mark_provenance_in, mark_sensitive_conditions,
     mark_template_sensitive_fields, mark_unattributed_field_sources, mark_untrusted_fix_sources_in,
-    masked_rule_mapping, merge_field_sources, merge_mapping_fields, merge_sensitive_fields,
+    masked_rule_mappings, merge_field_sources, merge_mapping_fields, merge_sensitive_fields,
     reject_ambiguous_yaml_in, reject_env_expansion_in, reject_env_reads_in_when,
     reject_remote_assembled_env_refs, reject_untrusted_assembled_when,
     reject_untrusted_env_instance_vars, reject_untrusted_env_var_reads,
@@ -259,6 +259,9 @@ fn resolve_top_level(
         )?;
         raw = merge(raw, drop_in);
     }
+    // With the forms the loader printed an `extends:` entry read from the
+    // environment in, which a later error can quote too (`load_extended_source`).
+    loader::add_environment_values(&mut raw.environment_values, &state.environment_values);
     Ok(raw)
 }
 
@@ -363,6 +366,11 @@ pub(crate) struct RawConfig {
     /// schema.
     #[serde(skip)]
     environment_values: Vec<String>,
+    /// Whether each of [`Self::extends`] read the environment, recorded by the
+    /// local-config parser before interpolation erases it. Not part of the
+    /// schema.
+    #[serde(skip)]
+    extends_environment: Vec<bool>,
 }
 
 const DEFAULT_FIX_SIZE_LIMIT: Option<u64> = Some(1 << 20);
@@ -497,9 +505,9 @@ impl RawConfig {
             reject_untrusted_env_instance_vars(m, &templates_by_id, &id_hint)?;
             // An unknown template's error quotes `extends_template:`, which may
             // be read from the environment.
-            let masked_instance = masked_rule_mapping(m);
+            let masked_instance = masked_rule_mappings(m);
             let mut expanded = expand_template(m, &templates_by_id).map_err(|error| {
-                redact_rule_error(error, masked_instance.as_ref(), &id_hint, |masked| {
+                redact_rule_error(error, masked_instance.as_deref(), &id_hint, |masked| {
                     expand_template(masked, &templates_by_id).map(drop)
                 })
             })?;
@@ -510,9 +518,9 @@ impl RawConfig {
             // and kind-checked too (not only the instance's own fields).
             // Scoping quotes a field it rejects (an absolute `paths:`), so its
             // error is redacted like the later steps' when that field may be secret.
-            let masked = masked_rule_mapping(&expanded);
+            let masked = masked_rule_mappings(&expanded);
             nested::apply_nested_scope(&mut expanded, catalog).map_err(|error| {
-                redact_rule_error(error, masked.as_ref(), &id_hint, |masked| {
+                redact_rule_error(error, masked.as_deref(), &id_hint, |masked| {
                     nested::apply_nested_scope(&mut masked.clone(), catalog)
                 })
             })?;
@@ -587,11 +595,11 @@ fn deserialize_effective_rule(
     catalog: Option<alint_core::KindCatalog<'_>>,
     id_hint: &str,
 ) -> Result<alint_core::RuleSpec> {
-    let masked = masked_rule_mapping(&expanded);
+    let masked = masked_rule_mappings(&expanded);
     let validate =
         |mapping: &Mapping| validate_effective_rule_fields(mapping, catalog, id_hint, None, None);
     validate(&expanded)
-        .map_err(|error| redact_rule_error(error, masked.as_ref(), id_hint, validate))?;
+        .map_err(|error| redact_rule_error(error, masked.as_deref(), id_hint, validate))?;
     let deserialize = |mut mapping: Mapping| {
         mapping.remove(FIELD_SOURCES_MARKER);
         let sensitive_fields = take_sensitive_fields(&mut mapping);
@@ -606,7 +614,7 @@ fn deserialize_effective_rule(
     };
     let (mut spec, sensitive_fields) =
         deserialize(std::mem::take(&mut expanded)).map_err(|error| {
-            redact_rule_error(error, masked.as_ref(), id_hint, |masked| {
+            redact_rule_error(error, masked.as_deref(), id_hint, |masked| {
                 deserialize(masked.clone()).map(drop)
             })
         })?;
@@ -615,23 +623,25 @@ fn deserialize_effective_rule(
 }
 
 /// Keep a configuration error of a rule with possibly secret values readable
-/// only when `rerun` on the masked copy fails with the identical message, which
-/// therefore cannot quote one of them; otherwise redact it. A rule without such
-/// values (`masked` is `None`) keeps every error.
+/// only when `rerun` on a masked copy ([`masked_rule_mappings`]) fails with the
+/// identical message, which therefore does not quote one of them; otherwise
+/// redact it. A rule without such values (`masked` is `None`) keeps every
+/// error.
 fn redact_rule_error(
     error: Error,
-    masked: Option<&Mapping>,
+    masked: Option<&[Mapping]>,
     id_hint: &str,
-    rerun: impl FnOnce(&Mapping) -> Result<()>,
+    mut rerun: impl FnMut(&Mapping) -> Result<()>,
 ) -> Error {
     let Some(masked) = masked else {
         return error;
     };
     let message = error.to_string();
-    if rerun(masked)
-        .err()
-        .is_some_and(|masked_error| masked_error.to_string() == message)
-    {
+    if masked.iter().any(|masked| {
+        rerun(masked)
+            .err()
+            .is_some_and(|masked_error| masked_error.to_string() == message)
+    }) {
         return error;
     }
     if error.is_internal() {
@@ -697,7 +707,15 @@ fn expand_template(
     let untrusted_fix_source = has_untrusted_fix_source(template) || has_untrusted_fix_source(rule);
     let mut expanded = (*template).clone();
     mark_template_sensitive_fields(&mut expanded, template, env_vars);
-    mark_unattributed_field_sources(&mut expanded, &format!("template `{template_id}`"));
+    // A template id read from the environment stays out of the attribution
+    // an error about a field the template supplies quotes. (`sensitive: true`
+    // leaves it shown: it names the rule's template, part of its identity.)
+    let template_source = if field_reads_environment(rule, "extends_template") {
+        "a template".to_string()
+    } else {
+        format!("template `{template_id}`")
+    };
+    mark_unattributed_field_sources(&mut expanded, &template_source);
     let template_field_sources = expanded.remove(FIELD_SOURCES_MARKER);
     let template_provenance = expanded.remove(PROVENANCE_MARKER);
     expanded = substitute_template_vars(expanded, &vars);
@@ -1452,6 +1470,7 @@ pub(crate) fn merge(a: RawConfig, b: RawConfig) -> RawConfig {
         untrusted_when_var_reads,
         compatibility,
         environment_values,
+        extends_environment: Vec::new(),
     }
 }
 

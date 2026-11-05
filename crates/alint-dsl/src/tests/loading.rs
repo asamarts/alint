@@ -151,6 +151,38 @@ rules:
     );
     assert!(error.contains("template `contains-template`"), "{error}");
 }
+
+#[test]
+fn configured_field_error_leaves_out_a_template_id_read_from_the_environment() {
+    #[derive(Debug)]
+    struct TemplateEnvironment;
+    impl crate::EnvironmentProvider for TemplateEnvironment {
+        fn get(&self, name: &str) -> Option<String> {
+            (name == "TEMPLATE").then(|| "contains-template".to_string())
+        }
+    }
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config,
+        "version: 1\ntemplates:\n  - id: contains-template\n    kind: dir_contains\n    \
+         paths: packages/*\n    select: packages/*\n    require: README.md\n    level: error\n\
+         rules:\n  - extends_template: '{{env.TEMPLATE}}'\n    id: packages-have-readmes\n",
+    )
+    .unwrap();
+    let options = LoadOptions {
+        environment: std::sync::Arc::new(TemplateEnvironment),
+        ..LoadOptions::with_catalog(test_catalog())
+    };
+    let error = load_with(&config, &options).unwrap_err().to_string();
+    assert!(
+        error.contains("`paths` is not supported by `dir_contains`"),
+        "{error}"
+    );
+    assert!(error.contains("supplied by a template"), "{error}");
+    assert!(!error.contains("contains-template"), "{error}");
+}
+
 #[test]
 fn nested_configured_field_error_names_the_template_that_supplied_require() {
     let yaml = r"

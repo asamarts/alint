@@ -1330,6 +1330,11 @@ pub struct CompiledNestedSpec {
     /// Pre-compiled `when:` expression. `None` when the nested
     /// spec carried no `when:` clause.
     pub when: Option<crate::when::WhenExpr>,
+    /// Whether the parent's `require:` may hold a secret: a value in it came
+    /// from the environment, or the parent is `sensitive: true`. Which nested
+    /// field such a value reached is not recorded, so
+    /// [`Self::instantiate`] treats every field of the nested rule as one.
+    pub sensitive_configuration: bool,
 }
 
 impl CompiledNestedSpec {
@@ -1353,7 +1358,38 @@ impl CompiledNestedSpec {
             })?),
             None => None,
         };
-        Ok(Self { spec, when })
+        Ok(Self {
+            spec,
+            when,
+            sensitive_configuration: false,
+        })
+    }
+
+    /// [`NestedRuleSpec::instantiate`], with every configured field of the
+    /// result sensitive ([`RuleSpec::field_is_sensitive`]) when
+    /// [`Self::sensitive_configuration`] is set, as an environment-derived
+    /// field of a top-level rule is: its errors and warnings leave the value
+    /// out.
+    pub fn instantiate(
+        &self,
+        parent_id: &str,
+        idx: usize,
+        level: Level,
+        tokens: &crate::template::PathTokens,
+    ) -> RuleSpec {
+        let mut spec = self.spec.instantiate(parent_id, idx, level, tokens);
+        if self.sensitive_configuration {
+            spec.sensitive_fields = ["paths", "message", "policy_url", "when", "scope_filter"]
+                .into_iter()
+                .map(str::to_string)
+                .chain(
+                    spec.extra
+                        .keys()
+                        .filter_map(|key| key.as_str().map(str::to_string)),
+                )
+                .collect();
+        }
+        spec
     }
 }
 
@@ -1459,8 +1495,9 @@ impl NestedRuleSpec {
 mod redaction;
 #[doc(hidden)]
 pub use redaction::{
-    CONFIGURATION_MASK, REDACTED_CONFIGURATION_ERROR, configuration_field_may_be_secret,
-    mask_configuration_values, redact_environment_values, redact_environment_values_in_error,
+    CONFIGURATION_MASK, NumberMask, REDACTED_CONFIGURATION_ERROR,
+    configuration_field_may_be_secret, mask_configuration_values, redact_environment_values,
+    redact_environment_values_in_error,
 };
 
 #[cfg(test)]
@@ -1806,6 +1843,29 @@ mod tests {
         assert!(matches!(from_owned, ContentSourceSpec::Inline(s) if s == "hi"));
         let from_str: ContentSourceSpec = "hi".into();
         assert!(matches!(from_str, ContentSourceSpec::Inline(s) if s == "hi"));
+    }
+
+    #[test]
+    fn compiled_nested_spec_marks_every_field_of_a_sensitive_require() {
+        let nested: NestedRuleSpec = yaml_serde::from_str(
+            "kind: git_commit_no_fixup\nsince: main\nscope_filter:\n  changed_since: main\n",
+        )
+        .unwrap();
+        let mut compiled = CompiledNestedSpec::compile(nested, "each", 0).unwrap();
+        let tokens = PathTokens::from_path(Path::new("pkg/a"));
+        let plain = compiled.instantiate("each", 0, Level::Error, &tokens);
+        assert!(plain.sensitive_fields.is_empty());
+        assert!(!plain.sensitive);
+
+        compiled.sensitive_configuration = true;
+        let spec = compiled.instantiate("each", 0, Level::Error, &tokens);
+        for field in ["since", "scope_filter", "paths", "message", "when"] {
+            assert!(spec.field_is_sensitive(field), "{field}");
+        }
+        assert!(!spec.field_is_sensitive("kind"));
+        // The flag marks fields, not `sensitive: true` itself; the parent,
+        // whose `require` is sensitive, redacts the findings it reports.
+        assert!(!spec.sensitive);
     }
 
     #[test]
