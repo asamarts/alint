@@ -883,6 +883,84 @@ mod tests {
         }))
     }
 
+    /// A rule whose nested rules fail validation with `message`.
+    #[derive(Debug)]
+    struct NestedFailure {
+        message: String,
+    }
+
+    impl Rule for NestedFailure {
+        fn id(&self) -> &'static str {
+            "t"
+        }
+
+        fn level(&self) -> Level {
+            Level::Error
+        }
+
+        fn evaluate(&self, _ctx: &crate::Context<'_>) -> Result<Vec<crate::Violation>> {
+            Ok(Vec::new())
+        }
+
+        fn validate_nested(&self, _registry: &RuleRegistry) -> Result<()> {
+            Err(Error::rule_config("t", self.message.clone()))
+        }
+    }
+
+    // The functions must match the public `RuleBuilder` signature.
+    #[allow(clippy::unnecessary_wraps)]
+    fn structural_nested_builder(_spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+        Ok(Box::new(NestedFailure {
+            message: "nested rule #0: unknown field `colour`".to_string(),
+        }))
+    }
+
+    #[allow(clippy::unnecessary_wraps)]
+    fn quoting_nested_builder(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
+        Ok(Box::new(NestedFailure {
+            message: format!(
+                "nested rule #0: invalid regex `{}`",
+                spec.extra["pattern"].as_str().unwrap_or_default()
+            ),
+        }))
+    }
+
+    #[test]
+    fn validate_nested_redacts_only_an_error_that_could_quote_a_secret() {
+        let mut registry = RuleRegistry::new();
+        registry.register("structural", &TEST_META, structural_nested_builder);
+        registry.register("quoting", &TEST_META, quoting_nested_builder);
+        let validate = |kind: &str, secret: bool| {
+            let mut spec: RuleSpec = yaml_serde::from_str(&format!(
+                "id: t\nkind: {kind}\nlevel: error\npattern: canary\n"
+            ))
+            .unwrap();
+            if secret {
+                spec.sensitive_fields.insert("pattern".to_string());
+            }
+            let rule = registry.build(&spec).unwrap();
+            registry
+                .validate_nested(&spec, rule.as_ref())
+                .unwrap_err()
+                .to_string()
+        };
+        // Nothing secret: each error is the nested rule's own.
+        assert!(validate("structural", false).contains("unknown field `colour`"));
+        assert!(validate("quoting", false).contains("invalid regex `canary`"));
+        // A secret pattern: an error the masked rerun reproduces stays
+        // readable, and one that quotes the pattern is redacted.
+        let structural = validate("structural", true);
+        assert!(
+            structural.contains("unknown field `colour`"),
+            "{structural}"
+        );
+        let quoting = validate("quoting", true);
+        assert!(
+            quoting.contains(crate::REDACTED_CONFIGURATION_ERROR) && !quoting.contains("canary"),
+            "{quoting}"
+        );
+    }
+
     #[test]
     fn new_registry_has_no_kinds() {
         let r = RuleRegistry::new();
