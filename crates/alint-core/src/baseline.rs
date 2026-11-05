@@ -527,10 +527,10 @@ mod tests {
             .prefix("alint-baseline-test-")
             .tempdir()
             .unwrap();
-        let mut names = vec!["base[1].json", "base1.json", "sub/base[1].json", "b*.json"];
+        let mut names = vec!["base[1].json", "base1.json", "sub/base[1].json"];
         if cfg!(unix) {
             // Legal names only off Windows.
-            names.extend(["a\\b.json", "a/b.json", "trailing ", "trailing"]);
+            names.extend(["b*.json", "a\\b.json", "a/b.json", "trailing ", "trailing"]);
         }
         for name in &names {
             let path = root.path().join(name);
@@ -553,8 +553,8 @@ mod tests {
             left_out
         };
         assert_eq!(walked("base[1].json"), ["base[1].json"]);
-        assert_eq!(walked("b*.json"), ["b*.json"]);
         if cfg!(unix) {
+            assert_eq!(walked("b*.json"), ["b*.json"]);
             assert_eq!(walked("a\\b.json"), ["a\\b.json"]);
             assert_eq!(walked("trailing "), ["trailing "]);
         }
