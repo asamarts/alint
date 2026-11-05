@@ -1453,6 +1453,16 @@ mod tests {
         assert!(!plain[0].sensitive_configuration);
         let sensitive = compile_nested_require(&parent("sensitive: true\n"), require()).unwrap();
         assert!(sensitive[0].sensitive_configuration);
+        // A `require:` read from the environment, and only that field.
+        let mut environment = parent("");
+        environment.sensitive_fields.insert("message".to_string());
+        assert!(
+            !compile_nested_require(&environment, require()).unwrap()[0].sensitive_configuration
+        );
+        environment.sensitive_fields.insert("require".to_string());
+        assert!(
+            compile_nested_require(&environment, require()).unwrap()[0].sensitive_configuration
+        );
     }
 
     #[test]

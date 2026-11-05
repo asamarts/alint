@@ -1590,3 +1590,32 @@ fn a_create_has_one_name_when_it_lands_where_it_is_written() {
     );
     assert_eq!(names("../outside.txt"), None);
 }
+
+#[test]
+fn engine_fix_warnings_show_a_hidden_file_as_redacted() {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join("dir")).unwrap();
+    std::fs::write(tmp.path().join("dir/secret.txt"), "x").unwrap();
+    std::fs::write(tmp.path().join("plain.txt"), "x").unwrap();
+    let hidden: HashSet<PathBuf> = std::iter::once(Engine::normalized_write_target(
+        tmp.path(),
+        Path::new("dir/secret.txt"),
+    ))
+    .collect();
+    // The same file under another spelling is still hidden.
+    for spelling in [
+        "dir/secret.txt",
+        "./dir/secret.txt",
+        "dir/../dir/secret.txt",
+    ] {
+        assert_eq!(
+            Engine::shown_path(tmp.path(), &hidden, Path::new(spelling)),
+            crate::CONFIGURATION_MASK,
+            "{spelling}"
+        );
+    }
+    assert_eq!(
+        Engine::shown_path(tmp.path(), &hidden, Path::new("plain.txt")),
+        "plain.txt"
+    );
+}

@@ -53,6 +53,17 @@ subject_max_length: "{{env.MAX_SUBJECT | default('72')}}"   # validates as the i
 
 A consequence: a string-typed field whose env value is bare-numeric (`"72"`) or bare-bool (`"true"`) re-types too, and validation then rejects it with a type error. alint shows that error as `<redacted>`, because it would quote the value, which may be a secret.
 
+## What alint shows of a value from the environment
+
+A value read from the environment may be a secret, so alint keeps it out of what it prints:
+
+- A configuration error that could quote the value shows `<redacted>` in its place. alint repeats the failed step with every such value masked (a string replaced, a number moved one step, a boolean flipped) and shows the real error only when the masked run fails with the same message, which then cannot quote one of them. An unknown option or an unsupported field stays readable this way.
+- A rule with any field read from the environment, other than `policy_url`, reports its findings with redacted evidence, as [`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019) does. When the field chooses files (`paths:`, `scope_filter:`, a selector such as `select:`, or a nested `require:`), the paths are `<redacted>` too, in reports and in the warnings `alint fix` prints.
+- A `pattern:` read from the environment, or in a `sensitive: true` rule, gets no warning about its `^` or `$` anchors: the warning would say how the pattern starts or ends.
+- A value in a top-level field (`extends:`, `ignore:`, `facts:`, `baseline:`, `version:`) is replaced with `<redacted>` wherever an error or warning prints it, including printed as a path or as a remote URL without its credentials.
+
+Two kinds of value are still printed: a boolean, and a value an error prints in fewer than four characters. Removing every occurrence of those would garble the message, and they are too short to be much of a secret. A value for an option with a fixed set of choices (`style: tabs`) cannot be masked with another valid choice, so an unrelated error after it in the same rule stays redacted.
+
 ## `env.X` in `when:` expressions
 
 The `when:` expression reads four namespaces: `facts`, `vars`, `env`, and `iter` (the last only inside iteration contexts, such as a `for_each_*` rule's `when_iter:`). `env` exposes environment variables:

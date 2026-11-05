@@ -9,7 +9,7 @@ use alint_output::{ColorChoice, Format, GlyphSet, HumanOptions, sanitize_termina
 use anyhow::{Context, Result, bail};
 
 use super::{
-    Cli, error_is_internal, print_stdout_line, redact_environment_values,
+    Cli, error_is_internal, fact_pattern_hints, print_stdout_line, redact_environment_values,
     remember_environment_values, terminal_error,
 };
 
@@ -235,7 +235,10 @@ fn validate_config_inner(
         }
         count += 1;
     }
-    hints.extend(alint_core::pattern_hints::fact_hints(&config.facts));
+    hints.extend(alint_core::pattern_hints::environment_fact_hints(
+        &config.facts,
+        &config.environment_values,
+    ));
     Ok((count, hints))
 }
 
@@ -329,7 +332,7 @@ pub(super) fn report_pattern_hints(
     let hints = entries
         .iter()
         .flat_map(|entry| entry.pattern_hints(registry))
-        .chain(alint_core::pattern_hints::fact_hints(facts));
+        .chain(fact_pattern_hints(facts));
     for hint in hints {
         eprintln!(
             "alint: warning: {}",

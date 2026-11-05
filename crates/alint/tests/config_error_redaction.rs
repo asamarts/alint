@@ -441,6 +441,155 @@ fn a_structural_error_beside_a_secret_stays_readable() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unknown field `colour`"), "{stderr}");
     assert!(!stderr.contains("<redacted>"), "{stderr}");
+
+    // A number at the edge of its range fails its check when the rerun moves
+    // it up, so the rerun also moves it down.
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: commented\n    kind: commented_out_code\n    \
+         paths: '**/*.rs'\n    threshold: 1.0\n    sensitive: true\n    level: error\n    \
+         scope_filter:\n      colour: red\n",
+    );
+    let output = run(root.path(), &["check"], &[]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown field `colour`"), "{stderr}");
+    assert!(!stderr.contains("<redacted>"), "{stderr}");
+}
+
+#[test]
+fn a_path_read_from_the_environment_stays_out_of_fix_warnings() {
+    const TRIM: &str = "    fix:\n      file_trim_trailing_whitespace: {}\n";
+    let env = [("VALUE", "canary-file.rs")];
+    let root = tempfile::tempdir().unwrap();
+    let stderr = |output: &Output| String::from_utf8_lossy(&output.stderr).into_owned();
+
+    // A file over `fix_size_limit` is skipped with a warning naming it.
+    write(root.path(), "canary-file.rs", "fn a() {}   \n");
+    write(
+        root.path(),
+        ".alint.yml",
+        &format!(
+            "version: 1\nfix_size_limit: 4\nrules:\n  - id: trim\n    \
+             kind: no_trailing_whitespace\n    paths: '{{{{env.VALUE}}}}'\n    level: error\n{TRIM}"
+        ),
+    );
+    let output = run(root.path(), &["fix"], &env);
+    assert!(
+        stderr(&output).contains("<redacted> is 13 bytes; exceeds fix_size_limit"),
+        "{}",
+        stderr(&output)
+    );
+    assert_left_out("fix_size_limit", &output, &["canary-file"]);
+
+    // A `replace` whose replacement still matches is left unfixed with a
+    // warning naming the file.
+    write(root.path(), "canary-file.rs", "zzz\n");
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: no-z\n    kind: file_content_forbidden\n    \
+         paths: '{{env.VALUE}}'\n    pattern: zzz\n    level: error\n    fix:\n      \
+         replace:\n        replacement: zzzz\n        applicability: safe\n",
+    );
+    let output = run(root.path(), &["fix"], &env);
+    assert!(
+        stderr(&output).contains("<redacted>: 1 `replace` match(es) left unfixed"),
+        "{}",
+        stderr(&output)
+    );
+    assert_left_out("replace", &output, &["canary-file"]);
+
+    // A write that fails names the file, and the I/O error names it again.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt as _;
+        write(root.path(), "canary-file.rs", "fn a() {}   \n");
+        std::fs::set_permissions(
+            root.path().join("canary-file.rs"),
+            std::fs::Permissions::from_mode(0o444),
+        )
+        .unwrap();
+        write(
+            root.path(),
+            ".alint.yml",
+            &format!(
+                "version: 1\nrules:\n  - id: trim\n    kind: no_trailing_whitespace\n    \
+                 paths: '{{{{env.VALUE}}}}'\n    level: error\n{TRIM}"
+            ),
+        );
+        let output = run(root.path(), &["fix"], &env);
+        assert!(
+            stderr(&output).contains("could not write <redacted>"),
+            "{}",
+            stderr(&output)
+        );
+        assert_left_out("write failure", &output, &["canary-file"]);
+    }
+}
+
+#[test]
+fn a_pattern_that_may_be_secret_raises_no_hint_and_no_quoted_warning() {
+    const HINT: &str = "matches only at the very end";
+    let root = tempfile::tempdir().unwrap();
+    write(root.path(), "README.md", "hi\n");
+    let output_text = |output: &Output| {
+        format!(
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        )
+    };
+
+    // Whether a hint appears says how the pattern ends. A literal pattern
+    // still gets its hint.
+    let rule = |pattern: &str, extra: &str| {
+        format!(
+            "version: 1\nrules:\n  - id: anchored\n    kind: file_content_matches\n    \
+             paths: README.md\n    pattern: '{pattern}'\n{extra}    level: error\n"
+        )
+    };
+    let fact = "version: 1\nfacts:\n  - id: anchored\n    file_content_matches:\n      \
+                paths: README.md\n      pattern: '{{env.VALUE}}'\nrules: []\n";
+    for (config, hinted) in [
+        (rule("hi$", ""), true),
+        (rule("{{env.VALUE}}", ""), false),
+        (rule("hi$", "    sensitive: true\n"), false),
+        (fact.to_string(), false),
+    ] {
+        write(root.path(), ".alint.yml", &config);
+        for args in [&["check"][..], &["validate-config"]] {
+            let output = run(root.path(), args, &[("VALUE", "canary$")]);
+            assert_eq!(
+                output_text(&output).contains(HINT),
+                hinted,
+                "{args:?}\n{config}\n{}",
+                output_text(&output)
+            );
+        }
+    }
+
+    // The deprecation warning for a `${VAR}` in `since:` quotes the field.
+    for (since, extra) in [
+        ("{{env.VALUE}}", ""),
+        ("${CANARY_REF}", "    sensitive: true\n"),
+    ] {
+        write(
+            root.path(),
+            ".alint.yml",
+            &format!(
+                "version: 1\nrules:\n  - id: message\n    kind: git_commit_message\n    \
+                 requires_body: true\n    since: '{since}'\n{extra}    level: error\n"
+            ),
+        );
+        let output = run(root.path(), &["check"], &[("VALUE", "canary-${X}")]);
+        let text = output_text(&output);
+        assert!(
+            text.contains("`since:` uses the deprecated")
+                && !text.to_lowercase().contains("canary"),
+            "{since}:\n{text}"
+        );
+    }
 }
 
 #[test]

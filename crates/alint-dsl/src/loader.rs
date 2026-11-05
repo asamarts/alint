@@ -397,12 +397,25 @@ fn parse_config_interpolated_inner_with_environment(
             }
         }
         let mut config: RawConfig = yaml_serde::from_value(value).map_err(|error| {
-            let reproduced = masked.is_none_or(|mut masked| {
-                let mask = |_: &str| Some(alint_core::CONFIGURATION_MASK.to_string());
-                crate::interp::interpolate_value(&mut masked, &mask).is_ok()
-                    && yaml_serde::from_value::<RawConfig>(masked)
-                        .err()
-                        .is_some_and(|masked_error| masked_error.to_string() == error.to_string())
+            // Each masked value keeps the type interpolation gave the real one
+            // (a 12-digit id is a number), so an error in an unrelated field
+            // after it still recurs; numbers move both ways, as a rule's
+            // rerun does, for a value at the edge of its range.
+            let reproduced = masked.is_none_or(|masked| {
+                alint_core::NumberMask::BOTH.into_iter().any(|numbers| {
+                    let mut masked = masked.clone();
+                    crate::interp::interpolate_masked(
+                        &mut masked,
+                        &|name| environment.get(name),
+                        numbers,
+                    )
+                    .is_ok()
+                        && yaml_serde::from_value::<RawConfig>(masked)
+                            .err()
+                            .is_some_and(|masked_error| {
+                                masked_error.to_string() == error.to_string()
+                            })
+                })
             });
             if reproduced {
                 error.into()
@@ -463,12 +476,20 @@ fn value_reads_environment(value: &yaml_serde::Value) -> bool {
     }
 }
 
-/// Whether each entry of a raw (pre-interpolation) sequence reads the
-/// environment (`extends:`, so the loader knows which entries came from it).
+/// Whether the URL of each entry of a raw (pre-interpolation) `extends:` reads
+/// the environment, so the loader knows which sources came from it: the whole
+/// entry in the string form, its `url:` in the mapping form. An `only:` or
+/// `except:` read from the environment leaves the URL as written; those values
+/// are recorded with the other top-level ones.
 fn entries_reading_environment(entries: Option<&yaml_serde::Value>) -> Vec<bool> {
     entries
         .and_then(yaml_serde::Value::as_sequence)
-        .map(|entries| entries.iter().map(value_reads_environment).collect())
+        .map(|entries| {
+            entries
+                .iter()
+                .map(|entry| value_reads_environment(entry.get("url").unwrap_or(entry)))
+                .collect()
+        })
         .unwrap_or_default()
 }
 

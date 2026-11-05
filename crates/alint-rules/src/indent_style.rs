@@ -796,6 +796,7 @@ mod tests {
             compose: None,
             stage_ops: None,
             process_environment: None,
+            paths_sensitive: false,
         };
         let outcome = reindent_fixer(Applicability::Safe)
             .apply(
@@ -831,6 +832,7 @@ mod tests {
             compose: None,
             stage_ops: None,
             process_environment: None,
+            paths_sensitive: false,
         };
         let outcome = reindent_fixer(Applicability::Safe)
             .apply(

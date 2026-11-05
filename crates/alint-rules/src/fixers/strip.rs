@@ -418,6 +418,7 @@ mod tests {
                 compose: None,
                 stage_ops: None,
                 process_environment: None,
+                paths_sensitive: false,
             };
             let outcome = fixer.apply(&viol, &ctx).unwrap();
             assert!(

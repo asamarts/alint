@@ -435,13 +435,22 @@ pub fn build(spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     if let Some(raw) = &opts.since
         && raw.contains("${")
     {
+        // A `since:` read from the environment, or set in a `sensitive: true`
+        // rule, may be secret: name the field without its value.
+        let (written, canonical) = if spec.field_is_sensitive("since") {
+            ("`since:`".to_string(), "`{{env.VAR}}`".to_string())
+        } else {
+            (
+                format!("`since: {raw}`"),
+                format!("`{}`", posix_to_env_template(raw)),
+            )
+        };
         eprintln!(
-            "alint: warning: rule {:?}: `since: {raw}` uses the deprecated v0.9.21 \
-             `${{VAR}}` interpolation syntax. The canonical v0.11+ form is `{}`; \
+            "alint: warning: rule {:?}: {written} uses the deprecated v0.9.21 \
+             `${{VAR}}` interpolation syntax. The canonical v0.11+ form is {canonical}; \
              the `${{VAR}}` form will be removed in v1.0. \
              See https://alint.org/docs/configuration/variable-interpolation/.",
             spec.id,
-            posix_to_env_template(raw),
         );
     }
 

@@ -64,7 +64,7 @@ impl Fixer for ReplaceFixer {
 
     fn collect_edits(
         &self,
-        _violations: &[Violation],
+        violations: &[Violation],
         file: &Path,
         bytes: &[u8],
         _root: &Path,
@@ -125,11 +125,17 @@ impl Fixer for ReplaceFixer {
         if nonconverging > 0 {
             // Surface the skip (the file otherwise silently keeps its violation),
             // matching the `fix_size_limit` over-cap warning's style.
+            // A path the rule's configuration reads from the environment is
+            // `<redacted>` in reports; the engine marks the findings so.
+            let shown = if violations.iter().any(Violation::path_is_sensitive) {
+                alint_core::CONFIGURATION_MASK.into()
+            } else {
+                file.to_string_lossy()
+            };
             eprintln!(
-                "alint: warning: {}: {nonconverging} `replace` match(es) left unfixed \
+                "alint: warning: {shown}: {nonconverging} `replace` match(es) left unfixed \
                  because the replacement still matches the pattern (a non-convergent \
-                 config; the forbidden pattern would remain)",
-                file.display()
+                 config; the forbidden pattern would remain)"
             );
         }
         edits

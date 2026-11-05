@@ -109,6 +109,18 @@ fn redact_environment_values(message: &str) -> std::borrow::Cow<'_, str> {
     }
 }
 
+/// The pattern hints for `facts`, leaving out a pattern that holds an
+/// environment value of a config loaded so far
+/// ([`alint_core::pattern_hints::environment_fact_hints`]).
+fn fact_pattern_hints(
+    facts: &[alint_core::FactSpec],
+) -> Vec<alint_core::pattern_hints::ConfigHint> {
+    let known = ENVIRONMENT_VALUES
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    alint_core::pattern_hints::environment_fact_hints(facts, &known)
+}
+
 /// Render a multi-line top-level error without letting an untrusted newline
 /// escape the CLI's `alint:` record prefix, and without the environment values
 /// of the loaded config ([`redact_environment_values`]).

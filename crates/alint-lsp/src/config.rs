@@ -299,7 +299,10 @@ fn build_session_for_config(
     let pattern_hints: Vec<_> = entries
         .iter()
         .flat_map(|entry| entry.pattern_hints(registry))
-        .chain(alint_core::pattern_hints::fact_hints(&config.facts))
+        .chain(alint_core::pattern_hints::environment_fact_hints(
+            &config.facts,
+            &environment_values,
+        ))
         .map(|mut hint| {
             hint.id = redact(hint.id);
             hint

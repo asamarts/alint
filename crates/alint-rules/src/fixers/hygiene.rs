@@ -552,6 +552,7 @@ mod tests {
             compose: None,
             stage_ops: None,
             process_environment: None,
+            paths_sensitive: false,
         }
     }
 
@@ -617,6 +618,7 @@ mod tests {
             compose: None,
             stage_ops: None,
             process_environment: None,
+            paths_sensitive: false,
         };
         let outcome = FileTrimTrailingWhitespaceFixer::new()
             .apply(
