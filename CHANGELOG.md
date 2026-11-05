@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-11-05
+
+A fix release. Ignore files stop at the repository boundary, as git's do, so a `.gitignore` in a
+directory above the repository (a home directory kept in git) can no longer hide the tree and make
+every rule pass, and a linked worktree honors the repository's shared `info/exclude`.
+`fix --dry-run` agrees with `fix` on whether a created file resolves its rule in many more
+layouts. A configuration error is readable again unless it could quote a value read from the
+environment or set in a `sensitive: true` rule, and such values stay out of the errors, warnings
+and listings that printed them. Nested rules are back within 0.5% of v0.20.1's speed.
+
 ### Security
 
 - The locked `pulldown-cmark` is now 0.13.6, fixing RUSTSEC-2026-0433
@@ -8445,7 +8455,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/asamarts/alint/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/asamarts/alint/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/asamarts/alint/compare/v0.20.0...v0.20.1
 [0.20.0]: https://github.com/asamarts/alint/compare/v0.19.0...v0.20.0

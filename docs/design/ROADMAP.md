@@ -10,7 +10,13 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.21.0** (2026-11-01): general-linter phase 2. `key_parity` keeps
+**Latest release: v0.21.1** (2026-11-05): a fix release. Ignore files stop at the repository
+boundary, as git's do, and a linked worktree honors the repository's shared `info/exclude`;
+`fix --dry-run` agrees with `fix` on whether a created file resolves its rule in many more
+layouts; configuration errors are readable again unless they could quote a value read from the
+environment or set in a `sensitive: true` rule, and such values stay out of errors, warnings and
+listings; and nested rules are back to v0.20.1's speed. The prior v0.21.0 (2026-11-01) was
+general-linter phase 2. `key_parity` keeps
 locale and environment files in step with a reference across JSON, YAML, TOML, dotenv, INI, Java
 properties, Android string resources, and `.resx`, on an internal relation layer that a shadow
 port of `cross_file`'s `equals` relation also runs on, matching the existing implementation on
