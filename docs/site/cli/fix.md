@@ -26,8 +26,12 @@ standing is reported `skipped` (`skip_kind: "unresolved"` in JSON) with a
 nonzero exit. The dry run predicts the common case of that: a `file_create` or
 `dir_create` whose target the walk never indexes (gitignored, including by an
 ignore file another fix in the same run creates, matched by `ignore:`, or
-below a symlink the walk does not follow), or a created file outside the
-rule's `paths:`, is reported the same way, not as applied. Anything else only
+below a symlink the walk does not follow), a target outside the root or the
+rule's `paths:`, or a created file a `git_tracked_only` rule cannot see because
+git does not track it, is reported the same way, not as applied. A
+`file_exists` rule with `respect_gitignore: false` looks for its literal path
+on disk itself, so a create the walk leaves out still resolves it, in the dry
+run as in the real one. Anything else only
 the real run's re-check can reveal, so a dry-run `applied` item means "the
 first pass would apply this", not "this resolves the violation": a fix that
 only makes progress on a later pass, a cascade where one rule's fix creates or

@@ -581,12 +581,14 @@ impl Engine {
     /// would-be-`Applied` create (`file_create`, `dir_create`) whose target
     /// the walk would not index (gitignored, `ignore:`d, including by an
     /// ignore file another create in the same pass writes, or below a
-    /// symlinked directory the walk does not enter), or a created file outside
-    /// the rule's `paths:`. Those become the same unresolved skip the real run
-    /// reports. Other ways a fix can fail its re-check (a cascade through
-    /// another rule, content a fixer writes that the rule still rejects, an
-    /// edit to an existing ignore file) are only found by running it;
-    /// `docs/site/cli/fix.md` documents the limit.
+    /// symlinked directory the walk does not enter) and the rule does not look
+    /// for on disk itself, a target outside the rule's `paths:` or the root, or
+    /// a created file a `git_tracked_only` rule would not see as tracked.
+    /// Those become the same unresolved skip the real run reports. Other ways a
+    /// fix can fail its re-check (a cascade through another rule, content a
+    /// fixer writes that the rule still rejects, an edit to an existing ignore
+    /// file) are only found by running it; `docs/site/cli/fix.md` documents the
+    /// limit.
     pub(super) fn predict_unresolved_creates(
         &self,
         root: &Path,
@@ -595,7 +597,8 @@ impl Engine {
         report: &mut FixReport,
     ) {
         // Each would-be-applied create: where its result and item sit in the
-        // report, its rule, the target and, for a file, its content.
+        // report, its rule, the target, whether it is a directory and, for a
+        // file whose fixer has an editor form, its content.
         let mut creates = Vec::new();
         for (result, rr) in report.results.iter().enumerate() {
             let Some(entry) = self.entries.iter().find(|e| e.rule.id() == &*rr.rule_id) else {
@@ -608,31 +611,47 @@ impl Engine {
                 if !matches!(it.status, FixStatus::Applied(_)) {
                     continue;
                 }
-                let (path, content) = match fixer.fix_edit(&it.violation, &[], root) {
-                    Some(FixEdit::CreateFile { path, content }) => (path, Some(content)),
-                    _ => match fixer.created_dir() {
-                        Some(dir) => (dir.to_path_buf(), None),
-                        None => continue,
+                // `file_create` declines an editor form for a target outside
+                // the root, which `allow_out_of_root` still lets it write.
+                let (path, is_dir, content) = match fixer.fix_edit(&it.violation, &[], root) {
+                    Some(FixEdit::CreateFile { path, content }) => (path, false, Some(content)),
+                    _ => match (fixer.created_file(), fixer.created_dir()) {
+                        (Some(file), _) => (file.to_path_buf(), false, None),
+                        (None, Some(dir)) => (dir.to_path_buf(), true, None),
+                        (None, None) => continue,
                     },
                 };
-                // The fixer writes to the root joined with the lexically
-                // normalized path (`a/../b` is `b`). `Err` for a path that
-                // leaves the root (`../x`), which only `allow_out_of_root`
-                // lets a fixer write, where no walk reaches.
-                let target = crate::pathsafe::normalize_confined(&path).ok_or(path);
-                creates.push((result, item, entry, target, content));
+                let target = Self::created_target(root, &path).ok_or(path);
+                creates.push((result, item, entry, target, is_dir, content));
             }
         }
-        // The walk after the fix reads the ignore files those creates write.
-        let created_ignores: Vec<(&Path, &[u8])> = creates
-            .iter()
-            .filter_map(|(_, _, _, target, content)| {
-                let (target, content) = (target.as_ref().ok()?, content.as_deref()?);
-                matches!(target.file_name()?.to_str()?, ".gitignore" | ".ignore")
-                    .then_some((target.as_path(), content))
-            })
+        // The walk after the fix reads the ignore files those creates write. A
+        // create skips a file that is already there, so the first create of a
+        // path wins, whichever name (through an in-tree symlink) it uses.
+        let mut created_ignores: Vec<(&Path, &[u8], PathBuf)> = Vec::new();
+        for (_, _, _, target, _, content) in &creates {
+            let (Ok(target), Some(content)) = (target, content.as_deref()) else {
+                continue;
+            };
+            if !matches!(
+                target.file_name().and_then(std::ffi::OsStr::to_str),
+                Some(".gitignore" | ".ignore")
+            ) {
+                continue;
+            }
+            let file = root.join(target);
+            let resolved = crate::pathsafe::resolve_existing_prefix(&file).unwrap_or(file);
+            if !created_ignores.iter().any(|(_, _, r)| *r == resolved) {
+                created_ignores.push((target.as_path(), content, resolved));
+            }
+        }
+        let created_ignores: Vec<(&Path, &[u8])> = created_ignores
+            .into_iter()
+            .map(|(target, content, _)| (target, content))
             .collect();
-        for (result, item, entry, target, content) in &creates {
+        // `git ls-files`, once, when a `git_tracked_only` rule creates a file.
+        let tracked = std::cell::OnceCell::new();
+        for (result, item, entry, target, is_dir, _) in &creates {
             let why = match target {
                 Err(path) => Some(format!(
                     "{} is outside the root, so the rule would never see it",
@@ -644,8 +663,9 @@ impl Engine {
                     walk_opts,
                     entry,
                     target,
-                    content.is_none(),
+                    *is_dir,
                     &created_ignores,
+                    &tracked,
                 ),
             };
             let it = &mut report.results[*result].items[*item];
@@ -657,10 +677,29 @@ impl Engine {
         }
     }
 
+    /// The root-relative path a create of `path` writes, or `None` when it
+    /// writes outside the root. A fixer joins the path to the root after
+    /// normalizing it lexically (`a/../b` is `b`), and an absolute path (only
+    /// `allow_out_of_root` permits one) replaces the root.
+    fn created_target(root: &Path, path: &Path) -> Option<PathBuf> {
+        if path.is_absolute() {
+            let canonical = root.canonicalize().ok();
+            let relative = path.strip_prefix(root).ok().or_else(|| {
+                canonical
+                    .as_deref()
+                    .and_then(|root| path.strip_prefix(root).ok())
+            })?;
+            return crate::pathsafe::normalize_confined(relative);
+        }
+        crate::pathsafe::normalize_confined(path)
+    }
+
     /// Why a create of `target` (root-relative, a directory when `is_dir`)
-    /// would not resolve `entry`'s violation, or `None` when it would: the walk
-    /// would leave it out (counting the ignore files the pass creates), or a
-    /// created file lies outside the rule's `paths:`.
+    /// would not resolve `entry`'s violation, or `None` when it would: the
+    /// rule sees only tracked files and the target is not one, the walk would
+    /// leave it out (counting the ignore files the pass creates) and the rule
+    /// does not look for it on disk, or it lies outside the rule's `paths:`.
+    #[allow(clippy::too_many_arguments)]
     fn predicted_unresolved(
         root: &Path,
         index: &FileIndex,
@@ -669,18 +708,41 @@ impl Engine {
         target: &Path,
         is_dir: bool,
         created_ignores: &[(&Path, &[u8])],
+        tracked: &std::cell::OnceCell<Option<HashSet<PathBuf>>>,
     ) -> Option<String> {
+        if !is_dir
+            && entry.rule.git_tracked_mode() != crate::GitTrackedMode::Off
+            && !tracked
+                .get_or_init(|| crate::git::collect_tracked_paths(root))
+                .as_ref()
+                .is_some_and(|t| t.contains(target))
+        {
+            return Some(format!(
+                "{} is not tracked in git, and the rule (`git_tracked_only`) sees only tracked \
+                 files",
+                target.display()
+            ));
+        }
+        if !is_dir && entry.rule.sees_path_past_walk(target) {
+            // The rule's own stat refuses a path that resolves out of the root.
+            return (!crate::pathsafe::resolved_within_root(&root.join(target), root)).then(|| {
+                format!(
+                    "{} resolves outside the root through a symlink, so the rule would never \
+                     see it",
+                    target.display()
+                )
+            });
+        }
         if crate::walker::would_walk_skip(root, walk_opts, target, is_dir, created_ignores) {
             Some(format!(
                 "{} is excluded from the walk (an ignore file, `ignore:`, or a symlink the \
                  walk does not enter), so the rule would never see it",
                 target.display()
             ))
-        } else if !is_dir
-            && entry
-                .rule
-                .path_scope()
-                .is_some_and(|scope| !scope.matches(target, index))
+        } else if entry
+            .rule
+            .path_scope()
+            .is_some_and(|scope| !scope.matches(target, index))
         {
             Some(format!(
                 "{} is outside the rule's `paths:`",

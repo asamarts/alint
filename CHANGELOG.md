@@ -22,9 +22,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the outer file excluded are now linted, so give the nested repository its
   own patterns or list them under the config's `ignore:`. A root linted from a
   subdirectory still reads its repository's ignore files above it. Outside any
-  repository, no ignore file above the linted root is read. `.ignore` files
-  above the repository still apply, as they do for ripgrep. `fix --dry-run`
-  predicts the same walk. See ADR-0028.
+  repository, no ignore file above the linted root applies, and a repository
+  nested below the root is not a boundary. `.ignore` files above the
+  repository still apply, as they do for ripgrep. `fix --dry-run` predicts the
+  same walk. See ADR-0028 and ADR-0029, which lists where the walk still
+  differs from git: a submodule's `info/exclude`, anchored patterns in the
+  global excludes file, and a linted root inside an ignored directory.
+- `dir_create` requires the directory in `paths:` in normal form, such as
+  `docs/adr`. A configuration with `docs/`, `./docs`, `docs//adr` or `/docs`
+  now fails to load. The rule never matched those forms, so `check` failed
+  even with the directory present and `fix` could not resolve it.
 - The walker uses `ignore` 0.4.34. In a linked git worktree
   (`git worktree add`), alint now honors the repository's shared
   `.git/info/exclude`, as it does in the main checkout; before, files excluded
@@ -59,7 +66,20 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   same run creates, and a file created below a symlink the walk does not
   follow (a loop, or one that leads out of the root). A `file_create` path
   with `..` is checked where the file is written (`out/../README.md` is
-  `README.md`), not through each component.
+  `README.md`), not through each component. A create the walk leaves out
+  still counts as resolving a `file_exists` rule with `respect_gitignore:
+  false`, which looks for its literal path on disk (the `.bazelversion`
+  pattern); the dry run used to report it unresolved. It now predicts that a
+  created file does not resolve a `git_tracked_only` rule unless git tracks
+  the path, and that a `file_create` target outside the root, which
+  `allow_out_of_root` permits, is never linted. An ignore file created through
+  a symlinked directory applies where it lands, and of two fixes that create
+  the same ignore file the first one's content counts, as in the real run.
+- A line that cannot be parsed in an ignore file above the linted root (`a\`
+  in a home directory's `.gitignore`), or a `.git` file there that alint
+  cannot read, no longer stops `alint check` and `alint fix` with a walk error
+  (exit 2). git never reads those files, and the same line in the
+  repository's own `.gitignore` was already skipped.
 - A configuration error is no longer replaced with `<redacted>` just because the
   rule reads a value from the environment or sets `sensitive: true`. alint now
   repeats the failed step with those values masked and shows the error when the

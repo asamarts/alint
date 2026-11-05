@@ -1105,6 +1105,11 @@ struct CreateRule {
     content: &'static [u8],
     dir: bool,
     scope: Scope,
+    /// Also looks for `checks` on disk, as `file_exists` does for a literal
+    /// path with `respect_gitignore: false`.
+    past_walk: bool,
+    /// Sees only git-tracked files, as with `git_tracked_only`.
+    tracked_only: bool,
 }
 
 fn create_rule(
@@ -1121,6 +1126,28 @@ fn create_rule(
         content,
         dir,
         scope: Scope::from_patterns(&[checks.to_string()]).unwrap(),
+        past_walk: false,
+        tracked_only: false,
+    })
+}
+
+/// A `file_create` of `path` for a rule that looks past the walk for it, or
+/// sees only tracked files.
+fn create_rule_seeing(
+    id: &'static str,
+    path: &str,
+    past_walk: bool,
+    tracked_only: bool,
+) -> Box<dyn Rule> {
+    Box::new(CreateRule {
+        id,
+        checks: PathBuf::from(path),
+        path: PathBuf::from(path),
+        content: b"x",
+        dir: false,
+        scope: Scope::from_patterns(&[path.to_string()]).unwrap(),
+        past_walk,
+        tracked_only,
     })
 }
 
@@ -1148,7 +1175,9 @@ impl crate::rule::Fixer for CreateRule {
             self.path.display()
         )))
     }
+    // Like `file_create`, no editor form for a target outside the root.
     fn fix_edit(&self, _v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+        crate::pathsafe::normalize_confined(&self.path)?;
         (!self.dir).then(|| FixEdit::CreateFile {
             path: self.path.clone(),
             content: self.content.to_vec(),
@@ -1156,6 +1185,9 @@ impl crate::rule::Fixer for CreateRule {
     }
     fn created_dir(&self) -> Option<&Path> {
         self.dir.then_some(self.path.as_path())
+    }
+    fn created_file(&self) -> Option<&Path> {
+        (!self.dir).then_some(self.path.as_path())
     }
 }
 
@@ -1169,8 +1201,20 @@ impl Rule for CreateRule {
     fn path_scope(&self) -> Option<&Scope> {
         Some(&self.scope)
     }
+    fn sees_path_past_walk(&self, path: &Path) -> bool {
+        self.past_walk && path == self.checks
+    }
+    fn git_tracked_mode(&self) -> crate::GitTrackedMode {
+        if self.tracked_only {
+            crate::GitTrackedMode::FileOnly
+        } else {
+            crate::GitTrackedMode::Off
+        }
+    }
     fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
-        Ok(if ctx.index.contains_path(&self.checks) {
+        let found = ctx.index.contains_path(&self.checks)
+            || (self.past_walk && ctx.root.join(&self.checks).is_file());
+        Ok(if found {
             Vec::new()
         } else {
             vec![Violation::new("missing")]
@@ -1243,4 +1287,158 @@ fn dry_run_predicts_each_create_the_real_fix_finds_unresolved() {
     .collect();
     assert_eq!(outcomes(true), expected, "dry run");
     assert_eq!(outcomes(false), expected, "real fix");
+}
+
+#[test]
+fn dry_run_takes_the_first_of_two_creates_of_one_ignore_file() {
+    // The real `fix` skips a create whose file is already there, so the first
+    // `.gitignore` written is the one the walk reads and `x.txt` stays walked.
+    let outcome = |dry_run: bool| -> bool {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = &tmp.path().join("root");
+        std::fs::create_dir_all(root).unwrap();
+        let rules = vec![
+            create_rule("first", ".gitignore", ".gitignore", b"other\n", false),
+            create_rule("second", ".gitignore", ".gitignore", b"x.txt\n", false),
+            create_rule("x", "x.txt", "x.txt", b"x", false),
+        ];
+        let opts = crate::WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        };
+        let index = crate::walk(root, &opts).unwrap();
+        let report = Engine::new(rules, RuleRegistry::new())
+            .fix(root, &index, &opts, dry_run, Applicability::Safe)
+            .unwrap();
+        let x = report
+            .results
+            .iter()
+            .find(|result| &*result.rule_id == "x")
+            .unwrap();
+        matches!(x.items[0].status, FixStatus::Applied(_))
+    };
+    assert!(outcome(false), "real fix");
+    assert!(outcome(true), "dry run");
+}
+
+#[test]
+fn dry_run_reads_an_absolute_create_inside_the_root_as_relative() {
+    // `allow_out_of_root` lets a fixer take an absolute path, which may still
+    // name a file in the tree; the walk indexes it there.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("root");
+    std::fs::create_dir_all(&root).unwrap();
+    let absolute = root.join("keep.txt").to_string_lossy().into_owned();
+    let rules = vec![create_rule("absolute", "keep.txt", &absolute, b"x", false)];
+    let opts = crate::WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    let index = crate::walk(&root, &opts).unwrap();
+    let report = Engine::new(rules, RuleRegistry::new())
+        .fix(&root, &index, &opts, true, Applicability::Safe)
+        .unwrap();
+    assert!(
+        matches!(report.results[0].items[0].status, FixStatus::Applied(_)),
+        "{:?}",
+        report.results[0].items[0].status
+    );
+}
+
+#[test]
+fn dry_run_trusts_a_rule_that_looks_past_the_walk() {
+    // Both files are gitignored. The rule that also looks on disk finds the
+    // created one anyway; the one that reads only the walk does not.
+    let outcomes = |dry_run: bool| -> Vec<(String, bool)> {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = &tmp.path().join("root");
+        std::fs::create_dir_all(root).unwrap();
+        std::fs::write(root.join(".gitignore"), "seen.txt\nunseen.txt\n").unwrap();
+        let rules = vec![
+            create_rule_seeing("past-walk", "seen.txt", true, false),
+            create_rule_seeing("walk-only", "unseen.txt", false, false),
+        ];
+        let opts = crate::WalkOptions {
+            respect_gitignore: true,
+            extra_ignores: Vec::new(),
+        };
+        let index = crate::walk(root, &opts).unwrap();
+        let report = Engine::new(rules, RuleRegistry::new())
+            .fix(root, &index, &opts, dry_run, Applicability::Safe)
+            .unwrap();
+        report
+            .results
+            .iter()
+            .map(|result| {
+                let applied = matches!(result.items[0].status, FixStatus::Applied(_));
+                (result.rule_id.to_string(), applied)
+            })
+            .collect()
+    };
+    let expected = vec![
+        ("past-walk".to_string(), true),
+        ("walk-only".to_string(), false),
+    ];
+    assert_eq!(outcomes(true), expected, "dry run");
+    assert_eq!(outcomes(false), expected, "real fix");
+}
+
+#[test]
+fn dry_run_resolves_a_tracked_only_rule_only_with_a_tracked_path() {
+    // git still tracks `gone.txt`, deleted from the worktree; `new.txt` was
+    // never added. A rule that sees only tracked files is resolved by a create
+    // of the first, not of the second; a rule that sees the walk, by either.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    let git = |args: &[&str]| {
+        let status = std::process::Command::new("git")
+            .arg("-C")
+            .arg(root)
+            .args([
+                "-c",
+                "user.name=Test",
+                "-c",
+                "user.email=test@example.invalid",
+                "-c",
+                "commit.gpgsign=false",
+            ])
+            .args(args)
+            .status()
+            .unwrap();
+        assert!(status.success(), "git {args:?}");
+    };
+    git(&["init", "-q"]);
+    std::fs::write(root.join("gone.txt"), "x").unwrap();
+    git(&["add", "gone.txt"]);
+    git(&["commit", "-qm", "base"]);
+    std::fs::remove_file(root.join("gone.txt")).unwrap();
+    let rules = vec![
+        create_rule_seeing("tracked-gone", "gone.txt", false, true),
+        create_rule_seeing("tracked-new", "new.txt", false, true),
+        create_rule_seeing("walked-new", "new.txt", false, false),
+    ];
+    let opts = crate::WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: Vec::new(),
+    };
+    let index = crate::walk(root, &opts).unwrap();
+    let report = Engine::new(rules, RuleRegistry::new())
+        .fix(root, &index, &opts, true, Applicability::Safe)
+        .unwrap();
+    let applied: Vec<(String, bool)> = report
+        .results
+        .iter()
+        .map(|result| {
+            let applied = matches!(result.items[0].status, FixStatus::Applied(_));
+            (result.rule_id.to_string(), applied)
+        })
+        .collect();
+    assert_eq!(
+        applied,
+        [
+            ("tracked-gone".to_string(), true),
+            ("tracked-new".to_string(), false),
+            ("walked-new".to_string(), true),
+        ]
+    );
 }

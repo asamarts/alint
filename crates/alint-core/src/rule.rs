@@ -1049,6 +1049,15 @@ pub trait Rule: Send + Sync + std::fmt::Debug {
         None
     }
 
+    /// Whether this rule looks for the file at `path` (root-relative and
+    /// normalized) on disk itself, so it finds the file even where the walk
+    /// leaves it out: `file_exists` with `respect_gitignore: false` on a
+    /// literal path. `fix --dry-run` then predicts a create of `path` without
+    /// asking whether the walk indexes it. Default `false`.
+    fn sees_path_past_walk(&self, _path: &Path) -> bool {
+        false
+    }
+
     /// Whether this rule has a file-like scope for which
     /// [`RuleSpec::expect_matches`](crate::RuleSpec::expect_matches) is
     /// meaningful. The default covers ordinary `paths:`-scoped rules.
@@ -1719,6 +1728,15 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
     /// `fix --dry-run` checks it against the walk, as it checks a
     /// [`FixEdit::CreateFile`]. Default `None`.
     fn created_dir(&self) -> Option<&Path> {
+        None
+    }
+
+    /// The file this fixer creates, as configured, for a fixer that creates
+    /// one (`file_create`). `fix --dry-run` falls back to it when
+    /// [`fix_edit`](Self::fix_edit) declines, as `file_create` does for a
+    /// target outside the root that `allow_out_of_root` still lets it write.
+    /// Default `None`.
+    fn created_file(&self) -> Option<&Path> {
         None
     }
 }

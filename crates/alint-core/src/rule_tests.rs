@@ -459,6 +459,7 @@ fn rule_trait_defaults_are_safe_no_ops() {
     assert!(!r.wants_analysis_time());
     assert!(!r.requires_full_index());
     assert!(r.path_scope().is_none());
+    assert!(!r.sees_path_past_walk(Path::new("README.md")));
     assert!(r.fixer().is_none());
 }
 

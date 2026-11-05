@@ -174,6 +174,10 @@ impl Fixer for FileCreateFixer {
             content,
         })
     }
+
+    fn created_file(&self) -> Option<&Path> {
+        Some(&self.path)
+    }
 }
 
 /// Confine a config-declared fixer path (a `file_create.path` write target or a
@@ -914,6 +918,20 @@ mod tests {
             std::fs::read_to_string(tmp.path().join("README.md")).unwrap(),
             "existing\n",
             "pre-existing content must not be overwritten"
+        );
+    }
+
+    #[test]
+    fn file_create_names_its_target_for_the_dry_run() {
+        // `fix --dry-run` falls back to this when `fix_edit` declines, as it
+        // does for a target outside the root.
+        let fixer = FileCreateFixer::new(PathBuf::from("../x.txt"), "x\n".into(), false);
+        assert_eq!(fixer.created_file(), Some(Path::new("../x.txt")));
+        let tmp = TempDir::new().unwrap();
+        assert!(
+            fixer
+                .fix_edit(&Violation::new("x"), &[], tmp.path())
+                .is_none()
         );
     }
 

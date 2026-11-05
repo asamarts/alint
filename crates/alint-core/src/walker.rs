@@ -920,17 +920,28 @@ impl DirIgnores {
 
     /// Take the ignore files among `created` that a fix will write in this
     /// directory (`rel`, root-relative) in place of what is there now.
+    /// A file created through an in-tree symlinked directory lands in the
+    /// directory the link leads to, which the walk also lists under the link's
+    /// name, so directories compare resolved.
     fn with_created(mut self, root: &Path, rel: &Path, created: &[(&Path, &[u8])]) -> Self {
         let dir = root.join(rel);
+        let mut resolved_dir = None;
         for (path, content) in created {
-            if path.parent() != Some(rel) {
-                continue;
-            }
             let slot = match path.file_name().and_then(std::ffi::OsStr::to_str) {
                 Some(".ignore") => &mut self.dot_ignore,
                 Some(".gitignore") => &mut self.git_ignore,
                 _ => continue,
             };
+            let parent = path.parent().unwrap_or_else(|| Path::new(""));
+            if parent != rel {
+                let resolved_dir = resolved_dir
+                    .get_or_insert_with(|| crate::pathsafe::resolve_existing_prefix(&dir));
+                if resolved_dir.is_none()
+                    || crate::pathsafe::resolve_existing_prefix(&root.join(parent)) != *resolved_dir
+                {
+                    continue;
+                }
+            }
             *slot = gitignore_from(&dir, &root.join(path), content);
         }
         self
@@ -1166,13 +1177,35 @@ fn build_walk_builder(root: &Path, opts: &WalkOptions) -> Result<(WalkBuilder, E
 
 /// Whether a walk error is a PER-ENTRY condition to skip (return `Ok(None)`)
 /// rather than a fatal abort of the whole walk: a dangling symlink or a file
-/// that vanished mid-walk (I/O `NotFound`), or a symlink cycle. Any other error
-/// (permission denied, ...) is left to propagate.
-fn is_skippable_walk_error(err: &ignore::Error) -> bool {
+/// that vanished mid-walk (I/O `NotFound`), a symlink cycle, or an ignore file
+/// that could not be read or parsed. Any other error (permission denied on a
+/// directory, ...) is left to propagate.
+fn is_skippable_walk_error(root: &Path, err: &ignore::Error) -> bool {
     if err.io_error().map(std::io::Error::kind) == Some(std::io::ErrorKind::NotFound) {
         return true;
     }
-    is_symlink_loop(err) || is_eloop(err)
+    is_symlink_loop(err) || is_eloop(err) || is_ignore_file_error(root, err)
+}
+
+/// Whether every part of a walk error names a file above the root. `ignore`
+/// reads the ignore files of every directory above the root before the walk
+/// starts, whether or not it applies them (ADR-0029), and reports a bad line
+/// in one, or a `.git` file it cannot read, as a walk error naming that file
+/// (several make a `Partial`), where an ignore file in the tree only marks its
+/// directory's entry. A bad line is dropped from its matcher either way, so
+/// the walk goes on as git does: git skips a pattern it cannot parse and never
+/// reads outside the repository. An error from the walk itself carries its
+/// depth (`WithDepth`) and is not one of these.
+fn is_ignore_file_error(root: &Path, err: &ignore::Error) -> bool {
+    match err {
+        // Every entry the walk yields is under the root, so a path outside it
+        // is one of the files read above it.
+        ignore::Error::WithPath { path, .. } => path.strip_prefix(root).is_err(),
+        ignore::Error::Partial(errs) => {
+            !errs.is_empty() && errs.iter().all(|err| is_ignore_file_error(root, err))
+        }
+        _ => false,
+    }
 }
 
 /// Whether an `ignore` walk error is (or wraps) a symlink-cycle `Loop`. The
@@ -1239,9 +1272,12 @@ fn result_to_entry(
             //     before this both aborted the run with exit 2 on a single stray
             //     link. `filter_entry` already prunes the recursion; the emitted
             //     error just needs to be non-fatal too.
+            //   * a bad ignore file above the root (`a\` in a parent
+            //     directory's `.gitignore`), which git never reads. The same line
+            //     in the tree's own `.gitignore` was already tolerated.
             // Any OTHER error (permission denied, ...) still propagates and stops
             // the walk, matching the prior contract.
-            if is_skippable_walk_error(&err) {
+            if is_skippable_walk_error(root, &err) {
                 return Ok(None);
             }
             return Err(err.into());
