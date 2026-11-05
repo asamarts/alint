@@ -143,6 +143,11 @@ git checkout -q -- editors/zed/Cargo.lock
 rm editors/zed/Cargo.lock
 expect_rejected "a missing Zed lockfile"
 git checkout -q -- editors/zed/Cargo.lock
+for manifest in editors/zed/extension.toml editors/zed/Cargo.toml npm/package.json; do
+  rm "$manifest"
+  expect_rejected "a missing $manifest"
+  git checkout -q -- "$manifest"
+done
 
 expect_rejected "unknown option is rejected" --unknown
 

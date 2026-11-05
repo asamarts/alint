@@ -103,7 +103,8 @@ summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
       echo "Each missed mutant is a change to the code that none of its crate's tests noticed:"
       echo
       # shellcheck disable=SC2016 # literal backticks: each line becomes inline code,
-      # fenced with two so a backtick in the text cannot end it
+      # fenced with two so a single backtick in the text (`replace `a` with`) cannot
+      # end it; cargo-mutants never writes two in a row
       sed 's/^/- `` /; s/$/ ``/' "$REPORT/missed.txt"
     fi
     if (( timeouts > 0 )); then
@@ -116,8 +117,10 @@ summary="${GITHUB_STEP_SUMMARY:-/dev/null}"
   fi
 } >> "$summary"
 
-# Workflow-command escaping: the message escapes % CR LF, and a property (the file)
-# also `:` and `,`, which would otherwise end it or start another property.
+# Workflow-command escaping as GitHub documents it: the message escapes % CR LF, and
+# a property (the file) also `:` and `,`, which would otherwise end it or start
+# another property. A line read below holds no LF and its path no `:`, so those two
+# escapes are only there to keep the functions correct for any input.
 escape_data() {
   local text=${1//%/%25}
   text=${text//$'\r'/%0D}

@@ -1709,7 +1709,7 @@ The only new user-facing surface is one rule kind.
   and `key_parity` implement, an injectable rule registry, and a draft WIT contract.
 
 ## v0.22: Completing the relation-layer port
-<!-- roadmap-public: blurb="The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus, the performance budgets held, and the code only the new equals runs within a fixed line budget. The next general-linter phase starts only if this release meets those gates." -->
+<!-- roadmap-public: blurb="The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus, the performance budgets held, and the code that only the new equals runs kept within a fixed line budget. The next general-linter phase starts only if this release meets those gates." -->
 
 Closes Phase 2 of
 [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)

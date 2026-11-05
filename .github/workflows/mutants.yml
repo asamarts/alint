@@ -2,9 +2,10 @@ name: Mutants
 
 # Advisory mutation testing (owner decision in docs/design/v0.21/pre-release-audit.md,
 # section 7, item 3). On a pull request that changes Rust, cargo-mutants tests the
-# mutants in the lines the pull request changes and lists the ones no test caught in
-# the job summary and as warnings on those lines. A missed mutant never fails the job,
-# and the job is not in ci.yml's Summary, so it never blocks a merge.
+# mutants in the lines the pull request changes against their own crate's tests, and
+# lists the ones those tests did not catch in the job summary, and the first ten as
+# warnings on their lines. A missed mutant never fails the job, and the job is not in
+# ci.yml's Summary, so it never blocks a merge.
 #
 # workflow_dispatch tests every mutant in one crate. alint-rules and alint-core have
 # thousands, more than the job's budget; ci/scripts/mutants.sh stops at the budget with

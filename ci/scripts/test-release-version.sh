@@ -115,9 +115,13 @@ else
 fi
 
 git reset --hard -q HEAD
-cp "$REPO_ROOT/Cargo.toml" Cargo.toml
-cp "$REPO_ROOT/action.yml" action.yml
-cp "$REPO_ROOT/ci/scripts/bump-version.sh" ci/scripts/bump-version.sh
+overlay=(Cargo.toml action.yml ci/scripts/bump-version.sh ci/scripts/check-release-version.sh)
+for file in "${overlay[@]}"; do
+  cp "$REPO_ROOT/$file" "$file"
+done
+# Stage the overlay, so `git diff` below lists only what the bump edits, not an
+# uncommitted change to one of these files in the working tree under test.
+git add -- "${overlay[@]}"
 PATH="$TMP_ROOT/fake-bin:$PATH" bash ci/scripts/bump-version.sh "$NEXT" >/dev/null
 expect_ok "bump-version updates workspace and Action together" "v$NEXT"
 

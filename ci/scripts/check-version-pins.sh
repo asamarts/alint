@@ -213,7 +213,11 @@ else
   fi
 fi
 
-if [[ -f npm/package.json ]]; then
+# Committed, like every manifest below: a missing one is a failure, not a skip.
+if [[ ! -f npm/package.json ]]; then
+  echo "[version-pin] npm/package.json is missing" >&2
+  failed=1
+else
   NPM_VER=$(awk -F'"' '/^[[:space:]]*"version":/ { print $4; exit }' npm/package.json)
   if [[ -z "$NPM_VER" ]]; then
     echo "[version-pin] npm/package.json: could not parse version field" >&2
@@ -229,17 +233,19 @@ fi
 # the workspace. (VS Code/JetBrains are version-stamped at publish, so their
 # committed versions are intentionally allowed to lag and are NOT gated here.)
 for zf in editors/zed/extension.toml editors/zed/Cargo.toml; do
-  if [[ -f "$zf" ]]; then
+  if [[ ! -f "$zf" ]]; then
+    echo "[version-pin] $zf is missing" >&2
+    failed=1
+  else
     ZED_VER=$(awk -F'"' '/^version = / { print $2; exit }' "$zf")
     if [[ "$ZED_VER" != "$WORKSPACE_VER" ]]; then
-      echo "[version-pin] $zf: version $ZED_VER != workspace $WORKSPACE_VER" >&2
+      echo "[version-pin] $zf: version ${ZED_VER:-<missing>} != workspace $WORKSPACE_VER" >&2
       failed=1
     fi
   fi
 done
 # Its lockfile records the extension's own version too; the editors job builds
-# with --locked, so a stale entry would fail there instead of here. The file is
-# committed; a missing one is a failure, not a skip.
+# with --locked, so a stale entry would fail there instead of here.
 if [[ ! -f editors/zed/Cargo.lock ]]; then
   echo "[version-pin] editors/zed/Cargo.lock is missing" >&2
   failed=1

@@ -2,7 +2,7 @@ name: Cross-Platform
 
 # Smoke-tests the workspace on macOS and Windows GitHub-hosted
 # runners so platform-specific regressions surface independently
-# of the primary Linux self-hosted CI lane.
+# of the primary Linux lane (ci.yml).
 #
 # This intentionally runs only `cargo test --workspace --locked`
 # without the heavier dogfood/bench/audit lanes — the goal is to
