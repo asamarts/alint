@@ -683,7 +683,18 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   lookup, a scan of that table run once per nested rule for every entry, then
   compiled to a loop instead of unrolled comparisons. #422 generates the table
   and a `match` lookup from one list (`for_each_dir/1000` at -3.10% in CI).
-  The fix ships in the next release; the owner decided against a v0.21.1.
+  The owner first held the fix for the next minor release, then chose a
+  v0.21.1 fix release for it together with the walker, dry-run and redaction
+  fixes.
+- **v0.21.1 (2026-11-05).** A fix release: ignore files stop at the
+  repository boundary (#443, ADR-0028; follow-ups #444, ADR-0029, and #446),
+  configuration errors stay readable unless they could quote a value read
+  from the environment (#431, #438, #442, #445, #447), and the nested-rule
+  lookup from #422. Reviews before the cut found that #445 had changed an
+  alint-core method the published 0.21.0 crates call; #447 restored it as a
+  deprecated shim and added `ci/scripts/check-patch-compat.sh`, which
+  RELEASING.md now runs for every patch release. The corpus replay against
+  v0.21.0 showed no differences.
 - **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
   within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
   ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on
