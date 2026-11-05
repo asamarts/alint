@@ -464,6 +464,30 @@ fn rule_trait_defaults_are_safe_no_ops() {
 }
 
 #[test]
+fn fix_context_shows_a_sensitive_path_as_redacted() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut ctx = FixContext {
+        root: dir.path(),
+        dry_run: false,
+        fix_size_limit: None,
+        allow_out_of_root: false,
+        compose: None,
+        stage_ops: None,
+        process_environment: None,
+        paths_sensitive: false,
+    };
+    assert_eq!(
+        ctx.shown_path(Path::new("dir/canary.txt")),
+        "dir/canary.txt"
+    );
+    ctx.paths_sensitive = true;
+    assert_eq!(
+        ctx.shown_path(Path::new("dir/canary.txt")),
+        crate::CONFIGURATION_MASK
+    );
+}
+
+#[test]
 fn check_fix_size_returns_none_when_limit_disabled() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("a.txt");

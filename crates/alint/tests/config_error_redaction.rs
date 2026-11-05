@@ -481,6 +481,14 @@ fn a_path_read_from_the_environment_stays_out_of_fix_warnings() {
         stderr(&output)
     );
     assert_left_out("fix_size_limit", &output, &["canary-file"]);
+    // `check` composes the same fixes for the formats that carry them.
+    let output = run(root.path(), &["check", "--format", "sarif"], &env);
+    assert!(
+        stderr(&output).contains("<redacted> is 13 bytes"),
+        "{}",
+        stderr(&output)
+    );
+    assert_left_out("fix_size_limit in sarif", &output, &["canary-file"]);
 
     // A `replace` whose replacement still matches is left unfixed with a
     // warning naming the file.
