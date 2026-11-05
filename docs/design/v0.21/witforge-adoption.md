@@ -2,8 +2,8 @@
 
 Status: done (2026-11-01). All seven steps of section 4 are done: witforge is on crates.io, the
 W2-7 job checks the contract against the pinned release in default CI (#417, against witforge
-0.1.1 at the tag), and W3 (#418) and the v0.21.0 tag (#420) followed. `main` pins witforge 0.1.2
-since #423 (validation fixes, generated output unchanged).
+0.1.1 at the tag), and W3 (#418) and the v0.21.0 tag (#420) followed. `main` pins witforge 0.2.0,
+which emits the contract's world metadata.
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is
 [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 4: v0.21.0 is not tagged until
@@ -24,6 +24,9 @@ and the WIT draft row in [`r8-readiness.md`](r8-readiness.md), blocked until thi
 - **witforge 0.1.2** followed on 2026-11-01, after alint's v0.21.0 tag. Its changes are
   validation, refusal, and `--check` behavior; its generated output is unchanged for every
   contract 0.1.1 accepts. alint pins it since #423, which changed no generated file.
+- **witforge 0.2.0** followed on 2026-11-04. It emits `src/plain/worlds.rs` for the contract's
+  worlds, so alint pins it and regenerates the committed consumer; no other generated file
+  changed.
 - **alint** has the `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, the hand-written
   `alint_core::plugin_api` it describes, and, since #409, the consumer crate
   `crates/alint-witforge-consumer` with witforge's output for the draft.
@@ -109,7 +112,7 @@ In alint, fixed in the follow-up pull request:
 
 | # | Problem | Fix |
 |---|---|---|
-| 1 | witforge 0.1 checks a world's imports and exports but generates nothing from them, so a world added, removed, or made to export another interface passed every test. | `tests/worlds.rs` reads the worlds from every `.wit` file in `v0.1`, requires each to be listed with its imports and exports, and requires each exported interface's generated trait to be paired in `inventory.rs` with the `plugin_api` trait a plugin of that kind implements. It refuses world items it does not understand (an inline function or interface, `use`, `include`). Swapping an export or adding an import fails it. |
+| 1 | witforge 0.1 checked a world's imports and exports but generated nothing from them, so a world added, removed, or made to export another interface passed every test. | `tests/worlds.rs` reads the worlds from every `.wit` file in `v0.1`, requires each to be listed with its imports and exports, and requires each exported interface's generated trait to be paired in `inventory.rs` with the `plugin_api` trait a plugin of that kind implements. It refuses world items it does not understand (an inline function or interface, `use`, `include`). Swapping an export or adding an import fails it. |
 | 2 | The inventory saw structs, enums, and traits only: a public type alias, constant, static, function, or union on either side, or an associated type or constant in a trait, went unaccounted. | It records every public item kind and trait member, and skips only re-exports (`pub use`, and the `super::` aliases each generated interface module declares). |
 | 3 | The `plugin_api` boundary test pooled the names every file declared, `#[cfg(test)]` items and nested modules included, so `#[cfg(test)] use regex;` made a shipping `regex::Regex` path pass, and `include!` could splice in an unchecked file. | Names are scoped to the module that declares them, `#[cfg(test)]` items declare none, and `include!`, `include_str!`, and `include_bytes!` are refused. Each of the eight escapes is a negative sample, and each passed the old test. |
 | 4 | No control showed that the check regenerates from the WIT (rather than comparing the committed files with themselves), refuses a witforge other than the pinned release, or accepts a relative `WITFORGE_BIN` from another directory. | Controls edit a doc comment in `plugin.wit` (the plain module must be reported changed), run a fake `witforge 0.1.1` (refused, naming both versions), and run the check from another directory with a relative path (passes). Without the path handling the last one fails. |

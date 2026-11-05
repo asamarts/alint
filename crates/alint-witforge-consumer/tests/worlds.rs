@@ -1,12 +1,12 @@
 //! Every world of the contract, accounted for.
 //!
-//! witforge 0.1 checks a world's imports and exports but generates nothing
-//! from them, so the generated code and `inventory.rs` cannot see a world
-//! that is added, removed, or made to import or export something else. This
-//! test reads the worlds from the WIT itself, requires each to be listed below
-//! with what it imports and exports, and requires the generated trait of each
-//! interface it exports to be paired, in `inventory.rs`, with the
-//! `plugin_api` trait a plugin of that kind implements.
+//! witforge 0.1 checked a world's imports and exports but generated nothing
+//! from them; 0.2.0 emits `plain::worlds`. The WIT remains the oracle here:
+//! this test reads the worlds from it, requires each to be listed below with
+//! what it imports and exports, compares that table with the generated world
+//! metadata, and requires the generated trait of each interface it exports to
+//! be paired, in `inventory.rs`, with the `plugin_api` trait a plugin of that
+//! kind implements.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::Path;
@@ -493,6 +493,24 @@ fn every_world_is_accounted_for() {
     assert!(!found.is_empty(), "no worlds found");
     let problems = problems(&found, WORLDS, GENERATED);
     assert!(problems.is_empty(), "{}", problems.join("\n"));
+}
+
+#[test]
+fn generated_world_metadata_matches_the_contract() {
+    let generated: BTreeMap<String, Items> = alint_witforge_consumer::plain::worlds::v0_1::WORLDS
+        .iter()
+        .map(|world| {
+            let set = |names: &[&str]| names.iter().map(ToString::to_string).collect();
+            (
+                world.name.to_string(),
+                Items {
+                    imports: set(world.imports),
+                    exports: set(world.exports),
+                },
+            )
+        })
+        .collect();
+    assert_eq!(generated, contract_worlds());
 }
 
 /// The parser reads worlds through comments and gates, ignores what is not

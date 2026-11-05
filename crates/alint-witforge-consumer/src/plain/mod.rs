@@ -2,3 +2,4 @@
 // source: alint:plugin
 
 pub mod v0_1;
+pub mod worlds;
