@@ -17,7 +17,8 @@ pub const REDACTED_CONFIGURATION_ERROR: &str = "<redacted> (the error could quot
 
 /// Whether a rule field's value may be secret in a configuration error: it was
 /// read from the environment (`environment_fields`), or the rule sets
-/// `sensitive: true` and the field is not part of the rule's identity.
+/// `sensitive: true` and the field is not part of the rule's identity (its
+/// `id`, `kind`, `level`, `sensitive` and the template it instantiates).
 #[doc(hidden)]
 #[must_use]
 pub fn configuration_field_may_be_secret(
@@ -26,12 +27,16 @@ pub fn configuration_field_may_be_secret(
     field: &str,
 ) -> bool {
     environment_fields.contains(field)
-        || (sensitive && !matches!(field, "id" | "kind" | "level" | "sensitive"))
+        || (sensitive
+            && !matches!(
+                field,
+                "id" | "kind" | "level" | "sensitive" | "extends_template"
+            ))
 }
 
 /// Replace every scalar in `value`, at any depth, with one that differs from
 /// it, so an error quoting the original cannot recur on the masked copy: a
-/// string becomes [`CONFIGURATION_MASK`], a number another number of the same
+/// string becomes [`CONFIGURATION_MASK`], a number the next one of the same
 /// kind, and a bool its negation. Interpolation re-types an environment value
 /// that reads as a number or a bool, so those can be secret too (a 12-digit
 /// account id). Numbers and bools keep their type, so an error about a type
@@ -67,19 +72,23 @@ pub fn mask_configuration_values(value: &mut yaml_serde::Value) {
     }
 }
 
-/// A number of the same kind (float or integer) that differs from `number`.
+/// A number of the same kind (float or integer) that differs from `number`:
+/// the next one (the previous one at the type's maximum). Staying next to the
+/// value keeps a range check (`max_width > 0`) passing as it did, so an
+/// unrelated error later in the rule still recurs and stays readable.
 fn differing_number(number: &yaml_serde::Number) -> yaml_serde::Number {
-    if number.is_f64() {
-        let mask = if number.as_f64() == Some(0.0) {
-            1.0
-        } else {
-            0.0
-        };
-        yaml_serde::Number::from(mask)
-    } else if number.as_u64() == Some(0) {
-        yaml_serde::Number::from(1_u64)
+    if let Some(value) = number.as_u64() {
+        yaml_serde::Number::from(value.checked_add(1).unwrap_or(u64::MAX - 1))
+    } else if let Some(value) = number.as_i64() {
+        yaml_serde::Number::from(value + 1)
     } else {
-        yaml_serde::Number::from(0_u64)
+        // From 2^53 on, adding one may not change a float; its negation differs.
+        let value = number.as_f64().unwrap_or_default();
+        yaml_serde::Number::from(if value.abs() < 9_007_199_254_740_992.0 {
+            value + 1.0
+        } else {
+            -value
+        })
     }
 }
 
@@ -99,11 +108,15 @@ impl Config {
 const MIN_REDACTED_ENVIRONMENT_VALUE: usize = 4;
 
 /// `text` with each of `values` replaced by [`CONFIGURATION_MASK`], in each
-/// form an error may print it: as written; as a path is printed once joined
-/// or on Windows (without a leading `./`, with either separator); escaped by
-/// `{:?}`; or (for a numeric value, which interpolation re-types) as the
-/// number. A boolean carries no secret and is left alone, and so is a value
-/// shorter than four characters.
+/// form an error may print it: as written; trimmed (a glob parser drops
+/// trailing whitespace); line by line (a regex error quotes a multi-line
+/// pattern so); as a path is printed once joined or on Windows (without a
+/// leading `./`, with either separator); escaped by `{:?}`; or (for a numeric
+/// value, which interpolation re-types) as the number. A form inside a longer
+/// word takes the whole word with it: a value written next to other text
+/// (`x{{env.V}}_tmp`) is printed so, and a value such as `build` turns
+/// `building` into `<redacted>` rather than `<redacted>ing`. A boolean carries
+/// no secret and is left alone, and so is a form shorter than four characters.
 #[doc(hidden)]
 #[must_use]
 pub fn redact_environment_values<'a>(
@@ -115,19 +128,25 @@ pub fn redact_environment_values<'a>(
         if matches!(value.trim(), "true" | "false") {
             continue;
         }
-        let mut bare = value.as_str();
-        while let Some(rest) = bare.strip_prefix("./").or_else(|| bare.strip_prefix(".\\")) {
-            bare = rest;
+        let mut written_forms = vec![value.as_str(), value.trim(), value.trim_end()];
+        if value.contains('\n') {
+            written_forms.extend(value.lines().map(str::trim));
         }
-        for path in [value.as_str(), bare] {
-            for written in [
-                path.to_string(),
-                path.replace('/', "\\"),
-                path.replace('\\', "/"),
-            ] {
-                let debug = format!("{written:?}");
-                forms.push(debug[1..debug.len() - 1].to_string());
-                forms.push(written);
+        for written in written_forms {
+            let mut bare = written;
+            while let Some(rest) = bare.strip_prefix("./").or_else(|| bare.strip_prefix(".\\")) {
+                bare = rest;
+            }
+            for path in [written, bare] {
+                for printed in [
+                    path.to_string(),
+                    path.replace('/', "\\"),
+                    path.replace('\\', "/"),
+                ] {
+                    let debug = format!("{printed:?}");
+                    forms.push(debug[1..debug.len() - 1].to_string());
+                    forms.push(printed);
+                }
             }
         }
         if value.len() <= 64
@@ -140,16 +159,50 @@ pub fn redact_environment_values<'a>(
     // Longest first, so a value that contains another is removed whole.
     forms.sort_by(|a, b| b.len().cmp(&a.len()).then_with(|| a.cmp(b)));
     forms.dedup();
-    if !forms.iter().any(|form| text.contains(form.as_str())) {
-        return std::borrow::Cow::Borrowed(text);
-    }
-    let mut redacted = text.to_string();
+    let mut redacted = std::borrow::Cow::Borrowed(text);
     for form in &forms {
-        if redacted.contains(form.as_str()) {
-            redacted = redacted.replace(form.as_str(), CONFIGURATION_MASK);
+        if let Some(replaced) = replace_occurrences(&redacted, form) {
+            redacted = std::borrow::Cow::Owned(replaced);
         }
     }
-    std::borrow::Cow::Owned(redacted)
+    redacted
+}
+
+/// `text` with each occurrence of `form` replaced by [`CONFIGURATION_MASK`],
+/// or `None` when there is none. An occurrence that a letter, digit or `_`
+/// touches at an edge where `form` has one is widened to the whole word.
+fn replace_occurrences(text: &str, form: &str) -> Option<String> {
+    let word = |c: char| c.is_alphanumeric() || c == '_';
+    let starts_word = form.chars().next().is_some_and(word);
+    let ends_word = form.chars().next_back().is_some_and(word);
+    let mut replaced = String::new();
+    let mut copied = 0;
+    for (found, _) in text.match_indices(form) {
+        if found < copied {
+            continue;
+        }
+        let mut start = found;
+        if starts_word {
+            start -= text[copied..found]
+                .chars()
+                .rev()
+                .take_while(|&c| word(c))
+                .map(char::len_utf8)
+                .sum::<usize>();
+        }
+        let mut end = found + form.len();
+        if ends_word {
+            end += text[end..]
+                .chars()
+                .take_while(|&c| word(c))
+                .map(char::len_utf8)
+                .sum::<usize>();
+        }
+        replaced.push_str(&text[copied..start]);
+        replaced.push_str(CONFIGURATION_MASK);
+        copied = end;
+    }
+    (copied > 0).then(|| replaced + &text[copied..])
 }
 
 /// `error` with each of `values` removed from its message

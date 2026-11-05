@@ -754,6 +754,21 @@ fn load_extended_source(
         bundled
     } else {
         let target = resolve_relative(source_dir, url);
+        // An entry read from the environment is also printed in the forms the
+        // loader normalizes it to (joined, canonical, relative to the root),
+        // which need not contain the value as written.
+        if state
+            .environment_values
+            .iter()
+            .any(|value| !value.is_empty() && url.contains(value.as_str()))
+        {
+            let mut normalized = vec![display_path(&target)];
+            if let Ok(canonical) = opts.config_source.canonicalize(&target) {
+                normalized.push(local_source_display(&canonical, confine));
+                normalized.push(display_path(&canonical));
+            }
+            add_environment_values(&mut state.environment_values, &normalized);
+        }
         confine_extends_target(&target, url, confine, opts.config_source.as_ref())?;
         load_recursive(
             &target,
@@ -767,7 +782,10 @@ fn load_extended_source(
     };
     gate_extended_source(&parent, &source_display, opts.kind_catalog)?;
     mark_extended_provenance(&mut parent, &source_display);
-    parent.drop_top_level_settings(&source_display);
+    parent.drop_top_level_settings(&alint_core::redact_environment_values(
+        &source_display,
+        &state.environment_values,
+    ));
     parent.rules = apply_rule_filter(parent.rules, entry, &source_display)?;
     if url.starts_with("https://") {
         let base = url.split('#').next().unwrap_or(url);
@@ -1734,6 +1752,45 @@ rules:
         .to_string();
         assert!(error.contains("<redacted>"), "{error}");
         assert!(!error.contains("canary-secret"), "{error}");
+
+        // An `extends:` entry read from the environment is scrubbed in the form
+        // the loader normalizes it to, which does not contain it as written:
+        // a parse error names the extended file by its canonical path...
+        std::fs::create_dir(root.path().join("sub")).unwrap();
+        std::fs::write(
+            root.path().join("canary-secret.yml"),
+            "version: 1\nrules: [\n",
+        )
+        .unwrap();
+        std::fs::write(
+            root.path().join(".alint.yml"),
+            "version: 1\nextends: ['{{env.VALUE}}']\nrules: []\n",
+        )
+        .unwrap();
+        let error = crate::load_with(
+            &root.path().join(".alint.yml"),
+            &value_options("sub/../canary-secret.yml"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("<redacted>"), "{error}");
+        assert!(!error.contains("canary-secret"), "{error}");
+
+        // ...while a literal entry beside a value read from the environment
+        // stays readable.
+        std::fs::write(
+            root.path().join(".alint.yml"),
+            "version: 1\nignore: ['{{env.VALUE}}']\nextends: ['./plain-missing.yml']\nrules: []\n",
+        )
+        .unwrap();
+        let error = crate::load_with(
+            &root.path().join(".alint.yml"),
+            &value_options("canary-ignored"),
+        )
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("plain-missing.yml"), "{error}");
+        assert!(!error.contains("<redacted>"), "{error}");
     }
 
     /// Options whose environment gives `VALUE` the value `value`.

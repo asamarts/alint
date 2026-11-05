@@ -139,11 +139,22 @@ impl Rule for GitCommitMessageRule {
                     // routing reports repository unavailability before dispatch.
                     Ok(None) => return Ok(violations),
                     Ok(Some(records)) => records,
-                    Err(CommitRangeError::BadRange { stderr }) => {
+                    Err(CommitRangeError::BadRange { mut stderr }) => {
+                        // A `${VAR}` reference is shown as written: its value
+                        // came from the environment and may be secret.
+                        let mut shown = since.as_str();
+                        if let Some(raw) = self.since_raw.as_deref()
+                            && raw != since
+                        {
+                            if !since.is_empty() {
+                                stderr = stderr.replace(since, alint_core::CONFIGURATION_MASK);
+                            }
+                            shown = raw;
+                        }
                         return Err(Error::rule_config(
                             &self.id,
                             format!(
-                                "could not resolve commit range `{since}..HEAD`: {stderr}. \
+                                "could not resolve commit range `{shown}..HEAD`: {stderr}. \
                                  Common cause: shallow clone. In a GitHub Actions PR \
                                  workflow, use `actions/checkout@v4` with \
                                  `fetch-depth: 0` so the base ref is reachable."

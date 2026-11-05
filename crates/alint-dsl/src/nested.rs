@@ -89,7 +89,7 @@ pub(crate) fn discover_nested(
     catalog: Option<KindCatalog<'_>>,
     running_version: RunningVersion,
     environment: &dyn crate::EnvironmentProvider,
-) -> Result<(Vec<Mapping>, Vec<ConfigCompatibility>)> {
+) -> Result<NestedRules> {
     let walk_opts = alint_core::WalkOptions {
         respect_gitignore: root.respect_gitignore.unwrap_or(true),
         extra_ignores: root.ignore.clone(),
@@ -107,6 +107,7 @@ pub(crate) fn discover_nested(
 
     let mut discovered: Vec<Mapping> = Vec::new();
     let mut compatibility = Vec::new();
+    let mut environment_values = Vec::new();
     for entry in &index.entries {
         if entry.is_dir {
             continue;
@@ -135,7 +136,7 @@ pub(crate) fn discover_nested(
             .unwrap_or_default();
 
         let source = entry.path.to_string_lossy().replace('\\', "/");
-        let (nested_rules, nested_compatibility) = load_nested_config(
+        let (nested_rules, nested_compatibility, nested_environment_values) = load_nested_config(
             &abs,
             &rel_dir,
             &source,
@@ -145,6 +146,7 @@ pub(crate) fn discover_nested(
             environment,
         )?;
         compatibility.extend(nested_compatibility);
+        crate::loader::add_environment_values(&mut environment_values, &nested_environment_values);
         for rule in nested_rules {
             if let Some(id) = rule.get("id").and_then(|v| v.as_str())
                 && !seen_ids.insert(id.to_string())
@@ -163,8 +165,13 @@ pub(crate) fn discover_nested(
             discovered.push(rule);
         }
     }
-    Ok((discovered, compatibility))
+    Ok((discovered, compatibility, environment_values))
 }
+
+/// The nested configs' rule mappings, their compatibility records, and the
+/// values their top-level fields read from the environment
+/// ([`RawConfig::environment_values`]).
+pub(crate) type NestedRules = (Vec<Mapping>, Vec<ConfigCompatibility>, Vec<String>);
 
 /// Load a nested config and return its rule mappings, each
 /// scoped to `rel_dir` (the path, relative to the root config's
@@ -177,7 +184,7 @@ fn load_nested_config(
     running_version: RunningVersion,
     catalog: Option<KindCatalog<'_>>,
     environment: &dyn crate::EnvironmentProvider,
-) -> Result<(Vec<Mapping>, Vec<ConfigCompatibility>)> {
+) -> Result<NestedRules> {
     let contents = fs::read_to_string(abs_path).map_err(|source| Error::Io {
         path: abs_path.to_path_buf(),
         source,
@@ -185,11 +192,35 @@ fn load_nested_config(
     // Route through the shared parse path so nested configs get the
     // same `{{env.X}}` interpolation as the top-level config and
     // drop-ins. Its errors already name the file.
-    let mut config: RawConfig = crate::loader::parse_config_interpolated_with_environment(
+    let config: RawConfig = crate::loader::parse_config_interpolated_with_environment(
         &contents,
         abs_path,
         environment,
     )?;
+    // A value the nested config's top-level fields read from the environment
+    // (its `version:`) stays out of its errors, as the root config's does.
+    let environment_values = config.environment_values.clone();
+    let (rules, compatibility) = nested_config_rules(
+        config,
+        rel_dir,
+        source,
+        consumer_version,
+        running_version,
+        catalog,
+    )
+    .map_err(|error| alint_core::redact_environment_values_in_error(error, &environment_values))?;
+    Ok((rules, compatibility, environment_values))
+}
+
+/// Check a parsed nested config and scope its rule mappings to `rel_dir`.
+fn nested_config_rules(
+    mut config: RawConfig,
+    rel_dir: &Path,
+    source: &str,
+    consumer_version: Option<u32>,
+    running_version: RunningVersion,
+    catalog: Option<KindCatalog<'_>>,
+) -> Result<(Vec<Mapping>, Vec<ConfigCompatibility>)> {
     crate::loader::validate_source_compatibility(
         &mut config,
         source,

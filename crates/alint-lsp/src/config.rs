@@ -295,10 +295,15 @@ fn build_session_for_config(
         entries.push(entry);
     }
 
+    // A fact's id may be read from the environment.
     let pattern_hints: Vec<_> = entries
         .iter()
         .flat_map(|entry| entry.pattern_hints(registry))
         .chain(alint_core::pattern_hints::fact_hints(&config.facts))
+        .map(|mut hint| {
+            hint.id = redact(hint.id);
+            hint
+        })
         .collect();
     let mut engine = Engine::from_entries(entries, registry.clone())
         .with_facts(config.facts)

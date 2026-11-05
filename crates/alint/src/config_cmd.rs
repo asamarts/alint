@@ -248,7 +248,11 @@ fn emit_validate_success(
 ) -> Result<ExitCode> {
     if format == "json" {
         // Pattern hints are advisory: the config is still valid.
-        let warnings: Vec<String> = hints.iter().map(ToString::to_string).collect();
+        // A fact's id may be read from the environment.
+        let warnings: Vec<String> = hints
+            .iter()
+            .map(|hint| redact_environment_values(&hint.to_string()).into_owned())
+            .collect();
         let envelope = serde_json::json!({
             "valid": true,
             "rule_count": rule_count,
@@ -261,7 +265,10 @@ fn emit_validate_success(
         // human format
         if !cli.quiet {
             for hint in hints {
-                eprintln!("alint: warning: {}", term(&hint.to_string()));
+                eprintln!(
+                    "alint: warning: {}",
+                    term(&redact_environment_values(&hint.to_string()))
+                );
             }
         }
         print_stdout_line(&format!(
@@ -324,7 +331,10 @@ pub(super) fn report_pattern_hints(
         .flat_map(|entry| entry.pattern_hints(registry))
         .chain(alint_core::pattern_hints::fact_hints(facts));
     for hint in hints {
-        eprintln!("alint: warning: {}", term(&hint.to_string()));
+        eprintln!(
+            "alint: warning: {}",
+            term(&redact_environment_values(&hint.to_string()))
+        );
     }
 }
 

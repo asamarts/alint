@@ -11,6 +11,7 @@
 mod deny_unknown_fields_uniformity;
 mod did_you_mean_integration;
 mod git_blame_age;
+mod git_commit_message_since;
 mod phase4_diagnostics_integration;
 mod scope_filter_integration;
 mod shell_out_rules;
