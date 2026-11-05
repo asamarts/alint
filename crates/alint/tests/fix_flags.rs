@@ -300,6 +300,74 @@ fn dry_run_flags_a_create_outside_the_rules_paths() {
     assert_eq!(dry.status.code(), Some(0));
 }
 
+#[test]
+fn dry_run_leaves_a_sensitive_rules_target_out_of_its_reason() {
+    // The reason a create would not resolve named its target, which a
+    // `sensitive: true` rule or a `fix:` read from the environment can hold.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    let configs = [
+        (
+            "sensitive: true",
+            "canary-target.txt",
+            "the target is outside the rule's `paths:`",
+        ),
+        (
+            "sensitive: false",
+            "{{env.CREATED}}",
+            "the target is outside the rule's `paths:`",
+        ),
+        (
+            "sensitive: true",
+            "../canary-target.txt",
+            "the target is outside the root",
+        ),
+    ];
+    for (sensitive, created, reason) in configs {
+        std::fs::write(
+            root.join(".alint.yml"),
+            format!(
+                "version: 1\nallow_out_of_root: true\nrules:\n\
+                 - {{id: env, kind: file_exists, paths: a.txt, level: error, {sensitive}, \
+                 fix: {{file_create: {{path: \"{created}\", content: \"x\\n\"}}}}}}\n"
+            ),
+        )
+        .unwrap();
+        for format in ["json", "human"] {
+            let home = tempfile::tempdir().unwrap();
+            let dry = isolated_alint(home.path())
+                .args(["fix", "--dry-run", "--format", format])
+                .current_dir(&root)
+                .env("CREATED", "canary-target.txt")
+                .output()
+                .expect("spawn alint");
+            let output = format!(
+                "{}{}",
+                String::from_utf8_lossy(&dry.stdout),
+                String::from_utf8_lossy(&dry.stderr)
+            );
+            assert_eq!(dry.status.code(), Some(1), "{created} {format}: {output}");
+            assert!(!output.contains("canary"), "{created} {format}: {output}");
+            if format == "json" {
+                let item = only_item(&dry);
+                assert_eq!(item["skip_kind"], "unresolved", "{item}");
+                assert!(item["detail"].as_str().unwrap().contains(reason), "{item}");
+            }
+        }
+    }
+    // Control: a rule that is not sensitive still names the target.
+    std::fs::write(root.join(".alint.yml"), create_config("a.txt", "b.txt")).unwrap();
+    let item = only_item(&run(&root, &["fix", "--dry-run", "--format", "json"]));
+    assert!(
+        item["detail"]
+            .as_str()
+            .unwrap()
+            .contains("b.txt is outside the rule's `paths:`"),
+        "{item}"
+    );
+}
+
 /// One run's outcome per rule, `(rule id, "applied" or the skip kind)`, and
 /// its exit code.
 type RunOutcome = (Vec<(String, String)>, Option<i32>);

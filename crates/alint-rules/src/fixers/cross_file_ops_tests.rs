@@ -781,7 +781,8 @@ fn value_regex_fix_declines_projected_output_over_the_limit() {
         .apply(&equals_viol("pins.txt", "x"), &limited)
         .unwrap();
     assert!(
-        matches!(out, FixOutcome::Skipped(ref reason) if reason.contains("output safety limit")),
+        matches!(out, FixOutcome::Skipped(ref reason)
+            if reason.contains("output safety limit") && !reason.contains("128")),
         "got {out:?}"
     );
     assert_eq!(read(&tmp, "pins.txt"), target.as_bytes());

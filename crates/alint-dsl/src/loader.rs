@@ -369,21 +369,8 @@ fn parse_config_interpolated_inner_with_environment(
         let env_vars = env_derived_vars(value.get("vars"));
         let rule_sensitive_fields = environment_sensitive_fields(value.get("rules"));
         let template_sensitive_fields = environment_sensitive_fields(value.get("templates"));
-        let rule_env_vars: Vec<Mapping> = value
-            .get("rules")
-            .and_then(yaml_serde::Value::as_sequence)
-            .map(|rules| {
-                rules
-                    .iter()
-                    .map(|r| {
-                        env_derived_vars(r.get("vars"))
-                            .into_iter()
-                            .map(|(k, v)| (k.into(), v.into()))
-                            .collect()
-                    })
-                    .collect()
-            })
-            .unwrap_or_default();
+        let extends_environment = entries_reading_environment(value.get("extends"));
+        let rule_env_vars = rule_env_derived_vars(value.get("rules"));
         // The names the top-level fields other than rules, templates and vars
         // read (`extends:`, `ignore:`, `facts:`, `baseline:` and the rest). The
         // code that consumes those fields can quote a value in an error, and no
@@ -428,6 +415,7 @@ fn parse_config_interpolated_inner_with_environment(
         crate::reject_ambiguous_yaml_in(&config, &source)?;
         config.env_vars = env_vars;
         config.environment_values = environment_values;
+        config.extends_environment = extends_environment;
         for (rule, marks) in config.rules.iter_mut().zip(rule_env_vars) {
             if !marks.is_empty() {
                 rule.insert(crate::ENV_VARS_MARKER.into(), marks.into());
@@ -473,6 +461,33 @@ fn value_reads_environment(value: &yaml_serde::Value) -> bool {
         yaml_serde::Value::Mapping(mapping) => mapping.values().any(value_reads_environment),
         _ => false,
     }
+}
+
+/// Whether each entry of a raw (pre-interpolation) sequence reads the
+/// environment (`extends:`, so the loader knows which entries came from it).
+fn entries_reading_environment(entries: Option<&yaml_serde::Value>) -> Vec<bool> {
+    entries
+        .and_then(yaml_serde::Value::as_sequence)
+        .map(|entries| entries.iter().map(value_reads_environment).collect())
+        .unwrap_or_default()
+}
+
+/// Each raw rule's [`env_derived_vars`], as the mapping its marker holds.
+fn rule_env_derived_vars(rules: Option<&yaml_serde::Value>) -> Vec<Mapping> {
+    rules
+        .and_then(yaml_serde::Value::as_sequence)
+        .map(|rules| {
+            rules
+                .iter()
+                .map(|r| {
+                    env_derived_vars(r.get("vars"))
+                        .into_iter()
+                        .map(|(k, v)| (k.into(), v.into()))
+                        .collect()
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 /// Append each of `values` that `into` does not hold yet.
@@ -638,6 +653,7 @@ pub(crate) fn load_recursive(
     };
 
     let extends = std::mem::take(&mut config.extends);
+    let extends_environment = std::mem::take(&mut config.extends_environment);
     if extends.is_empty() {
         visiting.remove(&canonical);
         if let Some(key) = memo_key {
@@ -675,9 +691,10 @@ pub(crate) fn load_recursive(
         version: config.version,
         ..RawConfig::default()
     };
-    for entry in &extends {
+    for (index, entry) in extends.iter().enumerate() {
         let parent = load_extended_source(
             entry,
+            extends_environment.get(index).copied().unwrap_or(false),
             &source_dir,
             state,
             opts,
@@ -695,8 +712,14 @@ pub(crate) fn load_recursive(
     Ok(merged)
 }
 
+/// `from_environment`: the entry read the environment, so it is also removed
+/// from errors in the forms the loader prints it in, which need not contain the
+/// value as written (a remote URL without its credentials, query and fragment;
+/// a local path joined, canonical, or relative to the root).
+#[allow(clippy::too_many_arguments)]
 fn load_extended_source(
     entry: &alint_core::ExtendsEntry,
+    from_environment: bool,
     source_dir: &Path,
     state: &mut LoadState,
     opts: &LoadOptions<'_>,
@@ -710,6 +733,12 @@ fn load_extended_source(
     } else {
         url.to_string()
     };
+    if from_environment {
+        add_environment_values(
+            &mut state.environment_values,
+            std::slice::from_ref(&source_display),
+        );
+    }
     let mut parent = if url.starts_with("http://") {
         return Err(Error::Other(format!(
             "plain http:// is not allowed in `extends:` (entry {source_display:?}); \
@@ -754,14 +783,7 @@ fn load_extended_source(
         bundled
     } else {
         let target = resolve_relative(source_dir, url);
-        // An entry read from the environment is also printed in the forms the
-        // loader normalizes it to (joined, canonical, relative to the root),
-        // which need not contain the value as written.
-        if state
-            .environment_values
-            .iter()
-            .any(|value| !value.is_empty() && url.contains(value.as_str()))
-        {
+        if from_environment {
             let mut normalized = vec![display_path(&target)];
             if let Ok(canonical) = opts.config_source.canonicalize(&target) {
                 normalized.push(local_source_display(&canonical, confine));
@@ -1791,6 +1813,64 @@ rules:
         .to_string();
         assert!(error.contains("plain-missing.yml"), "{error}");
         assert!(!error.contains("<redacted>"), "{error}");
+    }
+
+    #[test]
+    fn an_extends_entry_read_from_the_environment_is_scrubbed_in_the_forms_it_is_printed_in() {
+        let root = tempfile::tempdir().unwrap();
+        for name in ["value-of-shared.yml", "value-of-ignored-rules.yml"] {
+            std::fs::write(root.path().join(name), "version: 1\nrules: []\n").unwrap();
+        }
+        // `ignore:` reads a value the literal entry happens to contain.
+        std::fs::write(
+            root.path().join(".alint.yml"),
+            "version: 1\nignore: ['{{env.IGNORED}}']\n\
+             extends: ['./{{env.SHARED}}.yml', './value-of-ignored-rules.yml']\nrules: []\n",
+        )
+        .unwrap();
+        let options = crate::LoadOptions {
+            environment: std::sync::Arc::new(NamedEnvironment),
+            ..Default::default()
+        };
+        let config = crate::load_with(&root.path().join(".alint.yml"), &options).unwrap();
+        let forms = |file: &str| {
+            config
+                .environment_values
+                .iter()
+                .filter(|value| value.ends_with(file))
+                .count()
+        };
+        // The joined and canonical paths of the entry read from the
+        // environment; none of the literal one.
+        assert!(
+            forms("value-of-shared.yml") >= 2,
+            "{:?}",
+            config.environment_values
+        );
+        assert_eq!(
+            forms("value-of-ignored-rules.yml"),
+            0,
+            "{:?}",
+            config.environment_values
+        );
+
+        // A remote entry is printed without its credentials, query and
+        // fragment, so not as the value reads.
+        for policy in [crate::RemotePolicy::Deny, crate::RemotePolicy::Allow] {
+            std::fs::write(
+                root.path().join(".alint.yml"),
+                "version: 1\nextends: ['{{env.VALUE}}']\nrules: []\n",
+            )
+            .unwrap();
+            let mut options =
+                value_options("https://token@example.invalid/canary-path.yml?q=1#sha256-zz");
+            options.remote_policy = policy;
+            let error = crate::load_with(&root.path().join(".alint.yml"), &options)
+                .unwrap_err()
+                .to_string();
+            assert!(error.contains("<redacted>"), "{error}");
+            assert!(!error.contains("canary-path"), "{error}");
+        }
     }
 
     /// Options whose environment gives `VALUE` the value `value`.

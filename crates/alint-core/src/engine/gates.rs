@@ -517,11 +517,11 @@ impl Engine {
                 Err(crate::git::CommitRangeError::BadRange { mut stderr }) => {
                     let mut since = since;
                     if secret_refs.contains(&since) {
-                        // Git quotes the ref as given.
-                        if !since.is_empty() {
-                            stderr = stderr.replace(&since, crate::CONFIGURATION_MASK);
-                        }
-                        since = crate::CONFIGURATION_MASK.to_string();
+                        // Git quotes the ref, or only part of it (`a:b` is
+                        // "invalid object name 'a'"), so its message is left
+                        // out whole.
+                        crate::git::BAD_RANGE_MESSAGE_LEFT_OUT.clone_into(&mut stderr);
+                        crate::CONFIGURATION_MASK.clone_into(&mut since);
                     }
                     return Err(crate::error::Error::Other(format!(
                         "scope_filter.changed_since: could not resolve `{since}...HEAD`: \

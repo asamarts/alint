@@ -268,6 +268,11 @@ fn sensitive_fields(mapping: &Mapping) -> Option<&Mapping> {
         .and_then(yaml_serde::Value::as_mapping)
 }
 
+/// Whether `mapping`'s `field` took its value from the environment.
+pub(crate) fn field_reads_environment(mapping: &Mapping, field: &str) -> bool {
+    sensitive_fields(mapping).is_some_and(|fields| fields.contains_key(field))
+}
+
 fn add_sensitive_field(mapping: &mut Mapping, field: &yaml_serde::Value) {
     let mut fields = mapping
         .remove(SENSITIVE_FIELDS_MARKER)
@@ -382,11 +387,12 @@ fn nested_when_reads_sensitive_input(
     })
 }
 
-/// A copy of an effective rule whose possibly secret values (see
-/// [`alint_core::configuration_field_may_be_secret`]) are masked, or `None`
-/// when the rule has none. The private markers stay as they are: they hold
-/// field names and sources, not values.
-pub(crate) fn masked_rule_mapping(mapping: &Mapping) -> Option<Mapping> {
+/// Copies of an effective rule whose possibly secret values (see
+/// [`alint_core::configuration_field_may_be_secret`]) are masked, one for each
+/// way numbers move ([`alint_core::NumberMask::BOTH`]), or `None` when the rule
+/// has none. The private markers stay as they are: they hold field names and
+/// sources, not values.
+pub(crate) fn masked_rule_mappings(mapping: &Mapping) -> Option<Vec<Mapping>> {
     let environment_fields: std::collections::BTreeSet<String> = sensitive_fields(mapping)
         .into_iter()
         .flatten()
@@ -400,17 +406,24 @@ pub(crate) fn masked_rule_mapping(mapping: &Mapping) -> Option<Mapping> {
     if !sensitive && environment_fields.is_empty() {
         return None;
     }
-    let mut masked = mapping.clone();
-    for (field, value) in &mut masked {
-        let secret = !is_internal_field(field)
-            && field.as_str().is_some_and(|field| {
-                alint_core::configuration_field_may_be_secret(sensitive, &environment_fields, field)
-            });
-        if secret {
-            alint_core::mask_configuration_values(value);
+    let masked = |numbers| {
+        let mut masked = mapping.clone();
+        for (field, value) in &mut masked {
+            let secret = !is_internal_field(field)
+                && field.as_str().is_some_and(|field| {
+                    alint_core::configuration_field_may_be_secret(
+                        sensitive,
+                        &environment_fields,
+                        field,
+                    )
+                });
+            if secret {
+                alint_core::mask_configuration_values(value, numbers);
+            }
         }
-    }
-    Some(masked)
+        masked
+    };
+    Some(alint_core::NumberMask::BOTH.map(masked).to_vec())
 }
 
 /// Consume the private sparse marker before typed rule deserialization.

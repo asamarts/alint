@@ -485,9 +485,86 @@ fn order_key(v: &Violation) -> (Option<String>, usize, usize, &str) {
     )
 }
 
+/// The baseline file's path relative to the lint `root`, as a walk-exclude
+/// pattern ([`crate::WalkOptions::extra_ignores`]) that matches only that file,
+/// so a broad-glob content rule can't lint alint's own committed JSON-Lines
+/// artifact as a spurious "new" violation. `None` when the baseline lives
+/// outside the root (then it isn't walked anyway) or doesn't exist yet (the
+/// missing-baseline error surfaces at load time).
+#[must_use]
+pub fn walk_exclude(root: &Path, baseline: &Path) -> Option<String> {
+    let root_abs = root.canonicalize().ok()?;
+    let base_abs = baseline.canonicalize().ok()?;
+    let rel = base_abs.strip_prefix(&root_abs).ok()?;
+    // Root-anchored (leading `/`): the walker turns this into an override
+    // `!/…` that matches ONLY the baseline at the repo root, never a same-named
+    // file in a subdirectory. Without the anchor a separator-less pattern
+    // matches at any depth, silently dropping a real violation in e.g.
+    // `sub/.alint-baseline.json`. Each name is escaped, so `[`, `*` or `\` in
+    // it match only themselves.
+    let mut pattern = String::new();
+    for name in rel {
+        pattern.push('/');
+        pattern.push_str(&crate::template::glob_escape(&name.to_string_lossy()));
+    }
+    // An ignore pattern drops trailing whitespace; a class keeps it.
+    if let Some(last) = pattern.chars().last().filter(|c| c.is_whitespace()) {
+        pattern.pop();
+        pattern.push('[');
+        pattern.push(last);
+        pattern.push(']');
+    }
+    Some(pattern)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn walk_exclude_leaves_out_only_the_baseline() {
+        let root = tempfile::Builder::new()
+            .prefix("alint-baseline-test-")
+            .tempdir()
+            .unwrap();
+        let mut names = vec!["base[1].json", "base1.json", "sub/base[1].json"];
+        if cfg!(unix) {
+            // Legal names only off Windows.
+            names.extend(["b*.json", "a\\b.json", "a/b.json", "trailing ", "trailing"]);
+        }
+        for name in &names {
+            let path = root.path().join(name);
+            std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+            std::fs::write(path, "{}").unwrap();
+        }
+        let walked = |baseline: &str| {
+            let pattern = walk_exclude(root.path(), &root.path().join(baseline)).unwrap();
+            let opts = crate::WalkOptions {
+                respect_gitignore: false,
+                extra_ignores: vec![pattern],
+            };
+            let index = crate::walker::walk(root.path(), &opts).unwrap();
+            let mut left_out: Vec<&str> = names
+                .iter()
+                .copied()
+                .filter(|name| !index.contains_file(Path::new(name)))
+                .collect();
+            left_out.sort_unstable();
+            left_out
+        };
+        assert_eq!(walked("base[1].json"), ["base[1].json"]);
+        if cfg!(unix) {
+            assert_eq!(walked("b*.json"), ["b*.json"]);
+            assert_eq!(walked("a\\b.json"), ["a\\b.json"]);
+            assert_eq!(walked("trailing "), ["trailing "]);
+        }
+        assert_eq!(
+            walk_exclude(root.path(), &root.path().join("missing.json")),
+            None
+        );
+        let outside = tempfile::NamedTempFile::new_in(root.path().parent().unwrap()).unwrap();
+        assert_eq!(walk_exclude(root.path(), outside.path()), None);
+    }
 
     fn fp(
         rule: &str,

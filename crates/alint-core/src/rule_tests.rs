@@ -500,6 +500,8 @@ fn check_fix_size_skips_over_limit_files() {
         Some(FixOutcome::Skipped(reason)) => {
             assert!(reason.contains("exceeds fix_size_limit"));
             assert!(reason.contains("big.txt"));
+            // The limit can come from the environment.
+            assert!(!reason.contains("64"), "{reason}");
         }
         other => panic!("expected Skipped, got {other:?}"),
     }

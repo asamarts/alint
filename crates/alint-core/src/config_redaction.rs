@@ -34,18 +34,37 @@ pub fn configuration_field_may_be_secret(
             ))
 }
 
+/// Which way [`mask_configuration_values`] moves a number. A masked copy stays
+/// next to each number, so a range check (`max_width > 0`, a `threshold` in
+/// `0.0..=1.0`) passes as it did and an unrelated error later in the rule still
+/// recurs and stays readable. A value at the edge of its range fails the check
+/// in one direction, so a rerun tries both ([`Self::BOTH`]).
+#[doc(hidden)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NumberMask {
+    /// The next number up: the integer one higher, or the next float.
+    Up,
+    /// The next number down: the integer one lower, or the previous float.
+    Down,
+}
+
+impl NumberMask {
+    /// Both directions, in the order a rerun tries them.
+    pub const BOTH: [Self; 2] = [Self::Up, Self::Down];
+}
+
 /// Replace every scalar in `value`, at any depth, with one that differs from
 /// it, so an error quoting the original cannot recur on the masked copy: a
 /// string becomes [`CONFIGURATION_MASK`], a number the next one of the same
-/// kind, and a bool its negation. Interpolation re-types an environment value
-/// that reads as a number or a bool, so those can be secret too (a 12-digit
-/// account id). Numbers and bools keep their type, so an error about a type
-/// that does not quote the value still recurs and stays readable. Mapping keys
-/// are names, not values, and the `id`, `kind` and `level` of a nested rule (a
-/// mapping with a string `kind`) are never interpolated (they are its
-/// identity), so both stay as written.
+/// kind (in the direction `numbers` names), and a bool its negation.
+/// Interpolation re-types an environment value that reads as a number or a
+/// bool, so those can be secret too (a 12-digit account id). Numbers and bools
+/// keep their type, so an error about a type that does not quote the value
+/// still recurs and stays readable. Mapping keys are names, not values, and the
+/// `id`, `kind` and `level` of a nested rule (a mapping with a string `kind`)
+/// are never interpolated (they are its identity), so both stay as written.
 #[doc(hidden)]
-pub fn mask_configuration_values(value: &mut yaml_serde::Value) {
+pub fn mask_configuration_values(value: &mut yaml_serde::Value, numbers: NumberMask) {
     match value {
         yaml_serde::Value::String(text) => {
             *text = if text == CONFIGURATION_MASK {
@@ -54,9 +73,11 @@ pub fn mask_configuration_values(value: &mut yaml_serde::Value) {
                 CONFIGURATION_MASK.to_string()
             };
         }
-        yaml_serde::Value::Number(number) => *number = differing_number(number),
+        yaml_serde::Value::Number(number) => *number = differing_number(number, numbers),
         yaml_serde::Value::Bool(flag) => *flag = !*flag,
-        yaml_serde::Value::Sequence(items) => items.iter_mut().for_each(mask_configuration_values),
+        yaml_serde::Value::Sequence(items) => items
+            .iter_mut()
+            .for_each(|item| mask_configuration_values(item, numbers)),
         yaml_serde::Value::Mapping(mapping) => {
             // A nested rule (a mapping with a `kind`) keeps its identity.
             let rule = mapping
@@ -65,30 +86,50 @@ pub fn mask_configuration_values(value: &mut yaml_serde::Value) {
             mapping
                 .iter_mut()
                 .filter(|(key, _)| !(rule && matches!(key.as_str(), Some("id" | "kind" | "level"))))
-                .for_each(|(_, item)| mask_configuration_values(item));
+                .for_each(|(_, item)| mask_configuration_values(item, numbers));
         }
-        yaml_serde::Value::Tagged(tagged) => mask_configuration_values(&mut tagged.value),
+        yaml_serde::Value::Tagged(tagged) => mask_configuration_values(&mut tagged.value, numbers),
         yaml_serde::Value::Null => {}
     }
 }
 
-/// A number of the same kind (float or integer) that differs from `number`:
-/// the next one (the previous one at the type's maximum). Staying next to the
-/// value keeps a range check (`max_width > 0`) passing as it did, so an
-/// unrelated error later in the rule still recurs and stays readable.
-fn differing_number(number: &yaml_serde::Number) -> yaml_serde::Number {
+/// A number of the same kind (float or integer) that differs from `number`,
+/// next to it in the direction `numbers` names, or in the other one where that
+/// cannot move (the type's maximum or minimum, an infinity). A float moves by
+/// the smallest step, which still prints differently: Rust prints the shortest
+/// text that reads back as the same float. A NaN becomes zero.
+fn differing_number(number: &yaml_serde::Number, numbers: NumberMask) -> yaml_serde::Number {
+    let up = numbers == NumberMask::Up;
     if let Some(value) = number.as_u64() {
-        yaml_serde::Number::from(value.checked_add(1).unwrap_or(u64::MAX - 1))
-    } else if let Some(value) = number.as_i64() {
-        yaml_serde::Number::from(value + 1)
-    } else {
-        // From 2^53 on, adding one may not change a float; its negation differs.
-        let value = number.as_f64().unwrap_or_default();
-        yaml_serde::Number::from(if value.abs() < 9_007_199_254_740_992.0 {
-            value + 1.0
+        let moved = if (up && value < u64::MAX) || value == 0 {
+            value + 1
         } else {
-            -value
-        })
+            value - 1
+        };
+        yaml_serde::Number::from(moved)
+    } else if let Some(value) = number.as_i64() {
+        // Only a negative integer is not a `u64`.
+        let moved = if up || value == i64::MIN {
+            value + 1
+        } else {
+            value - 1
+        };
+        yaml_serde::Number::from(moved)
+    } else {
+        let value = number.as_f64().unwrap_or_default();
+        let (next, other) = if up {
+            (value.next_up(), value.next_down())
+        } else {
+            (value.next_down(), value.next_up())
+        };
+        let moved = if value.is_nan() {
+            0.0
+        } else if next.to_bits() == value.to_bits() {
+            other
+        } else {
+            next
+        };
+        yaml_serde::Number::from(moved)
     }
 }
 
@@ -235,23 +276,25 @@ pub fn redact_environment_values_in_error(error: crate::Error, values: &[String]
 impl RuleSpec {
     /// Fail closed when an error may quote environment-derived or explicitly
     /// sensitive configuration. `rerun` repeats the failed step on
-    /// [`Self::masked_configuration`]; the error stays readable only when that
-    /// copy fails with the identical message, which therefore cannot depend on
-    /// a masked value. Structural rule identity remains visible either way.
+    /// [`Self::masked_configuration`], with numbers moved up and then down
+    /// ([`NumberMask::BOTH`]); the error stays readable only when a copy fails
+    /// with the identical message, which therefore does not quote a masked
+    /// value. Structural rule identity remains visible either way.
     #[doc(hidden)]
     pub fn redact_configuration_error(
         &self,
         error: crate::Error,
-        rerun: impl FnOnce(&Self) -> crate::Result<()>,
+        mut rerun: impl FnMut(&Self) -> crate::Result<()>,
     ) -> crate::Error {
         if !self.has_sensitive_configuration() {
             return error;
         }
         let message = error.to_string();
-        let reproduced = self
-            .masked_configuration()
-            .and_then(|masked| rerun(&masked).err())
-            .is_some_and(|masked_error| masked_error.to_string() == message);
+        let reproduced = NumberMask::BOTH.into_iter().any(|numbers| {
+            self.masked_configuration(numbers)
+                .and_then(|masked| rerun(&masked).err())
+                .is_some_and(|masked_error| masked_error.to_string() == message)
+        });
         if reproduced {
             return error;
         }
@@ -275,13 +318,13 @@ impl RuleSpec {
 
     /// A copy whose possibly secret values (see
     /// [`configuration_field_may_be_secret`]) are masked
-    /// ([`mask_configuration_values`]), so a step repeated on it cannot quote
-    /// them. `None` when such a value sits in a
-    /// typed field this cannot rewrite (`fix`, or a manifest-path
+    /// ([`mask_configuration_values`], numbers moved as `numbers` says), so a
+    /// step repeated on it cannot quote them. `None` when such a value sits in
+    /// a typed field this cannot rewrite (`fix`, or a manifest-path
     /// `scope_filter`); the caller then fails closed.
     #[doc(hidden)]
     #[must_use]
-    pub fn masked_configuration(&self) -> Option<Self> {
+    pub fn masked_configuration(&self, numbers: NumberMask) -> Option<Self> {
         let secret = |field: &str| {
             configuration_field_may_be_secret(self.sensitive, &self.sensitive_fields, field)
         };
@@ -328,7 +371,7 @@ impl RuleSpec {
         }
         for (field, value) in &mut masked.extra {
             if field.as_str().is_some_and(secret) {
-                mask_configuration_values(value);
+                mask_configuration_values(value, numbers);
             }
         }
         Some(masked)

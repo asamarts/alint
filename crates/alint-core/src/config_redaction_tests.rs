@@ -35,23 +35,92 @@ fn only_environment_fields_or_a_sensitive_rules_values_may_be_secret() {
 
 #[test]
 fn masking_changes_every_value_but_keeps_names_types_and_nested_rule_identity() {
-    let mut value: yaml_serde::Value = yaml_serde::from_str(
-        "a: secret\nb: [one, {c: two, d: 123456789012, e: true, g: 0, h: 1.5, j: -7, \
-         k: 18446744073709551615, l: 1.0e300, m: 9007199254740991.0, n: 9007199254740992.0}]\nf: ~\n\
+    let document = "a: secret\nb: [one, {c: two, d: 123456789012, e: true, g: 0, h: 1.5, j: -7, \
+         k: 18446744073709551615}]\nf: ~\n\
          i: <redacted>\nrequire: [{id: n, kind: file_exists, level: error, paths: x}]\n\
-         data: {id: literal, level: high}\n",
-    )
-    .unwrap();
-    mask_configuration_values(&mut value);
-    let expected: yaml_serde::Value = yaml_serde::from_str(
-        "a: <redacted>\nb: [<redacted>, {c: <redacted>, d: 123456789013, e: false, g: 1, h: 2.5, \
-         j: -6, k: 18446744073709551614, l: -1.0e300, m: 9007199254740992.0, \
-         n: -9007199254740992.0}]\nf: ~\n\
-         i: <masked>\nrequire: [{id: n, kind: file_exists, level: error, paths: <redacted>}]\n\
-         data: {id: <redacted>, level: <redacted>}\n",
-    )
-    .unwrap();
-    assert_eq!(value, expected);
+         data: {id: literal, level: high}\n";
+    let expected = |d: i64, g: u64, h: f64, j: i64| {
+        format!(
+            "a: <redacted>\nb: [<redacted>, {{c: <redacted>, d: {d}, e: false, g: {g}, h: {h:?}, \
+             j: {j}, k: 18446744073709551614}}]\nf: ~\n\
+             i: <masked>\nrequire: [{{id: n, kind: file_exists, level: error, paths: <redacted>}}]\n\
+             data: {{id: <redacted>, level: <redacted>}}\n"
+        )
+    };
+    // At its type's maximum or minimum a number moves the other way.
+    for (numbers, expected) in [
+        (
+            NumberMask::Up,
+            expected(123_456_789_013, 1, 1.5_f64.next_up(), -6),
+        ),
+        (
+            NumberMask::Down,
+            expected(123_456_789_011, 1, 1.5_f64.next_down(), -8),
+        ),
+    ] {
+        let mut value: yaml_serde::Value = yaml_serde::from_str(document).unwrap();
+        mask_configuration_values(&mut value, numbers);
+        let expected: yaml_serde::Value = yaml_serde::from_str(&expected).unwrap();
+        assert_eq!(value, expected, "{numbers:?}");
+    }
+}
+
+#[test]
+fn a_masked_number_always_differs_and_stays_next_to_the_value() {
+    let moved = |number: yaml_serde::Number, numbers| {
+        let mut value = yaml_serde::Value::Number(number);
+        mask_configuration_values(&mut value, numbers);
+        let yaml_serde::Value::Number(masked) = value else {
+            panic!("a number stays a number: {value:?}");
+        };
+        masked
+    };
+    for numbers in NumberMask::BOTH {
+        for value in [
+            0.0,
+            0.5,
+            1.0,
+            -1.0,
+            1.0e300,
+            9_007_199_254_740_992.0,
+            f64::MAX,
+            f64::MIN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+        ] {
+            let masked = moved(value.into(), numbers).as_f64().unwrap();
+            assert_ne!(masked, value, "{value} {numbers:?}");
+            assert_ne!(
+                format!("{masked}"),
+                format!("{value}"),
+                "{value} {numbers:?}"
+            );
+            // One step, so a range check on the value still passes.
+            assert!(
+                [value.next_up(), value.next_down()]
+                    .iter()
+                    .any(|next| next.to_bits() == masked.to_bits()),
+                "{value} {numbers:?}"
+            );
+        }
+        assert_eq!(moved(f64::NAN.into(), numbers).as_f64(), Some(0.0));
+        for value in [0, 7, u64::MAX] {
+            let masked = moved(value.into(), numbers).as_u64().unwrap();
+            assert_eq!(masked.abs_diff(value), 1, "{value} {numbers:?}");
+        }
+        for value in [-7, i64::MIN] {
+            let masked = moved(value.into(), numbers).as_i64().unwrap();
+            assert_eq!(masked.abs_diff(value), 1, "{value} {numbers:?}");
+        }
+    }
+    assert_eq!(
+        moved(0.5.into(), NumberMask::Up).as_f64(),
+        Some(0.5_f64.next_up())
+    );
+    assert_eq!(
+        moved(0.5.into(), NumberMask::Down).as_f64(),
+        Some(0.5_f64.next_down())
+    );
 }
 
 #[test]
@@ -166,7 +235,7 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
         "limit",
         "scope_filter",
     ]));
-    let masked = rule.masked_configuration().unwrap();
+    let masked = rule.masked_configuration(NumberMask::Up).unwrap();
     assert_eq!(masked.id, "r");
     assert_eq!(masked.kind, "file_content_forbidden");
     assert!(matches!(
@@ -179,6 +248,10 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     // A number read from the environment can be a secret (an account id) and
     // is masked by the next number; a field not read from the environment stays.
     assert_eq!(masked.extra["limit"], 4);
+    assert_eq!(
+        rule.masked_configuration(NumberMask::Down).unwrap().extra["limit"],
+        2
+    );
     assert_eq!(masked.extra["ignore"], "plain");
     assert_eq!(masked.policy_url.as_deref(), Some("https://docs"));
     let scope = masked.scope_filter.unwrap();
@@ -191,7 +264,7 @@ fn masked_configuration_masks_each_environment_field_and_nothing_else() {
     let mut single = spec("id: r\nkind: k\nlevel: error\npaths: 'canary-secret['\n");
     single.set_sensitive_fields(environment_fields(&["paths"]));
     assert!(matches!(
-        single.masked_configuration().unwrap().paths,
+        single.masked_configuration(NumberMask::Up).unwrap().paths,
         Some(PathsSpec::Single(ref pattern)) if pattern == CONFIGURATION_MASK
     ));
 }
@@ -202,7 +275,7 @@ fn a_sensitive_rule_masks_every_value_but_its_identity() {
         "id: r\nkind: file_content_forbidden\nlevel: warning\nsensitive: true\n\
          paths: {include: a, exclude: b}\npattern: secret\npolicy_url: https://x\n",
     )
-    .masked_configuration()
+    .masked_configuration(NumberMask::Up)
     .unwrap();
     assert_eq!(
         (masked.id.as_str(), masked.kind.as_str(), masked.level),
@@ -227,25 +300,25 @@ fn a_secret_in_a_typed_field_this_cannot_mask_fails_closed() {
          fix: {file_create: {content: secret}}\n",
     );
     assert!(
-        fix.masked_configuration().is_some(),
+        fix.masked_configuration(NumberMask::Up).is_some(),
         "no secret, nothing to refuse"
     );
     fix.set_sensitive_fields(environment_fields(&["fix"]));
-    assert!(fix.masked_configuration().is_none());
+    assert!(fix.masked_configuration(NumberMask::Up).is_none());
 
     let mut manifest = spec(
         "id: r\nkind: file_content_forbidden\nlevel: error\npaths: '**'\npattern: x\n\
          scope_filter: {include_manifest_paths: {source: Cargo.toml, extract: {toml: '$.a'}}}\n",
     );
     manifest.set_sensitive_fields(environment_fields(&["scope_filter"]));
-    assert!(manifest.masked_configuration().is_none());
+    assert!(manifest.masked_configuration(NumberMask::Up).is_none());
 
     let mut excluded = spec(
         "id: r\nkind: file_content_forbidden\nlevel: error\npaths: '**'\npattern: x\n\
          scope_filter: {exclude_manifest_paths: {source: Cargo.toml, extract: {toml: '$.a'}}}\n",
     );
     excluded.set_sensitive_fields(environment_fields(&["scope_filter"]));
-    assert!(excluded.masked_configuration().is_none());
+    assert!(excluded.masked_configuration(NumberMask::Up).is_none());
 }
 
 #[test]
@@ -261,19 +334,40 @@ fn an_error_stays_readable_only_when_the_masked_copy_reproduces_it() {
     assert_eq!(kept.to_string(), structural().to_string());
 
     let quoting = || crate::Error::rule_config("r", "invalid regex `secret`");
-    for rerun_result in [
-        Err(crate::Error::rule_config("r", "invalid regex `<redacted>`")),
-        Ok(()),
-    ] {
+    for fails in [true, false] {
+        let mut reruns = 0;
         let redacted = rule.redact_configuration_error(quoting(), |masked| {
             assert_eq!(masked.extra["pattern"], CONFIGURATION_MASK);
-            rerun_result
+            reruns += 1;
+            if fails {
+                Err(crate::Error::rule_config("r", "invalid regex `<redacted>`"))
+            } else {
+                Ok(())
+            }
         });
+        // Numbers moved up, then down.
+        assert_eq!(reruns, 2);
         let message = redacted.to_string();
         assert!(message.contains(REDACTED_CONFIGURATION_ERROR), "{message}");
         assert!(!message.contains("secret`"), "{message}");
         assert!(message.contains("\"r\""), "the rule's id stays: {message}");
     }
+
+    // A number at the top of its range fails the check moved up, and the
+    // unrelated error recurs with it moved down.
+    let mut limited = spec("id: r\nkind: k\nlevel: error\nlimit: 100\n");
+    limited.set_sensitive_fields(environment_fields(&["limit"]));
+    let kept = limited.redact_configuration_error(structural(), |masked| {
+        if masked.extra["limit"].as_u64() > Some(100) {
+            Err(crate::Error::rule_config(
+                "r",
+                "`limit` must be at most 100",
+            ))
+        } else {
+            Err(structural())
+        }
+    });
+    assert_eq!(kept.to_string(), structural().to_string());
 
     // An internal error keeps its kind when it is redacted.
     let internal = rule.redact_configuration_error(crate::Error::internal("secret"), |_| Ok(()));

@@ -141,14 +141,15 @@ impl Rule for GitCommitMessageRule {
                     Ok(Some(records)) => records,
                     Err(CommitRangeError::BadRange { mut stderr }) => {
                         // A `${VAR}` reference is shown as written: its value
-                        // came from the environment and may be secret.
+                        // came from the environment and may be secret. Git
+                        // quotes the ref, or only part of it (`a:b` is
+                        // "invalid object name 'a'"), so its message is left
+                        // out whole.
                         let mut shown = since.as_str();
                         if let Some(raw) = self.since_raw.as_deref()
                             && raw != since
                         {
-                            if !since.is_empty() {
-                                stderr = stderr.replace(since, alint_core::CONFIGURATION_MASK);
-                            }
+                            alint_core::git::BAD_RANGE_MESSAGE_LEFT_OUT.clone_into(&mut stderr);
                             shown = raw;
                         }
                         return Err(Error::rule_config(
