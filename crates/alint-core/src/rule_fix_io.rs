@@ -155,10 +155,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
         _ => path.to_path_buf(),
     };
     let path = resolved.as_path();
-    let dir = path
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-        .map_or_else(|| std::path::PathBuf::from("."), Path::to_path_buf);
+    let dir = temp_dir_for(path);
     // Refuse to replace a file we could not write in place. A temp+rename only
     // needs write access to the DIRECTORY, so without this check a `chmod 444`
     // file (or a Perforce checkout not yet opened for edit) would be silently
@@ -196,6 +193,14 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
     Ok(())
 }
 
+/// The directory `write_atomic` writes its temporary file in: the target's
+/// own, so the rename stays on one filesystem (`.` for a bare file name).
+pub(super) fn temp_dir_for(path: &Path) -> PathBuf {
+    path.parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+}
+
 /// `Err(PermissionDenied)` when the existing file at `path` is not writable in
 /// place by this process.
 ///
@@ -206,7 +211,7 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
 /// bytes written; mtime is untouched). `readonly()` is kept as well so a
 /// `chmod 444` file stays refused even for root, whose open would succeed.
 /// Only a regular file is probed (opening a FIFO for writing could block).
-fn refuse_unwritable(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
+pub(super) fn refuse_unwritable(path: &Path, meta: &std::fs::Metadata) -> std::io::Result<()> {
     let refuse = |msg: String| {
         Err(std::io::Error::new(
             std::io::ErrorKind::PermissionDenied,

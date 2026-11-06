@@ -639,4 +639,10 @@ fn a_warning_escapes_the_control_characters_in_a_path() {
         !stderr.lines().any(|line| line.starts_with("WARN forged")),
         "{stderr:?}"
     );
+    // The message prints bare and every other field by name.
+    assert!(
+        stderr.contains("skipping unreadable file") && stderr.contains("path="),
+        "{stderr:?}"
+    );
+    assert!(!stderr.contains("message="), "{stderr:?}");
 }

@@ -685,6 +685,45 @@ fn a_create_has_one_name_when_it_lands_where_it_is_written() {
         ])
     );
     assert_eq!(names("../outside.txt"), None);
+    // An absolute path keeps the name written after its last `..`, even
+    // after two in a row.
+    std::fs::create_dir_all(root.join("sub/inner")).unwrap();
+    let absolute = root.join("sub/inner/../../alias/x.txt");
+    assert_eq!(
+        Engine::created_names(root, &absolute),
+        Some(vec![
+            PathBuf::from("alias/x.txt"),
+            PathBuf::from("real/x.txt")
+        ])
+    );
+}
+
+#[test]
+#[cfg(unix)]
+fn a_directory_with_a_dot_dot_is_where_the_os_resolves_it() {
+    use std::os::unix::fs::symlink;
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().canonicalize().unwrap();
+    for dir in ["sub", "q/r", "z/w", "x"] {
+        std::fs::create_dir_all(root.join(dir)).unwrap();
+    }
+    // `x/x/..` is `q`, through the link; `q/x` is a different link, so
+    // only the place the OS resolves the head to gives `q/d`.
+    symlink(root.join("q/r"), root.join("x/x")).unwrap();
+    symlink(root.join("z/w"), root.join("q/x")).unwrap();
+    assert_eq!(
+        Engine::directory_location(&root.join("sub/../d")),
+        Some(root.join("d"))
+    );
+    assert_eq!(
+        Engine::directory_location(&root.join("x/x/../d")),
+        Some(root.join("q/d"))
+    );
+    assert_eq!(
+        Engine::directory_location(&root.join("missing/../d")),
+        None,
+        "the write needs the directory before the `..`"
+    );
 }
 
 #[test]

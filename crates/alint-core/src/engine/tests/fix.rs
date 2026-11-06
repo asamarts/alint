@@ -1091,3 +1091,68 @@ fn reconciliation_drops_a_moot_fix_error_when_the_file_is_removed() {
         "no residual on the clean tree"
     );
 }
+
+/// `fix --baseline` on a rule that deletes `x.txt`, whose spec is `sensitive`
+/// as given, with a baseline holding `grandfathered`'s fingerprint: whether
+/// the fix was skipped, and whether `x.txt` survived.
+fn fix_against_baseline(sensitive: bool, grandfathered: &Violation) -> (bool, bool) {
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::write(tmp.path().join("x.txt"), b"hi").unwrap();
+    let spec: crate::RuleSpec = yaml_serde::from_str(&format!(
+        "id: removes\nkind: action\nlevel: error\nsensitive: {sensitive}\n"
+    ))
+    .unwrap();
+    let rule = Box::new(ActionRule {
+        id: "removes".into(),
+        file: PathBuf::from("x.txt"),
+        action: FixAction::Delete,
+    });
+    let baseline = crate::baseline::Baseline::from_fingerprints(
+        None,
+        [crate::baseline::FingerprintedViolation {
+            rule_id: "removes".into(),
+            path: Some("x.txt".into()),
+            fingerprint: crate::baseline::fingerprint("removes", grandfathered, None),
+            message: None,
+        }],
+    );
+    let report = Engine::from_entries(
+        vec![RuleEntry::new(rule).with_spec(Arc::new(spec))],
+        RuleRegistry::new(),
+    )
+    .with_fix_baseline(baseline)
+    .fix(
+        tmp.path(),
+        &idx(&["x.txt"]),
+        &crate::WalkOptions::default(),
+        false,
+        Applicability::Safe,
+    )
+    .unwrap();
+    let items: Vec<_> = report.results.iter().flat_map(|r| &r.items).collect();
+    let skipped = !items.is_empty()
+        && items.iter().all(|item| {
+            matches!(
+                item.status,
+                FixStatus::Skipped {
+                    kind: crate::report::SkipKind::Baselined,
+                    ..
+                }
+            )
+        });
+    (skipped, tmp.path().join("x.txt").exists())
+}
+
+#[test]
+fn fix_baseline_fingerprints_a_finding_as_check_reports_it() {
+    let raw = Violation::new("stands").with_path(PathBuf::from("x.txt"));
+    let mut redacted = raw.clone();
+    redacted.mark_sensitive("removes");
+    // A plain rule's finding keeps its message in the fingerprint.
+    assert_eq!(fix_against_baseline(false, &raw), (true, true));
+    assert_eq!(fix_against_baseline(false, &redacted), (false, false));
+    // A sensitive rule's finding is redacted in the report, so the baseline
+    // `alint baseline` wrote holds the redacted fingerprint.
+    assert_eq!(fix_against_baseline(true, &redacted), (true, true));
+    assert_eq!(fix_against_baseline(true, &raw), (false, false));
+}

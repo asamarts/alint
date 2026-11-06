@@ -350,7 +350,7 @@ impl Engine {
     /// Where `directory` has to exist for a write into it, resolved as the OS
     /// resolves it, or `None` when a directory before one of its `..` is
     /// missing: the write needs that one, not just the place it leads back to.
-    fn directory_location(directory: &Path) -> Option<PathBuf> {
+    pub(super) fn directory_location(directory: &Path) -> Option<PathBuf> {
         let components: Vec<_> = directory.components().collect();
         let Some(last_up) = components
             .iter()
