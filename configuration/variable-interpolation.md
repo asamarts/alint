@@ -64,10 +64,9 @@ A value read from the environment may be a secret, so alint keeps it out of what
 
 Two kinds of value are still printed: a boolean, and a value an error prints in fewer than four characters. Removing every occurrence of those would garble the message, and they are too short to be much of a secret. A value for an option with a fixed set of choices (`style: tabs`) cannot be masked with another valid choice, so an unrelated error after it in the same rule stays redacted.
 
-Three things are outside what alint recognizes:
+These are outside what alint recognizes:
 
 - A `since:` written in the deprecated `${VAR}` form is expanded when the rule runs, not at load, so it does not count as read from the environment and the rule's findings are not redacted. Its range error shows the reference as written. The [`{{env.X}}` form](#migrating-from-the-v0921-var-syntax) has neither gap.
-- `alint facts` recognizes a value as it was read. A `custom:` command that prints it changed (encoded, split, or in another case) shows it.
 - A finding with a `<redacted>` path keeps its fingerprint in the baseline file and in SARIF (`partialFingerprints`) and GitLab output. The fingerprint hashes the rule and the path, so someone holding the file can test a guessed path against it. Changing it would invalidate existing baselines, so it is unchanged.
 
 ## `env.X` in `when:` expressions
