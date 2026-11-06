@@ -447,3 +447,52 @@ fn fix_rejects_strict_and_show_baselined() {
         );
     }
 }
+
+/// A redacted finding is baselined by a fingerprint that leaves out its
+/// evidence, so `fix` must match it the same way `check` does, whether the
+/// rule is `sensitive: true` or reads a field from the environment.
+#[test]
+fn fix_baseline_skips_a_grandfathered_redacted_finding() {
+    for (rule, env) in [
+        ("    sensitive: true\n    paths: \"**/*.txt\"\n", None),
+        ("    paths: \"{{env.GLOB}}\"\n", Some(("GLOB", "**/*.txt"))),
+    ] {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(
+            root.join(".alint.yml"),
+            format!(
+                "version: 1\nrules:\n  - id: no-ws\n    kind: no_trailing_whitespace\n{rule}    \
+                 level: error\n    fix: {{ file_trim_trailing_whitespace: {{}} }}\n"
+            ),
+        )
+        .unwrap();
+        std::fs::write(root.join("a.txt"), "a  \nb\n").unwrap();
+        let alint = |args: &[&str]| {
+            let mut command = Command::new(alint());
+            command.args(args).current_dir(root);
+            if let Some((name, value)) = env {
+                command.env(name, value);
+            }
+            command.output().expect("spawn alint")
+        };
+        let bl = alint(&["baseline", "--output", "bl.json", "."]);
+        assert!(bl.status.success(), "{rule}: {bl:?}");
+
+        let check = alint(&["check", "--baseline", "bl.json", "."]);
+        assert_eq!(check.status.code(), Some(0), "{rule}: {check:?}");
+        let out = alint(&["fix", "--baseline", "bl.json", "."]);
+        assert_eq!(out.status.code(), Some(0), "{rule}: {out:?}");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        // The skip reason is a fix detail, which a redacted finding hides.
+        assert!(
+            stdout.contains("0 applied, 1 skipped"),
+            "{rule}: the grandfathered finding is skipped, not fixed:\n{stdout}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("a.txt")).unwrap(),
+            "a  \nb\n",
+            "{rule}"
+        );
+    }
+}

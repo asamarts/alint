@@ -90,13 +90,30 @@ pub fn mask_configuration_values(value: &mut yaml_serde::Value, numbers: NumberM
             let rule = mapping
                 .get("kind")
                 .is_some_and(yaml_serde::Value::is_string);
-            mapping
-                .iter_mut()
-                .filter(|(key, _)| !(rule && matches!(key.as_str(), Some("id" | "kind" | "level"))))
-                .for_each(|(_, item)| mask_configuration_values(item, numbers));
+            for (key, item) in mapping.iter_mut() {
+                match key.as_str() {
+                    Some("id" | "kind" | "level") if rule => {}
+                    Some(field) if rule => mask_configuration_field(field, item, numbers),
+                    _ => mask_configuration_values(item, numbers),
+                }
+            }
         }
         yaml_serde::Value::Tagged(tagged) => mask_configuration_values(&mut tagged.value, numbers),
         yaml_serde::Value::Null => {}
+    }
+}
+
+/// [`mask_configuration_values`] for the value of a rule's field `field`. A
+/// rule parses its `when:` and `when_iter:` before the rules they guard, so a
+/// string condition masks to one that parses too (`false`, or `true` where it
+/// was `false`).
+#[doc(hidden)]
+pub fn mask_configuration_field(field: &str, value: &mut yaml_serde::Value, numbers: NumberMask) {
+    match value {
+        yaml_serde::Value::String(text) if matches!(field, "when" | "when_iter") => {
+            *text = if text == "false" { "true" } else { "false" }.to_string();
+        }
+        _ => mask_configuration_values(value, numbers),
     }
 }
 
@@ -410,15 +427,7 @@ impl RuleSpec {
             let Some(field) = field.as_str().filter(|field| secret(field)) else {
                 continue;
             };
-            // A nested rule parses `when_iter:` before the rules it guards, so
-            // its mask is an expression that parses too.
-            if field == "when_iter"
-                && let yaml_serde::Value::String(text) = value
-            {
-                *text = if text == "false" { "true" } else { "false" }.to_string();
-                continue;
-            }
-            mask_configuration_values(value, numbers);
+            mask_configuration_field(field, value, numbers);
         }
         Some(masked)
     }

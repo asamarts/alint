@@ -726,25 +726,34 @@ impl Engine {
     /// to the root after normalizing it lexically (`a/../b` is `b`) when it
     /// stays inside, and as written otherwise (only `allow_out_of_root`
     /// permits that): an absolute path replaces the root, and `..` steps up
-    /// from the root's real location, which can lead back into it. An
-    /// absolute path is written as given, so the OS resolves a `..` in it
-    /// after any symlink; it reads as a name inside the root only without one.
+    /// from the root's real location, which can lead back into it. A path
+    /// written as given has each `..` resolved by the OS after the symlinks
+    /// before it, so it names a place inside the root through what follows
+    /// its last `..` (`<root>/sub/../alias/x` is `alias/x`).
     pub(super) fn created_names(root: &Path, path: &Path) -> Option<Vec<PathBuf>> {
         let canonical = root.canonicalize().ok()?;
-        let written = if path.is_absolute() {
-            path.strip_prefix(root)
-                .or_else(|_| path.strip_prefix(&canonical))
-                .ok()
-                .filter(|rel| {
-                    !rel.components()
-                        .any(|c| matches!(c, std::path::Component::ParentDir))
-                })
-                .and_then(crate::pathsafe::normalize_confined)
-        } else {
-            crate::pathsafe::normalize_confined(path)
-        };
+        let confined = crate::pathsafe::normalize_confined(path);
         // Joining an absolute path gives that path.
-        let joined = root.join(written.as_deref().unwrap_or(path));
+        let joined = root.join(confined.as_deref().unwrap_or(path));
+        let written = confined.or_else(|| {
+            let components: Vec<_> = joined.components().collect();
+            let named = match components
+                .iter()
+                .rposition(|c| matches!(c, std::path::Component::ParentDir))
+            {
+                Some(last_up) => {
+                    let head: PathBuf = components[..=last_up].iter().collect();
+                    let rest: PathBuf = components[last_up + 1..].iter().collect();
+                    crate::pathsafe::resolve_existing_prefix(&head)?.join(rest)
+                }
+                None => joined.clone(),
+            };
+            named
+                .strip_prefix(root)
+                .or_else(|_| named.strip_prefix(&canonical))
+                .ok()
+                .and_then(crate::pathsafe::normalize_confined)
+        });
         let landed = crate::pathsafe::resolve_existing_prefix(&joined)?;
         let landed = crate::pathsafe::normalize_confined(landed.strip_prefix(&canonical).ok()?)?;
         Some(match written {
@@ -806,6 +815,107 @@ impl Engine {
         } else {
             None
         }
+    }
+
+    /// A preview pass leaves a create that needs its directory to exist
+    /// ([`Fixer::needs_existing_directory`]) to this step, which sees every
+    /// create of the pass: the real `fix` makes the file once the directory
+    /// exists, which another create can arrange (a `dir_create`, or a create
+    /// that makes its parents), in the same pass or the next one. Without one,
+    /// the create declines as `fix` declines it. Returns the paths, as the
+    /// fixers wrote them, of the creates it declined, so `--diff` leaves them
+    /// out.
+    fn decline_creates_into_missing_directories(
+        &self,
+        root: &Path,
+        results: &mut [FixRuleResult],
+    ) -> Vec<PathBuf> {
+        // A create's target joined to the root as the fixers join it.
+        let joined = |path: &Path| {
+            root.join(
+                crate::pathsafe::normalize_confined(path)
+                    .unwrap_or_else(|| path.components().collect()),
+            )
+        };
+        // Each would-be create, with its fixer, the owning rule's permission
+        // and its violation.
+        let creates = || {
+            results.iter().enumerate().flat_map(|(result, rr)| {
+                let entry = self.entries.iter().find(|e| e.rule.id() == &*rr.rule_id);
+                let fixer = entry.and_then(|entry| entry.rule.fixer());
+                rr.items
+                    .iter()
+                    .enumerate()
+                    .filter(|(_, it)| matches!(it.status, FixStatus::Applied(_)))
+                    .filter_map(move |(item, it)| {
+                        Some((
+                            result,
+                            item,
+                            fixer?,
+                            entry?.allow_out_of_root,
+                            &it.violation,
+                        ))
+                    })
+            })
+        };
+        let mut waiting = Vec::new();
+        for (result, item, fixer, allow_out_of_root, violation) in creates() {
+            if !fixer.needs_existing_directory() {
+                continue;
+            }
+            let Some((path, _)) = fixer.created_file(violation, root, allow_out_of_root) else {
+                continue;
+            };
+            if let Some(directory) = joined(&path).parent()
+                && !directory.is_dir()
+            {
+                waiting.push((result, item, path, directory.to_path_buf()));
+            }
+        }
+        if waiting.is_empty() {
+            return Vec::new();
+        }
+        // Where the directories the pass's other creates make land.
+        let made: Vec<PathBuf> = creates()
+            .filter(|(_, _, fixer, _, _)| !fixer.needs_existing_directory())
+            .filter_map(|(_, _, fixer, allow_out_of_root, violation)| {
+                let directory = match fixer.created_file(violation, root, allow_out_of_root) {
+                    Some((path, _)) => joined(&path).parent()?.to_path_buf(),
+                    None => joined(fixer.created_dir()?),
+                };
+                crate::pathsafe::resolve_existing_prefix(&directory)
+            })
+            .collect();
+        let mut declined = Vec::new();
+        for (result, item, path, directory) in waiting {
+            if Self::directory_location(&directory)
+                .is_some_and(|needed| made.iter().any(|dir| dir.starts_with(&needed)))
+            {
+                continue;
+            }
+            results[result].items[item].status = FixStatus::declined(format!(
+                "{} is in a directory that does not exist (set `create_parents: true` to create it)",
+                path.display()
+            ));
+            declined.push(path);
+        }
+        declined
+    }
+
+    /// Where `directory` has to exist for a write into it, resolved as the OS
+    /// resolves it, or `None` when a directory before one of its `..` is
+    /// missing: the write needs that one, not just the place it leads back to.
+    fn directory_location(directory: &Path) -> Option<PathBuf> {
+        let components: Vec<_> = directory.components().collect();
+        let Some(last_up) = components
+            .iter()
+            .rposition(|c| matches!(c, std::path::Component::ParentDir))
+        else {
+            return crate::pathsafe::resolve_existing_prefix(directory);
+        };
+        let head: PathBuf = components[..=last_up].iter().collect();
+        let rest: PathBuf = components[last_up + 1..].iter().collect();
+        crate::pathsafe::resolve_existing_prefix(&head.canonicalize().ok()?.join(rest))
     }
 
     /// Remove remediation-only identity from sensitive findings after every
@@ -1337,6 +1447,9 @@ impl Engine {
                 false,
             );
             if Self::has_sensitive_manifest_scope(entry.rule.as_ref()) {
+                // Paths first, as in `redact_result_for_entry`: a redaction
+                // marker leaves out a path alint hides.
+                evaluated.redact_sensitive_paths();
                 evaluated.redact_manifest_scope();
             }
             if stage_ops.is_some() {
@@ -1386,7 +1499,19 @@ impl Engine {
                         is_fixable: false,
                     }],
                 };
+                // The report pass redacts every finding of a rule whose
+                // configuration is sensitive, so `baseline` and `check` saw
+                // these as sensitive: fingerprint them the same way.
+                let result_sensitive = entry
+                    .spec
+                    .as_deref()
+                    .is_some_and(crate::RuleSpec::has_sensitive_evidence);
                 let mut applied = crate::baseline::apply(&single, bl, |rid, v| {
+                    if result_sensitive && !v.is_sensitive() {
+                        let mut redacted = v.clone();
+                        redacted.mark_sensitive(rid);
+                        return crate::baseline::fingerprint(rid, &redacted, None);
+                    }
                     let bytes = crate::baseline::fingerprint_content(root, v, &mut fp_cache);
                     crate::baseline::fingerprint(rid, v, bytes)
                 });
@@ -1897,6 +2022,22 @@ impl Engine {
                                 "{FIX_ERROR_PREFIX} file could not be written"
                             ));
                         }
+                    }
+                }
+            }
+        }
+        // A preview reports a create into a missing directory from the fixer
+        // and decides here, where it sees every create of the pass.
+        if dry_run || stage_ops.is_some() {
+            let declined = self.decline_creates_into_missing_directories(root, &mut results);
+            if let Some(sink) = stage_ops {
+                let mut sink = sink.borrow_mut();
+                for path in declined {
+                    let staged = sink.iter().position(
+                        |edit| matches!(edit, FixEdit::CreateFile { path: created, .. } if *created == path),
+                    );
+                    if let Some(at) = staged {
+                        sink.remove(at);
                     }
                 }
             }

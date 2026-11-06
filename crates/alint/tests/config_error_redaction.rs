@@ -503,6 +503,28 @@ fn a_structural_error_beside_a_secret_stays_readable() {
         &[("CONDITION", "iter.basename == secret-crate")],
     );
     assert_redacted("bad when_iter", &output, &["secret-crate"]);
+
+    // The same holds for a `when_iter:` or `when:` inside a nested rule, whose
+    // `require:` is masked as a whole.
+    let deeper = |field: &str| {
+        format!(
+            "version: 1\nrules:\n  - id: outer\n    kind: for_each_dir\n    \
+             select: 'crates/*'\n    level: error\n    require:\n      \
+             - kind: for_each_file\n        select: '{{path}}/*'\n        \
+             {field}: 'iter.basename != \"{{{{env.SKIP}}}}\"'\n        require:\n          \
+             - kind: file_exists\n            paths: '{{path}}.lock'\n            colour: red\n"
+        )
+    };
+    for field in ["when_iter", "when"] {
+        write(root.path(), ".alint.yml", &deeper(field));
+        let output = run(root.path(), &["check"], &[("SKIP", "secret-crate")]);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            stderr.contains("unknown field `colour`"),
+            "{field}: {stderr}"
+        );
+        assert!(!stderr.contains("secret-crate"), "{field}: {stderr}");
+    }
 }
 
 #[test]

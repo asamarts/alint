@@ -93,12 +93,12 @@ pub(crate) fn interpolate_value<F>(value: &mut Value, env: &F) -> Result<(), Int
 where
     F: Fn(&str) -> Option<String>,
 {
-    walk(value, env, false, None)
+    walk(value, env, false, None, None)
 }
 
 /// [`interpolate_value`], then every scalar that took a substitution replaced
 /// by one of the same type that differs from it
-/// ([`alint_core::mask_configuration_values`], numbers moved as `numbers`
+/// ([`alint_core::mask_configuration_field`], numbers moved as `numbers`
 /// names): the copy a load error is rerun on. An error that recurs on it
 /// cannot quote an environment value, and one about an unrelated field still
 /// recurs, because each masked value keeps the type interpolation gave it.
@@ -110,18 +110,21 @@ pub(crate) fn interpolate_masked<F>(
 where
     F: Fn(&str) -> Option<String>,
 {
-    walk(value, env, false, Some(numbers))
+    walk(value, env, false, Some(numbers), None)
 }
 
 /// `in_rule_scope` is `true` while descending through a rule / template
 /// entry (anything under a top-level [`RULE_BEARING_KEYS`] key), where
 /// [`SKIP_KEYS`] must stay literal. It latches on: once inside a rule,
 /// nested rules (e.g. a `for_each_dir`'s `require:` list) inherit it.
+/// `field` is the key a value inside a rule sits under, which decides how it
+/// is masked ([`alint_core::mask_configuration_field`]).
 fn walk<F>(
     value: &mut Value,
     env: &F,
     in_rule_scope: bool,
     mask: Option<alint_core::NumberMask>,
+    field: Option<&str>,
 ) -> Result<(), InterpError>
 where
     F: Fn(&str) -> Option<String>,
@@ -141,13 +144,13 @@ where
                 *s = result.text;
             }
             if let (true, Some(numbers)) = (substituted, mask) {
-                alint_core::mask_configuration_values(value, numbers);
+                alint_core::mask_configuration_field(field.unwrap_or_default(), value, numbers);
             }
             Ok(())
         }
         Value::Sequence(seq) => {
             for v in seq.iter_mut() {
-                walk(v, env, in_rule_scope, mask)?;
+                walk(v, env, in_rule_scope, mask, None)?;
             }
             Ok(())
         }
@@ -161,7 +164,7 @@ where
                 // skip on for its subtree; once on, it stays on.
                 let child_scope =
                     in_rule_scope || key.is_some_and(|kk| RULE_BEARING_KEYS.contains(&kk));
-                walk(v, env, child_scope, mask)?;
+                walk(v, env, child_scope, mask, key.filter(|_| child_scope))?;
             }
             Ok(())
         }

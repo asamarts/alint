@@ -254,17 +254,37 @@ fn tracing_ansi(color: &str, no_color: bool, stderr_tty: bool) -> bool {
 }
 
 fn init_tracing(color: &str) {
+    use tracing_subscriber::field::MakeExt as _;
     use tracing_subscriber::{EnvFilter, fmt};
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
     let ansi = tracing_ansi(color, no_color, io::stderr().is_terminal());
     let filter = EnvFilter::try_from_env("ALINT_LOG").unwrap_or_else(|_| EnvFilter::new("warn"));
-    // Diagnostics go to stderr, never stdout: a `warn!` (e.g. an empty
-    // `include_manifest_paths` set) must not corrupt `--format json`/SARIF, which
-    // machine consumers read from stdout. `fmt()`'s default writer is stdout.
     let _ = fmt()
+        // Every field a diagnostic prints is a log field, often a path from the
+        // repository: its control characters print as escapes, so a file name
+        // cannot forge a record or drive the terminal, and the values the
+        // environment gave the loaded config are left out
+        // ([`redact_environment_values`]), as in `terminal_error`.
+        .fmt_fields(
+            fmt::format::debug_fn(|writer, field, value| {
+                let text = format!("{value:?}");
+                let text = redact_environment_values(&text);
+                let text = term(&text);
+                if field.name() == "message" {
+                    write!(writer, "{text}")
+                } else {
+                    write!(writer, "{}={text}", field.name())
+                }
+            })
+            .delimited(" "),
+        )
         .with_env_filter(filter)
         .with_target(false)
         .with_ansi(ansi)
+        // Diagnostics go to stderr, never stdout: a `warn!` (e.g. an empty
+        // `include_manifest_paths` set) must not corrupt `--format json`/SARIF,
+        // which machine consumers read from stdout. `fmt()`'s default writer is
+        // stdout.
         .with_writer(std::io::stderr)
         .try_init();
 }

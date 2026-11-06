@@ -625,13 +625,22 @@ impl RuleResult {
     }
 
     /// Hide primary paths derived from protected selector configuration while
-    /// preserving their internal identity for baselines and remediation.
+    /// preserving their internal identity for baselines and remediation. A
+    /// finding the rule already redacted carries markers that hash its path
+    /// (the rule built them before alint knew the path was hidden), so its
+    /// message is redacted again without it.
     pub(crate) fn redact_sensitive_paths(&mut self) {
         for finding in self.violations.iter_mut().chain(&mut self.notes) {
             finding.mark_path_sensitive();
+            if finding.is_sensitive() {
+                finding.redact_message(&self.rule_id);
+            }
         }
         for failure in &mut self.analysis_failures {
             failure.mark_path_sensitive();
+            if failure.is_sensitive() {
+                failure.redact_message(&self.rule_id);
+            }
         }
     }
 
@@ -1763,6 +1772,17 @@ pub trait Fixer: Send + Sync + std::fmt::Debug {
     ) -> Option<(PathBuf, Vec<u8>)> {
         let _ = (violation, root, allow_out_of_root);
         None
+    }
+
+    /// Whether the file this fixer creates ([`created_file`](Self::created_file))
+    /// needs its directory to exist already (`file_create` with
+    /// `create_parents: false`). A real `fix` declines the create until it
+    /// does. Another create in the same run can make the directory, so a
+    /// preview (`--dry-run`, `--diff`) reports the create from
+    /// [`apply`](Self::apply) and the engine declines it after the pass unless
+    /// the directory exists or a create in the pass makes it. Default `false`.
+    fn needs_existing_directory(&self) -> bool {
+        false
     }
 }
 

@@ -696,11 +696,14 @@ impl Fixer for DirCreateFixer {
             Ok(p) => p,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
+        // The checks look where the directory lands, which a `..` after a
+        // directory `create_dir_all` makes can move off the path as written.
+        let landing = alint_core::create_landing(&abs);
         // A symlink NODE at the target (incl. a BROKEN one, which `exists()` reads
         // as absent) must not be created through -- `symlink_metadata` does not
         // follow the link. Parity with `FileCreateFixer`; also fixes the raw-errno
         // leak on a dangling symlink (audit M1).
-        if abs
+        if landing
             .symlink_metadata()
             .is_ok_and(|m| m.file_type().is_symlink())
         {
@@ -709,17 +712,28 @@ impl Fixer for DirCreateFixer {
                 self.dir.display()
             )));
         }
-        if abs.is_dir() {
+        if landing.is_dir() {
             return Ok(FixOutcome::Skipped(format!(
                 "{} is already a directory",
                 self.dir.display()
             )));
         }
-        if abs.exists() {
+        if landing.exists() {
             // A non-directory (a regular file) already occupies the path -- do NOT
             // clobber it; the mismatch is a human call.
             return Ok(FixOutcome::Skipped(format!(
                 "{} exists but is not a directory",
+                self.dir.display()
+            )));
+        }
+        // `create_dir_all` fails at a file where a parent directory should be.
+        if abs
+            .parent()
+            .and_then(crate::fixers::creators::blocking_ancestor)
+            .is_some()
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is under a file, not a directory",
                 self.dir.display()
             )));
         }
@@ -1388,6 +1402,23 @@ mod tests {
             matches!(out, FixOutcome::Skipped(ref r) if r.contains("not a directory")),
             "got {out:?}"
         );
+        assert!(tmp.path().join("docs").is_file(), "the file is untouched");
+    }
+
+    #[test]
+    fn dir_create_declines_under_a_file_in_every_mode() {
+        // `create_dir_all` fails at a file where a parent directory should be.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("docs"), b"a file, not a dir\n").unwrap();
+        for dry_run in [true, false] {
+            let out = DirCreateFixer::new(PathBuf::from("docs/api"), Applicability::Safe)
+                .apply(&Violation::new("x"), &make_ctx(&tmp, dry_run))
+                .unwrap();
+            assert!(
+                matches!(out, FixOutcome::Skipped(ref r) if r.contains("under a file")),
+                "dry_run={dry_run}: {out:?}"
+            );
+        }
         assert!(tmp.path().join("docs").is_file(), "the file is untouched");
     }
 

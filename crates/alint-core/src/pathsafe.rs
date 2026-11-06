@@ -107,7 +107,9 @@ pub fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
 /// (`new/../x`, as `create_dir_all` then a write resolve it); once the tail
 /// empties, the next component may exist again (`new/../link/x`). Two names
 /// for one location (through an in-repo symlinked directory) resolve alike
-/// before the location exists.
+/// before the location exists. A symlink that leads nowhere counts as missing,
+/// though `create_dir_all` can make the place it leads to on the way
+/// (`b/../a/x` with `a -> b`); the dry run then predicts the wrong place.
 pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     use std::path::Component;
     // A path that exists resolves in one call.
@@ -177,6 +179,27 @@ pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
         }
     }
     Some(pending.into_iter().fold(real, |path, name| path.join(name)))
+}
+
+/// Where a create of `path` lands once the OS resolves it, for the checks a
+/// creating fixer makes before it writes (already there, a symlink). A `..`
+/// after a directory the create makes steps back out of it, so the path as
+/// written names nothing until that directory exists, while the place it
+/// leads to can hold anything. A path without `..` is its own landing, as is
+/// one whose directory does not resolve.
+#[doc(hidden)]
+#[must_use]
+pub fn create_landing(path: &Path) -> PathBuf {
+    if !path
+        .components()
+        .any(|c| matches!(c, std::path::Component::ParentDir))
+    {
+        return path.to_path_buf();
+    }
+    path.parent()
+        .zip(path.file_name())
+        .and_then(|(parent, name)| Some(resolve_existing_prefix(parent)?.join(name)))
+        .unwrap_or_else(|| path.to_path_buf())
 }
 
 /// Derive a target path from `path` by matching it against the `from`
@@ -473,5 +496,81 @@ mod tests {
             &root.join("real/new/../out/etc/passwd"),
             &root.join("real")
         ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn resolve_existing_prefix_lands_where_the_os_creates() {
+        // Every path of up to three components over a small tree (directories,
+        // a file, a symlinked directory, a missing name, a dangling symlink,
+        // `..`), then a file name: wherever `create_dir_all` and a write
+        // succeed, the file lands where the resolver said it would.
+        use super::resolve_existing_prefix;
+        const NAMES: [&str; 7] = ["d", "e", "f", "l", "m", "dl", ".."];
+        let mut paths: Vec<Vec<&str>> = vec![Vec::new()];
+        let mut frontier = paths.clone();
+        for _ in 0..3 {
+            frontier = frontier
+                .iter()
+                .flat_map(|path| {
+                    NAMES.iter().map(move |name| {
+                        let mut longer = path.clone();
+                        longer.push(*name);
+                        longer
+                    })
+                })
+                .collect();
+            paths.extend(frontier.iter().cloned());
+        }
+        let mut created = 0;
+        for components in &paths {
+            let tmp = tempfile::tempdir().unwrap();
+            // Deep enough that three `..` stay inside the temporary directory.
+            let root = tmp.path().canonicalize().unwrap().join("a/b/c/root");
+            std::fs::create_dir_all(root.join("d/e")).unwrap();
+            std::fs::write(root.join("f"), "").unwrap();
+            std::os::unix::fs::symlink("d/e", root.join("l")).unwrap();
+            // A dangling symlink to a place no path here creates.
+            std::os::unix::fs::symlink("nowhere/zz", root.join("dl")).unwrap();
+            let path = components
+                .iter()
+                .fold(root.clone(), |path, name| path.join(name))
+                .join("x.txt");
+            let predicted = resolve_existing_prefix(&path);
+            let written = path
+                .parent()
+                .is_some_and(|dir| std::fs::create_dir_all(dir).is_ok())
+                && std::fs::write(&path, "").is_ok();
+            if written {
+                assert_eq!(
+                    predicted,
+                    path.canonicalize().ok(),
+                    "{}",
+                    components.join("/")
+                );
+                created += 1;
+            }
+        }
+        assert!(created > 100, "only {created} paths could be created");
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn create_landing_is_where_a_dot_dot_after_a_new_directory_leads() {
+        use super::create_landing;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::write(root.join("KEEP.md"), "keep").unwrap();
+        // `new` does not exist, so the path as written names nothing.
+        assert!(!root.join("new/../KEEP.md").exists());
+        assert_eq!(
+            create_landing(&root.join("new/../KEEP.md")),
+            root.join("KEEP.md")
+        );
+        // Without `..`, a path is its own landing.
+        assert_eq!(
+            create_landing(&root.join("new/x.md")),
+            root.join("new/x.md")
+        );
     }
 }

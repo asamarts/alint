@@ -1531,8 +1531,8 @@ mod redaction;
 #[doc(hidden)]
 pub use redaction::{
     CONFIGURATION_MASK, NumberMask, REDACTED_CONFIGURATION_ERROR,
-    configuration_field_may_be_secret, mask_configuration_values, redact_environment_values,
-    redact_environment_values_in_error,
+    configuration_field_may_be_secret, mask_configuration_field, mask_configuration_values,
+    redact_environment_values, redact_environment_values_in_error,
 };
 
 #[cfg(test)]

@@ -1097,6 +1097,8 @@ fn reconciliation_drops_a_moot_fix_error_when_the_file_is_removed() {
 /// Requires `checks` and creates `path` (a file with `content`, or a directory
 /// when `dir`), as `file_create` and `dir_create` do: under the root joined
 /// with the lexically normalized path, and only when nothing is there yet.
+// Each flag mirrors one rule option a test turns on.
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Debug)]
 struct CreateRule {
     id: &'static str,
@@ -1112,6 +1114,9 @@ struct CreateRule {
     past_walk: bool,
     /// Sees only git-tracked files, as with `git_tracked_only`.
     tracked_only: bool,
+    /// Creates the file only in a directory that exists, as `file_create`
+    /// with `create_parents: false` does.
+    needs_directory: bool,
 }
 
 fn create_rule(
@@ -1130,6 +1135,7 @@ fn create_rule(
         scope: Some(Scope::from_patterns(&[checks.to_string()]).unwrap()),
         past_walk: false,
         tracked_only: false,
+        needs_directory: false,
     })
 }
 
@@ -1145,6 +1151,7 @@ fn scopeless_create_rule(id: &'static str, checks: &str, path: &str) -> Box<dyn 
         scope: None,
         past_walk: false,
         tracked_only: false,
+        needs_directory: false,
     })
 }
 
@@ -1165,6 +1172,22 @@ fn create_rule_seeing(
         scope: Some(Scope::from_patterns(&[path.to_string()]).unwrap()),
         past_walk,
         tracked_only,
+        needs_directory: false,
+    })
+}
+
+/// A `file_create` of `path` with `create_parents: false`.
+fn create_rule_into_existing_directory(id: &'static str, path: &str) -> Box<dyn Rule> {
+    Box::new(CreateRule {
+        id,
+        checks: PathBuf::from(path),
+        path: PathBuf::from(path),
+        content: b"x",
+        dir: false,
+        scope: Some(Scope::from_patterns(&[path.to_string()]).unwrap()),
+        past_walk: false,
+        tracked_only: false,
+        needs_directory: true,
     })
 }
 
@@ -1179,7 +1202,18 @@ impl crate::rule::Fixer for CreateRule {
         if target.exists() {
             return Ok(FixOutcome::Skipped("already there".to_string()));
         }
-        if !ctx.dry_run {
+        let previewing = ctx.dry_run || ctx.stage_ops.is_some();
+        if self.needs_directory && !previewing && !target.parent().unwrap().is_dir() {
+            return Ok(FixOutcome::Skipped("no directory".to_string()));
+        }
+        if let Some(sink) = ctx.stage_ops {
+            if !self.dir {
+                sink.borrow_mut().push(FixEdit::CreateFile {
+                    path: self.path.clone(),
+                    content: self.content.to_vec(),
+                });
+            }
+        } else if !ctx.dry_run {
             if self.dir {
                 std::fs::create_dir_all(&target).unwrap();
             } else {
@@ -1210,6 +1244,9 @@ impl crate::rule::Fixer for CreateRule {
         _allow_out_of_root: bool,
     ) -> Option<(PathBuf, Vec<u8>)> {
         (!self.dir).then(|| (self.path.clone(), self.content.to_vec()))
+    }
+    fn needs_existing_directory(&self) -> bool {
+        self.needs_directory
     }
 }
 
@@ -1244,6 +1281,100 @@ impl Rule for CreateRule {
     }
     fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
         Some(self)
+    }
+}
+
+#[test]
+fn a_preview_declines_a_create_into_a_missing_directory_only_when_nothing_makes_it() {
+    // `fix` creates the file once another create has made its directory, in
+    // the same pass or the next, so the dry run and `--diff` report it then,
+    // whatever the rules' order; with no such create, every mode declines it.
+    type Rules = fn() -> Vec<Box<dyn Rule>>;
+    let cases: [(&str, Rules, bool); 5] = [
+        (
+            "alone",
+            || vec![create_rule_into_existing_directory("needs", "docs/i.md")],
+            false,
+        ),
+        (
+            "directory first",
+            || {
+                vec![
+                    create_rule("dir", "docs", "docs", b"", true),
+                    create_rule_into_existing_directory("needs", "docs/i.md"),
+                ]
+            },
+            true,
+        ),
+        (
+            "directory after",
+            || {
+                vec![
+                    create_rule_into_existing_directory("needs", "docs/i.md"),
+                    create_rule("dir", "docs", "docs", b"", true),
+                ]
+            },
+            true,
+        ),
+        (
+            "parents of another file",
+            || {
+                vec![
+                    create_rule("other", "docs/sub/o.md", "docs/sub/o.md", b"x", false),
+                    create_rule_into_existing_directory("needs", "docs/i.md"),
+                ]
+            },
+            true,
+        ),
+        (
+            "another directory",
+            || {
+                vec![
+                    create_rule("dir", "other", "other", b"", true),
+                    create_rule_into_existing_directory("needs", "docs/i.md"),
+                ]
+            },
+            false,
+        ),
+    ];
+    let opts = crate::WalkOptions::default();
+    for (case, rules, expected) in cases {
+        let applied = |report: &FixReport| {
+            let result = report
+                .results
+                .iter()
+                .find(|r| &*r.rule_id == "needs")
+                .unwrap();
+            matches!(result.items[0].status, FixStatus::Applied(_))
+        };
+        for dry_run in [true, false] {
+            let tmp = tempfile::tempdir().unwrap();
+            let index = crate::walk(tmp.path(), &opts).unwrap();
+            let report = Engine::new(rules(), RuleRegistry::new())
+                .fix(tmp.path(), &index, &opts, dry_run, Applicability::Safe)
+                .unwrap();
+            assert_eq!(
+                applied(&report),
+                expected,
+                "{case}, dry_run={dry_run}: {report:?}"
+            );
+            assert_eq!(
+                tmp.path().join("docs/i.md").is_file(),
+                expected && !dry_run,
+                "{case}"
+            );
+        }
+        let tmp = tempfile::tempdir().unwrap();
+        let index = crate::walk(tmp.path(), &opts).unwrap();
+        let (report, staged) = Engine::new(rules(), RuleRegistry::new())
+            .stage_fixes(tmp.path(), &index, Applicability::Safe)
+            .unwrap();
+        assert_eq!(applied(&report), expected, "{case}, --diff");
+        assert_eq!(
+            staged.iter().any(|fix| fix.path == Path::new("docs/i.md")),
+            expected,
+            "{case}, --diff: {staged:?}"
+        );
     }
 }
 
@@ -1467,6 +1598,7 @@ fn dry_run_resolves_a_tracked_only_rule_only_with_a_tracked_path() {
 
 #[cfg(unix)]
 #[test]
+#[allow(clippy::too_many_lines)]
 fn dry_run_judges_a_create_by_where_it_lands() {
     // A create through a symlink, or by an absolute or `..` path, lands where
     // the filesystem resolves it; the walk lists it there, and under the path
@@ -1537,6 +1669,15 @@ fn dry_run_judges_a_create_by_where_it_lands() {
                 b"x",
                 false,
             ),
+            // Written as given, and the `..` cancels a real directory, so the
+            // walk lists the file under the symlink that follows.
+            create_rule(
+                "absolute-back-in-link",
+                "deeplink/q.txt",
+                &path(&root.join("sub/../deeplink/q.txt")),
+                b"x",
+                false,
+            ),
         ];
         let opts = crate::WalkOptions {
             respect_gitignore: true,
@@ -1568,6 +1709,7 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         ("absolute-link-up", false),
         ("back-in-alias", true),
         ("back-in-link-up", false),
+        ("absolute-back-in-link", true),
     ]
     .into_iter()
     .map(|(id, applied)| (id.to_string(), applied))

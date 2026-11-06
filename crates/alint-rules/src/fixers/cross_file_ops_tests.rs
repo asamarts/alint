@@ -1130,6 +1130,22 @@ fn create_and_register_create_guards() {
         "{out:?}"
     );
     assert_eq!(read(&tmp, "crates/have/Cargo.toml"), b"keep");
+    // A file where the member's directory should be: `create_dir_all` would
+    // fail, so every mode declines.
+    write(&tmp, "crates/flat", b"a file");
+    for dry_run in [true, false] {
+        let out = register_fixer(Some("x"))
+            .apply(
+                &existence_viol("crates/flat/Cargo.toml"),
+                &ctx(&tmp, dry_run),
+            )
+            .unwrap();
+        assert!(
+            matches!(&out, FixOutcome::Skipped(m) if m.contains("under a file")),
+            "dry_run={dry_run}: {out:?}"
+        );
+    }
+    assert_eq!(read(&tmp, "crates/flat"), b"a file");
 }
 
 #[cfg(unix)]

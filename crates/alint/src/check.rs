@@ -213,9 +213,11 @@ pub(super) fn cmd_check(
     // Baseline suppression (when --baseline is in effect): grandfather
     // recorded violations, leaving only new ones to format + gate on.
     let mut strict_stale_fail = false;
+    // One read cache for every fingerprint below: the baseline's and the
+    // GitLab or SARIF output's.
+    let mut reader = FileReader::new(&root);
     let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
-        let mut reader = FileReader::new(&root);
         let applied =
             alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
         // Stale-entry detection is only valid on a FULL run. When `--changed`
@@ -262,7 +264,7 @@ pub(super) fn cmd_check(
             // No baseline, but still emit the canonical `partialFingerprints` so
             // GitHub Code Scanning can correlate alerts across runs (these were
             // baseline-only before). Same fingerprints the GitLab path uses.
-            let fps = report_fingerprints(&report, &root);
+            let fps = report_fingerprints(&report, &mut reader);
             alint_output::write_sarif_for_config(&report, None, Some(&fps), &config_rel, &mut out)
         }
         (Format::Json, Some(marks)) => alint_output::write_json_with_baseline(
@@ -277,7 +279,7 @@ pub(super) fn cmd_check(
             // per-violation `violation_fingerprint` (file-content-aware, cached
             // reads), so a finding has ONE fingerprint across GitLab, SARIF, and
             // baseline mode.
-            let fps = report_fingerprints(&report, &root);
+            let fps = report_fingerprints(&report, &mut reader);
             alint_output::write_gitlab(&report, Some(&fps), &mut out)
         }
         _ => format.write_with_options(&report, &mut out, opts),
@@ -333,12 +335,15 @@ impl<'a> FileReader<'a> {
 
 /// The canonical per-violation `violation_fingerprint` for every violation in
 /// `report`, indexed `[result][violation]` to align with
-/// `report.results[i].violations[j]`. Reads each offending file once (cached,
-/// size-capped) for the content discriminator. Shared by the GitLab and the
+/// `report.results[i].violations[j]`. Reads each offending file at most once
+/// (size-capped) for the content discriminator, through `reader`'s cache, which
+/// the baseline's fingerprints share. Shared by the GitLab and the
 /// no-baseline SARIF output paths so a finding carries ONE identity across
 /// GitLab, SARIF, and baseline mode.
-fn report_fingerprints(report: &alint_core::Report, root: &Path) -> Vec<Vec<String>> {
-    let mut reader = FileReader::new(root);
+fn report_fingerprints(
+    report: &alint_core::Report,
+    reader: &mut FileReader<'_>,
+) -> Vec<Vec<String>> {
     report
         .results
         .iter()

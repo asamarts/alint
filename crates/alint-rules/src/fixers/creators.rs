@@ -75,12 +75,15 @@ impl Fixer for FileCreateFixer {
             Ok(p) => p,
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
-        if abs.exists() {
+        // The checks below look where the write lands, which a `..` after a
+        // directory `create_parents` makes can move off the path as written.
+        let landing = alint_core::create_landing(&abs);
+        if landing.exists() {
             // A DIRECTORY at the target is not the required file: `file_exists`
             // counts only files, so it keeps flagging while the fixer used to
             // report the false "already exists" and never converge. Report the
             // real blocker honestly.
-            if abs.is_dir() {
+            if landing.is_dir() {
                 return Ok(FixOutcome::Skipped(format!(
                     "{} is a directory; cannot create a file there",
                     self.path.display()
@@ -99,7 +102,7 @@ impl Fixer for FileCreateFixer {
         // as in-root) and `fs::write` would then follow it out of the tree. A
         // create should only ever make a NEW regular file, so refuse a symlink
         // node here (`symlink_metadata` does not follow the link).
-        if abs
+        if landing
             .symlink_metadata()
             .is_ok_and(|m| m.file_type().is_symlink())
         {
@@ -108,13 +111,9 @@ impl Fixer for FileCreateFixer {
                 self.path.display()
             )));
         }
-        // Without `create_parents` the write needs its directory to exist; a
-        // dry run and `--diff` decline it here as the real fix does.
-        if !self.create_parents && abs.parent().is_some_and(|parent| !parent.is_dir()) {
-            return Ok(FixOutcome::Skipped(format!(
-                "{} is in a directory that does not exist (set `create_parents: true` to create it)",
-                self.path.display()
-            )));
+        let previewing = ctx.dry_run || ctx.stage_ops.is_some();
+        if let Some(reason) = self.blocked_directory(&abs, previewing) {
+            return Ok(FixOutcome::Skipped(reason));
         }
         let content = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
             Ok(bytes) => bytes,
@@ -123,7 +122,7 @@ impl Fixer for FileCreateFixer {
         // A dry run reports only; a stage (`--diff`) records the create (with
         // its resolved content) so the diff can render the new file. Both return
         // before touching disk.
-        if ctx.dry_run || ctx.stage_ops.is_some() {
+        if previewing {
             if let Some(sink) = ctx.stage_ops {
                 sink.borrow_mut().push(FixEdit::CreateFile {
                     path: self.path.clone(),
@@ -159,6 +158,10 @@ impl Fixer for FileCreateFixer {
         // strictly (deny escape): an editor code-action must never create a
         // file — or read a template — outside the repo root.
         let abs = confine_fix_path(&self.path, root, false).ok()?;
+        // The editor cannot wait for another fix to make the directory.
+        if self.blocked_directory(&abs, false).is_some() {
+            return None;
+        }
         // Refuse a symlink AT the target (mirrors apply()): a BROKEN symlink
         // slips past `exists()` below (which follows the link) AND past
         // `confine_fix_path` (a non-existent target canonicalizes to nothing, so a
@@ -192,6 +195,40 @@ impl Fixer for FileCreateFixer {
         let content = resolve_source_bytes(&self.source, root, allow_out_of_root).ok()?;
         Some((self.path.clone(), content))
     }
+
+    fn needs_existing_directory(&self) -> bool {
+        !self.create_parents
+    }
+}
+
+impl FileCreateFixer {
+    /// Why the write to `abs` cannot get a directory, or `None` when it can.
+    /// Without `create_parents` the directory must exist; a preview leaves
+    /// that to the engine, which also sees the directories other creates in
+    /// the pass make. With it, `create_dir_all` fails at a file (or a symlink
+    /// leading nowhere) where a directory should be.
+    fn blocked_directory(&self, abs: &Path, previewing: bool) -> Option<String> {
+        let parent = abs.parent()?;
+        if !self.create_parents {
+            return (!previewing && !parent.is_dir()).then(|| {
+                format!(
+                    "{} is in a directory that does not exist (set `create_parents: true` to create it)",
+                    self.path.display()
+                )
+            });
+        }
+        blocking_ancestor(parent)
+            .map(|_| format!("{} is under a file, not a directory", self.path.display()))
+    }
+}
+
+/// The deepest existing ancestor of `dir` (itself included) when it is not a
+/// directory: a file, or a symlink that leads to none. `create_dir_all(dir)`
+/// fails there, so a create that needs `dir` declines instead.
+pub(crate) fn blocking_ancestor(dir: &Path) -> Option<&Path> {
+    dir.ancestors()
+        .find(|ancestor| ancestor.symlink_metadata().is_ok())
+        .filter(|ancestor| !ancestor.is_dir())
 }
 
 /// Confine a config-declared fixer path (a `file_create.path` write target or a
@@ -707,8 +744,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
+        make_ctx_at(tmp.path(), dry_run)
+    }
+
+    fn make_ctx_at(root: &Path, dry_run: bool) -> FixContext<'_> {
         FixContext {
-            root: tmp.path(),
+            root,
             dry_run,
             fix_size_limit: None,
             allow_out_of_root: false,
@@ -732,28 +773,97 @@ mod tests {
     }
 
     #[test]
-    fn file_create_without_create_parents_declines_a_missing_directory_in_every_mode() {
-        // The real write would fail on the missing directory, so a dry run must
-        // not report it as one that would apply.
+    fn file_create_without_create_parents_declines_a_missing_directory() {
+        // The real write would fail on the missing directory, so `fix` declines
+        // it. A preview reports it and leaves the verdict to the engine, which
+        // also sees directories other creates in the pass make.
         let tmp = TempDir::new().unwrap();
         let fixer = FileCreateFixer::new(PathBuf::from("sub/x.txt"), "x\n".into(), false);
-        for dry_run in [true, false] {
-            let outcome = fixer
-                .apply(&Violation::new("missing"), &make_ctx(&tmp, dry_run))
-                .unwrap();
-            assert!(
-                matches!(&outcome, FixOutcome::Skipped(reason) if reason.contains("create_parents")),
-                "dry_run={dry_run}: {outcome:?}"
-            );
-        }
+        assert!(fixer.needs_existing_directory());
+        assert!(
+            !FileCreateFixer::new(PathBuf::from("x"), "x".into(), true).needs_existing_directory()
+        );
+        let outcome = fixer
+            .apply(&Violation::new("missing"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(
+            matches!(&outcome, FixOutcome::Skipped(reason) if reason.contains("create_parents")),
+            "{outcome:?}"
+        );
+        let outcome = fixer
+            .apply(&Violation::new("missing"), &make_ctx(&tmp, true))
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        // The editor cannot wait for another fix to make the directory.
+        assert!(
+            fixer
+                .fix_edit(&Violation::new("missing"), &[], tmp.path())
+                .is_none()
+        );
         assert!(!tmp.path().join("sub").exists());
         // With the directory there, it creates the file.
         std::fs::create_dir(tmp.path().join("sub")).unwrap();
+        assert!(
+            fixer
+                .fix_edit(&Violation::new("missing"), &[], tmp.path())
+                .is_some()
+        );
         let outcome = fixer
             .apply(&Violation::new("missing"), &make_ctx(&tmp, false))
             .unwrap();
         assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
         assert!(tmp.path().join("sub/x.txt").is_file());
+    }
+
+    #[test]
+    fn file_create_declines_under_a_file_in_every_mode() {
+        // `create_dir_all` fails at a file where a directory should be, so no
+        // mode may report the create as one that applies.
+        let tmp = TempDir::new().unwrap();
+        std::fs::write(tmp.path().join("README.md"), "hi\n").unwrap();
+        let fixer = FileCreateFixer::new(PathBuf::from("README.md/sub/x.txt"), "x\n".into(), true);
+        for dry_run in [true, false] {
+            let outcome = fixer
+                .apply(&Violation::new("missing"), &make_ctx(&tmp, dry_run))
+                .unwrap();
+            assert!(
+                matches!(&outcome, FixOutcome::Skipped(reason) if reason.contains("under a file")),
+                "dry_run={dry_run}: {outcome:?}"
+            );
+        }
+        assert!(
+            fixer
+                .fix_edit(&Violation::new("missing"), &[], tmp.path())
+                .is_none()
+        );
+        assert_eq!(
+            std::fs::read_to_string(tmp.path().join("README.md")).unwrap(),
+            "hi\n"
+        );
+    }
+
+    #[test]
+    fn file_create_checks_where_a_dot_dot_after_a_new_directory_lands() {
+        // `new/..` names nothing until `create_parents` makes `new`, then leads
+        // back to the root: an existing file there must not be overwritten.
+        let parent = TempDir::new().unwrap();
+        let root = parent.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("KEEP.md"), "keep\n").unwrap();
+        let fixer =
+            FileCreateFixer::new(PathBuf::from("../repo/new/../KEEP.md"), "x\n".into(), true);
+        let mut ctx = make_ctx_at(&root, false);
+        ctx.allow_out_of_root = true;
+        let outcome = fixer.apply(&Violation::new("missing"), &ctx).unwrap();
+        assert!(
+            matches!(&outcome, FixOutcome::Skipped(reason) if reason.contains("already exists")),
+            "{outcome:?}"
+        );
+        assert_eq!(
+            std::fs::read_to_string(root.join("KEEP.md")).unwrap(),
+            "keep\n"
+        );
+        assert!(!root.join("new").exists());
     }
 
     #[test]

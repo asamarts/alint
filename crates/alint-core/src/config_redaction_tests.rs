@@ -462,3 +462,32 @@ fn a_masked_when_iter_still_parses_and_differs() {
         assert_eq!(masked.extra["select"], CONFIGURATION_MASK);
     }
 }
+
+#[test]
+fn a_masked_nested_condition_still_parses() {
+    // A nested rule parses its `when:` and `when_iter:` before the rules they
+    // guard, so an unrelated error in those rules recurs on the masked copy
+    // only when the masked conditions parse.
+    let mut value: yaml_serde::Value = yaml_serde::from_str(concat!(
+        "- kind: for_each_file\n",
+        "  select: '*.md'\n",
+        "  when_iter: 'iter.basename != \"x\"'\n",
+        "  require:\n",
+        "    - kind: file_exists\n",
+        "      paths: a\n",
+        "      when: 'false'\n",
+    ))
+    .unwrap();
+    mask_configuration_values(&mut value, NumberMask::Up);
+    let outer = &value[0];
+    assert_eq!(outer["kind"], "for_each_file");
+    assert_eq!(outer["when_iter"], "false");
+    assert_eq!(outer["select"], CONFIGURATION_MASK);
+    let inner = &outer["require"][0];
+    assert_eq!(inner["when"], "true");
+    assert_eq!(inner["paths"], CONFIGURATION_MASK);
+    // Outside a rule, `when` is an ordinary value.
+    let mut plain: yaml_serde::Value = yaml_serde::from_str("when: 'false'\n").unwrap();
+    mask_configuration_values(&mut plain, NumberMask::Up);
+    assert_eq!(plain["when"], CONFIGURATION_MASK);
+}
