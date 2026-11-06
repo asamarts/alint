@@ -575,6 +575,7 @@ fn a_when_iter_that_reads_the_environment_itself_hides_its_paths() {
 }
 
 /// A config whose fact reads the files `paths` matches.
+#[cfg(unix)]
 fn fact_config(paths: &str) -> String {
     format!(
         "version: 1\nfacts:\n  - id: has_marker\n    file_content_matches:\n      \
