@@ -455,6 +455,54 @@ fn a_structural_error_beside_a_secret_stays_readable() {
     let stderr = String::from_utf8_lossy(&output.stderr);
     assert!(stderr.contains("unknown field `colour`"), "{stderr}");
     assert!(!stderr.contains("<redacted>"), "{stderr}");
+
+    // A JSONPath read from the environment is masked with one that parses, so
+    // the rerun reaches the same later error; a bad one stays redacted.
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: absent\n    kind: json_path_absent\n    \
+         paths: 'c.json['\n    path: '{{env.QUERY}}'\n    level: error\n",
+    );
+    let output = run(root.path(), &["check"], &[("QUERY", "$.secretkey")]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("invalid glob \"c.json[\""), "{stderr}");
+    assert!(!stderr.contains("secretkey"), "{stderr}");
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nrules:\n  - id: absent\n    kind: json_path_absent\n    \
+         paths: c.json\n    path: '{{env.QUERY}}'\n    level: error\n",
+    );
+    let output = run(root.path(), &["check"], &[("QUERY", "$.[secret-key")]);
+    assert_redacted("bad JSONPath", &output, &["secret-key"]);
+
+    // A `when_iter:` is parsed before the nested rules, so it is masked with
+    // an expression that parses; a bad one stays redacted.
+    let nested = |when_iter: &str| {
+        format!(
+            "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    \
+             select: 'crates/*'\n    when_iter: '{when_iter}'\n    level: error\n    \
+             require:\n      - kind: file_exists\n        paths: '{{path}}/Cargo.toml'\n        \
+             colour: red\n"
+        )
+    };
+    write(
+        root.path(),
+        ".alint.yml",
+        &nested(r#"iter.basename == "{{env.WANTED}}""#),
+    );
+    let output = run(root.path(), &["check"], &[("WANTED", "secret-crate")]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown field `colour`"), "{stderr}");
+    assert!(!stderr.contains("secret-crate"), "{stderr}");
+    write(root.path(), ".alint.yml", &nested("{{env.CONDITION}}"));
+    let output = run(
+        root.path(),
+        &["check"],
+        &[("CONDITION", "iter.basename == secret-crate")],
+    );
+    assert_redacted("bad when_iter", &output, &["secret-crate"]);
 }
 
 #[test]
@@ -680,5 +728,37 @@ fn the_language_server_reports_configuration_errors_redacted() {
         assert!(!text.contains(secret), "the server leaked {secret}: {text}");
         assert!(text.contains("<redacted>"), "{text}");
         server.shutdown();
+    }
+}
+
+#[test]
+fn the_baseline_message_leaves_out_a_path_read_from_the_environment() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nbaseline: '{{env.VALUE}}.jsonl'\nrules:\n  - id: readme\n    \
+         kind: file_exists\n    paths: README.md\n    level: error\n",
+    );
+    let output = run(root.path(), &["baseline"], &[("VALUE", "canary-secret")]);
+    assert!(output.status.success(), "{output:?}");
+    assert_left_out("baseline", &output, &["canary-secret"]);
+    assert!(root.path().join("canary-secret.jsonl").is_file());
+}
+
+#[cfg(unix)]
+#[test]
+fn a_custom_fact_that_prints_an_environment_value_shows_it_redacted() {
+    let root = tempfile::tempdir().unwrap();
+    write(
+        root.path(),
+        ".alint.yml",
+        "version: 1\nfacts:\n  - id: token\n    custom:\n      argv: ['echo', '{{env.VALUE}}']\n\
+         rules: []\n",
+    );
+    for args in [&["facts"][..], &["facts", "--format", "json"]] {
+        let output = run(root.path(), args, &[("VALUE", "canary-secret")]);
+        assert!(output.status.success(), "{args:?}: {output:?}");
+        assert_left_out(&args.join(" "), &output, &["canary-secret"]);
     }
 }

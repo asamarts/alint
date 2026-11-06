@@ -62,7 +62,8 @@ The selected Serde/value API has no source-span interface; alint therefore retai
 Saphyr 0.2.2 event adapter for YAML edits and duplicate-aware extraction. The RustSec database
 reported no advisory for `yaml_serde`, `libyaml-rs`, `saphyr`, or `saphyr-parser` at evaluation
 time. The comparison explicitly treated an archived or advised transitive parser as disqualifying
-rather than something to waive.
+rather than something to waive. (Both Saphyr crates later moved together to 0.3.3, in November
+2026, with the event adapter and the compatibility contract unchanged.)
 
 The in-house assessment reused the existing `yaml_depth` lexer and the Saphyr-backed span/event paths
 as the smallest realistic prototype boundary. They demonstrate that alint can own narrow lexical

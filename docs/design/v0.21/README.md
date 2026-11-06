@@ -693,8 +693,38 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   lookup from #422. Reviews before the cut found that #445 had changed an
   alint-core method the published 0.21.0 crates call; #447 restored it as a
   deprecated shim and added `ci/scripts/check-patch-compat.sh`, which
-  RELEASING.md now runs for every patch release. The corpus replay against
-  v0.21.0 showed no differences.
+  RELEASING.md now runs for every patch release. v0.21.1 also adds public
+  fields to `FixContext` (`paths_sensitive`), `Config`
+  (`environment_values`) and `CompiledNestedSpec` (`sensitive_configuration`):
+  code that builds one of those with a struct literal must set the new field.
+  The published 0.21.0 crates do not, and v0.22 should make such structs
+  `#[non_exhaustive]` or give them constructors. The corpus replay against
+  v0.21.0 (on 255acdb8c, #445; #446 and #447 changed no relation code) showed
+  no differences. The bench record (#451) passed both gates. The dry-run
+  prediction from #444 and #446 costs about 14.5 µs per predicted create:
+  `fix_throughput/dry_run_only/100`, a report-only bench, is +41% in
+  instructions and SFIX, a dry-run fix, +3% to +5% in wall time. The
+  record's `for_each_dir` cells are 2.2% to 2.6% over v0.20.1 (2.2% to 2.4%
+  rebuilt with Rust 1.99.1), although #422 alone had them level with it: a
+  bisect against #422 has every change through #438 within 0.5%, #442 at
+  +0.5% and #445 at +2.4%, the jump mostly #445's
+  `CompiledNestedSpec::instantiate`, which copied each entry's `RuleSpec`
+  once more. The v0.21.1 CHANGELOG had claimed "within 0.5%"; the
+  correction and the fix (the spec built in place, and a successful nested
+  build returned straight from the builder) landed after the release.
+- **After v0.21.1 (for v0.21.2).** Two review rounds after the release
+  (#453 and its follow-up) closed further dry-run, `--diff`, `explain` and
+  redaction gaps: the forward-walking `resolve_existing_prefix`, a
+  `create_parents: false` create declined in every mode, `when_iter:` and
+  dotted selectors hiding their paths, redaction markers that leave out a
+  hidden path, and a baseline fingerprint that no longer tries to read a
+  directory (`alint baseline` and `check --baseline` warned once per
+  directory a nested rule flagged, naming it). The fingerprint of a finding
+  with a hidden path still hashes the path, unsalted, in the baseline file,
+  SARIF `partialFingerprints` and GitLab output, so a holder of the file can
+  test a guessed path. Changing it invalidates every existing baseline entry
+  for such findings, so it waits for v0.22, together with the
+  `non_exhaustive` structs above.
 - **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
   within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
   ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on

@@ -6,16 +6,109 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance
+
+- Nested rules run 1.4% to 2% fewer instructions than in v0.21.1, where each
+  iterated entry's rule specification passed through one more call that copied
+  it. In the deterministic micro-benchmark gate (Callgrind, Rust 1.99.1),
+  `for_each_dir` is back within 0.5% of v0.20.1, from 2.2% to 2.6% slower in
+  v0.21.1, and `every_matching_has` within 0.7%. The specification is now
+  built in place, and a successful nested build returns straight from the
+  builder.
+
+### Changed
+
+- `ci/scripts/check-patch-compat.sh` deletes each previous crate's
+  `Cargo.lock` before building it, checks with all features, fails unless
+  every sibling it built against is this workspace's, and refuses a previous
+  version off the workspace's `0.y` line. The lock pinned the siblings at the
+  previous version, so once the workspace version was bumped cargo ignored the
+  `[patch]` and the check passed without testing anything. It also takes every
+  earlier patch on the line in one run, finds the workspace from its own
+  location rather than the current directory, and refuses a prerelease
+  workspace version.
+
+- The YAML parser behind source spans, structured fixes and duplicate-aware key
+  extraction (`saphyr` and `saphyr-parser`) moves from 0.2.2 to 0.3.3, the two
+  still pinned together. An empty block scalar at the end of a file now reads
+  as an empty string instead of a newline. The loader also stops after 100,000
+  nodes produced by aliases. alint loads a document that way only to place a
+  `set_value` or `remove_value` edit, after its own alias guard, which allows
+  more, so such a fix now declines on a document whose aliases expand past
+  that limit.
+
+### Fixed
+
+- `fix --dry-run` agrees with `fix` again for a `dir_create` or
+  `create_and_register` through a symlink. Those rules look for the path as
+  written, but since 0.21.1 the dry run also accepted where the file lands, so
+  a create through an ignored symlinked directory was predicted applied. A
+  `create_and_register` member written as an absolute path or with `..` is
+  predicted unresolved, as the rule never matches it. A create written outside
+  the root (`allow_out_of_root`) is predicted where it lands: through a
+  directory it makes (`../repo/new/../x.txt` with `create_parents`), through a
+  symlink after one (`../repo/new/../link/x.txt`), and, for an absolute path,
+  through a symlink before a `..`, which the dry run used to cancel against it.
+- `create_and_register` declines a member written with a backslash on Linux
+  and macOS, where the backslash is part of a name, and says to write it with
+  `/`. The rule looked for that name, but the fix created the member with `/`
+  in its place, so the finding stood after every run while `fix --dry-run`
+  predicted it applied.
+- `file_create` with `create_parents: false` declines a file whose directory
+  does not exist, and says to set `create_parents: true`. `fix` failed on the
+  write instead, and `fix --dry-run` and `fix --diff` reported the create as
+  applied.
+- `check --format sarif`, `agent` and `json --include-fixes` no longer warn
+  about a `--diff` preview nobody asked for. They build their proposed fixes
+  with the same single pass as `fix --diff`, so its warning that a whole-file
+  fix pushed a located edit out of the preview now says "the fix preview".
+- `fix --diff` no longer shows a create outside the root (`allow_out_of_root`)
+  from a rule with redacted findings. It printed the file's path and content,
+  which can hold a value read from the environment or set in a
+  `sensitive: true` rule.
+- A rule whose selector with a dotted name (`targets.files`, `source.file`,
+  `require.forbidden_edges[].to`) reads the environment now shows its paths as
+  `<redacted>` in reports, `fix` and the baseline, as one reading `paths:` or
+  `select:` does. The check compared the dotted name with the top-level field
+  the environment marks, so it never matched.
+- A nested rule whose `when_iter:` reads the environment shows its paths as
+  `<redacted>`, as one whose `require:` reads it does. The filter picks the
+  entries the rule reports, so their names can spell the value.
+- A redaction marker no longer hashes a path alint hides, so two findings that
+  differ only in such a path get the same marker. The marker covered the
+  finding's path before the path was hidden.
+- `alint baseline`, `check --baseline`, `fix` and the language server no longer
+  warn that they cannot read each directory a nested rule flags. The baseline
+  fingerprint leaves a directory's content out, as it did, without trying to
+  read it, and it no longer reads the file of a finding with redacted evidence,
+  whose fingerprint leaves the content out too. Its warning for a file it
+  cannot read shows `<redacted>` for a path alint hides. A file over the
+  256 MiB analysis cap is reported through its finding, which hides such a
+  path, without the warning that named it.
+- A JSONPath or a nested rule's `when_iter:` read from the environment no
+  longer hides an unrelated configuration error after it: the rerun that
+  decides whether an error could quote the value masks it with one that still
+  parses.
+- `alint baseline`'s confirmation, and its error for a regeneration that would
+  grandfather new findings, show `<redacted>` for a `baseline:` path read from
+  the environment. `alint facts` does the same for a fact value that holds one,
+  as a `custom:` command given it as an argument can print it.
+- `alint explain` no longer prints a value read from the environment in a
+  rule's `fix:` line. A fixer describes itself from the rule's fields, so a
+  `file_create` or `dir_create` named the `paths:` entry, a `replace` quoted the
+  `pattern:` and a `set_value` the `path:`, although `explain` showed those
+  fields as `<redacted>`. The `fix:` line is now `<redacted>` whenever the
+  rule's evidence is, in the human and JSON formats.
+
 ## [0.21.1] - 2026-11-05
 
-A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees
-with `fix` in many more layouts, configuration errors are readable again without showing values
-read from the environment, and nested rules are back within 0.5% of v0.20.1's speed. A
-`.gitignore` in a directory above the repository (a home directory kept in git) can no longer hide
-the tree and make every rule pass, and a linked worktree honors the repository's shared
-`info/exclude`. A configuration error is shown unless it could quote a value read from the
-environment or set in a `sensitive: true` rule, and such values stay out of the errors, warnings
-and listings that printed them.
+A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees with
+`fix` in many more layouts, and configuration errors are readable again without showing values read
+from the environment. A `.gitignore` in a directory above the repository (a home directory kept in
+git) can no longer hide the tree and make every rule pass, and a linked worktree honors the
+repository's shared `info/exclude`. A configuration error is shown unless it could quote a value
+read from the environment or set in a `sensitive: true` rule, and such values stay out of the
+errors, warnings and listings that printed them.
 
 ### Security
 
@@ -39,7 +132,9 @@ and listings that printed them.
   repository still apply, as they do for ripgrep. `fix --dry-run` predicts the
   same walk. See ADR-0028 and ADR-0029, which lists where the walk still
   differs from git: a submodule's `info/exclude`, anchored patterns in the
-  global excludes file, and a linted root inside an ignored directory.
+  global excludes file, a linted root inside an ignored directory, and the
+  excludes file `~/.gitconfig` names, which the walk still reads when
+  `GIT_CONFIG_GLOBAL` names a file that sets no `core.excludesFile`.
 - `dir_create` requires the directory in `paths:` in normal form, such as
   `docs/adr`. A configuration with `docs/`, `./docs`, `docs//adr` or `/docs`
   now fails to load. The rule never matched those forms, so `check` failed
@@ -60,8 +155,10 @@ and listings that printed them.
   a table for every iterated entry. Adding `key_parity` to that table in v0.21.0
   stopped the compiler unrolling the scan, which then cost about 300
   instructions per entry and made `for_each_dir` 3% slower than v0.20.1 in the
-  release's deterministic micro-benchmark gate. It is now back within 0.5% of
-  v0.20.1.
+  release's deterministic micro-benchmark gate. That change alone brought it
+  back within 0.5% of v0.20.1, but later fixes in this release added about 2%
+  again, so v0.21.1's `for_each_dir` is 2.2% to 2.6% slower than v0.20.1 in
+  the same gate.
 
 ### Fixed
 

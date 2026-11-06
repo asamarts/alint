@@ -1370,6 +1370,11 @@ impl CompiledNestedSpec {
     /// [`Self::sensitive_configuration`] is set, as an environment-derived
     /// field of a top-level rule is: its errors and warnings leave the value
     /// out.
+    // A thin wrapper on the per-entry path of `for_each_dir` and
+    // `every_matching_has`, in another crate: with only `#[inline]` it stays a
+    // call, and those benches measure 0.4% more instructions.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn instantiate(
         &self,
         parent_id: &str,
@@ -1377,23 +1382,41 @@ impl CompiledNestedSpec {
         level: Level,
         tokens: &crate::template::PathTokens,
     ) -> RuleSpec {
-        let mut spec = self.spec.instantiate(parent_id, idx, level, tokens);
-        if self.sensitive_configuration {
-            spec.sensitive_fields = ["paths", "message", "policy_url", "when", "scope_filter"]
+        // Built in place: a `RuleSpec` moved out of a second call costs a
+        // copy per iterated entry, which `for_each_dir` measures.
+        let sensitive_fields = if self.sensitive_configuration {
+            ["paths", "message", "policy_url", "when", "scope_filter"]
                 .into_iter()
                 .map(str::to_string)
                 .chain(
-                    spec.extra
+                    self.spec
+                        .extra
                         .keys()
-                        .filter_map(|key| key.as_str().map(str::to_string)),
+                        .filter_map(|key| key.as_str())
+                        .filter(|key| !NestedRuleSpec::PARENT_FIELDS.contains(key))
+                        .map(str::to_string),
                 )
-                .collect();
-        }
-        spec
+                .collect()
+        } else {
+            std::collections::BTreeSet::new()
+        };
+        self.spec
+            .instantiate_with(parent_id, idx, level, tokens, sensitive_fields)
     }
 }
 
 impl NestedRuleSpec {
+    /// Fields a nested config may write that belong to the parent (`id` and
+    /// `level` are synthesized from it, `fix` and the git toggles are
+    /// top-level only): they stay out of the leaf's option set.
+    const PARENT_FIELDS: &[&str] = &[
+        "id",
+        "level",
+        "fix",
+        "git_tracked_only",
+        "respect_gitignore",
+    ];
+
     /// Synthesize a full [`RuleSpec`] for a single iteration, applying
     /// path-template substitution (using the iterated entry's tokens) to
     /// every string field. The resulting spec has `id =
@@ -1436,12 +1459,33 @@ impl NestedRuleSpec {
         acc
     }
 
+    // A thin wrapper, as [`CompiledNestedSpec::instantiate`] is.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn instantiate(
         &self,
         parent_id: &str,
         idx: usize,
         level: Level,
         tokens: &crate::template::PathTokens,
+    ) -> RuleSpec {
+        self.instantiate_with(
+            parent_id,
+            idx,
+            level,
+            tokens,
+            std::collections::BTreeSet::new(),
+        )
+    }
+
+    /// [`Self::instantiate`] with `sensitive_fields` set on the result.
+    fn instantiate_with(
+        &self,
+        parent_id: &str,
+        idx: usize,
+        level: Level,
+        tokens: &crate::template::PathTokens,
+        sensitive_fields: std::collections::BTreeSet<String>,
     ) -> RuleSpec {
         RuleSpec {
             id: format!("{parent_id}.require[{idx}]"),
@@ -1459,13 +1503,13 @@ impl NestedRuleSpec {
             when: self.when.clone(),
             expect_matches: self.expect_matches,
             sensitive: self.sensitive,
-            sensitive_fields: std::collections::BTreeSet::new(),
+            sensitive_fields,
             fix: None,
             // `git_tracked_only` and `respect_gitignore` are both kind-specific
             // options now (ADR-0008), stripped from the nested `extra` via
-            // PARENT_FIELDS below, so a nested existence rule doesn't silently
+            // `PARENT_FIELDS`, so a nested existence rule doesn't silently
             // inherit either. If/when nested rules need one, drop it from
-            // PARENT_FIELDS and let it flow into the leaf's option set.
+            // `PARENT_FIELDS` and let it flow into the leaf's option set.
             scope_filter: self.scope_filter.clone(),
             // `NestedRuleSpec` doesn't name `id`/`level` (synthesized from the
             // parent) or the top-level-only `fix`/git toggles, so a nested
@@ -1474,19 +1518,10 @@ impl NestedRuleSpec {
             // options, and would otherwise trip the leaf's unknown-option
             // validation (a deny-unknown-fields `Options` struct, or an
             // option-less rule's `deny_unknown_options`).
-            extra: {
-                const PARENT_FIELDS: &[&str] = &[
-                    "id",
-                    "level",
-                    "fix",
-                    "git_tracked_only",
-                    "respect_gitignore",
-                ];
-                crate::template::render_nested_options(&self.kind, self.extra.clone(), tokens)
-                    .into_iter()
-                    .filter(|(k, _)| k.as_str().is_none_or(|s| !PARENT_FIELDS.contains(&s)))
-                    .collect()
-            },
+            extra: crate::template::render_nested_options(&self.kind, self.extra.clone(), tokens)
+                .into_iter()
+                .filter(|(k, _)| k.as_str().is_none_or(|s| !Self::PARENT_FIELDS.contains(&s)))
+                .collect(),
         }
     }
 }
@@ -1871,7 +1906,8 @@ mod tests {
     #[test]
     fn nested_rule_spec_instantiate_synthesizes_id_and_inherits_level() {
         let nested: NestedRuleSpec = yaml_serde::from_str(
-            "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: missing in {path}\n",
+            "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: missing in {path}\n\
+             git_tracked_only: true\nroot_only: true\n",
         )
         .unwrap();
         let tokens = PathTokens::from_path(Path::new("packages/foo"));
@@ -1897,6 +1933,8 @@ mod tests {
                 .any(|k| k.as_str() == Some("git_tracked_only")),
             "git_tracked_only should be stripped from nested extra"
         );
+        // The kind's own options still reach it.
+        assert_eq!(spec.extra["root_only"], true);
     }
 }
 

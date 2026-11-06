@@ -1104,7 +1104,9 @@ struct CreateRule {
     path: PathBuf,
     content: &'static [u8],
     dir: bool,
-    scope: Scope,
+    /// The rule's `paths:`; without one it looks for `checks` as written, as
+    /// `dir_exists` and `cross_file` do.
+    scope: Option<Scope>,
     /// Also looks for `checks` on disk, as `file_exists` does for a literal
     /// path with `respect_gitignore: false`.
     past_walk: bool,
@@ -1125,7 +1127,22 @@ fn create_rule(
         path: PathBuf::from(path),
         content,
         dir,
-        scope: Scope::from_patterns(&[checks.to_string()]).unwrap(),
+        scope: Some(Scope::from_patterns(&[checks.to_string()]).unwrap()),
+        past_walk: false,
+        tracked_only: false,
+    })
+}
+
+/// A `file_create` of `path` for a rule with no `paths:` scope that requires
+/// `checks`.
+fn scopeless_create_rule(id: &'static str, checks: &str, path: &str) -> Box<dyn Rule> {
+    Box::new(CreateRule {
+        id,
+        checks: PathBuf::from(checks),
+        path: PathBuf::from(path),
+        content: b"x",
+        dir: false,
+        scope: None,
         past_walk: false,
         tracked_only: false,
     })
@@ -1145,7 +1162,7 @@ fn create_rule_seeing(
         path: PathBuf::from(path),
         content: b"x",
         dir: false,
-        scope: Scope::from_patterns(&[path.to_string()]).unwrap(),
+        scope: Some(Scope::from_patterns(&[path.to_string()]).unwrap()),
         past_walk,
         tracked_only,
     })
@@ -1204,7 +1221,7 @@ impl Rule for CreateRule {
         Level::Error
     }
     fn path_scope(&self) -> Option<&Scope> {
-        Some(&self.scope)
+        self.scope.as_ref()
     }
     fn sees_path_past_walk(&self, path: &Path) -> bool {
         self.past_walk && path == self.checks
@@ -1460,7 +1477,7 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         let base = tmp.path().canonicalize().unwrap();
         let root = &base.join("root");
         std::fs::create_dir_all(root.join("sub")).unwrap();
-        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(root.join("real/deep")).unwrap();
         std::fs::create_dir_all(root.join("hidden")).unwrap();
         std::fs::create_dir_all(base.join("outside")).unwrap();
         std::fs::write(root.join(".gitignore"), "alias\nhidden\nveiled\n").unwrap();
@@ -1472,6 +1489,8 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         // A name for the root from outside it, and a way out of it.
         symlink("root", base.join("root-link")).unwrap();
         symlink("../outside", root.join("out")).unwrap();
+        // A `..` after it steps up from `real/deep`, not back to the root.
+        symlink("real/deep", root.join("deeplink")).unwrap();
         let path = |p: &Path| p.to_string_lossy().into_owned();
         let rules = vec![
             create_rule("loop", "x.txt", "sub/up/x.txt", b"x", false),
@@ -1494,6 +1513,30 @@ fn dry_run_judges_a_create_by_where_it_lands() {
             ),
             create_rule("relative-dotdot", "u.txt", "../root/u.txt", b"x", false),
             create_rule("lands-outside", "out/o.txt", "out/o.txt", b"x", false),
+            // Written as given, so the OS resolves `deeplink/..` to `real`.
+            create_rule(
+                "absolute-link-up",
+                "t.txt",
+                &path(&root.join("deeplink/../t.txt")),
+                b"x",
+                false,
+            ),
+            // Out and back in through a directory the create makes, then a
+            // symlink: `new/..` cancels and `alias` still leads to `real`.
+            create_rule(
+                "back-in-alias",
+                "real/s.txt",
+                "../root/new/../alias/s.txt",
+                b"x",
+                false,
+            ),
+            create_rule(
+                "back-in-link-up",
+                "r.txt",
+                "../root/new/../deeplink/../r.txt",
+                b"x",
+                false,
+            ),
         ];
         let opts = crate::WalkOptions {
             respect_gitignore: true,
@@ -1522,6 +1565,9 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         ("absolute-dotdot", true),
         ("relative-dotdot", true),
         ("lands-outside", false),
+        ("absolute-link-up", false),
+        ("back-in-alias", true),
+        ("back-in-link-up", false),
     ]
     .into_iter()
     .map(|(id, applied)| (id.to_string(), applied))
@@ -1618,4 +1664,198 @@ fn engine_fix_warnings_show_a_hidden_file_as_redacted() {
         Engine::shown_path(tmp.path(), &hidden, Path::new("plain.txt")),
         "plain.txt"
     );
+}
+
+#[test]
+fn dry_run_judges_a_rule_without_a_paths_scope_by_the_path_as_written() {
+    // A rule with no `paths:` finds nothing under another name: a create
+    // written out of the root and back in lands on `back.txt` but never
+    // matches `../root/back.txt`, while `out/../keep.txt` reads as `keep.txt`.
+    let outcomes = |dry_run: bool| -> Vec<(String, bool)> {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = &tmp.path().join("root");
+        std::fs::create_dir_all(root).unwrap();
+        let rules = vec![
+            scopeless_create_rule("back-in", "../root/back.txt", "../root/back.txt"),
+            scopeless_create_rule("normalized", "keep.txt", "out/../keep.txt"),
+        ];
+        let opts = crate::WalkOptions::default();
+        let index = crate::walk(root, &opts).unwrap();
+        let report = Engine::new(rules, RuleRegistry::new())
+            .fix(root, &index, &opts, dry_run, Applicability::Safe)
+            .unwrap();
+        report
+            .results
+            .iter()
+            .map(|result| {
+                let applied = matches!(result.items[0].status, FixStatus::Applied(_));
+                (result.rule_id.to_string(), applied)
+            })
+            .collect()
+    };
+    let expected = vec![
+        ("back-in".to_string(), false),
+        ("normalized".to_string(), true),
+    ];
+    assert_eq!(outcomes(true), expected, "dry run");
+    assert_eq!(outcomes(false), expected, "real fix");
+}
+
+/// Creates `../outside.txt` only when its rule's `allow_out_of_root` lets it
+/// leave the root, with no editor form, as `file_create` does there.
+#[derive(Debug)]
+struct OutOfRootCreate;
+
+impl crate::rule::Fixer for OutOfRootCreate {
+    fn describe(&self) -> String {
+        "create ../outside.txt".to_string()
+    }
+    fn apply(&self, _v: &Violation, _ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+        Ok(FixOutcome::Applied("create ../outside.txt".to_string()))
+    }
+    fn created_file(
+        &self,
+        _v: &Violation,
+        _root: &Path,
+        allow_out_of_root: bool,
+    ) -> Option<(PathBuf, Vec<u8>)> {
+        allow_out_of_root.then(|| (PathBuf::from("../outside.txt"), b"x".to_vec()))
+    }
+}
+
+impl Rule for OutOfRootCreate {
+    fn id(&self) -> &'static str {
+        "escape"
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+        Ok(vec![Violation::new("missing")])
+    }
+    fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+        Some(self)
+    }
+}
+
+#[test]
+fn diff_hides_a_sensitive_create_outside_the_root() {
+    // `--diff` hides every file a sensitive item writes. A create out of the
+    // root has no editor form, so the target comes from `created_file` under
+    // the rule's own `allow_out_of_root`.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = &tmp.path().join("root");
+    std::fs::create_dir_all(root).unwrap();
+    let report = |sensitive: bool| FixReport {
+        results: vec![FixRuleResult {
+            rule_id: "escape".into(),
+            level: Level::Error,
+            items: vec![FixItem {
+                violation: if sensitive {
+                    Violation::new("missing").with_redacted_message("escape")
+                } else {
+                    Violation::new("missing")
+                },
+                status: FixStatus::Applied("create ../outside.txt".to_string()),
+            }],
+            analysis_failures: Vec::new(),
+        }],
+        non_convergent: false,
+    };
+    let engine = |allow: bool| {
+        Engine::from_entries(
+            vec![RuleEntry::new(Box::new(OutOfRootCreate)).with_allow_out_of_root(allow)],
+            RuleRegistry::new(),
+        )
+    };
+    let outside = Engine::normalized_write_target(root, Path::new("../outside.txt"));
+    assert_eq!(
+        engine(true).sensitive_fix_targets(&report(true), root),
+        std::iter::once(outside).collect::<HashSet<_>>()
+    );
+    assert!(
+        engine(true)
+            .sensitive_fix_targets(&report(false), root)
+            .is_empty()
+    );
+    assert!(
+        engine(false)
+            .sensitive_fix_targets(&report(true), root)
+            .is_empty()
+    );
+}
+
+static PATH_SELECTION_SELECTORS: &[crate::SelectorMeta] = &[crate::SelectorMeta {
+    name: std::borrow::Cow::Borrowed("targets.files"),
+    selector_type: crate::SelectorType::Glob,
+    rerootable: false,
+}];
+
+fn path_selection_meta(
+    selectors: &'static [crate::SelectorMeta],
+    nested_rules: bool,
+) -> crate::KindMeta {
+    crate::KindMeta {
+        dispatch: crate::DispatchClass::FullIndex { path_scope: false },
+        paths: crate::PathsSupport::Optional,
+        scope_filter: crate::ScopeFilterSupport::Full,
+        git_tracked_only: crate::GitTrackedSupport::None,
+        respect_gitignore: false,
+        root_only: false,
+        selectors: std::borrow::Cow::Borrowed(selectors),
+        since: crate::SinceSupport::None,
+        capabilities: std::borrow::Cow::Borrowed(&[]),
+        content: crate::ContentAccess::PathOnly,
+        formats: std::borrow::Cow::Borrowed(&[]),
+        dependencies: std::borrow::Cow::Borrowed(&[]),
+        fix_ops: std::borrow::Cow::Borrowed(&[]),
+        expect_matches: false,
+        nested_rules,
+        trace: crate::TraceMeta::SELECTION,
+    }
+}
+
+#[test]
+fn a_path_selection_read_from_the_environment_is_sensitive() {
+    let mut registry = RuleRegistry::new();
+    for (kind, selectors, nested) in [
+        ("selecting", PATH_SELECTION_SELECTORS, false),
+        ("nesting", &[][..], true),
+        ("flat", &[][..], false),
+    ] {
+        registry.register_owned(
+            kind,
+            std::sync::Arc::new(path_selection_meta(selectors, nested)),
+            |_| unreachable!("never built"),
+        );
+    }
+    let entry = |kind: &str, field: Option<&str>| {
+        let mut spec: crate::RuleSpec =
+            yaml_serde::from_str(&format!("id: r\nkind: {kind}\nlevel: error\n")).unwrap();
+        spec.set_sensitive_fields(field.map(str::to_string).into_iter().collect());
+        RuleEntry::new(stub("r", "**/*.txt")).with_spec(std::sync::Arc::new(spec))
+    };
+    let cases = [
+        (entry("flat", None), false),
+        (entry("flat", Some("paths")), true),
+        (entry("flat", Some("scope_filter")), true),
+        (entry("flat", Some("message")), false),
+        // `require:` and `when_iter:` choose the paths of a nested kind only.
+        (entry("nesting", Some("require")), true),
+        (entry("flat", Some("require")), false),
+        (entry("nesting", Some("when_iter")), true),
+        (entry("flat", Some("when_iter")), false),
+        // The environment marks a selector's top-level field.
+        (entry("selecting", Some("targets")), true),
+        (entry("flat", Some("targets")), false),
+        (RuleEntry::new(stub("r", "**/*.txt")), false),
+    ];
+    let expected: Vec<bool> = cases.iter().map(|(_, sensitive)| *sensitive).collect();
+    let engine = Engine::from_entries(cases.into_iter().map(|(e, _)| e).collect(), registry);
+    let actual: Vec<bool> = engine
+        .entries
+        .iter()
+        .map(|entry| engine.has_sensitive_path_selection(entry))
+        .collect();
+    assert_eq!(actual, expected);
 }

@@ -427,3 +427,38 @@ fn a_when_error_is_hidden_only_when_the_condition_may_be_secret() {
         REDACTED_CONFIGURATION_ERROR
     );
 }
+
+#[test]
+fn a_masked_jsonpath_still_parses_and_differs() {
+    for query in ["$.k", "$['a-b'][0]", "$", "$['<redacted>']"] {
+        let mut value = yaml_serde::Value::String(query.to_string());
+        mask_configuration_values(&mut value, NumberMask::Up);
+        let yaml_serde::Value::String(masked) = value else {
+            panic!("a string stays a string: {value:?}");
+        };
+        assert_ne!(masked, query);
+        assert!(
+            serde_json_path::JsonPath::parse(&masked).is_ok(),
+            "{query} -> {masked}"
+        );
+    }
+}
+
+#[test]
+fn a_masked_when_iter_still_parses_and_differs() {
+    for (when_iter, expected) in [
+        ("iter.basename == \"canary\"", "false"),
+        ("false", "true"),
+        ("true", "false"),
+    ] {
+        let mut rule = spec(&format!(
+            "id: r\nkind: for_each_dir\nlevel: error\nselect: 'a/*'\nwhen_iter: '{when_iter}'\n"
+        ));
+        rule.set_sensitive_fields(environment_fields(&["when_iter", "select"]));
+        let masked = rule.masked_configuration(NumberMask::Up).unwrap();
+        assert_eq!(masked.extra["when_iter"], expected, "{when_iter}");
+        assert!(crate::when::parse(expected).is_ok());
+        // Other fields keep the plain mask.
+        assert_eq!(masked.extra["select"], CONFIGURATION_MASK);
+    }
+}

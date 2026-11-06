@@ -323,22 +323,10 @@ impl<'a> FileReader<'a> {
     }
 
     fn fingerprint(&mut self, rule_id: &str, v: &alint_core::Violation) -> String {
-        let bytes = match v.path.as_ref() {
-            Some(p) => self
-                .cache
-                .entry(p.to_path_buf())
-                .or_insert_with(|| {
-                    // Cap the fingerprint read (M3): a pathological >256 MiB
-                    // file must not OOM the fingerprint path. Over-cap → None →
-                    // the fingerprint degrades to its non-content identity
-                    // rather than reading unbounded bytes.
-                    let full = self.root.join(p);
-                    let size = std::fs::metadata(&full).map_or(0, |m| m.len());
-                    alint_core::read_capped_or_skip(&full, size)
-                })
-                .as_deref(),
-            None => None,
-        };
+        // Capped (M3): a pathological >256 MiB file must not OOM the
+        // fingerprint path; over the cap, the fingerprint degrades to its
+        // non-content identity rather than reading unbounded bytes.
+        let bytes = alint_core::baseline::fingerprint_content(self.root, v, &mut self.cache);
         alint_core::baseline::fingerprint(rule_id, v, bytes)
     }
 }
@@ -597,7 +585,7 @@ pub(super) fn cmd_baseline(
             bail!(
                 "regenerating {} would grandfather {added} new violation(s) (+{added} / -{removed}); \
                  fix them, or pass --accept-new to accept them into the baseline",
-                out_path.display()
+                crate::redact_environment_values(&out_path.display().to_string())
             );
         }
     }
@@ -614,7 +602,9 @@ pub(super) fn cmd_baseline(
         let total = new_baseline.total();
         eprintln!(
             "alint: wrote {} ({n} entr{}, {total} occurrence{})",
-            term(&out_path.display().to_string()),
+            term(&crate::redact_environment_values(
+                &out_path.display().to_string()
+            )),
             if n == 1 { "y" } else { "ies" },
             if total == 1 { "" } else { "s" },
         );

@@ -212,3 +212,228 @@ fn sensitive_fix_diff_omits_secret_bearing_file_edits() {
         );
     }
 }
+
+#[test]
+fn explain_hides_a_fix_description_built_from_an_environment_value() {
+    // Each fixer describes itself from a field other than `fix:`.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: create-file
+    kind: file_exists
+    paths: "{{env.ENV_PATH_SECRET}}.txt"
+    level: error
+    fix:
+      file_create: { content: "x\n" }
+  - id: create-dir
+    kind: dir_exists
+    paths: "{{env.ENV_PATH_SECRET}}-dir"
+    level: error
+    fix:
+      dir_create: {}
+  - id: replace-pattern
+    kind: file_content_forbidden
+    paths: "*.md"
+    pattern: "{{env.ENV_PATH_SECRET}}"
+    level: error
+    fix:
+      replace: { replacement: "ok" }
+  - id: set-path
+    kind: json_path_equals
+    paths: package.json
+    path: "$['{{env.ENV_PATH_SECRET}}']"
+    equals: 1
+    level: error
+    fix:
+      set_value: {}
+  - id: plain-create
+    kind: file_exists
+    paths: LICENSE
+    level: error
+    fix:
+      file_create: { content: "MIT\n" }
+"#,
+    )
+    .unwrap();
+
+    for id in ["create-file", "create-dir", "replace-pattern", "set-path"] {
+        for format in ["human", "json"] {
+            let output = run(dir.path(), &["explain", id, "--format", format]);
+            assert!(output.status.success(), "{id} {format}: {output:?}");
+            let rendered = String::from_utf8_lossy(&output.stdout);
+            assert!(
+                !rendered.contains(ENV_PATH_SECRET),
+                "explain {id} {format} leaked the value:\n{rendered}"
+            );
+            assert!(
+                rendered.contains("<redacted>"),
+                "{id} {format}:\n{rendered}"
+            );
+        }
+    }
+
+    // A rule with nothing from the environment keeps its description.
+    let output = run(dir.path(), &["explain", "plain-create"]);
+    assert!(output.status.success(), "{output:?}");
+    let rendered = String::from_utf8_lossy(&output.stdout);
+    assert!(rendered.contains("create LICENSE"), "{rendered}");
+}
+
+#[test]
+fn fix_diff_omits_a_sensitive_create_outside_the_root() {
+    // `allow_out_of_root` lets these creates leave the root, where the editor
+    // form `--diff` used to find the hidden files by never reaches.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        r#"version: 1
+allow_out_of_root: true
+rules:
+  - id: env-content
+    kind: file_exists
+    paths: ../shared/token.txt
+    level: error
+    fix:
+      file_create: { content: "{{env.ENV_PATH_SECRET}}\n" }
+  - id: sensitive-content
+    kind: file_exists
+    sensitive: true
+    paths: ../shared/sensitive.txt
+    level: error
+    fix:
+      file_create: { content: "EXPLICIT_TOKEN_VALUE_DO_NOT_REPORT\n" }
+  - id: env-path
+    kind: file_exists
+    paths: "../{{env.ENV_PATH_SECRET}}-out/x.txt"
+    level: error
+    fix:
+      file_create: { content: "x\n", create_parents: true }
+  - id: plain
+    kind: file_exists
+    paths: ../shared/plain.txt
+    level: error
+    fix:
+      file_create: { content: "plain\n" }
+"#,
+    )
+    .unwrap();
+    let output = run(&root, &["fix", "--diff"]);
+    let rendered = String::from_utf8_lossy(&output.stdout);
+    for secret in [
+        ENV_PATH_SECRET,
+        EXPLICIT_SECRET,
+        "token.txt",
+        "sensitive.txt",
+    ] {
+        assert!(
+            !String::from_utf8_lossy(&all_output(&output)).contains(secret),
+            "fix --diff leaked {secret}:\n{rendered}"
+        );
+    }
+    assert!(rendered.contains("+++ b/../shared/plain.txt"), "{rendered}");
+}
+
+#[test]
+fn a_dotted_selector_read_from_the_environment_hides_its_paths() {
+    // `targets.files` names a path into `targets:`, the field the environment
+    // marks.
+    let dir = tempfile::tempdir().unwrap();
+    for member in ["a", "b"] {
+        let path = dir.path().join(ENV_PATH_SECRET).join(member);
+        std::fs::create_dir_all(&path).unwrap();
+        std::fs::write(path.join("README.md"), member).unwrap();
+    }
+    std::fs::write(dir.path().join("README.md"), "root").unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: same-readme
+    kind: cross_file
+    relation: identical
+    source: { file: README.md }
+    targets: { files: "{{env.ENV_PATH_SECRET}}/*/README.md" }
+    level: error
+"#,
+    )
+    .unwrap();
+    for args in [
+        &["check", "--format", "human"][..],
+        &["check", "--format", "json"],
+        &["check", "--format", "sarif"],
+        &["fix", "--dry-run", "--format", "json"],
+    ] {
+        let output = run(dir.path(), args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        let rendered = String::from_utf8_lossy(&all_output(&output)).into_owned();
+        assert!(
+            !rendered.contains(ENV_PATH_SECRET),
+            "{args:?} leaked the selector path:\n{rendered}"
+        );
+        assert!(rendered.contains("<redacted"), "{args:?}:\n{rendered}");
+    }
+}
+
+#[test]
+fn a_when_iter_filter_read_from_the_environment_hides_its_paths() {
+    // `when_iter` picks which directories a nested rule visits, so a filter
+    // read from the environment chooses the paths it reports.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("pkgs").join(ENV_PATH_SECRET)).unwrap();
+    std::fs::create_dir_all(dir.path().join("pkgs/other")).unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: each-readme
+    kind: for_each_dir
+    select: "pkgs/*"
+    when_iter: 'iter.basename == "{{env.ENV_PATH_SECRET}}"'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+"#,
+    )
+    .unwrap();
+    for args in [
+        &["check", "--format", "human"][..],
+        &["check", "--format", "json"],
+        &["check", "--format", "sarif"],
+        &["explain", "each-readme", "--trace", "--preview"],
+        &[
+            "explain",
+            "each-readme",
+            "--trace",
+            "--format",
+            "json",
+            "--preview",
+        ],
+    ] {
+        let output = run(dir.path(), args);
+        let rendered = String::from_utf8_lossy(&all_output(&output)).into_owned();
+        assert!(
+            !rendered.contains(ENV_PATH_SECRET),
+            "{args:?} leaked the iterated path:\n{rendered}"
+        );
+        if args[0] == "check" {
+            assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+            assert!(rendered.contains("<redacted"), "{args:?}:\n{rendered}");
+        }
+    }
+
+    let baseline = dir.path().join(".alint-baseline.json");
+    let output = run(
+        dir.path(),
+        &["baseline", "--output", baseline.to_str().unwrap()],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let rendered = String::from_utf8_lossy(&all_output(&output)).into_owned();
+    assert!(!rendered.contains(ENV_PATH_SECRET), "{rendered}");
+    let written = std::fs::read_to_string(&baseline).unwrap();
+    assert!(!written.contains(ENV_PATH_SECRET), "{written}");
+}

@@ -247,8 +247,9 @@ pub(super) fn render_facts_human(
             out,
             "{:<id_width$}  {dim}{kind_name}{dim:#}{kind_pad}  {value_style}{}{value_style:#}",
             term(id),
-            // A fact value can come from repo content or a `custom:` command.
-            term(&value_str),
+            // A fact value can come from repo content or a `custom:` command,
+            // which can print a value its arguments read from the environment.
+            term(&super::redact_environment_values(&value_str)),
         )?;
     }
     Ok(())
@@ -262,9 +263,15 @@ pub(super) fn render_facts_json(
     let entries: Vec<serde_json::Value> = facts
         .iter()
         .map(|spec| {
-            let value = values
-                .get(&spec.id)
-                .map_or(serde_json::Value::Null, fact_value_json);
+            let value = match values.get(&spec.id) {
+                // As in the human form, a value read from the environment
+                // stays out of a string value.
+                Some(alint_core::FactValue::String(text)) => {
+                    serde_json::Value::String(super::redact_environment_values(text).into_owned())
+                }
+                Some(value) => fact_value_json(value),
+                None => serde_json::Value::Null,
+            };
             serde_json::json!({
                 // A fact id can come from the environment.
                 "id": super::redact_environment_values(&spec.id),
@@ -304,6 +311,19 @@ fn explain_field_is_sensitive(entry: &alint_core::RuleEntry, field: &str) -> boo
         .spec
         .as_deref()
         .is_some_and(|spec| spec.field_is_sensitive(field))
+}
+
+/// Whether the `fix:` description must be hidden. A fixer describes itself
+/// from its rule's fields, not only from `fix:` (`file_create` and
+/// `dir_create` name a `paths:` entry, `replace` quotes `pattern:`,
+/// `set_value` the rule's `path:`), so the description is hidden whenever the
+/// rule's evidence is: it sets `sensitive: true` or reads a field other than
+/// `policy_url` from the environment.
+fn explain_fix_is_sensitive(entry: &alint_core::RuleEntry) -> bool {
+    entry
+        .spec
+        .as_deref()
+        .is_some_and(alint_core::RuleSpec::has_sensitive_evidence)
 }
 
 fn explain_repository_path(root: &Path, path: &Path) -> String {
@@ -885,7 +905,7 @@ fn write_explain_rule_evidence(
         writeln!(out, "{dim}when:      {dim:#} {}", term(condition))?;
     }
     if let Some(fixer) = entry.rule.fixer() {
-        let description = if explain_field_is_sensitive(entry, "fix") {
+        let description = if explain_fix_is_sensitive(entry) {
             std::borrow::Cow::Borrowed("<redacted>")
         } else {
             std::borrow::Cow::Owned(alint_core::Fixer::describe(fixer))
@@ -1051,7 +1071,7 @@ fn explain_rule_json_document<'a>(
         })
     };
     let fix = entry.rule.fixer().map(|fixer| {
-        if sensitive("fix") {
+        if explain_fix_is_sensitive(entry) {
             redacted()
         } else {
             serde_json::Value::String(alint_core::Fixer::describe(fixer))

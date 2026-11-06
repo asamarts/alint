@@ -179,6 +179,32 @@ fn regeneration_refuses_to_grandfather_new_debt_without_accept_new() {
 }
 
 #[test]
+fn directory_findings_baseline_without_a_read_warning() {
+    // A nested rule flags directories. The fingerprint leaves their content
+    // out without trying to read them, so neither command warns per directory.
+    let d = tempfile::tempdir().unwrap();
+    let root = d.path();
+    for pkg in ["a", "b"] {
+        std::fs::create_dir_all(root.join("pkgs").join(pkg)).unwrap();
+    }
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n  - id: each-readme\n    kind: for_each_dir\n    select: \"pkgs/*\"\n    \
+         require:\n      - kind: file_exists\n        paths: \"{path}/README.md\"\n    level: error\n",
+    )
+    .unwrap();
+    for args in [
+        &["baseline"][..],
+        &["check", "--baseline", ".alint-baseline.json"],
+    ] {
+        let out = run(root, args);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert_eq!(code(&out), 0, "{args:?}: {stderr}");
+        assert!(!stderr.contains("WARN"), "{args:?}: {stderr}");
+    }
+}
+
+#[test]
 fn baseline_rejects_changed_scope() {
     let d = fixture();
     let out = run(d.path(), &["baseline", "--changed"]);

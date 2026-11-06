@@ -451,8 +451,50 @@ fn diff_warns_when_a_located_edit_is_deferred_behind_a_whole_file_fix() {
     let out = run(tmp.path(), &["fix", "--diff", "--unsafe-fixes", "."]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("--diff preview omits") && stderr.contains("located edit"),
+        stderr.contains("fix preview omits") && stderr.contains("located edit"),
         "a deferred located edit must warn, not silently vanish; stderr:\n{stderr}"
+    );
+
+    // `check` stages the same pass for the fixes it attaches to its machine
+    // formats, so the warning there must not name a `--diff` nobody passed.
+    for format in ["sarif", "agent"] {
+        let out = run(tmp.path(), &["check", "--format", format, "."]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("fix preview omits") && !stderr.contains("--diff"),
+            "{format}: {stderr}"
+        );
+    }
+}
+
+#[test]
+fn diff_names_a_deferred_file_chosen_by_an_environment_value_redacted() {
+    // The same deferral as above, with the files chosen by a `paths:` read
+    // from the environment: the warning shows `<redacted>`, not the path.
+    let tmp = tempfile::tempdir().unwrap();
+    std::fs::create_dir(tmp.path().join("hunter2-dir")).unwrap();
+    std::fs::write(
+        tmp.path().join(".alint.yml"),
+        "version: 1\nrules:\n\
+         \x20 - id: no-todo\n    kind: file_content_forbidden\n    paths: \"{{env.DIR}}/*.txt\"\n    pattern: TODO\n    level: error\n    fix: { replace: { replacement: DONE } }\n\
+         \x20 - id: no-ws\n    kind: no_trailing_whitespace\n    paths: \"{{env.DIR}}/*.txt\"\n    level: error\n    fix: { file_trim_trailing_whitespace: {} }\n",
+    )
+    .unwrap();
+    std::fs::write(tmp.path().join("hunter2-dir/a.txt"), "TODO x   \n").unwrap();
+    let out = Command::new(alint())
+        .args(["fix", "--diff", "--unsafe-fixes", "."])
+        .current_dir(tmp.path())
+        .env("DIR", "hunter2-dir")
+        .output()
+        .expect("spawn alint");
+    let stderr = String::from_utf8_lossy(&out.stderr);
+    assert!(
+        stderr.contains("fix preview omits") && stderr.contains("in <redacted>"),
+        "{stderr}"
+    );
+    assert!(
+        !format!("{stderr}{}", String::from_utf8_lossy(&out.stdout)).contains("hunter2"),
+        "{stderr}"
     );
 }
 

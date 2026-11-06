@@ -580,8 +580,9 @@ impl Engine {
     /// `--dry-run` has no re-walk to discover that a fix will not stick, so
     /// predict the known cases the real `fix` demotes after its re-check: a
     /// would-be-`Applied` create (`file_create`, `dir_create`,
-    /// `create_and_register`'s member) that the walk would list under no name,
-    /// neither the path as written nor where it lands once symlinks resolve
+    /// `create_and_register`'s member) that the walk would list under no name
+    /// the rule checks, neither the path as written nor, for a rule with a
+    /// `paths:` scope, where it lands once symlinks resolve
     /// (gitignored, `ignore:`d, including by an ignore file another create in
     /// the same pass writes, or below a symlinked directory the walk does not
     /// enter), and the rule does not look for on disk itself; a target outside
@@ -622,8 +623,8 @@ impl Engine {
                             None => continue,
                         },
                     };
-                let names = Self::created_names(root, &path).ok_or(path);
-                creates.push((result, item, entry, names, is_dir, content));
+                let names = Self::created_names(root, &path).ok_or_else(|| path.clone());
+                creates.push((result, item, entry, path, names, is_dir, content));
             }
         }
         // The walk after the fix reads the ignore files those creates write,
@@ -631,7 +632,7 @@ impl Engine {
         // first create of a path wins, whichever name (through an in-tree
         // symlink) it uses.
         let mut created_ignores: Vec<(&Path, &[u8])> = Vec::new();
-        for (_, _, _, names, _, content) in &creates {
+        for (_, _, _, _, names, _, content) in &creates {
             let (Ok(names), Some(content)) = (names, content.as_deref()) else {
                 continue;
             };
@@ -646,7 +647,7 @@ impl Engine {
         }
         // `git ls-files`, once, when a `git_tracked_only` rule creates a file.
         let tracked = std::cell::OnceCell::new();
-        for (result, item, entry, names, is_dir, _) in &creates {
+        for (result, item, entry, path, names, is_dir, _) in &creates {
             // A sensitive item's reason leaves the target out: its rule's
             // configuration or evidence can hold it, as the redacted summary
             // already does.
@@ -665,6 +666,30 @@ impl Engine {
                     "{} is outside the root, so the rule would never see it",
                     shown(path)
                 )),
+                // A rule without a `paths:` scope (`dir_exists`, `cross_file`)
+                // looks for the path as written, normalized as it normalizes
+                // it, and finds nothing under another name: one written out of
+                // the root (absolute, or `..` back in) never matches.
+                Ok(_) if entry.rule.path_scope().is_none() => {
+                    match crate::pathsafe::normalize_confined(path) {
+                        Some(written) => Self::predicted_unresolved(
+                            root,
+                            index,
+                            walk_opts,
+                            entry,
+                            &written,
+                            &shown(&written),
+                            *is_dir,
+                            &created_ignores,
+                            &tracked,
+                        ),
+                        None => Some(format!(
+                            "{} is written as a path outside the root, so the rule would never \
+                             match it",
+                            shown(path)
+                        )),
+                    }
+                }
                 // Resolved when the rule sees the file under any of its names;
                 // otherwise the reason for the first, the path as written.
                 Ok(names) => {
@@ -701,17 +726,24 @@ impl Engine {
     /// to the root after normalizing it lexically (`a/../b` is `b`) when it
     /// stays inside, and as written otherwise (only `allow_out_of_root`
     /// permits that): an absolute path replaces the root, and `..` steps up
-    /// from the root's real location, which can lead back into it.
+    /// from the root's real location, which can lead back into it. An
+    /// absolute path is written as given, so the OS resolves a `..` in it
+    /// after any symlink; it reads as a name inside the root only without one.
     pub(super) fn created_names(root: &Path, path: &Path) -> Option<Vec<PathBuf>> {
         let canonical = root.canonicalize().ok()?;
         let written = if path.is_absolute() {
             path.strip_prefix(root)
                 .or_else(|_| path.strip_prefix(&canonical))
                 .ok()
+                .filter(|rel| {
+                    !rel.components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                })
                 .and_then(crate::pathsafe::normalize_confined)
         } else {
             crate::pathsafe::normalize_confined(path)
         };
+        // Joining an absolute path gives that path.
         let joined = root.join(written.as_deref().unwrap_or(path));
         let landed = crate::pathsafe::resolve_existing_prefix(&joined)?;
         let landed = crate::pathsafe::normalize_confined(landed.strip_prefix(&canonical).ok()?)?;
@@ -797,6 +829,11 @@ impl Engine {
         let mut targets = HashSet::new();
         for result in &report.results {
             let fixer = self.fixer_for(&result.rule_id);
+            let allow_out_of_root = self
+                .entries
+                .iter()
+                .find(|e| e.rule.id() == &*result.rule_id)
+                .is_some_and(|e| e.allow_out_of_root);
             for item in &result.items {
                 if !item.violation.is_sensitive() {
                     continue;
@@ -815,6 +852,16 @@ impl Engine {
                     .unwrap_or_default();
                 if let Some(edit) = fixer.fix_edit(&item.violation, &bytes, root) {
                     Self::insert_fix_targets(root, &edit, &mut targets);
+                }
+                // The editor form never leaves the root; a create the rule's
+                // `allow_out_of_root` lets out of it is named here.
+                if let Some((path, _)) =
+                    fixer.created_file(&item.violation, root, allow_out_of_root)
+                {
+                    targets.insert(Self::normalized_write_target(root, &path));
+                }
+                if let Some(dir) = fixer.created_dir() {
+                    targets.insert(Self::normalized_write_target(root, dir));
                 }
             }
         }
@@ -874,15 +921,29 @@ impl Engine {
         };
         spec.field_is_environment_derived("paths")
             || spec.field_is_environment_derived("scope_filter")
-            || (meta.nested_rules && spec.field_is_environment_derived("require"))
-            || meta
-                .selectors
-                .iter()
-                .any(|selector| spec.field_is_environment_derived(&selector.name))
+            // A nested kind reports the iterated entries its `require:` fails
+            // on and its `when_iter:` keeps.
+            || (meta.nested_rules
+                && (spec.field_is_environment_derived("require")
+                    || spec.field_is_environment_derived("when_iter")))
+            // A selector names a path into its field (`targets.files`,
+            // `source.file`, `require.forbidden_edges[].to`); the environment
+            // marks the top-level field.
+            || meta.selectors.iter().any(|selector| {
+                selector
+                    .name
+                    .split(['.', '['])
+                    .next()
+                    .is_some_and(|field| spec.field_is_environment_derived(field))
+            })
     }
 
     pub(super) fn redact_result_for_entry(&self, index: usize, result: &mut RuleResult) {
         let entry = &self.entries[index];
+        // Paths first: a redaction marker leaves out a path alint hides.
+        if self.has_sensitive_path_selection(entry) {
+            result.redact_sensitive_paths();
+        }
         if Self::has_sensitive_manifest_scope(entry.rule.as_ref()) {
             result.redact_manifest_scope();
         }
@@ -899,9 +960,6 @@ impl Engine {
             .is_some_and(crate::RuleSpec::has_sensitive_evidence)
         {
             result.redact_sensitive();
-        }
-        if self.has_sensitive_path_selection(entry) {
-            result.redact_sensitive_paths();
         }
         result.sanitize_sensitive_metadata();
     }
@@ -1329,17 +1387,7 @@ impl Engine {
                     }],
                 };
                 let mut applied = crate::baseline::apply(&single, bl, |rid, v| {
-                    let bytes = match v.path.as_ref() {
-                        Some(p) => fp_cache
-                            .entry(p.to_path_buf())
-                            .or_insert_with(|| {
-                                let full = root.join(p);
-                                let size = std::fs::metadata(&full).map_or(0, |m| m.len());
-                                crate::read_capped_or_skip(&full, size)
-                            })
-                            .as_deref(),
-                        None => None,
-                    };
+                    let bytes = crate::baseline::fingerprint_content(root, v, &mut fp_cache);
                     crate::baseline::fingerprint(rid, v, bytes)
                 });
                 if !applied.suppressed.is_empty() {
@@ -1681,10 +1729,12 @@ impl Engine {
                     // them onto the (whole-file-changed) current bytes would
                     // corrupt. Rather than silently omit them (a consumer applying
                     // the previewed patch would keep the violation), warn. Full
-                    // multi-pass `--diff` fidelity is a follow-up.
+                    // multi-pass `--diff` fidelity is a follow-up. `check` stages
+                    // the same way for the fixes it attaches to SARIF, `agent` and
+                    // `json --include-fixes`, so the warning does not name `--diff`.
                     if stage_ops.is_some() {
                         eprintln!(
-                            "alint: warning: --diff preview omits {} located edit(s) in {} \
+                            "alint: warning: the fix preview omits {} located edit(s) in {} \
                              that a later fix pass would apply (a whole-file fix changed the \
                              file first); run `alint fix` to apply them.",
                             batch.len(),
@@ -1866,26 +1916,25 @@ impl Engine {
             let sensitive_paths =
                 entry.is_some_and(|entry| self.has_sensitive_path_selection(entry));
             for failure in &mut result.analysis_failures {
-                if result_sensitive {
-                    failure.redact_message(&result.rule_id);
-                }
                 if sensitive_paths {
                     failure.mark_path_sensitive();
                 }
+                if result_sensitive {
+                    failure.redact_message(&result.rule_id);
+                }
             }
             for item in &mut result.items {
-                if result_sensitive {
-                    item.violation.redact_message(&result.rule_id);
-                }
                 if sensitive_paths {
                     item.violation.mark_path_sensitive();
                 }
+                if result_sensitive {
+                    item.violation.redact_message(&result.rule_id);
+                }
                 if item.violation.is_sensitive() {
-                    let path = item
-                        .violation
-                        .path
-                        .as_deref()
-                        .map_or_else(String::new, |path| path.to_string_lossy().into_owned());
+                    let path = crate::rule::locator_path(
+                        item.violation.path.as_deref(),
+                        item.violation.path_is_sensitive(),
+                    );
                     let locator = format!("fix\0{}\0{path}", result.rule_id);
                     item.status = item.status.clone().redact_detail(&locator);
                 }

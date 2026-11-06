@@ -68,11 +68,11 @@ points are explicit.
    is the pre-push sanity gate.
 
    For a patch release (`x.y.z` with `z > 0`), also run
-   `ci/scripts/check-patch-compat.sh <previous x.y.z>` (it needs network
-   access). crates.io resolves the previous release's `^x.y.0` sibling
-   requirements to this release's libraries, so
-   `cargo install alint --version <previous>` builds the previous CLI
-   against them. The script compiles the previous `alint`, `alint-lsp` and
+   `ci/scripts/check-patch-compat.sh <every earlier x.y.z>` (for example
+   `0.21.0 0.21.1` before `0.21.2`; it needs network access). crates.io
+   resolves an earlier release's `^x.y.z` sibling requirements to this
+   release's libraries, so `cargo install alint --version <earlier>` builds
+   that CLI against them. The script compiles the previous `alint`, `alint-lsp` and
    `alint-testkit` that way. A failure means a public API they call
    changed: keep the old form as a `#[deprecated]` shim instead of shipping
    the break.
@@ -627,6 +627,14 @@ Review checklist:
      the released version at the top.
    - The date and headline sentence extracted from `CHANGELOG.md` are suitable.
      If the sentence needs work, edit the changelog and re-render the history.
+   - Any benchmark figure the release's CHANGELOG entry cites (its headline
+     or a Performance bullet) holds in this run's `micro-det` job and macro
+     numbers, on this run's toolchain. If it held only in a PR's local
+     measurement, say which toolchain it was measured with.
+   - The workflow does not refresh the overview pages. In the same PR, point
+     `docs/benchmarks/README.md` ("Latest published release" and its 1M
+     table) and the "latest published" line in
+     `docs/benchmarks/micro/README.md` at the new version.
 
 4. **Investigation hand-off.** If a non-advisory cell drifts > 20 % vs the
    previous release (and the CV is below 10 % so it is a real signal), open
