@@ -265,6 +265,16 @@ impl Engine {
         root: &Path,
         results: &mut [FixRuleResult],
     ) -> Vec<PathBuf> {
+        // Most configurations have no such fixer: skip the walk over every
+        // finding.
+        if !self.entries.iter().any(|entry| {
+            entry
+                .rule
+                .fixer()
+                .is_some_and(crate::rule::Fixer::needs_existing_directory)
+        }) {
+            return Vec::new();
+        }
         // A create's target joined to the root as the fixers join it.
         let joined = |path: &Path| {
             root.join(
