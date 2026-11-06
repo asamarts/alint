@@ -377,3 +377,63 @@ rules:
         assert!(rendered.contains("<redacted"), "{args:?}:\n{rendered}");
     }
 }
+
+#[test]
+fn a_when_iter_filter_read_from_the_environment_hides_its_paths() {
+    // `when_iter` picks which directories a nested rule visits, so a filter
+    // read from the environment chooses the paths it reports.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("pkgs").join(ENV_PATH_SECRET)).unwrap();
+    std::fs::create_dir_all(dir.path().join("pkgs/other")).unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: each-readme
+    kind: for_each_dir
+    select: "pkgs/*"
+    when_iter: 'iter.basename == "{{env.ENV_PATH_SECRET}}"'
+    require:
+      - kind: file_exists
+        paths: "{path}/README.md"
+    level: error
+"#,
+    )
+    .unwrap();
+    for args in [
+        &["check", "--format", "human"][..],
+        &["check", "--format", "json"],
+        &["check", "--format", "sarif"],
+        &["explain", "each-readme", "--trace", "--preview"],
+        &[
+            "explain",
+            "each-readme",
+            "--trace",
+            "--format",
+            "json",
+            "--preview",
+        ],
+    ] {
+        let output = run(dir.path(), args);
+        let rendered = String::from_utf8_lossy(&all_output(&output)).into_owned();
+        assert!(
+            !rendered.contains(ENV_PATH_SECRET),
+            "{args:?} leaked the iterated path:\n{rendered}"
+        );
+        if args[0] == "check" {
+            assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+            assert!(rendered.contains("<redacted"), "{args:?}:\n{rendered}");
+        }
+    }
+
+    let baseline = dir.path().join(".alint-baseline.json");
+    let output = run(
+        dir.path(),
+        &["baseline", "--output", baseline.to_str().unwrap()],
+    );
+    assert!(output.status.success(), "{output:?}");
+    let rendered = String::from_utf8_lossy(&all_output(&output)).into_owned();
+    assert!(!rendered.contains(ENV_PATH_SECRET), "{rendered}");
+    let written = std::fs::read_to_string(&baseline).unwrap();
+    assert!(!written.contains(ENV_PATH_SECRET), "{written}");
+}

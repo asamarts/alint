@@ -726,18 +726,28 @@ impl Engine {
     /// to the root after normalizing it lexically (`a/../b` is `b`) when it
     /// stays inside, and as written otherwise (only `allow_out_of_root`
     /// permits that): an absolute path replaces the root, and `..` steps up
-    /// from the root's real location, which can lead back into it.
+    /// from the root's real location, which can lead back into it. An
+    /// absolute path is written as given, so the OS resolves a `..` in it
+    /// after any symlink; it reads as a name inside the root only without one.
     pub(super) fn created_names(root: &Path, path: &Path) -> Option<Vec<PathBuf>> {
         let canonical = root.canonicalize().ok()?;
         let written = if path.is_absolute() {
             path.strip_prefix(root)
                 .or_else(|_| path.strip_prefix(&canonical))
                 .ok()
+                .filter(|rel| {
+                    !rel.components()
+                        .any(|c| matches!(c, std::path::Component::ParentDir))
+                })
                 .and_then(crate::pathsafe::normalize_confined)
         } else {
             crate::pathsafe::normalize_confined(path)
         };
-        let joined = root.join(written.as_deref().unwrap_or(path));
+        let joined = match &written {
+            Some(written) => root.join(written),
+            None if path.is_absolute() => path.to_path_buf(),
+            None => root.join(path),
+        };
         let landed = crate::pathsafe::resolve_existing_prefix(&joined)?;
         let landed = crate::pathsafe::normalize_confined(landed.strip_prefix(&canonical).ok()?)?;
         Some(match written {
@@ -914,7 +924,11 @@ impl Engine {
         };
         spec.field_is_environment_derived("paths")
             || spec.field_is_environment_derived("scope_filter")
-            || (meta.nested_rules && spec.field_is_environment_derived("require"))
+            // A nested kind reports the iterated entries its `require:` fails
+            // on and its `when_iter:` keeps.
+            || (meta.nested_rules
+                && (spec.field_is_environment_derived("require")
+                    || spec.field_is_environment_derived("when_iter")))
             // A selector names a path into its field (`targets.files`,
             // `source.file`, `require.forbidden_edges[].to`); the environment
             // marks the top-level field.
@@ -929,6 +943,10 @@ impl Engine {
 
     pub(super) fn redact_result_for_entry(&self, index: usize, result: &mut RuleResult) {
         let entry = &self.entries[index];
+        // Paths first: a redaction marker leaves out a path alint hides.
+        if self.has_sensitive_path_selection(entry) {
+            result.redact_sensitive_paths();
+        }
         if Self::has_sensitive_manifest_scope(entry.rule.as_ref()) {
             result.redact_manifest_scope();
         }
@@ -945,9 +963,6 @@ impl Engine {
             .is_some_and(crate::RuleSpec::has_sensitive_evidence)
         {
             result.redact_sensitive();
-        }
-        if self.has_sensitive_path_selection(entry) {
-            result.redact_sensitive_paths();
         }
         result.sanitize_sensitive_metadata();
     }
@@ -1375,17 +1390,7 @@ impl Engine {
                     }],
                 };
                 let mut applied = crate::baseline::apply(&single, bl, |rid, v| {
-                    let bytes = match v.path.as_ref() {
-                        Some(p) => fp_cache
-                            .entry(p.to_path_buf())
-                            .or_insert_with(|| {
-                                let full = root.join(p);
-                                let size = std::fs::metadata(&full).map_or(0, |m| m.len());
-                                crate::read_capped_or_skip(&full, size)
-                            })
-                            .as_deref(),
-                        None => None,
-                    };
+                    let bytes = crate::baseline::fingerprint_content(root, v, &mut fp_cache);
                     crate::baseline::fingerprint(rid, v, bytes)
                 });
                 if !applied.suppressed.is_empty() {
@@ -1727,10 +1732,12 @@ impl Engine {
                     // them onto the (whole-file-changed) current bytes would
                     // corrupt. Rather than silently omit them (a consumer applying
                     // the previewed patch would keep the violation), warn. Full
-                    // multi-pass `--diff` fidelity is a follow-up.
+                    // multi-pass `--diff` fidelity is a follow-up. `check` stages
+                    // the same way for the fixes it attaches to SARIF, `agent` and
+                    // `json --include-fixes`, so the warning does not name `--diff`.
                     if stage_ops.is_some() {
                         eprintln!(
-                            "alint: warning: --diff preview omits {} located edit(s) in {} \
+                            "alint: warning: the fix preview omits {} located edit(s) in {} \
                              that a later fix pass would apply (a whole-file fix changed the \
                              file first); run `alint fix` to apply them.",
                             batch.len(),
@@ -1912,26 +1919,25 @@ impl Engine {
             let sensitive_paths =
                 entry.is_some_and(|entry| self.has_sensitive_path_selection(entry));
             for failure in &mut result.analysis_failures {
-                if result_sensitive {
-                    failure.redact_message(&result.rule_id);
-                }
                 if sensitive_paths {
                     failure.mark_path_sensitive();
                 }
+                if result_sensitive {
+                    failure.redact_message(&result.rule_id);
+                }
             }
             for item in &mut result.items {
-                if result_sensitive {
-                    item.violation.redact_message(&result.rule_id);
-                }
                 if sensitive_paths {
                     item.violation.mark_path_sensitive();
                 }
+                if result_sensitive {
+                    item.violation.redact_message(&result.rule_id);
+                }
                 if item.violation.is_sensitive() {
-                    let path = item
-                        .violation
-                        .path
-                        .as_deref()
-                        .map_or_else(String::new, |path| path.to_string_lossy().into_owned());
+                    let path = crate::rule::locator_path(
+                        item.violation.path.as_deref(),
+                        item.violation.path_is_sensitive(),
+                    );
                     let locator = format!("fix\0{}\0{path}", result.rule_id);
                     item.status = item.status.clone().redact_detail(&locator);
                 }

@@ -42,7 +42,16 @@ pub const MAX_ANALYZE_BYTES: u64 = 256 * 1024 * 1024;
 pub fn read_capped_or_skip(path: &Path, size: u64) -> Option<Vec<u8>> {
     match read_for_analysis(path, size) {
         AnalysisRead::Bytes(b) => Some(b),
-        AnalysisRead::Missing | AnalysisRead::TooLarge(_) => None,
+        AnalysisRead::Missing => None,
+        AnalysisRead::TooLarge(size) => {
+            tracing::warn!(
+                path = %path.display(),
+                size,
+                cap = MAX_ANALYZE_BYTES,
+                "file exceeds the analysis cap"
+            );
+            None
+        }
         AnalysisRead::Unreadable(e) => {
             tracing::warn!(path = %path.display(), error = %e, "skipping unreadable file");
             None
@@ -67,15 +76,11 @@ pub enum AnalysisRead {
 }
 
 /// [`read_capped_or_skip`], but preserving the reason analysis could not read
-/// the discovered file so policy-evaluation callers can fail loudly.
+/// the discovered file so policy-evaluation callers can fail loudly. It logs
+/// nothing: the caller reports the failure, and only it knows whether the
+/// path is one alint hides.
 pub fn read_for_analysis(path: &Path, size: u64) -> AnalysisRead {
     if size > MAX_ANALYZE_BYTES {
-        tracing::warn!(
-            path = %path.display(),
-            size,
-            cap = MAX_ANALYZE_BYTES,
-            "file exceeds the analysis cap"
-        );
         return AnalysisRead::TooLarge(size);
     }
     // M3-F2 (TOCTOU): the walk-time `size` above is a fast reject only — it can
@@ -120,10 +125,7 @@ fn read_bounded_classified(path: &Path, cap: u64, size_hint: u64) -> AnalysisRea
     let file = match std::fs::File::open(path) {
         Ok(f) => f,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => return AnalysisRead::Missing,
-        Err(e) => {
-            tracing::debug!(path = %path.display(), error = %e, "unreadable file");
-            return AnalysisRead::Unreadable(e);
-        }
+        Err(e) => return AnalysisRead::Unreadable(e),
     };
     let prealloc = usize::try_from(size_hint.min(cap.saturating_add(1))).unwrap_or(0);
     let mut buf = Vec::with_capacity(prealloc);

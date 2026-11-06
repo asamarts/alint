@@ -1392,7 +1392,9 @@ impl CompiledNestedSpec {
                     self.spec
                         .extra
                         .keys()
-                        .filter_map(|key| key.as_str().map(str::to_string)),
+                        .filter_map(|key| key.as_str())
+                        .filter(|key| !NestedRuleSpec::PARENT_FIELDS.contains(key))
+                        .map(str::to_string),
                 )
                 .collect()
         } else {
@@ -1404,6 +1406,17 @@ impl CompiledNestedSpec {
 }
 
 impl NestedRuleSpec {
+    /// Fields a nested config may write that belong to the parent (`id` and
+    /// `level` are synthesized from it, `fix` and the git toggles are
+    /// top-level only): they stay out of the leaf's option set.
+    const PARENT_FIELDS: &[&str] = &[
+        "id",
+        "level",
+        "fix",
+        "git_tracked_only",
+        "respect_gitignore",
+    ];
+
     /// Synthesize a full [`RuleSpec`] for a single iteration, applying
     /// path-template substitution (using the iterated entry's tokens) to
     /// every string field. The resulting spec has `id =
@@ -1494,9 +1507,9 @@ impl NestedRuleSpec {
             fix: None,
             // `git_tracked_only` and `respect_gitignore` are both kind-specific
             // options now (ADR-0008), stripped from the nested `extra` via
-            // PARENT_FIELDS below, so a nested existence rule doesn't silently
+            // `PARENT_FIELDS`, so a nested existence rule doesn't silently
             // inherit either. If/when nested rules need one, drop it from
-            // PARENT_FIELDS and let it flow into the leaf's option set.
+            // `PARENT_FIELDS` and let it flow into the leaf's option set.
             scope_filter: self.scope_filter.clone(),
             // `NestedRuleSpec` doesn't name `id`/`level` (synthesized from the
             // parent) or the top-level-only `fix`/git toggles, so a nested
@@ -1505,19 +1518,10 @@ impl NestedRuleSpec {
             // options, and would otherwise trip the leaf's unknown-option
             // validation (a deny-unknown-fields `Options` struct, or an
             // option-less rule's `deny_unknown_options`).
-            extra: {
-                const PARENT_FIELDS: &[&str] = &[
-                    "id",
-                    "level",
-                    "fix",
-                    "git_tracked_only",
-                    "respect_gitignore",
-                ];
-                crate::template::render_nested_options(&self.kind, self.extra.clone(), tokens)
-                    .into_iter()
-                    .filter(|(k, _)| k.as_str().is_none_or(|s| !PARENT_FIELDS.contains(&s)))
-                    .collect()
-            },
+            extra: crate::template::render_nested_options(&self.kind, self.extra.clone(), tokens)
+                .into_iter()
+                .filter(|(k, _)| k.as_str().is_none_or(|s| !Self::PARENT_FIELDS.contains(&s)))
+                .collect(),
         }
     }
 }

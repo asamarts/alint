@@ -108,6 +108,14 @@ impl Fixer for FileCreateFixer {
                 self.path.display()
             )));
         }
+        // Without `create_parents` the write needs its directory to exist; a
+        // dry run and `--diff` decline it here as the real fix does.
+        if !self.create_parents && abs.parent().is_some_and(|parent| !parent.is_dir()) {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is in a directory that does not exist (set `create_parents: true` to create it)",
+                self.path.display()
+            )));
+        }
         let content = match resolve_source_bytes(&self.source, ctx.root, ctx.allow_out_of_root) {
             Ok(bytes) => bytes,
             Err(skip_msg) => return Ok(FixOutcome::Skipped(skip_msg)),
@@ -721,6 +729,31 @@ mod tests {
         assert!(matches!(outcome, FixOutcome::Applied(_)));
         let written = std::fs::read_to_string(tmp.path().join("LICENSE")).unwrap();
         assert_eq!(written, "Apache-2.0\n");
+    }
+
+    #[test]
+    fn file_create_without_create_parents_declines_a_missing_directory_in_every_mode() {
+        // The real write would fail on the missing directory, so a dry run must
+        // not report it as one that would apply.
+        let tmp = TempDir::new().unwrap();
+        let fixer = FileCreateFixer::new(PathBuf::from("sub/x.txt"), "x\n".into(), false);
+        for dry_run in [true, false] {
+            let outcome = fixer
+                .apply(&Violation::new("missing"), &make_ctx(&tmp, dry_run))
+                .unwrap();
+            assert!(
+                matches!(&outcome, FixOutcome::Skipped(reason) if reason.contains("create_parents")),
+                "dry_run={dry_run}: {outcome:?}"
+            );
+        }
+        assert!(!tmp.path().join("sub").exists());
+        // With the directory there, it creates the file.
+        std::fs::create_dir(tmp.path().join("sub")).unwrap();
+        let outcome = fixer
+            .apply(&Violation::new("missing"), &make_ctx(&tmp, false))
+            .unwrap();
+        assert!(matches!(outcome, FixOutcome::Applied(_)), "{outcome:?}");
+        assert!(tmp.path().join("sub/x.txt").is_file());
     }
 
     #[test]

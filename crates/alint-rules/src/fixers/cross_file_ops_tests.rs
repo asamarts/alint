@@ -1059,6 +1059,34 @@ fn create_and_register_existence_member_parses_the_key() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn create_and_register_declines_a_member_its_key_names_differently() {
+    // The rule checks `crates\b/...`, one name on Unix; the key slashes it.
+    let tmp = TempDir::new().unwrap();
+    let fixer = register_fixer(Some("[package]\n"));
+    let finding = Violation::new("missing")
+        .with_path(Path::new("crates\\b/Cargo.toml"))
+        .with_baseline_key("registered\u{0}exists\u{0}crates/b/Cargo.toml");
+    for dry_run in [true, false] {
+        let out = fixer.apply(&finding, &ctx(&tmp, dry_run)).unwrap();
+        let FixOutcome::Skipped(reason) = out else {
+            panic!("expected a decline, got {out:?}");
+        };
+        assert!(
+            reason.contains("write the member path with `/`"),
+            "{reason}"
+        );
+    }
+    assert!(!tmp.path().join("crates").exists());
+    assert!(fixer.fix_edit(&finding, &[], tmp.path()).is_none());
+    assert!(fixer.created_file(&finding, tmp.path(), false).is_none());
+    // The same member written with `/` is created.
+    let slashed = existence_viol("crates/b/Cargo.toml");
+    assert!(fixer.fix_edit(&slashed, &[], tmp.path()).is_some());
+    assert!(fixer.created_file(&slashed, tmp.path(), false).is_some());
+}
+
 #[test]
 fn create_and_register_creates_a_missing_member() {
     let tmp = TempDir::new().unwrap();

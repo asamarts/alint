@@ -1477,7 +1477,7 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         let base = tmp.path().canonicalize().unwrap();
         let root = &base.join("root");
         std::fs::create_dir_all(root.join("sub")).unwrap();
-        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(root.join("real/deep")).unwrap();
         std::fs::create_dir_all(root.join("hidden")).unwrap();
         std::fs::create_dir_all(base.join("outside")).unwrap();
         std::fs::write(root.join(".gitignore"), "alias\nhidden\nveiled\n").unwrap();
@@ -1489,6 +1489,8 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         // A name for the root from outside it, and a way out of it.
         symlink("root", base.join("root-link")).unwrap();
         symlink("../outside", root.join("out")).unwrap();
+        // A `..` after it steps up from `real/deep`, not back to the root.
+        symlink("real/deep", root.join("deeplink")).unwrap();
         let path = |p: &Path| p.to_string_lossy().into_owned();
         let rules = vec![
             create_rule("loop", "x.txt", "sub/up/x.txt", b"x", false),
@@ -1511,6 +1513,30 @@ fn dry_run_judges_a_create_by_where_it_lands() {
             ),
             create_rule("relative-dotdot", "u.txt", "../root/u.txt", b"x", false),
             create_rule("lands-outside", "out/o.txt", "out/o.txt", b"x", false),
+            // Written as given, so the OS resolves `deeplink/..` to `real`.
+            create_rule(
+                "absolute-link-up",
+                "t.txt",
+                &path(&root.join("deeplink/../t.txt")),
+                b"x",
+                false,
+            ),
+            // Out and back in through a directory the create makes, then a
+            // symlink: `new/..` cancels and `alias` still leads to `real`.
+            create_rule(
+                "back-in-alias",
+                "real/s.txt",
+                "../root/new/../alias/s.txt",
+                b"x",
+                false,
+            ),
+            create_rule(
+                "back-in-link-up",
+                "r.txt",
+                "../root/new/../deeplink/../r.txt",
+                b"x",
+                false,
+            ),
         ];
         let opts = crate::WalkOptions {
             respect_gitignore: true,
@@ -1539,6 +1565,9 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         ("absolute-dotdot", true),
         ("relative-dotdot", true),
         ("lands-outside", false),
+        ("absolute-link-up", false),
+        ("back-in-alias", true),
+        ("back-in-link-up", false),
     ]
     .into_iter()
     .map(|(id, applied)| (id.to_string(), applied))
@@ -1811,9 +1840,11 @@ fn a_path_selection_read_from_the_environment_is_sensitive() {
         (entry("flat", Some("paths")), true),
         (entry("flat", Some("scope_filter")), true),
         (entry("flat", Some("message")), false),
-        // `require:` names the paths of a nested rule's kind only.
+        // `require:` and `when_iter:` choose the paths of a nested kind only.
         (entry("nesting", Some("require")), true),
         (entry("flat", Some("require")), false),
+        (entry("nesting", Some("when_iter")), true),
+        (entry("flat", Some("when_iter")), false),
         // The environment marks a selector's top-level field.
         (entry("selecting", Some("targets")), true),
         (entry("flat", Some("targets")), false),

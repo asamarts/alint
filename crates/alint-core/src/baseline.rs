@@ -122,6 +122,50 @@ pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> S
     )
 }
 
+/// The file content [`fingerprint`] uses for `v`, read from under `root` once
+/// per path through `cache`. `None` for a sensitive finding, whose fingerprint
+/// leaves the content out, so its file is not read at all; for a directory (a
+/// nested rule's entry); and for a file it cannot read within the analysis
+/// cap, with a warning that names the file unless its path is one alint hides.
+pub fn fingerprint_content<'c, S: std::hash::BuildHasher>(
+    root: &Path,
+    v: &Violation,
+    cache: &'c mut std::collections::HashMap<std::path::PathBuf, Option<Vec<u8>>, S>,
+) -> Option<&'c [u8]> {
+    if v.is_sensitive() {
+        return None;
+    }
+    let path = v.path.as_deref()?;
+    cache
+        .entry(path.to_path_buf())
+        .or_insert_with(|| {
+            let full = root.join(path);
+            let size = std::fs::metadata(&full)
+                .ok()
+                .filter(std::fs::Metadata::is_file)?
+                .len();
+            let reason = match crate::walker::read_for_analysis(&full, size) {
+                crate::walker::AnalysisRead::Bytes(bytes) => return Some(bytes),
+                crate::walker::AnalysisRead::Missing => return None,
+                crate::walker::AnalysisRead::TooLarge(size) => {
+                    format!("it exceeds the analysis cap ({size} bytes)")
+                }
+                crate::walker::AnalysisRead::Unreadable(error) => error.to_string(),
+            };
+            let shown = if v.path_is_sensitive() {
+                crate::CONFIGURATION_MASK.to_string()
+            } else {
+                path.display().to_string()
+            };
+            tracing::warn!(
+                path = %shown,
+                "the baseline fingerprint leaves out the content of a file it cannot read: {reason}"
+            );
+            None
+        })
+        .as_deref()
+}
+
 /// Normalise a path to stable bytes. Windows separators are rewritten to `/`;
 /// Unix paths retain their exact bytes so lossy UTF-8 replacement cannot merge
 /// distinct filenames. Portable UTF-8 paths fingerprint exactly as before and

@@ -879,6 +879,22 @@ impl CreateAndRegisterFixer {
             .then(|| PathBuf::from(parts[2]))
     }
 
+    /// Why the create half declines `member`: the key writes it with `/`, so a
+    /// finding whose own path differs (a backslash, which is part of a name on
+    /// Unix, or a name that is not UTF-8) would get a file the rule never
+    /// checks, and registering that would name a directory that is not there.
+    fn written_elsewhere(violation: &Violation, member: &Path) -> Option<String> {
+        let written = violation.path.as_deref()?;
+        (written != member).then(|| {
+            format!(
+                "{} names a different path than {} here (a backslash is not a path \
+                 separator on this platform); write the member path with `/`",
+                written.display(),
+                member.display()
+            )
+        })
+    }
+
     /// Create a MISSING named member's file from `content` (the create half of the
     /// two-postcondition model). Mirrors `FileCreateFixer`'s confinement + no-clobber
     /// + symlink-refusal guards; creates parent dirs (a new crate needs its dir).
@@ -1100,6 +1116,9 @@ impl Fixer for CreateAndRegisterFixer {
         // `content`/`content_from` (the create half of the two-postcondition model;
         // the registration finding, handled below, appends its path independently).
         if let Some(member) = Self::existence_member(violation) {
+            if let Some(reason) = Self::written_elsewhere(violation, &member) {
+                return Ok(FixOutcome::Skipped(reason));
+            }
             return self.create_member(&member, ctx);
         }
         let Some(target) = &violation.path else {
@@ -1151,6 +1170,9 @@ impl Fixer for CreateAndRegisterFixer {
     fn fix_edit(&self, violation: &Violation, bytes: &[u8], root: &Path) -> Option<FixEdit> {
         // An existence finding -> a CreateFile (mirrors `create_member`'s guards).
         if let Some(member) = Self::existence_member(violation) {
+            if Self::written_elsewhere(violation, &member).is_some() {
+                return None;
+            }
             let source = self.content.as_ref()?;
             let abs = confine_fix_path(&member, root, false).ok()?;
             if abs.exists()
@@ -1186,6 +1208,9 @@ impl Fixer for CreateAndRegisterFixer {
         allow_out_of_root: bool,
     ) -> Option<(PathBuf, Vec<u8>)> {
         let member = Self::existence_member(violation)?;
+        if Self::written_elsewhere(violation, &member).is_some() {
+            return None;
+        }
         let content = crate::fixers::creators::resolve_source_bytes(
             self.content.as_ref()?,
             root,

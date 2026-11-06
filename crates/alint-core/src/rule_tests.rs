@@ -119,6 +119,43 @@ fn sensitive_path_projection_preserves_internal_identity() {
 }
 
 #[test]
+fn a_hidden_path_stays_out_of_its_redaction_markers() {
+    // A marker that hashed a path alint hides would tell anyone who can list
+    // the repository's files which one it is.
+    let redacted = |path: &str, hidden: bool| {
+        let mut result = RuleResult::new(
+            "rule".into(),
+            Level::Error,
+            None,
+            vec![
+                Violation::new("x").with_path(Path::new(path)),
+                Violation::new("x")
+                    .with_path(Path::new(path))
+                    .as_analysis_failure(AnalysisFailureKind::Evaluation),
+            ],
+            false,
+        );
+        if hidden {
+            result.redact_sensitive_paths();
+        }
+        result.redact_sensitive();
+        result.sanitize_sensitive_metadata();
+        let finding = &result.violations[0];
+        (
+            finding.message.to_string(),
+            finding.baseline_key.clone(),
+            result.analysis_failures[0].message.to_string(),
+        )
+    };
+    assert_eq!(redacted("a/one.txt", true), redacted("b/two.txt", true));
+    // A path that is shown still tells two findings apart.
+    let [one, two] = [redacted("a/one.txt", false), redacted("b/two.txt", false)];
+    assert_ne!(one.0, two.0);
+    assert_ne!(one.1, two.1);
+    assert_ne!(one.2, two.2);
+}
+
+#[test]
 fn evidence_redaction_removes_raw_and_debug_escaped_values() {
     const SECRET: &str = "line one\n\"line two\"";
     let rendered = format!("source value {SECRET:?}; raw value {SECRET} does not match");

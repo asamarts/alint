@@ -451,9 +451,20 @@ fn diff_warns_when_a_located_edit_is_deferred_behind_a_whole_file_fix() {
     let out = run(tmp.path(), &["fix", "--diff", "--unsafe-fixes", "."]);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("--diff preview omits") && stderr.contains("located edit"),
+        stderr.contains("fix preview omits") && stderr.contains("located edit"),
         "a deferred located edit must warn, not silently vanish; stderr:\n{stderr}"
     );
+
+    // `check` stages the same pass for the fixes it attaches to its machine
+    // formats, so the warning there must not name a `--diff` nobody passed.
+    for format in ["sarif", "agent"] {
+        let out = run(tmp.path(), &["check", "--format", format, "."]);
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        assert!(
+            stderr.contains("fix preview omits") && !stderr.contains("--diff"),
+            "{format}: {stderr}"
+        );
+    }
 }
 
 #[test]
@@ -478,7 +489,7 @@ fn diff_names_a_deferred_file_chosen_by_an_environment_value_redacted() {
         .expect("spawn alint");
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
-        stderr.contains("--diff preview omits") && stderr.contains("in <redacted>"),
+        stderr.contains("fix preview omits") && stderr.contains("in <redacted>"),
         "{stderr}"
     );
     assert!(

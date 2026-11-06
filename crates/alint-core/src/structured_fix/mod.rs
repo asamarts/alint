@@ -1662,9 +1662,11 @@ mod json_ {
 /// (YAML is a superset of JSON), so the serializer reuses `serde_json`.
 ///
 /// CONSERVATIVE by design: for SET the resolver declines a multi-document stream, a
-/// non-scalar target, an aliased value (`saphyr` leaves aliases un-expanded as
-/// `Alias` nodes, so it never expands a billion-laughs bomb -- but the path then
-/// resolves to a non-scalar and declines), a non-string mapping key, a BLOCK (`|` /
+/// non-scalar target, an aliased value (`saphyr` resolves an alias by cloning the
+/// anchored subtree but keeps the span on the `*ref` text, so the resolver declines
+/// a span starting with `*`; since 0.3.3 the loader also fails past 100,000
+/// alias-produced nodes, below `Format::parse`'s expansion budget, so a document
+/// between the two declines), a non-string mapping key, a BLOCK (`|` /
 /// `>`) or line-folded scalar (multi-line span), and an IMPLICIT null (`x:` --
 /// saphyr's zero-width span sits at the colon). `remove_value` (`yaml_removal_span`)
 /// deletes a single-line block-mapping entry's whole line (saphyr is read-only, so
@@ -1673,7 +1675,7 @@ mod json_ {
 /// key does not own its line).
 ///
 /// THREE `saphyr` quirks handled here (all verified empirically + gated; re-checked
-/// on 0.2.2, which still resolves an empty plain node to `""`, not null): (1)
+/// on 0.3.3, which, like 0.2.2, loads an empty plain node as null): (1)
 /// `Marker::index` is a CHAR offset despite the `index()` rustdoc claiming bytes,
 /// so spans are converted char->byte; a bump must re-verify this. (2) a
 /// QUOTED scalar's `span.end` runs to end-of-line (past a trailing comment), so

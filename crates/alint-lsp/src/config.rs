@@ -378,15 +378,7 @@ fn apply_baseline(
     let applied = alint_core::baseline::apply(&report, baseline, |rule_id, v| {
         let bytes: Option<&[u8]> = match v.path.as_deref() {
             Some(p) if overlay.is_some_and(|(op, _)| op == p) => overlay.map(|(_, b)| b),
-            Some(p) => cache
-                .entry(p.to_path_buf())
-                .or_insert_with(|| {
-                    let full = session.root.join(p);
-                    let size = std::fs::metadata(&full).map_or(0, |m| m.len());
-                    alint_core::read_capped_or_skip(&full, size)
-                })
-                .as_deref(),
-            None => None,
+            _ => alint_core::baseline::fingerprint_content(&session.root, v, &mut cache),
         };
         alint_core::baseline::fingerprint(rule_id, v, bytes)
     });
