@@ -693,8 +693,19 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   lookup from #422. Reviews before the cut found that #445 had changed an
   alint-core method the published 0.21.0 crates call; #447 restored it as a
   deprecated shim and added `ci/scripts/check-patch-compat.sh`, which
-  RELEASING.md now runs for every patch release. The corpus replay against
-  v0.21.0 showed no differences.
+  RELEASING.md now runs for every patch release. v0.21.1 also adds public
+  fields to `FixContext` (`paths_sensitive`), `Config`
+  (`environment_values`) and `CompiledNestedSpec` (`sensitive_configuration`):
+  code that builds one of those with a struct literal must set the new field.
+  The published 0.21.0 crates do not, and v0.22 should make such structs
+  `#[non_exhaustive]` or give them constructors. The corpus replay against
+  v0.21.0 (on 255acdb8c, #445; #446 and #447 changed no relation code) showed
+  no differences. The bench record (#451) passed both gates. The dry-run
+  prediction from #444 and #446 costs about 14.5 µs per predicted create:
+  `fix_throughput/dry_run_only/100`, a report-only bench, is +41% in
+  instructions and SFIX, a dry-run fix, +3% to +5% in wall time. The
+  record's `for_each_dir` cells, built with the bench host's Rust 1.97.0, are
+  2.2% to 2.6% over v0.20.1, against #422's -3.10% on Rust 1.99.1.
 - **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
   within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
   ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on

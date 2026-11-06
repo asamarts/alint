@@ -672,6 +672,105 @@ fn dry_run_agrees_with_fix_for_a_member_created_outside_the_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn dry_run_agrees_with_fix_for_a_rule_without_a_paths_scope_through_a_symlink() {
+    // `dir_exists` and `cross_file` look for the path as written, not for
+    // where a symlink makes it land: `alias` (ignored) leads to `real`, and
+    // `deep/x/up` back to `deep`, which the walk does not enter from below.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::create_dir(root.join("real")).unwrap();
+    std::os::unix::fs::symlink("real", root.join("alias")).unwrap();
+    std::fs::create_dir_all(root.join("deep/x")).unwrap();
+    std::os::unix::fs::symlink("..", root.join("deep/x/up")).unwrap();
+    std::fs::write(root.join(".gitignore"), "alias\n").unwrap();
+    std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n\
+         - {id: ignored-alias, kind: dir_exists, paths: alias/m, level: error, \
+         fix: {dir_create: {}}}\n\
+         - {id: up-link, kind: dir_exists, paths: deep/x/up/n, level: error, \
+         fix: {dir_create: {}}}\n\
+         - id: member\n\
+         \x20 kind: cross_file\n\
+         \x20 relation: registered\n\
+         \x20 source: {file: alias/a/Cargo.toml}\n\
+         \x20 register_as: \"{dir}\"\n\
+         \x20 targets:\n\
+         \x20   - {file: Cargo.toml, extract: {toml: \"$.workspace.members[*]\"}}\n\
+         \x20 level: error\n\
+         \x20 fix:\n\
+         \x20   create_and_register: {content: \"[package]\\n\", applicability: safe}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[
+        ("ignored-alias", "unresolved"),
+        ("up-link", "unresolved"),
+        ("member", "unresolved"),
+    ]);
+    let [dry, real] = dry_and_real(root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+}
+
+#[test]
+fn dry_run_agrees_with_fix_for_a_member_written_back_into_the_root() {
+    // `../repo/crates/b` leads back into the root, but `cross_file` compares
+    // a member it cannot read as a path inside the root as written, so the
+    // created member never matches.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nrules:\n\
+         - id: member\n\
+         \x20 kind: cross_file\n\
+         \x20 relation: registered\n\
+         \x20 source: {file: ../repo/crates/b/Cargo.toml}\n\
+         \x20 register_as: \"{dir}\"\n\
+         \x20 targets:\n\
+         \x20   - {file: Cargo.toml, extract: {toml: \"$.workspace.members[*]\"}}\n\
+         \x20 level: error\n\
+         \x20 fix:\n\
+         \x20   create_and_register: {content: \"[package]\\n\", applicability: safe}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("member", "unresolved")]);
+    let [dry, real] = dry_and_real(&root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+    assert!(
+        root.join("crates/b/Cargo.toml").is_file(),
+        "the real fix creates it"
+    );
+}
+
+#[test]
+fn dry_run_agrees_with_fix_for_a_create_through_a_directory_it_makes() {
+    // `newdir/..` is the root once `create_parents` makes `newdir`, so the
+    // file lands at `x.txt`; the dry run used to place it outside the root.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path().join("repo");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nallow_out_of_root: true\nrules:\n\
+         - {id: x, kind: file_exists, paths: x.txt, level: error, \
+         fix: {file_create: {path: ../repo/newdir/../x.txt, content: \"x\\n\", \
+         create_parents: true}}}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("x", "applied")]);
+    let [dry, real] = dry_and_real(&root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(0)), "dry run");
+    assert_eq!(real, (expected, Some(0)), "real fix");
+    assert!(root.join("x.txt").is_file());
+}
+
 /// `git` with an empty global and system config, so a developer's settings
 /// (commit signing, hooks) cannot fail or change the setup.
 fn git(dir: &Path, args: &[&str]) {

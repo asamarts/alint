@@ -775,7 +775,9 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
 }
 
 /// Run `registration`'s builder on `spec`, redacting an error that could quote
-/// a sensitive value (see [`RuleSpec::redact_unless_reproduced`]).
+/// a sensitive value (see [`RuleSpec::redact_unless_reproduced`]). Inlined:
+/// `for_each_dir` builds a nested rule per iterated entry through it.
+#[inline]
 fn build_rule(registration: &RegisteredKind, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let build = |spec: &RuleSpec| {
         registration

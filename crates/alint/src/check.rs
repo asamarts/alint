@@ -597,7 +597,7 @@ pub(super) fn cmd_baseline(
             bail!(
                 "regenerating {} would grandfather {added} new violation(s) (+{added} / -{removed}); \
                  fix them, or pass --accept-new to accept them into the baseline",
-                out_path.display()
+                crate::redact_environment_values(&out_path.display().to_string())
             );
         }
     }
@@ -614,7 +614,9 @@ pub(super) fn cmd_baseline(
         let total = new_baseline.total();
         eprintln!(
             "alint: wrote {} ({n} entr{}, {total} occurrence{})",
-            term(&out_path.display().to_string()),
+            term(&crate::redact_environment_values(
+                &out_path.display().to_string()
+            )),
             if n == 1 { "y" } else { "ies" },
             if total == 1 { "" } else { "s" },
         );

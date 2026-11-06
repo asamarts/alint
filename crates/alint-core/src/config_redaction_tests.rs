@@ -427,3 +427,19 @@ fn a_when_error_is_hidden_only_when_the_condition_may_be_secret() {
         REDACTED_CONFIGURATION_ERROR
     );
 }
+
+#[test]
+fn a_masked_jsonpath_still_parses_and_differs() {
+    for query in ["$.k", "$['a-b'][0]", "$", "$['<redacted>']"] {
+        let mut value = yaml_serde::Value::String(query.to_string());
+        mask_configuration_values(&mut value, NumberMask::Up);
+        let yaml_serde::Value::String(masked) = value else {
+            panic!("a string stays a string: {value:?}");
+        };
+        assert_ne!(masked, query);
+        assert!(
+            serde_json_path::JsonPath::parse(&masked).is_ok(),
+            "{query} -> {masked}"
+        );
+    }
+}

@@ -100,22 +100,34 @@ pub fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
 /// `path` with its deepest existing ancestor canonicalized and the rest
 /// re-attached, or `None` when no ancestor resolves. A component that does not
 /// exist cannot be a symlink, so two names for one location (through an
-/// in-repo symlinked directory) resolve alike before the location exists.
+/// in-repo symlinked directory) resolve alike before the location exists, and
+/// a `..` after one (`new/../x`, as `create_dir_all` then a write resolve it)
+/// cancels it; a `..` left over steps up from the existing ancestor's real
+/// location.
 pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     let mut tail = PathBuf::new();
     let mut cur = path.to_path_buf();
+    // `..`s met before the components they cancel (the walk runs backwards).
+    let mut up = 0usize;
     loop {
-        if let Ok(real) = cur.canonicalize() {
+        if let Ok(mut real) = cur.canonicalize() {
+            for _ in 0..up {
+                real.pop();
+            }
             return Some(if tail.as_os_str().is_empty() {
                 real
             } else {
                 real.join(&tail)
             });
         }
-        // `cur` doesn't resolve yet; fold its last component into `tail`
-        // and retry against the parent.
-        let name = std::ffi::OsString::from(cur.file_name()?);
-        tail = Path::new(&name).join(&tail);
+        // `cur` doesn't resolve yet; fold its last component into `tail` (or
+        // let it cancel a pending `..`) and retry against the parent.
+        match cur.components().next_back()? {
+            std::path::Component::ParentDir => up += 1,
+            std::path::Component::Normal(_) if up > 0 => up -= 1,
+            std::path::Component::Normal(name) => tail = Path::new(name).join(&tail),
+            _ => return None,
+        }
         if !cur.pop() {
             return None;
         }
@@ -348,5 +360,45 @@ mod tests {
         // is Windows-only.)
         assert_eq!(confined(r"C:\Windows\System32"), None);
         assert_eq!(confined(r"\\server\share\x"), None);
+    }
+
+    #[test]
+    fn a_dotdot_after_a_missing_directory_cancels_it() {
+        use super::{resolve_existing_prefix, resolved_within_root};
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().join("repo");
+        std::fs::create_dir(&root).unwrap();
+        let real = root.canonicalize().unwrap();
+        let resolve = |rel: &str| resolve_existing_prefix(&root.join(rel));
+        // `create_dir_all` makes `new`, so `new/..` is the root.
+        assert_eq!(resolve("new/../x.txt"), Some(real.join("x.txt")));
+        assert_eq!(resolve("a/new/../../x.txt"), Some(real.join("x.txt")));
+        assert_eq!(resolve("new/../sub/y"), Some(real.join("sub/y")));
+        assert!(resolved_within_root(&root.join("new/../x.txt"), &root));
+        // A `..` left over steps up from the root's real location.
+        assert_eq!(
+            resolve("new/../../x.txt"),
+            Some(real.parent().unwrap().join("x.txt"))
+        );
+        assert!(!resolved_within_root(&root.join("new/../../x.txt"), &root));
+        assert!(!resolved_within_root(
+            &root.join("a/b/../../../etc/passwd"),
+            &root
+        ));
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_leftover_dotdot_steps_up_from_where_a_symlink_lands() {
+        use super::resolve_existing_prefix;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("elsewhere/deep")).unwrap();
+        std::os::unix::fs::symlink(root.join("elsewhere/deep"), root.join("link")).unwrap();
+        // `link/new/../..` is `elsewhere`, the parent of where `link` lands.
+        assert_eq!(
+            resolve_existing_prefix(&root.join("link/new/../../x")),
+            Some(root.join("elsewhere/x"))
+        );
     }
 }

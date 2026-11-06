@@ -10,6 +10,10 @@ use super::{Config, PathsSpec, RuleSpec};
 #[doc(hidden)]
 pub const CONFIGURATION_MASK: &str = "<redacted>";
 
+/// The mask for a `JSONPath` query (a string starting with `$`), which a rule
+/// parses before it reports a later error.
+const JSONPATH_MASK: &str = "$['<redacted>']";
+
 /// The message of a configuration error that could quote a secret value.
 #[doc(hidden)]
 pub const REDACTED_CONFIGURATION_ERROR: &str = "<redacted> (the error could quote a value read \
@@ -55,8 +59,10 @@ impl NumberMask {
 
 /// Replace every scalar in `value`, at any depth, with one that differs from
 /// it, so an error quoting the original cannot recur on the masked copy: a
-/// string becomes [`CONFIGURATION_MASK`], a number the next one of the same
-/// kind (in the direction `numbers` names), and a bool its negation.
+/// string becomes [`CONFIGURATION_MASK`] (one starting with `$`, a `JSONPath`,
+/// becomes a `JSONPath` naming it, so the query still parses), a number the next
+/// one of the same kind (in the direction `numbers` names), and a bool its
+/// negation.
 /// Interpolation re-types an environment value that reads as a number or a
 /// bool, so those can be secret too (a 12-digit account id). Numbers and bools
 /// keep their type, so an error about a type that does not quote the value
@@ -67,11 +73,12 @@ impl NumberMask {
 pub fn mask_configuration_values(value: &mut yaml_serde::Value, numbers: NumberMask) {
     match value {
         yaml_serde::Value::String(text) => {
-            *text = if text == CONFIGURATION_MASK {
-                "<masked>".to_string()
+            let [mask, other] = if text.starts_with('$') {
+                [JSONPATH_MASK, "$['<masked>']"]
             } else {
-                CONFIGURATION_MASK.to_string()
+                [CONFIGURATION_MASK, "<masked>"]
             };
+            *text = if text == mask { other } else { mask }.to_string();
         }
         yaml_serde::Value::Number(number) => *number = differing_number(number, numbers),
         yaml_serde::Value::Bool(flag) => *flag = !*flag,

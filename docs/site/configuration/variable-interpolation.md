@@ -57,10 +57,15 @@ A consequence: a string-typed field whose env value is bare-numeric (`"72"`) or 
 
 A value read from the environment may be a secret, so alint keeps it out of what it prints:
 
-- A configuration error that could quote the value shows `<redacted>` in its place. alint repeats the failed step with every such value masked (a string replaced, a number moved one step, a boolean flipped) and shows the real error only when the masked run fails with the same message, which then cannot quote one of them. An unknown option or an unsupported field stays readable this way.
+- A configuration error that could quote the value shows `<redacted>` in its place. alint repeats the failed step with every such value masked (a string replaced, a number moved one step, a boolean flipped) and shows the real error only when the masked run fails with the same message, which then cannot quote one of them. An unknown option or an unsupported field stays readable this way, except in a rule whose `fix:` block or manifest-path `scope_filter:` reads the environment: alint cannot mask those, so that rule's errors stay redacted.
 - A rule with any field read from the environment, other than `policy_url`, reports its findings with redacted evidence, as [`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019) does. When the field chooses files (`paths:`, `scope_filter:`, a selector such as `select:`, or a nested `require:`), the paths are `<redacted>` too, in reports and in the warnings `alint fix` prints.
 - A `pattern:` read from the environment, or in a `sensitive: true` rule, gets no warning about its `^` or `$` anchors: the warning would say how the pattern starts or ends.
 - A value in a top-level field (`extends:`, `ignore:`, `facts:`, `baseline:`, `version:`) is replaced with `<redacted>` wherever an error or warning prints it, including printed as a path or as a remote URL without its credentials.
+<!-- alint:since=0.21.2 -->
+- A selector with a dotted name (`targets.files`, `source.file`) chooses files too, and `alint explain` shows the `fix:` line of a rule with redacted findings as `<redacted>`, since a fixer's description can quote its other fields.
+- A `JSONPath` is masked with one that still parses, so an unrelated error after it stays readable.
+- `alint baseline`'s confirmation, and `alint facts` for a fact value (a `custom:` command given the value as an argument can print it), show `<redacted>` in its place.
+<!-- /alint:since -->
 
 Two kinds of value are still printed: a boolean, and a value an error prints in fewer than four characters. Removing every occurrence of those would garble the message, and they are too short to be much of a secret. A value for an option with a fixed set of choices (`style: tabs`) cannot be masked with another valid choice, so an unrelated error after it in the same rule stays redacted.
 

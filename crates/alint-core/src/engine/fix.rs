@@ -580,8 +580,9 @@ impl Engine {
     /// `--dry-run` has no re-walk to discover that a fix will not stick, so
     /// predict the known cases the real `fix` demotes after its re-check: a
     /// would-be-`Applied` create (`file_create`, `dir_create`,
-    /// `create_and_register`'s member) that the walk would list under no name,
-    /// neither the path as written nor where it lands once symlinks resolve
+    /// `create_and_register`'s member) that the walk would list under no name
+    /// the rule checks, neither the path as written nor, for a rule with a
+    /// `paths:` scope, where it lands once symlinks resolve
     /// (gitignored, `ignore:`d, including by an ignore file another create in
     /// the same pass writes, or below a symlinked directory the walk does not
     /// enter), and the rule does not look for on disk itself; a target outside
@@ -622,8 +623,8 @@ impl Engine {
                             None => continue,
                         },
                     };
-                let names = Self::created_names(root, &path).ok_or(path);
-                creates.push((result, item, entry, names, is_dir, content));
+                let names = Self::created_names(root, &path).ok_or_else(|| path.clone());
+                creates.push((result, item, entry, path, names, is_dir, content));
             }
         }
         // The walk after the fix reads the ignore files those creates write,
@@ -631,7 +632,7 @@ impl Engine {
         // first create of a path wins, whichever name (through an in-tree
         // symlink) it uses.
         let mut created_ignores: Vec<(&Path, &[u8])> = Vec::new();
-        for (_, _, _, names, _, content) in &creates {
+        for (_, _, _, _, names, _, content) in &creates {
             let (Ok(names), Some(content)) = (names, content.as_deref()) else {
                 continue;
             };
@@ -646,7 +647,7 @@ impl Engine {
         }
         // `git ls-files`, once, when a `git_tracked_only` rule creates a file.
         let tracked = std::cell::OnceCell::new();
-        for (result, item, entry, names, is_dir, _) in &creates {
+        for (result, item, entry, path, names, is_dir, _) in &creates {
             // A sensitive item's reason leaves the target out: its rule's
             // configuration or evidence can hold it, as the redacted summary
             // already does.
@@ -665,6 +666,30 @@ impl Engine {
                     "{} is outside the root, so the rule would never see it",
                     shown(path)
                 )),
+                // A rule without a `paths:` scope (`dir_exists`, `cross_file`)
+                // looks for the path as written, normalized as it normalizes
+                // it, and finds nothing under another name: one written out of
+                // the root (absolute, or `..` back in) never matches.
+                Ok(_) if entry.rule.path_scope().is_none() => {
+                    match crate::pathsafe::normalize_confined(path) {
+                        Some(written) => Self::predicted_unresolved(
+                            root,
+                            index,
+                            walk_opts,
+                            entry,
+                            &written,
+                            &shown(&written),
+                            *is_dir,
+                            &created_ignores,
+                            &tracked,
+                        ),
+                        None => Some(format!(
+                            "{} is written as a path outside the root, so the rule would never \
+                             match it",
+                            shown(path)
+                        )),
+                    }
+                }
                 // Resolved when the rule sees the file under any of its names;
                 // otherwise the reason for the first, the path as written.
                 Ok(names) => {
@@ -797,6 +822,11 @@ impl Engine {
         let mut targets = HashSet::new();
         for result in &report.results {
             let fixer = self.fixer_for(&result.rule_id);
+            let allow_out_of_root = self
+                .entries
+                .iter()
+                .find(|e| e.rule.id() == &*result.rule_id)
+                .is_some_and(|e| e.allow_out_of_root);
             for item in &result.items {
                 if !item.violation.is_sensitive() {
                     continue;
@@ -815,6 +845,16 @@ impl Engine {
                     .unwrap_or_default();
                 if let Some(edit) = fixer.fix_edit(&item.violation, &bytes, root) {
                     Self::insert_fix_targets(root, &edit, &mut targets);
+                }
+                // The editor form never leaves the root; a create the rule's
+                // `allow_out_of_root` lets out of it is named here.
+                if let Some((path, _)) =
+                    fixer.created_file(&item.violation, root, allow_out_of_root)
+                {
+                    targets.insert(Self::normalized_write_target(root, &path));
+                }
+                if let Some(dir) = fixer.created_dir() {
+                    targets.insert(Self::normalized_write_target(root, dir));
                 }
             }
         }
@@ -875,10 +915,16 @@ impl Engine {
         spec.field_is_environment_derived("paths")
             || spec.field_is_environment_derived("scope_filter")
             || (meta.nested_rules && spec.field_is_environment_derived("require"))
-            || meta
-                .selectors
-                .iter()
-                .any(|selector| spec.field_is_environment_derived(&selector.name))
+            // A selector names a path into its field (`targets.files`,
+            // `source.file`, `require.forbidden_edges[].to`); the environment
+            // marks the top-level field.
+            || meta.selectors.iter().any(|selector| {
+                selector
+                    .name
+                    .split(['.', '['])
+                    .next()
+                    .is_some_and(|field| spec.field_is_environment_derived(field))
+            })
     }
 
     pub(super) fn redact_result_for_entry(&self, index: usize, result: &mut RuleResult) {
