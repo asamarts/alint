@@ -775,8 +775,9 @@ fn assert_instance_conformance(kind: &str, meta: &KindMeta, spec: &RuleSpec, rul
 }
 
 /// Run `registration`'s builder on `spec`, redacting an error that could quote
-/// a sensitive value (see [`RuleSpec::redact_unless_reproduced`]). Inlined:
-/// `for_each_dir` builds a nested rule per iterated entry through it.
+/// a sensitive value (see [`RuleSpec::redact_unless_reproduced`]). A success
+/// returns straight from the builder: `for_each_dir` builds a nested rule per
+/// iterated entry through here.
 #[inline]
 fn build_rule(registration: &RegisteredKind, spec: &RuleSpec) -> Result<Box<dyn Rule>> {
     let build = |spec: &RuleSpec| {
@@ -785,8 +786,13 @@ fn build_rule(registration: &RegisteredKind, spec: &RuleSpec) -> Result<Box<dyn 
             .build(spec)
             .map_err(|error| enrich_error(error, &spec.kind))
     };
-    build(spec)
-        .map_err(|error| spec.redact_unless_reproduced(error, |masked| build(masked).map(drop)))
+    match registration.builder.build(spec) {
+        Ok(rule) => Ok(rule),
+        Err(error) => Err(spec
+            .redact_unless_reproduced(enrich_error(error, &spec.kind), |masked| {
+                build(masked).map(drop)
+            })),
+    }
 }
 
 /// Apply [`did_you_mean::enrich`] to the message of a `RuleConfig`

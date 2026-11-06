@@ -1370,7 +1370,11 @@ impl CompiledNestedSpec {
     /// [`Self::sensitive_configuration`] is set, as an environment-derived
     /// field of a top-level rule is: its errors and warnings leave the value
     /// out.
-    #[inline]
+    // A thin wrapper on the per-entry path of `for_each_dir` and
+    // `every_matching_has`, in another crate: with only `#[inline]` it stays a
+    // call, and those benches measure 0.4% more instructions.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn instantiate(
         &self,
         parent_id: &str,
@@ -1442,7 +1446,9 @@ impl NestedRuleSpec {
         acc
     }
 
-    #[inline]
+    // A thin wrapper, as [`CompiledNestedSpec::instantiate`] is.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn instantiate(
         &self,
         parent_id: &str,
