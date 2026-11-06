@@ -55,7 +55,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@1f235b300077205b05bf763f902aee274fdaccda # v0.21.1
+        uses: asamarts/alint@0fd3381b23e1860c2f54570f032eda0888d75746 # v0.21.2
 ```
 
 ## Options

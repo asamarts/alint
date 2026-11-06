@@ -14,7 +14,7 @@ The official Action wraps the `install.sh` flow plus alint invocation into one s
 ## Inline PR annotations (default)
 
 ```yaml
-- uses: asamarts/alint@1f235b300077205b05bf763f902aee274fdaccda # v0.21.1
+- uses: asamarts/alint@0fd3381b23e1860c2f54570f032eda0888d75746 # v0.21.2
 ```
 
 This runs `alint check --format github` against `.` and emits findings as `::error::` / `::warning::` workflow commands, which GitHub renders inline on the PR.
@@ -22,7 +22,7 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 ## Inputs (all optional)
 
 ```yaml
-- uses: asamarts/alint@1f235b300077205b05bf763f902aee274fdaccda # v0.21.1
+- uses: asamarts/alint@0fd3381b23e1860c2f54570f032eda0888d75746 # v0.21.2
   with:
     version: ""            # binary release to install (default: the one this Action release carries)
     path: .                # directory to lint (default: .)
@@ -38,7 +38,7 @@ This runs `alint check --format github` against `.` and emits findings as `::err
 Use `format: sarif` and pipe to the standard upload action:
 
 ```yaml
-- uses: asamarts/alint@1f235b300077205b05bf763f902aee274fdaccda # v0.21.1
+- uses: asamarts/alint@0fd3381b23e1860c2f54570f032eda0888d75746 # v0.21.2
   id: alint
   with:
     format: sarif
@@ -58,7 +58,7 @@ alint's SARIF carries a stable [`partialFingerprints`](/docs/reference/output-fo
 For supply-chain hygiene (and to satisfy alint's own [`ci/github-actions@v1`](/docs/bundled-rulesets/) bundled ruleset), pin the action to a commit SHA:
 
 ```yaml
-- uses: asamarts/alint@1f235b300077205b05bf763f902aee274fdaccda # v0.21.1
+- uses: asamarts/alint@0fd3381b23e1860c2f54570f032eda0888d75746 # v0.21.2
 ```
 
 Look up the SHA on the [tag page](https://github.com/asamarts/alint/tags). From
@@ -91,7 +91,7 @@ jobs:
       - name: alint check
         env:
           ALINT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        uses: asamarts/alint@1f235b300077205b05bf763f902aee274fdaccda # v0.21.1
+        uses: asamarts/alint@0fd3381b23e1860c2f54570f032eda0888d75746 # v0.21.2
 ```
 
 The rule in `.alint.yml`:
