@@ -743,11 +743,8 @@ impl Engine {
         } else {
             crate::pathsafe::normalize_confined(path)
         };
-        let joined = match &written {
-            Some(written) => root.join(written),
-            None if path.is_absolute() => path.to_path_buf(),
-            None => root.join(path),
-        };
+        // Joining an absolute path gives that path.
+        let joined = root.join(written.as_deref().unwrap_or(path));
         let landed = crate::pathsafe::resolve_existing_prefix(&joined)?;
         let landed = crate::pathsafe::normalize_confined(landed.strip_prefix(&canonical).ok()?)?;
         Some(match written {

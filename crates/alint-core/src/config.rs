@@ -1906,7 +1906,8 @@ mod tests {
     #[test]
     fn nested_rule_spec_instantiate_synthesizes_id_and_inherits_level() {
         let nested: NestedRuleSpec = yaml_serde::from_str(
-            "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: missing in {path}\n",
+            "kind: file_exists\npaths: \"{path}/README.md\"\nmessage: missing in {path}\n\
+             git_tracked_only: true\nroot_only: true\n",
         )
         .unwrap();
         let tokens = PathTokens::from_path(Path::new("packages/foo"));
@@ -1932,6 +1933,8 @@ mod tests {
                 .any(|k| k.as_str() == Some("git_tracked_only")),
             "git_tracked_only should be stripped from nested extra"
         );
+        // The kind's own options still reach it.
+        assert_eq!(spec.extra["root_only"], true);
     }
 }
 

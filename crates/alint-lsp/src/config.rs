@@ -384,3 +384,65 @@ fn apply_baseline(
     });
     applied.live.results
 }
+
+#[cfg(test)]
+mod baseline_tests {
+    use super::*;
+
+    #[test]
+    fn the_edited_buffer_fingerprints_from_its_text_and_other_files_from_disk() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        // A finding the baseline tells apart by its line's content.
+        let rule = "rules:\n  - id: markers\n    kind: no_merge_conflict_markers\n    \
+                    paths: '*.txt'\n    level: error\n";
+        std::fs::write(root.join(".alint.yml"), format!("version: 1\n{rule}")).unwrap();
+        for file in ["a.txt", "b.txt"] {
+            std::fs::write(root.join(file), "<<<<<<< old\n").unwrap();
+        }
+        // Grandfather both files' findings as they are on disk.
+        let session = build_session(root).unwrap().unwrap();
+        let report = session.engine.run(&session.root, &session.index).unwrap();
+        let baseline = Baseline::from_fingerprints(
+            None,
+            report.results.iter().flat_map(|result| {
+                result.violations.iter().map(|v| {
+                    let bytes = std::fs::read(root.join(v.path.as_deref().unwrap())).unwrap();
+                    alint_core::baseline::FingerprintedViolation {
+                        rule_id: result.rule_id.to_string(),
+                        path: None,
+                        fingerprint: alint_core::baseline::fingerprint(
+                            &result.rule_id,
+                            v,
+                            Some(&bytes),
+                        ),
+                        message: None,
+                    }
+                })
+            }),
+        );
+        assert_eq!(baseline.entries.len(), 2, "one per file");
+        std::fs::write(root.join("base.jsonl"), baseline.to_jsonl()).unwrap();
+        std::fs::write(
+            root.join(".alint.yml"),
+            format!("version: 1\nbaseline: base.jsonl\n{rule}"),
+        )
+        .unwrap();
+        let session = build_session(root).unwrap().unwrap();
+        let report = session.engine.run(&session.root, &session.index).unwrap();
+
+        // `a.txt`'s buffer now reads differently, so its finding is new;
+        // `b.txt` is fingerprinted from disk and stays grandfathered.
+        let live = apply_baseline(
+            &session,
+            report.results,
+            Some((Path::new("a.txt"), b"<<<<<<< new\n")),
+        );
+        let paths: Vec<_> = live
+            .iter()
+            .flat_map(|result| &result.violations)
+            .filter_map(|v| v.path.as_deref())
+            .collect();
+        assert_eq!(paths, [Path::new("a.txt")]);
+    }
+}

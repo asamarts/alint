@@ -566,6 +566,43 @@ mod tests {
     use super::*;
 
     #[test]
+    fn fingerprint_content_reads_each_file_once_and_only_files() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.txt"), "line\n").unwrap();
+        std::fs::create_dir(root.path().join("dir")).unwrap();
+        let mut cache = std::collections::HashMap::new();
+        let file = Violation::new("x").with_path(Path::new("a.txt"));
+        assert_eq!(
+            fingerprint_content(root.path(), &file, &mut cache),
+            Some(&b"line\n"[..])
+        );
+        // Cached: a second finding on the file reuses the first read.
+        std::fs::write(root.path().join("a.txt"), "changed\n").unwrap();
+        assert_eq!(
+            fingerprint_content(root.path(), &file, &mut cache),
+            Some(&b"line\n"[..])
+        );
+        for path in ["dir", "missing.txt"] {
+            let v = Violation::new("x").with_path(Path::new(path));
+            assert_eq!(fingerprint_content(root.path(), &v, &mut cache), None);
+        }
+        assert_eq!(
+            fingerprint_content(root.path(), &Violation::new("x"), &mut cache),
+            None
+        );
+        // A sensitive finding's fingerprint leaves its content out, so the
+        // file is not read at all.
+        let mut sensitive = Violation::new("x").with_path(Path::new("b.txt"));
+        std::fs::write(root.path().join("b.txt"), "secret\n").unwrap();
+        sensitive.mark_sensitive("test");
+        assert_eq!(
+            fingerprint_content(root.path(), &sensitive, &mut cache),
+            None
+        );
+        assert!(!cache.contains_key(Path::new("b.txt")));
+    }
+
+    #[test]
     fn walk_exclude_leaves_out_only_the_baseline() {
         let root = tempfile::Builder::new()
             .prefix("alint-baseline-test-")
