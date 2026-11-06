@@ -69,7 +69,12 @@ points are explicit.
 
    For a patch release (`x.y.z` with `z > 0`), also run
    `ci/scripts/check-patch-compat.sh <every earlier x.y.z>` (for example
-   `0.21.0 0.21.1` before `0.21.2`; it needs network access). crates.io
+   `0.21.0 0.21.1` before `0.21.2`; it needs network access) after the
+   version bump, as it refuses a version that is not earlier than the
+   workspace's. It extracts the crates under `$TMPDIR` (default `/tmp`; point
+   it at a disk-backed directory where `/tmp` is memory) and builds in
+   `target/patch-compat` unless `CARGO_TARGET_DIR` is set.
+   crates.io
    resolves an earlier release's `^x.y.z` sibling requirements to this
    release's libraries, so `cargo install alint --version <earlier>` builds
    that CLI against them. The script compiles the previous `alint`, `alint-lsp` and
@@ -129,6 +134,8 @@ points are explicit.
      editors/zed/Cargo.lock editors/zed/extension.toml \
      docs/site/getting-started/installation.md \
      docs/site/integrations/docker.md docs/site/integrations/pre-commit.md
+   # plus every file the steps below touch: unwrapped `alint:since` blocks,
+   # raised dependency floors, the design-doc status
    git commit -m "chore(release): bump workspace to <x.y.z>"
    git push -u origin release/v<x.y.z>
    gh pr create --fill
@@ -175,7 +182,10 @@ checklist so the release-gated pieces land and nothing drifts:
      fails `--check`. For a hand-authored branch, drop the keyword from
      `config.json`, then `gen-schema`.
    - **Prose sentinels.** Unwrap every `<!-- alint:since=<ver> -->` block; grep
-     `alint:since` across `docs/rules.md` and `docs/site/reference/**` to find all.
+     `alint:since=` across `docs/` to find all (`docs/rules.md`,
+     `docs/site/reference/**` and pages such as
+     `docs/site/configuration/variable-interpolation.md` hold them), and stage
+     each file you unwrap.
    For v0.14: remove `#[schemars(extend("x-since" = "0.14"))]` from
    `crates/alint-rules/src/{file_absent,dir_absent,dir_exists}.rs` (`root_only`),
    and unwrap the six `alint:since=0.14` blocks: five in `docs/rules.md`
