@@ -5,7 +5,7 @@
     {
       "version": "v0.21.1",
       "date": "2026-11-05",
-      "headline": "A fix release.",
+      "headline": "A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees with `fix` in many more layouts, and configuration errors are readable again without showing values read from the environment.",
       "workload_revisions": {
         "S1": 2,
         "S2": 2,

@@ -126,7 +126,10 @@ condition, result, and configuration-error evidence is replaced with
 `<redacted>` before trace storage or rendering. Dotenv and Java-properties
 extracted values are sensitive by default. Rule ids and literal repository
 source paths remain visible structural identity; environment-derived selector
-paths and evidence-derived paths fail closed to `<redacted>`.
+paths and evidence-derived paths fail closed to `<redacted>`. The `fix:` line is
+`<redacted>` whenever the rule's evidence is, because a fixer describes itself
+from the rule's fields: a `file_create` names its `paths:` entry and a `replace`
+quotes its `pattern:`.
 
 ## Examples
 

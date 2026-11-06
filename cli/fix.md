@@ -34,7 +34,10 @@ resolve (gitignored, including by an ignore file another fix in the same run
 creates, matched by `ignore:`, or below a symlink the walk does not follow), a
 target outside the rule's `paths:` or landing outside the root, or a created
 file a `git_tracked_only` rule cannot see because git does not track it, is
-reported the same way, not as applied. A
+reported the same way, not as applied. A `file_create` with
+`create_parents: false` whose directory does not exist is reported skipped, as
+`fix` skips it, unless another create in the same run makes that directory: the
+real run then creates the file, in the same pass or the next. A
 `file_exists` rule with `respect_gitignore: false` looks for its literal path
 on disk itself, so a create the walk leaves out still resolves it, in the dry
 run as in the real one. Anything else only
@@ -42,12 +45,21 @@ the real run's re-check can reveal, so a dry-run `applied` item means "the
 first pass would apply this", not "this resolves the violation": a fix that
 only makes progress on a later pass, a cascade where one rule's fix creates or
 resolves another's violation, an edit to an existing ignore file, or content a
-fix writes that the rule still rejects. `--diff` shows that first pass's edits
+fix writes that the rule still rejects. The prediction also leaves out an
+ignore file created outside the root, a created `.git/info/exclude` or nested
+repository marker, a rule's `root_only`, other names the walk lists a file
+under through in-tree symlinks, a symlink that leads nowhere until a create
+makes the place it points to, and, on a case-insensitive filesystem, a path
+whose case differs from a directory already there. A `dir_exists` or
+`cross_file` rule looks for the path as written, so only that name counts for
+its create. `--diff` shows that first pass's edits
 without the prediction, so its exit code can be `0` where a real `fix` exits
-`1`. It also leaves out every file a rule with redacted findings would change
-([`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019), or a field
-read from the environment), so the diff cannot show a secret beside an edit;
-`alint fix` still applies those fixes.
+`1`. It also leaves out every file a rule with redacted findings reports on
+or would change ([`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019),
+or a field read from the environment), together with other rules' edits to
+that file, so the diff does not show what those rules redact; `alint fix`
+still applies those fixes. A secret in a file no such rule reports on is
+diffed like any other content.
 
 If alint cannot obtain a policy verdict, the fix report carries a typed
 `analysis_failure` instead of a fix item. It is never passed to a fixer and
