@@ -25,6 +25,7 @@ use crate::walker::FileIndex;
 use crate::when::{WhenEnv, WhenExpr};
 mod fix;
 mod gates;
+mod preview;
 mod run;
 
 /// Run a parallel `job` inside an explicitly-built rayon pool, degrading gracefully
