@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance
+
+- Nested rules run about 2% fewer instructions than in v0.21.1, where each
+  iterated entry's rule specification passed through one more call that copied
+  it. In the deterministic micro-benchmark gate, `for_each_dir` is back within
+  0.5% of v0.20.1 and `every_matching_has` within 0.7%, from 2.2% to 2.6%
+  slower in v0.21.1. The specification is now built in place, and a successful
+  nested build returns straight from the builder.
+
 ### Changed
 
 - `ci/scripts/check-patch-compat.sh` deletes each previous crate's
@@ -50,14 +59,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.21.1] - 2026-11-05
 
-A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees
-with `fix` in many more layouts, configuration errors are readable again without showing values
-read from the environment, and nested rules are back within 0.5% of v0.20.1's speed. A
-`.gitignore` in a directory above the repository (a home directory kept in git) can no longer hide
-the tree and make every rule pass, and a linked worktree honors the repository's shared
-`info/exclude`. A configuration error is shown unless it could quote a value read from the
-environment or set in a `sensitive: true` rule, and such values stay out of the errors, warnings
-and listings that printed them.
+A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees with
+`fix` in many more layouts, and configuration errors are readable again without showing values read
+from the environment. A `.gitignore` in a directory above the repository (a home directory kept in
+git) can no longer hide the tree and make every rule pass, and a linked worktree honors the
+repository's shared `info/exclude`. A configuration error is shown unless it could quote a value
+read from the environment or set in a `sensitive: true` rule, and such values stay out of the
+errors, warnings and listings that printed them.
 
 ### Security
 
@@ -104,8 +112,10 @@ and listings that printed them.
   a table for every iterated entry. Adding `key_parity` to that table in v0.21.0
   stopped the compiler unrolling the scan, which then cost about 300
   instructions per entry and made `for_each_dir` 3% slower than v0.20.1 in the
-  release's deterministic micro-benchmark gate. It is now back within 0.5% of
-  v0.20.1.
+  release's deterministic micro-benchmark gate. That change alone brought it
+  back within 0.5% of v0.20.1, but later fixes in this release added about 2%
+  again, so v0.21.1's `for_each_dir` is 2.2% to 2.6% slower than v0.20.1 in
+  the same gate.
 
 ### Fixed
 

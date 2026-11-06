@@ -704,8 +704,14 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   prediction from #444 and #446 costs about 14.5 µs per predicted create:
   `fix_throughput/dry_run_only/100`, a report-only bench, is +41% in
   instructions and SFIX, a dry-run fix, +3% to +5% in wall time. The
-  record's `for_each_dir` cells, built with the bench host's Rust 1.97.0, are
-  2.2% to 2.6% over v0.20.1, against #422's -3.10% on Rust 1.99.1.
+  record's `for_each_dir` cells are 2.2% to 2.6% over v0.20.1 (2.2% to 2.4%
+  rebuilt with Rust 1.99.1), although #422 alone had them level with it: a
+  bisect against #422 has every change through #438 within 0.5%, #442 at
+  +0.5% and #445 at +2.4%, the jump mostly #445's
+  `CompiledNestedSpec::instantiate`, which copied each entry's `RuleSpec`
+  once more. The v0.21.1 CHANGELOG had claimed "within 0.5%"; the
+  correction and the fix (the spec built in place, and a successful nested
+  build returned straight from the builder) landed after the release.
 - **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
   within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
   ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on
