@@ -1650,4 +1650,7 @@ fn read_bounded_bounds_the_actual_read_toctou() {
         read_bounded(&tmp.path().join("nope"), 100, 50).is_none(),
         "missing file is None"
     );
+    // The cap is inclusive: a file of exactly `cap` bytes reads.
+    assert_eq!(read_bounded(&p, 10, 10).unwrap().len(), 10);
+    assert!(read_bounded(&p, 9, 10).is_none());
 }

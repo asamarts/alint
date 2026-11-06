@@ -911,19 +911,31 @@ impl CreateAndRegisterFixer {
             Err(reason) => return Ok(FixOutcome::Skipped(reason)),
         };
         // Never clobber an existing file/dir, and never create THROUGH a (possibly
-        // broken) symlink at the target -- exactly `FileCreateFixer`'s guards.
-        if abs.exists() {
+        // broken) symlink at the target -- exactly `FileCreateFixer`'s guards,
+        // looking where the write lands (`alint_core::create_landing`).
+        let landing = alint_core::create_landing(&abs);
+        if landing.exists() {
             return Ok(FixOutcome::Skipped(format!(
                 "{} already exists",
                 member.display()
             )));
         }
-        if abs
+        if landing
             .symlink_metadata()
             .is_ok_and(|m| m.file_type().is_symlink())
         {
             return Ok(FixOutcome::Skipped(format!(
                 "{} is a symlink; refusing to create through it",
+                member.display()
+            )));
+        }
+        if abs
+            .parent()
+            .and_then(crate::fixers::creators::blocking_ancestor)
+            .is_some()
+        {
+            return Ok(FixOutcome::Skipped(format!(
+                "{} is under a file, not a directory",
                 member.display()
             )));
         }

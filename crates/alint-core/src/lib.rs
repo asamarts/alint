@@ -61,8 +61,8 @@ pub use config::{
     FileRenameFixSpec, FileStripBidiFixSpec, FileStripBomFixSpec, FileStripZeroWidthFixSpec,
     FileTrimTrailingWhitespaceFixSpec, FixSpec, NestedRuleSpec, NumberMask, PathsSpec,
     REDACTED_CONFIGURATION_ERROR, RuleSpec, configuration_field_may_be_secret,
-    mask_configuration_values, redact_environment_values, redact_environment_values_in_error,
-    resolve_content_source,
+    mask_configuration_field, mask_configuration_values, redact_environment_values,
+    redact_environment_values_in_error, resolve_content_source,
 };
 pub use engine::{Engine, RuleEntry, StagedFix, StagedKind};
 pub use error::{Error, Result};
@@ -80,7 +80,7 @@ pub use kind_meta::{
 };
 pub use level::Level;
 pub use location::{MAX_RELATED_LOCATIONS, RelatedLocation, SourceRange, physical_lines};
-pub use pathsafe::{derive_target, normalize_confined, resolved_within_root};
+pub use pathsafe::{create_landing, derive_target, normalize_confined, resolved_within_root};
 pub use proposed_fix::{EditRegion, ProposedEdit, attach_proposed_edits, byte_to_line_col};
 pub use redaction::{redact_evidence, redaction_marker};
 pub use registry::{

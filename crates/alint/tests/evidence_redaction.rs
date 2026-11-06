@@ -437,3 +437,212 @@ rules:
     let written = std::fs::read_to_string(&baseline).unwrap();
     assert!(!written.contains(ENV_PATH_SECRET), "{written}");
 }
+
+/// The `<redacted:…>` markers in `rendered`, in order.
+fn markers(rendered: &str) -> Vec<&str> {
+    rendered
+        .match_indices("<redacted:")
+        .map(|(start, _)| {
+            let end = rendered[start..].find('>').unwrap();
+            &rendered[start..=start + end]
+        })
+        .collect()
+}
+
+/// A dotenv manifest that names `one.env` and `two.env`, scoping a rule that
+/// fails on both.
+fn manifest_scope_fixture() -> tempfile::TempDir {
+    let dir = tempfile::tempdir().unwrap();
+    for name in ["one.env", "two.env"] {
+        std::fs::write(dir.path().join(name), "MODE=dev\n").unwrap();
+    }
+    std::fs::write(dir.path().join("manifest.env"), "A=one.env\nB=two.env\n").unwrap();
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        r#"version: 1
+rules:
+  - id: envmode
+    kind: dotenv_path_equals
+    paths: ["one.env", "two.env"]
+    path: "$.MODE"
+    equals: "prod"
+    scope_filter:
+      include_manifest_paths:
+        source: manifest.env
+        extract: { dotenv: "$.*" }
+    level: error
+"#,
+    )
+    .unwrap();
+    dir
+}
+
+#[test]
+fn a_manifest_scope_keeps_its_hidden_paths_out_of_the_rules_own_markers() {
+    // The rule writes markers of its own, which hash the file they are in, so
+    // the same finding in two hidden files must still read the same.
+    let dir = manifest_scope_fixture();
+    for args in [
+        &["check", "--format", "json"][..],
+        &["check", "--format", "sarif"],
+        &["fix", "--dry-run", "--format", "json"],
+    ] {
+        let output = run(dir.path(), args);
+        assert_eq!(output.status.code(), Some(1), "{args:?}: {output:?}");
+        let rendered = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(
+            !rendered.contains("one.env") && !rendered.contains("two.env"),
+            "{args:?} leaked a scoped path:\n{rendered}"
+        );
+        let found = markers(&rendered);
+        assert!(found.len() >= 2, "{args:?}:\n{rendered}");
+        assert!(
+            found.iter().all(|marker| *marker == found[0]),
+            "{args:?} markers differ by file: {found:?}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_manifest_scope_keeps_its_hidden_paths_out_of_fix_failure_markers() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = manifest_scope_fixture();
+    for name in ["one.env", "two.env"] {
+        std::fs::set_permissions(
+            dir.path().join(name),
+            std::fs::Permissions::from_mode(0o000),
+        )
+        .unwrap();
+    }
+    if std::fs::read(dir.path().join("one.env")).is_ok() {
+        // Running as root: nothing is unreadable.
+        return;
+    }
+    for args in [
+        &["check", "--format", "json"][..],
+        &["fix", "--dry-run", "--format", "json"],
+    ] {
+        let output = run(dir.path(), args);
+        let rendered = String::from_utf8_lossy(&output.stdout).into_owned();
+        assert!(
+            !rendered.contains("one.env") && !rendered.contains("two.env"),
+            "{args:?} leaked a scoped path:\n{rendered}"
+        );
+        let found = markers(&rendered);
+        assert!(found.len() >= 2, "{args:?}:\n{rendered}");
+        assert!(
+            found.iter().all(|marker| *marker == found[0]),
+            "{args:?} failure markers differ by file: {found:?}"
+        );
+    }
+}
+
+#[test]
+fn a_when_iter_that_reads_the_environment_itself_hides_its_paths() {
+    // `env.WANTED` is read when the expression runs, not interpolated, and a
+    // variable can carry the value in, but either way it picks the paths.
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::create_dir_all(dir.path().join("pkgs").join(ENV_PATH_SECRET)).unwrap();
+    std::fs::create_dir_all(dir.path().join("pkgs/other")).unwrap();
+    for (vars, when_iter) in [
+        ("", "iter.basename == env.ENV_PATH_SECRET"),
+        (
+            "vars:\n  wanted: \"{{env.ENV_PATH_SECRET}}\"\n",
+            "iter.basename == vars.wanted",
+        ),
+    ] {
+        std::fs::write(
+            dir.path().join(".alint.yml"),
+            format!(
+                "version: 1\n{vars}rules:\n  - id: each-readme\n    kind: for_each_dir\n    \
+                 select: \"pkgs/*\"\n    when_iter: '{when_iter}'\n    require:\n      \
+                 - kind: file_exists\n        paths: \"{{path}}/README.md\"\n    level: error\n"
+            ),
+        )
+        .unwrap();
+        for format in ["human", "json", "sarif"] {
+            let output = run(dir.path(), &["check", "--format", format]);
+            assert_eq!(output.status.code(), Some(1), "{when_iter}: {output:?}");
+            let rendered = String::from_utf8_lossy(&all_output(&output)).into_owned();
+            assert!(
+                !rendered.contains(ENV_PATH_SECRET),
+                "{when_iter} {format} leaked the iterated path:\n{rendered}"
+            );
+            assert!(rendered.contains("<redacted"), "{format}:\n{rendered}");
+        }
+    }
+}
+
+/// A config whose fact reads the files `paths` matches.
+#[cfg(unix)]
+fn fact_config(paths: &str) -> String {
+    format!(
+        "version: 1\nfacts:\n  - id: has_marker\n    file_content_matches:\n      \
+         paths: \"{paths}\"\n      pattern: marker\nrules:\n  - id: readme\n    \
+         kind: file_exists\n    paths: README.md\n    when: facts.has_marker\n    level: error\n"
+    )
+}
+
+/// Writes an unreadable file at `path`, or returns false when this user can
+/// read it anyway (root).
+#[cfg(unix)]
+fn unreadable(path: &Path) -> bool {
+    use std::os::unix::fs::PermissionsExt as _;
+    std::fs::write(path, "marker\n").unwrap();
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o000)).unwrap();
+    std::fs::read(path).is_err()
+}
+
+#[cfg(unix)]
+#[test]
+fn a_fact_path_read_from_the_environment_stays_out_of_its_warning() {
+    let dir = tempfile::tempdir().unwrap();
+    if !unreadable(&dir.path().join(format!("{ENV_PATH_SECRET}.txt"))) {
+        return;
+    }
+    std::fs::write(
+        dir.path().join(".alint.yml"),
+        fact_config("{{env.ENV_PATH_SECRET}}.txt"),
+    )
+    .unwrap();
+    for args in [&["check"][..], &["facts"]] {
+        let output = run(dir.path(), args);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        assert!(
+            !stderr.contains(ENV_PATH_SECRET),
+            "{args:?} leaked the fact path:\n{stderr}"
+        );
+        assert!(
+            stderr.contains("unreadable") && stderr.contains("<redacted>"),
+            "{args:?} warns with the path left out:\n{stderr}"
+        );
+    }
+}
+
+#[cfg(unix)]
+#[test]
+fn a_warning_escapes_the_control_characters_in_a_path() {
+    let dir = tempfile::tempdir().unwrap();
+    if !unreadable(&dir.path().join("evil\nWARN forged\x1b[31mred.txt")) {
+        return;
+    }
+    std::fs::write(dir.path().join(".alint.yml"), fact_config("evil*")).unwrap();
+    let output = run(dir.path(), &["check"]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(
+        stderr.contains("unreadable") && stderr.contains("evil"),
+        "the warning names the file:\n{stderr}"
+    );
+    assert!(!stderr.contains('\x1b'), "{stderr:?}");
+    assert!(
+        !stderr.lines().any(|line| line.starts_with("WARN forged")),
+        "{stderr:?}"
+    );
+    // The message prints bare and every other field by name.
+    assert!(
+        stderr.contains("skipping unreadable file") && stderr.contains("path="),
+        "{stderr:?}"
+    );
+    assert!(!stderr.contains("message="), "{stderr:?}");
+}

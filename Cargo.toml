@@ -71,8 +71,8 @@ tempfile = "3"
 dir-test = "0.4"
 proptest = "1"
 # Test-only: the `plugin_api` import-boundary test parses the module and visits
-# every path. Both are already in the tree through the derive macros, so this
-# adds no crate.
+# every path. proc-macro2 is already in the tree through the derive macros,
+# which still use syn 2, so syn 3 is a second copy that only tests build.
 syn = { version = "3", features = ["full", "visit"] }
 proc-macro2 = "1"
 trycmd = "1"

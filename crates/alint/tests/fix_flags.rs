@@ -849,3 +849,51 @@ fn dry_run_agrees_with_fix_for_a_git_tracked_only_rule() {
     assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
     assert_eq!(real, (expected, Some(1)), "real fix");
 }
+
+#[test]
+fn dry_run_and_diff_agree_with_fix_for_a_create_into_a_directory_another_fix_makes() {
+    // `file_create` with `create_parents: false` needs its directory. Another
+    // rule's `dir_create` makes it, before or after it in the config, and the
+    // real `fix` then creates the file; without that rule every mode declines.
+    let index = "{id: index, kind: file_exists, paths: docs/index.md, level: error, \
+                 fix: {file_create: {content: \"x\\n\", create_parents: false}}}";
+    let dir = "{id: dir, kind: dir_exists, paths: docs, level: error, fix: {dir_create: {}}}";
+    let cases = [
+        (
+            vec![dir, index],
+            &[("dir", "applied"), ("index", "applied")][..],
+            Some(0),
+        ),
+        (
+            vec![index, dir],
+            &[("index", "applied"), ("dir", "applied")][..],
+            Some(0),
+        ),
+        (vec![index], &[("index", "declined")][..], Some(1)),
+    ];
+    for (rules, expected, code) in cases {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        let rules = rules
+            .iter()
+            .map(|rule| format!("  - {rule}\n"))
+            .collect::<Vec<_>>()
+            .concat();
+        std::fs::write(
+            root.join(".alint.yml"),
+            format!("version: 1\nrules:\n{rules}"),
+        )
+        .unwrap();
+        let diff = run(root, &["fix", "--diff"]);
+        assert_eq!(
+            String::from_utf8_lossy(&diff.stdout).contains("+++ b/docs/index.md"),
+            code == Some(0),
+            "--diff for {rules}: {}",
+            String::from_utf8_lossy(&diff.stdout)
+        );
+        let [dry, real] = dry_and_real(root, &[]);
+        assert_eq!(dry, (outcomes(expected), code), "dry run for {rules}");
+        assert_eq!(real, (outcomes(expected), code), "real fix for {rules}");
+        assert_eq!(root.join("docs/index.md").is_file(), code == Some(0));
+    }
+}

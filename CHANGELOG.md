@@ -6,49 +6,64 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `ci/scripts/check-patch-compat.sh` deletes each previous crate's
+  `Cargo.lock` before building it, checks with all features, fails unless
+  every sibling it built against is this workspace's, and refuses a version
+  that is not an earlier release on the workspace's caret line (the same
+  `0.y`, or after 1.0 the same major version). The lock pinned the siblings at
+  the previous version, so once the workspace version was bumped cargo ignored
+  the `[patch]` and the check passed without testing anything. It also takes
+  every earlier release in one run, finds the workspace from its own location
+  rather than the current directory, and refuses a prerelease workspace
+  version. It keeps each extracted crate out of any workspace around the
+  scratch directory, builds in `target/patch-compat` unless `CARGO_TARGET_DIR`
+  is set rather than in a scratch directory under `$TMPDIR`, and exits 2
+  rather than 1 when cargo cannot resolve or download the previous crates.
+  `ci/scripts/test-check-patch-compat.sh` exercises each exit code with
+  `curl` and `cargo` stubbed.
+
+- The YAML parser behind source spans, structured fixes and duplicate-aware key
+  extraction (`saphyr` and `saphyr-parser`) moves from 0.2.2 to 0.3.3, the two
+  still pinned together.
+  - An empty block scalar at the end of a file now reads as an empty string
+    instead of a newline.
+  - A compact pair in a flow sequence whose value is a flow mapping
+    (`[k: {a: 1, b: 2}]`) now reads as one mapping. The parser ended the
+    mapping at its first comma and started a new one for the keys after it.
+  - The loader stops after 100,000 nodes produced by aliases. alint loads a
+    document that way only to place a `set_value`, `remove_value` or
+    `yaml_path_matches` `replace` edit, after its own alias guard, which
+    allows more, so such a fix now declines on a document whose aliases
+    expand past that limit.
+
 ### Performance
 
 - Nested rules run 1.4% to 2% fewer instructions than in v0.21.1, where each
   iterated entry's rule specification passed through one more call that copied
   it. In the deterministic micro-benchmark gate (Callgrind, Rust 1.99.1),
-  `for_each_dir` is back within 0.5% of v0.20.1, from 2.2% to 2.6% slower in
-  v0.21.1, and `every_matching_has` within 0.7%. The specification is now
-  built in place, and a successful nested build returns straight from the
-  builder.
-
-### Changed
-
-- `ci/scripts/check-patch-compat.sh` deletes each previous crate's
-  `Cargo.lock` before building it, checks with all features, fails unless
-  every sibling it built against is this workspace's, and refuses a previous
-  version off the workspace's `0.y` line. The lock pinned the siblings at the
-  previous version, so once the workspace version was bumped cargo ignored the
-  `[patch]` and the check passed without testing anything. It also takes every
-  earlier patch on the line in one run, finds the workspace from its own
-  location rather than the current directory, and refuses a prerelease
-  workspace version.
-
-- The YAML parser behind source spans, structured fixes and duplicate-aware key
-  extraction (`saphyr` and `saphyr-parser`) moves from 0.2.2 to 0.3.3, the two
-  still pinned together. An empty block scalar at the end of a file now reads
-  as an empty string instead of a newline. The loader also stops after 100,000
-  nodes produced by aliases. alint loads a document that way only to place a
-  `set_value` or `remove_value` edit, after its own alias guard, which allows
-  more, so such a fix now declines on a document whose aliases expand past
-  that limit.
+  `for_each_dir` is back within 0.5% of v0.20.1, from 2.2% to 2.4% slower in
+  v0.21.1 with the same toolchain, and `every_matching_has` within 0.7%. The
+  specification is now built in place, and a successful nested build returns
+  straight from the builder.
 
 ### Fixed
 
 - `fix --dry-run` agrees with `fix` again for a `dir_create` or
-  `create_and_register` through a symlink. Those rules look for the path as
-  written, but since 0.21.1 the dry run also accepted where the file lands, so
-  a create through an ignored symlinked directory was predicted applied. A
-  `create_and_register` member written as an absolute path or with `..` is
+  `create_and_register` through a symlink. The rules these fix (`dir_exists`
+  and `cross_file`) look for the path as written, but since 0.21.1 the dry run
+  also accepted where the file lands, so a create through an ignored symlinked
+  directory was predicted applied. A `create_and_register` member written as
+  an absolute path, or with a `..` that leaves the root (`../repo/...`), is
   predicted unresolved, as the rule never matches it. A create written outside
   the root (`allow_out_of_root`) is predicted where it lands: through a
   directory it makes (`../repo/new/../x.txt` with `create_parents`), through a
   symlink after one (`../repo/new/../link/x.txt`), and, for an absolute path,
   through a symlink before a `..`, which the dry run used to cancel against it.
+  An absolute path whose `..` cancels a real directory keeps the name written
+  after it, so `<root>/sub/../alias/x.txt` is matched as `alias/x.txt`, as the
+  walk lists it.
 - `create_and_register` declines a member written with a backslash on Linux
   and macOS, where the backslash is part of a name, and says to write it with
   `/`. The rule looked for that name, but the fix created the member with `/`
@@ -57,38 +72,68 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `file_create` with `create_parents: false` declines a file whose directory
   does not exist, and says to set `create_parents: true`. `fix` failed on the
   write instead, and `fix --dry-run` and `fix --diff` reported the create as
+  applied. When another fix in the same run makes that directory (a
+  `dir_create`, or a create with `create_parents`), all three report the create
+  applied, and `fix` makes the file in the same pass or the next. The editor's
+  quick fix no longer offers a create into a missing directory.
+- `file_create`, `dir_create` and `create_and_register` decline in every mode
+  when a file or a symlink that leads nowhere stands where a directory is
+  needed (`README.md/x.txt`), saying the path is under a file. `fix` failed on
+  the write, while `fix --dry-run` and `fix --diff` reported the create as
   applied.
-- `check --format sarif`, `agent` and `json --include-fixes` no longer warn
-  about a `--diff` preview nobody asked for. They build their proposed fixes
-  with the same single pass as `fix --diff`, so its warning that a whole-file
-  fix pushed a located edit out of the preview now says "the fix preview".
+- A create written outside the root that passes through a directory it makes
+  before a `..` (`../repo/new/../dl`) checks for an existing file or a symlink
+  where it lands. It checked the path as written, which does not exist yet, so
+  it could overwrite a file or write through a symlink out of the root.
+- A create written outside the root with a trailing slash (`../repo/y.txt/`)
+  creates `y.txt`, as `fix --dry-run` predicted. `fix` failed with "Is a
+  directory".
+- `check --format sarif`, `agent` and `json --include-fixes` word their warning
+  that a whole-file fix pushed a located edit out of the preview as "the fix
+  preview", not a `--diff` preview nobody asked for. They build their proposed
+  fixes with the same single pass as `fix --diff`.
 - `fix --diff` no longer shows a create outside the root (`allow_out_of_root`)
   from a rule with redacted findings. It printed the file's path and content,
   which can hold a value read from the environment or set in a
   `sensitive: true` rule.
-- A rule whose selector with a dotted name (`targets.files`, `source.file`,
-  `require.forbidden_edges[].to`) reads the environment now shows its paths as
-  `<redacted>` in reports, `fix` and the baseline, as one reading `paths:` or
-  `select:` does. The check compared the dotted name with the top-level field
-  the environment marks, so it never matched.
+- A rule that reads the environment in a selector with a dotted name
+  (`targets.files`, `source.file`, `require.forbidden_edges[].to`) now shows
+  its paths as `<redacted>` in reports, `fix` and the baseline, as one reading
+  `paths:` or `select:` does. The check compared the dotted name with the
+  top-level field the environment marks, so it never matched.
 - A nested rule whose `when_iter:` reads the environment shows its paths as
-  `<redacted>`, as one whose `require:` reads it does. The filter picks the
-  entries the rule reports, so their names can spell the value.
+  `<redacted>`, as one whose `require:` reads it does, whether the value is
+  interpolated (`{{env.X}}`), read when the expression runs (`env.X`) or
+  carried in by a variable. The filter picks the entries the rule reports, so
+  their names can spell the value.
 - A redaction marker no longer hashes a path alint hides, so two findings that
   differ only in such a path get the same marker. The marker covered the
-  finding's path before the path was hidden.
+  finding's path before the path was hidden. This includes the markers a rule
+  writes itself, such as a `dotenv_path_equals` mismatch, when a manifest
+  scope hides the path, and the analysis-failure markers `fix` writes for such
+  a rule.
+- `fix --baseline` skips a grandfathered finding of a `sensitive: true` rule
+  or one that reads a field from the environment, as `check --baseline` does.
+  It fingerprinted the finding before redacting it, so the fingerprint never
+  matched the baseline's and `fix` rewrote the file.
 - `alint baseline`, `check --baseline`, `fix` and the language server no longer
   warn that they cannot read each directory a nested rule flags. The baseline
-  fingerprint leaves a directory's content out, as it did, without trying to
-  read it, and it no longer reads the file of a finding with redacted evidence,
-  whose fingerprint leaves the content out too. Its warning for a file it
-  cannot read shows `<redacted>` for a path alint hides. A file over the
-  256 MiB analysis cap is reported through its finding, which hides such a
-  path, without the warning that named it.
-- A JSONPath or a nested rule's `when_iter:` read from the environment no
-  longer hides an unrelated configuration error after it: the rerun that
-  decides whether an error could quote the value masks it with one that still
-  parses.
+  fingerprint reads a file only for a finding on a line whose fingerprint
+  uses the line's content, so it no longer reads a directory, the file of a
+  finding with redacted evidence or a whole-file finding, and
+  `check --baseline --format gitlab` reads each file once for both
+  fingerprints. A file over the 256 MiB
+  analysis cap, or one that grows past it while alint reads it, is reported
+  through its finding, which hides such a path, without a warning that named
+  it.
+- Warnings and other log lines show `<redacted>` for a value the environment
+  gave the configuration, such as the path of an unreadable file a fact read
+  through `{{env.X}}`, and escape control characters, so a file name cannot
+  start a forged log line or drive the terminal.
+- A JSONPath, or a `when_iter:` or `when:` in a nested rule at any depth, read
+  from the environment no longer hides an unrelated configuration error after
+  it: the rerun that decides whether an error could quote the value masks it
+  with one that still parses.
 - `alint baseline`'s confirmation, and its error for a regeneration that would
   grandfather new findings, show `<redacted>` for a `baseline:` path read from
   the environment. `alint facts` does the same for a fact value that holds one,

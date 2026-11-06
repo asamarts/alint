@@ -108,31 +108,35 @@ pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> S
             None,
         );
     }
-    let identity_line = v
-        .range
-        .as_ref()
-        .map_or(v.line, crate::SourceRange::baseline_identity_line);
     violation_fingerprint(
         rule_id,
         v.path.as_deref(),
-        identity_line,
+        identity_line(v),
         v.baseline_key.as_deref(),
         &v.message,
         file_bytes,
     )
 }
 
+/// The line whose content identifies `v` in its fingerprint.
+fn identity_line(v: &Violation) -> Option<usize> {
+    v.range
+        .as_ref()
+        .map_or(v.line, crate::SourceRange::baseline_identity_line)
+}
+
 /// The file content [`fingerprint`] uses for `v`, read from under `root` once
-/// per path through `cache`. `None` for a sensitive finding, whose fingerprint
-/// leaves the content out, so its file is not read at all; for a directory (a
-/// nested rule's entry); and for a file it cannot read within the analysis
-/// cap, with a warning that names the file unless its path is one alint hides.
+/// per path through `cache`. `None`, without reading the file, when the
+/// fingerprint leaves the content out: for a sensitive finding, one with a
+/// `baseline_key`, and one without a line. `None` also for a directory (a
+/// nested rule's entry) and for a file it cannot read within the analysis cap,
+/// with a warning that names the file unless its path is one alint hides.
 pub fn fingerprint_content<'c, S: std::hash::BuildHasher>(
     root: &Path,
     v: &Violation,
     cache: &'c mut std::collections::HashMap<std::path::PathBuf, Option<Vec<u8>>, S>,
 ) -> Option<&'c [u8]> {
-    if v.is_sensitive() {
+    if v.is_sensitive() || v.baseline_key.is_some() || identity_line(v).is_none() {
         return None;
     }
     let path = v.path.as_deref()?;
@@ -571,7 +575,12 @@ mod tests {
         std::fs::write(root.path().join("a.txt"), "line\n").unwrap();
         std::fs::create_dir(root.path().join("dir")).unwrap();
         let mut cache = std::collections::HashMap::new();
-        let file = Violation::new("x").with_path(Path::new("a.txt"));
+        let on_line = |path: &str| {
+            Violation::new("x")
+                .with_path(Path::new(path))
+                .with_location(1, 1)
+        };
+        let file = on_line("a.txt");
         assert_eq!(
             fingerprint_content(root.path(), &file, &mut cache),
             Some(&b"line\n"[..])
@@ -583,23 +592,27 @@ mod tests {
             Some(&b"line\n"[..])
         );
         for path in ["dir", "missing.txt"] {
-            let v = Violation::new("x").with_path(Path::new(path));
-            assert_eq!(fingerprint_content(root.path(), &v, &mut cache), None);
+            assert_eq!(
+                fingerprint_content(root.path(), &on_line(path), &mut cache),
+                None
+            );
         }
         assert_eq!(
             fingerprint_content(root.path(), &Violation::new("x"), &mut cache),
             None
         );
-        // A sensitive finding's fingerprint leaves its content out, so the
-        // file is not read at all.
-        let mut sensitive = Violation::new("x").with_path(Path::new("b.txt"));
+        // A fingerprint that leaves the content out does not read the file: a
+        // sensitive finding, one with a `baseline_key`, and one without a line.
         std::fs::write(root.path().join("b.txt"), "secret\n").unwrap();
+        let mut sensitive = on_line("b.txt");
         sensitive.mark_sensitive("test");
-        assert_eq!(
-            fingerprint_content(root.path(), &sensitive, &mut cache),
-            None
-        );
-        assert!(!cache.contains_key(Path::new("b.txt")));
+        let mut keyed = on_line("b.txt");
+        keyed.baseline_key = Some("key".into());
+        let lineless = Violation::new("x").with_path(Path::new("b.txt"));
+        for v in [sensitive, keyed, lineless] {
+            assert_eq!(fingerprint_content(root.path(), &v, &mut cache), None);
+            assert!(!cache.contains_key(Path::new("b.txt")));
+        }
     }
 
     #[test]

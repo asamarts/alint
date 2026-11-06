@@ -49,7 +49,9 @@ pub(crate) enum Confined {
 pub(crate) fn confine(path: &Path, allow_escape: bool) -> Confined {
     match normalize_confined(path) {
         Some(p) => Confined::In(p),
-        None if allow_escape => Confined::AllowedEscape(path.to_path_buf()),
+        // Rebuilt from its components, as an in-tree path is: `..` stays, but a
+        // trailing `/` goes, which would make a create's write fail on a file.
+        None if allow_escape => Confined::AllowedEscape(path.components().collect()),
         None => Confined::Denied,
     }
 }

@@ -1118,3 +1118,59 @@ fn load_resolves_https_extends_via_cache_hit() {
     let ids: Vec<&str> = cfg.rules.iter().map(|r| r.id.as_str()).collect();
     assert_eq!(ids, vec!["inherited", "local"]);
 }
+
+#[test]
+fn a_condition_that_reads_the_environment_marks_its_field_sensitive() {
+    // A `when:` or a nested rule's `when_iter:` that reads `env.X` as it runs,
+    // or a var whose value came from the environment, decides what a rule
+    // reports, so the field counts as read from the environment.
+    let tmp = tempfile::tempdir().unwrap();
+    let config = tmp.path().join(".alint.yml");
+    std::fs::write(
+        &config,
+        "version: 1\nvars:\n  wanted: \"{{env.ALINT_TEST_UNSET_WANTED | default('a')}}\"\n\
+         rules:\n\
+         \x20 - id: env-iter\n    kind: for_each_dir\n    select: 'pkgs/*'\n    \
+         when_iter: 'iter.basename == env.ALINT_TEST_UNSET_WANTED'\n    \
+         require: [{ kind: file_exists, paths: '{path}/README.md' }]\n    level: error\n\
+         \x20 - id: var-iter\n    kind: for_each_dir\n    select: 'pkgs/*'\n    \
+         when_iter: 'iter.basename == vars.wanted'\n    \
+         require: [{ kind: file_exists, paths: '{path}/README.md' }]\n    level: error\n\
+         \x20 - id: env-when\n    kind: file_exists\n    paths: README.md\n    \
+         when: 'env.ALINT_TEST_UNSET_WANTED == \"a\"'\n    level: error\n\
+         \x20 - id: literal-iter\n    kind: for_each_dir\n    select: 'pkgs/*'\n    \
+         when_iter: 'iter.basename == \"a\"'\n    \
+         require: [{ kind: file_exists, paths: '{path}/README.md' }]\n    level: error\n",
+    )
+    .unwrap();
+    let loaded = crate::load(&config).unwrap();
+    let fields = |id: &str| {
+        loaded
+            .rules
+            .iter()
+            .find(|rule| rule.id == id)
+            .unwrap()
+            .sensitive_fields
+            .clone()
+    };
+    assert!(
+        fields("env-iter").contains("when_iter"),
+        "{:?}",
+        fields("env-iter")
+    );
+    assert!(
+        fields("var-iter").contains("when_iter"),
+        "{:?}",
+        fields("var-iter")
+    );
+    assert!(
+        fields("env-when").contains("when"),
+        "{:?}",
+        fields("env-when")
+    );
+    assert!(
+        fields("literal-iter").is_empty(),
+        "{:?}",
+        fields("literal-iter")
+    );
+}

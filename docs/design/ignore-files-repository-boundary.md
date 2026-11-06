@@ -126,7 +126,7 @@ No new dependency.
   `ignore_files_above_the_root_match_the_canonical_root`, `ignore_files_count_only_under_their_exact_name`
   (meaningful on a case-insensitive filesystem), `a_repository_marker_counts_only_under_its_exact_name_when_listed`,
   `would_walk_skip_reads_the_ignore_files_a_fix_creates` and
-  `would_walk_skip_stops_at_a_symlink_the_walk_does_not_enter`. `engine/tests/fix.rs`:
+  `would_walk_skip_stops_at_a_symlink_the_walk_does_not_enter`. `engine/tests/preview.rs`:
   `dry_run_predicts_each_create_the_real_fix_finds_unresolved` runs a dry run and a real fix on
   the same tree and compares each rule's outcome. `crates/alint/tests/fix_flags.rs` does the same
   through the CLI with the shipped fixers, below a symlink loop, and with an `info/exclude` that
@@ -222,7 +222,7 @@ could not converge. `dir_exists` now refuses them with `dir_create` when the con
 **Tests.** `walker_tests.rs`: `a_bad_ignore_file_above_the_root_does_not_stop_the_walk`,
 `an_unreadable_file_above_the_root_does_not_stop_the_walk`, the control
 `an_unreadable_directory_still_stops_the_walk`, and
-`would_walk_skip_reads_an_ignore_file_created_through_a_symlink`. `engine/tests/fix.rs`:
+`would_walk_skip_reads_an_ignore_file_created_through_a_symlink`. `engine/tests/preview.rs`:
 `dry_run_takes_the_first_of_two_creates_of_one_ignore_file`,
 `dry_run_reads_an_absolute_create_inside_the_root_as_relative`,
 `dry_run_trusts_a_rule_that_looks_past_the_walk` and
@@ -242,7 +242,7 @@ adversarial layouts found the cases the two bullets above now cover: a created `
 known), a `create_and_register` member outside the root had no create to check, and a create was
 judged only by its written path, so one through an in-tree symlink, or an absolute or `..` path
 landing inside the root, was predicted unresolved although the real run resolves it. Tests:
-`engine/tests/fix.rs` `dry_run_judges_a_create_by_where_it_lands` and
+`engine/tests/preview.rs` `dry_run_judges_a_create_by_where_it_lands` and
 `dry_run_names_an_absolute_create_through_the_canonical_root`, `fix_flags.rs`
 `dry_run_agrees_with_fix_for_an_ignore_file_read_from_outside_the_root` and
 `dry_run_agrees_with_fix_for_a_member_created_outside_the_root`, and unit tests for both fixers'
@@ -283,6 +283,33 @@ where the OS resolves the symlink first; an absolute path with a `..` is now res
 A `file_create` with `create_parents: false` into a missing directory was predicted applied (and
 shown by `fix --diff`) while `fix` failed on the write; the fixer now declines it in every mode.
 Tests: `pathsafe.rs` `a_symlink_after_a_cancelled_missing_directory_still_resolves`;
-`engine/tests/fix.rs` `dry_run_judges_a_create_by_where_it_lands` (`absolute-link-up`,
+`engine/tests/preview.rs` `dry_run_judges_a_create_by_where_it_lands` (`absolute-link-up`,
 `back-in-alias`, `back-in-link-up`); `creators.rs`
-`file_create_without_create_parents_declines_a_missing_directory_in_every_mode`.
+`file_create_without_create_parents_declines_a_missing_directory`.
+
+**Fifth review (after the fourth).** Declining that create in every mode was wrong when another fix
+in the same run makes the directory (a `dir_create`, or a create with `create_parents`): the real
+run makes it first, or in its next pass, and then creates the file, while the dry run and
+`fix --diff`, which write nothing, found no directory. The fixer now declines a missing directory
+only in the real run. A preview leaves it to the engine, which declines such a create once every
+fixer has run unless a create in the same pass makes that directory
+(`Fixer::needs_existing_directory`). Every create fixer (`file_create`, `dir_create`,
+`create_and_register`) now also declines in every mode under a file or a dangling symlink, where
+`create_dir_all` fails, and runs its existence and symlink checks where a `..` after a directory it
+makes leads (`pathsafe::create_landing`). Those checks ran on the path as written, which does not
+exist yet, so `../repo/new/../dl`, with `dl` a dangling link out of the root, was written through
+the link. The editor form no longer offers a create whose directory is missing either.
+`created_names` keeps the written name of an absolute path with a `..`: it resolves the path up to
+its last `..` and appends the rest as written, so `<root>/sub/../alias/x.txt` keeps `alias/x.txt`
+while `deeplink/../t.txt` still follows the link. An out-of-root path with a trailing slash is
+confined without it, so the dry run and `fix` both create the file. A differential test against
+the OS replaces the hand-picked examples for `resolve_existing_prefix`; it found one limit, now
+documented: a dangling symlink whose target the create's own directories make. Tests:
+`engine/tests/preview.rs` `a_preview_declines_a_create_into_a_missing_directory_only_when_nothing_makes_it`
+and `dry_run_judges_a_create_by_where_it_lands` (`absolute-back-in-link`); `fix_flags.rs`
+`dry_run_and_diff_agree_with_fix_for_a_create_into_a_directory_another_fix_makes`; `creators.rs`
+`file_create_declines_under_a_file_in_every_mode` and
+`file_create_checks_where_a_dot_dot_after_a_new_directory_lands`; `file_ops.rs`
+`dir_create_declines_under_a_file_in_every_mode`; `pathsafe.rs`
+`resolve_existing_prefix_lands_where_the_os_creates` and
+`create_landing_is_where_a_dot_dot_after_a_new_directory_leads`.

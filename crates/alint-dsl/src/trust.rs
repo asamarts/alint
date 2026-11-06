@@ -330,15 +330,17 @@ pub(crate) fn mark_template_sensitive_fields(
 }
 
 /// Mark conditions whose truth value depends on the host environment, directly
-/// or through an environment-derived top-level variable.
+/// or through an environment-derived top-level variable. A nested rule's
+/// `when_iter:` decides which entries it reports, whose names can spell what
+/// it read.
 pub(crate) fn mark_sensitive_conditions(
     mapping: &mut Mapping,
     env_vars: &std::collections::HashMap<String, String>,
 ) {
-    for top_level in ["when", "require"] {
+    for top_level in ["when", "when_iter", "require"] {
         let sensitive = match top_level {
-            "when" => mapping
-                .get("when")
+            "when" | "when_iter" => mapping
+                .get(top_level)
                 .and_then(yaml_serde::Value::as_str)
                 .is_some_and(|source| when_reads_sensitive_input(source, env_vars)),
             "require" => mapping
@@ -409,17 +411,17 @@ pub(crate) fn masked_rule_mappings(mapping: &Mapping) -> Option<Vec<Mapping>> {
     let masked = |numbers| {
         let mut masked = mapping.clone();
         for (field, value) in &mut masked {
-            let secret = !is_internal_field(field)
-                && field.as_str().is_some_and(|field| {
-                    alint_core::configuration_field_may_be_secret(
+            let Some(field) = field.as_str().filter(|field| {
+                !field.starts_with(INTERNAL_FIELD_PREFIX)
+                    && alint_core::configuration_field_may_be_secret(
                         sensitive,
                         &environment_fields,
                         field,
                     )
-                });
-            if secret {
-                alint_core::mask_configuration_values(value, numbers);
-            }
+            }) else {
+                continue;
+            };
+            alint_core::mask_configuration_field(field, value, numbers);
         }
         masked
     };

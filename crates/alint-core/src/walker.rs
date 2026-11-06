@@ -119,7 +119,7 @@ pub(crate) fn read_bounded(path: &Path, cap: u64, size_hint: u64) -> Option<Vec<
 }
 
 /// The classifying core of `read_bounded` (see its docs for the TOCTOU bound
-/// and the preallocation hint).
+/// and the preallocation hint). Like [`read_for_analysis`], it logs nothing.
 fn read_bounded_classified(path: &Path, cap: u64, size_hint: u64) -> AnalysisRead {
     use std::io::Read as _;
     let file = match std::fs::File::open(path) {
@@ -131,18 +131,10 @@ fn read_bounded_classified(path: &Path, cap: u64, size_hint: u64) -> AnalysisRea
     let mut buf = Vec::with_capacity(prealloc);
     match file.take(cap.saturating_add(1)).read_to_end(&mut buf) {
         Ok(_) if u64::try_from(buf.len()).is_ok_and(|n| n > cap) => {
-            tracing::warn!(
-                path = %path.display(),
-                cap,
-                "file grew past the analysis cap"
-            );
             AnalysisRead::TooLarge(cap.saturating_add(1))
         }
         Ok(_) => AnalysisRead::Bytes(buf),
-        Err(e) => {
-            tracing::debug!(path = %path.display(), error = %e, "unreadable file");
-            AnalysisRead::Unreadable(e)
-        }
+        Err(e) => AnalysisRead::Unreadable(e),
     }
 }
 

@@ -213,6 +213,50 @@ fn write_atomic_refuses_a_file_the_owner_cannot_write() {
     assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
 }
 
+#[cfg(unix)]
+#[test]
+fn write_atomic_writes_through_a_symlink_and_keeps_it() {
+    // A temp+rename on the link itself would replace it with a regular file.
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("target.txt");
+    let link = dir.path().join("link.txt");
+    std::fs::write(&target, b"old").unwrap();
+    std::os::unix::fs::symlink("target.txt", &link).unwrap();
+    write_atomic(&link, b"new").unwrap();
+    assert!(
+        std::fs::symlink_metadata(&link)
+            .unwrap()
+            .file_type()
+            .is_symlink()
+    );
+    assert_eq!(std::fs::read(&target).unwrap(), b"new");
+}
+
+#[test]
+fn write_atomic_writes_its_temporary_file_beside_the_target() {
+    use super::fix_io::temp_dir_for;
+    assert_eq!(temp_dir_for(Path::new("a/b.txt")), Path::new("a"));
+    assert_eq!(temp_dir_for(Path::new("b.txt")), Path::new("."));
+    let dir = tempfile::tempdir().unwrap();
+    assert_eq!(temp_dir_for(&dir.path().join("x.txt")), dir.path());
+}
+
+#[test]
+fn write_atomic_lets_a_file_that_vanished_be_written() {
+    // The file existed when its metadata was read and is gone by the
+    // writability probe: nothing is left to protect.
+    let dir = tempfile::tempdir().unwrap();
+    let present = dir.path().join("present.txt");
+    std::fs::write(&present, b"x").unwrap();
+    let meta = std::fs::metadata(&present).unwrap();
+    super::fix_io::refuse_unwritable(&dir.path().join("gone.txt"), &meta).unwrap();
+}
+
+#[test]
+fn a_fixer_needs_no_existing_directory_by_default() {
+    assert!(!TierEdgeFixer(Applicability::Safe).needs_existing_directory());
+}
+
 #[test]
 fn write_atomic_refuses_a_read_only_file() {
     // Audit 2026-10 finding 11: temp+rename only needs DIRECTORY write
@@ -541,6 +585,27 @@ fn check_fix_size_returns_none_when_limit_disabled() {
     };
     let outcome = check_fix_size(&f, Path::new("a.txt"), &ctx).unwrap();
     assert!(outcome.is_none());
+}
+
+#[test]
+fn check_fix_size_allows_a_file_exactly_at_the_limit() {
+    let dir = tempfile::tempdir().unwrap();
+    let f = dir.path().join("edge.txt");
+    std::fs::write(&f, vec![b'x'; 64]).unwrap();
+    let ctx = |limit| FixContext {
+        root: dir.path(),
+        dry_run: false,
+        fix_size_limit: Some(limit),
+        allow_out_of_root: false,
+        compose: None,
+        stage_ops: None,
+        process_environment: None,
+        paths_sensitive: false,
+    };
+    let at = check_fix_size(&f, Path::new("edge.txt"), &ctx(64)).unwrap();
+    assert!(at.is_none(), "{at:?}");
+    let over = check_fix_size(&f, Path::new("edge.txt"), &ctx(63)).unwrap();
+    assert!(matches!(over, Some(FixOutcome::Skipped(_))), "{over:?}");
 }
 
 #[test]

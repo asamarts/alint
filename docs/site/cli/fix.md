@@ -30,7 +30,10 @@ resolve (gitignored, including by an ignore file another fix in the same run
 creates, matched by `ignore:`, or below a symlink the walk does not follow), a
 target outside the rule's `paths:` or landing outside the root, or a created
 file a `git_tracked_only` rule cannot see because git does not track it, is
-reported the same way, not as applied. A
+reported the same way, not as applied. A `file_create` with
+`create_parents: false` whose directory does not exist is reported skipped, as
+`fix` skips it, unless another create in the same run makes that directory: the
+real run then creates the file, in the same pass or the next. A
 `file_exists` rule with `respect_gitignore: false` looks for its literal path
 on disk itself, so a create the walk leaves out still resolves it, in the dry
 run as in the real one. Anything else only
@@ -41,7 +44,8 @@ resolves another's violation, an edit to an existing ignore file, or content a
 fix writes that the rule still rejects. The prediction also leaves out an
 ignore file created outside the root, a created `.git/info/exclude` or nested
 repository marker, a rule's `root_only`, other names the walk lists a file
-under through in-tree symlinks, and, on a case-insensitive filesystem, a path
+under through in-tree symlinks, a symlink that leads nowhere until a create
+makes the place it points to, and, on a case-insensitive filesystem, a path
 whose case differs from a directory already there. A `dir_exists` or
 `cross_file` rule looks for the path as written, so only that name counts for
 its create. `--diff` shows that first pass's edits

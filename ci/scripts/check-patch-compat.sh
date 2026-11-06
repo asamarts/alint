@@ -19,7 +19,9 @@
 # Usage: ci/scripts/check-patch-compat.sh <previous-version>...
 #   e.g.  ci/scripts/check-patch-compat.sh 0.21.0 0.21.1
 #
-# Every earlier patch on the line resolves to this release, so pass them all.
+# Every earlier release on the caret line resolves to this release, so pass
+# them all: each earlier patch of this 0.y, or after 1.0 each earlier release
+# of this major version.
 #
 # Each `.crate` ships the previous release's Cargo.lock, which pins every
 # sibling at <previous-version>; cargo then ignores a `[patch]` whose version
@@ -27,14 +29,18 @@
 # with all features on, and fails unless every sibling in the build graph is
 # this workspace's copy.
 #
-# Needs network access (crates.io downloads, dependency resolution). Scratch
-# goes under $TMPDIR; set CARGO_TARGET_DIR to reuse a target directory.
+# Needs network access (crates.io downloads, dependency resolution). The
+# extracted crates go under $TMPDIR (default /tmp), each made a workspace of
+# its own so cargo never joins one around it. The build goes to
+# $CARGO_TARGET_DIR, by default target/patch-compat in this workspace, which
+# keeps the full build on disk and lets the next run reuse it.
 #
 # Exit codes:
 #   0  every previous crate compiles against this workspace
 #   1  at least one does not, or one did not build against this workspace
-#   2  usage or download error, a <previous-version> that is not an earlier
-#      release on this workspace's caret line, or a prerelease workspace
+#   2  usage error, a download or dependency-resolution failure, a
+#      <previous-version> that is not an earlier release on this workspace's
+#      caret line, or a prerelease workspace
 
 set -euo pipefail
 
@@ -58,11 +64,18 @@ for PREVIOUS in "$@"; do
     echo "usage: $0 <previous-version>... (e.g. 0.21.0 0.21.1)" >&2
     exit 2
   fi
-  # A caret requirement on 0.y.z accepts 0.y.z' for z' >= z: the same 0.y line.
+  # A caret requirement on 0.y.z accepts 0.y.z' for z' >= z, the same 0.y
+  # line; on x.y.z with x >= 1 it accepts every later x.y'.z'.
   IFS=. read -r prev_major prev_minor prev_patch <<<"$PREVIOUS"
-  if [[ "$prev_major.$prev_minor" != "$cur_major.$cur_minor" || "$prev_major" != 0 ]] \
-    || ((10#$prev_patch >= 10#$cur_patch)); then
-    echo "patch-compat: $PREVIOUS is not an earlier 0.y.z on this workspace's line ($CURRENT)" >&2
+  earlier=0
+  if ((10#$prev_major == 0 && 10#$cur_major == 0)); then
+    ((10#$prev_minor == 10#$cur_minor && 10#$prev_patch < 10#$cur_patch)) && earlier=1
+  elif ((10#$prev_major == 10#$cur_major)); then
+    ((10#$prev_minor < 10#$cur_minor \
+      || (10#$prev_minor == 10#$cur_minor && 10#$prev_patch < 10#$cur_patch))) && earlier=1
+  fi
+  if ((earlier == 0)); then
+    echo "patch-compat: $PREVIOUS is not an earlier release on this workspace's caret line ($CURRENT)" >&2
     exit 2
   fi
 done
@@ -71,7 +84,10 @@ CHECKED=(alint alint-lsp alint-testkit)
 
 WORK="$(mktemp -d "${TMPDIR:-/tmp}/alint-patch-compat.XXXXXX")"
 trap 'rm -rf "$WORK"' EXIT
-TARGET="${CARGO_TARGET_DIR:-$WORK/target}"
+TARGET="${CARGO_TARGET_DIR:-$ROOT/target/patch-compat}"
+# Each build runs from its extracted crate, so a relative path is made
+# absolute here, against where the script was run.
+[[ "$TARGET" == /* ]] || TARGET="$PWD/$TARGET"
 
 failed=0
 for PREVIOUS in "$@"; do
@@ -85,6 +101,8 @@ for PREVIOUS in "$@"; do
     dir="$WORK/$crate-$PREVIOUS"
     {
       echo
+      echo "[workspace]"
+      echo
       echo "[patch.crates-io]"
       for sibling in "${SIBLINGS[@]}"; do
         [[ "$sibling" == "$crate" ]] && continue
@@ -93,6 +111,12 @@ for PREVIOUS in "$@"; do
     } >>"$dir/Cargo.toml"
     rm -f "$dir/Cargo.lock"
     echo "==> patch-compat: $crate $PREVIOUS against $ROOT ($CURRENT)"
+    # Resolve and download first, so a network or registry failure is not
+    # reported as a compile failure.
+    if ! (cd "$dir" && cargo fetch --quiet); then
+      echo "patch-compat: could not resolve or download $crate $PREVIOUS's dependencies" >&2
+      exit 2
+    fi
     if ! (cd "$dir" && CARGO_TARGET_DIR="$TARGET" cargo check --quiet --keep-going --all-features); then
       echo "patch-compat: $crate $PREVIOUS does not compile against this workspace" >&2
       failed=1
