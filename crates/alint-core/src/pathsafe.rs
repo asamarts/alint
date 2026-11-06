@@ -114,17 +114,49 @@ pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     if let Ok(real) = path.canonicalize() {
         return Some(real);
     }
-    let mut real = if path.has_root() {
-        path.components()
-            .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
-            .collect::<PathBuf>()
-            .canonicalize()
-            .ok()?
+    // The deepest existing ancestor before the first `..` also resolves in
+    // one call, so the walk starts there rather than at the root: a missing
+    // file in an existing directory costs two calls, not one per component.
+    let components: Vec<Component<'_>> = path.components().collect();
+    let base = components
+        .iter()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .count();
+    let first_up = components
+        .iter()
+        .position(|c| matches!(c, Component::ParentDir))
+        .unwrap_or(components.len());
+    // The whole path, when it has no `..`, is known not to resolve.
+    let mut end = if first_up == components.len() {
+        first_up.checked_sub(1)?
     } else {
-        Path::new(".").canonicalize().ok()?
+        first_up
+    };
+    let mut real = loop {
+        let prefix: PathBuf = components[..end].iter().collect();
+        let resolved = if prefix.as_os_str().is_empty() {
+            Path::new(".").canonicalize()
+        } else {
+            prefix.canonicalize()
+        };
+        if let Ok(real) = resolved {
+            break real;
+        }
+        if end <= base {
+            return None;
+        }
+        end -= 1;
     };
     let mut pending: Vec<&std::ffi::OsStr> = Vec::new();
-    for component in path.components() {
+    let mut rest = &components[end..];
+    // One component longer did not resolve, so the next one is missing.
+    if end < first_up
+        && let Some((Component::Normal(name), after)) = rest.split_first()
+    {
+        pending.push(name);
+        rest = after;
+    }
+    for component in rest {
         match component {
             Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
             Component::ParentDir => {
