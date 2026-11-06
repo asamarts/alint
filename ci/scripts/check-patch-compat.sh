@@ -16,8 +16,10 @@
 # Not covered: a consumer that pins one library with `=` to the previous
 # version while taking newer siblings. Cargo never resolves that on its own.
 #
-# Usage: ci/scripts/check-patch-compat.sh <previous-version>
-#   e.g.  ci/scripts/check-patch-compat.sh 0.21.0
+# Usage: ci/scripts/check-patch-compat.sh <previous-version>...
+#   e.g.  ci/scripts/check-patch-compat.sh 0.21.0 0.21.1
+#
+# Every earlier patch on the line resolves to this release, so pass them all.
 #
 # Each `.crate` ships the previous release's Cargo.lock, which pins every
 # sibling at <previous-version>; cargo then ignores a `[patch]` whose version
@@ -31,27 +33,39 @@
 # Exit codes:
 #   0  every previous crate compiles against this workspace
 #   1  at least one does not, or one did not build against this workspace
-#   2  usage or download error, or <previous-version> is not an earlier
-#      release on this workspace's caret line
+#   2  usage or download error, a <previous-version> that is not an earlier
+#      release on this workspace's caret line, or a prerelease workspace
 
 set -euo pipefail
 
-PREVIOUS="${1:-}"
-if [[ ! "$PREVIOUS" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
-  echo "usage: $0 <previous-version, e.g. 0.21.0>" >&2
+if (($# == 0)); then
+  echo "usage: $0 <previous-version>... (e.g. 0.21.0 0.21.1)" >&2
   exit 2
 fi
 
-ROOT="$(git rev-parse --show-toplevel)"
+# The workspace this script belongs to, wherever it is run from.
+ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 CURRENT="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' "$ROOT/Cargo.toml")"
-# A caret requirement on 0.y.z accepts 0.y.z' for z' >= z: the same 0.y line.
-IFS=. read -r prev_major prev_minor prev_patch <<<"$PREVIOUS"
-IFS=. read -r cur_major cur_minor cur_patch <<<"$CURRENT"
-if [[ "$prev_major.$prev_minor" != "$cur_major.$cur_minor" || "$prev_major" != 0 ]] \
-  || ((prev_patch >= cur_patch)); then
-  echo "patch-compat: $PREVIOUS is not an earlier 0.y.z on this workspace's line ($CURRENT)" >&2
+# A caret requirement does not select a prerelease, so an unlocked install of
+# a previous release never resolves to one: there is nothing to check.
+if [[ ! "$CURRENT" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "patch-compat: the workspace version $CURRENT is not a plain x.y.z release" >&2
   exit 2
 fi
+IFS=. read -r cur_major cur_minor cur_patch <<<"$CURRENT"
+for PREVIOUS in "$@"; do
+  if [[ ! "$PREVIOUS" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+    echo "usage: $0 <previous-version>... (e.g. 0.21.0 0.21.1)" >&2
+    exit 2
+  fi
+  # A caret requirement on 0.y.z accepts 0.y.z' for z' >= z: the same 0.y line.
+  IFS=. read -r prev_major prev_minor prev_patch <<<"$PREVIOUS"
+  if [[ "$prev_major.$prev_minor" != "$cur_major.$cur_minor" || "$prev_major" != 0 ]] \
+    || ((10#$prev_patch >= 10#$cur_patch)); then
+    echo "patch-compat: $PREVIOUS is not an earlier 0.y.z on this workspace's line ($CURRENT)" >&2
+    exit 2
+  fi
+done
 SIBLINGS=(alint-core alint-dsl alint-rules alint-output alint-lsp alint-testkit)
 CHECKED=(alint alint-lsp alint-testkit)
 
@@ -60,50 +74,52 @@ trap 'rm -rf "$WORK"' EXIT
 TARGET="${CARGO_TARGET_DIR:-$WORK/target}"
 
 failed=0
-for crate in "${CHECKED[@]}"; do
-  url="https://static.crates.io/crates/$crate/$crate-$PREVIOUS.crate"
-  if ! curl -fsSL --retry 3 -A "alint-patch-compat (https://github.com/asamarts/alint)" "$url" \
-    | tar -xz -C "$WORK"; then
-    echo "patch-compat: could not download $crate $PREVIOUS" >&2
-    exit 2
-  fi
-  dir="$WORK/$crate-$PREVIOUS"
-  {
-    echo
-    echo "[patch.crates-io]"
+for PREVIOUS in "$@"; do
+  for crate in "${CHECKED[@]}"; do
+    url="https://static.crates.io/crates/$crate/$crate-$PREVIOUS.crate"
+    if ! curl -fsSL --retry 3 -A "alint-patch-compat (https://github.com/asamarts/alint)" "$url" \
+      | tar -xz -C "$WORK"; then
+      echo "patch-compat: could not download $crate $PREVIOUS" >&2
+      exit 2
+    fi
+    dir="$WORK/$crate-$PREVIOUS"
+    {
+      echo
+      echo "[patch.crates-io]"
+      for sibling in "${SIBLINGS[@]}"; do
+        [[ "$sibling" == "$crate" ]] && continue
+        echo "$sibling = { path = \"$ROOT/crates/$sibling\" }"
+      done
+    } >>"$dir/Cargo.toml"
+    rm -f "$dir/Cargo.lock"
+    echo "==> patch-compat: $crate $PREVIOUS against $ROOT ($CURRENT)"
+    if ! (cd "$dir" && CARGO_TARGET_DIR="$TARGET" cargo check --quiet --keep-going --all-features); then
+      echo "patch-compat: $crate $PREVIOUS does not compile against this workspace" >&2
+      failed=1
+      continue
+    fi
+    # Every sibling the build used must be this workspace's copy (`name vX (path)`).
+    if ! graph="$(cd "$dir" && cargo tree --quiet --all-features --prefix none -e normal,build \
+      --format '{p}')"; then
+      echo "patch-compat: could not read $crate $PREVIOUS's dependency graph" >&2
+      failed=1
+      continue
+    fi
+    others=()
     for sibling in "${SIBLINGS[@]}"; do
-      [[ "$sibling" == "$crate" ]] && continue
-      echo "$sibling = { path = \"$ROOT/crates/$sibling\" }"
+      [[ "$sibling" != "$crate" ]] && others+=("$sibling")
     done
-  } >>"$dir/Cargo.toml"
-  rm -f "$dir/Cargo.lock"
-  echo "==> patch-compat: $crate $PREVIOUS against $ROOT ($CURRENT)"
-  if ! (cd "$dir" && CARGO_TARGET_DIR="$TARGET" cargo check --quiet --keep-going --all-features); then
-    echo "patch-compat: $crate $PREVIOUS does not compile against this workspace" >&2
-    failed=1
-    continue
-  fi
-  # Every sibling the build used must be this workspace's copy (`name vX (path)`).
-  if ! graph="$(cd "$dir" && cargo tree --quiet --all-features --prefix none -e normal,build \
-    --format '{p}')"; then
-    echo "patch-compat: could not read $crate $PREVIOUS's dependency graph" >&2
-    failed=1
-    continue
-  fi
-  others=()
-  for sibling in "${SIBLINGS[@]}"; do
-    [[ "$sibling" != "$crate" ]] && others+=("$sibling")
+    pattern="^($(IFS='|'; echo "${others[*]}")) v"
+    unpatched="$(grep -E "$pattern" <<<"$graph" | grep -vF "($ROOT/crates/" | sort -u || true)"
+    if [[ -n "$unpatched" ]]; then
+      echo "patch-compat: $crate $PREVIOUS built against siblings outside this workspace:" >&2
+      echo "$unpatched" >&2
+      failed=1
+    fi
   done
-  pattern="^($(IFS='|'; echo "${others[*]}")) v"
-  unpatched="$(grep -E "$pattern" <<<"$graph" | grep -vF "($ROOT/crates/" | sort -u || true)"
-  if [[ -n "$unpatched" ]]; then
-    echo "patch-compat: $crate $PREVIOUS built against siblings outside this workspace:" >&2
-    echo "$unpatched" >&2
-    failed=1
-  fi
 done
 
 if [[ "$failed" == 0 ]]; then
-  echo "patch-compat: alint, alint-lsp and alint-testkit $PREVIOUS compile against this workspace"
+  echo "patch-compat: alint, alint-lsp and alint-testkit $* compile against this workspace"
 fi
 exit "$failed"

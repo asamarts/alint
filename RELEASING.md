@@ -68,11 +68,11 @@ points are explicit.
    is the pre-push sanity gate.
 
    For a patch release (`x.y.z` with `z > 0`), also run
-   `ci/scripts/check-patch-compat.sh <previous x.y.z>` (it needs network
-   access). crates.io resolves the previous release's `^x.y.0` sibling
-   requirements to this release's libraries, so
-   `cargo install alint --version <previous>` builds the previous CLI
-   against them. The script compiles the previous `alint`, `alint-lsp` and
+   `ci/scripts/check-patch-compat.sh <every earlier x.y.z>` (for example
+   `0.21.0 0.21.1` before `0.21.2`; it needs network access). crates.io
+   resolves an earlier release's `^x.y.z` sibling requirements to this
+   release's libraries, so `cargo install alint --version <earlier>` builds
+   that CLI against them. The script compiles the previous `alint`, `alint-lsp` and
    `alint-testkit` that way. A failure means a public API they call
    changed: keep the old form as a `#[deprecated]` shim instead of shipping
    the break.
