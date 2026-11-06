@@ -38,7 +38,13 @@ the real run's re-check can reveal, so a dry-run `applied` item means "the
 first pass would apply this", not "this resolves the violation": a fix that
 only makes progress on a later pass, a cascade where one rule's fix creates or
 resolves another's violation, an edit to an existing ignore file, or content a
-fix writes that the rule still rejects. `--diff` shows that first pass's edits
+fix writes that the rule still rejects. The prediction also leaves out an
+ignore file created outside the root, a created `.git/info/exclude` or nested
+repository marker, a rule's `root_only`, other names the walk lists a file
+under through in-tree symlinks, and, on a case-insensitive filesystem, a path
+whose case differs from a directory already there. A `dir_exists` or
+`cross_file` rule looks for the path as written, so only that name counts for
+its create. `--diff` shows that first pass's edits
 without the prediction, so its exit code can be `0` where a real `fix` exits
 `1`. It also leaves out every file a rule with redacted findings would change
 ([`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019), or a field

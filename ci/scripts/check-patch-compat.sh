@@ -19,13 +19,20 @@
 # Usage: ci/scripts/check-patch-compat.sh <previous-version>
 #   e.g.  ci/scripts/check-patch-compat.sh 0.21.0
 #
+# Each `.crate` ships the previous release's Cargo.lock, which pins every
+# sibling at <previous-version>; cargo then ignores a `[patch]` whose version
+# differs and only warns. The check deletes it, as an unlocked install does,
+# with all features on, and fails unless every sibling in the build graph is
+# this workspace's copy.
+#
 # Needs network access (crates.io downloads, dependency resolution). Scratch
 # goes under $TMPDIR; set CARGO_TARGET_DIR to reuse a target directory.
 #
 # Exit codes:
 #   0  every previous crate compiles against this workspace
-#   1  at least one does not
-#   2  usage or download error
+#   1  at least one does not, or one did not build against this workspace
+#   2  usage or download error, or <previous-version> is not an earlier
+#      release on this workspace's caret line
 
 set -euo pipefail
 
@@ -36,6 +43,15 @@ if [[ ! "$PREVIOUS" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
 fi
 
 ROOT="$(git rev-parse --show-toplevel)"
+CURRENT="$(sed -n '/^\[workspace.package\]/,/^\[/s/^version = "\(.*\)"$/\1/p' "$ROOT/Cargo.toml")"
+# A caret requirement on 0.y.z accepts 0.y.z' for z' >= z: the same 0.y line.
+IFS=. read -r prev_major prev_minor prev_patch <<<"$PREVIOUS"
+IFS=. read -r cur_major cur_minor cur_patch <<<"$CURRENT"
+if [[ "$prev_major.$prev_minor" != "$cur_major.$cur_minor" || "$prev_major" != 0 ]] \
+  || ((prev_patch >= cur_patch)); then
+  echo "patch-compat: $PREVIOUS is not an earlier 0.y.z on this workspace's line ($CURRENT)" >&2
+  exit 2
+fi
 SIBLINGS=(alint-core alint-dsl alint-rules alint-output alint-lsp alint-testkit)
 CHECKED=(alint alint-lsp alint-testkit)
 
@@ -60,9 +76,29 @@ for crate in "${CHECKED[@]}"; do
       echo "$sibling = { path = \"$ROOT/crates/$sibling\" }"
     done
   } >>"$dir/Cargo.toml"
-  echo "==> patch-compat: $crate $PREVIOUS against $ROOT"
-  if ! (cd "$dir" && CARGO_TARGET_DIR="$TARGET" cargo check --quiet --keep-going); then
+  rm -f "$dir/Cargo.lock"
+  echo "==> patch-compat: $crate $PREVIOUS against $ROOT ($CURRENT)"
+  if ! (cd "$dir" && CARGO_TARGET_DIR="$TARGET" cargo check --quiet --keep-going --all-features); then
     echo "patch-compat: $crate $PREVIOUS does not compile against this workspace" >&2
+    failed=1
+    continue
+  fi
+  # Every sibling the build used must be this workspace's copy (`name vX (path)`).
+  if ! graph="$(cd "$dir" && cargo tree --quiet --all-features --prefix none -e normal,build \
+    --format '{p}')"; then
+    echo "patch-compat: could not read $crate $PREVIOUS's dependency graph" >&2
+    failed=1
+    continue
+  fi
+  others=()
+  for sibling in "${SIBLINGS[@]}"; do
+    [[ "$sibling" != "$crate" ]] && others+=("$sibling")
+  done
+  pattern="^($(IFS='|'; echo "${others[*]}")) v"
+  unpatched="$(grep -E "$pattern" <<<"$graph" | grep -vF "($ROOT/crates/" | sort -u || true)"
+  if [[ -n "$unpatched" ]]; then
+    echo "patch-compat: $crate $PREVIOUS built against siblings outside this workspace:" >&2
+    echo "$unpatched" >&2
     failed=1
   fi
 done

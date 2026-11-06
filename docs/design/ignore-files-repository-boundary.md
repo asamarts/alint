@@ -199,12 +199,15 @@ documented rather than fixed:
   is the editor form, which never leaves the root for the target or a `content_from`), so a
   target outside the root and an ignore file whose content comes from outside it are predicted
   like the real run; `file_create` and `create_and_register` (a missing member) implement it;
-- judges a create by every name the walk could list it under (`created_names`): the path as
-  written, when it reads as one inside the root (an absolute path stripped of the root as given
-  or of its canonical form), and where the file lands once symlinks resolve. It is resolved
-  when the rule sees it under either, and outside the root when it lands there, so a create
-  through `sub/up -> ..`, through an ignored symlinked directory, or by an absolute or `..`
-  path that leads back into the root is predicted applied, as the real run finds it;
+- judges a create by two names (`created_names`): the path as written, when it reads as one
+  inside the root (an absolute path stripped of the root as given or of its canonical form),
+  and where the file lands once symlinks resolve. It is resolved when the rule sees it under
+  either, and outside the root when it lands there, so a create through `sub/up -> ..`,
+  through an ignored symlinked directory, or by an absolute or `..` path that leads back into
+  the root is predicted applied, as the real run finds it. A rule without a `paths:` scope
+  (`dir_exists`, `cross_file`) looks for the path as written, normalized as it normalizes it,
+  so only that name counts, and a member written out of the root never matches (follow-up
+  below);
 - keeps the first create of each ignore file, keyed by its resolved path, since the real fix
   skips a file that is already there; and `DirIgnores::with_created` compares directories
   resolved (`pathsafe::resolve_existing_prefix`), so an ignore file created through an in-tree
@@ -245,3 +248,24 @@ landing inside the root, was predicted unresolved although the real run resolves
 `dry_run_agrees_with_fix_for_a_member_created_outside_the_root`, and unit tests for both fixers'
 `created_file`. `fix --diff` does not make the prediction; its help no longer claims its exit
 code matches a real `fix`.
+
+**Third review (after v0.21.1).** The second review's "resolved under either name" was right only
+for a rule with a `paths:` scope. `dir_exists` and `cross_file` have none, so the landed name was
+accepted unchecked: a `dir_create` through an ignored symlinked directory or through
+`deep/x/up -> ..`, and a `create_and_register` member below an ignored alias, were predicted
+applied while the real run left them unresolved. Such a rule now counts only the path as written,
+normalized as the rule normalizes it, and a member written out of the root (absolute, or `..`
+back in) never matches, as `cross_file`'s `member_exists` finds. `pathsafe::resolve_existing_prefix`
+now lets a `..` cancel a directory that does not exist yet (`newdir/../x.txt` under
+`create_parents`), where it returned `None` and the create read as outside the root. `fix --diff`
+also hides a create outside the root from a rule with redacted findings: it found the hidden files
+through the editor form, which never leaves the root, and now adds `Fixer::created_file` and
+`created_dir`. Limits left documented in `cli/fix.md`: an ignore file created outside the root,
+a created `.git/info/exclude` or repository marker, `root_only`, other names the walk lists a file
+under through in-tree symlinks, and case differences on a case-insensitive filesystem. Tests:
+`fix_flags.rs` `dry_run_agrees_with_fix_for_a_rule_without_a_paths_scope_through_a_symlink`,
+`dry_run_agrees_with_fix_for_a_member_written_back_into_the_root` and
+`dry_run_agrees_with_fix_for_a_create_through_a_directory_it_makes`; `evidence_redaction.rs`
+`fix_diff_omits_a_sensitive_create_outside_the_root`; `pathsafe.rs`
+`a_dotdot_after_a_missing_directory_cancels_it` and
+`a_leftover_dotdot_steps_up_from_where_a_symlink_lands`.

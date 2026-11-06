@@ -7,18 +7,18 @@ How fast is alint, how do we measure it, and where do the numbers live.
 `linux-x86_64` (Intel Core i7-6700HQ 4-core / 15 GB / ext4 / rustc 1.97.0, the
 bench host). Canonical since 2026-07-15; the retired 3900X dev-box series is
 retained at [`macro/results/linux-x86_64-ryzen-3900x/`](macro/results/linux-x86_64-ryzen-3900x/)
-and summarized in [`legacy/HISTORY.md`](legacy/HISTORY.md). Latest published release: **v0.21.0**
-(2026-11-01). Headline full-run wall-times at 1M files (sourced from
+and summarized in [`legacy/HISTORY.md`](legacy/HISTORY.md). Latest published release: **v0.21.1**
+(2026-11-05). Headline full-run wall-times at 1M files (sourced from
 [`HISTORY.md`](HISTORY.md)):
 
-| Workload (1M, full) | Workload revision | v0.21.0 |
+| Workload (1M, full) | Workload revision | v0.21.1 |
 |---|---|---:|
-| S1 layout and path | r2 | 4.14 s ± 0.10 |
-| S2 per-file content | r2 | 5.30 s ± 0.04 |
-| S3 cross-file relational | r2 | 476.4 s ± 3.6 |
-| S4 workspace bundle | r4 | 8.61 s ± 0.07 |
+| S1 layout and path | r2 | 4.05 s ± 0.03 |
+| S2 per-file content | r2 | 5.20 s ± 0.00 |
+| S3 cross-file relational | r2 | 477.5 s ± 2.1 |
+| S4 workspace bundle | r4 | 8.35 s ± 0.03 |
 
-v0.21.0 starts new workload revisions: r2 for S1-S3 (and SFIX) and r4 for S4.
+v0.21.0 started new workload revisions, which v0.21.1 keeps: r2 for S1-S3 (and SFIX) and r4 for S4.
 The generated sources now end with a newline and no line starts or ends with a
 space. Before, S2's `final_newline` rule reported one finding per generated
 source and its whitespace rules tens of thousands more, so its timings measured
@@ -27,8 +27,8 @@ r1 to r3 for S4); [`HISTORY.md`](HISTORY.md) marks each reset.
 
 The full per-scenario, per-size trajectory (every release × 1k/10k/100k/1M ×
 full/changed) lives in [`HISTORY.md`](HISTORY.md); per-version raw snapshots
-under [`macro/results/linux-x86_64/v0.21.0/`](macro/results/linux-x86_64/v0.21.0/)
-and [`micro/results/linux-x86_64/v0.21.0/`](micro/results/linux-x86_64/v0.21.0/).
+under [`macro/results/linux-x86_64/v0.21.1/`](macro/results/linux-x86_64/v0.21.1/)
+and [`micro/results/linux-x86_64/v0.21.1/`](micro/results/linux-x86_64/v0.21.1/).
 
 ## Layout
 

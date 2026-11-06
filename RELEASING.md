@@ -627,6 +627,14 @@ Review checklist:
      the released version at the top.
    - The date and headline sentence extracted from `CHANGELOG.md` are suitable.
      If the sentence needs work, edit the changelog and re-render the history.
+   - Any benchmark figure the release's CHANGELOG entry cites (its headline
+     or a Performance bullet) holds in this run's `micro-det` job and macro
+     numbers, on this run's toolchain. If it held only in a PR's local
+     measurement, say which toolchain it was measured with.
+   - The workflow does not refresh the overview pages. In the same PR, point
+     `docs/benchmarks/README.md` ("Latest published release" and its 1M
+     table) and the "latest published" line in
+     `docs/benchmarks/micro/README.md` at the new version.
 
 4. **Investigation hand-off.** If a non-advisory cell drifts > 20 % vs the
    previous release (and the CV is below 10 % so it is a real signal), open

@@ -1370,6 +1370,11 @@ impl CompiledNestedSpec {
     /// [`Self::sensitive_configuration`] is set, as an environment-derived
     /// field of a top-level rule is: its errors and warnings leave the value
     /// out.
+    // A thin wrapper on the per-entry path of `for_each_dir` and
+    // `every_matching_has`, in another crate: with only `#[inline]` it stays a
+    // call, and those benches measure 0.4% more instructions.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn instantiate(
         &self,
         parent_id: &str,
@@ -1377,19 +1382,24 @@ impl CompiledNestedSpec {
         level: Level,
         tokens: &crate::template::PathTokens,
     ) -> RuleSpec {
-        let mut spec = self.spec.instantiate(parent_id, idx, level, tokens);
-        if self.sensitive_configuration {
-            spec.sensitive_fields = ["paths", "message", "policy_url", "when", "scope_filter"]
+        // Built in place: a `RuleSpec` moved out of a second call costs a
+        // copy per iterated entry, which `for_each_dir` measures.
+        let sensitive_fields = if self.sensitive_configuration {
+            ["paths", "message", "policy_url", "when", "scope_filter"]
                 .into_iter()
                 .map(str::to_string)
                 .chain(
-                    spec.extra
+                    self.spec
+                        .extra
                         .keys()
                         .filter_map(|key| key.as_str().map(str::to_string)),
                 )
-                .collect();
-        }
-        spec
+                .collect()
+        } else {
+            std::collections::BTreeSet::new()
+        };
+        self.spec
+            .instantiate_with(parent_id, idx, level, tokens, sensitive_fields)
     }
 }
 
@@ -1436,12 +1446,33 @@ impl NestedRuleSpec {
         acc
     }
 
+    // A thin wrapper, as [`CompiledNestedSpec::instantiate`] is.
+    #[allow(clippy::inline_always)]
+    #[inline(always)]
     pub fn instantiate(
         &self,
         parent_id: &str,
         idx: usize,
         level: Level,
         tokens: &crate::template::PathTokens,
+    ) -> RuleSpec {
+        self.instantiate_with(
+            parent_id,
+            idx,
+            level,
+            tokens,
+            std::collections::BTreeSet::new(),
+        )
+    }
+
+    /// [`Self::instantiate`] with `sensitive_fields` set on the result.
+    fn instantiate_with(
+        &self,
+        parent_id: &str,
+        idx: usize,
+        level: Level,
+        tokens: &crate::template::PathTokens,
+        sensitive_fields: std::collections::BTreeSet<String>,
     ) -> RuleSpec {
         RuleSpec {
             id: format!("{parent_id}.require[{idx}]"),
@@ -1459,7 +1490,7 @@ impl NestedRuleSpec {
             when: self.when.clone(),
             expect_matches: self.expect_matches,
             sensitive: self.sensitive,
-            sensitive_fields: std::collections::BTreeSet::new(),
+            sensitive_fields,
             fix: None,
             // `git_tracked_only` and `respect_gitignore` are both kind-specific
             // options now (ADR-0008), stripped from the nested `extra` via
