@@ -13,12 +13,15 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.21.1** (2026-11-05): a fix release. Ignore files stop at the repository
-boundary, as git's do, and a linked worktree honors the repository's shared `info/exclude`; `fix
---dry-run` agrees with `fix` on whether a created file resolves its rule in many more layouts;
-configuration errors are readable again unless they could quote a value read from the environment or
-set in a `sensitive: true` rule, and such values stay out of errors, warnings and listings. The
-prior v0.21.0 (2026-11-01) was general-linter phase 2. `key_parity` keeps
+**Latest release: v0.21.2** (2026-11-06): a fix release. `fix --dry-run` and `fix --diff` agree with
+`fix` on creates in more layouts, and a create written outside the root no longer overwrites a
+file or writes through a symlink when a `..` follows a directory it makes; more paths read from
+the environment show as `<redacted>`, hidden paths stay out of redaction markers and log
+warnings, and `fix --baseline` skips grandfathered findings with redacted evidence; nested rules
+run 1.4% to 2% fewer instructions than in v0.21.1. The prior v0.21.1 (2026-11-05) made ignore
+files stop at the repository boundary, as git's do, and configuration errors readable again
+without showing values read from the environment. The prior v0.21.0 (2026-11-01) was
+general-linter phase 2. `key_parity` keeps
 locale and environment files in step with a reference across JSON, YAML, TOML, dotenv, INI, Java
 properties, Android string resources, and `.resx`, on an internal relation layer that a shadow
 port of `cross_file`'s `equals` relation also runs on, matching the existing implementation on
