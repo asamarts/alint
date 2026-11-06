@@ -149,10 +149,9 @@ pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     };
     let mut pending: Vec<&std::ffi::OsStr> = Vec::new();
     let mut rest = &components[end..];
-    // One component longer did not resolve, so the next one is missing.
-    if end < first_up
-        && let Some((Component::Normal(name), after)) = rest.split_first()
-    {
+    // Unless the walk stopped at the first `..`, the next component is the
+    // one a longer prefix did not resolve through: it is missing.
+    if let Some((Component::Normal(name), after)) = rest.split_first() {
         pending.push(name);
         rest = after;
     }
