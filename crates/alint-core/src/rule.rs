@@ -141,10 +141,7 @@ impl AnalysisFailure {
 
     /// Replace repository-controlled detail with the standard sensitive marker.
     pub fn redact_message(&mut self, rule_id: &str) {
-        let path = self
-            .path
-            .as_deref()
-            .map_or_else(String::new, |path| path.to_string_lossy().into_owned());
+        let path = locator_path(self.path.as_deref(), self.path_sensitive);
         let locator = format!(
             "explicit\0{rule_id}\0analysis_failure\0{}\0{path}",
             self.kind.as_str()
@@ -321,10 +318,7 @@ impl Violation {
 
     /// Apply the explicit `sensitive: true` policy to a flattened finding.
     pub fn redact_message(&mut self, rule_id: &str) {
-        let path = self
-            .path
-            .as_deref()
-            .map_or_else(String::new, |path| path.to_string_lossy().into_owned());
+        let path = locator_path(self.path.as_deref(), self.path_sensitive);
         let channel = match self.disposition {
             FindingDisposition::Violation => "violation",
             FindingDisposition::Note(kind) => kind.as_str(),
@@ -426,10 +420,7 @@ impl Violation {
         if !self.sensitive {
             return;
         }
-        let path = self
-            .path
-            .as_deref()
-            .map_or_else(String::new, |path| path.to_string_lossy().into_owned());
+        let path = locator_path(self.path.as_deref(), self.path_sensitive);
         let channel = match self.disposition {
             FindingDisposition::Violation => "violation",
             FindingDisposition::Note(kind) => kind.as_str(),
@@ -685,6 +676,17 @@ impl RuleResult {
 
     pub fn passed(&self) -> bool {
         self.violations.is_empty() && self.analysis_failures.is_empty()
+    }
+}
+
+/// `path` as a redaction locator names it. A path alint hides is left out:
+/// a marker that hashed it would tell anyone who can list the repository's
+/// files which one it is.
+pub(crate) fn locator_path(path: Option<&Path>, hidden: bool) -> String {
+    match path {
+        Some(_) if hidden => crate::CONFIGURATION_MASK.to_string(),
+        Some(path) => path.to_string_lossy().into_owned(),
+        None => String::new(),
     }
 }
 

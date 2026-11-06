@@ -407,9 +407,18 @@ impl RuleSpec {
             }
         }
         for (field, value) in &mut masked.extra {
-            if field.as_str().is_some_and(secret) {
-                mask_configuration_values(value, numbers);
+            let Some(field) = field.as_str().filter(|field| secret(field)) else {
+                continue;
+            };
+            // A nested rule parses `when_iter:` before the rules it guards, so
+            // its mask is an expression that parses too.
+            if field == "when_iter"
+                && let yaml_serde::Value::String(text) = value
+            {
+                *text = if text == "false" { "true" } else { "false" }.to_string();
+                continue;
             }
+            mask_configuration_values(value, numbers);
         }
         Some(masked)
     }

@@ -749,9 +749,41 @@ fn dry_run_agrees_with_fix_for_a_member_written_back_into_the_root() {
     );
 }
 
+#[cfg(unix)]
+#[test]
+fn dry_run_agrees_with_fix_for_a_member_written_with_a_backslash() {
+    // On Unix `crates\b` is one name, which the rule looks for, but the
+    // finding's key writes it `crates/b`. Creating that would leave the
+    // finding standing, so both runs decline and write nothing.
+    let tmp = tempfile::tempdir().unwrap();
+    let root = tmp.path();
+    std::fs::write(root.join("Cargo.toml"), "[workspace]\nmembers = []\n").unwrap();
+    std::fs::write(
+        root.join(".alint.yml"),
+        "version: 1\nrules:\n\
+         - id: member\n\
+         \x20 kind: cross_file\n\
+         \x20 relation: registered\n\
+         \x20 source: {file: 'crates\\b/Cargo.toml'}\n\
+         \x20 register_as: \"{dir}\"\n\
+         \x20 targets:\n\
+         \x20   - {file: Cargo.toml, extract: {toml: \"$.workspace.members[*]\"}}\n\
+         \x20 level: error\n\
+         \x20 fix:\n\
+         \x20   create_and_register: {content: \"[package]\\n\", applicability: safe}\n",
+    )
+    .unwrap();
+    let expected = outcomes(&[("member", "declined")]);
+    let [dry, real] = dry_and_real(root, &[]);
+    assert_eq!(dry, (expected.clone(), Some(1)), "dry run");
+    assert_eq!(real, (expected, Some(1)), "real fix");
+    assert!(!root.join("crates").exists(), "nothing is created");
+}
+
 #[test]
 fn dry_run_agrees_with_fix_for_a_create_through_a_directory_it_makes() {
-    // `newdir/..` is the root once `create_parents` makes `newdir`, so the
+    // Written out of the root (`../repo/...`), the path is used as given, so
+    // `newdir/..` is the root once `create_parents` makes `newdir` and the
     // file lands at `x.txt`; the dry run used to place it outside the root.
     let tmp = tempfile::tempdir().unwrap();
     let root = tmp.path().join("repo");

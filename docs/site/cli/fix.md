@@ -46,10 +46,12 @@ whose case differs from a directory already there. A `dir_exists` or
 `cross_file` rule looks for the path as written, so only that name counts for
 its create. `--diff` shows that first pass's edits
 without the prediction, so its exit code can be `0` where a real `fix` exits
-`1`. It also leaves out every file a rule with redacted findings would change
-([`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019), or a field
-read from the environment), so the diff cannot show a secret beside an edit;
-`alint fix` still applies those fixes.
+`1`. It also leaves out every file a rule with redacted findings reports on
+or would change ([`sensitive: true`](/docs/configuration/#sensitive-all-rules-v019),
+or a field read from the environment), together with other rules' edits to
+that file, so the diff does not show what those rules redact; `alint fix`
+still applies those fixes. A secret in a file no such rule reports on is
+diffed like any other content.
 
 If alint cannot obtain a policy verdict, the fix report carries a typed
 `analysis_failure` instead of a fix item. It is never passed to a fixer and

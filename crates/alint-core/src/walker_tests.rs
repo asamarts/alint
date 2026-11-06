@@ -1577,6 +1577,46 @@ fn symlink_cycles_are_skipped_not_fatal() {
 }
 
 #[test]
+fn read_for_analysis_tells_each_outcome_apart() {
+    // Callers report these differently, so the classification is the
+    // contract: a size at the cap is read, one past it is too large, and a
+    // file that is gone is missing rather than unreadable.
+    let tmp = tempfile::tempdir().unwrap();
+    let p = tmp.path().join("small.txt");
+    std::fs::write(&p, b"tiny").unwrap();
+    assert!(matches!(
+        read_for_analysis(&p, MAX_ANALYZE_BYTES),
+        AnalysisRead::Bytes(bytes) if bytes == b"tiny"
+    ));
+    assert!(matches!(
+        read_for_analysis(&p, MAX_ANALYZE_BYTES + 1),
+        AnalysisRead::TooLarge(size) if size == MAX_ANALYZE_BYTES + 1
+    ));
+    assert!(matches!(
+        read_for_analysis(&tmp.path().join("nope"), 0),
+        AnalysisRead::Missing
+    ));
+}
+
+#[cfg(unix)]
+#[test]
+fn read_for_analysis_reports_a_file_it_cannot_open_as_unreadable() {
+    use std::os::unix::fs::PermissionsExt;
+    let tmp = tempfile::tempdir().unwrap();
+    let p = tmp.path().join("locked.txt");
+    std::fs::write(&p, b"x").unwrap();
+    std::fs::set_permissions(&p, std::fs::Permissions::from_mode(0o000)).unwrap();
+    if std::fs::File::open(&p).is_ok() {
+        eprintln!("running with permission to read anything; skipping");
+        return;
+    }
+    assert!(matches!(
+        read_for_analysis(&p, 1),
+        AnalysisRead::Unreadable(_)
+    ));
+}
+
+#[test]
 fn read_capped_or_skip_missing_file_is_none() {
     let tmp = tempfile::tempdir().unwrap();
     assert!(read_capped_or_skip(&tmp.path().join("nope"), 0).is_none());

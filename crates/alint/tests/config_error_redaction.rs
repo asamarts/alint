@@ -476,6 +476,33 @@ fn a_structural_error_beside_a_secret_stays_readable() {
     );
     let output = run(root.path(), &["check"], &[("QUERY", "$.[secret-key")]);
     assert_redacted("bad JSONPath", &output, &["secret-key"]);
+
+    // A `when_iter:` is parsed before the nested rules, so it is masked with
+    // an expression that parses; a bad one stays redacted.
+    let nested = |when_iter: &str| {
+        format!(
+            "version: 1\nrules:\n  - id: each\n    kind: for_each_dir\n    \
+             select: 'crates/*'\n    when_iter: '{when_iter}'\n    level: error\n    \
+             require:\n      - kind: file_exists\n        paths: '{{path}}/Cargo.toml'\n        \
+             colour: red\n"
+        )
+    };
+    write(
+        root.path(),
+        ".alint.yml",
+        &nested(r#"iter.basename == "{{env.WANTED}}""#),
+    );
+    let output = run(root.path(), &["check"], &[("WANTED", "secret-crate")]);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(stderr.contains("unknown field `colour`"), "{stderr}");
+    assert!(!stderr.contains("secret-crate"), "{stderr}");
+    write(root.path(), ".alint.yml", &nested("{{env.CONDITION}}"));
+    let output = run(
+        root.path(),
+        &["check"],
+        &[("CONDITION", "iter.basename == secret-crate")],
+    );
+    assert_redacted("bad when_iter", &output, &["secret-crate"]);
 }
 
 #[test]

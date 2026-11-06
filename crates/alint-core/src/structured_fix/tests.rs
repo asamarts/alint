@@ -1228,8 +1228,8 @@ fn yaml_value_span_declines_non_scalar_alias_multidoc_and_bad_input() {
     let src = "a:\n  b: 1\nlist:\n  - x\n";
     assert!(resolve_value_span(Format::Yaml, src.as_bytes(), &[key("a")]).is_none());
     assert!(resolve_value_span(Format::Yaml, src.as_bytes(), &[key("list")]).is_none());
-    // An aliased value is an `Alias` node (saphyr does not expand) -> declines,
-    // so a splice can never corrupt the alias / its anchor.
+    // An aliased value resolves to the anchor's value with its span on `*d`, so
+    // the resolver declines it rather than replace the reference with a literal.
     let al = "defaults: &d 5\nuse: *d\n";
     assert!(resolve_value_span(Format::Yaml, al.as_bytes(), &[key("use")]).is_none());
     // A multi-document stream is ambiguous -> declines.
@@ -1318,8 +1318,9 @@ fn yaml_value_span_declines_block_scalars_and_implicit_null() {
 
 #[test]
 fn yaml_value_span_for_an_explicit_empty_key_is_none_or_exactly_the_value() {
-    // saphyr 0.2.2 resolves the empty key of `? \n: 8080` to `""`. The resolver
-    // must still decline or point at exactly the value -- never a bogus span.
+    // saphyr (0.2.2 and 0.3.3) loads the empty key of `? \n: 8080` as null, so
+    // the `""` path does not resolve. Should that change, the resolver must point
+    // at exactly the value -- never a bogus span.
     let src = "? \n: 8080\n";
     if let Some(span) = resolve_value_span(Format::Yaml, src.as_bytes(), &[key("")]) {
         assert_eq!(&src[span], "8080");

@@ -122,6 +122,50 @@ pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> S
     )
 }
 
+/// The file content [`fingerprint`] uses for `v`, read from under `root` once
+/// per path through `cache`. `None` for a sensitive finding, whose fingerprint
+/// leaves the content out, so its file is not read at all; for a directory (a
+/// nested rule's entry); and for a file it cannot read within the analysis
+/// cap, with a warning that names the file unless its path is one alint hides.
+pub fn fingerprint_content<'c, S: std::hash::BuildHasher>(
+    root: &Path,
+    v: &Violation,
+    cache: &'c mut std::collections::HashMap<std::path::PathBuf, Option<Vec<u8>>, S>,
+) -> Option<&'c [u8]> {
+    if v.is_sensitive() {
+        return None;
+    }
+    let path = v.path.as_deref()?;
+    cache
+        .entry(path.to_path_buf())
+        .or_insert_with(|| {
+            let full = root.join(path);
+            let size = std::fs::metadata(&full)
+                .ok()
+                .filter(std::fs::Metadata::is_file)?
+                .len();
+            let reason = match crate::walker::read_for_analysis(&full, size) {
+                crate::walker::AnalysisRead::Bytes(bytes) => return Some(bytes),
+                crate::walker::AnalysisRead::Missing => return None,
+                crate::walker::AnalysisRead::TooLarge(size) => {
+                    format!("it exceeds the analysis cap ({size} bytes)")
+                }
+                crate::walker::AnalysisRead::Unreadable(error) => error.to_string(),
+            };
+            let shown = if v.path_is_sensitive() {
+                crate::CONFIGURATION_MASK.to_string()
+            } else {
+                path.display().to_string()
+            };
+            tracing::warn!(
+                path = %shown,
+                "the baseline fingerprint leaves out the content of a file it cannot read: {reason}"
+            );
+            None
+        })
+        .as_deref()
+}
+
 /// Normalise a path to stable bytes. Windows separators are rewritten to `/`;
 /// Unix paths retain their exact bytes so lossy UTF-8 replacement cannot merge
 /// distinct filenames. Portable UTF-8 paths fingerprint exactly as before and
@@ -520,6 +564,43 @@ pub fn walk_exclude(root: &Path, baseline: &Path) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fingerprint_content_reads_each_file_once_and_only_files() {
+        let root = tempfile::tempdir().unwrap();
+        std::fs::write(root.path().join("a.txt"), "line\n").unwrap();
+        std::fs::create_dir(root.path().join("dir")).unwrap();
+        let mut cache = std::collections::HashMap::new();
+        let file = Violation::new("x").with_path(Path::new("a.txt"));
+        assert_eq!(
+            fingerprint_content(root.path(), &file, &mut cache),
+            Some(&b"line\n"[..])
+        );
+        // Cached: a second finding on the file reuses the first read.
+        std::fs::write(root.path().join("a.txt"), "changed\n").unwrap();
+        assert_eq!(
+            fingerprint_content(root.path(), &file, &mut cache),
+            Some(&b"line\n"[..])
+        );
+        for path in ["dir", "missing.txt"] {
+            let v = Violation::new("x").with_path(Path::new(path));
+            assert_eq!(fingerprint_content(root.path(), &v, &mut cache), None);
+        }
+        assert_eq!(
+            fingerprint_content(root.path(), &Violation::new("x"), &mut cache),
+            None
+        );
+        // A sensitive finding's fingerprint leaves its content out, so the
+        // file is not read at all.
+        let mut sensitive = Violation::new("x").with_path(Path::new("b.txt"));
+        std::fs::write(root.path().join("b.txt"), "secret\n").unwrap();
+        sensitive.mark_sensitive("test");
+        assert_eq!(
+            fingerprint_content(root.path(), &sensitive, &mut cache),
+            None
+        );
+        assert!(!cache.contains_key(Path::new("b.txt")));
+    }
 
     #[test]
     fn walk_exclude_leaves_out_only_the_baseline() {

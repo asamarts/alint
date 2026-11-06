@@ -712,6 +712,19 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   once more. The v0.21.1 CHANGELOG had claimed "within 0.5%"; the
   correction and the fix (the spec built in place, and a successful nested
   build returned straight from the builder) landed after the release.
+- **After v0.21.1 (for v0.21.2).** Two review rounds after the release
+  (#453 and its follow-up) closed further dry-run, `--diff`, `explain` and
+  redaction gaps: the forward-walking `resolve_existing_prefix`, a
+  `create_parents: false` create declined in every mode, `when_iter:` and
+  dotted selectors hiding their paths, redaction markers that leave out a
+  hidden path, and a baseline fingerprint that no longer tries to read a
+  directory (`alint baseline` and `check --baseline` warned once per
+  directory a nested rule flagged, naming it). The fingerprint of a finding
+  with a hidden path still hashes the path, unsalted, in the baseline file,
+  SARIF `partialFingerprints` and GitLab output, so a holder of the file can
+  test a guessed path. Changing it invalidates every existing baseline entry
+  for such findings, so it waits for v0.22, together with the
+  `non_exhaustive` structs above.
 - **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
   within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
   ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on

@@ -97,41 +97,86 @@ pub fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
     resolve_existing_prefix(candidate).is_some_and(|real| real.starts_with(&root_real))
 }
 
-/// `path` with its deepest existing ancestor canonicalized and the rest
-/// re-attached, or `None` when no ancestor resolves. A component that does not
-/// exist cannot be a symlink, so two names for one location (through an
-/// in-repo symlinked directory) resolve alike before the location exists, and
-/// a `..` after one (`new/../x`, as `create_dir_all` then a write resolve it)
-/// cancels it; a `..` left over steps up from the existing ancestor's real
-/// location.
+/// `path` with its existing components resolved as the OS resolves them and
+/// the rest re-attached, or `None` when its root (or, for a relative path, the
+/// working directory) does not resolve. The walk runs forward: an existing
+/// component resolves against the real location so far (through a symlink,
+/// to where it leads), and a `..` steps up from that real location. A
+/// component that does not exist cannot be a symlink, so it and every one
+/// after it wait in a pending tail, where a `..` cancels the last of them
+/// (`new/../x`, as `create_dir_all` then a write resolve it); once the tail
+/// empties, the next component may exist again (`new/../link/x`). Two names
+/// for one location (through an in-repo symlinked directory) resolve alike
+/// before the location exists.
 pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
-    let mut tail = PathBuf::new();
-    let mut cur = path.to_path_buf();
-    // `..`s met before the components they cancel (the walk runs backwards).
-    let mut up = 0usize;
-    loop {
-        if let Ok(mut real) = cur.canonicalize() {
-            for _ in 0..up {
-                real.pop();
-            }
-            return Some(if tail.as_os_str().is_empty() {
-                real
-            } else {
-                real.join(&tail)
-            });
+    use std::path::Component;
+    // A path that exists resolves in one call.
+    if let Ok(real) = path.canonicalize() {
+        return Some(real);
+    }
+    // The deepest existing ancestor before the first `..` also resolves in
+    // one call, so the walk starts there rather than at the root: a missing
+    // file in an existing directory costs two calls, not one per component.
+    let components: Vec<Component<'_>> = path.components().collect();
+    let base = components
+        .iter()
+        .take_while(|c| matches!(c, Component::Prefix(_) | Component::RootDir))
+        .count();
+    let first_up = components
+        .iter()
+        .position(|c| matches!(c, Component::ParentDir))
+        .unwrap_or(components.len());
+    // The whole path, when it has no `..`, is known not to resolve.
+    let mut end = if first_up == components.len() {
+        first_up.checked_sub(1)?
+    } else {
+        first_up
+    };
+    let mut real = loop {
+        let prefix: PathBuf = components[..end].iter().collect();
+        let resolved = if prefix.as_os_str().is_empty() {
+            Path::new(".").canonicalize()
+        } else {
+            prefix.canonicalize()
+        };
+        if let Ok(real) = resolved {
+            break real;
         }
-        // `cur` doesn't resolve yet; fold its last component into `tail` (or
-        // let it cancel a pending `..`) and retry against the parent.
-        match cur.components().next_back()? {
-            std::path::Component::ParentDir => up += 1,
-            std::path::Component::Normal(_) if up > 0 => up -= 1,
-            std::path::Component::Normal(name) => tail = Path::new(name).join(&tail),
-            _ => return None,
-        }
-        if !cur.pop() {
+        if end <= base {
             return None;
         }
+        end -= 1;
+    };
+    let mut pending: Vec<&std::ffi::OsStr> = Vec::new();
+    let mut rest = &components[end..];
+    // Unless the walk stopped at the first `..`, the next component is the
+    // one a longer prefix did not resolve through: it is missing.
+    if let Some((Component::Normal(name), after)) = rest.split_first() {
+        pending.push(name);
+        rest = after;
     }
+    for component in rest {
+        match component {
+            Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
+            Component::ParentDir => {
+                if pending.pop().is_none() {
+                    // `real` is canonical, so its parent is where `..` leads;
+                    // at the filesystem root it stays put, as `/..` does.
+                    real.pop();
+                }
+            }
+            Component::Normal(name) => {
+                if pending.is_empty()
+                    && let Ok(next) = real.join(name).canonicalize()
+                {
+                    real = next;
+                    continue;
+                }
+                pending.push(name);
+            }
+        }
+    }
+    Some(pending.into_iter().fold(real, |path, name| path.join(name)))
 }
 
 /// Derive a target path from `path` by matching it against the `from`
@@ -400,5 +445,33 @@ mod tests {
             resolve_existing_prefix(&root.join("link/new/../../x")),
             Some(root.join("elsewhere/x"))
         );
+    }
+
+    #[test]
+    #[cfg(unix)]
+    fn a_symlink_after_a_cancelled_missing_directory_still_resolves() {
+        use super::{resolve_existing_prefix, resolved_within_root};
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("real")).unwrap();
+        std::fs::create_dir_all(root.join("elsewhere/deep")).unwrap();
+        std::os::unix::fs::symlink(root.join("real"), root.join("alias")).unwrap();
+        std::os::unix::fs::symlink(root.join("elsewhere/deep"), root.join("link")).unwrap();
+        // Once `new/..` cancels, `alias` exists and leads to `real`.
+        assert_eq!(
+            resolve_existing_prefix(&root.join("new/../alias/x.txt")),
+            Some(root.join("real/x.txt"))
+        );
+        // And `link/..` steps up from where `link` lands, not back to the root.
+        assert_eq!(
+            resolve_existing_prefix(&root.join("new/../link/../x.txt")),
+            Some(root.join("elsewhere/x.txt"))
+        );
+        // A symlink out of the root after a cancelled directory is outside it.
+        std::os::unix::fs::symlink("/", root.join("real/out")).unwrap();
+        assert!(!resolved_within_root(
+            &root.join("real/new/../out/etc/passwd"),
+            &root.join("real")
+        ));
     }
 }

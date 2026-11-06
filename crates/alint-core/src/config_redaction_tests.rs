@@ -443,3 +443,22 @@ fn a_masked_jsonpath_still_parses_and_differs() {
         );
     }
 }
+
+#[test]
+fn a_masked_when_iter_still_parses_and_differs() {
+    for (when_iter, expected) in [
+        ("iter.basename == \"canary\"", "false"),
+        ("false", "true"),
+        ("true", "false"),
+    ] {
+        let mut rule = spec(&format!(
+            "id: r\nkind: for_each_dir\nlevel: error\nselect: 'a/*'\nwhen_iter: '{when_iter}'\n"
+        ));
+        rule.set_sensitive_fields(environment_fields(&["when_iter", "select"]));
+        let masked = rule.masked_configuration(NumberMask::Up).unwrap();
+        assert_eq!(masked.extra["when_iter"], expected, "{when_iter}");
+        assert!(crate::when::parse(expected).is_ok());
+        // Other fields keep the plain mask.
+        assert_eq!(masked.extra["select"], CONFIGURATION_MASK);
+    }
+}
