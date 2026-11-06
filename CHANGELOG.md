@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.21.2] - 2026-11-06
+
+A fix release: `fix --dry-run` and `fix --diff` agree with `fix` on creates in more layouts, and
+values read from the environment stay out of more of what alint prints. A create into a missing
+directory, under a file or through a symlink is predicted as `fix` runs it, and a create written
+outside the root no longer overwrites a file or writes through a symlink when a `..` follows a
+directory it makes. More paths read from the environment show as `<redacted>`, hidden paths stay
+out of redaction markers and log warnings, `fix --baseline` skips a grandfathered finding with
+redacted evidence, and nested rules run 1.4% to 2% fewer instructions than in v0.21.1.
+
 ### Changed
 
 - `ci/scripts/check-patch-compat.sh` deletes each previous crate's
@@ -8598,7 +8608,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.1...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.2...HEAD
+[0.21.2]: https://github.com/asamarts/alint/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/asamarts/alint/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/asamarts/alint/compare/v0.20.1...v0.21.0
 [0.20.1]: https://github.com/asamarts/alint/compare/v0.20.0...v0.20.1

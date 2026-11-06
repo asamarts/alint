@@ -712,8 +712,10 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   once more. The v0.21.1 CHANGELOG had claimed "within 0.5%"; the
   correction and the fix (the spec built in place, and a successful nested
   build returned straight from the builder) landed after the release.
-- **After v0.21.1 (for v0.21.2).** Three review rounds after the release
-  (#453, #454 and the round after it) closed further dry-run, `--diff`,
+- **v0.21.2 (2026-11-06).** A fix release. #453 won back the nested-rule
+  slowdown above (`for_each_dir` within 0.5% of v0.20.1 in the deterministic
+  gate on Rust 1.99.1), and saphyr moved to 0.3.3 (#426). Three review rounds
+  after v0.21.1 (#453, #454 and #455) closed further dry-run, `--diff`,
   `explain` and redaction gaps: the forward-walking
   `resolve_existing_prefix`, a `create_parents: false` create declined
   unless another create in the run makes its directory, creates declined
@@ -728,7 +730,11 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   SARIF `partialFingerprints` and GitLab output, so a holder of the file can
   test a guessed path. Changing it invalidates every existing baseline entry
   for such findings, so it waits for v0.22, together with the
-  `non_exhaustive` structs above.
+  `non_exhaustive` structs above. Before the cut, `check-patch-compat.sh`
+  built the published 0.21.0 and 0.21.1 `alint`, `alint-lsp` and
+  `alint-testkit` against this release's libraries, and the corpus replay
+  against v0.21.1 (on 1313d682d) showed no differences: 106 of
+  110 repositories replayed, 4 skipped, none crashed.
 - **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
   within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
   ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on
