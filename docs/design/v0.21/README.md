@@ -712,14 +712,18 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   once more. The v0.21.1 CHANGELOG had claimed "within 0.5%"; the
   correction and the fix (the spec built in place, and a successful nested
   build returned straight from the builder) landed after the release.
-- **After v0.21.1 (for v0.21.2).** Two review rounds after the release
-  (#453 and its follow-up) closed further dry-run, `--diff`, `explain` and
-  redaction gaps: the forward-walking `resolve_existing_prefix`, a
-  `create_parents: false` create declined in every mode, `when_iter:` and
-  dotted selectors hiding their paths, redaction markers that leave out a
-  hidden path, and a baseline fingerprint that no longer tries to read a
-  directory (`alint baseline` and `check --baseline` warned once per
-  directory a nested rule flagged, naming it). The fingerprint of a finding
+- **After v0.21.1 (for v0.21.2).** Three review rounds after the release
+  (#453, #454 and the round after it) closed further dry-run, `--diff`,
+  `explain` and redaction gaps: the forward-walking
+  `resolve_existing_prefix`, a `create_parents: false` create declined
+  unless another create in the run makes its directory, creates declined
+  under a file in every mode, `when_iter:` and dotted selectors hiding their
+  paths, redaction markers that leave out a hidden path (including the ones
+  a rule writes itself), `fix --baseline` matching a redacted finding as
+  `check --baseline` does, log fields escaped and scrubbed of environment
+  values, and a baseline fingerprint that reads a file only when it uses the
+  content (`alint baseline` and `check --baseline` warned once per directory
+  a nested rule flagged, naming it). The fingerprint of a finding
   with a hidden path still hashes the path, unsalted, in the baseline file,
   SARIF `partialFingerprints` and GitLab output, so a holder of the file can
   test a guessed path. Changing it invalidates every existing baseline entry

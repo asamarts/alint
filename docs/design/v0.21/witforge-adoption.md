@@ -23,9 +23,9 @@ and the WIT draft row in [`r8-readiness.md`](r8-readiness.md), blocked until thi
   macOS, and Windows runners and no self-hosted runner (step 3).
 - **witforge 0.1.2** followed on 2026-11-01, after alint's v0.21.0 tag. Its changes are
   validation, refusal, and `--check` behavior; its generated output is unchanged for every
-  contract 0.1.1 accepts. alint pins it since #423, which changed no generated file.
+  contract 0.1.1 accepts. alint pinned it from #423, which changed no generated file.
 - **witforge 0.2.0** followed on 2026-11-04. It emits `src/plain/worlds.rs` for the contract's
-  worlds, so alint pins it and regenerates the committed consumer; no other generated file
+  worlds, so alint pinned it and regenerated the committed consumer; no other generated file
   changed.
 - **witforge 0.3.0** followed on 2026-11-06. It adds `witforge diff`, JSON/SARIF diagnostics, and
   the GitHub Action; its generated output for this contract is unchanged, so alint pins it

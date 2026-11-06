@@ -285,4 +285,31 @@ shown by `fix --diff`) while `fix` failed on the write; the fixer now declines i
 Tests: `pathsafe.rs` `a_symlink_after_a_cancelled_missing_directory_still_resolves`;
 `engine/tests/fix.rs` `dry_run_judges_a_create_by_where_it_lands` (`absolute-link-up`,
 `back-in-alias`, `back-in-link-up`); `creators.rs`
-`file_create_without_create_parents_declines_a_missing_directory_in_every_mode`.
+`file_create_without_create_parents_declines_a_missing_directory`.
+
+**Fifth review (after the fourth).** Declining that create in every mode was wrong when another fix
+in the same run makes the directory (a `dir_create`, or a create with `create_parents`): the real
+run makes it first, or in its next pass, and then creates the file, while the dry run and
+`fix --diff`, which write nothing, found no directory. The fixer now declines a missing directory
+only in the real run. A preview leaves it to the engine, which declines such a create once every
+fixer has run unless a create in the same pass makes that directory
+(`Fixer::needs_existing_directory`). Every create fixer (`file_create`, `dir_create`,
+`create_and_register`) now also declines in every mode under a file or a dangling symlink, where
+`create_dir_all` fails, and runs its existence and symlink checks where a `..` after a directory it
+makes leads (`pathsafe::create_landing`). Those checks ran on the path as written, which does not
+exist yet, so `../repo/new/../dl`, with `dl` a dangling link out of the root, was written through
+the link. The editor form no longer offers a create whose directory is missing either.
+`created_names` keeps the written name of an absolute path with a `..`: it resolves the path up to
+its last `..` and appends the rest as written, so `<root>/sub/../alias/x.txt` keeps `alias/x.txt`
+while `deeplink/../t.txt` still follows the link. An out-of-root path with a trailing slash is
+confined without it, so the dry run and `fix` both create the file. A differential test against
+the OS replaces the hand-picked examples for `resolve_existing_prefix`; it found one limit, now
+documented: a dangling symlink whose target the create's own directories make. Tests:
+`engine/tests/fix.rs` `a_preview_declines_a_create_into_a_missing_directory_only_when_nothing_makes_it`
+and `dry_run_judges_a_create_by_where_it_lands` (`absolute-back-in-link`); `fix_flags.rs`
+`dry_run_and_diff_agree_with_fix_for_a_create_into_a_directory_another_fix_makes`; `creators.rs`
+`file_create_declines_under_a_file_in_every_mode` and
+`file_create_checks_where_a_dot_dot_after_a_new_directory_lands`; `file_ops.rs`
+`dir_create_declines_under_a_file_in_every_mode`; `pathsafe.rs`
+`resolve_existing_prefix_lands_where_the_os_creates` and
+`create_landing_is_where_a_dot_dot_after_a_new_directory_leads`.
