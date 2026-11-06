@@ -24,6 +24,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   previous version, so once the workspace version was bumped cargo ignored the
   `[patch]` and the check passed without testing anything.
 
+- The YAML parser behind source spans, structured fixes and duplicate-aware key
+  extraction (`saphyr` and `saphyr-parser`) moves from 0.2.2 to 0.3.3, the two
+  still pinned together. The update brings the parser's own fixes, among them
+  a bound on recursive alias expansion (beneath alint's own alias guard) and an
+  empty block scalar at the end of a file reading as an empty string instead
+  of a newline.
+
 ### Fixed
 
 - `fix --dry-run` agrees with `fix` again for a `dir_create` or
