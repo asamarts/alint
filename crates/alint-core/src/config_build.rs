@@ -111,3 +111,64 @@ impl Config {
         self
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::compatibility::{
+        ConfigCompatibility, ConfigRequirements, ConfigSourceClass, StableVersion,
+    };
+    use crate::facts::FactKind;
+
+    #[test]
+    fn every_setter_sets_its_field() {
+        let requires = ConfigRequirements {
+            alint: StableVersion::new(0, 22, 0),
+        };
+        let compatibility = ConfigCompatibility {
+            source: "base.yml".into(),
+            source_class: ConfigSourceClass::LocalExtend,
+            config_version: 1,
+            requires_alint: Some(StableVersion::new(0, 21, 0)),
+            consumer_version: None,
+        };
+        let config = Config::new(1, Vec::new())
+            .with_requires(Some(requires))
+            .with_extends(vec![ExtendsEntry::Url("base.yml".into())])
+            .with_ignore(vec!["target/**".into()])
+            .with_respect_gitignore(false)
+            .with_vars(HashMap::from([("org".into(), "acme".into())]))
+            .with_facts(vec![FactSpec {
+                id: "rust_files".into(),
+                kind: FactKind::CountFiles {
+                    count_files: "**/*.rs".into(),
+                },
+            }])
+            .with_fix_size_limit(Some(4096))
+            .with_nested_configs(true)
+            .with_allow_out_of_root(AllowOutOfRoot::All)
+            .with_baseline(Some(PathBuf::from(".alint-baseline.json")))
+            .with_compatibility(vec![compatibility.clone()])
+            .with_environment_values(vec!["secret".into()]);
+
+        assert_eq!(config.requires, Some(requires));
+        assert!(matches!(&config.extends[..], [ExtendsEntry::Url(u)] if u == "base.yml"));
+        assert_eq!(config.ignore, ["target/**"]);
+        assert!(!config.respect_gitignore);
+        assert_eq!(config.vars["org"], "acme");
+        assert!(matches!(
+            &config.facts[..],
+            [FactSpec { id, kind: FactKind::CountFiles { count_files } }]
+                if id == "rust_files" && count_files == "**/*.rs"
+        ));
+        assert_eq!(config.fix_size_limit, Some(4096));
+        assert!(config.nested_configs);
+        assert!(matches!(config.allow_out_of_root, AllowOutOfRoot::All));
+        assert_eq!(
+            config.baseline.as_deref(),
+            Some(std::path::Path::new(".alint-baseline.json"))
+        );
+        assert_eq!(config.compatibility, [compatibility]);
+        assert_eq!(config.environment_values, ["secret"]);
+    }
+}
