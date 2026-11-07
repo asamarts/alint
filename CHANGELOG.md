@@ -42,6 +42,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   A dry run of 20 creates spends 91% fewer instructions predicting them (6.8M to 0.6M) and 40%
   fewer in all; a single create costs the same.
 
+- The `.env` parser behind the `dotenv_path_*` rules, `key_parity` and dotenv fixes (`adotenv`)
+  moves from 0.10.4 to 1.3.0. Findings and fixes are unchanged: alint built with either version
+  gives identical `check` and `fix` output on 50,000 generated `.env` files, of which about
+  18,000 parse and 10,000 take a fix.
+
 ### Removed
 
 - The test-only `shadow-ir` feature of `alint-rules`, and the shadow implementation of

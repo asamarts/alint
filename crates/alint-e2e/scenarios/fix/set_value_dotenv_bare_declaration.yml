@@ -2,7 +2,7 @@ test_version: 1
 name: set_value assigns a dotenv bare declaration
 tags: [fix, dotenv_path_equals, set_value, dotenv]
 
-# adotenv 0.2 represents `PORT` as a key with no assigned value. The native
+# adotenv represents `PORT` as a key with no assigned value. The native
 # editor inserts `=8080` at the key boundary; the sibling remains byte-identical.
 
 given:

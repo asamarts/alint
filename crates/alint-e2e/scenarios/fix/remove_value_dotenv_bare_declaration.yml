@@ -2,7 +2,7 @@ test_version: 1
 name: remove_value removes a dotenv bare declaration
 tags: [fix, dotenv_path_absent, remove_value, dotenv]
 
-# adotenv 0.2 retains a bare declaration distinctly from an empty assignment.
+# adotenv retains a bare declaration distinctly from an empty assignment.
 # alint maps it to JSON null, the absent rule still sees the key, and the native
 # removal edit removes the complete declaration without touching its sibling.
 

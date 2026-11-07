@@ -793,7 +793,7 @@ mod xml {
     }
 }
 
-/// Dotenv spans and edits delegated to `adotenv` 0.2's lossless document model.
+/// Dotenv spans and edits delegated to `adotenv`'s lossless document model.
 /// The fixer consumes the crate's native verified edit ranges and replacements;
 /// it does not reconstruct or diff the edited document. A key that appears more
 /// than once is ambiguous and therefore declines rather than guessing which

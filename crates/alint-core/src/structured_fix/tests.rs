@@ -672,7 +672,7 @@ fn dotenv_serialize_declines_an_unescapable_control_char() {
 
 #[test]
 fn dotenv_value_span_is_byte_accurate_with_multibyte_neighbors() {
-    // Portable keys are ASCII in adotenv 0.10.4, but surrounding comments and the
+    // Portable keys are ASCII in adotenv, but surrounding comments and the
     // value can be multibyte. The span must still use original UTF-8 bytes.
     let src = "# café\nKEY=☕\nPORT=1\n";
     let span = resolve_value_span(Format::Dotenv, src.as_bytes(), &[key("KEY")]).unwrap();
@@ -1602,7 +1602,7 @@ fn finalize_preserves_uniform_crlf_with_a_multiline_string() {
     );
 }
 
-// ---- dotenv: native verified edits through adotenv 0.10.4 ----
+// ---- dotenv: native verified edits through adotenv ----
 
 #[test]
 fn dotenv_native_edits_decline_over_budget_documents() {
