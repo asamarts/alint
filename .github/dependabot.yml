@@ -11,6 +11,10 @@ version: 2
 # This is the lane that actually rots: docker/setup-buildx
 # minor-pinned to @v3 means bug fixes get picked up; @v4 majors
 # arrive as PRs we evaluate.
+#
+# Each lane's `commit-message.prefix` carries its own scope
+# (`chore(deps)`), so `include: scope` stays off: it appends a second
+# one (`chore(deps)(deps): ...`).
 updates:
   - package-ecosystem: cargo
     directory: /
@@ -46,7 +50,6 @@ updates:
         versions: ["0.21.x"]
     commit-message:
       prefix: "chore(deps)"
-      include: scope
 
   - package-ecosystem: github-actions
     directory: /
@@ -71,7 +74,6 @@ updates:
       - dependency-name: "dtolnay/rust-toolchain"
     commit-message:
       prefix: "chore(actions)"
-      include: scope
 
   # ── Distribution + editor packaging ecosystems ─────────────────────
   # Same cadence, grouping and commit style as the two lanes above. Each
@@ -108,7 +110,6 @@ updates:
         versions: [">=12"]
     commit-message:
       prefix: "chore(deps)"
-      include: scope
 
   - package-ecosystem: npm
     directory: /npm
@@ -125,7 +126,6 @@ updates:
           - minor
     commit-message:
       prefix: "chore(deps)"
-      include: scope
 
   - package-ecosystem: cargo
     directory: /editors/zed
@@ -142,7 +142,6 @@ updates:
           - minor
     commit-message:
       prefix: "chore(deps)"
-      include: scope
 
   - package-ecosystem: gradle
     directory: /editors/jetbrains
@@ -159,7 +158,6 @@ updates:
           - minor
     commit-message:
       prefix: "chore(deps)"
-      include: scope
 
   # The release image (/Dockerfile). Its base is digest-pinned, so this is
   # the lane that moves the digest forward. bench/Dockerfile is deliberately
@@ -175,4 +173,3 @@ updates:
     open-pull-requests-limit: 5
     commit-message:
       prefix: "chore(docker)"
-      include: scope
