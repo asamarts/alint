@@ -6,6 +6,22 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `cross_file` reads the values it compares through the relation layer: the run's read and
+  decode caches and the extract adapter `key_parity` already uses (ADR-0025 decision 3, gate 1).
+  Findings are unchanged. A file the configuration names (`source.file`, a `targets` entry) is
+  read and decoded once per run for every rule that names it; a file a glob matches is still
+  read once per rule and not kept, so memory does not grow with the matches. A glob-matched file
+  whose name is not UTF-8 reads through the same path.
+- `alint fix` clears the relation caches after a rule's fix lands, so a rule evaluated later in
+  the same pass reads a file that fix created, removed or renamed as it now is.
+
+### Removed
+
+- The test-only `shadow-ir` feature of `alint-rules`, and the shadow implementation of
+  `cross_file` `equals` it enabled, now that the relation layer is the implementation.
+
 ## [0.21.2] - 2026-11-06
 
 A fix release: `fix --dry-run` and `fix --diff` agree with `fix` on creates in more layouts, and

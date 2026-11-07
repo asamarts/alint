@@ -1456,6 +1456,16 @@ impl Engine {
                     status,
                 });
             }
+            // A fix may have created, removed, or renamed a file on disk
+            // already (content edits wait in the compose buffer), so a later
+            // rule's relation reads must not come from the caches.
+            if !dry_run
+                && items
+                    .iter()
+                    .any(|item| matches!(item.status, FixStatus::Applied(_)))
+            {
+                index.clear_relation_caches();
+            }
             push_fix_result(
                 &mut results,
                 Arc::from(entry.rule.id()),
