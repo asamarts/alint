@@ -36,11 +36,25 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `baseline::apply` takes a fingerprinter that returns `baseline::Fingerprints` (from
   `baseline::fingerprints`) to match both forms; one that returns a `String`, as before, matches
   only the new form.
+- `fix --dry-run` and `fix --diff` read the walk's ignore files once per pass, not once per
+  predicted create (ADR-0030 decision 4): the overrides, the repository boundary, the ignore
+  files above the root and the global excludes file once, and each directory's ignore files once.
+  A dry run of 20 creates spends 91% fewer instructions predicting them (6.8M to 0.6M) and 40%
+  fewer in all; a single create costs the same.
 
 ### Removed
 
 - The test-only `shadow-ir` feature of `alint-rules`, and the shadow implementation of
   `cross_file` `equals` it enabled, now that the relation layer is the implementation.
+
+### Fixed
+
+- `fix --dry-run` and `fix --diff` predict where a create lands when a symlink on its path leads
+  nowhere until the create's own directories exist (ADR-0030 decision 4). A path written as
+  given, which `allow_out_of_root` permits, such as `../repo/made/../pointer/p.txt` in a
+  repository `repo` with `pointer -> made`, makes `made` and lands in it; the dry run reported
+  the create unresolved. This was the one difference v0.21.2's OS differential test found; the
+  test now covers it, directly, through another symlink and through `..`.
 
 ## [0.21.2] - 2026-11-06
 

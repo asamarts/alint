@@ -107,9 +107,9 @@ pub fn resolved_within_root(candidate: &Path, root: &Path) -> bool {
 /// (`new/../x`, as `create_dir_all` then a write resolve it); once the tail
 /// empties, the next component may exist again (`new/../link/x`). Two names
 /// for one location (through an in-repo symlinked directory) resolve alike
-/// before the location exists. A symlink that leads nowhere counts as missing,
-/// though `create_dir_all` can make the place it leads to on the way
-/// (`b/../a/x` with `a -> b`); the dry run then predicts the wrong place.
+/// before the location exists. A symlink that leads nowhere is missing too,
+/// unless it leads into a directory `create_dir_all` made earlier in the same
+/// path (`b/../a/x` with `a -> b` lands in `b`).
 pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     use std::path::Component;
     // A path that exists resolves in one call.
@@ -134,7 +134,7 @@ pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
     } else {
         first_up
     };
-    let mut real = loop {
+    let real = loop {
         let prefix: PathBuf = components[..end].iter().collect();
         let resolved = if prefix.as_os_str().is_empty() {
             Path::new(".").canonicalize()
@@ -149,36 +149,138 @@ pub(crate) fn resolve_existing_prefix(path: &Path) -> Option<PathBuf> {
         }
         end -= 1;
     };
-    let mut pending: Vec<&std::ffi::OsStr> = Vec::new();
     let mut rest = &components[end..];
+    // A symlink met after a `..` can lead into a directory made before it,
+    // so only then are the made directories worth keeping.
+    let mut landing = Landing {
+        real,
+        pending: Vec::new(),
+        made: rest
+            .iter()
+            .any(|c| matches!(c, Component::ParentDir))
+            .then(Vec::new),
+    };
     // Unless the walk stopped at the first `..`, the next component is the
     // one a longer prefix did not resolve through: it is missing.
     if let Some((Component::Normal(name), after)) = rest.split_first() {
-        pending.push(name);
+        landing.make(name);
         rest = after;
     }
     for component in rest {
+        landing.step(*component);
+    }
+    Some(landing.position())
+}
+
+/// A create's walk along its path, as `create_dir_all` then a write take it:
+/// the real directory reached, the names below it the create makes, and, when
+/// a symlink could still lead into them, every directory made so far.
+struct Landing {
+    real: PathBuf,
+    pending: Vec<std::ffi::OsString>,
+    made: Option<Vec<PathBuf>>,
+}
+
+/// How many symlinks a lookup follows before giving up, as the OS does.
+const MAX_SYMLINKS: usize = 40;
+
+impl Landing {
+    fn step(&mut self, component: Component<'_>) {
         match component {
             Component::Prefix(_) | Component::RootDir | Component::CurDir => {}
             Component::ParentDir => {
-                if pending.pop().is_none() {
+                if self.pending.pop().is_none() {
                     // `real` is canonical, so its parent is where `..` leads;
                     // at the filesystem root it stays put, as `/..` does.
-                    real.pop();
+                    self.real.pop();
                 }
             }
             Component::Normal(name) => {
-                if pending.is_empty()
-                    && let Ok(next) = real.join(name).canonicalize()
-                {
-                    real = next;
-                    continue;
+                if self.pending.is_empty() {
+                    let next = self.real.join(name);
+                    if let Ok(real) = next.canonicalize() {
+                        self.real = real;
+                        return;
+                    }
+                    if let Some((real, pending)) = self.through_dangling(&next, 0) {
+                        self.real = real;
+                        self.pending = pending;
+                        return;
+                    }
                 }
-                pending.push(name);
+                self.make(name);
             }
         }
     }
-    Some(pending.into_iter().fold(real, |path, name| path.join(name)))
+
+    fn make(&mut self, name: &std::ffi::OsStr) {
+        self.pending.push(name.to_owned());
+        if self.made.is_some() {
+            let position = self.position();
+            if let Some(made) = &mut self.made {
+                made.push(position);
+            }
+        }
+    }
+
+    fn position(&self) -> PathBuf {
+        self.pending
+            .iter()
+            .fold(self.real.clone(), |path, name| path.join(name))
+    }
+
+    /// Where `link`, a symlink that does not resolve, leads now that the
+    /// directories this create made exist: a real directory and made names
+    /// below it. `None` when it is not a symlink or leads anywhere else.
+    fn through_dangling(
+        &self,
+        link: &Path,
+        followed: usize,
+    ) -> Option<(PathBuf, Vec<std::ffi::OsString>)> {
+        let made = self.made.as_deref().filter(|made| !made.is_empty())?;
+        if followed >= MAX_SYMLINKS {
+            return None;
+        }
+        let target = std::fs::read_link(link).ok()?;
+        // `link` sits in a canonical directory, which a relative target
+        // starts from.
+        let mut real = if target.has_root() {
+            PathBuf::new()
+        } else {
+            link.parent()?.to_path_buf()
+        };
+        let mut pending: Vec<std::ffi::OsString> = Vec::new();
+        for component in target.components() {
+            match component {
+                Component::Prefix(_) | Component::RootDir => real.push(component.as_os_str()),
+                Component::CurDir => {}
+                Component::ParentDir => {
+                    if pending.pop().is_none() {
+                        real.pop();
+                    }
+                }
+                Component::Normal(name) => {
+                    if pending.is_empty() {
+                        let next = real.join(name);
+                        if let Ok(resolved) = next.canonicalize() {
+                            real = resolved;
+                            continue;
+                        }
+                        if let Some(inner) = self.through_dangling(&next, followed + 1) {
+                            (real, pending) = inner;
+                            continue;
+                        }
+                    }
+                    pending.push(name.to_owned());
+                    let reached = pending.iter().fold(real.clone(), |path, n| path.join(n));
+                    if !made.contains(&reached) {
+                        return None;
+                    }
+                }
+            }
+        }
+        (!pending.is_empty()).then_some((real, pending))
+    }
 }
 
 /// Where a create of `path` lands once the OS resolves it, for the checks a
@@ -500,13 +602,30 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn a_loop_of_dangling_symlinks_stops_at_the_link_limit() {
+        use super::resolve_existing_prefix;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::os::unix::fs::symlink("b", root.join("a")).unwrap();
+        std::os::unix::fs::symlink("a", root.join("b")).unwrap();
+        // After `made/..` the resolver follows dangling symlinks, and `a` and
+        // `b` lead only to each other: it gives up at the link limit rather
+        // than recursing without end, and takes `a` as a name still to make.
+        assert_eq!(
+            resolve_existing_prefix(&root.join("made/../a/x.txt")),
+            Some(root.join("a/x.txt"))
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn resolve_existing_prefix_lands_where_the_os_creates() {
         // Every path of up to three components over a small tree (directories,
-        // a file, a symlinked directory, a missing name, a dangling symlink,
+        // a file, a symlinked directory, a missing name, dangling symlinks,
         // `..`), then a file name: wherever `create_dir_all` and a write
         // succeed, the file lands where the resolver said it would.
         use super::resolve_existing_prefix;
-        const NAMES: [&str; 7] = ["d", "e", "f", "l", "m", "dl", ".."];
+        const NAMES: [&str; 10] = ["d", "e", "f", "l", "m", "dl", "dn", "dc", "dd", ".."];
         let mut paths: Vec<Vec<&str>> = vec![Vec::new()];
         let mut frontier = paths.clone();
         for _ in 0..3 {
@@ -530,8 +649,13 @@ mod tests {
             std::fs::create_dir_all(root.join("d/e")).unwrap();
             std::fs::write(root.join("f"), "").unwrap();
             std::os::unix::fs::symlink("d/e", root.join("l")).unwrap();
-            // A dangling symlink to a place no path here creates.
-            std::os::unix::fs::symlink("nowhere/zz", root.join("dl")).unwrap();
+            // Dangling symlinks: to a name a path here makes (`m/../dl/x.txt`
+            // lands in `m`), directly, through another link, and through `..`;
+            // and to a place no path here makes.
+            std::os::unix::fs::symlink("m", root.join("dl")).unwrap();
+            std::os::unix::fs::symlink("dl", root.join("dc")).unwrap();
+            std::os::unix::fs::symlink("./d/../m", root.join("dd")).unwrap();
+            std::os::unix::fs::symlink("nowhere/zz", root.join("dn")).unwrap();
             let path = components
                 .iter()
                 .fold(root.clone(), |path, name| path.join(name))
