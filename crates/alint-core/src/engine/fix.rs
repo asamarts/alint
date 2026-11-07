@@ -877,18 +877,14 @@ impl Engine {
         // `--dry-run` pass has no buffer and writes nothing, exactly as before.
         let compose_buf: Option<RefCell<BTreeMap<PathBuf, Vec<u8>>>> =
             (!dry_run).then(|| RefCell::new(BTreeMap::new()));
-        let mut fix_ctx = FixContext {
-            root,
-            dry_run,
-            fix_size_limit: self.fix_size_limit,
-            // Set per-entry inside the loop below, so each fixer confines its
-            // config-declared paths against the OWNING rule's permission.
-            allow_out_of_root: false,
-            compose: compose_buf.as_ref(),
-            stage_ops,
-            process_environment: self.process_environment.as_ref(),
-            paths_sensitive: false,
-        };
+        // `allow_out_of_root` is set per entry inside the loop below, so each
+        // fixer confines its config-declared paths against the OWNING rule's
+        // permission.
+        let mut fix_ctx = FixContext::new(root, dry_run)
+            .with_fix_size_limit(self.fix_size_limit)
+            .with_compose(compose_buf.as_ref())
+            .with_stage_ops(stage_ops)
+            .with_process_environment(self.process_environment.as_ref());
 
         // Same dependency resolution as `run`, so a fix pass respects per-rule
         // diff and manifest scoping without touching false `when:` rules.

@@ -136,16 +136,7 @@ mod tests {
     }
 
     fn ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
-        FixContext {
-            root: tmp.path(),
-            dry_run,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        }
+        FixContext::new(tmp.path(), dry_run)
     }
 
     fn is_tracked(tmp: &TempDir, name: &str) -> bool {
@@ -337,16 +328,7 @@ mod tests {
         }
         let tmp = repo_with_tracked("build.o");
         let sink = std::cell::RefCell::new(Vec::new());
-        let fix_ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: Some(&sink),
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let fix_ctx = FixContext::new(tmp.path(), false).with_stage_ops(Some(&sink));
         let v = Violation::new("x").with_path(Path::new("build.o"));
         let out = GitUntrackFixer::new(Applicability::Unsafe)
             .apply(&v, &fix_ctx)

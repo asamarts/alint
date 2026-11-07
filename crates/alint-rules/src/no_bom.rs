@@ -343,16 +343,7 @@ mod utf16_tests {
             fixer.fix_edit(&vs[0], UTF16_NO_NUL, tmp.path()).is_none(),
             "the editor path must not strip it"
         );
-        let fctx = alint_core::FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let fctx = alint_core::FixContext::new(tmp.path(), false);
         let outcome = fixer.apply(&vs[0], &fctx).unwrap();
         assert!(
             matches!(outcome, alint_core::FixOutcome::Skipped(_)),

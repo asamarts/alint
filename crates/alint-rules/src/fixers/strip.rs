@@ -410,16 +410,7 @@ mod tests {
             );
             let tmp = TempDir::new().unwrap();
             std::fs::write(tmp.path().join("blob"), binary).unwrap();
-            let ctx = FixContext {
-                root: tmp.path(),
-                dry_run: false,
-                fix_size_limit: None,
-                allow_out_of_root: false,
-                compose: None,
-                stage_ops: None,
-                process_environment: None,
-                paths_sensitive: false,
-            };
+            let ctx = FixContext::new(tmp.path(), false);
             let outcome = fixer.apply(&viol, &ctx).unwrap();
             assert!(
                 matches!(outcome, FixOutcome::Skipped(_)),

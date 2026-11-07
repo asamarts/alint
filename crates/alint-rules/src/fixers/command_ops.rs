@@ -193,16 +193,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
-        FixContext {
-            root: tmp.path(),
-            dry_run,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        }
+        FixContext::new(tmp.path(), dry_run)
     }
 
     fn fixer(argv: &[&str]) -> CommandFixFixer {

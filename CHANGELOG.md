@@ -16,6 +16,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   whose name is not UTF-8 reads through the same path.
 - `alint fix` clears the relation caches after a rule's fix lands, so a rule evaluated later in
   the same pass reads a file that fix created, removed or renamed as it now is.
+- **Breaking (library API):** `alint-core`'s `FixContext`, `Config` and `CompiledNestedSpec`
+  are `#[non_exhaustive]` (ADR-0030 decision 2), so adding a field to them is no longer a
+  breaking change, and code outside `alint-core` can no longer build them with a struct
+  literal. Build a `FixContext` with `FixContext::new(root, dry_run)` and a `Config` with
+  `Config::new(version, rules)`, then the `with_*` setters for the other fields; a
+  `CompiledNestedSpec` comes from `CompiledNestedSpec::compile`, as before. The fields stay
+  public to read.
 
 ### Removed
 

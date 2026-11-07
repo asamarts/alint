@@ -135,3 +135,30 @@ fn load_extending_top(remote_body: &str, top_body: &str) -> alint_core::Config {
     drop(tmp);
     cfg
 }
+
+/// `Config::new` gives every field the value a file that sets only `version`
+/// and `rules` loads with.
+#[test]
+fn config_new_matches_a_minimal_loaded_config() {
+    let dir = tempfile::tempdir().unwrap();
+    let path = dir.path().join(".alint.yml");
+    std::fs::write(&path, "version: 1\nrules: []\n").unwrap();
+    let loaded = load(&path).unwrap();
+    let built = Config::new(1, Vec::new());
+    assert_eq!(built.version, loaded.version);
+    assert_eq!(built.requires.is_none(), loaded.requires.is_none());
+    assert_eq!(built.extends.len(), loaded.extends.len());
+    assert_eq!(built.ignore, loaded.ignore);
+    assert_eq!(built.respect_gitignore, loaded.respect_gitignore);
+    assert_eq!(built.vars, loaded.vars);
+    assert_eq!(built.facts.len(), loaded.facts.len());
+    assert_eq!(built.rules.len(), loaded.rules.len());
+    assert_eq!(built.fix_size_limit, loaded.fix_size_limit);
+    assert_eq!(built.nested_configs, loaded.nested_configs);
+    assert_eq!(
+        format!("{:?}", built.allow_out_of_root),
+        format!("{:?}", loaded.allow_out_of_root)
+    );
+    assert_eq!(built.baseline, loaded.baseline);
+    assert!(built.environment_values.is_empty() && loaded.environment_values.is_empty());
+}

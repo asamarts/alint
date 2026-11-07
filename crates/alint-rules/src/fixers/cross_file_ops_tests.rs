@@ -4,16 +4,7 @@ use std::collections::BTreeMap;
 use tempfile::TempDir;
 
 fn ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
-    FixContext {
-        root: tmp.path(),
-        dry_run,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    }
+    FixContext::new(tmp.path(), dry_run)
 }
 
 fn write(tmp: &TempDir, rel: &str, content: &[u8]) {
@@ -227,16 +218,9 @@ fn stage_mode_composes_without_writing() {
     write(&tmp, "copy.txt", b"stale\n");
     let compose = RefCell::new(BTreeMap::new());
     let sink = RefCell::new(Vec::new());
-    let fix_ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: Some(&compose),
-        stage_ops: Some(&sink),
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let fix_ctx = FixContext::new(tmp.path(), false)
+        .with_compose(Some(&compose))
+        .with_stage_ops(Some(&sink));
     let out = SyncFromFixer::new(PathBuf::from("canon.txt"), Applicability::Unsafe)
         .apply(&viol("copy.txt"), &fix_ctx)
         .unwrap();
@@ -273,16 +257,7 @@ fn allow_out_of_root_permits_an_out_of_root_source() {
     let src = outside.path().join("canon");
     std::fs::write(&src, b"external canonical\n").unwrap();
     write(&tmp, "copy.txt", b"stale\n");
-    let fix_ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: true,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let fix_ctx = FixContext::new(tmp.path(), false).with_allow_out_of_root(true);
     let out = SyncFromFixer::new(src, Applicability::Unsafe)
         .apply(&viol("copy.txt"), &fix_ctx)
         .unwrap();

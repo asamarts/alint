@@ -15,8 +15,13 @@ where
 }
 
 /// Parsed form of a `.alint.yml` file.
+///
+/// Outside deserialization, built with [`Config::new`] and the `with_*`
+/// setters, so a later field is an addition rather than a breaking change; the
+/// fields stay readable.
 #[derive(Debug, Clone, Deserialize, Default)]
 #[serde(deny_unknown_fields)]
+#[non_exhaustive]
 pub struct Config {
     pub version: u32,
     /// Highest minimum stable alint release required by any composed source.
@@ -109,11 +114,11 @@ pub struct Config {
 // load-bearing at the field level, so clippy's warning on the
 // default fn is noise here.
 #[allow(clippy::unnecessary_wraps)]
-fn default_fix_size_limit() -> Option<u64> {
+pub(crate) fn default_fix_size_limit() -> Option<u64> {
     Some(1 << 20)
 }
 
-fn default_respect_gitignore() -> bool {
+pub(crate) fn default_respect_gitignore() -> bool {
     true
 }
 
@@ -1320,7 +1325,10 @@ pub struct NestedRuleSpec {
 /// `Vec<CompiledNestedSpec>` from `Vec<NestedRuleSpec>` in
 /// their `build` impl; `evaluate_for_each` consumes the
 /// compiled form.
+///
+/// Built only by [`CompiledNestedSpec::compile`]; the fields stay readable.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct CompiledNestedSpec {
     /// The original nested-rule spec — passed to
     /// [`NestedRuleSpec::instantiate`] per iteration to get a
