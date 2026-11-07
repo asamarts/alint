@@ -752,12 +752,22 @@ fn assert_prediction_matches_walk(root: &Path, opts: &WalkOptions, expected: &[(
         .map(|entry| (entry.path.to_path_buf(), entry.is_dir))
         .collect();
     let entries = tree_entries(root);
+    // One `WalkSkips` for every entry, as `fix --dry-run` checks a pass's
+    // creates, reads each directory's ignore files once and must still agree.
+    let shared = WalkSkips::new(root, opts, &[]);
     for (rel, is_dir) in &entries {
         let walked = indexed.contains(&(rel.clone(), *is_dir));
         assert_eq!(
             would_walk_skip(root, opts, rel, *is_dir, &[]),
             !walked,
             "would_walk_skip disagrees with the walk on {} (respect_gitignore: {})",
+            rel.display(),
+            opts.respect_gitignore,
+        );
+        assert_eq!(
+            shared.skips(rel, *is_dir),
+            !walked,
+            "a shared WalkSkips disagrees with the walk on {} (respect_gitignore: {})",
             rel.display(),
             opts.respect_gitignore,
         );
@@ -1268,6 +1278,11 @@ fn would_walk_skip_reads_the_ignore_files_a_fix_creates() {
             )
         })
         .collect();
+    // One `WalkSkips` for every case reads each created file where it lands.
+    let shared = WalkSkips::new(&root, &opts, &created);
+    for (rel, skipped) in &predicted {
+        assert_eq!(shared.skips(Path::new(rel), false), *skipped, "{rel}");
+    }
     // Nothing is excluded before the files exist.
     for (rel, _) in cases {
         assert!(

@@ -531,6 +531,8 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         symlink("../outside", root.join("out")).unwrap();
         // A `..` after it steps up from `real/deep`, not back to the root.
         symlink("real/deep", root.join("deeplink")).unwrap();
+        // Leads nowhere until a create makes `made`.
+        symlink("made", root.join("pointer")).unwrap();
         let path = |p: &Path| p.to_string_lossy().into_owned();
         let rules = vec![
             create_rule("loop", "x.txt", "sub/up/x.txt", b"x", false),
@@ -586,6 +588,15 @@ fn dry_run_judges_a_create_by_where_it_lands() {
                 b"x",
                 false,
             ),
+            // The create makes `made`, steps back out, and `pointer` now leads
+            // into it.
+            create_rule(
+                "back-in-dangling",
+                "made/p.txt",
+                "../root/made/../pointer/p.txt",
+                b"x",
+                false,
+            ),
         ];
         let opts = crate::WalkOptions {
             respect_gitignore: true,
@@ -618,6 +629,7 @@ fn dry_run_judges_a_create_by_where_it_lands() {
         ("back-in-alias", true),
         ("back-in-link-up", false),
         ("absolute-back-in-link", true),
+        ("back-in-dangling", true),
     ]
     .into_iter()
     .map(|(id, applied)| (id.to_string(), applied))

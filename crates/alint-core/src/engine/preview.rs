@@ -78,8 +78,10 @@ impl Engine {
                 created_ignores.push((landed.as_path(), content));
             }
         }
-        // `git ls-files`, once, when a `git_tracked_only` rule creates a file.
+        // `git ls-files`, once, when a `git_tracked_only` rule creates a file,
+        // and the walk's ignore files, once for every create.
         let tracked = std::cell::OnceCell::new();
+        let skips = crate::walker::WalkSkips::new(root, walk_opts, &created_ignores);
         for (result, item, entry, path, names, is_dir, _) in &creates {
             // A sensitive item's reason leaves the target out: its rule's
             // configuration or evidence can hold it, as the redacted summary
@@ -108,12 +110,11 @@ impl Engine {
                         Some(written) => Self::predicted_unresolved(
                             root,
                             index,
-                            walk_opts,
                             entry,
                             &written,
                             &shown(&written),
                             *is_dir,
-                            &created_ignores,
+                            &skips,
                             &tracked,
                         ),
                         None => Some(format!(
@@ -130,12 +131,11 @@ impl Engine {
                         Self::predicted_unresolved(
                             root,
                             index,
-                            walk_opts,
                             entry,
                             name,
                             &shown(name),
                             *is_dir,
-                            &created_ignores,
+                            &skips,
                             &tracked,
                         )
                     });
@@ -205,12 +205,11 @@ impl Engine {
     fn predicted_unresolved(
         root: &Path,
         index: &FileIndex,
-        walk_opts: &crate::WalkOptions,
         entry: &RuleEntry,
         target: &Path,
         shown: &str,
         is_dir: bool,
-        created_ignores: &[(&Path, &[u8])],
+        skips: &crate::walker::WalkSkips<'_>,
         tracked: &std::cell::OnceCell<Option<HashSet<PathBuf>>>,
     ) -> Option<String> {
         if !is_dir
@@ -227,14 +226,18 @@ impl Engine {
         }
         if !is_dir && entry.rule.sees_path_past_walk(target) {
             // The rule's own stat refuses a path that resolves out of the root.
-            return (!crate::pathsafe::resolved_within_root(&root.join(target), root)).then(|| {
+            let within = skips.canonical_root().is_some_and(|canonical| {
+                crate::pathsafe::resolve_existing_prefix(&root.join(target))
+                    .is_some_and(|real| real.starts_with(canonical))
+            });
+            return (!within).then(|| {
                 format!(
                     "{shown} resolves outside the root through a symlink, so the rule would \
                      never see it"
                 )
             });
         }
-        if crate::walker::would_walk_skip(root, walk_opts, target, is_dir, created_ignores) {
+        if skips.skips(target, is_dir) {
             Some(format!(
                 "{shown} is excluded from the walk (an ignore file, `ignore:`, or a symlink \
                  the walk does not enter), so the rule would never see it"
