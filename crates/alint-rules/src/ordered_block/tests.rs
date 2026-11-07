@@ -675,16 +675,7 @@ fn apply_sorts_the_file_on_disk() {
     let tmp = TempDir::new().unwrap();
     let t = "# keep-sorted start\ncharlie\nalpha\nbravo\n# keep-sorted end\n";
     std::fs::write(tmp.path().join("f.txt"), t).unwrap();
-    let ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(tmp.path(), false);
     let outcome = sort_fixer(Comparator::Lexical, false)
         .apply(&Violation::new("x").with_path(Path::new("f.txt")), &ctx)
         .unwrap();
@@ -701,16 +692,7 @@ fn apply_dry_run_leaves_disk_untouched() {
     let tmp = TempDir::new().unwrap();
     let t = "# keep-sorted start\nb\na\n# keep-sorted end\n";
     std::fs::write(tmp.path().join("f.txt"), t).unwrap();
-    let ctx = FixContext {
-        root: tmp.path(),
-        dry_run: true,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(tmp.path(), true);
     let outcome = sort_fixer(Comparator::Lexical, false)
         .apply(&Violation::new("x").with_path(Path::new("f.txt")), &ctx)
         .unwrap();
@@ -727,16 +709,7 @@ fn apply_skips_an_already_sorted_file() {
     let tmp = TempDir::new().unwrap();
     let t = "# keep-sorted start\na\nb\n# keep-sorted end\n";
     std::fs::write(tmp.path().join("f.txt"), t).unwrap();
-    let ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(tmp.path(), false);
     let outcome = sort_fixer(Comparator::Lexical, false)
         .apply(&Violation::new("x").with_path(Path::new("f.txt")), &ctx)
         .unwrap();
@@ -757,16 +730,7 @@ fn apply_declines_an_unclosed_finding_even_with_an_unsorted_block() {
     // An unsorted block: without the guard, apply(unclosed) would sort it.
     let t = "# keep-sorted start\nb\na\n# keep-sorted end\n";
     std::fs::write(tmp.path().join("f.txt"), t).unwrap();
-    let ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(tmp.path(), false);
     let outcome = sort_fixer(Comparator::Lexical, false)
         .apply(
             &Violation::new("x")
@@ -995,16 +959,7 @@ fn insert_line_apply_declines_a_non_require_finding() {
     use tempfile::TempDir;
     let tmp = TempDir::new().unwrap();
     std::fs::write(tmp.path().join("f.txt"), "b\na\n").unwrap();
-    let ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(tmp.path(), false);
     let outcome = insert_fixer(Comparator::Lexical)
         .apply(
             &Violation::new("x")
@@ -1028,16 +983,7 @@ fn insert_line_apply_splices_on_disk() {
     use tempfile::TempDir;
     let tmp = TempDir::new().unwrap();
     std::fs::write(tmp.path().join("CODEOWNERS"), "*.md @docs\n*.rs @rust\n").unwrap();
-    let ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(tmp.path(), false);
     let outcome = insert_fixer(Comparator::Lexical)
         .apply(
             &Violation::new("x")
@@ -1157,16 +1103,7 @@ fn sort_apply_reports_the_require_specific_skip_reason() {
     use tempfile::TempDir;
     let tmp = TempDir::new().unwrap();
     std::fs::write(tmp.path().join("f.txt"), "b\na\n").unwrap();
-    let ctx = FixContext {
-        root: tmp.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(tmp.path(), false);
     let outcome = sort_fixer(Comparator::Lexical, false)
         .apply(
             &Violation::new("required line \"m\" is missing")

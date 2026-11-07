@@ -788,16 +788,7 @@ mod tests {
         use tempfile::TempDir;
         let tmp = TempDir::new().unwrap();
         std::fs::write(tmp.path().join("f.rs"), "fn x() {\n\tlet a = 1;\n}\n").unwrap();
-        let ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let ctx = FixContext::new(tmp.path(), false);
         let outcome = reindent_fixer(Applicability::Safe)
             .apply(
                 &Violation::new("x")
@@ -824,16 +815,7 @@ mod tests {
         // line 1 = width-mismatch (UNFIXABLE, the reported first bad line); line 2
         // = pure-tab (would be converted without the guard).
         std::fs::write(tmp.path().join("f.rs"), "   a();\n\tb();\n").unwrap();
-        let ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let ctx = FixContext::new(tmp.path(), false);
         let outcome = reindent_fixer(Applicability::Safe)
             .apply(
                 &Violation::new("x")

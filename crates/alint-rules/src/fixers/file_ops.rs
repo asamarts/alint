@@ -775,16 +775,7 @@ mod tests {
     }
 
     fn make_ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
-        FixContext {
-            root: tmp.path(),
-            dry_run,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        }
+        FixContext::new(tmp.path(), dry_run)
     }
 
     #[cfg(unix)]
@@ -1304,16 +1295,7 @@ mod tests {
         tmp: &'a TempDir,
         sink: &'a std::cell::RefCell<Vec<FixEdit>>,
     ) -> FixContext<'a> {
-        FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: Some(sink),
-            process_environment: None,
-            paths_sensitive: false,
-        }
+        FixContext::new(tmp.path(), false).with_stage_ops(Some(sink))
     }
 
     #[test]
@@ -1483,16 +1465,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let outside = TempDir::new().unwrap();
         let abs_target = outside.path().join("allowed");
-        let ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: true,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let ctx = FixContext::new(tmp.path(), false).with_allow_out_of_root(true);
         let out = DirCreateFixer::new(abs_target.clone(), Applicability::Safe)
             .apply(&Violation::new("x"), &ctx)
             .unwrap();
@@ -1526,16 +1499,7 @@ mod tests {
         // nothing to the sink.
         let tmp = TempDir::new().unwrap();
         let sink = std::cell::RefCell::new(Vec::new());
-        let ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: Some(&sink),
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let ctx = FixContext::new(tmp.path(), false).with_stage_ops(Some(&sink));
         let out = DirCreateFixer::new(PathBuf::from("docs"), Applicability::Safe)
             .apply(&Violation::new("x"), &ctx)
             .unwrap();
@@ -1864,16 +1828,7 @@ mod tests {
         // matches the guard's lookup.
         buf.borrow_mut()
             .insert(tmp.path().join("Cargo.lock"), b"# created\n".to_vec());
-        let ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: Some(&buf),
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let ctx = FixContext::new(tmp.path(), false).with_compose(Some(&buf));
         let out = RelocateFixer::new(Applicability::Unsafe)
             .apply(
                 &Violation::new("x").with_path(Path::new("sub/Cargo.lock")),

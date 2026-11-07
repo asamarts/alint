@@ -571,22 +571,18 @@ impl RawConfig {
             }
             rules.push(deserialize_effective_rule(expanded, catalog, &id_hint)?);
         }
-        Ok(Config {
-            version: self.version.unwrap_or(0),
-            requires: effective_requirements(&self.compatibility),
-            extends: Vec::new(),
-            ignore: self.ignore,
-            respect_gitignore: self.respect_gitignore.unwrap_or(true),
-            vars: self.vars,
-            facts: self.facts,
-            rules,
-            fix_size_limit: self.fix_size_limit.unwrap_or(DEFAULT_FIX_SIZE_LIMIT),
-            nested_configs: self.nested_configs.unwrap_or(false),
-            allow_out_of_root: self.allow_out_of_root,
-            baseline: self.baseline,
-            compatibility: self.compatibility,
-            environment_values: self.environment_values,
-        })
+        Ok(Config::new(self.version.unwrap_or(0), rules)
+            .with_requires(effective_requirements(&self.compatibility))
+            .with_ignore(self.ignore)
+            .with_respect_gitignore(self.respect_gitignore.unwrap_or(true))
+            .with_vars(self.vars)
+            .with_facts(self.facts)
+            .with_fix_size_limit(self.fix_size_limit.unwrap_or(DEFAULT_FIX_SIZE_LIMIT))
+            .with_nested_configs(self.nested_configs.unwrap_or(false))
+            .with_allow_out_of_root(self.allow_out_of_root)
+            .with_baseline(self.baseline)
+            .with_compatibility(self.compatibility)
+            .with_environment_values(self.environment_values))
     }
 }
 

@@ -8,6 +8,7 @@ pub mod baseline;
 mod category;
 mod compatibility;
 mod config;
+mod config_build;
 pub mod did_you_mean;
 mod dotenv;
 mod engine;

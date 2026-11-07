@@ -748,16 +748,7 @@ mod tests {
     }
 
     fn make_ctx_at(root: &Path, dry_run: bool) -> FixContext<'_> {
-        FixContext {
-            root,
-            dry_run,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        }
+        FixContext::new(root, dry_run)
     }
 
     #[test]
@@ -1134,16 +1125,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let fixer = FileCreateFixer::new(PathBuf::from("README.md"), "# Hi\n".into(), true);
         let sink = std::cell::RefCell::new(Vec::new());
-        let ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: Some(&sink),
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let ctx = FixContext::new(tmp.path(), false).with_stage_ops(Some(&sink));
         let outcome = fixer.apply(&Violation::new("missing"), &ctx).unwrap();
         assert!(matches!(outcome, FixOutcome::Applied(_)));
         assert!(

@@ -544,16 +544,7 @@ mod tests {
     use tempfile::TempDir;
 
     fn make_ctx(tmp: &TempDir, dry_run: bool) -> FixContext<'_> {
-        FixContext {
-            root: tmp.path(),
-            dry_run,
-            fix_size_limit: None,
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        }
+        FixContext::new(tmp.path(), dry_run)
     }
 
     #[test]
@@ -610,16 +601,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let big = "x   \n".repeat(2_000);
         std::fs::write(tmp.path().join("big.txt"), &big).unwrap();
-        let ctx = FixContext {
-            root: tmp.path(),
-            dry_run: false,
-            fix_size_limit: Some(100),
-            allow_out_of_root: false,
-            compose: None,
-            stage_ops: None,
-            process_environment: None,
-            paths_sensitive: false,
-        };
+        let ctx = FixContext::new(tmp.path(), false).with_fix_size_limit(Some(100));
         let outcome = FileTrimTrailingWhitespaceFixer::new()
             .apply(
                 &Violation::new("ws").with_path(std::path::Path::new("big.txt")),

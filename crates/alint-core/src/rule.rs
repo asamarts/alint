@@ -1346,7 +1346,11 @@ pub fn unreadable_file_violation(rel: &Path, err: &std::io::Error) -> Violation 
 }
 
 /// Runtime context for applying a fix.
+///
+/// Built with [`FixContext::new`] and the `with_*` setters, so a later field is
+/// an addition rather than a breaking change; the fields stay readable.
 #[derive(Debug)]
+#[non_exhaustive]
 pub struct FixContext<'a> {
     pub root: &'a Path,
     /// When true, fixers must describe what they would do without
@@ -1390,7 +1394,73 @@ pub struct FixContext<'a> {
     pub paths_sensitive: bool,
 }
 
-impl FixContext<'_> {
+impl<'a> FixContext<'a> {
+    /// A context for fixing the tree at `root`, writing straight to disk (or
+    /// only describing, when `dry_run`), with no size cap, root confinement,
+    /// no compose buffer or stage sink, the inherited process environment,
+    /// and paths shown as they are.
+    #[must_use]
+    pub fn new(root: &'a Path, dry_run: bool) -> Self {
+        Self {
+            root,
+            dry_run,
+            fix_size_limit: None,
+            allow_out_of_root: false,
+            compose: None,
+            stage_ops: None,
+            process_environment: None,
+            paths_sensitive: false,
+        }
+    }
+
+    /// Sets [`Self::fix_size_limit`].
+    #[must_use]
+    pub fn with_fix_size_limit(mut self, fix_size_limit: Option<u64>) -> Self {
+        self.fix_size_limit = fix_size_limit;
+        self
+    }
+
+    /// Sets [`Self::allow_out_of_root`].
+    #[must_use]
+    pub fn with_allow_out_of_root(mut self, allow_out_of_root: bool) -> Self {
+        self.allow_out_of_root = allow_out_of_root;
+        self
+    }
+
+    /// Sets [`Self::compose`].
+    #[must_use]
+    pub fn with_compose(
+        mut self,
+        compose: Option<&'a RefCell<BTreeMap<PathBuf, Vec<u8>>>>,
+    ) -> Self {
+        self.compose = compose;
+        self
+    }
+
+    /// Sets [`Self::stage_ops`].
+    #[must_use]
+    pub fn with_stage_ops(mut self, stage_ops: Option<&'a RefCell<Vec<FixEdit>>>) -> Self {
+        self.stage_ops = stage_ops;
+        self
+    }
+
+    /// Sets [`Self::process_environment`].
+    #[must_use]
+    pub fn with_process_environment(
+        mut self,
+        process_environment: Option<&'a std::collections::BTreeMap<String, String>>,
+    ) -> Self {
+        self.process_environment = process_environment;
+        self
+    }
+
+    /// Sets [`Self::paths_sensitive`].
+    #[must_use]
+    pub fn with_paths_sensitive(mut self, paths_sensitive: bool) -> Self {
+        self.paths_sensitive = paths_sensitive;
+        self
+    }
+
     /// `path` as a fixer's stderr warning may print it: `<redacted>` when
     /// [`Self::paths_sensitive`].
     #[must_use]

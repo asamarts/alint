@@ -547,16 +547,7 @@ fn rule_trait_defaults_are_safe_no_ops() {
 #[test]
 fn fix_context_shows_a_sensitive_path_as_redacted() {
     let dir = tempfile::tempdir().unwrap();
-    let mut ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let mut ctx = FixContext::new(dir.path(), false);
     assert_eq!(
         ctx.shown_path(Path::new("dir/canary.txt")),
         "dir/canary.txt"
@@ -573,16 +564,7 @@ fn check_fix_size_returns_none_when_limit_disabled() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("a.txt");
     std::fs::write(&f, b"hello").unwrap();
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false);
     let outcome = check_fix_size(&f, Path::new("a.txt"), &ctx).unwrap();
     assert!(outcome.is_none());
 }
@@ -592,16 +574,7 @@ fn check_fix_size_allows_a_file_exactly_at_the_limit() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("edge.txt");
     std::fs::write(&f, vec![b'x'; 64]).unwrap();
-    let ctx = |limit| FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: Some(limit),
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = |limit| FixContext::new(dir.path(), false).with_fix_size_limit(Some(limit));
     let at = check_fix_size(&f, Path::new("edge.txt"), &ctx(64)).unwrap();
     assert!(at.is_none(), "{at:?}");
     let over = check_fix_size(&f, Path::new("edge.txt"), &ctx(63)).unwrap();
@@ -613,16 +586,7 @@ fn check_fix_size_skips_over_limit_files() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("big.txt");
     std::fs::write(&f, vec![b'x'; 1024]).unwrap();
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: Some(64),
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false).with_fix_size_limit(Some(64));
     let outcome = check_fix_size(&f, Path::new("big.txt"), &ctx).unwrap();
     match outcome {
         Some(FixOutcome::Skipped(reason)) => {
@@ -640,16 +604,7 @@ fn read_for_fix_returns_bytes_when_in_limit() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("a.txt");
     std::fs::write(&f, b"hello").unwrap();
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: Some(1 << 20),
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false).with_fix_size_limit(Some(1 << 20));
     match read_for_fix(&f, Path::new("a.txt"), &ctx).unwrap() {
         ReadForFix::Bytes(b) => assert_eq!(b, b"hello"),
         ReadForFix::Skipped(_) => panic!("expected Bytes, got Skipped"),
@@ -661,16 +616,7 @@ fn read_for_fix_returns_skipped_when_over_limit() {
     let dir = tempfile::tempdir().unwrap();
     let f = dir.path().join("big.txt");
     std::fs::write(&f, vec![b'x'; 1024]).unwrap();
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: Some(64),
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false).with_fix_size_limit(Some(64));
     match read_for_fix(&f, Path::new("big.txt"), &ctx).unwrap() {
         ReadForFix::Skipped(FixOutcome::Skipped(_)) => {}
         ReadForFix::Skipped(FixOutcome::Applied(_)) => {
@@ -692,16 +638,7 @@ fn read_for_fix_refuses_a_non_regular_file() {
     let dir = tempfile::tempdir().unwrap();
     let subdir = dir.path().join("adir");
     std::fs::create_dir(&subdir).unwrap();
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false);
     match read_for_fix(&subdir, Path::new("adir"), &ctx).unwrap() {
         ReadForFix::Skipped(FixOutcome::Skipped(r)) => {
             assert!(r.contains("not a regular file"), "{r}");
@@ -725,16 +662,7 @@ fn commit_write_asserts_against_a_dry_run_write() {
     // debug/tests (this test); in release the early-return makes it a safe
     // no-op instead of a silent tree mutation during the cap-confirmation pass.
     let dir = tempfile::tempdir().unwrap();
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: true,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), true);
     let _ = ctx.commit_write(&dir.path().join("x"), b"nope");
 }
 
@@ -744,16 +672,7 @@ fn compose_buffer_captures_writes_and_reads_them_back() {
     let abs = dir.path().join("a.txt");
     std::fs::write(&abs, b"on disk").unwrap();
     let buf = RefCell::new(BTreeMap::new());
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: Some(&buf),
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false).with_compose(Some(&buf));
     let rel = Path::new("a.txt");
     // Compose mode: commit_write buffers; disk stays untouched.
     ctx.commit_write(&abs, b"composed").unwrap();
@@ -782,16 +701,7 @@ fn commit_write_direct_mode_writes_through_to_disk() {
     let dir = tempfile::tempdir().unwrap();
     let abs = dir.path().join("a.txt");
     std::fs::write(&abs, b"old").unwrap();
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: None,
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false);
     // No compose buffer: commit_write is a direct atomic write, identical
     // to calling write_atomic.
     ctx.commit_write(&abs, b"new").unwrap();
@@ -813,16 +723,7 @@ fn compose_buffer_coalesces_symlink_and_target() {
     let link = dir.path().join("link.txt");
     symlink(&target, &link).unwrap();
     let buf = RefCell::new(BTreeMap::new());
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: Some(&buf),
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false).with_compose(Some(&buf));
     // Write through the LINK; read through the TARGET must see the write.
     ctx.commit_write(&link, b"composed").unwrap();
     match read_for_fix(&target, Path::new("real.txt"), &ctx).unwrap() {
@@ -845,16 +746,7 @@ fn compose_buffer_coalesces_through_a_symlinked_dir() {
     std::fs::write(dir.path().join("real/file.txt"), b"orig").unwrap();
     symlink(dir.path().join("real"), dir.path().join("link")).unwrap(); // link/ -> real/
     let buf = RefCell::new(BTreeMap::new());
-    let ctx = FixContext {
-        root: dir.path(),
-        dry_run: false,
-        fix_size_limit: None,
-        allow_out_of_root: false,
-        compose: Some(&buf),
-        stage_ops: None,
-        process_environment: None,
-        paths_sensitive: false,
-    };
+    let ctx = FixContext::new(dir.path(), false).with_compose(Some(&buf));
     // Write through the symlinked dir; read through the real dir -> hit.
     ctx.commit_write(&dir.path().join("link/file.txt"), b"composed")
         .unwrap();
@@ -873,4 +765,30 @@ fn compose_buffer_coalesces_through_a_symlinked_dir() {
         1,
         "one entry for the real underlying file"
     );
+}
+
+#[test]
+fn fix_context_new_defaults_and_setters() {
+    let dir = tempfile::tempdir().unwrap();
+    let ctx = FixContext::new(dir.path(), true);
+    assert!(ctx.dry_run);
+    assert_eq!(ctx.fix_size_limit, None);
+    assert!(!ctx.allow_out_of_root && !ctx.paths_sensitive);
+    assert!(ctx.compose.is_none() && ctx.stage_ops.is_none());
+    assert!(ctx.process_environment.is_none());
+
+    let compose = std::cell::RefCell::new(std::collections::BTreeMap::new());
+    let sink = std::cell::RefCell::new(Vec::new());
+    let environment = std::collections::BTreeMap::new();
+    let ctx = FixContext::new(dir.path(), false)
+        .with_fix_size_limit(Some(7))
+        .with_allow_out_of_root(true)
+        .with_compose(Some(&compose))
+        .with_stage_ops(Some(&sink))
+        .with_process_environment(Some(&environment))
+        .with_paths_sensitive(true);
+    assert_eq!(ctx.fix_size_limit, Some(7));
+    assert!(ctx.allow_out_of_root && ctx.paths_sensitive);
+    assert!(ctx.compose.is_some() && ctx.stage_ops.is_some());
+    assert!(ctx.process_environment.is_some());
 }

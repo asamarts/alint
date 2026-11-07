@@ -319,22 +319,7 @@ mod tests {
     }
 
     fn config_with(rules: Vec<alint_core::RuleSpec>) -> alint_core::Config {
-        alint_core::Config {
-            version: 1,
-            requires: None,
-            rules,
-            facts: Vec::new(),
-            extends: Vec::new(),
-            vars: std::collections::HashMap::new(),
-            respect_gitignore: true,
-            ignore: Vec::new(),
-            fix_size_limit: None,
-            nested_configs: false,
-            allow_out_of_root: alint_core::AllowOutOfRoot::default(),
-            baseline: None,
-            compatibility: Vec::new(),
-            environment_values: Vec::new(),
-        }
+        alint_core::Config::new(1, rules).with_fix_size_limit(None)
     }
 
     #[test]
