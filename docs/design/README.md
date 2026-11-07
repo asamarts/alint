@@ -44,3 +44,4 @@ in `docs/adr/` is missing from this table.
 | [0027](../adr/0027-plugin-contract-0-1-stays-a-draft.md) | Plugin contract 0.1 stays a draft until plugins load | accepted |
 | [0028](../adr/0028-ignore-files-stop-at-the-repository-boundary.md) | Ignore files stop at the repository boundary | accepted |
 | [0029](../adr/0029-ignore-file-boundary-corrections-after-review.md) | Ignore-file boundary corrections after review | accepted |
+| [0030](../adr/0030-v022-owner-decisions.md) | v0.22 owner decisions: hidden-path fingerprints, sealed structs, and order of work | accepted |
