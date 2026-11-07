@@ -88,7 +88,6 @@ mod tests {
     #[test]
     fn resolve_remote_populates_cache_then_serves_from_it() {
         use std::io::{Read as _, Write as _};
-        use std::net::TcpListener;
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
         use std::thread;
@@ -115,7 +114,7 @@ mod tests {
         // Minimal one-shot HTTP server. Only one connection is
         // accepted, so the second `resolve_remote` call MUST hit
         // the cache or the test will hang.
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = fetcher::tests::bind_local();
         let port = listener.local_addr().unwrap().port();
         let counter = Arc::new(AtomicUsize::new(0));
         let c2 = counter.clone();

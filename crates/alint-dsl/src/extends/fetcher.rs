@@ -99,20 +99,37 @@ pub enum FetchError {
 }
 
 #[cfg(test)]
-mod tests {
+pub(super) mod tests {
     use super::*;
     use std::io::Write as _;
     use std::net::TcpListener;
-    use std::sync::Arc;
     use std::sync::atomic::{AtomicUsize, Ordering};
+    use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
     use std::thread;
+
+    /// Held while a test binds a localhost port, and by
+    /// `get_errors_on_connection_refused` from freeing its port until the
+    /// request is refused, so no other test's server can take that port in
+    /// between and answer the request meant to be refused.
+    static PORTS: Mutex<()> = Mutex::new(());
+
+    fn ports() -> MutexGuard<'static, ()> {
+        PORTS.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    /// A listener on a free localhost port. Every test in this crate that
+    /// serves HTTP binds through here.
+    pub(in crate::extends) fn bind_local() -> TcpListener {
+        let _ports = ports();
+        TcpListener::bind("127.0.0.1:0").unwrap()
+    }
 
     /// Spin up a minimal one-shot HTTP server on localhost that
     /// serves `body` for `hits` connections, then exits. Returns
     /// the base URL plus a counter tracking how many GETs the
     /// server actually saw.
     fn spawn_http_server(body: Vec<u8>, hits: usize) -> (String, Arc<AtomicUsize>) {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = bind_local();
         let port = listener.local_addr().unwrap().port();
         let counter = Arc::new(AtomicUsize::new(0));
         let c2 = counter.clone();
@@ -147,7 +164,7 @@ mod tests {
 
     #[test]
     fn get_errors_on_non_2xx() {
-        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let listener = bind_local();
         let port = listener.local_addr().unwrap().port();
         thread::spawn(move || {
             if let Ok((mut stream, _)) = listener.accept() {
@@ -173,7 +190,7 @@ mod tests {
         // request preference.
         let (target_url, target_hits) = spawn_http_server(b"private".to_vec(), 1);
 
-        let redirect = TcpListener::bind("127.0.0.1:0").unwrap();
+        let redirect = bind_local();
         let redirect_port = redirect.local_addr().unwrap().port();
         thread::spawn(move || {
             if let Ok((mut stream, _)) = redirect.accept() {
@@ -201,7 +218,9 @@ mod tests {
 
     #[test]
     fn get_errors_on_connection_refused() {
-        // Bind + drop so the port is guaranteed free.
+        // Bind + drop so the port is free, and keep other tests from binding
+        // it until the request is refused.
+        let _ports = ports();
         let port = {
             let listener = TcpListener::bind("127.0.0.1:0").unwrap();
             listener.local_addr().unwrap().port()
