@@ -260,6 +260,28 @@ Self-referential rules (`line_endings`, `no_trailing_whitespace`) take branch 1
 via a path key, so the terminator-stripping in branch 2 never erases the bytes
 they police.
 
+**Sensitive and hidden-path findings.** A sensitive finding (a `sensitive: true`
+rule, or one with a field read from the environment) takes the constant
+discriminator `sensitive` in place of the four branches above, so its key,
+message and line never reach the hash. A finding whose path alint hides (a field
+that chooses files was read from the environment) also leaves the path out, from
+v0.22 ([ADR-0030](../adr/0030-v022-owner-decisions.md) decision 1):
+
+```
+fingerprint = sha256( lp(rule_id) ‖ lp("\0hidden-path") ‖ lp("sensitive") )
+```
+
+No path contains a NUL byte, so no finding with a real path shares it. A rule's
+hidden-path findings share the fingerprint and are matched by count (§3.2), and
+SARIF and GitLab carry the same value. v0.21 hashed the path
+(`sha256(lp(rule_id) ‖ lp(path) ‖ lp("sensitive"))`), so whoever held a baseline,
+SARIF or GitLab file could confirm a guessed path. For one minor release,
+`check --baseline`, `fix --baseline`, the language server and `alint baseline`'s
+regeneration guard also accept that form: a finding draws first on an entry with
+its v0.21 fingerprint, then on the shared one. `alint baseline` writes only the
+new form; v0.23 drops the old one. The engine's own per-finding key within a
+`fix` run keeps the path, so two hidden-path findings stay apart there.
+
 ### 3.2 Counting identical fingerprints
 
 Distinct violations that share a fingerprint (e.g. N matching lines with

@@ -107,9 +107,14 @@ fn sensitive_path_projection_preserves_internal_identity() {
     assert_eq!(finding.path.as_deref(), Some(path));
     assert_eq!(finding.report_path(), Some(Path::new("<redacted>")));
     assert_eq!(
+        crate::baseline::path_identity_fingerprint("rule", finding, None),
+        before,
+        "public path redaction must not change the engine's identity for the finding"
+    );
+    assert_ne!(
         crate::baseline::fingerprint("rule", finding, None),
         before,
-        "public path redaction must not change baseline identity"
+        "the baseline fingerprint leaves a hidden path out (ADR-0030 decision 1)"
     );
     assert_eq!(result.notes[0].report_path(), Some(Path::new("<redacted>")));
     assert_eq!(
