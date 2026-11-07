@@ -2,7 +2,7 @@ test_version: 1
 name: replace on a dotenv value uses the native context-safe edit
 tags: [fix, dotenv_path_matches, replace, dotenv, safety]
 
-# adotenv 0.2 native edit: `D = #q` would turn the intended value into an
+# adotenv's native edit: `D = #q` would turn the intended value into an
 # inline comment. The editor quotes the rewritten value while preserving the
 # export prefix, spacing, comment, and line ending.
 

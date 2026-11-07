@@ -2,7 +2,7 @@ test_version: 1
 name: set_value on a dotenv value chooses context-safe quoting
 tags: [fix, dotenv_path_equals, set_value, dotenv]
 
-# adotenv 0.2 native edit: a bare `#z` after `B = ` would begin an inline
+# adotenv's native edit: a bare `#z` after `B = ` would begin an inline
 # comment and parse as an empty value. The editor emits a quoted token while
 # preserving the assignment's spacing, comment, and line ending.
 
