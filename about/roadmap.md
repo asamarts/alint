@@ -1570,6 +1570,9 @@ decision 3, with the second counted as
 [ADR-0026](https://github.com/asamarts/alint/blob/main/docs/adr/0026-measuring-the-v022-simplicity-gate.md)
 defines. Phase 3 (`version: 2` selectors and report-only constraints) starts only if v0.22 meets
 all three; otherwise the program's stop rule applies.
+The plan, its phases and the owner decisions for the rest of the release are in
+[`v0.22/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.22/README.md) and
+[ADR-0030](https://github.com/asamarts/alint/blob/main/docs/adr/0030-v022-owner-decisions.md).
 
 - **One `equals` implementation.** The relation layer becomes the authoritative `cross_file`
   `equals` (including the `cross_file_value_equals` alias), and the old `equals` code is deleted.
