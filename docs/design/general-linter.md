@@ -1530,8 +1530,10 @@ Phase 3 starts only if v0.22 meets all three; otherwise the stop rule applies.
 `cross_file::eval`). Gate 3's deterministic part is met: the e2e suite is unchanged, the corpus
 replay shows zero differences against v0.21.2 on 106 repositories, and instructions and
 read/stat-family syscalls stay within the section 9.6 budgets against v0.18.2. Its wall-clock and
-peak-RSS part (100k and 1M files) is the release check before the v0.22.0 tag; Phase 3 starts
-once that passes. The record is in [`v0.22/README.md`](v0.22/README.md), section 7.
+peak-RSS part, the release check before the v0.22.0 tag, is met too: at 100k and 1M files every
+S1-S3 median is within +3% of v0.18.2 (the largest is S3 full at 1M, +1.37%), and peak RSS at 1M
+is within +10% (the largest is S2, +1.4%). All three gates are met, so Phase 3 starts. The record
+is in [`v0.22/README.md`](v0.22/README.md), section 7.
 [ADR-0027](../adr/0027-plugin-contract-0-1-stays-a-draft.md) keeps plugin contract 0.1 a draft
 until the first release that loads plugins.
 
@@ -1625,8 +1627,8 @@ do not expose a generic DSL.
 `cross_file` `equals`. The verdict was GO on consistency, with simplicity gated in v0.22
 (section 11.1, "Phase 2 outcome"): v0.22 makes the IR path the only `equals`, deletes the old
 code, and must meet the ADR-0026 line bound and the zero-difference and budget checks before
-Phase 3 starts. v0.22 met gates 1 and 2 and gate 3's deterministic part; the wall-clock check
-remains before its tag (section 11.1, "v0.22 gate results").
+Phase 3 starts. v0.22.0 (2026-11-07) met all three gates (section 11.1, "v0.22 gate results"),
+so Phase 3 starts.
 
 ### 11.6 Phase 3: selectors and report-only constraints
 

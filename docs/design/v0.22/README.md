@@ -1,6 +1,6 @@
 # v0.22: completing the relation-layer port
 
-Status: phases 0 to 6 done (2026-11-07); the release check before the tag remains.
+Status: done (2026-11-07). All three gates are met; released as v0.22.0.
 Decisions: [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 3 (the gates),
 [ADR-0026](../../adr/0026-measuring-the-v022-simplicity-gate.md) (how gate 2 is counted),
 [ADR-0030](../../adr/0030-v022-owner-decisions.md) (the owner decisions and the order of work).
@@ -188,5 +188,31 @@ stop rule decides whether Phase 3 starts; v0.22 can still ship phases 3 to 6.
   one corpus configuration that chooses files from the environment (`facebook/react`) is among
   the four skips, so no replayed report has a hidden-path finding.
 
-Next, before the tag (section 4): the wall-clock and peak-RSS run on the bench host, in a quiet
-window the maintainer schedules.
+- 2026-11-07: the release check (section 4), met. On the bench host with caches dropped, in one
+  session, rustc 1.97.0 builds of main (9f8876070), v0.18.2 and v0.21.2 ran in this order: main,
+  v0.18.2 and v0.21.2 at 100k, then v0.18.2 and main at 1M, then peak RSS.
+  - Wall-clock medians against v0.18.2, full / changed: at 100k (30 runs) S1 -1.62% / -1.25%, S2
+    -11.75% / +1.29%, S3 -0.51% / -0.43%; at 1M (one warm-up and three runs) S1 -3.12% / -4.21%,
+    S2 -10.64% / -0.09%, S3 +1.37% / +0.82%. All are within +3%.
+  - Against v0.21.2 at 100k, every cell is within 1.3%: S1 +0.45% / +1.16%, S2 -0.71% / -0.26%,
+    S3 -0.35% / -0.49%.
+  - Peak RSS of `alint check` on a persistent 1M tree, from `wait4`, the highest of each
+    version's runs: S1 159,772 KB against v0.18.2's 168,224 (-5.0%), S2 113,848 against 112,280
+    (+1.4%), S3 244,040 against 252,824 (-3.5%). All are within +10%, and hyperfine's
+    peak-memory figures for the timed 1M cells agree.
+  - S3 is bimodal on this host. In every version a sixth to a third of its runs take 6-10%
+    longer at 100k (main 5 and 7 of 30, v0.18.2 7 and 5, v0.21.2 4 and 8). At 1M, two of main's
+    seven S3 runs fell in the slow mode (516.6 s in the timed full cell, 507.4 s in the memory
+    pass) and one of v0.18.2's seven (497.5 s), so the mean of main's S3 full cell is 3.4% above
+    v0.18.2's while its median is 1.37% above. The gate is on medians, and S3's instruction count
+    is within 1% of v0.18.2's (phase 2). A process sampler, every five minutes, saw nothing
+    running besides the harness.
+  - The corpus replay of main's tip (9f8876070, which adds adotenv 1.3.0 after the phase 5
+    replay) against v0.21.2 (run 42423454717): 106 of 110 repositories replayed, 49 of them with
+  `cross_file` `equals`, the same four skipped, none crashed, zero differences.
+  - Gate 3 is met in full, so all three gates are met and Phase 3 may start.
+
+Next: v0.23, general-linter Phase 3 (`version: 2` selectors and report-only constraints), with a
+design doc and the version-boundary ADR first; v0.23 also stops matching the v0.21 hidden-path
+fingerprint (ADR-0030 decision 1). The npm package's move to per-platform binaries is its own
+release after v0.22.0 (ADR-0030).
