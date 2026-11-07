@@ -132,7 +132,10 @@ def on_branch(repo, branch, sha):
     """Whether `sha` is in `branch`'s history (a blobless fetch of that branch)."""
     with tempfile.TemporaryDirectory() as tmp:
         git('init', '-q', '--bare', tmp)
-        git('fetch', '-q', '--filter=blob:none', '--no-tags', f'{GIT_BASE}/{repo}',
+        # No background maintenance: a fetch starts a detached repack that
+        # writes into `tmp` while the context manager deletes it.
+        git('-c', 'maintenance.auto=false', '-c', 'gc.auto=0',
+            'fetch', '-q', '--filter=blob:none', '--no-tags', f'{GIT_BASE}/{repo}',
             f'refs/heads/{branch}:refs/heads/{branch}', cwd=tmp)
         r = subprocess.run(['git', 'merge-base', '--is-ancestor', sha, f'refs/heads/{branch}'],
                            cwd=tmp, capture_output=True)
