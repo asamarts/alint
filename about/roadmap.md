@@ -13,12 +13,14 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.21.2** (2026-11-06): a fix release. `fix --dry-run` and `fix --diff` agree with
-`fix` on creates in more layouts, and a create written outside the root no longer overwrites a
-file or writes through a symlink when a `..` follows a directory it makes; more paths read from
-the environment show as `<redacted>`, hidden paths stay out of redaction markers and log
-warnings, and `fix --baseline` skips grandfathered findings with redacted evidence; nested rules
-run 1.3% to 2% fewer instructions than in v0.21.1. The prior v0.21.1 (2026-11-05) made ignore
+**Latest release: v0.22.0** (2026-11-07): general-linter phase 2 is complete. `cross_file` reads
+the values it compares through the relation layer and the old reader is gone, with findings
+unchanged on the case-study corpus; `FixContext`, `Config` and `CompiledNestedSpec` in
+`alint-core` are `#[non_exhaustive]` and gain constructors; a finding whose path is hidden gets a
+baseline fingerprint without the path (v0.21's form is accepted until v0.23); and `fix --dry-run`
+predicts a create through a dangling symlink. The prior v0.21.2 (2026-11-06) was a fix release:
+`fix --dry-run` and `fix --diff` agree with `fix` on creates in more layouts, and more paths read
+from the environment show as `<redacted>`. The prior v0.21.1 (2026-11-05) made ignore
 files stop at the repository boundary, as git's do, and configuration errors readable again
 without showing values read from the environment. The prior v0.21.0 (2026-11-01) was
 general-linter phase 2. `key_parity` keeps
