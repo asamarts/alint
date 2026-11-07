@@ -734,7 +734,20 @@ could not show moves to three gates v0.22 must pass before Phase 3 starts.
   built the published 0.21.0 and 0.21.1 `alint`, `alint-lsp` and
   `alint-testkit` against this release's libraries, and the corpus replay
   against v0.21.1 (on 1313d682d) showed no differences: 106 of
-  110 repositories replayed, 4 skipped, none crashed.
+  110 repositories replayed, 4 skipped, none crashed. The bench record
+  (#459) passed both gates. Its Callgrind job, on Rust 1.97.0, has nested
+  rules 1.3% to 1.9% below v0.21.1 in instructions; the CHANGELOG first
+  said 1.4% to 2%, the range #453 measured with 1.99.1, and #459 corrected
+  it. A local Callgrind run with 1.97.0 has `for_each_dir` within 0.5% of
+  v0.20.1 and `every_matching_has` within 0.6%. The report-only
+  `fix_throughput/dry_run_only` bench, one predicted create per dry run, is
+  12% to 13% over v0.21.1, about 12,000 more instructions per predicted
+  create for the checks of where a create lands (about 9 points from #454
+  and 3 to 4 from #455), while SFIX's wall times stay within 2% of
+  v0.21.1's. S1 at 1M is 3.6% slower by `min_ms`, inside the gate, yet
+  makes the same syscalls as v0.21.1 on S1's 100k tree, with level
+  instruction counts: the host was noisier, and 28 of the 36 cells spread
+  wider than in v0.21.1's record.
 - **Next:** v0.22, which must make the IR the only `cross_file` `equals` path
   within ADR-0025's conditions as ADR-0026 measures them. W4's remaining items
   ([`pre-release-audit.md`](pre-release-audit.md) section 6) were done on

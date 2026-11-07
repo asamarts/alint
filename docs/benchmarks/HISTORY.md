@@ -51,7 +51,8 @@ Each scenario's workload column marks its revision resets with a bold
 
 | Version | Date | S1 workload | 1M S1 full | S2 workload | 1M S2 full | S3 workload | 1M S3 full | S4 workload | 1M S4 full | Headline change |
 |---|---|---|---:|---|---:|---|---:|---|---:|---|
-| **v0.21.1** | 2026-11-05 | r2 | 4.05 s ± 0.03 | r2 | 5.20 s ± 0.00 | r2 | 477.5 s ± 2.1 | r4 | 8.35 s ± 0.03 | A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees with `fix` in many more layouts, and configuration errors are readable again without showing values read from the environment. |
+| **v0.21.2** | 2026-11-06 | r2 | 4.22 s ± 0.04 | r2 | 5.36 s ± 0.08 | r2 | 475.2 s ± 1.1 | r4 | 8.42 s ± 0.03 | A fix release: `fix --dry-run` and `fix --diff` agree with `fix` on creates in more layouts, and values read from the environment stay out of more of what alint prints. |
+| v0.21.1 | 2026-11-05 | r2 | 4.05 s ± 0.03 | r2 | 5.20 s ± 0.00 | r2 | 477.5 s ± 2.1 | r4 | 8.35 s ± 0.03 | A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees with `fix` in many more layouts, and configuration errors are readable again without showing values read from the environment. |
 | v0.21.0 | 2026-11-01 | **r2 ← reset from r1** | 4.14 s ± 0.10 | **r2 ← reset from r1** | 5.30 s ± 0.04 | **r2 ← reset from r1** | 476.4 s ± 3.6 | **r4 ← reset from r3** | 8.61 s ± 0.07 | General-linter phase 2 adds `key_parity` on a new internal relation layer. |
 | v0.20.1 | 2026-10-23 | r1 | 4.08 s ± 0.06 | r1 | 18.16 s ± 0.63 | r1 | 480.6 s ± 8.4 | r3 | 15.55 s ± 0.32 | A performance and diagnostics patch: rule path checks, nested-rule kinds and several other hot paths are cheaper, and alint now warns when a content pattern's `^` or `$` anchors to the whole file where a line was almost certainly meant (#343). |
 | v0.20.0 | 2026-10-21 | r1 | 4.22 s ± 0.08 | r1 | 18.95 s ± 0.81 | r1 | 474.7 s ± 2.7 | **r3 ← reset from r2** | 16.28 s ± 0.33 | General-linter phase 1b closes the policy-authoring loop with a public, hermetic policy-test runner, selected-rule production traces with bounded redaction-safe previews, and per-source configuration compatibility requirements. |
@@ -88,7 +89,8 @@ Walker + `GlobSet` + path/metadata rules with little or no content read — the 
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r2 | 10 ms ± 1 | 44 ms ± 2 | 379 ms ± 4 | 4.05 s ± 0.03 |
+| **v0.21.2** | r2 | 10 ms ± 1 | 45 ms ± 2 | 384 ms ± 7 | 4.22 s ± 0.04 |
+| v0.21.1 | r2 | 10 ms ± 1 | 44 ms ± 2 | 379 ms ± 4 | 4.05 s ± 0.03 |
 | v0.21.0 | **r2 ← reset from r1** | 10 ms ± 1 | 43 ms ± 2 | 388 ms ± 14 | 4.14 s ± 0.10 |
 | v0.20.1 | r1 | 10 ms ± 1 | 43 ms ± 1 | 378 ms ± 11 | 4.08 s ± 0.06 |
 | v0.20.0 | r1 | 10 ms ± 1 | 44 ms ± 3 | 398 ms ± 15 | 4.22 s ± 0.08 |
@@ -114,7 +116,8 @@ Walker + `GlobSet` + path/metadata rules with little or no content read — the 
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r2 | 12 ms ± 1 | 52 ms ± 2 | 440 ms ± 4 | 4.74 s ± 0.02 |
+| **v0.21.2** | r2 | 13 ms ± 1 | 53 ms ± 1 | 449 ms ± 9 | 4.80 s ± 0.03 |
+| v0.21.1 | r2 | 12 ms ± 1 | 52 ms ± 2 | 440 ms ± 4 | 4.74 s ± 0.02 |
 | v0.21.0 | **r2 ← reset from r1** | 13 ms ± 1 | 52 ms ± 1 | 446 ms ± 12 | 4.68 s ± 0.02 |
 | v0.20.1 | r1 | 13 ms ± 1 | 51 ms ± 1 | 441 ms ± 10 | 4.70 s ± 0.09 |
 | v0.20.0 | r1 | 20 ms ± 1 | 52 ms ± 2 | 447 ms ± 14 | 4.73 s ± 0.08 |
@@ -144,7 +147,8 @@ Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whol
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r2 | 13 ms ± 1 | 58 ms ± 1 | 504 ms ± 1 | 5.20 s ± 0.00 |
+| **v0.21.2** | r2 | 13 ms ± 1 | 59 ms ± 2 | 524 ms ± 8 | 5.36 s ± 0.08 |
+| v0.21.1 | r2 | 13 ms ± 1 | 58 ms ± 1 | 504 ms ± 1 | 5.20 s ± 0.00 |
 | v0.21.0 | **r2 ← reset from r1** | 13 ms ± 0 | 59 ms ± 2 | 526 ms ± 7 | 5.30 s ± 0.04 |
 | v0.20.1 | r1 | 23 ms ± 1 | 168 ms ± 3 | 1.71 s ± 0.04 | 18.16 s ± 0.63 |
 | v0.20.0 | r1 | 24 ms ± 1 | 178 ms ± 5 | 1.79 s ± 0.04 | 18.95 s ± 0.81 |
@@ -170,7 +174,8 @@ Per-file dispatch fan-out: every `**/*.rs` file is read once and hit by the whol
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r2 | 15 ms ± 1 | 53 ms ± 1 | 431 ms ± 2 | 4.55 s ± 0.01 |
+| **v0.21.2** | r2 | 15 ms ± 1 | 54 ms ± 1 | 442 ms ± 8 | 4.61 s ± 0.07 |
+| v0.21.1 | r2 | 15 ms ± 1 | 53 ms ± 1 | 431 ms ± 2 | 4.55 s ± 0.01 |
 | v0.21.0 | **r2 ← reset from r1** | 15 ms ± 1 | 53 ms ± 1 | 431 ms ± 5 | 4.52 s ± 0.01 |
 | v0.20.1 | r1 | 16 ms ± 1 | 59 ms ± 1 | 498 ms ± 9 | 5.13 s ± 0.03 |
 | v0.20.0 | r1 | 23 ms ± 1 | 60 ms ± 1 | 507 ms ± 9 | 5.30 s ± 0.09 |
@@ -200,7 +205,8 @@ Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r2 | 456 ms ± 10 | 4.64 s ± 0.02 | 47.05 s ± 0.38 | 477.5 s ± 2.1 |
+| **v0.21.2** | r2 | 454 ms ± 12 | 4.72 s ± 0.15 | 47.83 s ± 1.66 | 475.2 s ± 1.1 |
+| v0.21.1 | r2 | 456 ms ± 10 | 4.64 s ± 0.02 | 47.05 s ± 0.38 | 477.5 s ± 2.1 |
 | v0.21.0 | **r2 ← reset from r1** | 451 ms ± 2 | 4.74 s ± 0.18 | 47.58 s ± 1.31 | 476.4 s ± 3.6 |
 | v0.20.1 | r1 | 461 ms ± 16 | 4.80 s ± 0.19 | 47.35 s ± 1.14 | 480.6 s ± 8.4 |
 | v0.20.0 | r1 | 449 ms ± 1 | 4.67 s ± 0.11 | 48.48 s ± 1.90 | 474.7 s ± 2.7 |
@@ -226,7 +232,8 @@ Whole-index build + path-index + relational fan-out (`pair` / `unique_by` / `for
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r2 | 454 ms ± 3 | 4.66 s ± 0.02 | 46.96 s ± 0.13 | 476.4 s ± 1.5 |
+| **v0.21.2** | r2 | 461 ms ± 17 | 4.74 s ± 0.19 | 47.90 s ± 1.47 | 477.4 s ± 1.4 |
+| v0.21.1 | r2 | 454 ms ± 3 | 4.66 s ± 0.02 | 46.96 s ± 0.13 | 476.4 s ± 1.5 |
 | v0.21.0 | **r2 ← reset from r1** | 467 ms ± 17 | 4.79 s ± 0.19 | 47.93 s ± 1.54 | 477.2 s ± 2.6 |
 | v0.20.1 | r1 | 456 ms ± 10 | 4.66 s ± 0.01 | 47.18 s ± 0.98 | 479.7 s ± 8.1 |
 | v0.20.0 | r1 | 460 ms ± 1 | 4.68 s ± 0.13 | 47.60 s ± 1.37 | 482.4 s ± 6.0 |
@@ -256,7 +263,8 @@ The realistic mixed workload and the release anchor: `extends:` eight bundled ru
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r4 | 55 ms ± 1 | 117 ms ± 2 | 793 ms ± 8 | 8.35 s ± 0.03 |
+| **v0.21.2** | r4 | 56 ms ± 2 | 119 ms ± 4 | 806 ms ± 13 | 8.42 s ± 0.03 |
+| v0.21.1 | r4 | 55 ms ± 1 | 117 ms ± 2 | 793 ms ± 8 | 8.35 s ± 0.03 |
 | v0.21.0 | **r4 ← reset from r3** | 56 ms ± 1 | 122 ms ± 3 | 852 ms ± 22 | 8.61 s ± 0.07 |
 | v0.20.1 | r3 | 61 ms ± 1 | 182 ms ± 6 | 1.43 s ± 0.01 | 15.55 s ± 0.32 |
 | v0.20.0 | **r3 ← reset from r2** | 62 ms ± 1 | 188 ms ± 5 | 1.51 s ± 0.02 | 16.28 s ± 0.33 |
@@ -282,7 +290,8 @@ The realistic mixed workload and the release anchor: `extends:` eight bundled ru
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r4 | 58 ms ± 2 | 124 ms ± 2 | 835 ms ± 6 | 8.87 s ± 0.03 |
+| **v0.21.2** | r4 | 59 ms ± 3 | 129 ms ± 3 | 857 ms ± 14 | 8.80 s ± 0.03 |
+| v0.21.1 | r4 | 58 ms ± 2 | 124 ms ± 2 | 835 ms ± 6 | 8.87 s ± 0.03 |
 | v0.21.0 | **r4 ← reset from r3** | 59 ms ± 2 | 130 ms ± 3 | 864 ms ± 11 | 8.83 s ± 0.02 |
 | v0.20.1 | r3 | 59 ms ± 2 | 131 ms ± 3 | 884 ms ± 10 | 9.12 s ± 0.09 |
 | v0.20.0 | **r3 ← reset from r2** | 68 ms ± 3 | 135 ms ± 2 | 928 ms ± 14 | 9.58 s ± 0.08 |
@@ -312,7 +321,8 @@ The fix engine over all 24 non-spawning fix ops (`FixSpec::ALL_OP_NAMES` minus `
 
 | Version | Workload | 1k | 10k | 100k | 1M |
 |---|---|---:|---:|---:|---:|
-| **v0.21.1** | r2 | 40 ms ± 1 | 354 ms ± 4 | 3.57 s ± 0.04 | 37.09 s ± 0.37 |
+| **v0.21.2** | r2 | 41 ms ± 2 | 364 ms ± 13 | 3.66 s ± 0.17 | 36.71 s ± 0.18 |
+| v0.21.1 | r2 | 40 ms ± 1 | 354 ms ± 4 | 3.57 s ± 0.04 | 37.09 s ± 0.37 |
 | v0.21.0 | **r2 ← reset from r1** | 41 ms ± 2 | 349 ms ± 13 | 3.50 s ± 0.13 | 35.30 s ± 0.18 |
 | v0.20.1 | r1 | 52 ms ± 2 | 500 ms ± 19 | 4.98 s ± 0.17 | 54.38 s ± 2.47 |
 | v0.20.0 | r1 | 53 ms ± 3 | 499 ms ± 20 | 5.07 s ± 0.24 | 54.19 s ± 2.45 |
