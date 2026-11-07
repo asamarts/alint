@@ -1,6 +1,6 @@
 # v0.22: completing the relation-layer port
 
-Status: in progress; phases 0 to 2 done (2026-11-07).
+Status: phases 0 to 6 done (2026-11-07); the release check before the tag remains.
 Decisions: [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 3 (the gates),
 [ADR-0026](../../adr/0026-measuring-the-v022-simplicity-gate.md) (how gate 2 is counted),
 [ADR-0030](../../adr/0030-v022-owner-decisions.md) (the owner decisions and the order of work).
@@ -161,10 +161,32 @@ stop rule decides whether Phase 3 starts; v0.22 can still ship phases 3 to 6.
     nothing in `cross_file::eval`. Merging the two source-side cardinality findings and dropping a
     check `each_target` already makes paid for phase 1's five lines.
   - Gate 3, deterministic part: met. The e2e suite passes unchanged. The corpus replay against
-    v0.21.2 shows zero differences on 106 repositories (90 `equals` rules in 51 of them; the four
+    v0.21.2 shows zero differences on 106 repositories (87 `equals` rules in 49 of them; the four
     skips are the committed expectations). Against v0.18.2, instructions change by -13.1% / -13.1%
     (S1, 1k / 10k), -11.5% / -12.4% (S2) and +0.1% / -1.0% (S3), within +3%; read/stat-family
     syscalls at 10k grow by at most 29 calls per family, within 32.
   - Gate 3, wall-clock and peak RSS at 100k and 1M: the release check in phase 6.
+- 2026-11-07: phase 3 (#467). The three structs are `#[non_exhaustive]`. `FixContext::new` and
+  `Config::new` take the required parts, setters the rest, and the workspace builds both through
+  them; `CompiledNestedSpec` is built only by `CompiledNestedSpec::compile`, as before. A test
+  sets every `Config` setter, since the mutation run found none of them covered.
+- 2026-11-07: phase 4 (#468). A hidden-path fingerprint is `sha256(rule, "\0hidden-path",
+  "sensitive")`. `check --baseline`, `fix --baseline`, the regeneration guard and the language
+  server match the v0.21 form first, then the new one, and report the new one. The end-to-end
+  test checks a baseline in the v0.21 form; one the released v0.21.2 binary wrote for six such
+  findings was suppressed in full by `check` and `fix`. `alint fix` still tells hidden paths
+  apart within a run, through the internal path-keyed identity.
+- 2026-11-07: phase 5 (#469). The dry run follows a dangling symlink into directories the create
+  makes. The OS differential test covers such a symlink pointing there directly, through another
+  symlink and through `..`, and a unit test holds a loop of dangling symlinks to the link limit.
+  One `WalkSkips` per dry run shares the ignore, override and symlink lookups across creates
+  (predicting 20 creates in a 100-file repository falls from 6.84M to 0.62M instructions).
+- 2026-11-07: phase 6. The roadmap item for sealing `Violation`, `Context`, `RuleSpec` and
+  `WalkOptions` before v1.0, and the Phase 2 outcome in `general-linter.md`. The corpus replay of
+  main after phase 5 (53090d4a7) against v0.21.2 shows zero differences on the same 106
+  repositories. Only hidden-path fingerprints were allowed to differ (ADR-0030 decision 3); the
+  one corpus configuration that chooses files from the environment (`facebook/react`) is among
+  the four skips, so no replayed report has a hidden-path finding.
 
-Next: phase 3.
+Next, before the tag (section 4): the wall-clock and peak-RSS run on the bench host, in a quiet
+window the maintainer schedules.
