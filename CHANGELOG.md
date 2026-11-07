@@ -14,7 +14,7 @@ directory, under a file or through a symlink is predicted as `fix` runs it, and 
 outside the root no longer overwrites a file or writes through a symlink when a `..` follows a
 directory it makes. More paths read from the environment show as `<redacted>`, hidden paths stay
 out of redaction markers and log warnings, `fix --baseline` skips a grandfathered finding with
-redacted evidence, and nested rules run 1.4% to 2% fewer instructions than in v0.21.1.
+redacted evidence, and nested rules run 1.3% to 2% fewer instructions than in v0.21.1.
 
 ### Changed
 
@@ -50,13 +50,14 @@ redacted evidence, and nested rules run 1.4% to 2% fewer instructions than in v0
 
 ### Performance
 
-- Nested rules run 1.4% to 2% fewer instructions than in v0.21.1, where each
+- Nested rules run 1.3% to 2% fewer instructions than in v0.21.1, where each
   iterated entry's rule specification passed through one more call that copied
-  it. In the deterministic micro-benchmark gate (Callgrind, Rust 1.99.1),
-  `for_each_dir` is back within 0.5% of v0.20.1, from 2.2% to 2.4% slower in
-  v0.21.1 with the same toolchain, and `every_matching_has` within 0.7%. The
-  specification is now built in place, and a successful nested build returns
-  straight from the builder.
+  it. In the deterministic micro-benchmark gate (Callgrind), `for_each_dir` is
+  back within 0.5% of v0.20.1 and `every_matching_has` within 0.7%, with Rust
+  1.99.1 and with 1.97.0, the bench record's toolchain. With 1.99.1, v0.21.1's
+  `for_each_dir` was 2.2% to 2.4% slower than v0.20.1. The specification is now
+  built in place, and a successful nested build returns straight from the
+  builder.
 
 ### Fixed
 

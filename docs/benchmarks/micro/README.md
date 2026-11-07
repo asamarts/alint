@@ -108,7 +108,7 @@ results/
 ├── linux-x86_64/                 ← the bench host (i7-6700HQ), canonical since 2026-07-15
 │   ├── v0.10.0/criterion/        ← oldest release in this series
 │   ├── …                         ← one directory per benchmarked release
-│   └── v0.21.1/criterion/        ← latest published
+│   └── v0.21.2/criterion/        ← latest published
 └── linux-x86_64-ryzen-3900x/     ← retired 3900X dev-box series, v0.7.0 to v0.13.0
 ```
 
