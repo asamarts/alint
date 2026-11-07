@@ -55,6 +55,8 @@ The crux of a usable baseline is a stable identity for each violation. alint fin
 
 So inserting or deleting unrelated lines never churns the baseline. **Editing the offending line** re-keys a line-anchored finding, so it counts as new and the gate catches it, but a structured-query or whole-file finding keeps its identity across unrelated edits. The baseline survives ordinary refactoring without stale-entry noise, and never masks a genuinely new problem.
 
+A finding whose path alint hides (`<redacted>`, because a field that chooses files was [read from the environment](/docs/configuration/variable-interpolation/)) is the exception: from v0.22 its fingerprint leaves out the path and the content, so a rule's hidden-path findings share one fingerprint and the baseline matches them by count.
+
 ## The baseline file
 
 `.alint-baseline.json` is **JSON Lines**: a header, then one sorted entry per grandfathered finding.

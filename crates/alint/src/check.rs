@@ -219,7 +219,7 @@ pub(super) fn cmd_check(
     let (mut report, baseline_marks) = if let Some(baseline_path) = &effective_baseline {
         let baseline = load_baseline(baseline_path)?;
         let applied =
-            alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprint(rid, v));
+            alint_core::baseline::apply(&report, &baseline, |rid, v| reader.fingerprints(rid, v));
         // Stale-entry detection is only valid on a FULL run. When `--changed`
         // or `--only` restricts what was evaluated, a baseline entry for an
         // out-of-scope file/rule legitimately "doesn't fire this run" but is
@@ -330,6 +330,17 @@ impl<'a> FileReader<'a> {
         // non-content identity rather than reading unbounded bytes.
         let bytes = alint_core::baseline::fingerprint_content(self.root, v, &mut self.cache);
         alint_core::baseline::fingerprint(rule_id, v, bytes)
+    }
+
+    /// [`Self::fingerprint`], plus the v0.21 form a baseline file may still
+    /// hold for a finding whose path alint hides.
+    fn fingerprints(
+        &mut self,
+        rule_id: &str,
+        v: &alint_core::Violation,
+    ) -> alint_core::baseline::Fingerprints {
+        let bytes = alint_core::baseline::fingerprint_content(self.root, v, &mut self.cache);
+        alint_core::baseline::fingerprints(rule_id, v, bytes)
     }
 }
 
@@ -562,30 +573,21 @@ pub(super) fn cmd_baseline(
     // Regeneration guard: refuse to grandfather NEW debt without
     // --accept-new. Pruning stale entries is always allowed.
     if out_path.exists() && !accept_new {
-        use std::collections::HashMap;
         let existing = load_baseline(&out_path)?;
         // Compare by OCCURRENCE, not just fingerprint identity: a higher count
         // on an already-baselined finding is fresh debt too, and must not slip
-        // in silently. Both baselines are dup-free (load + from_fingerprints
-        // dedup), so each fingerprint maps to exactly one count.
-        let old_counts: HashMap<&str, u32> = existing
-            .entries
+        // in silently. Applying the existing file counts exactly that, and
+        // counts a v0.21 entry for a hidden-path finding, which the new file
+        // records in the current form, as already grandfathered.
+        let applied =
+            alint_core::baseline::apply(&report, &existing, |rid, v| reader.fingerprints(rid, v));
+        let added: u64 = applied
+            .live
+            .results
             .iter()
-            .map(|e| (e.fingerprint.as_str(), e.count))
-            .collect();
-        let new_counts: HashMap<&str, u32> = new_baseline
-            .entries
-            .iter()
-            .map(|e| (e.fingerprint.as_str(), e.count))
-            .collect();
-        let added: u64 = new_counts
-            .iter()
-            .map(|(fp, &c)| u64::from(c.saturating_sub(old_counts.get(fp).copied().unwrap_or(0))))
+            .map(|r| r.violations.len() as u64)
             .sum();
-        let removed: u64 = old_counts
-            .iter()
-            .map(|(fp, &c)| u64::from(c.saturating_sub(new_counts.get(fp).copied().unwrap_or(0))))
-            .sum();
+        let removed: u64 = applied.stale.iter().map(|e| u64::from(e.count)).sum();
         if added > 0 {
             bail!(
                 "regenerating {} would grandfather {added} new violation(s) (+{added} / -{removed}); \

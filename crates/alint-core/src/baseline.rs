@@ -77,8 +77,13 @@ pub fn violation_fingerprint(
         message.trim().as_bytes()
     };
 
+    hash_components([rule_id.as_bytes(), path_norm.as_ref(), discriminator])
+}
+
+/// `sha256(lp(a) ‖ lp(b) ‖ lp(c))`, as 64 hex digits.
+fn hash_components(components: [&[u8]; 3]) -> String {
     let mut hasher = Sha256::new();
-    for component in [rule_id.as_bytes(), path_norm.as_ref(), discriminator] {
+    for component in components {
         let len = u32::try_from(component.len()).unwrap_or(u32::MAX);
         hasher.update(len.to_le_bytes());
         hasher.update(component);
@@ -96,8 +101,68 @@ pub fn violation_fingerprint(
 /// their producer key, message, or offending-line bytes. The path and rule id
 /// remain structural identity, while duplicate findings collapse through the
 /// baseline count.
+///
+/// A finding whose path alint hides ([`Violation::path_is_sensitive`]) leaves
+/// the path out as well (ADR-0030 decision 1): the hash is
+/// `sha256(lp(rule_id) ‖ lp("\0hidden-path") ‖ lp("sensitive"))`, so a
+/// baseline file, SARIF or GitLab report holding it cannot confirm a guessed
+/// path. No real path contains a NUL byte, so no finding with a path shares
+/// it. A rule's hidden-path findings share the one fingerprint and match by
+/// count.
 #[must_use]
 pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> String {
+    if v.path_is_sensitive() {
+        return hash_components([rule_id.as_bytes(), HIDDEN_PATH, b"sensitive"]);
+    }
+    path_identity_fingerprint(rule_id, v, file_bytes)
+}
+
+/// What stands for the path in a hidden-path finding's fingerprint.
+const HIDDEN_PATH: &[u8] = b"\0hidden-path";
+
+/// A finding's baseline fingerprints, as [`apply`] matches them: the one
+/// `alint baseline` writes, and, for a finding whose path alint hides, the
+/// v0.21 fingerprint an existing baseline file may still hold. v0.22 matches
+/// both so those files keep working; v0.23 drops the old form (ADR-0030
+/// decision 1).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fingerprints {
+    /// What `alint baseline`, SARIF and GitLab output carry.
+    pub current: String,
+    /// The v0.21 fingerprint of a hidden-path finding; `None` for any other
+    /// finding, whose fingerprint did not change.
+    pub v021: Option<String>,
+}
+
+impl From<String> for Fingerprints {
+    fn from(current: String) -> Self {
+        Self {
+            current,
+            v021: None,
+        }
+    }
+}
+
+/// [`fingerprint`], plus the v0.21 form for a finding whose path alint hides.
+#[must_use]
+pub fn fingerprints(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> Fingerprints {
+    Fingerprints {
+        current: fingerprint(rule_id, v, file_bytes),
+        v021: v
+            .path_is_sensitive()
+            .then(|| path_identity_fingerprint(rule_id, v, file_bytes)),
+    }
+}
+
+/// [`fingerprint`] as if no path were hidden: `rule_id` and path always take
+/// part. It is the v0.21 fingerprint of a hidden-path finding, and the engine
+/// keys findings by it within a run, where two hidden paths must stay apart.
+#[must_use]
+pub(crate) fn path_identity_fingerprint(
+    rule_id: &str,
+    v: &Violation,
+    file_bytes: Option<&[u8]>,
+) -> String {
     if v.is_sensitive() {
         return violation_fingerprint(
             rule_id,
@@ -448,10 +513,17 @@ pub struct AppliedBaseline {
 /// below the current count) does not depend on the engine's parallel
 /// collection order. `fingerprint_of(rule_id, violation)` is supplied by
 /// the caller, which holds the file bytes the line-content discriminator
-/// needs (typically `|rid, v| fingerprint(rid, v, file_bytes_for(v))`).
-pub fn apply<F>(report: &Report, baseline: &Baseline, mut fingerprint_of: F) -> AppliedBaseline
+/// needs (typically `|rid, v| fingerprints(rid, v, file_bytes_for(v))`).
+///
+/// A hidden-path finding draws first on an entry with its v0.21 fingerprint,
+/// which names one path, then on the shared current one, so a file that mixes
+/// both forms grandfathers as many findings as it can. Suppressed and live
+/// findings carry the current fingerprint either way. A caller that returns a
+/// plain `String` gets no v0.21 matching.
+pub fn apply<F, P>(report: &Report, baseline: &Baseline, mut fingerprint_of: F) -> AppliedBaseline
 where
-    F: FnMut(&str, &Violation) -> String,
+    F: FnMut(&str, &Violation) -> P,
+    P: Into<Fingerprints>,
 {
     use std::collections::HashMap;
 
@@ -478,18 +550,22 @@ where
         let mut live = Vec::new();
         let mut live_fps = Vec::new();
         for v in ordered {
-            let fp = fingerprint_of(&result.rule_id, v);
-            if let Some(count) = remaining.get_mut(fp.as_str()).filter(|c| **c > 0) {
+            let Fingerprints { current, v021 } = fingerprint_of(&result.rule_id, v).into();
+            let matched = v021
+                .iter()
+                .chain(std::iter::once(&current))
+                .find(|fp| remaining.get(fp.as_str()).is_some_and(|c| *c > 0));
+            if let Some(count) = matched.and_then(|fp| remaining.get_mut(fp.as_str())) {
                 *count -= 1;
                 suppressed_total += 1;
                 suppressed.push(SuppressedViolation {
                     rule_id: result.rule_id.clone(),
                     violation: v.clone(),
-                    fingerprint: fp,
+                    fingerprint: current,
                 });
             } else {
                 live.push(v.clone());
-                live_fps.push(fp);
+                live_fps.push(current);
             }
         }
 
@@ -936,6 +1012,58 @@ mod tests {
         );
     }
 
+    /// A finding whose path alint hides, as the engine leaves it.
+    fn hidden(path: &str) -> Violation {
+        let mut violation = Violation::new("m".to_string())
+            .with_path(std::path::PathBuf::from(path))
+            .with_location(1, 1);
+        violation.mark_path_sensitive();
+        violation.redact_message("rule");
+        violation
+    }
+
+    #[test]
+    fn a_hidden_path_stays_out_of_the_fingerprint() {
+        let (one, two) = (hidden("secret-one.txt"), hidden("dir/secret-two.txt"));
+        let current = fingerprint("rule", &one, Some(b"x\n"));
+        // Pinned: v0.22 baseline files hold this digest.
+        assert_eq!(
+            current,
+            "61312ccbd0108b3d383c3d2eaadf02298387d8d9f8801aecb7534d21a78dbb19"
+        );
+        assert_eq!(fingerprint("rule", &two, None), current);
+        assert_ne!(fingerprint("other", &one, None), current, "the rule counts");
+        // A redacted finding in a file that is really named `hidden-path`.
+        let mut named = Violation::new("m".to_string()).with_path(Path::new("hidden-path"));
+        named.redact_message("rule");
+        assert_ne!(fingerprint("rule", &named, None), current);
+
+        // The v0.21 form hashed the path; the engine's run-local key still does.
+        let both = fingerprints("rule", &one, None);
+        assert_eq!(both.current, current);
+        let old = fp(
+            "rule",
+            Some("secret-one.txt"),
+            None,
+            Some("sensitive"),
+            "",
+            None,
+        );
+        assert_eq!(both.v021, Some(old));
+        assert_ne!(
+            path_identity_fingerprint("rule", &one, None),
+            path_identity_fingerprint("rule", &two, None)
+        );
+        // No other finding has a second form.
+        let mut plain = Violation::new("m".to_string()).with_path(Path::new("a.txt"));
+        assert_eq!(
+            fingerprints("rule", &plain, None),
+            Fingerprints::from(fingerprint("rule", &plain, None))
+        );
+        plain.redact_message("rule");
+        assert_eq!(fingerprints("rule", &plain, None).v021, None);
+    }
+
     fn item(rule: &str, path: Option<&str>, fp: &str) -> FingerprintedViolation {
         FingerprintedViolation {
             rule_id: rule.into(),
@@ -1136,6 +1264,50 @@ mod tests {
     // the transform test from the hash.
     fn by_message(_rule: &str, v: &Violation) -> String {
         v.message.to_string()
+    }
+
+    #[test]
+    fn apply_matches_a_hidden_path_by_either_form_and_reports_the_current_one() {
+        let report = |paths: &[&str]| Report {
+            results: vec![RuleResult::new(
+                std::sync::Arc::from("rule"),
+                Level::Error,
+                None,
+                paths.iter().map(|path| hidden(path)).collect(),
+                false,
+            )],
+        };
+        let current = fingerprint("rule", &hidden("a.txt"), None);
+        let v021 = |path: &str| path_identity_fingerprint("rule", &hidden(path), None);
+        let both = |rule: &str, v: &Violation| fingerprints(rule, v, None);
+        let baseline = |entries: Vec<BaselineEntry>| Baseline {
+            alint_version: None,
+            entries,
+        };
+
+        // A v0.21 file: one entry per path.
+        let old = baseline(vec![entry(&v021("a.txt"), 1), entry(&v021("b.txt"), 1)]);
+        let out = apply(&report(&["a.txt", "b.txt", "c.txt"]), &old, both);
+        assert_eq!(out.suppressed_total, 2);
+        assert_eq!(out.stale, Vec::new());
+        assert!(out.suppressed.iter().all(|s| s.fingerprint == current));
+        assert_eq!(
+            out.live_fingerprints,
+            [vec![current.clone()]],
+            "c.txt is new"
+        );
+        // A plain `String` fingerprinter gets no v0.21 matching.
+        let out = apply(&report(&["a.txt", "b.txt"]), &old, |rule, v| {
+            fingerprint(rule, v, None)
+        });
+        assert_eq!((out.suppressed_total, out.stale.len()), (0, 2));
+
+        // A mixed file: the entry naming a.txt goes first, so the shared one
+        // still covers b.txt.
+        let mixed = baseline(vec![entry(&current, 1), entry(&v021("a.txt"), 1)]);
+        let out = apply(&report(&["a.txt", "b.txt"]), &mixed, both);
+        assert_eq!(out.suppressed_total, 2);
+        assert_eq!(out.stale, Vec::new());
     }
 
     #[test]

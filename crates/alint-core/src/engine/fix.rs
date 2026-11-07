@@ -770,9 +770,10 @@ impl Engine {
     /// that; the F4 tripwire in `fix` (the fixpoint driver) asserts it in debug.
     /// `file_bytes` is `None` (no re-read); the discriminator is the rule's
     /// `baseline_key` or, absent one, the path (or the message for a pathless
-    /// violation).
+    /// violation). A hidden path takes part too: the baseline leaves it out of
+    /// what it writes, but two hidden-path findings of one rule stay apart here.
     pub(super) fn violation_key(rule_id: &str, v: &Violation) -> String {
-        crate::baseline::fingerprint(rule_id, v, None)
+        crate::baseline::path_identity_fingerprint(rule_id, v, None)
     }
 
     // `created` (2b) is the eighth parameter; the signature stays flat rather than
@@ -1165,10 +1166,10 @@ impl Engine {
                     if result_sensitive && !v.is_sensitive() {
                         let mut redacted = v.clone();
                         redacted.mark_sensitive(rid);
-                        return crate::baseline::fingerprint(rid, &redacted, None);
+                        return crate::baseline::fingerprints(rid, &redacted, None);
                     }
                     let bytes = crate::baseline::fingerprint_content(root, v, &mut fp_cache);
-                    crate::baseline::fingerprint(rid, v, bytes)
+                    crate::baseline::fingerprints(rid, v, bytes)
                 });
                 if !applied.suppressed.is_empty() {
                     let items = applied

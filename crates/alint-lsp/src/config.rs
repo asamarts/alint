@@ -380,7 +380,7 @@ fn apply_baseline(
             Some(p) if overlay.is_some_and(|(op, _)| op == p) => overlay.map(|(_, b)| b),
             _ => alint_core::baseline::fingerprint_content(&session.root, v, &mut cache),
         };
-        alint_core::baseline::fingerprint(rule_id, v, bytes)
+        alint_core::baseline::fingerprints(rule_id, v, bytes)
     });
     applied.live.results
 }
@@ -444,5 +444,53 @@ mod baseline_tests {
             .filter_map(|v| v.path.as_deref())
             .collect();
         assert_eq!(paths, [Path::new("a.txt")]);
+    }
+
+    #[test]
+    fn a_v021_baseline_still_grandfathers_a_hidden_path_finding() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        let v021 = |path: &str| {
+            alint_core::baseline::violation_fingerprint(
+                "markers",
+                Some(Path::new(path)),
+                None,
+                Some("sensitive"),
+                "",
+                None,
+            )
+        };
+        let entry = |fingerprint: String| alint_core::baseline::BaselineEntry {
+            rule_id: "markers".into(),
+            path: Some("<redacted>".into()),
+            fingerprint,
+            count: 1,
+            message: None,
+        };
+        std::fs::write(
+            root.join(".alint.yml"),
+            "version: 1\nbaseline: base.jsonl\nrules:\n  - id: markers\n    \
+             kind: no_merge_conflict_markers\n    paths: '*.txt'\n    level: error\n",
+        )
+        .unwrap();
+        std::fs::write(root.join("a.txt"), "<<<<<<< old\n").unwrap();
+        for (recorded, live) in [("a.txt", 0), ("other.txt", 1)] {
+            let baseline = Baseline {
+                alint_version: Some("0.21.2".into()),
+                entries: vec![entry(v021(recorded))],
+            };
+            std::fs::write(root.join("base.jsonl"), baseline.to_jsonl()).unwrap();
+            let session = build_session(root).unwrap().unwrap();
+            let mut report = session.engine.run(&session.root, &session.index).unwrap();
+            // As the engine leaves a finding whose path the configuration
+            // read from the environment.
+            for violation in &mut report.results[0].violations {
+                violation.path_sensitive = true;
+                violation.redact_message("markers");
+            }
+            let left = apply_baseline(&session, report.results, None);
+            let count: usize = left.iter().map(|result| result.violations.len()).sum();
+            assert_eq!(count, live, "baseline records {recorded}");
+        }
     }
 }

@@ -36,6 +36,7 @@ mod fix_flags;
 mod fix_robustness;
 mod fix_skip_classification;
 mod fix_spawn_gate;
+mod hidden_path_baseline;
 mod lsp_audit;
 mod lsp_protocol;
 mod lsp_smoke;

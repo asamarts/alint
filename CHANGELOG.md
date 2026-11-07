@@ -23,6 +23,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `Config::new(version, rules)`, then the `with_*` setters for the other fields; a
   `CompiledNestedSpec` comes from `CompiledNestedSpec::compile`, as before. The fields stay
   public to read.
+- **Baseline fingerprints of hidden-path findings (ADR-0030 decision 1).** A finding whose path
+  is `<redacted>`, because a field that chooses files was read from the environment, gets a
+  fingerprint that leaves the path out, in the baseline file, SARIF `partialFingerprints` and
+  GitLab `fingerprint`. Holding one of those files no longer lets anyone confirm a guessed path.
+  A rule's hidden-path findings share the fingerprint, and a baseline grandfathers them by count.
+  `check --baseline`, `fix --baseline`, the language server and `alint baseline`'s regeneration
+  guard still accept the fingerprint v0.21 wrote for such a finding, so existing baseline files
+  keep working; `alint baseline` rewrites them in the new form without `--accept-new`. v0.23
+  will drop the old form, so re-run `alint baseline` before upgrading to it. A baseline file
+  v0.22 writes does not grandfather these findings in v0.21. In `alint-core`,
+  `baseline::apply` takes a fingerprinter that returns `baseline::Fingerprints` (from
+  `baseline::fingerprints`) to match both forms; one that returns a `String`, as before, matches
+  only the new form.
 
 ### Removed
 
