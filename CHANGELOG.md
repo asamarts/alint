@@ -6,6 +6,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-07
+
+v0.22 completes general-linter phase 2. `cross_file` reads the values it compares through the
+relation layer that `key_parity` brought in v0.21, and the old reader is gone. Findings are
+unchanged: a replay of the 110-repository case-study corpus against v0.21.2 shows no
+differences. Two changes need attention. Library users: `FixContext`, `Config` and
+`CompiledNestedSpec` in `alint-core` are now `#[non_exhaustive]`, so build them with their
+constructors and `with_*` setters. Baseline users: a finding whose path is hidden gets a
+fingerprint without the path; v0.22 still accepts the form v0.21 wrote, but v0.23 will not, so
+re-run `alint baseline` before upgrading to v0.23. `fix --dry-run` also predicts a create
+through a dangling symlink, and predicting many creates costs far less.
+
 ### Changed
 
 - `cross_file` reads the values it compares through the relation layer: the run's read and
@@ -36,16 +48,18 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `baseline::apply` takes a fingerprinter that returns `baseline::Fingerprints` (from
   `baseline::fingerprints`) to match both forms; one that returns a `String`, as before, matches
   only the new form.
+- The `.env` parser behind the `dotenv_path_*` rules, `key_parity` and dotenv fixes (`adotenv`)
+  moves from 0.10.4 to 1.3.0. Findings and fixes are unchanged: alint built with either version
+  gives identical `check` and `fix` output on 50,000 generated `.env` files, of which about
+  18,000 parse and 10,000 take a fix.
+
+### Performance
+
 - `fix --dry-run` and `fix --diff` read the walk's ignore files once per pass, not once per
   predicted create (ADR-0030 decision 4): the overrides, the repository boundary, the ignore
   files above the root and the global excludes file once, and each directory's ignore files once.
   A dry run of 20 creates spends 91% fewer instructions predicting them (6.8M to 0.6M) and 40%
   fewer in all; a single create costs the same.
-
-- The `.env` parser behind the `dotenv_path_*` rules, `key_parity` and dotenv fixes (`adotenv`)
-  moves from 0.10.4 to 1.3.0. Findings and fixes are unchanged: alint built with either version
-  gives identical `check` and `fix` output on 50,000 generated `.env` files, of which about
-  18,000 parse and 10,000 take a fix.
 
 ### Removed
 
@@ -8664,7 +8678,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/asamarts/alint/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/asamarts/alint/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/asamarts/alint/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/asamarts/alint/compare/v0.20.1...v0.21.0
