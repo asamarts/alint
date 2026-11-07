@@ -2,8 +2,8 @@
 
 Status: done (2026-11-01). All seven steps of section 4 are done: witforge is on crates.io, the
 W2-7 job checks the contract against the pinned release in default CI (#417, against witforge
-0.1.1 at the tag), and W3 (#418) and the v0.21.0 tag (#420) followed. `main` pins witforge 0.3.0,
-which adds diff/diagnostics/Action support and leaves the consumer output unchanged.
+0.1.1 at the tag), and W3 (#418) and the v0.21.0 tag (#420) followed. `main` pins witforge 0.4.1,
+which, like 0.3.0, leaves the consumer output unchanged.
 The owner's decisions are in section 3; the contract's status is recorded in
 [ADR-0027](../../adr/0027-plugin-contract-0-1-stays-a-draft.md). The gate this plan clears is
 [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 4: v0.21.0 is not tagged until
@@ -30,6 +30,10 @@ and the WIT draft row in [`r8-readiness.md`](r8-readiness.md), blocked until thi
 - **witforge 0.3.0** followed on 2026-11-06. It adds `witforge diff`, JSON/SARIF diagnostics, and
   the GitHub Action; its generated output for this contract is unchanged, so alint pins it
   without changing a generated file.
+- **witforge 0.4.0 and 0.4.1** followed on 2026-11-06. 0.4.0 adds `wit/deps` dependency types and
+  opt-in Serde derives, and 0.4.1 fixes dependency glue; output changes only for a contract that
+  uses `deps/` or enables Serde, and alint's does neither, so alint pins 0.4.1 without changing a
+  generated file.
 - **alint** has the `alint:plugin@0.1.0` WIT draft at `wit/alint-plugin/v0.1/`, the hand-written
   `alint_core::plugin_api` it describes, and, since #409, the consumer crate
   `crates/alint-witforge-consumer` with witforge's output for the draft.
