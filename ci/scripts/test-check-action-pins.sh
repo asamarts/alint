@@ -86,6 +86,24 @@ check "local and docker references are skipped" ok "uses: ./" "uses: docker://al
 check "a tag naming another commit" rejected "uses: acme/tagged@$c2 # v1.0.0"
 check "a commit outside the named series" rejected "uses: acme/tagged@$c3 # v1"
 check "a commit not on the named branch" rejected "uses: acme/branchy@$b3 # master"
+
+# The branch check fetches into a temporary repository and deletes it at once.
+# git's automatic maintenance after a fetch runs detached and repacked into it
+# during the deletion (a failed run on main), so the fetch must start none.
+check "setup for the maintenance check" ok "uses: acme/branchy@$b1 # master"
+rm -f "$sandbox/trace.json"
+ACTION_PINS_REPO_ROOT="$root" ACTION_PINS_GIT_BASE="file://$sandbox/remotes" ACTION_PINS_ATTEMPTS=1 \
+  GIT_TRACE2_EVENT="$sandbox/trace.json" bash "$sandbox/check.sh" > "$sandbox/out" 2>&1 || true
+if ! grep -q '"fetch"' "$sandbox/trace.json"; then
+  echo "  FAIL: the maintenance check traced no fetch" >&2
+  fail=$((fail + 1))
+elif grep -q '"maintenance","run"' "$sandbox/trace.json"; then
+  echo "  FAIL: the branch check's fetch starts git maintenance" >&2
+  fail=$((fail + 1))
+else
+  echo "  ok: the branch check's fetch starts no git maintenance"
+  pass=$((pass + 1))
+fi
 check "a pin without a comment" rejected "uses: acme/tagged@$c1"
 check "a comment with extra words" rejected "uses: acme/tagged@$c1 # v1.0.0 (latest)"
 check "an unpinned tag" rejected "uses: acme/tagged@v1.0.0 # v1.0.0"
