@@ -251,6 +251,13 @@ mod tests {
     }
 
     #[test]
+    fn a_path_displays_as_its_text() {
+        let path = RelPath::parse("./docs//README.md").unwrap();
+        assert_eq!(path.to_string(), "docs/README.md");
+        assert_eq!(format!("{path:?}"), "\"docs/README.md\"");
+    }
+
+    #[test]
     fn os_paths_match_index_paths_when_utf8() {
         for path in ["a/b.txt", "./a/../b", "crates/core/lib.rs"] {
             let path = Path::new(path);
@@ -292,6 +299,7 @@ mod tests {
         assert!(one_rel < dash);
         assert!(two_rel < one_rel);
         assert_eq!(format!("{one_rel:?}"), "\"dir/bad\u{fffd}.json\"");
+        assert_eq!(one_rel.to_string(), "dir/bad\u{fffd}.json");
     }
 
     proptest::proptest! {

@@ -575,3 +575,24 @@ fn repeated_mismatches_key_apart_and_an_empty_targets_glob_is_reported() {
     let findings = run("empty-targets-glob-allowed", &allowed, tmp.path(), &index);
     expect(&findings, &[]);
 }
+
+#[test]
+fn the_value_limit_and_the_run_budget_are_worded_apart() {
+    use alint_core::relation::{AdapterError, LimitExceeded, LimitKind};
+
+    let reached = |kind, limit| {
+        super::adapter_failure(AdapterError::Limit(LimitExceeded {
+            kind,
+            limit,
+            reached: limit + 1,
+        }))
+    };
+    assert_eq!(
+        reached(LimitKind::RowsPerExtractor, 10_000),
+        "extract selected more than the 10000-value safety limit"
+    );
+    assert_eq!(
+        reached(LimitKind::RowsPerRun, 5_000_000),
+        "relation limit `rows_per_run` (5000000) reached: 5000001 rows or values"
+    );
+}

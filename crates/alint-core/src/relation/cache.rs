@@ -561,6 +561,33 @@ mod tests {
     }
 
     #[test]
+    fn clearing_the_index_caches_forgets_reads_and_decodes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"old").unwrap();
+        let index = crate::walker::FileIndex::from_entries(Vec::new());
+        index.enable_relation_caches();
+        let (reads, decodes) = (index.read_cache().unwrap(), index.decode_cache().unwrap());
+        let resource = literal("a.txt");
+        let adapter = ExtractAdapter::new(Extract::WholeFile);
+        let value = || {
+            let read = reads.read(dir.path(), &resource, 0);
+            let ResourceRead::Present(bytes) = read.as_ref() else {
+                panic!("{read:?}");
+            };
+            let output = decodes
+                .decode(&adapter, &resource, bytes, &Limits::default())
+                .unwrap();
+            output.rows[0].value().cloned()
+        };
+        assert_eq!(value(), Some(Value::String("old".into())));
+        std::fs::write(dir.path().join("a.txt"), b"new").unwrap();
+        assert_eq!(value(), Some(Value::String("old".into())), "cached");
+        index.clear_relation_caches();
+        assert_eq!(value(), Some(Value::String("new".into())));
+        assert_eq!((reads.reads(), decodes.decodes()), (2, 2));
+    }
+
+    #[test]
     fn missing_and_escapes_are_their_own_outcomes() {
         let dir = tempfile::tempdir().unwrap();
         let cache = ReadCache::new();

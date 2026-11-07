@@ -329,14 +329,7 @@ fn decode(
     } else {
         caches.decodes.decode(adapter, resource, bytes, &limits)
     };
-    let output = output.map_err(|error| match error {
-        AdapterError::Parse(message) => message,
-        AdapterError::Limit(limit) if limit.kind == LimitKind::RowsPerExtractor => format!(
-            "extract selected more than the {}-value safety limit",
-            limit.limit
-        ),
-        AdapterError::Limit(limit) => limit.to_string(),
-    })?;
+    let output = output.map_err(adapter_failure)?;
     let values = output
         .rows
         .iter()
@@ -383,6 +376,20 @@ fn unreadable(path: &Path, message: &str) -> Violation {
 pub(super) fn confined_rel(ctx: &Context<'_>, rel: &Path) -> Option<PathBuf> {
     let p = crate::pathsafe::normalize_confined(rel)?;
     crate::pathsafe::resolved_within_root(&ctx.root.join(&p), ctx.root).then_some(p)
+}
+
+/// A failed decode in a finding's words: the per-extract value limit as the
+/// reader has always worded it, the run-wide row budget as the relation layer
+/// names it.
+fn adapter_failure(error: AdapterError) -> String {
+    match error {
+        AdapterError::Parse(message) => message,
+        AdapterError::Limit(limit) if limit.kind == LimitKind::RowsPerExtractor => format!(
+            "extract selected more than the {}-value safety limit",
+            limit.limit
+        ),
+        AdapterError::Limit(limit) => limit.to_string(),
+    }
 }
 
 #[cfg(test)]
