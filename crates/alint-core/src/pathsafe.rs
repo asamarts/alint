@@ -602,6 +602,23 @@ mod tests {
 
     #[test]
     #[cfg(unix)]
+    fn a_loop_of_dangling_symlinks_stops_at_the_link_limit() {
+        use super::resolve_existing_prefix;
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path().canonicalize().unwrap();
+        std::os::unix::fs::symlink("b", root.join("a")).unwrap();
+        std::os::unix::fs::symlink("a", root.join("b")).unwrap();
+        // After `made/..` the resolver follows dangling symlinks, and `a` and
+        // `b` lead only to each other: it gives up at the link limit rather
+        // than recursing without end, and takes `a` as a name still to make.
+        assert_eq!(
+            resolve_existing_prefix(&root.join("made/../a/x.txt")),
+            Some(root.join("a/x.txt"))
+        );
+    }
+
+    #[test]
+    #[cfg(unix)]
     fn resolve_existing_prefix_lands_where_the_os_creates() {
         // Every path of up to three components over a small tree (directories,
         // a file, a symlinked directory, a missing name, dangling symlinks,
