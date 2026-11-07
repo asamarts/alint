@@ -337,7 +337,7 @@ fn emit_read_failure(
             }
         }
         ResourceRead::Missing => {
-            let reason = match super::eval::read_rel(ctx, path) {
+            let reason = match super::values::read_rel(ctx, path) {
                 Err(crate::io::ReadCapError::Io(error)) => {
                     format!("source file is missing: {error}")
                 }
