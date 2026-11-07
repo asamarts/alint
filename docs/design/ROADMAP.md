@@ -1739,6 +1739,18 @@ The plan, its phases and the owner decisions for the rest of the release are in
   differences against v0.21, and the performance budgets of `general-linter.md` section 9.6 hold
   as ADR-0024 decision 6 measures them.
 
+After the port, in this order ([ADR-0030](https://github.com/asamarts/alint/blob/main/docs/adr/0030-v022-owner-decisions.md)):
+
+- **Sealed structs.** `FixContext`, `Config` and `CompiledNestedSpec` in `alint-core` become
+  `#[non_exhaustive]`, so a later field is additive; `FixContext` and `Config` gain constructors
+  and setters.
+- **Path-free hidden-path fingerprints.** The baseline, SARIF and GitLab fingerprint of a finding
+  whose path is hidden no longer depends on the path. v0.22 still matches a v0.21 baseline's
+  fingerprint for such a finding; v0.23 drops that.
+- **Dry-run follow-ups.** `fix --dry-run` predicts a create through a dangling symlink whose
+  target the create's own directories make, and the landing checks of a run's predicted creates
+  share their lookups.
+
 ## v1.0: Stability
 <!-- roadmap-public: blurb="A committed DSL and plugin ABI, a frozen alint-core public API, and a versioned documentation site." -->
 
@@ -1749,6 +1761,11 @@ The plan, its phases and the owner decisions for the rest of the release are in
   and protobuf bindings; see [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
   section 9.4).
 - `alint-core` public API frozen; breaking changes follow semver-major.
+- **Seal the remaining public `alint-core` structs** before the freeze: `Violation`, `Context`,
+  `RuleSpec` and `WalkOptions` become `#[non_exhaustive]` with constructors, as `FixContext` and
+  `Config` did in v0.22
+  ([ADR-0030](https://github.com/asamarts/alint/blob/main/docs/adr/0030-v022-owner-decisions.md)
+  decision 2), so the frozen API does not commit to struct literals.
 - Documentation site.
 - **Remove the deprecated `${VAR}` interpolation path** in
   `git_commit_message.since:` (replaced by `{{env.X}}` in v0.11).

@@ -1523,6 +1523,15 @@ moved simplicity to three gates for v0.22:
    budgets held as ADR-0024 decision 6 measures them.
 
 Phase 3 starts only if v0.22 meets all three; otherwise the stop rule applies.
+
+**v0.22 gate results (2026-11-07).** Gates 1 and 2 are met: the relation layer is the only
+`cross_file` value reader, the old reader and the shadow are deleted, and the code only the new
+`equals` runs is 130 lines as ADR-0026 counts them (a test holds it at 134 and keeps it out of
+`cross_file::eval`). Gate 3's deterministic part is met: the e2e suite is unchanged, the corpus
+replay shows zero differences against v0.21.2 on 106 repositories, and instructions and
+read/stat-family syscalls stay within the section 9.6 budgets against v0.18.2. Its wall-clock and
+peak-RSS part (100k and 1M files) is the release check before the v0.22.0 tag; Phase 3 starts
+once that passes. The record is in [`v0.22/README.md`](v0.22/README.md), section 7.
 [ADR-0027](../adr/0027-plugin-contract-0-1-stays-a-draft.md) keeps plugin contract 0.1 a draft
 until the first release that loads plugins.
 
@@ -1616,7 +1625,8 @@ do not expose a generic DSL.
 `cross_file` `equals`. The verdict was GO on consistency, with simplicity gated in v0.22
 (section 11.1, "Phase 2 outcome"): v0.22 makes the IR path the only `equals`, deletes the old
 code, and must meet the ADR-0026 line bound and the zero-difference and budget checks before
-Phase 3 starts.
+Phase 3 starts. v0.22 met gates 1 and 2 and gate 3's deterministic part; the wall-clock check
+remains before its tag (section 11.1, "v0.22 gate results").
 
 ### 11.6 Phase 3: selectors and report-only constraints
 
