@@ -3,6 +3,39 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.21.2",
+      "date": "2026-11-06",
+      "headline": "A fix release: `fix --dry-run` and `fix --diff` agree with `fix` on creates in more layouts, and values read from the environment stay out of more of what alint prints.",
+      "workload_revisions": {
+        "S1": 2,
+        "S2": 2,
+        "S3": 2,
+        "S4": 4
+      },
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4216.088834133333,
+          "stddev_ms": 37.564952317615656,
+          "display": "4.22 s ± 0.04"
+        },
+        "s2_1m_full": {
+          "mean_ms": 5362.261858453334,
+          "stddev_ms": 83.87195775875621,
+          "display": "5.36 s ± 0.08"
+        },
+        "s3_1m_full": {
+          "mean_ms": 475227.3308244133,
+          "stddev_ms": 1142.2681036581698,
+          "display": "475.2 s ± 1.1"
+        },
+        "s4_1m_full": {
+          "mean_ms": 8421.309744693333,
+          "stddev_ms": 30.266653360024886,
+          "display": "8.42 s ± 0.03"
+        }
+      }
+    },
+    {
       "version": "v0.21.1",
       "date": "2026-11-05",
       "headline": "A fix release: ignore files stop at the repository boundary as git's do, `fix --dry-run` agrees with `fix` in many more layouts, and configuration errors are readable again without showing values read from the environment.",

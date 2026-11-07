@@ -18,7 +18,7 @@ description: 'What each alint version shipped, from the v0.1 MVP to the latest r
 file or writes through a symlink when a `..` follows a directory it makes; more paths read from
 the environment show as `<redacted>`, hidden paths stay out of redaction markers and log
 warnings, and `fix --baseline` skips grandfathered findings with redacted evidence; nested rules
-run 1.4% to 2% fewer instructions than in v0.21.1. The prior v0.21.1 (2026-11-05) made ignore
+run 1.3% to 2% fewer instructions than in v0.21.1. The prior v0.21.1 (2026-11-05) made ignore
 files stop at the repository boundary, as git's do, and configuration errors readable again
 without showing values read from the environment. The prior v0.21.0 (2026-11-01) was
 general-linter phase 2. `key_parity` keeps
