@@ -62,8 +62,8 @@ points are explicit.
    bash ci/scripts/preflight.sh
    ```
 
-   Runs the full preflight bundle: fmt + clippy + shadow-feature + test +
-   doc + version-pins + dep-floors + secrets-inv + dogfood. The
+   Runs the full preflight bundle: fmt + clippy + test + doc +
+   version-pins + dep-floors + secrets-inv + dogfood. The
    `release.yml` `preflight` job runs the same gates remotely; this
    is the pre-push sanity gate.
 
@@ -117,9 +117,7 @@ points are explicit.
    It replays the 110-repository case-study corpus with both binaries on the
    canonical bench host and lists every repository whose findings changed.
    Each difference must be explained by a CHANGELOG entry, and a crash
-   blocks the release. The replay binary is built with
-   `alint-rules/shadow-ir`, so it also runs R4's shadow implementation; any
-   shadow difference blocks the release.
+   blocks the release.
 
 4. **Commit, merge, and tag.**
 

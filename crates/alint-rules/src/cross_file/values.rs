@@ -1,14 +1,20 @@
-//! Reading the values a `cross_file` relation compares: the source's extracted
-//! values (one file, or a glob union for the set relations), each target's,
-//! and the confined reads behind them. Every value relation and `resolves`
-//! read through here.
+//! Reading the values a `cross_file` relation compares, through the relation
+//! layer: each file is a [`Resource`] that the run's [`ReadCache`] reads and an
+//! [`ExtractAdapter`] decodes (a target `regex:` goes through the
+//! target-syntax filter instead). A file the config names (`source.file`, a
+//! `targets` entry) is kept and decoded once per run, for every rule that
+//! names it; a file a glob matches is read and decoded without being kept, so
+//! the run's memory does not grow with the matches. Every value relation,
+//! `resolves` and `registered` read through here.
 
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
-use alint_core::{
-    AnalysisFailureKind, Context, Extract, ExtractedValues, Violation, extract_values_bounded,
-    is_non_literal, unreadable_file_violation,
+use alint_core::relation::{
+    Adapter as _, AdapterError, AdapterNote, DecodeCache, ExtractAdapter, LimitKind, Limits,
+    ReadCache, RelPath, Resource, ResourceRead, Value,
 };
+use alint_core::{AnalysisFailureKind, Context, Extract, NonStringValueKind, Violation};
 
 use super::CrossFileRule;
 use super::spec::Targets;
@@ -16,6 +22,51 @@ use super::spec::Targets;
 /// Per-target callback for `each_target`: receives the target path, extractor,
 /// raw literal values, and the violation sink.
 pub(super) type TargetFn<'a> = dyn FnMut(&Path, &Extract, &[String], &mut Vec<Violation>) + 'a;
+
+/// Which side of the relation a file is on, and whether the config names it or
+/// a glob matched it.
+#[derive(Clone, Copy)]
+enum Role {
+    NamedSource,
+    MatchedSource,
+    NamedTarget,
+    MatchedTarget,
+}
+
+impl Role {
+    fn side(self) -> &'static str {
+        match self {
+            Self::NamedSource | Self::MatchedSource => "source",
+            Self::NamedTarget | Self::MatchedTarget => "target",
+        }
+    }
+
+    fn matched(self) -> bool {
+        matches!(self, Self::MatchedSource | Self::MatchedTarget)
+    }
+}
+
+/// The run's read and decode caches, or fresh ones when the engine did not
+/// enable them (a rule evaluated directly, as the unit tests do).
+#[derive(Clone, Copy)]
+struct Caches<'a> {
+    reads: &'a ReadCache,
+    decodes: &'a DecodeCache,
+}
+
+impl<'a> Caches<'a> {
+    fn of(ctx: &'a Context<'_>, local: &'a mut Option<(ReadCache, DecodeCache)>) -> Self {
+        if let (Some(reads), Some(decodes)) = (ctx.index.read_cache(), ctx.index.decode_cache()) {
+            return Self { reads, decodes };
+        }
+        let (reads, decodes) = local.insert((ReadCache::new(), DecodeCache::new()));
+        Self { reads, decodes }
+    }
+}
+
+/// One file's decoded values: the literal strings, the kinds of the non-string
+/// values the extract selected, and the computed values it skipped.
+type Decoded = (Vec<String>, Vec<NonStringValueKind>, Vec<String>);
 
 impl CrossFileRule {
     /// Read + extract the source file's literal values (raw, not
@@ -29,6 +80,9 @@ impl CrossFileRule {
         out: &mut Vec<Violation>,
     ) -> Option<Vec<String>> {
         let extract = self.source_extract.as_ref()?;
+        let adapter = ExtractAdapter::new(extract.clone());
+        let mut local = None;
+        let caches = Caches::of(ctx, &mut local);
         if let Some(scope) = &self.source_glob {
             // Glob-union source: extract from every matching file and
             // union the values into one set (the set relations only).
@@ -37,9 +91,14 @@ impl CrossFileRule {
             for entry in ctx.index.files() {
                 if scope.matches(&entry.path, ctx.index) {
                     matched += 1;
-                    if let Some(vals) =
-                        self.source_values_from(ctx, &entry.path, extract, out, true)
-                    {
+                    if let Some(vals) = self.read_values(
+                        ctx,
+                        caches,
+                        Role::MatchedSource,
+                        &entry.path,
+                        &adapter,
+                        out,
+                    ) {
                         all.extend(vals);
                     }
                 }
@@ -59,88 +118,15 @@ impl CrossFileRule {
             }
             return Some(all);
         }
-        self.source_values_from(ctx, Path::new(&self.source_file), extract, out, false)
-    }
-
-    /// Read one source file + extract its literal values - the
-    /// per-file body shared by the single-`file` and `files:`
-    /// glob-union forms.
-    pub(super) fn source_values_from(
-        &self,
-        ctx: &Context<'_>,
-        src: &Path,
-        extract: &Extract,
-        out: &mut Vec<Violation>,
-        discovered: bool,
-    ) -> Option<Vec<String>> {
-        let text = match read_rel(ctx, src) {
-            Ok(t) => t,
-            Err(crate::io::ReadCapError::TooLarge(n)) => {
-                out.push(alint_core::too_large_file_violation(src, n));
-                return None;
-            }
-            Err(crate::io::ReadCapError::Io(e))
-                if discovered && e.kind() == std::io::ErrorKind::NotFound =>
-            {
-                out.push(alint_core::missing_file_violation(src));
-                return None;
-            }
-            Err(crate::io::ReadCapError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                out.push(Self::violation(
-                    src,
-                    &format!("source file is missing: {e}"),
-                ));
-                return None;
-            }
-            Err(crate::io::ReadCapError::Io(e)) => {
-                out.push(unreadable_file_violation(src, &e));
-                return None;
-            }
-        };
-        let values = match extract_values_bounded(extract, &text, super::MAX_EXTRACTED_VALUES) {
-            Ok(v) => v,
-            Err(e) => {
-                let mut finding = Self::analysis_failure(
-                    src,
-                    AnalysisFailureKind::ResourceParse,
-                    &format!("source extract failed: {e}"),
-                );
-                if extract.redacts_by_default() {
-                    finding.redact_message(&self.id);
-                }
-                out.push(finding);
-                return None;
-            }
-        };
-        let has_non_strings = !values.non_strings.is_empty();
-        if let Some(mut violation) =
-            crate::non_string_extract_violation(src, "source extract", &values.non_strings)
-        {
-            self.redact_extracted(&mut violation, "source", src, extract, "non_string", &[]);
-            out.push(violation);
-        }
-        if has_non_strings && values.strings.is_empty() {
-            return None;
-        }
-        // Whole-file content is compared verbatim — the non-literal
-        // skip (for interpolated *paths*) does not apply.
-        if matches!(extract, Extract::WholeFile) {
-            return Some(values.strings);
-        }
-        let (skipped, literal): (Vec<String>, Vec<String>) =
-            values.strings.into_iter().partition(|v| is_non_literal(v));
-        for v in &skipped {
-            let mut finding = Self::note(src, &format!("skipped non-literal source value {v:?}"));
-            self.redact_extracted(&mut finding, "source", src, extract, "skipped", &[v]);
-            out.push(finding);
-        }
-        Some(literal)
+        let source = Path::new(&self.source_file);
+        self.read_values(ctx, caches, Role::NamedSource, source, &adapter, out)
     }
 
     /// Iterate the value-relation targets, calling
     /// `f(target_path, raw_literal_values, out)` for each readable
     /// target. Read/extract errors and a zero-match glob are
-    /// reported here, so `f` sees only resolvable targets. `build`
+    /// reported here, so `f` sees only resolvable targets, and under
+    /// `allow_missing_target` only targets with values. `build`
     /// guarantees `targets` is `Some` and every `extract` is `Some`
     /// for the value relations that call this.
     pub(super) fn each_target(
@@ -149,19 +135,25 @@ impl CrossFileRule {
         out: &mut Vec<Violation>,
         f: &mut TargetFn<'_>,
     ) {
+        let mut local = None;
+        let caches = Caches::of(ctx, &mut local);
         match &self.targets {
             Some(Targets::Glob {
                 scope,
                 extract: Some(extract),
                 matches,
             }) => {
+                let adapter = ExtractAdapter::new(extract.clone());
                 let mut matched = 0usize;
                 for e in ctx.index.files() {
                     if !scope.matches(&e.path, ctx.index) {
                         continue;
                     }
                     matched += 1;
-                    if let Some(mut values) = self.target_values(ctx, &e.path, extract, out) {
+                    let role = Role::MatchedTarget;
+                    if let Some(mut values) =
+                        self.read_values(ctx, caches, role, &e.path, &adapter, out)
+                    {
                         if let Some(regex) = matches {
                             values.retain(|value| regex.is_match(value));
                         }
@@ -187,7 +179,11 @@ impl CrossFileRule {
                     // so the violation path matches git's canonical diff spelling and
                     // the value fixer's stored target path (audit F2).
                     let target = Path::new(&target_spec.file);
-                    if let Some(mut values) = self.target_values(ctx, target, extract, out) {
+                    let adapter = ExtractAdapter::new(extract.clone());
+                    let role = Role::NamedTarget;
+                    if let Some(mut values) =
+                        self.read_values(ctx, caches, role, target, &adapter, out)
+                    {
                         if let Some(regex) = &target_spec.matches {
                             values.retain(|value| regex.is_match(value));
                         }
@@ -201,53 +197,64 @@ impl CrossFileRule {
             _ => {}
         }
     }
-
-    /// Read + extract one target's raw literal values. `None`
-    /// (with a violation pushed, unless `allow_missing` for the
-    /// missing-file case) when the target can't be read or parsed.
-    pub(super) fn target_values(
+    /// Read and decode one file's values (raw, not normalized: callers
+    /// normalize as the relation needs). `None`, with a finding pushed, when the
+    /// file is missing (no finding for a missing target under
+    /// `allow_missing_target`), over the size cap, unreadable, fails to decode,
+    /// or selects only non-string values.
+    fn read_values(
         &self,
         ctx: &Context<'_>,
-        target: &Path,
-        extract: &Extract,
+        caches: Caches<'_>,
+        role: Role,
+        path: &Path,
+        adapter: &ExtractAdapter,
         out: &mut Vec<Violation>,
     ) -> Option<Vec<String>> {
-        let text = match read_rel(ctx, target) {
-            Ok(t) => t,
-            Err(crate::io::ReadCapError::TooLarge(n)) => {
-                out.push(alint_core::too_large_file_violation(target, n));
+        let side = role.side();
+        let extract = adapter.extractor();
+        // An absolute or root-escaping path never reads outside the tree: the
+        // lexical check is here, and the read rejects an escape through a
+        // symlink. A matched file is read as a literal path too, with the same
+        // containment and file-type checks.
+        let Some(relative) = RelPath::from_os_path(path) else {
+            out.push(unreadable(path, "path escapes the repo root"));
+            return None;
+        };
+        let resource = Resource::literal(relative);
+        let read = if role.matched() {
+            caches.reads.read_unretained(ctx.root, &resource, 0)
+        } else {
+            caches.reads.read(ctx.root, &resource, 0)
+        };
+        let bytes = match read.as_ref() {
+            ResourceRead::Present(bytes) => bytes,
+            ResourceRead::TooLarge(length) => {
+                out.push(alint_core::too_large_file_violation(path, *length));
                 return None;
             }
-            Err(crate::io::ReadCapError::Io(e)) if e.kind() == std::io::ErrorKind::NotFound => {
-                if !self.allow_missing {
-                    out.push(Self::violation(target, "target file is missing"));
-                }
+            ResourceRead::Missing => {
+                self.missing(ctx, role, path, &resource, out);
                 return None;
             }
-            Err(crate::io::ReadCapError::Io(e)) => {
-                out.push(unreadable_file_violation(target, &e));
+            ResourceRead::Unreadable(message) => {
+                out.push(unreadable(path, message));
                 return None;
             }
         };
-        let values = match extract {
-            Extract::Regex(pattern) => super::target_regex_capture_ranges(target, &text, pattern)
-                .map(|captures| ExtractedValues {
-                    strings: captures
-                        .ranges
-                        .into_iter()
-                        .map(|range| text[range].to_string())
-                        .collect(),
-                    non_strings: Vec::new(),
-                }),
-            _ => extract_values_bounded(extract, &text, super::MAX_EXTRACTED_VALUES),
+        let decoded = match (role, extract) {
+            (Role::NamedTarget | Role::MatchedTarget, Extract::Regex(pattern)) => {
+                target_regex_values(path, bytes, pattern)
+            }
+            _ => decode(caches, role, &resource, bytes, adapter),
         };
-        let values = match values {
-            Ok(values) => values,
-            Err(error) => {
+        let (values, non_strings, skipped) = match decoded {
+            Ok(decoded) => decoded,
+            Err(message) => {
                 let mut finding = Self::analysis_failure(
-                    target,
+                    path,
                     AnalysisFailureKind::ResourceParse,
-                    &format!("target extract failed: {error}"),
+                    &format!("{side} extract failed: {message}"),
                 );
                 if extract.redacts_by_default() {
                     finding.redact_message(&self.id);
@@ -256,31 +263,109 @@ impl CrossFileRule {
                 return None;
             }
         };
-        let has_non_strings = !values.non_strings.is_empty();
         if let Some(mut violation) =
-            crate::non_string_extract_violation(target, "target extract", &values.non_strings)
+            crate::non_string_extract_violation(path, &format!("{side} extract"), &non_strings)
         {
-            self.redact_extracted(&mut violation, "target", target, extract, "non_string", &[]);
+            self.redact_extracted(&mut violation, side, path, extract, "non_string", &[]);
             out.push(violation);
         }
-        if has_non_strings && values.strings.is_empty() {
+        if !non_strings.is_empty() && values.is_empty() && skipped.is_empty() {
             return None;
         }
-        // Whole-file content is compared verbatim — the non-literal
-        // skip (for interpolated *paths*) does not apply.
-        if matches!(extract, Extract::WholeFile) {
-            return Some(values.strings);
-        }
-        let (skipped, literal): (Vec<String>, Vec<String>) =
-            values.strings.into_iter().partition(|v| is_non_literal(v));
-        for v in &skipped {
+        for value in &skipped {
             let mut finding =
-                Self::note(target, &format!("skipped non-literal target value {v:?}"));
-            self.redact_extracted(&mut finding, "target", target, extract, "skipped", &[v]);
+                Self::note(path, &format!("skipped non-literal {side} value {value:?}"));
+            self.redact_extracted(&mut finding, side, path, extract, "skipped", &[value]);
             out.push(finding);
         }
-        Some(literal)
+        Some(values)
     }
+
+    /// The finding for a file that is not there.
+    fn missing(
+        &self,
+        ctx: &Context<'_>,
+        role: Role,
+        path: &Path,
+        resource: &Resource,
+        out: &mut Vec<Violation>,
+    ) {
+        match role {
+            Role::NamedSource => {
+                // The read records only that the file is absent; the finding
+                // quotes the operating system's reason, as it always has.
+                let message = match std::fs::metadata(ctx.root.join(resource.path().as_path())) {
+                    Err(error) => format!("source file is missing: {error}"),
+                    Ok(_) => "source file is missing".to_string(),
+                };
+                out.push(Self::violation(path, &message));
+            }
+            // The glob matched it, so it vanished after the walk.
+            Role::MatchedSource => out.push(alint_core::missing_file_violation(path)),
+            Role::NamedTarget | Role::MatchedTarget => {
+                if !self.allow_missing {
+                    out.push(Self::violation(path, "target file is missing"));
+                }
+            }
+        }
+    }
+}
+
+/// Decode through the adapter, under the per-file value limit `cross_file`
+/// has always applied: a named file once per run, a matched one without
+/// keeping the output.
+fn decode(
+    caches: Caches<'_>,
+    role: Role,
+    resource: &Resource,
+    bytes: &[u8],
+    adapter: &ExtractAdapter,
+) -> Result<Decoded, String> {
+    let limits = Limits::default()
+        .with(LimitKind::RowsPerExtractor, super::MAX_EXTRACTED_VALUES)
+        .expect("the value limit is below the hard cap");
+    let output = if role.matched() {
+        adapter.extract(resource, bytes, &limits).map(Arc::new)
+    } else {
+        caches.decodes.decode(adapter, resource, bytes, &limits)
+    };
+    let output = output.map_err(adapter_failure)?;
+    let values = output
+        .rows
+        .iter()
+        .filter_map(|row| match row.value() {
+            Some(Value::String(text)) => Some(text.to_string()),
+            _ => None,
+        })
+        .collect();
+    let skipped = output
+        .notes
+        .iter()
+        .map(|note| match note {
+            AdapterNote::NonLiteral { value } => value.clone(),
+        })
+        .collect();
+    Ok((values, output.non_strings.clone(), skipped))
+}
+
+/// A target `regex:`'s values: capture group 1 of each match the target-syntax
+/// filter accepts (Dockerfile `FROM`, `__version__`, and similar).
+fn target_regex_values(path: &Path, bytes: &[u8], pattern: &str) -> Result<Decoded, String> {
+    let text = String::from_utf8_lossy(bytes);
+    let captures = super::target_regex_capture_ranges(path, &text, pattern)?;
+    let (skipped, values) = captures
+        .ranges
+        .into_iter()
+        .map(|range| text[range].to_string())
+        .partition(|value| alint_core::is_non_literal(value));
+    Ok((values, Vec::new(), skipped))
+}
+
+/// The analysis failure for a file the read could not open or finish.
+fn unreadable(path: &Path, message: &str) -> Violation {
+    Violation::new(format!("could not read file: {message}"))
+        .with_path(path.to_path_buf())
+        .as_analysis_failure(AnalysisFailureKind::ResourceRead)
 }
 
 /// Lexically confine `rel`, then verify it doesn't escape the root through
@@ -293,17 +378,20 @@ pub(super) fn confined_rel(ctx: &Context<'_>, rel: &Path) -> Option<PathBuf> {
     crate::pathsafe::resolved_within_root(&ctx.root.join(&p), ctx.root).then_some(p)
 }
 
-/// Read a tree-relative path as text (the index stores paths, not
-/// contents, so the cross-file rules read the file themselves).
-pub(super) fn read_rel(ctx: &Context<'_>, rel: &Path) -> Result<String, crate::io::ReadCapError> {
-    // Confine to the repo root before any read — an absolute or
-    // root-escaping (lexically or via symlink) `source.file` /
-    // `targets[].file` must never read a file outside the tree.
-    let Some(rel) = confined_rel(ctx, rel) else {
-        return Err(crate::io::ReadCapError::Io(std::io::Error::new(
-            std::io::ErrorKind::InvalidInput,
-            "path escapes the repo root",
-        )));
-    };
-    crate::io::read_capped(&ctx.root.join(rel)).map(|b| String::from_utf8_lossy(&b).into_owned())
+/// A failed decode in a finding's words: the per-extract value limit as the
+/// reader has always worded it, the run-wide row budget as the relation layer
+/// names it.
+fn adapter_failure(error: AdapterError) -> String {
+    match error {
+        AdapterError::Parse(message) => message,
+        AdapterError::Limit(limit) if limit.kind == LimitKind::RowsPerExtractor => format!(
+            "extract selected more than the {}-value safety limit",
+            limit.limit
+        ),
+        AdapterError::Limit(limit) => limit.to_string(),
+    }
 }
+
+#[cfg(test)]
+#[path = "values_tests.rs"]
+mod tests;

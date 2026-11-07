@@ -1,6 +1,6 @@
 # v0.22: completing the relation-layer port
 
-Status: planned (2026-11-07).
+Status: in progress; phases 0 to 2 done (2026-11-07).
 Decisions: [ADR-0025](../../adr/0025-v021-pre-release-decisions.md) decision 3 (the gates),
 [ADR-0026](../../adr/0026-measuring-the-v022-simplicity-gate.md) (how gate 2 is counted),
 [ADR-0030](../../adr/0030-v022-owner-decisions.md) (the owner decisions and the order of work).
@@ -75,17 +75,26 @@ relation that reads values, and leaves `equals` with only its own logic:
   outside tests (at most 134) and refuses a reference to `eval`, so gate 2 is asserted on every
   test run, not measured once.
 - **Lossless paths.** `RelPath` keeps a path that is not valid UTF-8 (raw bytes on Unix, as the OS
-  gives them on Windows), so the reader never needs a fallback and `key_parity` gains the same
-  coverage. Display stays lossy, as `Path::display` is today.
+  gives them on Windows), so the reader never needs a fallback. Display stays lossy, as
+  `Path::display` is today. As built, the walked-path constructor `RelPath::from_os_path` keeps
+  such a name; selectors and the plugin contract keep `from_index_path`, because a plugin receives
+  paths as strings, so `key_parity` is unchanged.
 - **Caches for every value rule.** `CrossFileRule::uses_relations` returns true for the value
   relations and `resolves`, so the engine provides run-scoped caches whenever such a rule runs.
   Only paths a relation reads are retained (`ReadCache::mark_interest`), normally a few manifests
   per rule. The run-wide decode row budget is checked against the old per-extract limit
   (`MAX_EXTRACTED_VALUES`) before the switch, so no configuration that passed fails on a budget it
-  never had.
+  never had. As built: a file the configuration names (`source.file`, a `targets` entry) is kept
+  and decoded once per run; a file a glob matches is read with `ReadCache::read_unretained` and
+  decoded without `DecodeCache`, so neither the kept bytes nor the run's row budget grow with the
+  matches, and the 10,000-value limit applies to both through `LimitKind::RowsPerExtractor`.
+  `alint fix` clears the caches after a rule's fix lands, because creates, removes and renames
+  reach the disk at once and later rules have always seen them.
 - **Deleted:** the old reader, `check_equals` in `cross_file::eval`, `shadow.rs`, the `shadow-ir`
   feature, its enablement in `alint-e2e` and the corpus replay, and CI's feature-tree check for it.
-  `read_rel` stays only if a non-value relation still needs it.
+  `read_rel` stays only if a non-value relation still needs it. As built, `read_rel` is gone:
+  `identical`, the one relation that does not read values, still reads its two files directly,
+  through `confined_rel`.
 
 The `sync_from` value fixer (`fixers/cross_file_ops.rs`) re-extracts through
 `extract_values_bounded` when it applies an edit; it is a fixer, not the relation, and stays.
@@ -131,7 +140,10 @@ stop rule decides whether Phase 3 starts; v0.22 can still ship phases 3 to 6.
 - **Reader differences outside `equals`.** The shadow proved the relation-layer reader only for
   `equals`. The set relations and `resolves` also take a glob-union source (`source.files`), where a
   missing match reports differently (`discovered`). Phase 2 adds tests for those paths before the
-  switch, and the corpus replay covers the set relations it contains.
+  switch, and the corpus replay covers the set relations it contains. Outcome: the reader tests
+  (`cross_file/values_tests.rs`) cover every relation, both sides, named and matched files, and
+  each way a read or decode can fail; their complete findings are byte-identical between phase 1
+  and phase 2, including three cases the shadow never compared.
 - **Performance.** Reading through the caches adds a map lookup and an `Arc` per resource and
   retains the bytes of every file a relation reads. The deterministic and syscall gates catch
   instruction and I/O growth; peak RSS is checked at 1M before the tag.
@@ -139,5 +151,20 @@ stop rule decides whether Phase 3 starts; v0.22 can still ship phases 3 to 6.
 ## 7. Status log
 
 - 2026-11-07: plan and ADR-0030 (phase 0).
+- 2026-11-07: phase 1 (#465). Pure moves. `check_equals` grew from 93 to 98 lines because its
+  `pub(super)` signature wraps.
+- 2026-11-07: phase 2 (#466).
+  - Gate 1: met. The relation layer is the only `cross_file` value reader; the old reader,
+    `shadow.rs` and `shadow-ir` are deleted.
+  - Gate 2: met. `check_equals` (89) and `mismatch` (41) are 130 lines as ADR-0026 counts them;
+    `equals_stays_within_the_simplicity_gate` asserts the bound of 134 and that `equals` calls
+    nothing in `cross_file::eval`. Merging the two source-side cardinality findings and dropping a
+    check `each_target` already makes paid for phase 1's five lines.
+  - Gate 3, deterministic part: met. The e2e suite passes unchanged. The corpus replay against
+    v0.21.2 shows zero differences on 106 repositories (90 `equals` rules in 51 of them; the four
+    skips are the committed expectations). Against v0.18.2, instructions change by -13.1% / -13.1%
+    (S1, 1k / 10k), -11.5% / -12.4% (S2) and +0.1% / -1.0% (S3), within +3%; read/stat-family
+    syscalls at 10k grow by at most 29 calls per family, within 32.
+  - Gate 3, wall-clock and peak RSS at 100k and 1M: the release check in phase 6.
 
-Next: phase 1.
+Next: phase 3.

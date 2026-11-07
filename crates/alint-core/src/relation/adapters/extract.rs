@@ -21,9 +21,9 @@ use crate::relation::value::Value;
 /// The adapter id includes the extractor's specification, so two different
 /// queries over the same file never share a decode cache entry.
 ///
-/// The wrapper is generic. `cross_file` additionally filters target regex
-/// captures by syntax (Dockerfile `FROM`, `__version__`, and similar); the
-/// shadow port (R4) applies that filter around the adapter, not inside it.
+/// The wrapper is generic. `cross_file` filters a target `regex:`'s captures
+/// by syntax (Dockerfile `FROM`, `__version__`, and similar), so its reader
+/// takes those captures from the target-syntax filter instead of this adapter.
 #[derive(Debug, Clone)]
 pub struct ExtractAdapter {
     extract: Extract,

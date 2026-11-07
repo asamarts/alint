@@ -1156,3 +1156,189 @@ fn fix_baseline_fingerprints_a_finding_as_check_reports_it() {
     assert_eq!(fix_against_baseline(true, &redacted), (true, true));
     assert_eq!(fix_against_baseline(true, &raw), (false, false));
 }
+
+// ---- A fix that lands on disk is visible to later relation reads ----
+//
+// `fix` evaluates rule by rule and applies each rule's fixes before the next
+// rule runs. A create (or remove, or rename) lands on disk at once, and the
+// rules after it have always seen it; a relation read cached before the fix
+// must not hide it.
+
+#[derive(Debug)]
+struct CachedReader {
+    id: &'static str,
+    seen: std::sync::Arc<std::sync::Mutex<Vec<String>>>,
+}
+
+impl Rule for CachedReader {
+    fn id(&self) -> &str {
+        self.id
+    }
+    fn level(&self) -> Level {
+        Level::Info
+    }
+    fn uses_relations(&self) -> bool {
+        true
+    }
+    fn requires_full_index(&self) -> bool {
+        true
+    }
+    fn evaluate(&self, ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+        let resource = crate::relation::Resource::literal(
+            crate::relation::RelPath::parse("made.txt").expect("a literal test path"),
+        );
+        let read = ctx
+            .index
+            .read_cache()
+            .expect("a relation consumer enables the run cache")
+            .read(ctx.root, &resource, 0);
+        let state = match read.as_ref() {
+            crate::relation::ResourceRead::Present(_) => "present",
+            _ => "absent",
+        };
+        self.seen
+            .lock()
+            .unwrap()
+            .push(format!("{}: {state}", self.id));
+        Ok(Vec::new())
+    }
+}
+
+#[derive(Debug)]
+struct CreateFixer {
+    target: PathBuf,
+}
+impl crate::rule::Fixer for CreateFixer {
+    fn describe(&self) -> String {
+        "create the file".to_string()
+    }
+    fn apply(&self, _v: &Violation, ctx: &FixContext<'_>) -> crate::error::Result<FixOutcome> {
+        if !ctx.dry_run {
+            std::fs::write(&self.target, b"made").unwrap();
+        }
+        Ok(FixOutcome::Applied("created".to_string()))
+    }
+    fn fix_edit(&self, _v: &Violation, _bytes: &[u8], _root: &Path) -> Option<FixEdit> {
+        None
+    }
+}
+
+#[derive(Debug)]
+struct MustExist {
+    fixer: CreateFixer,
+}
+impl Rule for MustExist {
+    fn id(&self) -> &'static str {
+        "must-exist"
+    }
+    fn level(&self) -> Level {
+        Level::Error
+    }
+    fn path_scope(&self) -> Option<&Scope> {
+        None
+    }
+    fn evaluate(&self, _ctx: &Context<'_>) -> crate::error::Result<Vec<Violation>> {
+        if self.fixer.target.exists() {
+            return Ok(Vec::new());
+        }
+        Ok(vec![Violation::new("the file is missing")])
+    }
+    fn fixer(&self) -> Option<&dyn crate::rule::Fixer> {
+        Some(&self.fixer)
+    }
+}
+
+#[test]
+fn a_rule_after_a_landed_fix_reads_the_tree_as_it_now_is() {
+    let tmp = tempfile::tempdir().unwrap();
+    let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+    let reader = |id| -> Box<dyn Rule> {
+        Box::new(CachedReader {
+            id,
+            seen: std::sync::Arc::clone(&seen),
+        })
+    };
+    let engine = Engine::new(
+        vec![
+            reader("before"),
+            Box::new(MustExist {
+                fixer: CreateFixer {
+                    target: tmp.path().join("made.txt"),
+                },
+            }),
+            reader("after"),
+        ],
+        RuleRegistry::new(),
+    );
+    let report = engine
+        .fix(
+            tmp.path(),
+            &idx(&[]),
+            &crate::WalkOptions::default(),
+            false,
+            Applicability::Safe,
+        )
+        .unwrap();
+    assert!(!report.non_convergent);
+    let seen = seen.lock().unwrap();
+    assert_eq!(
+        seen[..2],
+        ["before: absent", "after: present"],
+        "the first pass: {seen:?}"
+    );
+}
+
+#[test]
+fn a_fix_run_that_lands_nothing_keeps_the_relation_caches() {
+    // A dry run's applied fix lands nothing, and neither does a run with
+    // nothing to fix, so the second reader's read is a cache hit.
+    for (dry_run, exists) in [(true, false), (false, true)] {
+        let tmp = tempfile::tempdir().unwrap();
+        if exists {
+            std::fs::write(tmp.path().join("made.txt"), b"made").unwrap();
+        }
+        let seen = std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));
+        let reader = |id| -> Box<dyn Rule> {
+            Box::new(CachedReader {
+                id,
+                seen: std::sync::Arc::clone(&seen),
+            })
+        };
+        let engine = Engine::new(
+            vec![
+                reader("before"),
+                Box::new(MustExist {
+                    fixer: CreateFixer {
+                        target: tmp.path().join("made.txt"),
+                    },
+                }),
+                reader("after"),
+            ],
+            RuleRegistry::new(),
+        );
+        let index = idx(&[]);
+        let report = engine
+            .fix(
+                tmp.path(),
+                &index,
+                &crate::WalkOptions::default(),
+                dry_run,
+                Applicability::Safe,
+            )
+            .unwrap();
+        let applied = report
+            .results
+            .iter()
+            .flat_map(|result| &result.items)
+            .filter(|item| matches!(item.status, FixStatus::Applied(_)))
+            .count();
+        assert_eq!(applied, usize::from(dry_run), "dry_run={dry_run}");
+        let cache = index.read_cache().expect("the run enabled the caches");
+        assert_eq!(
+            (cache.reads(), cache.hits()),
+            (1, 1),
+            "dry_run={dry_run}: {:?}",
+            seen.lock().unwrap()
+        );
+    }
+}

@@ -6,8 +6,9 @@
 //! `pins.tsv`. Each repository is fetched once, at depth 1, into the cache and
 //! reused by later runs. `--compare` runs a second binary over the same trees
 //! and reports every repository whose JSON report (proposed edits included) or
-//! baseline fingerprints differ: this is how v0.21's shadow port of
-//! `cross_file` `equals` is checked on real configurations (ADR-0023). A
+//! baseline fingerprints differ: this is how a change to the relation layer,
+//! such as v0.22's port of `cross_file` onto it, is checked on real
+//! configurations (ADR-0023, ADR-0025). A
 //! config with analysis failures cannot produce a baseline by design; both
 //! binaries then compare an empty fingerprint list and the check report still
 //! carries the analysis failures.

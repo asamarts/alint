@@ -331,6 +331,18 @@ impl FileIndex {
             .get_or_init(|| std::sync::Arc::new(crate::relation::DecodeCache::new()));
     }
 
+    /// Clear both relation caches, if enabled, so later reads see the tree as
+    /// it is now. Filtered indexes share them, so they see it too.
+    #[doc(hidden)]
+    pub fn clear_relation_caches(&self) {
+        if let Some(cache) = self.reads.get() {
+            cache.clear();
+        }
+        if let Some(cache) = self.decodes.get() {
+            cache.clear();
+        }
+    }
+
     /// Share this index's relation caches with a filtered index built from it.
     pub(crate) fn share_relation_caches(&self, other: &Self) {
         if let Some(cache) = self.reads.get() {

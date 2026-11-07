@@ -15,6 +15,7 @@ use std::sync::{Arc, Mutex, OnceLock};
 
 use super::adapter::{Adapter, AdapterError, AdapterOutput};
 use super::limits::{Limits, RunBudget};
+use super::path::RelPath;
 use super::resource::{Resource, ResourceRead};
 
 /// One resource read, cached for the whole run.
@@ -62,9 +63,28 @@ impl ReadCache {
     /// already pruned by the walker, so it takes the cheaper path.
     pub fn read(&self, root: &Path, resource: &Resource, size_hint: u64) -> Arc<ResourceRead> {
         let literal = matches!(resource.origin(), super::resource::Origin::Literal);
-        let relative = Path::new(resource.path().as_str());
+        let relative = resource.path().as_path();
         self.mark_interest(relative);
         self.read_inner(root, relative, size_hint, literal)
+    }
+
+    /// [`read`](Self::read) without retaining the bytes: a resource some
+    /// consumer marked is shared, and any other is read and dropped, as the
+    /// per-file pass reads. For a relation that reads every file a glob
+    /// selects, so the bytes the run keeps do not grow with the matches.
+    pub fn read_unretained(
+        &self,
+        root: &Path,
+        resource: &Resource,
+        size_hint: u64,
+    ) -> Arc<ResourceRead> {
+        let literal = matches!(resource.origin(), super::resource::Origin::Literal);
+        let relative = resource.path().as_path();
+        if self.is_interested(relative) {
+            return self.read_inner(root, relative, size_hint, literal);
+        }
+        self.reads.fetch_add(1, Ordering::Relaxed);
+        Arc::new(read_once(root, relative, size_hint, literal))
     }
 
     /// Mark a resource as one a relation consumer will read, so the read is
@@ -156,6 +176,14 @@ impl ReadCache {
         value
     }
 
+    /// Forget every read, so the next one sees the file as it is now. The
+    /// paths marked with [`mark_interest`](Self::mark_interest) stay marked.
+    /// `alint fix` calls this after a fix changes files, before the next rule
+    /// reads them.
+    pub fn clear(&self) {
+        self.slots.lock().expect("read cache lock").clear();
+    }
+
     /// How many filesystem reads this cache performed. Test/diagnostic only.
     #[must_use]
     pub fn reads(&self) -> usize {
@@ -203,8 +231,8 @@ fn read_once(root: &Path, relative: &Path, size_hint: u64, literal: bool) -> Res
         // skips this extra stat.
         match std::fs::metadata(&absolute) {
             // No path in the message: the finding carries the repo-relative
-            // one, and this must match `alint-rules`' direct-read helpers,
-            // which the `cross_file` shadow compares it with.
+            // one, and this matches `alint-rules`' direct-read helpers, which
+            // the content rules that bypass this cache still use.
             Ok(metadata) if !metadata.is_file() => {
                 return ResourceRead::Unreadable("not a regular file".to_string());
             }
@@ -228,7 +256,7 @@ fn read_once(root: &Path, relative: &Path, size_hint: u64, literal: bool) -> Res
 }
 
 type DecodeResult = Result<Arc<AdapterOutput>, AdapterError>;
-type DecodeSlots = HashMap<(String, String, Limits), Arc<OnceLock<DecodeResult>>>;
+type DecodeSlots = HashMap<(String, RelPath, Limits), Arc<OnceLock<DecodeResult>>>;
 
 /// One adapter output, cached for the whole run.
 ///
@@ -296,11 +324,7 @@ impl DecodeCache {
         bytes: &[u8],
         limits: &Limits,
     ) -> DecodeResult {
-        let key = (
-            adapter.id().to_string(),
-            resource.path().as_str().to_string(),
-            *limits,
-        );
+        let key = (adapter.id().to_string(), resource.path().clone(), *limits);
         let slot = {
             let mut slots = self.slots.lock().expect("decode cache lock");
             slots
@@ -315,6 +339,13 @@ impl DecodeCache {
             Ok(Arc::new(output))
         })
         .clone()
+    }
+
+    /// Forget every decode, with [`ReadCache::clear`]. The rows already taken
+    /// stay counted against the run's budget, which bounds the run's decode
+    /// work, not only what is kept.
+    pub fn clear(&self) {
+        self.slots.lock().expect("decode cache lock").clear();
     }
 
     /// How many decodes this cache performed. Test/diagnostic only.
@@ -456,6 +487,104 @@ mod tests {
         let _ = cache.read_index_path(dir.path(), std::path::Path::new("a.txt"), 0);
         let _ = cache.read_index_path(dir.path(), std::path::Path::new("a.txt"), 0);
         assert_eq!(cache.reads(), 2, "an unrelated file is not retained");
+    }
+
+    #[test]
+    fn an_unretained_read_shares_only_a_marked_path() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"hello").unwrap();
+        std::fs::write(dir.path().join("b.txt"), b"named").unwrap();
+        let cache = ReadCache::new();
+        let _ = cache.read_unretained(dir.path(), &literal("a.txt"), 0);
+        let again = cache.read_unretained(dir.path(), &literal("a.txt"), 0);
+        assert_eq!(
+            cache.reads(),
+            2,
+            "an unmarked glob match is read and dropped"
+        );
+        assert_eq!(
+            again.as_ref(),
+            &ResourceRead::Present(Arc::<[u8]>::from(&b"hello"[..]))
+        );
+        let named = cache.read(dir.path(), &literal("b.txt"), 0);
+        let shared = cache.read_unretained(dir.path(), &literal("b.txt"), 0);
+        assert_eq!(cache.reads(), 3, "a path a consumer named is shared");
+        assert!(Arc::ptr_eq(&named, &shared));
+        // The literal checks still apply.
+        assert_eq!(
+            cache
+                .read_unretained(dir.path(), &literal("nope"), 0)
+                .as_ref(),
+            &ResourceRead::Missing
+        );
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn paths_that_are_not_utf8_read_and_decode_apart() {
+        use std::ffi::OsStr;
+        use std::os::unix::ffi::OsStrExt;
+
+        let dir = tempfile::tempdir().unwrap();
+        let one = std::path::PathBuf::from(OsStr::from_bytes(b"v\xff.txt"));
+        let two = std::path::PathBuf::from(OsStr::from_bytes(b"v\xfe.txt"));
+        if std::fs::write(dir.path().join(&one), b"one").is_err() {
+            return; // a file system that refuses such names (macOS APFS)
+        }
+        std::fs::write(dir.path().join(&two), b"two").unwrap();
+        let resource = |path: &std::path::Path| {
+            Resource::literal(crate::relation::RelPath::from_os_path(path).unwrap())
+        };
+        let (one, two) = (resource(&one), resource(&two));
+        let reads = ReadCache::new();
+        let decodes = DecodeCache::new();
+        let adapter = ExtractAdapter::new(Extract::WholeFile);
+        let mut values = Vec::new();
+        for resource in [&one, &two] {
+            let read = reads.read(dir.path(), resource, 0);
+            let ResourceRead::Present(bytes) = read.as_ref() else {
+                panic!("{read:?}");
+            };
+            let output = decodes
+                .decode(&adapter, resource, bytes, &Limits::default())
+                .unwrap();
+            values.push(output.rows[0].value().cloned());
+        }
+        assert_eq!(
+            values,
+            [
+                Some(Value::String("one".into())),
+                Some(Value::String("two".into()))
+            ]
+        );
+        assert_eq!((reads.reads(), decodes.decodes()), (2, 2));
+    }
+
+    #[test]
+    fn clearing_the_index_caches_forgets_reads_and_decodes() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("a.txt"), b"old").unwrap();
+        let index = crate::walker::FileIndex::from_entries(Vec::new());
+        index.enable_relation_caches();
+        let (reads, decodes) = (index.read_cache().unwrap(), index.decode_cache().unwrap());
+        let resource = literal("a.txt");
+        let adapter = ExtractAdapter::new(Extract::WholeFile);
+        let value = || {
+            let read = reads.read(dir.path(), &resource, 0);
+            let ResourceRead::Present(bytes) = read.as_ref() else {
+                panic!("{read:?}");
+            };
+            let output = decodes
+                .decode(&adapter, &resource, bytes, &Limits::default())
+                .unwrap();
+            output.rows[0].value().cloned()
+        };
+        assert_eq!(value(), Some(Value::String("old".into())));
+        std::fs::write(dir.path().join("a.txt"), b"new").unwrap();
+        assert_eq!(value(), Some(Value::String("old".into())), "cached");
+        index.clear_relation_caches();
+        assert_eq!(value(), Some(Value::String("new".into())));
+        assert_eq!((reads.reads(), decodes.decodes()), (2, 2));
     }
 
     #[test]
