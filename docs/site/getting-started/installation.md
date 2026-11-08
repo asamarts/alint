@@ -116,7 +116,7 @@ The `install.sh` one-liner is shell-based and does not cover Windows. On Windows
 
 - **npm:** `npm install -g @asamarts/alint` (see [npm](#npm)) — the simplest path;
 - **cargo:** `cargo install alint` or `cargo binstall alint` (see [cargo](#cargo));
-- **manual:** download `alint-v0.22.0-x86_64-pc-windows-msvc.tar.gz` (or, from v0.22.1, `aarch64-pc-windows-msvc` for Windows on ARM) from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
+- **manual:** download `alint-v0.22.0-x86_64-pc-windows-msvc.tar.gz` (or `aarch64-pc-windows-msvc` for Windows on ARM) from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
 
 Note on manually-downloaded binaries: a tarball downloaded through a **browser** carries a "mark of the web", so the first run can trip Windows SmartScreen ("More info → Run anyway") or, on macOS, Gatekeeper quarantine — clear it with `xattr -d com.apple.quarantine ./alint`. Binaries fetched by `curl`/npm/cargo/Homebrew/Docker carry no such mark and run without prompts.
 
@@ -125,7 +125,7 @@ Note on manually-downloaded binaries: a tarball downloaded through a **browser**
 Air-gapped setups can install without direct github.com access:
 
 - **Docker:** re-tag and push the image into your internal registry, then pull from there.
-- **npm:** point `.npmrc` `registry=` at your internal mirror. The binary arrives in a platform package from that registry, so nothing reaches github.com (from v0.22.1; earlier versions downloaded it from GitHub Releases in a postinstall script).
+- **npm:** point `.npmrc` `registry=` at your internal mirror. The binary arrives in a platform package from that registry, so nothing reaches github.com.
 - **cargo:** use a [source replacement](https://doc.rust-lang.org/cargo/reference/source-replacement.html) mirror for the from-source build.
 
 ## From source

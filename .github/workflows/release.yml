@@ -127,6 +127,13 @@ jobs:
         run: ci/scripts/shell-tests.sh
       - name: packaging (install.sh / npm shim / Dockerfile / pre-commit hooks)
         run: ci/scripts/packaging-check.sh
+      # npm publishes are permanent: install the staged packages from a local
+      # registry with npm, pnpm, bun and yarn before anything is published.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+      - name: npm packages install end to end (local registry)
+        run: ci/scripts/test-npm-install.sh
       - name: deny (licenses + bans + sources + advisories, blocking)
         run: ci/scripts/deny.sh
       - name: audit (RustSec via cargo audit, blocking on vulnerabilities)
