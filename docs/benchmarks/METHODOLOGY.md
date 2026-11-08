@@ -346,7 +346,13 @@ micro-det` makes the micro suite deterministic:
    per-iteration `__inv_measure` frame and the rayon jobs it dispatches.
    `(Ir(K) - Ir(1)) / (K - 1)` is the exact steady-state instruction count
    of one iteration on every thread, with setup and first-call warm-up
-   excluded.
+   excluded. K is 6 by default, 1001 for tiny benches, 2 for heavy ones and
+   51 for `fix_throughput/trim_trailing_whitespace`, which writes a fresh
+   tree of real files every iteration: at K = 6 one build of its `/100`
+   case spanned 3.3% between runs, enough to fail a +3% gate on noise. Each
+   run's `TMPDIR` sits under a scratch directory whose name has the same
+   length for every run (`job-00007`), because the length of the path those
+   files sit under moved the same count by up to 0.9%.
 3. Head is compared with base (and the anchor). The gate covers every
    benchmark whose count is stable: in calibration (two full runs of v0.19.0
    and v0.20.0) 56+ benchmarks moved under 1% between identical runs. Two
