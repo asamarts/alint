@@ -270,5 +270,18 @@ belongs to the v0.23 track.
   not yet adoptable (section 4); its gaps went to ayaml's maintainers, and alint-side work is in
   #481-#484. Owner decisions in ADR-0031.
 
-Next: phase W (Windows on ARM) and phase N (npm packages) in parallel, then the owner's bootstrap
-(N7), then the release.
+- 2026-11-08: phases W and N implemented in #486. Done there: W2 (cross-platform.yml builds and
+  tests on `windows-11-arm`, with `ensure-rustup.sh`), W3 (the release job collects every
+  `*.tar.gz.sha256` into `SHA256SUMS`, so cosign, the build attestation and the SBOM glob cover the
+  new tarball with no change), W4 (no binstall metadata: binstall's default
+  `{name}-v{version}-{target}` template already names the asset), W5, N1-N4, N6, N8 (the smoke
+  code), N9, and N10 (`test-npm-install.sh` installs from a Verdaccio with no uplinks, and nothing
+  in the packages fetches). The editor extensions' download maps gained `win32/arm64` too.
+  Found on the way: Yarn 4.18 quarantines versions younger than a day by default
+  (`npmMinimalAgeGate`), so Yarn users get a new release a day late; pnpm 12 ignores
+  `--store-dir` (the test sets `storeDir` in `pnpm-workspace.yaml`). Verifiable only at the tag:
+  W1's release build and N5's publish; the release preflight now runs the install test before
+  anything publishes.
+
+Next: merge #486, then the owner's bootstrap (N7: `ci/scripts/npm-bootstrap-platform-packages.sh`),
+then the release (R1-R3).
