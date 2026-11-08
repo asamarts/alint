@@ -3,6 +3,39 @@
   "arch": "linux-x86_64",
   "rows": [
     {
+      "version": "v0.22.0",
+      "date": "2026-11-07",
+      "headline": "v0.22 completes general-linter phase 2.",
+      "workload_revisions": {
+        "S1": 2,
+        "S2": 2,
+        "S3": 2,
+        "S4": 4
+      },
+      "cells": {
+        "s1_1m_full": {
+          "mean_ms": 4237.45369282,
+          "stddev_ms": 106.34258318156091,
+          "display": "4.24 s ± 0.11"
+        },
+        "s2_1m_full": {
+          "mean_ms": 5294.048853259999,
+          "stddev_ms": 30.26350274377903,
+          "display": "5.29 s ± 0.03"
+        },
+        "s3_1m_full": {
+          "mean_ms": 490448.52765114664,
+          "stddev_ms": 13789.682073697695,
+          "display": "490.4 s ± 13.8"
+        },
+        "s4_1m_full": {
+          "mean_ms": 8831.070682320002,
+          "stddev_ms": 494.73291512571865,
+          "display": "8.83 s ± 0.49"
+        }
+      }
+    },
+    {
       "version": "v0.21.2",
       "date": "2026-11-06",
       "headline": "A fix release: `fix --dry-run` and `fix --diff` agree with `fix` on creates in more layouts, and values read from the environment stay out of more of what alint prints.",
