@@ -175,7 +175,7 @@ uvx alint check
 uv tool install alint
 ```
 
-`install.sh` detects your platform, downloads the matching tarball, verifies its SHA-256, and installs to `~/.local/bin`. The npm and PyPI packages ship the same prebuilt binary; the PyPI wheel even installs cleanly where the npm shim cannot, including under `--ignore-scripts`, on offline mirrors, and on Windows. A distroless multi-arch Docker image is published to ghcr.io on every release:
+`install.sh` detects your platform, downloads the matching tarball, verifies its SHA-256, and installs to `~/.local/bin`. The npm and PyPI packages ship the same prebuilt binary inside per-platform packages, with no install script, so both work under `--ignore-scripts`, from offline mirrors, and on Windows (x64 and arm64). A distroless multi-arch Docker image is published to ghcr.io on every release:
 
 ```bash
 docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.22.0 check

@@ -88,10 +88,14 @@ two that go keyless if you take the OIDC path).
 2. **crates.io** — keyless: add the Trusted Publisher (above). Token
    fallback: crates.io → Account Settings → API Tokens → new token
    scoped to publish; `gh secret set CARGO_REGISTRY_TOKEN`.
-3. **npm** — keyless via Trusted Publishing (OIDC), no secret. One-time:
-   npmjs.com → `@asamarts/alint` → Settings → Trusted Publisher → GitHub
-   Actions: repo `asamarts/alint`, workflow `release.yml`, no environment
-   (see the keyless section above).
+3. **npm** — keyless via Trusted Publishing (OIDC), no secret. One-time,
+   for `@asamarts/alint` **and each platform package** in `npm/platforms.json`
+   (`@asamarts/alint-<os>-<cpu>`, since v0.22.1): npmjs.com → package →
+   Settings → Trusted Publisher → GitHub Actions: repo `asamarts/alint`,
+   workflow `release.yml`, no environment (see the keyless section above). A
+   platform package must exist first; `ci/scripts/npm-bootstrap-platform-packages.sh`
+   publishes a placeholder and adds the entry (RELEASING.md, "npm Trusted
+   Publishing").
 4. **PyPI** — keyless via Trusted Publishing (OIDC), no secret. One-time:
    pypi.org → project `alint` → Publishing → add a **pending** GitHub
    Actions publisher (owner `asamarts`, repo `alint`, workflow

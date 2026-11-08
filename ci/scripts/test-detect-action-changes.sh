@@ -61,7 +61,10 @@ expect_routes "action helper reaches shell and docs tests" action/resolve-versio
 # (asserted statically below), or a PR loosening the policy skips cargo-deny.
 expect_routes "deny.toml reaches supply-chain (and Deny)" deny.toml supply_chain=true
 expect_routes "install.sh reaches packaging" install.sh packaging=true
-expect_routes "npm shim reaches packaging" npm/install.js packaging=true
+expect_routes "npm shim reaches packaging" npm/bin/alint.js packaging=true
+expect_routes "npm platform table reaches packaging" npm/platforms.json packaging=true
+expect_routes "npm stager reaches packaging" ci/scripts/stage_npm_packages.py packaging=true
+expect_routes "npm install e2e reaches packaging" ci/scripts/test-npm-install.sh packaging=true
 expect_routes "Dockerfile reaches packaging" Dockerfile packaging=true
 expect_routes ".dockerignore reaches packaging" .dockerignore packaging=true
 expect_routes "pre-commit manifest reaches packaging" .pre-commit-hooks.yaml packaging=true
@@ -71,7 +74,8 @@ expect_routes "pre-commit manifest reaches packaging" .pre-commit-hooks.yaml pac
 # the Gradle wrapper checksum, test-npm-shim the npm table, ...).
 expect_routes "install.sh reaches shell tests" install.sh shell=true
 expect_routes "Dockerfile reaches shell tests" Dockerfile shell=true
-expect_routes "npm shim reaches shell tests" npm/install.js shell=true
+expect_routes "npm shim reaches shell tests" npm/bin/alint.js shell=true
+expect_routes "npm platform table reaches shell tests" npm/platforms.json shell=true
 expect_routes "dependabot.yml reaches shell tests" .github/dependabot.yml shell=true
 expect_routes "Gradle wrapper reaches shell tests" \
   editors/jetbrains/gradle/wrapper/gradle-wrapper.properties shell=true

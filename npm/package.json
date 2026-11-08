@@ -1,7 +1,7 @@
 {
   "name": "@asamarts/alint",
   "version": "0.22.0",
-  "description": "Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules. This package downloads and wraps the platform-matched native alint binary.",
+  "description": "Language-agnostic linter for repository structure, file existence, filename conventions, and file content rules. Runs the native alint binary from the matching @asamarts/alint-<os>-<cpu> package.",
   "keywords": ["lint", "linter", "repository", "filename", "policy", "compliance"],
   "homepage": "https://github.com/asamarts/alint",
   "bugs": "https://github.com/asamarts/alint/issues",
@@ -15,19 +15,19 @@
     "alint": "bin/alint.js"
   },
   "files": [
-    "install.js",
     "bin/alint.js",
+    "platforms.json",
     "README.md"
   ],
-  "scripts": {
-    "postinstall": "node install.js"
-  },
-  "dependencies": {
-    "tar": "^7.4.0"
-  },
   "engines": {
     "node": ">=18"
   },
-  "os": ["linux", "darwin", "win32"],
-  "cpu": ["x64", "arm64"]
+  "optionalDependencies": {
+    "@asamarts/alint-linux-x64": "0.22.0",
+    "@asamarts/alint-linux-arm64": "0.22.0",
+    "@asamarts/alint-darwin-x64": "0.22.0",
+    "@asamarts/alint-darwin-arm64": "0.22.0",
+    "@asamarts/alint-win32-x64": "0.22.0",
+    "@asamarts/alint-win32-arm64": "0.22.0"
+  }
 }

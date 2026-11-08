@@ -75,10 +75,11 @@ if echo "$CHANGED" | grep -qE '(^|/)Cargo\.(toml|lock)$|^(about\.(toml|hbs)|deny
 fi
 
 # Distribution packaging that no Rust/docs gate covers: the curl-able
-# installer, the npm shim, the release Docker image and the pre-commit hook
-# manifest. Routed to the `packaging` job (ci/scripts/packaging-check.sh), so a
+# installer, the npm packages (and the scripts that stage and test them), the
+# release Docker image and the pre-commit hook manifest. Routed to the
+# `packaging` job (ci/scripts/packaging-check.sh, test-npm-install.sh), so a
 # PR touching only these still gets shellcheck / node --check / a docker build.
-if echo "$CHANGED" | grep -qE '^(install\.sh|Dockerfile|\.dockerignore|\.pre-commit-hooks\.yaml|npm/)'; then
+if echo "$CHANGED" | grep -qE '^(install\.sh|Dockerfile|\.dockerignore|\.pre-commit-hooks\.yaml|npm/|ci/scripts/(stage_npm_packages\.py|test-npm-(install|shim)\.(sh|js)|packaging-check\.sh)$)'; then
   PACKAGING=true
 fi
 

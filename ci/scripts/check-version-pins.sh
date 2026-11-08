@@ -226,6 +226,22 @@ else
     echo "[version-pin] npm/package.json: version $NPM_VER != workspace $WORKSPACE_VER" >&2
     failed=1
   fi
+  # The platform packages are exact-version optionalDependencies (ADR-0031);
+  # publish-npm restamps them from the tag, but HEAD should already match.
+  # test-npm-shim checks that they name exactly npm/platforms.json's rows.
+  npm_platform_pins=$(sed -nE 's/^[[:space:]]*"(@asamarts\/alint-[a-z0-9-]+)":[[:space:]]*"([^"]*)",?[[:space:]]*$/\1 \2/p' \
+    npm/package.json)
+  if [[ -z "$npm_platform_pins" ]]; then
+    echo "[version-pin] npm/package.json: no @asamarts/alint-<os>-<cpu> optionalDependencies" >&2
+    failed=1
+  fi
+  while read -r name pin; do
+    [[ -z "$name" ]] && continue
+    if [[ "$pin" != "$WORKSPACE_VER" ]]; then
+      echo "[version-pin] npm/package.json: $name pinned at $pin != workspace $WORKSPACE_VER" >&2
+      failed=1
+    fi
+  done <<<"$npm_platform_pins"
 fi
 
 # Zed extension manifests: the registry builds from source at the committed

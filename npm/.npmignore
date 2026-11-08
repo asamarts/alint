@@ -5,6 +5,5 @@
 .gitignore
 .dockerignore
 node_modules/
-bin-platform/
 *.log
 *.tgz

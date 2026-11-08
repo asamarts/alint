@@ -38,13 +38,18 @@ Supply-chain note: the installer verifies the SHA-256 of the release tarball it 
 npm install -g @asamarts/alint
 ```
 
-The [`@asamarts/alint`](https://www.npmjs.com/package/@asamarts/alint) package is a thin wrapper: on install it downloads the platform-matched native binary from GitHub Releases and verifies its SHA-256. Handy in Node/JS projects and CI that already have npm. Zero-install works too:
+The [`@asamarts/alint`](https://www.npmjs.com/package/@asamarts/alint) package runs the native binary from a per-platform package (`@asamarts/alint-linux-x64`, `@asamarts/alint-win32-arm64`, and so on) that it lists as an optional dependency; your package manager installs only the one for your OS and CPU. Each platform package carries the same binary as the GitHub Release tarball, with npm provenance. Handy in Node/JS projects and CI that already have npm. Zero-install works too:
 
 ```bash
 npx @asamarts/alint check
 ```
 
-Supports Linux (x64/arm64), macOS (x64/arm64), and Windows (x64). The install runs a postinstall script, so it needs network access at install time and does not work under `npm install --ignore-scripts`, Bun's `bunx`, or **pnpm 10+** (which blocks dependency build scripts by default — run `pnpm approve-builds @asamarts/alint` to allow it). A future release moves to per-platform packages to lift those limits.
+Supports Linux (x64/arm64, any libc), macOS (x64/arm64), and Windows (x64/arm64). No package runs an install script, so it works with npm, pnpm, Yarn (including Plug'n'Play), and Bun, under `--ignore-scripts`, and from a registry mirror. Two things to know:
+
+- **Optional dependencies must be installed.** With `npm install --omit=optional` (or `--no-optional`), or a lockfile written on another platform without its optional dependencies, the `alint` command exits with a message saying how to reinstall.
+- **`ALINT_BINARY`** points the `alint` command at a binary of your choosing instead, for example one from an internal mirror or on a platform without a published package.
+
+`npm audit signatures` verifies the registry signatures and provenance attestations of both packages.
 
 ## PyPI (uvx / pipx / pip / uv)
 
@@ -61,9 +66,9 @@ pipx install alint
 pip install alint
 ```
 
-The [`alint`](https://pypi.org/project/alint/) PyPI package ships the native binary **inside** a per-platform wheel (`py3-none-<platform>`): no source build, no PyO3, no Python in the hot path. It is the same executable the other channels ship, delivered through the Python packaging ecosystem. Because the wheel embeds the binary rather than downloading it in a postinstall step, it installs cleanly where the npm wrapper cannot: locked-down `--ignore-scripts`-style installs, offline/mirror setups, and `bunx`. Convenient for Python-tooling repos, pre-commit, and any environment that already has `uv` or `pipx`.
+The [`alint`](https://pypi.org/project/alint/) PyPI package ships the native binary **inside** a per-platform wheel (`py3-none-<platform>`): no source build, no PyO3, no Python in the hot path. It is the same executable the other channels ship, delivered through the Python packaging ecosystem. Because the wheel embeds the binary rather than downloading it at install time, it installs cleanly in locked-down `--ignore-scripts`-style installs and offline/mirror setups. Convenient for Python-tooling repos, pre-commit, and any environment that already has `uv` or `pipx`.
 
-Supports Linux (x86_64/aarch64, glibc **and** musl), macOS (x86_64/arm64), and Windows (x64). Python 3.7+ is enough to select a wheel; the binary itself is interpreter-independent.
+Supports Linux (x86_64/aarch64, glibc **and** musl), macOS (x86_64/arm64), and Windows (x64/arm64). Python 3.7+ is enough to select a wheel; the binary itself is interpreter-independent.
 
 ## cargo
 
@@ -111,7 +116,7 @@ The `install.sh` one-liner is shell-based and does not cover Windows. On Windows
 
 - **npm:** `npm install -g @asamarts/alint` (see [npm](#npm)) — the simplest path;
 - **cargo:** `cargo install alint` or `cargo binstall alint` (see [cargo](#cargo));
-- **manual:** download `alint-v0.22.0-x86_64-pc-windows-msvc.tar.gz` from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
+- **manual:** download `alint-v0.22.0-x86_64-pc-windows-msvc.tar.gz` (or `aarch64-pc-windows-msvc` for Windows on ARM) from the [Releases page](https://github.com/asamarts/alint/releases), extract, and put `alint.exe` on your `PATH`.
 
 Note on manually-downloaded binaries: a tarball downloaded through a **browser** carries a "mark of the web", so the first run can trip Windows SmartScreen ("More info → Run anyway") or, on macOS, Gatekeeper quarantine — clear it with `xattr -d com.apple.quarantine ./alint`. Binaries fetched by `curl`/npm/cargo/Homebrew/Docker carry no such mark and run without prompts.
 
@@ -120,7 +125,7 @@ Note on manually-downloaded binaries: a tarball downloaded through a **browser**
 Air-gapped setups can install without direct github.com access:
 
 - **Docker:** re-tag and push the image into your internal registry, then pull from there.
-- **npm:** once a future release ships per-platform packages, point `.npmrc` `registry=` at your internal mirror; today the postinstall wrapper fetches from github.com.
+- **npm:** point `.npmrc` `registry=` at your internal mirror. The binary arrives in a platform package from that registry, so nothing reaches github.com.
 - **cargo:** use a [source replacement](https://doc.rust-lang.org/cargo/reference/source-replacement.html) mirror for the from-source build.
 
 ## From source

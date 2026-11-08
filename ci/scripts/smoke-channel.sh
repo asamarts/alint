@@ -124,6 +124,49 @@ install_via_script() {
     | ALINT_VERSION="$TAG" ALINT_REQUIRE_VERIFY="$REQUIRE_VERIFY" bash 2>&1 | tee "$INSTALL_LOG"
 }
 
+# From v0.22.1 the npm binary ships in a per-platform package that the shim
+# names as an optionalDependency (ADR-0031). Install into a fresh project, as
+# most users do: npx must run alint, the platform package must be the one the
+# shim runs, npm must verify every package's registry signature and provenance
+# attestation, and an install without optional dependencies must say how to fix
+# itself rather than fail obscurely.
+FIRST_NPM_PLATFORM_RELEASE="0.22.1"
+smoke_npm_project() {
+  local proj omitted audit platform_pkg attested
+  proj="$(mktemp -d)"
+  omitted="$(mktemp -d)"
+  (cd "$proj" && npm init -y >/dev/null && retry npm install --no-fund --no-audit "@asamarts/alint@${VER}")
+  (cd "$proj" && assert_version npx --no-install alint --version)
+  if ! version_ge "$VER" "$FIRST_NPM_PLATFORM_RELEASE"; then
+    echo "  [smoke] note: ${TAG} predates the npm platform packages (first: v${FIRST_NPM_PLATFORM_RELEASE})"
+    return 0
+  fi
+  platform_pkg="@asamarts/alint-$(node -p 'process.platform + "-" + process.arch')"
+  if [[ "$(cd "$proj" && node -p "require('${platform_pkg}/package.json').version" 2>/dev/null)" != "$VER" ]]; then
+    echo "  [smoke] FAIL: ${platform_pkg}@${VER} is not installed beside @asamarts/alint" >&2
+    return 1
+  fi
+  echo "  [smoke] OK: ${platform_pkg}@${VER} carries the binary"
+  if ! audit="$(cd "$proj" && npm audit signatures 2>&1)"; then
+    echo "  [smoke] FAIL: npm audit signatures: ${audit}" >&2
+    return 1
+  fi
+  attested="$(printf '%s\n' "$audit" | sed -nE 's/^([0-9]+) packages? ha(s|ve) (a )?verified attestations?.*/\1/p')"
+  if [[ "${attested:-0}" -lt 2 ]]; then
+    echo "  [smoke] FAIL: expected verified attestations for the shim and ${platform_pkg}: ${audit}" >&2
+    return 1
+  fi
+  echo "  [smoke] OK: npm verified ${attested} provenance attestations"
+  (cd "$omitted" && npm init -y >/dev/null && retry npm install --no-fund --no-audit --omit=optional "@asamarts/alint@${VER}")
+  local out rc=0
+  out="$(cd "$omitted" && npx --no-install alint --version 2>&1)" || rc=$?
+  if [[ "$rc" -ne 1 || "$out" != *"--omit=optional"* ]]; then
+    echo "  [smoke] FAIL: --omit=optional install: exit ${rc}, expected 1 with the reinstall hint: ${out}" >&2
+    return 1
+  fi
+  echo "  [smoke] OK: an install without optional dependencies explains the fix"
+}
+
 echo "==> smoke: channel=${CHANNEL} tag=${TAG} ver=${VER} floating=${SMOKE_FLOATING:-0}"
 case "$CHANNEL" in
   install.sh)
@@ -160,6 +203,7 @@ case "$CHANNEL" in
     assert_version alint --version
     smoke_policy_test alint
     check_floating "$(npm view "@asamarts/alint" version 2>/dev/null)"
+    smoke_npm_project
     ;;
   docker)
     retry "$DOCKER" pull "${IMAGE}:${VER}"

@@ -31,7 +31,14 @@ fail=0
 mkdir -p "$sandbox/bin"
 stub() { printf '#!/usr/bin/env bash\necho "%s $*" >> "$STUB_LOG"\n%s\n' "$1" "$2" > "$sandbox/bin/$1"; chmod +x "$sandbox/bin/$1"; }
 {
-stub npm 'if [[ "$1" == view ]]; then printf "%s\n" "${NPM_VIEW_OUT:-}"; [[ -n "${NPM_VIEW_OUT:-}" ]] || exit 1; fi; exit 0'
+# npm view: NPM_VIEW_PUBLISHED lists the name@version specs the registry serves
+# (else every view prints NPM_VIEW_OUT); npm publish also logs its package dir.
+stub npm 'if [[ "$1" == view ]]; then
+  if [[ " ${NPM_VIEW_PUBLISHED:-} " == *" $2 "* ]]; then echo "${2##*@}"; exit 0; fi
+  printf "%s\n" "${NPM_VIEW_OUT:-}"; [[ -n "${NPM_VIEW_OUT:-}" ]] || exit 1
+fi
+[[ "$1" == publish ]] && echo "npm-publish-in $(basename "$PWD")" >> "$STUB_LOG"
+exit 0'
 stub node 'exit 0'
 stub npx 'exit 0'
 stub curl 'if [[ "${CURL_FAIL:-0}" == 1 ]]; then exit 22; fi; printf "%s\n" "${CURL_OUT:-}"'
@@ -109,16 +116,40 @@ expect "release: an incomplete draft is NOT published" nonzero '' '^gh release e
 run_step release "$REL_STEP" "$rel" "${REL_ENV[@]}" GH_RELEASE_EXISTS=1 GH_IS_DRAFT=
 expect "release: an unreadable draft state fails closed" nonzero '' '^gh release edit'
 
-# ── 2. npm: skip a version the registry already serves ────────────────
-NPM_STEP='stamp package version from tag + publish'
-mkdir -p "$sandbox/npmw/npm"
-echo '{"name":"@asamarts/alint","version":"0.0.0"}' > "$sandbox/npmw/npm/package.json"
+# ── 2. npm: skip each package the registry already serves ─────────────
+NPM_STEP='publish the platform packages, then the shim'
+npm_dist() {
+  rm -rf "$sandbox/npmw"
+  for pkg in alint-linux-x64 alint-win32-arm64 alint; do
+    mkdir -p "$sandbox/npmw/npm-dist/$pkg"
+    printf '{\n  "name": "@asamarts/%s",\n  "version": "1.2.3"\n}\n' "$pkg" > "$sandbox/npmw/npm-dist/$pkg/package.json"
+  done
+}
+npm_dist
 run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=1.2.3
-expect "npm: already-published version is skipped (exit 0, no publish)" 0 '^npm view @asamarts/alint@1\.2\.3 version' '^npm publish'
+expect "npm: already-published versions are skipped (exit 0, no publish)" 0 \
+  '^npm view @asamarts/alint-win32-arm64@1\.2\.3 version' '^npm publish'
+expect "npm: the shim's version is checked too" 0 '^npm view @asamarts/alint@1\.2\.3 version' ''
 run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=
-expect "npm: unpublished version is published" 0 '^npm publish --access public --provenance --tag latest$' ''
+expect "npm: unpublished packages are published" 0 '^npm publish --access public --provenance --tag latest$' ''
+if [[ "$(grep -c '^npm publish ' <<< "$log")" -ne 3 ]]; then bad "npm: all three staged packages are published"; else ok "npm: all three staged packages are published"; fi
+if [[ "$(grep '^npm-publish-in ' <<< "$log" | tail -n1)" != "npm-publish-in alint" ]]; then
+  bad "npm: the shim is published last, after every platform package"
+else
+  ok "npm: the shim is published last, after every platform package"
+fi
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT= \
+  NPM_VIEW_PUBLISHED='@asamarts/alint-linux-x64@1.2.3'
+expect "npm: a re-run skips only the packages already published" 0 \
+  '^npm-publish-in alint-win32-arm64$' '^npm-publish-in alint-linux-x64$'
 run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=1.2.2
 expect "npm: an older registry version does not suppress the publish" 0 '^npm publish ' ''
+sed -i 's/"@asamarts\/alint-win32-arm64"/"@asamarts\/alint-other"/' "$sandbox/npmw/npm-dist/alint-win32-arm64/package.json"
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=
+expect "npm: a staged dir whose package.json names another package fails" nonzero '' '^npm-publish-in alint$'
+rm -rf "$sandbox/npmw" && mkdir -p "$sandbox/npmw"
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT=
+expect "npm: nothing staged fails closed" nonzero '' '^npm publish'
 
 # ── 3. VS Code / Open VSX: --skip-duplicate is a real argument ────────
 mkdir -p "$sandbox/vsc/editors/vscode"

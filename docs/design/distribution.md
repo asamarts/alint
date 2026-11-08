@@ -129,7 +129,7 @@ The whole system is one `needs:`-chained dependency graph in `release.yml`, all
 triggered by a `v*.*.*` tag push:
 
 ```
-preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
+preflight ─▶ build (6-target matrix) ─▶ release ─▶ publish-npm
                      │                     │      ─▶ homebrew
                      ├─▶ docker            │      ─▶ publish-vscode (+Open VSX)
                      └─▶ publish-crates    └─▶ publish-jetbrains
@@ -141,7 +141,7 @@ preflight ─▶ build (5-target matrix) ─▶ release ─▶ publish-npm
 | **install.sh** (`curl \| bash` via alint.org) | platform-detect → SHA-256 verified download → `$HOME/.local/bin` (prints a PATH hint if that dir is not on `PATH`, `install.sh:104-108`) | 4 (no Windows) | none |
 | **GitHub Action** `asamarts/alint@<sha>` | composite; fetches install.sh at the consumer's pinned ref with 3x retry; explicit version wins, exact tags select themselves, full SHAs select the version baked into that commit, and moving refs follow latest | 4 (no Windows) | none |
 | **crates.io** `cargo install alint` | source build; publishes 6 crates in dep order; **keyless OIDC** publishing | any Rust target | OIDC |
-| **npm** `@asamarts/alint` | **postinstall-download** wrapper (no native bytes in the tarball; `install.js` downloads + SHA-256-verifies at install time); keyless OIDC publishing | 5 (declares win-arm64 it can't serve) | OIDC |
+| **npm** `@asamarts/alint` | shim + six **per-platform packages** (`@asamarts/alint-<os>-<cpu>`, exact-version `optionalDependencies`, no install script; the binary is the release tarball's, with npm provenance) since v0.22.1 (ADR-0031); keyless OIDC publishing, one Trusted Publisher per package | 6 (win-arm64 native since v0.22.1) | OIDC |
 | **Docker** `ghcr.io/asamarts/alint` | distroless-static, nonroot (UID 65532), re-extracts the *release* binaries so the image is byte-identical to the tarballs; OCI labels set in CI (`release.yml:313-317`); tags `:vX.Y.Z`/`:X.Y.Z`/`:X.Y`/`:latest` | linux amd64+arm64 | `GITHUB_TOKEN` |
 | **Homebrew tap** `asamarts/homebrew-alint` | formula regenerated from `SHA256SUMS` in CI (no rebuild), golden-tested in preflight, committed over SSH | macOS arm/intel + Linuxbrew x64/aarch64 | SSH deploy key |
 | **VS Code + Open VSX** | `vsce publish` + `ovsx publish`, version stamped from tag; real-client e2e in `editors-e2e.yml` | n/a | `VSCE_PAT`, `OVSX_PAT` |
@@ -192,8 +192,8 @@ live citations.
 | **MP-H2** | HIGH | Official GitHub Action silently fails on Windows runners (composite → install.sh hard-exits) though a win-x64 binary exists. | `action.yml:56-130` (`bash "$install_sh"` at `:129`), `install.sh:32-38` | Windows path in the Action / P2; doc note / P0 |
 | **MP-M1** | NOTE | The crates.io publish is coupled to the full build matrix (`publish-crates: needs: build`), so a flaky win/aarch64 leg can block it. **Considered and kept** (decision 2026-08-16): `release.yml:321-328` deliberately uses the matrix as a *cross-platform compile gate* before the irreversible publish (preflight is ubuntu-only), and shipping win/aarch64-broken source to immutable crates.io is the worse harm. A build-blocked publish is recovered by re-running the idempotent `publish-crates` job. | `release.yml:329` + `:321-328` (rationale) | keep as-is; document the re-run recovery in RELEASING.md / P0 (doc only) |
 | **MP-M2** | MED | Four secret-bearing channels, each a split-brain single point of failure, all run after the Release exists. Three are expiring tokens; the Homebrew SSH key is long-lived (compromise, not expiry). | `NPM_TOKEN release.yml:375`; `VSCE_PAT/OVSX_PAT :475-476`; the four JetBrains secrets `:525-528`; `HOMEBREW_TAP_DEPLOY_KEY :420` | migrate npm to OIDC (now GA) / P2; rotation runbook / P0, extended to the P2-added AUR SSH key + WinGet PAT |
-| **MP-M3** | MED | npm declares `win32/arm64` (os×cpu) it cannot serve; hard postinstall error instead of clean `EBADPLATFORM`. | `npm/package.json:31-32`, `npm/install.js:52-58` | fix declaration / P0; add win-arm64 build+package / P2 |
-| **MP-M4** | MED | Air-gapped/enterprise install is impossible from the primary paths: `install.sh` hardcodes `api.github.com` + `github.com` and its `ALINT_REPO` overrides only the repo path, not the host; `npm/install.js`'s repo is a hardcoded const with no env override. | `install.sh:18,48,60`, `npm/install.js:26` | install.sh base-URL override + npm made mirrorable by the optionalDeps migration + mirror docs / §7.2, P0 docs + P2 code |
+| **MP-M3** | MED | npm declares `win32/arm64` (os×cpu) it cannot serve; hard postinstall error instead of clean `EBADPLATFORM`. | ~~`npm/package.json:31-32`, `npm/install.js:52-58`~~ | **RESOLVED (v0.22.1, ADR-0031):** a native `aarch64-pc-windows-msvc` build ships as `@asamarts/alint-win32-arm64`; `install.js` is gone |
+| **MP-M4** | MED | Air-gapped/enterprise install is impossible from the primary paths: `install.sh` hardcodes `api.github.com` + `github.com` and its `ALINT_REPO` overrides only the repo path, not the host; `npm/install.js`'s repo is a hardcoded const with no env override. | `install.sh:18,48,60`, ~~`npm/install.js:26`~~ | install.sh base-URL override + mirror docs / §7.2, P0 docs + P2 code. **npm part RESOLVED (v0.22.1):** the binary arrives from the configured registry in a platform package, and `ALINT_BINARY` overrides it |
 | **MP-M5** | MED | No automated post-publish install smoke: the release DAG ends at the publish jobs, and nothing installs from a live channel and runs `alint --version` afterward, so a broken npm postinstall, a missing/checksum-mismatched asset, or an unresolvable crates.io graph ships unnoticed until a user reports. alint's owned surface is transformation-heavy (npm downloads at install; brew regenerates the formula; docker re-extracts), unlike ripgrep's zero-transform surface. | grep of `.github/workflows/` (no `npm i -g`/`cargo install`/`docker run`/`brew install` post-publish); `action-selftest` runs the *local* action against the *previous* release | `post-publish-smoke` matrix job (advisory monitoring, not a merge gate) / P1 |
 | **MP-M6** | MED | No third-party/transitive license attribution ships with any artifact. The build resolves ~374 crates (`Cargo.lock`) under MIT/Apache-2.0 — both require reproducing their notices in binary redistribution — yet only alint's *own* `LICENSE-*` ship (in the tarball; the Docker image and npm package carry no license text at all), and there is no root `NOTICE`. `deny.toml` gates license *compatibility* but emits no attribution artifact. alint even *ships* `apache-2-notice-file-exists` (a `warning`-level `file_exists` rule) and a `reuse` ruleset as bundled rulesets, though it does not run them on its own repo (which would trip the NOTICE rule). | no `about.toml`/`cargo-about`/`NOTICE`/`THIRD-PARTY*`; `release-binary.sh:55` lists `NOTICE` in its staging loop but the `[[ -f ]]` guard skips the absent file | `cargo about generate THIRD-PARTY-LICENSES` + a root `NOTICE`, staged into tarball/image/npm alongside the SBOM / P1 |
 | **MP-L1** | LOW | install.sh resolves "latest" via the unauthenticated GitHub API (60 req/hr/IP); 403s on shared CI egress. | `install.sh:48` | doc `ALINT_VERSION` pin / P0. **Fixed (2026-10):** `latest` now resolves through github.com's `/releases/latest` redirect (not API-rate-limited), with the API as fallback, a tag-format check and curl retries; pinned by `ci/scripts/test-install-sh.sh`. |
@@ -255,6 +255,14 @@ surface of `MP-N1`/`MP-N2`.) Migrate
 to the **optionalDependencies** model (§4), which removes all four failure modes (the
 binary ships inside the sub-package) and adds the missing win-arm64 target — the
 packaging axis of `MP-M3`, scheduled in P2.
+
+**Shipped in v0.22.1** (ADR-0031, plan in `docs/design/v0.22.1/README.md`): pure
+optionalDependencies with no install script and no network fallback. With optional
+dependencies omitted, `alint` exits 1 and says how to reinstall; `ALINT_BINARY` points it
+at any binary. `ci/scripts/stage_npm_packages.py` repackages the attested tarballs
+(fail-closed on a checksum or an executable header that does not match the package), and
+`ci/scripts/test-npm-install.sh` installs the packages from a local registry with npm,
+pnpm, Bun and Yarn PnP on Linux, macOS, Windows and Windows on ARM.
 
 ---
 
