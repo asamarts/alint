@@ -6,6 +6,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Performance
+
+- `alint fix` computes each finding's fingerprint as cheaply as v0.21.2 did again. v0.22.0
+  moved the hashing into a helper the compiler did not inline, and the fix loop hashes every
+  finding of every pass, so a fix run over 100 files cost up to 3.16% more instructions than
+  v0.21.2 in the bench record's deterministic micro gate.
+
 ## [0.22.0] - 2026-11-07
 
 v0.22 completes general-linter phase 2. `cross_file` reads the values it compares through the

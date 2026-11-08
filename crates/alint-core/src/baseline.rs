@@ -80,7 +80,10 @@ pub fn violation_fingerprint(
     hash_components([rule_id.as_bytes(), path_norm.as_ref(), discriminator])
 }
 
-/// `sha256(lp(a) ‖ lp(b) ‖ lp(c))`, as 64 hex digits.
+/// `sha256(lp(a) ‖ lp(b) ‖ lp(c))`, as 64 hex digits. Inlined: `alint fix` keys
+/// every finding of every pass by it, and the out-of-line call put
+/// `fix_throughput/trim_trailing_whitespace/100` 3.16% over v0.21.2.
+#[inline]
 fn hash_components(components: [&[u8]; 3]) -> String {
     let mut hasher = Sha256::new();
     for component in components {
