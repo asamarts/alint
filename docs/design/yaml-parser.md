@@ -139,3 +139,21 @@ Revisit a pure-Rust cutover when one candidate simultaneously provides:
 
 Until then, maintaining alint's narrow lexical/security adapters while using the YAML organization's
 maintained libyaml fork is the lower-risk ownership boundary.
+
+## Re-evaluation log
+
+- **2026-11-08: ayaml 0.1.1 and its unreleased main, not adopted yet.** ayaml is a pure-Rust YAML
+  1.2.2 parser with a libyaml compatibility mode and default limits equal to alint's constants. A
+  cutover rebased onto main passes the build, MSRV, deny, audit and the e2e and corpus suites. It
+  removes `libyaml-rs` and `yaml_serde` from the graph, and all 868 committed YAML files parse to the
+  same value on ayaml main. It fails these triggers:
+  - `from_value` accepts wrong-typed scalars, so `pattern: null` loads as `/null/`;
+  - valid YAML is rejected, and error locations differ;
+  - compatibility entry points take no limits;
+  - small configurations cost 5% to 9% more instructions;
+  - releases are pre-1.0 and unattested, with exact `serde`/`indexmap` pins;
+  - there is no differential fuzzing yet.
+
+  The re-qualification targets ayaml 0.1.2 and the first minor after it
+  ([ADR-0031](../adr/0031-v0221-owner-decisions.md), [`v0.22.1/README.md`](v0.22.1/README.md)
+  section 4, #481-#484).
