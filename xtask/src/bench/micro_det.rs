@@ -105,6 +105,12 @@ pub struct Policy {
 /// Benchmarks whose per-iteration cost is tiny, so K must be large for the
 /// instruction count to dominate Callgrind's fixed per-run accounting.
 const TINY: &[&str] = &["regex_content/", "single_file/reeval_vs_full/run_for_file/"];
+/// Benchmarks that build a fresh tree of real files for every iteration, so
+/// one iteration's count varies with the tree's random directory name: at
+/// six iterations the same build of `trim_trailing_whitespace/100` ranged
+/// over 3.3% (1,570k to 1,622k), which put v0.22.0's record 3.16% over
+/// v0.21.2 though the two differ by 0.09%. At 51 the spread is under 0.8%.
+const FRESH_TREE: &[&str] = &["fix_throughput/trim_trailing_whitespace/"];
 /// Benchmarks costing >100M instructions per iteration: one extra
 /// iteration is plenty and keeps the full suite affordable.
 const HEAVY: &[&str] = &[
@@ -183,6 +189,8 @@ fn matches_any(id: &str, prefixes: &[&str]) -> bool {
 pub fn policy(id: &str) -> Policy {
     let k2 = if matches_any(id, TINY) {
         1001
+    } else if matches_any(id, FRESH_TREE) {
+        51
     } else if matches_any(id, HEAVY) {
         2
     } else {
@@ -626,6 +634,15 @@ pub fn markdown(rows: &[Row], header: &str, anchor_label: Option<&str>) -> Strin
     s
 }
 
+/// The scratch directory (and so the `TMPDIR`) of the `n`th measurement.
+/// Every name has the same length: a bench's base and head run at different
+/// queue positions, and the length of the path its files sit under moved
+/// `trim_trailing_whitespace/100` by up to 0.9% at 51 iterations (`job-7`,
+/// `job-77`, `job-177`), where equal-length names agree within 0.3%.
+fn job_dir(scratch: &Path, n: usize) -> PathBuf {
+    scratch.join(format!("job-{n:05}"))
+}
+
 // ─── entry point ──────────────────────────────────────────────────────
 
 fn measure_all(
@@ -643,7 +660,7 @@ fn measure_all(
                     let Some((n, (rev, bin, id, k2))) = queue.lock().unwrap().pop() else {
                         break;
                     };
-                    let dir = scratch.join(format!("job-{n}"));
+                    let dir = job_dir(scratch, n);
                     let _ = std::fs::create_dir_all(&dir);
                     match measure(bin, id, *k2, &dir) {
                         Ok(v) => {
@@ -859,8 +876,25 @@ mod tests {
             "exact match, not prefix"
         );
         assert_eq!(policy("regex_content/1024").k2, 1001);
+        assert_eq!(policy("fix_throughput/trim_trailing_whitespace/100").k2, 51);
+        assert_eq!(
+            policy("fix_throughput/trim_trailing_whitespace/1000").k2,
+            51
+        );
+        assert_eq!(policy("fix_throughput/dry_run_only/100").k2, 6);
         assert!(policy("output_formats/1000_violations/sarif").in_pr);
         assert_eq!(policy("output_formats/10000_violations/sarif").k2, 2);
+    }
+
+    #[test]
+    fn every_measurement_gets_a_scratch_path_of_one_length() {
+        let scratch = Path::new("/scratch");
+        let lengths: BTreeSet<usize> = [0, 7, 77, 177, 293, 99_999]
+            .into_iter()
+            .map(|n| job_dir(scratch, n).as_os_str().len())
+            .collect();
+        assert_eq!(lengths.len(), 1, "{lengths:?}");
+        assert_ne!(job_dir(scratch, 7), job_dir(scratch, 77));
     }
 
     #[test]
