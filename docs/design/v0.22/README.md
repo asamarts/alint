@@ -212,6 +212,26 @@ stop rule decides whether Phase 3 starts; v0.22 can still ship phases 3 to 6.
   `cross_file` `equals`, the same four skipped, none crashed, zero differences.
   - Gate 3 is met in full, so all three gates are met and Phase 3 may start.
 
+- 2026-11-08: the v0.22.0 bench record (#479), reviewed.
+  - `bench-gate` passes. Mean S3 full at 1M is 490.4 s against v0.21.2's 475.2 s, and S4 is
+    8.83 s against 8.42 s, but their spreads (13.8 s and 0.49 s) are the bimodal and one-slow-run
+    cases. The gate's `min_ms` puts S3 at +0.25% and S4 at +1.3%.
+  - The release run's `micro-det` job reported `fix_throughput/trim_trailing_whitespace/100` at
+    +3.16%. That was harness noise, fixed in #478. At six iterations the same build of that
+    bench ranged over 3.3%, and paths of different lengths moved it by up to 0.9%. At 51
+    iterations, interleaved, v0.21.2 and v0.22.0 are 0.09% apart, and the full suite against
+    v0.21.2 passes with #478's harness. That bench is -0.30%, and `/1000` +0.16%.
+  - The record's same-session criterion A/B, which runs v0.21.2 first, showed
+    `cross_file/for_each_dir/100` at +24% (and `/5000` at +10%), and
+    `output_formats/10000_violations/gitlab` at +13%. Their instruction counts are within
+    0.1%, and neither `for_each_dir.rs` nor `alint-output` changed. An interleaved A/B on the
+    bench host (three ABBA rounds of rustc 1.97.0 builds) puts them at +0.4%, +2.7% with
+    overlapping ranges, and +0.4%.
+  - The CHANGELOG's dry-run figure was measured in one repository, where prediction was 45% of
+    the run. Two more 100-file repositories (one a git repository) with rustc 1.97.0 release
+    builds give 85% and 89% fewer prediction instructions at 20 creates, but 9% and 15% fewer in
+    all, so the CHANGELOG now gives the ranges. A single create costs the same in each.
+
 Next: v0.23, general-linter Phase 3 (`version: 2` selectors and report-only constraints), with a
 design doc and the version-boundary ADR first; v0.23 also stops matching the v0.21 hidden-path
 fingerprint (ADR-0030 decision 1). The npm package's move to per-platform binaries is its own

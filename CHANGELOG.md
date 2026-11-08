@@ -58,8 +58,9 @@ through a dangling symlink, and predicting many creates costs far less.
 - `fix --dry-run` and `fix --diff` read the walk's ignore files once per pass, not once per
   predicted create (ADR-0030 decision 4): the overrides, the repository boundary, the ignore
   files above the root and the global excludes file once, and each directory's ignore files once.
-  A dry run of 20 creates spends 91% fewer instructions predicting them (6.8M to 0.6M) and 40%
-  fewer in all; a single create costs the same.
+  In three 100-file repositories, a dry run of 20 creates spent 85% to 91% fewer instructions
+  predicting them (at most 6.8M to 0.6M). The whole run saved 9% to 40%, depending on how much
+  of it prediction took. A single create costs the same.
 
 ### Removed
 
