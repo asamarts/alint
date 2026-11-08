@@ -9,6 +9,75 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.0] - 2026-11-07
+
+v0.22 completes general-linter phase 2. `cross_file` reads the values it compares through the
+relation layer that `key_parity` brought in v0.21, and the old reader is gone. Findings are
+unchanged: a replay of the 110-repository case-study corpus against v0.21.2 shows no
+differences. Two changes need attention. Library users: `FixContext`, `Config` and
+`CompiledNestedSpec` in `alint-core` are now `#[non_exhaustive]`, so build them with their
+constructors and `with_*` setters. Baseline users: a finding whose path is hidden gets a
+fingerprint without the path; v0.22 still accepts the form v0.21 wrote, but v0.23 will not, so
+re-run `alint baseline` before upgrading to v0.23. `fix --dry-run` also predicts a create
+through a dangling symlink, and predicting many creates costs far less.
+
+### Changed
+
+- `cross_file` reads the values it compares through the relation layer: the run's read and
+  decode caches and the extract adapter `key_parity` already uses (ADR-0025 decision 3, gate 1).
+  Findings are unchanged. A file the configuration names (`source.file`, a `targets` entry) is
+  read and decoded once per run for every rule that names it; a file a glob matches is still
+  read once per rule and not kept, so memory does not grow with the matches. A glob-matched file
+  whose name is not UTF-8 reads through the same path.
+- `alint fix` clears the relation caches after a rule's fix lands, so a rule evaluated later in
+  the same pass reads a file that fix created, removed or renamed as it now is.
+- **Breaking (library API):** `alint-core`'s `FixContext`, `Config` and `CompiledNestedSpec`
+  are `#[non_exhaustive]` (ADR-0030 decision 2), so adding a field to them is no longer a
+  breaking change, and code outside `alint-core` can no longer build them with a struct
+  literal. Build a `FixContext` with `FixContext::new(root, dry_run)` and a `Config` with
+  `Config::new(version, rules)`, then the `with_*` setters for the other fields; a
+  `CompiledNestedSpec` comes from `CompiledNestedSpec::compile`, as before. The fields stay
+  public to read.
+- **Baseline fingerprints of hidden-path findings (ADR-0030 decision 1).** A finding whose path
+  is `<redacted>`, because a field that chooses files was read from the environment, gets a
+  fingerprint that leaves the path out, in the baseline file, SARIF `partialFingerprints` and
+  GitLab `fingerprint`. Holding one of those files no longer lets anyone confirm a guessed path.
+  A rule's hidden-path findings share the fingerprint, and a baseline grandfathers them by count.
+  `check --baseline`, `fix --baseline`, the language server and `alint baseline`'s regeneration
+  guard still accept the fingerprint v0.21 wrote for such a finding, so existing baseline files
+  keep working; `alint baseline` rewrites them in the new form without `--accept-new`. v0.23
+  will drop the old form, so re-run `alint baseline` before upgrading to it. A baseline file
+  v0.22 writes does not grandfather these findings in v0.21. In `alint-core`,
+  `baseline::apply` takes a fingerprinter that returns `baseline::Fingerprints` (from
+  `baseline::fingerprints`) to match both forms; one that returns a `String`, as before, matches
+  only the new form.
+- The `.env` parser behind the `dotenv_path_*` rules, `key_parity` and dotenv fixes (`adotenv`)
+  moves from 0.10.4 to 1.3.0. Findings and fixes are unchanged: alint built with either version
+  gives identical `check` and `fix` output on 50,000 generated `.env` files, of which about
+  18,000 parse and 10,000 take a fix.
+
+### Performance
+
+- `fix --dry-run` and `fix --diff` read the walk's ignore files once per pass, not once per
+  predicted create (ADR-0030 decision 4): the overrides, the repository boundary, the ignore
+  files above the root and the global excludes file once, and each directory's ignore files once.
+  A dry run of 20 creates spends 91% fewer instructions predicting them (6.8M to 0.6M) and 40%
+  fewer in all; a single create costs the same.
+
+### Removed
+
+- The test-only `shadow-ir` feature of `alint-rules`, and the shadow implementation of
+  `cross_file` `equals` it enabled, now that the relation layer is the implementation.
+
+### Fixed
+
+- `fix --dry-run` and `fix --diff` predict where a create lands when a symlink on its path leads
+  nowhere until the create's own directories exist (ADR-0030 decision 4). A path written as
+  given, which `allow_out_of_root` permits, such as `../repo/made/../pointer/p.txt` in a
+  repository `repo` with `pointer -> made`, makes `made` and lands in it; the dry run reported
+  the create unresolved. This was the one difference v0.21.2's OS differential test found; the
+  test now covers it, directly, through another symlink and through `..`.
+
 ## [0.21.2] - 2026-11-06
 
 A fix release: `fix --dry-run` and `fix --diff` agree with `fix` on creates in more layouts, and
@@ -17,7 +86,7 @@ directory, under a file or through a symlink is predicted as `fix` runs it, and 
 outside the root no longer overwrites a file or writes through a symlink when a `..` follows a
 directory it makes. More paths read from the environment show as `<redacted>`, hidden paths stay
 out of redaction markers and log warnings, `fix --baseline` skips a grandfathered finding with
-redacted evidence, and nested rules run 1.4% to 2% fewer instructions than in v0.21.1.
+redacted evidence, and nested rules run 1.3% to 2% fewer instructions than in v0.21.1.
 
 ### Changed
 
@@ -53,13 +122,14 @@ redacted evidence, and nested rules run 1.4% to 2% fewer instructions than in v0
 
 ### Performance
 
-- Nested rules run 1.4% to 2% fewer instructions than in v0.21.1, where each
+- Nested rules run 1.3% to 2% fewer instructions than in v0.21.1, where each
   iterated entry's rule specification passed through one more call that copied
-  it. In the deterministic micro-benchmark gate (Callgrind, Rust 1.99.1),
-  `for_each_dir` is back within 0.5% of v0.20.1, from 2.2% to 2.4% slower in
-  v0.21.1 with the same toolchain, and `every_matching_has` within 0.7%. The
-  specification is now built in place, and a successful nested build returns
-  straight from the builder.
+  it. In the deterministic micro-benchmark gate (Callgrind), `for_each_dir` is
+  back within 0.5% of v0.20.1 and `every_matching_has` within 0.7%, with Rust
+  1.99.1 and with 1.97.0, the bench record's toolchain. With 1.99.1, v0.21.1's
+  `for_each_dir` was 2.2% to 2.4% slower than v0.20.1. The specification is now
+  built in place, and a successful nested build returns straight from the
+  builder.
 
 ### Fixed
 
@@ -8611,7 +8681,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.21.2...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.22.0...HEAD
+[0.22.0]: https://github.com/asamarts/alint/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/asamarts/alint/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/asamarts/alint/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/asamarts/alint/compare/v0.20.1...v0.21.0

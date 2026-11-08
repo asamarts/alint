@@ -48,8 +48,9 @@ resolves another's violation, an edit to an existing ignore file, or content a
 fix writes that the rule still rejects. The prediction also leaves out an
 ignore file created outside the root, a created `.git/info/exclude` or nested
 repository marker, a rule's `root_only`, other names the walk lists a file
-under through in-tree symlinks, a symlink that leads nowhere until a create
-makes the place it points to, and, on a case-insensitive filesystem, a path
+under through in-tree symlinks, a symlink that leads nowhere until another
+create makes the place it points to (one the create's own directories make is
+predicted), and, on a case-insensitive filesystem, a path
 whose case differs from a directory already there. A `dir_exists` or
 `cross_file` rule looks for the path as written, so only that name counts for
 its create. `--diff` shows that first pass's edits
