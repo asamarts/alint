@@ -172,7 +172,10 @@ npm can configure a trusted publisher only for a package that already exists (np
 1. Publishes a placeholder `0.0.0` of each of the six new packages.
 2. Adds the trusted publisher to each: repository `asamarts/alint`, workflow `release.yml`.
 
-A script does both and prompts for the 2FA code. A package without its trusted publisher fails
+A script does both and prompts for the 2FA code. npm accepts a new package's first publish with
+HTTP 202 and processes it for a few minutes; until then `npm deprecate` and `npm trust` answer 404,
+so the script waits until the registry serves each placeholder, and a re-run finishes any package
+an earlier run published but did not deprecate or trust. A package without its trusted publisher fails
 `publish-npm` at publish time. The recovery is the same as for a new crate on crates.io: configure
 it, then `gh run rerun --failed`, never re-tag.
 
@@ -283,5 +286,10 @@ belongs to the v0.23 track.
   W1's release build and N5's publish; the release preflight now runs the install test before
   anything publishes.
 
-Next: merge #486, then the owner's bootstrap (N7: `ci/scripts/npm-bootstrap-platform-packages.sh`),
-then the release (R1-R3).
+- 2026-11-08: the owner's first bootstrap run published `@asamarts/alint-linux-x64@0.0.0`, then
+  `npm deprecate` failed with 404: npm had accepted the new package (HTTP 202) but was still
+  processing it. The script now waits until the registry serves each placeholder, and deprecates
+  any placeholder that is not deprecated yet, so a re-run resumes.
+
+Next: the owner's bootstrap (N7: `ci/scripts/npm-bootstrap-platform-packages.sh`), then the release
+(R1-R3).

@@ -6,15 +6,21 @@
 # release.yml's publish-npm job publishes tokenlessly through npm Trusted
 # Publishing, and npm can only configure a Trusted Publisher for a package that
 # already exists. So for each platform package this script:
-#   1. publishes a placeholder 0.0.0 if the package does not exist yet, and
-#      deprecates it at once (nothing depends on it: the shim pins each platform
-#      package at its own exact version);
-#   2. configures its Trusted Publisher (repository asamarts/alint, workflow
+#   1. publishes a placeholder 0.0.0 if the package does not exist yet, then
+#      waits until the registry serves it: npm accepts a new package's first
+#      publish (HTTP 202) and processes it for a few minutes, and until then
+#      `npm deprecate` and `npm trust` answer 404;
+#   2. deprecates the placeholder unless it already is (nothing depends on it:
+#      the shim pins each platform package at its own exact version);
+#   3. configures its Trusted Publisher (repository asamarts/alint, workflow
 #      release.yml) unless one is already there.
-# Idempotent: re-running skips what is done. --dry-run prints the changes
+# Idempotent: re-running skips what is done and finishes a package an earlier
+# run published but did not deprecate or trust. --dry-run prints the changes
 # without making them.
 #
 # Usage: ci/scripts/npm-bootstrap-platform-packages.sh [--dry-run]
+# NPM_BOOTSTRAP_POLL_SECONDS (10) and NPM_BOOTSTRAP_POLL_TRIES (90) bound the
+# wait in step 1.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -30,9 +36,32 @@ case "${1:-}" in
   *) echo "usage: $0 [--dry-run]" >&2; exit 2 ;;
 esac
 
+POLL_SECONDS=${NPM_BOOTSTRAP_POLL_SECONDS:-10}
+POLL_TRIES=${NPM_BOOTSTRAP_POLL_TRIES:-90}
+
 run() { # print, then run unless --dry-run
   echo "+ $*"
   [[ "$DRY_RUN" == 1 ]] || "$@"
+}
+
+# --prefer-online: a fresh answer, never the local cache's.
+published() { [[ -n "$(npm view "$1" name --prefer-online 2>/dev/null || true)" ]]; }
+
+undeprecated_placeholder() {
+  [[ "$(npm view "$1@0.0.0" version --prefer-online 2>/dev/null || true)" == 0.0.0 &&
+     -z "$(npm view "$1@0.0.0" deprecated --prefer-online 2>/dev/null || true)" ]]
+}
+
+wait_until_published() {
+  local tries=0
+  until published "$1"; do
+    if ((++tries > POLL_TRIES)); then
+      echo "    the registry still does not serve $1; re-run this script later to finish it" >&2
+      exit 1
+    fi
+    ((tries > 1)) || echo "    waiting for the registry to finish processing it"
+    sleep "$POLL_SECONDS"
+  done
 }
 
 if ! npm trust --help >/dev/null 2>&1; then
@@ -53,7 +82,8 @@ trap 'rm -rf "$work"' EXIT
 for row in "${rows[@]}"; do
   IFS=$'\t' read -r name os cpu label <<<"$row"
   echo "==> ${name}"
-  if [[ -n "$(npm view "$name" name 2>/dev/null || true)" ]]; then
+  placeholder_published=0
+  if published "$name"; then
     echo "    exists on npm"
   else
     dir="$work/${name#@asamarts/}"
@@ -78,7 +108,16 @@ for row in "${rows[@]}"; do
         `# ${NAME}\n\nA placeholder. Real versions carry the alint binary for ${LABEL};\n` +
         `install [\`${SHIM}\`](https://www.npmjs.com/package/${SHIM}), which depends on them.\n`);
     ' "$dir"
-    (cd "$dir" && run npm publish --access public)
+    if ! (cd "$dir" && run npm publish --access public); then
+      echo "    publish failed; if an earlier run published ${name} minutes ago, the registry" >&2
+      echo "    may still be processing it: wait, then re-run this script" >&2
+      exit 1
+    fi
+    placeholder_published=1
+    [[ "$DRY_RUN" == 1 ]] || wait_until_published "$name"
+  fi
+
+  if [[ "$DRY_RUN" == 1 && "$placeholder_published" == 1 ]] || undeprecated_placeholder "$name"; then
     run npm deprecate "${name}@0.0.0" "Placeholder that reserved the name; install ${SHIM} instead."
   fi
 
