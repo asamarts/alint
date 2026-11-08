@@ -143,6 +143,12 @@ git checkout -q -- editors/zed/Cargo.lock
 rm editors/zed/Cargo.lock
 expect_rejected "a missing Zed lockfile"
 git checkout -q -- editors/zed/Cargo.lock
+sed -i -E 's/^([[:space:]]*"@asamarts\/alint-win32-arm64":[[:space:]]*)"[^"]*"/\1"0.0.1"/' npm/package.json
+expect_rejected "a stale npm platform-package pin"
+git checkout -q -- npm/package.json
+sed -i -E '/^[[:space:]]*"@asamarts\/alint-[a-z0-9-]+":/d' npm/package.json
+expect_rejected "npm/package.json without platform packages"
+git checkout -q -- npm/package.json
 for manifest in editors/zed/extension.toml editors/zed/Cargo.toml npm/package.json; do
   rm "$manifest"
   expect_rejected "a missing $manifest"

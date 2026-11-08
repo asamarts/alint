@@ -1,0 +1,53 @@
+{
+  "comment": "The npm platform packages. The shim (bin/alint.js), the package stager (ci/scripts/stage_npm_packages.py), ci/scripts/test-npm-shim.sh and the version-pin gate all read this table; each target must be a row of release.yml's build matrix.",
+  "packages": [
+    {
+      "name": "@asamarts/alint-linux-x64",
+      "os": "linux",
+      "cpu": "x64",
+      "target": "x86_64-unknown-linux-musl",
+      "binary": "alint",
+      "label": "Linux x64 (static musl, any libc)"
+    },
+    {
+      "name": "@asamarts/alint-linux-arm64",
+      "os": "linux",
+      "cpu": "arm64",
+      "target": "aarch64-unknown-linux-musl",
+      "binary": "alint",
+      "label": "Linux arm64 (static musl, any libc)"
+    },
+    {
+      "name": "@asamarts/alint-darwin-x64",
+      "os": "darwin",
+      "cpu": "x64",
+      "target": "x86_64-apple-darwin",
+      "binary": "alint",
+      "label": "macOS x64"
+    },
+    {
+      "name": "@asamarts/alint-darwin-arm64",
+      "os": "darwin",
+      "cpu": "arm64",
+      "target": "aarch64-apple-darwin",
+      "binary": "alint",
+      "label": "macOS arm64"
+    },
+    {
+      "name": "@asamarts/alint-win32-x64",
+      "os": "win32",
+      "cpu": "x64",
+      "target": "x86_64-pc-windows-msvc",
+      "binary": "alint.exe",
+      "label": "Windows x64"
+    },
+    {
+      "name": "@asamarts/alint-win32-arm64",
+      "os": "win32",
+      "cpu": "arm64",
+      "target": "aarch64-pc-windows-msvc",
+      "binary": "alint.exe",
+      "label": "Windows arm64"
+    }
+  ]
+}

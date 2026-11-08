@@ -1,7 +1,7 @@
 // Managed binary download — the opt-in third tier of binary
-// resolution. Mirrors `npm/install.js`: same release URLs, same
-// SHA-256 verification, same tarball layout, so it fetches the
-// byte-identical artifact the npm shim and install.sh use.
+// resolution. Mirrors install.sh: same release URLs, same SHA-256
+// verification, same tarball layout, so it fetches the byte-identical
+// artifact install.sh and the npm platform packages carry.
 
 import * as https from "node:https";
 import * as crypto from "node:crypto";

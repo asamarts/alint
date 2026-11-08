@@ -63,7 +63,7 @@ jobs:
           echo "smoking release tag: ${tag} (is_latest=${is_latest}, latest=${latest})"
 
   smoke:
-    name: smoke ${{ matrix.channel }}
+    name: smoke ${{ matrix.channel }} (${{ matrix.os }})
     needs: resolve
     runs-on: ${{ matrix.os }}
     strategy:
@@ -75,6 +75,10 @@ jobs:
           - { channel: install.sh, os: ubuntu-latest }
           - { channel: docker, os: ubuntu-latest }
           - { channel: npm, os: ubuntu-latest }
+          # The platform packages (ADR-0031): each OS resolves its own.
+          - { channel: npm, os: macos-latest }
+          - { channel: npm, os: windows-latest }
+          - { channel: npm, os: windows-11-arm }
           - { channel: pypi, os: ubuntu-latest }
           - { channel: cargo-binstall, os: ubuntu-latest }
           - { channel: cargo, os: ubuntu-latest }
@@ -125,4 +129,5 @@ jobs:
           SMOKE_FLOATING: ${{ needs.resolve.outputs.is_latest }}
           SMOKE_CHANNEL: ${{ matrix.channel }}
           SMOKE_TAG: ${{ needs.resolve.outputs.tag }}
+        shell: bash   # Git Bash on the Windows rows
         run: ci/scripts/smoke-channel.sh "$SMOKE_CHANNEL" "$SMOKE_TAG"

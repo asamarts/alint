@@ -168,11 +168,22 @@ jobs:
           - target: x86_64-pc-windows-msvc
             os: windows-latest
             use_cross: false
+          # Native Windows on ARM (ADR-0031); cross-platform.yml tests the
+          # workspace on the same runner image.
+          - target: aarch64-pc-windows-msvc
+            os: windows-11-arm
+            use_cross: false
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      # dtolnay/rust-toolchain installs rustup only off Windows, and the
+      # windows-11-arm image may not ship it.
+      - name: install rustup where the image lacks it (windows-11-arm)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: ci/scripts/ensure-rustup.sh
       - uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8 # master
         with:
           toolchain: ${{ env.RELEASE_RUST }}
@@ -663,17 +674,20 @@ jobs:
 
   publish-npm:
     name: publish @asamarts/alint to npm
-    # `needs: release` so the npm package's postinstall download
-    # always finds the matching binary tarballs on GitHub
-    # Releases. The npm tarball itself contains only the
-    # install script + bin shim — no native bytes — so the build
-    # matrix is irrelevant here; we just gate on the GH Release
-    # being live.
+    # One package per platform carrying that platform's binary, plus the
+    # @asamarts/alint shim that names them as exact-version optionalDependencies
+    # (ADR-0015, ADR-0031). `needs: release` so the platform packages repackage
+    # the exact tarballs that are live on the GitHub Release: the same
+    # byte-identical, attested bytes as the PyPI wheels, and npm provenance now
+    # covers them. Tokenless via npm Trusted Publishing (OIDC), configured per
+    # package on npmjs.com (repo=asamarts/alint, workflow=release.yml). A package
+    # without a Trusted Publisher fails THIS job; configure it, then
+    # `gh run rerun --failed`. Never re-tag.
     needs: release
     runs-on: ubuntu-latest
     permissions:
       id-token: write   # OIDC token for npm Trusted Publishing (tokenless publish)
-      contents: read    # checkout only; no writes needed here
+      contents: read    # checkout + `gh release download`; no writes needed here
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
@@ -682,6 +696,32 @@ jobs:
           registry-url: "https://registry.npmjs.org"
       - name: use an OIDC-capable npm (Trusted Publishing needs npm >= 11.5.1; pin the latest 11.x)
         run: npm install -g npm@11.19.0   # not 12.x: it may drop Node 22 support
+      - name: download the release tarballs (the attested binaries)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.ref_name }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-tarballs
+          # The .sha256 sidecars ride along; the stager refuses a tarball without
+          # one or that does not match it.
+          gh release download "$TAG" --repo "$REPO" \
+            --pattern 'alint-*.tar.gz' --pattern 'alint-*.tar.gz.sha256' \
+            --dir release-tarballs
+          ls -la release-tarballs
+      - name: stage the platform packages and the shim
+        env:
+          TAG: ${{ github.ref_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Fail-closed: every npm/platforms.json row needs its tarball, the
+          # tarball must match its sidecar, and the binary's header must match
+          # the package's os and cpu. Stamps every version from the tag.
+          python3 ci/scripts/stage_npm_packages.py --tag "$TAG" \
+            --tarball-dir release-tarballs --out npm-dist
       # The version itself is immutable, but npm's `latest` dist-tag is a moving
       # pointer (and npm refuses to implicitly move it below the current one), so
       # a backport publishes under a per-minor dist-tag instead (rollback guard).
@@ -690,53 +730,47 @@ jobs:
         env:
           TAG: ${{ github.ref_name }}
         run: ci/scripts/release-pointer-guard.sh "$TAG"
-      - name: stamp package version from tag + publish
+      - name: publish the platform packages, then the shim
         env:
-          # Tokenless publish via npm Trusted Publishing (OIDC): no NPM_TOKEN, so
-          # nothing here can expire mid-release (the v0.15.1 failure mode). Requires a
-          # Trusted Publisher on npmjs.com for @asamarts/alint (repo=asamarts/alint,
-          # workflow=release.yml); npm validates it only at publish time, so a missing
-          # entry fails THIS job on the next release (fix it, then rerun --failed). The
-          # auto-provenance attests only this shim (install script + bin shim), NOT the
-          # binaries it downloads from GitHub Releases -- those carry their own
-          # build-provenance. The optionalDependencies migration (ADR-0015 / P2) will
-          # ship native bytes so the same provenance covers real payload.
           TAG: ${{ github.ref_name }}
           HIGHEST_OVERALL: ${{ steps.pointers.outputs.highest_overall }}
         shell: bash
         run: |
           set -euo pipefail
-          cd npm
-          # Strip leading v: v0.5.11 → 0.5.11. The committed
-          # source can stay at any past version (so local
-          # `npm install` against the previous release still
-          # works during development); CI rewrites to match
-          # the release tag immediately before publishing.
           ver="${TAG#v}"
-          node -e "
-            const fs = require('fs');
-            const pkg = require('./package.json');
-            pkg.version = '$ver';
-            fs.writeFileSync('./package.json', JSON.stringify(pkg, null, 2) + '\n');
-          "
-          echo "==> package.json version set to $ver"
-          # Re-run safe: `npm publish` of an already-published version fails
-          # (E403), so a `gh run rerun --failed` after a later failure would red
-          # here. Skip when the registry already serves this exact version.
-          if [[ "$(npm view "@asamarts/alint@${ver}" version 2>/dev/null || true)" == "$ver" ]]; then
-            echo "::notice::@asamarts/alint@${ver} is already on npm; skipping publish (re-run)."
-            exit 0
-          fi
           # Only the highest release moves the `latest` dist-tag; a backport
-          # lands on `release-<major>.<minor>` (rollback guard).
+          # lands on `release-<major>.<minor>` (rollback guard). Every package
+          # gets the same dist-tag, so `@asamarts/alint@latest` and its
+          # platform packages always move together.
           dist_tag=latest
           if [[ "$HIGHEST_OVERALL" != "true" ]]; then
             dist_tag="release-${ver%.*}"
             echo "::notice::${TAG} is not the highest release; publishing under dist-tag ${dist_tag}, leaving 'latest' alone."
           fi
-          # --provenance rides the OIDC id-token; with Trusted Publishing npm also
-          # generates provenance automatically, so this is explicit-and-belt.
-          npm publish --access public --provenance --tag "$dist_tag"
+          # Platform packages first, the shim last: nothing depends on a platform
+          # package until the shim that names it is published, so a failure part
+          # way through breaks no install.
+          shopt -s nullglob
+          dirs=(npm-dist/alint-*/ npm-dist/alint/)
+          if [[ ${#dirs[@]} -lt 2 || ! -f npm-dist/alint/package.json ]]; then
+            echo "::error::npm-dist has no staged packages" >&2
+            exit 1
+          fi
+          for dir in "${dirs[@]}"; do
+            name="@asamarts/$(basename "$dir")"
+            grep -q "\"name\": \"${name}\"" "${dir}package.json" ||
+              { echo "::error::${dir}package.json is not ${name}" >&2; exit 1; }
+            # Re-run safe: `npm publish` of an already-published version fails
+            # (E403), so a `gh run rerun --failed` after a later failure would
+            # red here. Skip each package the registry already serves.
+            if [[ "$(npm view "${name}@${ver}" version 2>/dev/null || true)" == "$ver" ]]; then
+              echo "::notice::${name}@${ver} is already on npm; skipping publish (re-run)."
+              continue
+            fi
+            # --provenance rides the OIDC id-token; with Trusted Publishing npm
+            # also generates provenance automatically, so this is explicit-and-belt.
+            (cd "$dir" && npm publish --access public --provenance --tag "$dist_tag")
+          done
 
   publish-pypi:
     name: publish alint to PyPI

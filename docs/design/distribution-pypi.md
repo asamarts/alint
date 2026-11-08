@@ -81,7 +81,7 @@ runs there fine.
 | `x86_64-apple-darwin` | `macosx_10_12_x86_64` |
 | `aarch64-apple-darwin` | `macosx_11_0_arm64` |
 | `x86_64-pc-windows-msvc` | `win_amd64` |
-| *(P2)* `aarch64-pc-windows-msvc` | `win_arm64` -- **rides P2's win-arm64 build** |
+| `aarch64-pc-windows-msvc` | `win_arm64` (from v0.22.1, with the native win-arm64 build) |
 
 - **Prerequisite `MP-L7`:** pin `MACOSX_DEPLOYMENT_TARGET` in CI so the mac tags are
   stable. Today the floor is the rustc per-target default (10.12 / 11.0) and *drifts* on

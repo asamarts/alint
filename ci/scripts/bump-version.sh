@@ -127,15 +127,14 @@ if [[ -f docs/site/integrations/docker.md ]]; then
   sed -i -E "s#:${CUR_MINOR//./\\.}([^0-9.]|\$)#:${NEW_MINOR}\1#g" docs/site/integrations/docker.md
 fi
 
-# 2b. npm shim version. The package itself ships zero JS behaviour
-#     — it downloads the matching binary at install time — but
-#     `npm view @asamarts/alint version` reports whatever is in
-#     this file at HEAD, so it should track the workspace version.
-#     release.yml also rewrites this at publish time (belt-and-
-#     suspenders); the bump here makes the committed value at HEAD
-#     match what users see post-publish.
+# 2b. npm shim version and its exact-version platform packages
+#     (optionalDependencies). release.yml's stager also stamps both from
+#     the tag at publish time (belt-and-suspenders); the bump here makes
+#     the committed values at HEAD match what users see post-publish, and
+#     check-version-pins.sh enforces it.
 if [[ -f npm/package.json ]]; then
   sed -i -E "s/^([[:space:]]*\"version\":[[:space:]]+)\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" npm/package.json
+  sed -i -E "s/^([[:space:]]*\"@asamarts\/alint-[a-z0-9-]+\":[[:space:]]+)\"${CUR_ESCAPED}\"/\1\"${NEW}\"/" npm/package.json
 fi
 
 # 2c. Zed extension version. Unlike VS Code/JetBrains (which release.yml

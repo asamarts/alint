@@ -15,8 +15,8 @@ import java.security.MessageDigest
 /**
  * Binary resolution + managed download, consistent with the other
  * install channels: `alint.path` setting → PATH → previously downloaded
- * copy → (opt-in) download. Mirrors `npm/install.js` conventions exactly
- * so it fetches the byte-identical release artifact.
+ * copy → (opt-in) download. Mirrors install.sh's conventions exactly so it
+ * fetches the byte-identical release artifact.
  */
 object AlintBinary {
     private const val REPO = "asamarts/alint"
@@ -98,7 +98,7 @@ object AlintBinary {
     }
 
     /** Map the JVM os.name/os.arch to the alint release-target triple.
-     * Mirrors `npm/install.js` and the release.yml build matrix. */
+     * Mirrors `npm/platforms.json` and the release.yml build matrix. */
     private fun resolveTarget(): String {
         val os = System.getProperty("os.name").lowercase()
         val arch = when (System.getProperty("os.arch").lowercase()) {
@@ -109,10 +109,7 @@ object AlintBinary {
         return when {
             os.contains("linux") -> "$arch-unknown-linux-musl"
             os.contains("mac") || os.contains("darwin") -> "$arch-apple-darwin"
-            os.contains("win") -> {
-                require(arch == "x86_64") { "only x86_64 Windows is published" }
-                "x86_64-pc-windows-msvc"
-            }
+            os.contains("win") -> "$arch-pc-windows-msvc"
             else -> error("unsupported OS $os")
         }
     }

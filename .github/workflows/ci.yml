@@ -555,7 +555,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
       - run: ci/scripts/packaging-check.sh
+      # Publish the npm packages to a local registry and install them with npm,
+      # pnpm, bun and yarn (cross-platform.yml runs it on macOS and Windows).
+      - name: npm packages install end to end
+        run: ci/scripts/test-npm-install.sh
 
   # ── Editor extensions ─────────────────────────────────────────────
   # Build the packaged extensions that otherwise only build at release

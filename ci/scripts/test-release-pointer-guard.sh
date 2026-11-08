@@ -141,9 +141,11 @@ run_step release "$REL" "$sandbox/rel" "${REL_ENV[@]}" HIGHEST_OVERALL=false
 check "release: backport is not marked Latest" logged '^gh release create v0\.16\.2 .*--latest=false( |$)'
 
 # npm `latest` dist-tag
-NPM_STEP='stamp package version from tag + publish'
-mkdir -p "$sandbox/npmw/npm"
-echo '{"name":"@asamarts/alint","version":"0.0.0"}' > "$sandbox/npmw/npm/package.json"
+NPM_STEP='publish the platform packages, then the shim'
+for pkg in alint-linux-x64 alint; do
+  mkdir -p "$sandbox/npmw/npm-dist/$pkg"
+  printf '{\n  "name": "@asamarts/%s"\n}\n' "$pkg" > "$sandbox/npmw/npm-dist/$pkg/package.json"
+done
 printf '#!/usr/bin/env bash\necho "npm $*" >> "$STUB_LOG"\n[[ "$1" == view ]] && exit 1\nexit 0\n' > "$sandbox/bin/npm"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$sandbox/bin/node"
 chmod +x "$sandbox/bin/npm" "$sandbox/bin/node"
@@ -172,7 +174,7 @@ GUARDED = [
     ('release', 'move the major tag (e.g. v0) to this release', {'HIGHEST_OVERALL': 'highest_overall'}),
     ('docker', 'derive image tags', {'HIGHEST_OVERALL': 'highest_overall', 'HIGHEST_IN_MINOR': 'highest_in_minor'}),
     ('homebrew', 'commit + push', {'HIGHEST_OVERALL': 'highest_overall'}),
-    ('publish-npm', 'stamp package version from tag + publish', {'HIGHEST_OVERALL': 'highest_overall'}),
+    ('publish-npm', 'publish the platform packages, then the shim', {'HIGHEST_OVERALL': 'highest_overall'}),
 ]
 failures = []
 for job, name, wants in GUARDED:

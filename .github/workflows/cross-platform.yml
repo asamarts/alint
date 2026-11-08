@@ -1,11 +1,12 @@
 name: Cross-Platform
 
-# Smoke-tests the workspace on macOS and Windows GitHub-hosted
-# runners so platform-specific regressions surface independently
+# Smoke-tests the workspace on macOS, Windows and Windows on ARM
+# GitHub-hosted runners so platform-specific regressions surface independently
 # of the primary Linux lane (ci.yml).
 #
 # This intentionally runs only `cargo test --workspace --locked`
-# without the heavier dogfood/bench/audit lanes — the goal is to
+# (plus the npm install end-to-end test) without the heavier
+# dogfood/bench/audit lanes — the goal is to
 # catch path-handling, line-ending, and pty-related drift, not to
 # duplicate the main pipeline.
 on:
@@ -40,9 +41,30 @@ jobs:
             target: aarch64-apple-darwin
           - os: windows-latest
             target: x86_64-pc-windows-msvc
+          # Native Windows on ARM, which release.yml builds (ADR-0031).
+          - os: windows-11-arm
+            target: aarch64-pc-windows-msvc
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      # The npm platform packages, installed end to end on this OS
+      # (ci.yml's Packaging job covers Linux). No Rust needed, so it runs
+      # first and fails fast.
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: "22"
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.12"
+      - name: npm packages install end to end
+        shell: bash
+        run: ci/scripts/test-npm-install.sh
+
+      - name: Install rustup where the image lacks it (windows-11-arm)
+        if: runner.os == 'Windows'
+        shell: bash
+        run: ci/scripts/ensure-rustup.sh
 
       - name: Install stable toolchain
         run: rustup toolchain install stable --profile minimal

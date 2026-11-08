@@ -47,6 +47,7 @@ TARGET_PLATFORM_TAGS: dict[str, list[str]] = {
     "x86_64-apple-darwin": ["macosx_10_12_x86_64"],
     "aarch64-apple-darwin": ["macosx_11_0_arm64"],
     "x86_64-pc-windows-msvc": ["win_amd64"],
+    "aarch64-pc-windows-msvc": ["win_arm64"],
 }
 
 # License / attribution files copied out of the tarball into the wheel's

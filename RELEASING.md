@@ -278,17 +278,33 @@ Trusted Publishing settings on crates.io and confirm the entry exists.
 
 npm publishes tokenlessly via **npm Trusted Publishing** (OIDC), the same
 keyless model as the crates.io publisher above: no `NPM_TOKEN`, so nothing here
-can expire mid-release. One-time setup on npmjs.com: package `@asamarts/alint`
-→ Settings → Trusted Publisher → repo `asamarts/alint`, workflow `release.yml`,
-no environment. npm validates this only at publish time, so a missing or
-mismatched entry fails the `publish npm` job on the next release; recovery is
-add/fix the entry, then `gh run rerun <id> --failed` (never re-tag). The
-`publish-npm` job needs `id-token: write`, npm CLI `>= 11.5.1`, and Node
-`>= 22.14`. Trusted Publishing auto-attaches provenance; today it attests only
-the download shim (install script + bin shim), not the binaries the shim
-fetches from GitHub Releases (those carry their own build-provenance). When the
-optionalDependencies migration ships native bytes, the same provenance covers
-real payload.
+can expire mid-release. Since v0.22.1 the `publish-npm` job publishes seven
+packages (ADR-0031): one per row of `npm/platforms.json`
+(`@asamarts/alint-<os>-<cpu>`, each carrying that platform's binary from the
+release tarball), then the `@asamarts/alint` shim that names them as
+exact-version optionalDependencies. Platform packages go first, so a failure
+part way through breaks no install; each publish is skipped on a re-run if the
+registry already serves that version.
+
+**Every package needs its own Trusted Publisher**: repo `asamarts/alint`,
+workflow `release.yml`, no environment. npm can only configure one for a package
+that already exists, so a new platform package needs a one-time owner bootstrap
+**before the tag** that first ships it:
+
+1. `npm login` (2FA) with an npm 11 new enough to have `npm trust`.
+2. `ci/scripts/npm-bootstrap-platform-packages.sh --dry-run`, then without
+   `--dry-run`. For each platform package it publishes a deprecated `0.0.0`
+   placeholder if the package does not exist, and runs
+   `npm trust github <package> --file release.yml --repo asamarts/alint
+   --allow-publish` unless that entry exists. Re-running is safe.
+3. Confirm with `npm trust list <package>` for each one.
+
+npm validates the entry only at publish time, so a missing or mismatched one
+fails the `publish npm` job; recovery is add/fix the entry, then
+`gh run rerun <id> --failed` (never re-tag). The `publish-npm` job needs
+`id-token: write`, npm CLI `>= 11.5.1`, and Node `>= 22.14`. Trusted Publishing
+attaches provenance to every package, and since the platform packages carry the
+binary, that provenance now covers the binary bytes.
 
 ## Recovering a partial release
 
@@ -325,7 +341,7 @@ never re-tag** (crates.io / npm / ghcr are permanent, and a new tag would collid
   is a **draft** (made by hand, or left by an interrupted attempt), the step
   publishes it (`gh release edit --draft=false`) once the asset set is verified;
   a draft would otherwise stay invisible to `install.sh`, `releases/latest` and
-  the npm postinstall download. The docs-bundle dispatch is
+  the PyPI and npm publishers that download its tarballs. The docs-bundle dispatch is
   non-fatal: if it fails the job emits a `::warning::` and you run
   `gh workflow run docs-bundle.yml --ref main` by hand.
 - **Expiring credentials** (`MP-M2`). Three channels carry secrets that can expire: VS
@@ -679,7 +695,8 @@ contains a critical bug:
    `alint-core`, `alint-rules`, `alint-output`, `alint-dsl`, `alint-lsp`,
    `alint-testkit`).
 2. Mark the npm package as `npm deprecate "@asamarts/alint@<x.y.z>"
-   "Yanked: <reason>; upgrade to <x.y.z+1>"`.
+   "Yanked: <reason>; upgrade to <x.y.z+1>"`. The shim is enough: its
+   platform packages are only installed through it.
 3. Delete the GitHub Release (the asset tarballs stay accessible via
    the tag, but the Release page disappears so install.sh can fail
    loud rather than silently downloading the broken version).

@@ -119,7 +119,7 @@ impl zed::Extension for AlintExtension {
 }
 
 /// Map Zed's platform/arch to the alint release-target triple. Mirrors
-/// `npm/install.js` and the release.yml build matrix.
+/// `npm/platforms.json` and the release.yml build matrix.
 fn target_triple(platform: zed::Os, arch: zed::Architecture) -> Result<String> {
     let triple = match (platform, arch) {
         (zed::Os::Linux, zed::Architecture::X8664) => "x86_64-unknown-linux-musl",
@@ -127,6 +127,7 @@ fn target_triple(platform: zed::Os, arch: zed::Architecture) -> Result<String> {
         (zed::Os::Mac, zed::Architecture::X8664) => "x86_64-apple-darwin",
         (zed::Os::Mac, zed::Architecture::Aarch64) => "aarch64-apple-darwin",
         (zed::Os::Windows, zed::Architecture::X8664) => "x86_64-pc-windows-msvc",
+        (zed::Os::Windows, zed::Architecture::Aarch64) => "aarch64-pc-windows-msvc",
         (os, arch) => return Err(format!("unsupported platform {os:?}/{arch:?}")),
     };
     Ok(triple.to_string())

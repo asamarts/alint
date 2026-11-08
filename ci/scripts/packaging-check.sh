@@ -30,12 +30,12 @@ fi
 
 # ── npm shim ──────────────────────────────────────────────────────────
 if have node; then
-  for f in npm/install.js npm/bin/alint.js; do
+  for f in npm/bin/alint.js ci/scripts/test-npm-shim.js; do
     node --check "$f" || bad "$f: node --check"
   done
   node -e 'JSON.parse(require("fs").readFileSync("npm/package.json","utf8"))' \
     || bad "npm/package.json: invalid JSON"
-  bash ci/scripts/test-npm-shim.sh || bad "npm shim: os/cpu -> release target table"
+  bash ci/scripts/test-npm-shim.sh || bad "npm: platform table, optionalDependencies and shim"
 fi
 
 # ── .pre-commit-hooks.yaml ────────────────────────────────────────────
