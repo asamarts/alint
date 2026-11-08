@@ -6,6 +6,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- `.env` files are parsed with adotenv 1.4.0, up from 1.3.0. Its parser and edits are unchanged; 1.4.0
+  adds a reference-rename edit that alint does not use, so findings and fixes are the same.
+
 ## [0.22.0] - 2026-11-07
 
 v0.22 completes general-linter phase 2. `cross_file` reads the values it compares through the
