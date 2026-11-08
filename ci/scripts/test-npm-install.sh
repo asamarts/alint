@@ -107,7 +107,10 @@ for m in $MANAGERS; do
 done
 echo "==> installing ${tool_pkgs[*]}"
 npm install --prefix "$tools" --no-fund --no-audit --loglevel=error "${tool_pkgs[@]}" >/dev/null
-export PATH="$tools/node_modules/.bin:$PATH"
+bin_dir="$tools/node_modules/.bin"
+# PATH is colon-separated: on Git Bash it needs the /c/... form, not C:/...
+if command -v cygpath >/dev/null 2>&1; then bin_dir="$(cygpath -u "$bin_dir")"; fi
+export PATH="$bin_dir:$PATH"
 
 port=$((20000 + RANDOM % 20000))
 reg="http://127.0.0.1:${port}"
