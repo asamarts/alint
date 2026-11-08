@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # Behavioural test for ci/scripts/npm-bootstrap-platform-packages.sh, the
 # owner's one-time npm bootstrap, against a stub `npm` that records its argv:
-# placeholders are published (as 0.0.0) and deprecated only for packages that do
-# not exist, Trusted Publishers are added only where missing, --dry-run changes
-# nothing, and a logged-out or too-old npm stops before any change.
+# placeholders are published (as 0.0.0) only for packages that do not exist, a
+# placeholder is deprecated once the registry serves it (a new package answers
+# 404 for a while after its publish is accepted, as npmjs.org does), an earlier
+# run's undeprecated placeholder is deprecated on a re-run, Trusted Publishers
+# are added only where missing, --dry-run changes nothing, and a logged-out or
+# too-old npm stops before any change.
 #
 # Stub bodies are single-quoted on purpose: they expand when the stub runs.
 # shellcheck disable=SC2016
@@ -25,21 +28,57 @@ fi
 sandbox=$(mktemp -d)
 trap 'rm -rf "$sandbox"' EXIT
 mkdir -p "$sandbox/bin"
+# Registry model: NPM_EXISTING packages exist with a deprecated 0.0.0 placeholder,
+# except NPM_UNDEPRECATED ones (placeholder not deprecated) and NPM_NO_PLACEHOLDER
+# ones (no 0.0.0). A package published in the run stays invisible for
+# NPM_VISIBLE_AFTER `npm view` polls, and until then deprecate/trust answer 404.
 cat >"$sandbox/bin/npm" <<'STUB'
 #!/usr/bin/env bash
 echo "npm $*" >> "$STUB_LOG"
+listed() { [[ " ${!1:-} " == *" $2 "* ]]; }
+key() { echo "$STUB_STATE/${1//\//_}"; }
+visible() { # <pkg>: exists before the run, or published and processed
+  listed NPM_EXISTING "$1" && return 0
+  [[ -e "$(key "$1").published" && ! -s "$(key "$1").published" ]]
+}
+not_found() { echo "npm error code E404" >&2; exit 1; }
 case "$1 ${2:-}" in
   "--version "*) echo 11.19.0 ;;
   "trust --help") [[ -z "${NPM_NO_TRUST:-}" ]] || exit 1 ;;
   "whoami "*) [[ -z "${NPM_LOGGED_OUT:-}" ]] || exit 1; echo someone ;;
-  "view "*) [[ " ${NPM_EXISTING:-} " == *" $2 "* ]] && echo "$2" || exit 1 ;;
+  "view "*)
+    pkg=${2%@0.0.0}
+    if [[ -s "$(key "$pkg").published" ]]; then # still processing: one poll fewer to go
+      left=$(($(cat "$(key "$pkg").published") - 1))
+      if ((left > 0)); then echo "$left" >"$(key "$pkg").published"; else : >"$(key "$pkg").published"; fi
+    fi
+    visible "$pkg" || not_found
+    case "$3" in
+      name) echo "$pkg" ;;
+      version)
+        if [[ "$2" == *@0.0.0 ]] && ! listed NPM_NO_PLACEHOLDER "$pkg"; then echo 0.0.0; fi ;;
+      deprecated)
+        if [[ -e "$(key "$pkg").deprecated" ]] ||
+           { listed NPM_EXISTING "$pkg" && ! listed NPM_UNDEPRECATED "$pkg" && ! listed NPM_NO_PLACEHOLDER "$pkg"; }; then
+          echo "Placeholder"
+        fi ;;
+    esac ;;
+  "deprecate "*)
+    visible "${2%@0.0.0}" || not_found
+    touch "$(key "${2%@0.0.0}").deprecated" ;;
   "trust list")
-    if [[ " ${NPM_TRUSTED:-} " == *" $3 "* ]]; then
+    visible "$3" || not_found
+    if listed NPM_TRUSTED "$3"; then
       echo '[{"type":"github","repository":"asamarts/alint","file":"release.yml"}]'
     else
       echo '[]'
     fi ;;
-  "publish "*) echo "published $(node -p 'const p = require("./package.json"); p.name + "@" + p.version + " " + p.os + "/" + p.cpu')" >> "$STUB_LOG" ;;
+  "trust github") visible "$3" || not_found ;;
+  "publish "*)
+    pkg=$(node -p 'require("./package.json").name')
+    echo "${NPM_VISIBLE_AFTER:-0}" >"$(key "$pkg").published"
+    [[ "${NPM_VISIBLE_AFTER:-0}" -gt 0 ]] || : >"$(key "$pkg").published"
+    echo "published $(node -p 'const p = require("./package.json"); p.name + "@" + p.version + " " + p.os + "/" + p.cpu')" >> "$STUB_LOG" ;;
 esac
 exit 0
 STUB
@@ -52,8 +91,11 @@ N=${#ALL[@]}
 
 run() {
   : >"$sandbox/log"
+  rm -rf "$sandbox/state"
+  mkdir "$sandbox/state"
   rc=0
-  env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" "$@" bash "$SCRIPT" ${DRY:+--dry-run} >"$sandbox/out" 2>&1 || rc=$?
+  env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" STUB_STATE="$sandbox/state" \
+    NPM_BOOTSTRAP_POLL_SECONDS=0 "$@" bash "$SCRIPT" ${DRY:+--dry-run} >"$sandbox/out" 2>&1 || rc=$?
   log=$(cat "$sandbox/log")
 }
 count() { grep -cE -- "$1" <<<"$log" || true; }
@@ -89,10 +131,35 @@ DRY='' run NPM_EXISTING="${ALL[*]}" NPM_TRUSTED="${ALL[0]}"
 check "existing but untrusted: adds only the missing Trusted Publishers" \
   bash -c '[[ $0 -eq 0 ]] && ! grep -q "^published" <<<"$1" && [[ $(grep -c "^npm trust github" <<<"$1") -eq $2 ]]' "$rc" "$log" "$((N - 1))"
 
+DRY='' run NPM_VISIBLE_AFTER=3
+check "slow registry: waits until each placeholder is served, then deprecates and trusts it" \
+  bash -c '[[ $0 -eq 0 ]] && [[ $(grep -c "^npm deprecate " <<<"$1") -eq $2 && $(grep -c "^npm trust github " <<<"$1") -eq $2 ]]' \
+  "$rc" "$log" "$N"
+check "slow registry: polls each new package until it is served" \
+  test "$(count "^npm view ${ALL[0]} name ")" -eq 4
+check "slow registry: says it is waiting" grep -q "waiting for the registry" "$sandbox/out"
+
+DRY='' run NPM_VISIBLE_AFTER=1000 NPM_BOOTSTRAP_POLL_TRIES=3
+check "registry never serves it: stops after the poll limit with a re-run hint, deprecating nothing" \
+  bash -c '[[ $0 -ne 0 ]] && ! grep -q "^npm deprecate" <<<"$1" && grep -q "re-run this script later" "$2"' \
+  "$rc" "$log" "$sandbox/out"
+
+DRY='' run NPM_EXISTING="${ALL[*]}" NPM_UNDEPRECATED="${ALL[0]}" NPM_TRUSTED="${ALL[*]}"
+check "earlier run stopped before deprecating: deprecates that placeholder, publishes nothing" \
+  bash -c '[[ $0 -eq 0 ]] && ! grep -qE "^(published|npm trust github)" <<<"$1" && [[ $(grep -c "^npm deprecate $2@0\.0\.0 " <<<"$1") -eq 1 && $(grep -c "^npm deprecate" <<<"$1") -eq 1 ]]' \
+  "$rc" "$log" "${ALL[0]}"
+
+DRY='' run NPM_EXISTING="${ALL[*]}" NPM_NO_PLACEHOLDER="${ALL[*]}" NPM_TRUSTED="${ALL[*]}"
+check "package without a 0.0.0 placeholder: deprecates nothing" \
+  bash -c '[[ $0 -eq 0 ]] && ! grep -q "^npm deprecate" <<<"$1"' "$rc" "$log"
+
 DRY=1 run
 check "--dry-run: prints the changes but makes none" \
   bash -c '[[ $0 -eq 0 ]] && ! grep -qE "^(published|npm deprecate|npm trust github)" <<<"$1" && grep -q "^+ npm trust github" "$2"' \
   "$rc" "$log" "$sandbox/out"
+check "--dry-run: prints a deprecate for each placeholder it would publish, without waiting" \
+  bash -c '[[ $(grep -c "^+ npm deprecate " "$0") -eq $1 && $(grep -c "^npm view .* name " <<<"$2") -eq $1 ]]' \
+  "$sandbox/out" "$N" "$log"
 
 DRY='' run NPM_LOGGED_OUT=1
 check "logged out: stops before any change" bash -c '[[ $0 -ne 0 ]] && ! grep -q "^published" <<<"$1"' "$rc" "$log"
