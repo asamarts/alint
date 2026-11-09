@@ -291,15 +291,18 @@ workflow `release.yml`, no environment. npm can only configure one for a package
 that already exists, so a new platform package needs a one-time owner bootstrap
 **before the tag** that first ships it:
 
-1. `npm login` (2FA) with an npm 11 new enough to have `npm trust`.
+1. `npm login` (2FA) with an npm 11 new enough to have `npm trust`, and
+   `python3` on the PATH.
 2. `ci/scripts/npm-bootstrap-platform-packages.sh --dry-run`, then without
-   `--dry-run`. For each platform package it publishes a `0.0.0` placeholder if
-   the package does not exist, waits until the registry serves it (npm processes
-   a new package for a few minutes after accepting it, and answers 404 until
-   then), deprecates the placeholder, and runs
-   `npm trust github <package> --file release.yml --repo asamarts/alint
-   --allow-publish` unless that entry exists. Re-running is safe and finishes
-   whatever an earlier run left undone.
+   `--dry-run`. One step at a time across all platform packages, it publishes a
+   `0.0.0` placeholder of each package that does not exist, waits until the
+   registry serves them (npm processes a new package for a few minutes after
+   accepting it, and answers 404 until then), deprecates each placeholder, and
+   runs `npm trust github <package> --file release.yml --repo asamarts/alint
+   --allow-publish` unless that entry exists. Publish, deprecate, `npm trust
+   list` and `npm trust github` each ask for 2FA; ticking npm's "skip 2FA for
+   the next 5 minutes" at a prompt covers the rest of that step. Re-running is
+   safe and finishes whatever an earlier run left undone.
 3. Confirm with `npm trust list <package>` for each one.
 
 npm validates the entry only at publish time, so a missing or mismatched one

@@ -291,5 +291,14 @@ belongs to the v0.23 track.
   processing it. The script now waits until the registry serves each placeholder, and deprecates
   any placeholder that is not deprecated yet, so a re-run resumes.
 
+- 2026-11-08: the owner's re-run finished `@asamarts/alint-linux-x64` and published
+  `@asamarts/alint-linux-arm64`, then stopped at its deprecate, most likely a 2FA prompt that timed
+  out during the wait. A second gap: npm asks for 2FA only on a terminal, and `npm trust list`
+  needs 2FA, so the script's piped `npm trust list` failed with EOTP and every re-run would have
+  tried to add a second Trusted Publisher, which the registry refuses (one per package). The script
+  now reads `npm trust list` on a pseudo-terminal (as plain text: under `--json` npm hides its 2FA
+  URL), and runs each step for all packages before the
+  next, so the 2FA prompts come together and the wait happens once.
+
 Next: the owner's bootstrap (N7: `ci/scripts/npm-bootstrap-platform-packages.sh`), then the release
 (R1-R3).
