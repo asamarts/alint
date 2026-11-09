@@ -13,7 +13,7 @@ import java.util.zip.ZipFile
 
 plugins {
     kotlin("jvm") version "2.4.21"
-    id("org.jetbrains.intellij.platform") version "2.19.0"
+    id("org.jetbrains.intellij.platform") version "2.20.0"
 }
 
 group = "org.alint"
