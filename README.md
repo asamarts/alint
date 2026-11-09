@@ -178,7 +178,7 @@ uv tool install alint
 `install.sh` detects your platform, downloads the matching tarball, verifies its SHA-256, and installs to `~/.local/bin`. The npm and PyPI packages ship the same prebuilt binary inside per-platform packages, with no install script, so both work under `--ignore-scripts`, from offline mirrors, and on Windows (x64 and arm64). A distroless multi-arch Docker image is published to ghcr.io on every release:
 
 ```bash
-docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.22.0 check
+docker run --rm -v "$PWD:/repo" ghcr.io/asamarts/alint:v0.22.1 check
 ```
 
 Build from source with `cargo build --release -p alint`. Every channel and platform is covered in the [installation guide](https://alint.org/docs/getting-started/installation/).

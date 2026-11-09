@@ -10,7 +10,10 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.22.0** (2026-11-07): general-linter phase 2 is complete. `cross_file` reads
+**Latest release: v0.22.1** (2026-11-09) changes how alint installs, not what it checks: the npm
+package runs the binary from a per-platform optional dependency instead of downloading it at
+install time, and Windows on ARM gets a native binary on every channel. The prior v0.22.0
+(2026-11-07) completed general-linter phase 2. `cross_file` reads
 the values it compares through the relation layer and the old reader is gone, with findings
 unchanged on the case-study corpus; `FixContext`, `Config` and `CompiledNestedSpec` in
 `alint-core` are `#[non_exhaustive]` and gain constructors; a finding whose path is hidden gets a

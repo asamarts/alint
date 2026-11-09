@@ -6,6 +6,16 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-09
+
+v0.22.1 changes how alint installs, not what it checks. The npm package no longer downloads the
+binary when it is installed: `@asamarts/alint` runs it from a per-platform package that npm, pnpm,
+Yarn and Bun install as an optional dependency, so it now installs with install scripts disabled,
+under Bun and Yarn Plug'n'Play, offline and from a registry mirror. One behavior to note:
+installing with optional dependencies omitted (`--omit=optional`) now leaves an `alint` that exits
+1 with a reinstall hint. Windows on ARM gets a native binary on every channel. Findings and fixes
+are unchanged.
+
 ### Added
 
 - **Windows on ARM.** Each release builds a native `aarch64-pc-windows-msvc` binary: a release
@@ -8704,7 +8714,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/asamarts/alint/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/asamarts/alint/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/asamarts/alint/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/asamarts/alint/compare/v0.21.0...v0.21.1
