@@ -5,8 +5,11 @@
 # placeholder is deprecated once the registry serves it (a new package answers
 # 404 for a while after its publish is accepted, as npmjs.org does), an earlier
 # run's undeprecated placeholder is deprecated on a re-run, Trusted Publishers
-# are added only where missing, --dry-run changes nothing, and a logged-out or
-# too-old npm stops before any change.
+# are added only where missing, each step runs for every package before the
+# next, --dry-run changes nothing, and a logged-out or too-old npm stops before
+# any change. Like npm with 2FA on, the stub refuses publish, deprecate and trust
+# (EOTP) unless stdin and stdout are a terminal, and refuses a second Trusted
+# Publisher; the script runs on a pseudo-terminal, as the owner runs it.
 #
 # Stub bodies are single-quoted on purpose: they expand when the stub runs.
 # shellcheck disable=SC2016
@@ -43,6 +46,14 @@ visible() { # <pkg>: exists before the run, or published and processed
 }
 not_found() { echo "npm error code E404" >&2; exit 1; }
 case "$1 ${2:-}" in
+  "publish "* | "deprecate "* | "trust list" | "trust github")
+    if [[ ! -t 0 || ! -t 1 ]]; then
+      echo "EOTP $1 ${2:-}" >> "$STUB_LOG"
+      echo '{"error":{"code":"EOTP","summary":"This operation requires a one-time password."}}'
+      exit 1
+    fi ;;
+esac
+case "$1 ${2:-}" in
   "--version "*) echo 11.19.0 ;;
   "trust --help") [[ -z "${NPM_NO_TRUST:-}" ]] || exit 1 ;;
   "whoami "*) [[ -z "${NPM_LOGGED_OUT:-}" ]] || exit 1; echo someone ;;
@@ -67,13 +78,23 @@ case "$1 ${2:-}" in
     visible "${2%@0.0.0}" || not_found
     touch "$(key "${2%@0.0.0}").deprecated" ;;
   "trust list")
+    if [[ " $* " == *" --json "* ]]; then # npm would hold the 2FA URL back for the JSON
+      echo "2FA URL hidden by --json" >> "$STUB_LOG"
+      exit 1
+    fi
     visible "$3" || not_found
-    if listed NPM_TRUSTED "$3"; then
-      echo '[{"type":"github","repository":"asamarts/alint","file":"release.yml"}]'
+    if listed NPM_TRUSTED "$3" || [[ -e "$(key "$3").trusted" ]]; then
+      printf 'type: github\nid: 1\nfile: release.yml\nrepository: asamarts/alint\npermissions: publish\n'
     else
-      echo '[]'
+      echo "No trust configurations found for package ($3)"
     fi ;;
-  "trust github") visible "$3" || not_found ;;
+  "trust github")
+    visible "$3" || not_found
+    if listed NPM_TRUSTED "$3" || [[ -e "$(key "$3").trusted" ]]; then
+      echo "npm error a trust configuration already exists for $3" >&2
+      exit 1
+    fi
+    touch "$(key "$3").trusted" ;;
   "publish "*)
     pkg=$(node -p 'require("./package.json").name')
     echo "${NPM_VISIBLE_AFTER:-0}" >"$(key "$pkg").published"
@@ -84,6 +105,7 @@ exit 0
 STUB
 chmod +x "$sandbox/bin/npm"
 
+ON_PTY='import pty, sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)'
 pass=0
 fail=0
 mapfile -t ALL < <(node -p 'require("./npm/platforms.json").packages.map((p) => p.name).join("\n")')
@@ -95,7 +117,8 @@ run() {
   mkdir "$sandbox/state"
   rc=0
   env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" STUB_STATE="$sandbox/state" \
-    NPM_BOOTSTRAP_POLL_SECONDS=0 "$@" bash "$SCRIPT" ${DRY:+--dry-run} >"$sandbox/out" 2>&1 || rc=$?
+    NPM_BOOTSTRAP_POLL_SECONDS=0 "$@" python3 -c "$ON_PTY" bash "$SCRIPT" ${DRY:+--dry-run} \
+    </dev/null >"$sandbox/out" 2>&1 || rc=$?
   log=$(cat "$sandbox/log")
 }
 count() { grep -cE -- "$1" <<<"$log" || true; }
@@ -123,6 +146,10 @@ check "fresh: deprecates each placeholder" test "$(count '^npm deprecate @asamar
 check "fresh: trusts release.yml of asamarts/alint for each package" \
   test "$(count '^npm trust github @asamarts/alint-[a-z0-9-]+ --file release\.yml --repo asamarts/alint --allow-publish --yes$')" -eq "$N"
 check "fresh: never touches the shim package" bash -c '! grep -qE "(publish|deprecate|trust github) @asamarts/alint( |@|$)" <<<"$0"' "$log"
+check "fresh: every command that needs 2FA runs on a terminal, where npm shows its 2FA URL" \
+  bash -c '! grep -qE "^(EOTP|2FA URL hidden)" <<<"$0"' "$log"
+check "fresh: publishes every placeholder before any deprecate, and deprecates all before any trust" \
+  bash -c 'grep -E "^(published|npm deprecate|npm trust github)" <<<"$0" | cut -d" " -f1-3 | sed -E "s/ @.*//" | uniq | tr "\n" " " | grep -qx "published npm deprecate npm trust github "' "$log"
 
 DRY='' run NPM_EXISTING="${ALL[*]}" NPM_TRUSTED="${ALL[*]}"
 check "done: re-running changes nothing" bash -c '[[ $0 -eq 0 ]] && ! grep -qE "^(published|npm deprecate|npm trust github)" <<<"$1"' "$rc" "$log"
@@ -148,6 +175,11 @@ DRY='' run NPM_EXISTING="${ALL[*]}" NPM_UNDEPRECATED="${ALL[0]}" NPM_TRUSTED="${
 check "earlier run stopped before deprecating: deprecates that placeholder, publishes nothing" \
   bash -c '[[ $0 -eq 0 ]] && ! grep -qE "^(published|npm trust github)" <<<"$1" && [[ $(grep -c "^npm deprecate $2@0\.0\.0 " <<<"$1") -eq 1 && $(grep -c "^npm deprecate" <<<"$1") -eq 1 ]]' \
   "$rc" "$log" "${ALL[0]}"
+
+DRY='' run NPM_EXISTING="${ALL[0]} ${ALL[1]}" NPM_UNDEPRECATED="${ALL[1]}" NPM_TRUSTED="${ALL[0]}" NPM_VISIBLE_AFTER=2
+check "resume (first package done, second published only): finishes the rest and leaves the first alone" \
+  bash -c '[[ $0 -eq 0 ]] && [[ $(grep -c "^published" <<<"$1") -eq $(($2 - 2)) && $(grep -c "^npm deprecate" <<<"$1") -eq $(($2 - 1)) && $(grep -c "^npm trust github" <<<"$1") -eq $(($2 - 1)) ]] && ! grep -qE "^npm (deprecate|trust github) $3( |@)" <<<"$1"' \
+  "$rc" "$log" "$N" "${ALL[0]}"
 
 DRY='' run NPM_EXISTING="${ALL[*]}" NPM_NO_PLACEHOLDER="${ALL[*]}" NPM_TRUSTED="${ALL[*]}"
 check "package without a 0.0.0 placeholder: deprecates nothing" \
