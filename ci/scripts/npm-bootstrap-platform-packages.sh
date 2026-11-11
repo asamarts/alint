@@ -62,7 +62,7 @@ undeprecated_placeholder() {
 # the 2FA URL back for the JSON output, so the owner would never see it.
 trust_list() {
   python3 -c 'import pty, sys; sys.exit(pty.spawn(sys.argv[1:]) >> 8)' \
-    npm trust list "$1" --color=false --no-progress | tee /dev/stderr
+    npm trust list "$1" --color=false --no-progress | tee -a /dev/stderr
 }
 
 trusted() {

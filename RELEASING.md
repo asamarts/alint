@@ -284,7 +284,10 @@ packages (ADR-0031): one per row of `npm/platforms.json`
 release tarball), then the `@asamarts/alint` shim that names them as
 exact-version optionalDependencies. Platform packages go first, so a failure
 part way through breaks no install; each publish is skipped on a re-run if the
-registry already serves that version.
+registry already serves that version. npm serves a version a few minutes after
+it accepts the publish, so the job waits until it serves every platform package
+before publishing the shim (an install that resolves the shim first gets no
+binary), and waits for the shim before the post-publish smoke starts.
 
 **Every package needs its own Trusted Publisher**: repo `asamarts/alint`,
 workflow `release.yml`, no environment. npm can only configure one for a package
@@ -301,13 +304,19 @@ that already exists, so a new platform package needs a one-time owner bootstrap
    runs `npm trust github <package> --file release.yml --repo asamarts/alint
    --allow-publish` unless that entry exists. Publish, deprecate, `npm trust
    list` and `npm trust github` each ask for 2FA; ticking npm's "skip 2FA for
-   the next 5 minutes" at a prompt covers the rest of that step. Re-running is
-   safe and finishes whatever an earlier run left undone.
+   the next 5 minutes" at a prompt covers the following publishes and trust
+   commands, but each deprecation still asks on its own. An approval link
+   expires after about five minutes. Re-running is safe and finishes whatever
+   an earlier run left undone.
 3. Confirm with `npm trust list <package>` for each one.
 
 npm validates the entry only at publish time, so a missing or mismatched one
 fails the `publish npm` job; recovery is add/fix the entry, then
-`gh run rerun <id> --failed` (never re-tag). The `publish-npm` job needs
+`gh run rerun <id> --failed` (never re-tag). An entry that `npm trust list`
+shows correctly can still fail: in v0.22.1, `@asamarts/alint-linux-x64` got
+`404 Not Found - PUT` on every attempt while its siblings published, and it
+published once its entry was revoked (`npm trust revoke <package> --id=<id>`)
+and created again. The `publish-npm` job needs
 `id-token: write`, npm CLI `>= 11.5.1`, and Node `>= 22.14`. Trusted Publishing
 attaches provenance to every package, and since the platform packages carry the
 binary, that provenance now covers the binary bytes.
