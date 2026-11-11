@@ -10,7 +10,7 @@
 > markers. See [`v0.11/roadmap_generator.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.11/roadmap_generator.md)
 > for the marker syntax and the v0.9.22 migration plan.
 
-**Latest release: v0.22.1** (2026-11-09) changes how alint installs, not what it checks: the npm
+**Latest release: v0.22.1** (2026-11-11) changes how alint installs, not what it checks: the npm
 package runs the binary from a per-platform optional dependency instead of downloading it at
 install time, and Windows on ARM gets a native binary on every channel. The prior v0.22.0
 (2026-11-07) completed general-linter phase 2. `cross_file` reads

@@ -6,7 +6,7 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-## [0.22.1] - 2026-11-09
+## [0.22.1] - 2026-11-11
 
 v0.22.1 changes how alint installs, not what it checks. The npm package no longer downloads the
 binary when it is installed: `@asamarts/alint` runs it from a per-platform package that npm, pnpm,
