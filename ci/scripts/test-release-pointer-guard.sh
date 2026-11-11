@@ -86,6 +86,7 @@ run_step() {
   python3 "$EXTRACT" "$WF" "$job" "$name" run > "$sandbox/step.sh"
   : > "$sandbox/log"
   : > "$sandbox/gh_output"
+  rm -f "$sandbox/npm-served"
   rc=0
   (cd "$dir" && env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" \
      GITHUB_OUTPUT="$sandbox/gh_output" GITHUB_REF_NAME=v0.16.2 GITHUB_SHA=deadbeef "$@" \
@@ -146,7 +147,11 @@ for pkg in alint-linux-x64 alint; do
   mkdir -p "$sandbox/npmw/npm-dist/$pkg"
   printf '{\n  "name": "@asamarts/%s"\n}\n' "$pkg" > "$sandbox/npmw/npm-dist/$pkg/package.json"
 done
-printf '#!/usr/bin/env bash\necho "npm $*" >> "$STUB_LOG"\n[[ "$1" == view ]] && exit 1\nexit 0\n' > "$sandbox/bin/npm"
+# npm serves a package once this run has published it (the step waits for that).
+printf '%s\n' '#!/usr/bin/env bash' 'echo "npm $*" >> "$STUB_LOG"' \
+  'served="$(dirname "$STUB_LOG")/npm-served"' \
+  'if [[ "$1" == view ]]; then grep -qxF -- "${2%@*}" "$served" 2>/dev/null && echo "${2##*@}" && exit 0; exit 1; fi' \
+  '[[ "$1" == publish ]] && echo "@asamarts/$(basename "$PWD")" >> "$served"' 'exit 0' > "$sandbox/bin/npm"
 printf '#!/usr/bin/env bash\nexit 0\n' > "$sandbox/bin/node"
 chmod +x "$sandbox/bin/npm" "$sandbox/bin/node"
 run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v0.16.2 HIGHEST_OVERALL=true

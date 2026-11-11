@@ -305,4 +305,23 @@ belongs to the v0.23 track.
   dogfood), and `check-patch-compat.sh 0.22.0` passes: `alint`, `alint-lsp` and `alint-testkit`
   0.22.0 compile against 0.22.1. No corpus replay: nothing in the relation layer changed.
 
-Next: the owner finishes the bootstrap (N7), then the tag (R2) once the release PR is merged.
+- 2026-11-11: N7 done: all six platform packages have a deprecated `0.0.0` placeholder and a
+  Trusted Publisher for `release.yml`. R2: v0.22.1 tagged at 5054852d (#489). Every channel
+  published on the first run except npm, where `@asamarts/alint-linux-x64` got
+  `404 Not Found - PUT` twice while three siblings published. Its Trusted Publisher, the only one
+  created on 2026-11-08, looked the same as the others in `npm trust list`; revoked and created
+  again, the third attempt published linux-x64, both Windows packages and the shim, all with
+  provenance. The post-publish smoke then failed its npm rows: npm served the shim before
+  linux-x64 and win32-arm64, so an install in that window got no binary. Re-run, it passed on
+  all channels. `publish-npm` now waits until npm serves every platform package before publishing
+  the shim, and the shim before the smoke starts. alint.org synced (alint.org#124), Action pin
+  #495.
+- 2026-11-11: R3, skipped. bench-record's engine-change guard skipped both the micro gate and the
+  record because no `crates/**/*.rs` changed, and logged "byte-identical binary", which is not
+  quite true: the adotenv 1.3.0 -> 1.4.0 lock change reaches the binary. It cannot move a number.
+  adotenv's parser files are byte-identical between the two versions, `edit.rs` only gains the new
+  reference-rename edit (243 lines added, none changed) and `lib.rs` only a doc line, so the code
+  alint calls is unchanged, and no micro or macro benchmark parses or edits a `.env` file. The
+  v0.22.0 record stands for v0.22.1, and alint.org needs no bench snapshot.
+
+v0.22.1 is complete.

@@ -31,13 +31,21 @@ fail=0
 mkdir -p "$sandbox/bin"
 stub() { printf '#!/usr/bin/env bash\necho "%s $*" >> "$STUB_LOG"\n%s\n' "$1" "$2" > "$sandbox/bin/$1"; chmod +x "$sandbox/bin/$1"; }
 {
-# npm view: NPM_VIEW_PUBLISHED lists the name@version specs the registry serves
-# (else every view prints NPM_VIEW_OUT); npm publish also logs its package dir.
+# npm view: NPM_VIEW_PUBLISHED lists the name@version specs the registry serves,
+# and a package this run published is served from then on, unless
+# NPM_NEVER_SERVED names it (else every view prints NPM_VIEW_OUT); npm publish
+# also logs its package dir.
 stub npm 'if [[ "$1" == view ]]; then
-  if [[ " ${NPM_VIEW_PUBLISHED:-} " == *" $2 "* ]]; then echo "${2##*@}"; exit 0; fi
+  if [[ " ${NPM_VIEW_PUBLISHED:-} " == *" $2 "* ]] || grep -qxF -- "${2%@*}" "$NPM_SERVED_FILE"; then
+    echo "${2##*@}"; exit 0
+  fi
   printf "%s\n" "${NPM_VIEW_OUT:-}"; [[ -n "${NPM_VIEW_OUT:-}" ]] || exit 1
 fi
-[[ "$1" == publish ]] && echo "npm-publish-in $(basename "$PWD")" >> "$STUB_LOG"
+if [[ "$1" == publish ]]; then
+  echo "npm-publish-in $(basename "$PWD")" >> "$STUB_LOG"
+  [[ " ${NPM_NEVER_SERVED:-} " == *" @asamarts/$(basename "$PWD") "* ]] ||
+    echo "@asamarts/$(basename "$PWD")" >> "$NPM_SERVED_FILE"
+fi
 exit 0'
 stub node 'exit 0'
 stub npx 'exit 0'
@@ -61,8 +69,10 @@ run_step() {
   shift 3
   python3 "$EXTRACT" "$WF" "$job" "$name" run > "$sandbox/step.sh"
   : > "$sandbox/log"
+  : > "$sandbox/npm-served"
   rc=0
-  (cd "$dir" && env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" "$@" \
+  (cd "$dir" && env PATH="$sandbox/bin:$PATH" STUB_LOG="$sandbox/log" NPM_SERVED_FILE="$sandbox/npm-served" \
+     NPM_SERVED_SLEEP=0 NPM_SERVED_TRIES=3 "$@" \
      bash --noprofile --norc -eo pipefail "$sandbox/step.sh") > "$sandbox/out" 2>&1 || rc=$?
   log=$(cat "$sandbox/log")
 }
@@ -138,6 +148,25 @@ if [[ "$(grep '^npm-publish-in ' <<< "$log" | tail -n1)" != "npm-publish-in alin
 else
   ok "npm: the shim is published last, after every platform package"
 fi
+# npm serves a publish minutes after accepting it; the shim must wait until
+# every platform package is served, and the step until the shim is.
+if awk '/^npm-publish-in alint-/ { pub[$2] = 1 }
+        /^npm-publish-in alint$/ { shim = 1 }
+        /^npm view @asamarts\/alint-/ { n = $3; sub(/^@asamarts\//, "", n); sub(/@.*/, "", n)
+                                         if ((n in pub) && !shim) waited[n] = 1 }
+        END { for (n in pub) if (!(n in waited)) exit 1; exit !shim }' <<< "$log" &&
+   [[ "$(tail -n1 <<< "$log")" == "npm view @asamarts/alint@1.2.3 version --prefer-online" ]]; then
+  ok "npm: the shim waits for the platform packages, and the step for the shim"
+else
+  bad "npm: the shim waits for the platform packages, and the step for the shim"
+fi
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT= \
+  NPM_NEVER_SERVED=@asamarts/alint-win32-arm64
+expect "npm: a platform package npm never serves fails the step before the shim" nonzero \
+  '^npm-publish-in alint-win32-arm64$' '^npm-publish-in alint$'
+run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT= \
+  NPM_NEVER_SERVED=@asamarts/alint
+expect "npm: a shim npm never serves fails the step" nonzero '^npm-publish-in alint$' ''
 run_step publish-npm "$NPM_STEP" "$sandbox/npmw" TAG=v1.2.3 HIGHEST_OVERALL=true NPM_VIEW_OUT= \
   NPM_VIEW_PUBLISHED='@asamarts/alint-linux-x64@1.2.3'
 expect "npm: a re-run skips only the packages already published" 0 \

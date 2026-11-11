@@ -758,26 +758,55 @@ jobs:
           # package until the shim that names it is published, so a failure part
           # way through breaks no install.
           shopt -s nullglob
-          dirs=(npm-dist/alint-*/ npm-dist/alint/)
-          if [[ ${#dirs[@]} -lt 2 || ! -f npm-dist/alint/package.json ]]; then
+          platforms=(npm-dist/alint-*/)
+          if [[ ${#platforms[@]} -eq 0 || ! -f npm-dist/alint/package.json ]]; then
             echo "::error::npm-dist has no staged packages" >&2
             exit 1
           fi
-          for dir in "${dirs[@]}"; do
+          served() { [[ "$(npm view "$1@${ver}" version --prefer-online 2>/dev/null || true)" == "$ver" ]]; }
+          # npm answers a publish with 202 and serves the version minutes later.
+          # An install that resolves the new shim before npm serves its platform
+          # package skips that optional dependency and leaves `alint` without a
+          # binary (v0.22.1's linux-x64 was served 4 minutes after the shim), so
+          # wait for every platform package before publishing the shim, and for
+          # the shim before the post-publish smoke starts.
+          wait_served() {
+            local name n
+            for name in "$@"; do
+              for ((n = 1; ; n++)); do
+                served "$name" && break
+                if ((n >= ${NPM_SERVED_TRIES:-80})); then
+                  echo "::error::npm still does not serve ${name}@${ver} after ${n} checks" >&2
+                  return 1
+                fi
+                sleep "${NPM_SERVED_SLEEP:-15}"
+              done
+            done
+          }
+          publish() {
+            local dir=$1 name
             name="@asamarts/$(basename "$dir")"
             grep -q "\"name\": \"${name}\"" "${dir}package.json" ||
               { echo "::error::${dir}package.json is not ${name}" >&2; exit 1; }
             # Re-run safe: `npm publish` of an already-published version fails
             # (E403), so a `gh run rerun --failed` after a later failure would
             # red here. Skip each package the registry already serves.
-            if [[ "$(npm view "${name}@${ver}" version 2>/dev/null || true)" == "$ver" ]]; then
+            if served "$name"; then
               echo "::notice::${name}@${ver} is already on npm; skipping publish (re-run)."
-              continue
+              return 0
             fi
             # --provenance rides the OIDC id-token; with Trusted Publishing npm
             # also generates provenance automatically, so this is explicit-and-belt.
             (cd "$dir" && npm publish --access public --provenance --tag "$dist_tag")
+          }
+          names=()
+          for dir in "${platforms[@]}"; do
+            publish "$dir"
+            names+=("@asamarts/$(basename "$dir")")
           done
+          wait_served "${names[@]}"
+          publish npm-dist/alint/
+          wait_served @asamarts/alint
 
   publish-pypi:
     name: publish alint to PyPI
