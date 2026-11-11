@@ -9,6 +9,41 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.22.1] - 2026-11-11
+
+v0.22.1 changes how alint installs, not what it checks. The npm package no longer downloads the
+binary when it is installed: `@asamarts/alint` runs it from a per-platform package that npm, pnpm,
+Yarn and Bun install as an optional dependency, so it now installs with install scripts disabled,
+under Bun and Yarn Plug'n'Play, offline and from a registry mirror. One behavior to note:
+installing with optional dependencies omitted (`--omit=optional`) now leaves an `alint` that exits
+1 with a reinstall hint. Windows on ARM gets a native binary on every channel. Findings and fixes
+are unchanged.
+
+### Added
+
+- **Windows on ARM.** Each release builds a native `aarch64-pc-windows-msvc` binary: a release
+  tarball, a `win_arm64` wheel on PyPI, the `@asamarts/alint-win32-arm64` npm package, and the
+  binary the VS Code, JetBrains and Zed extensions download. Windows on ARM previously ran the x64
+  binary under emulation through npm and had no other native install.
+
+### Changed
+
+- **The npm package no longer downloads anything at install time** (ADR-0031). `@asamarts/alint`
+  now runs the binary from a per-platform package (`@asamarts/alint-linux-x64`,
+  `@asamarts/alint-darwin-arm64`, and so on) that it lists as an exact-version optional
+  dependency, so your package manager installs only the one for your OS and CPU. No package has an
+  install script, so the npm package now installs under `--ignore-scripts`, with Bun and with
+  pnpm's default script blocking (no `pnpm approve-builds` needed), with Yarn Plug'n'Play, offline,
+  and from a registry mirror. It also keeps working if a GitHub Release is deleted. Each platform
+  package carries the binary from the release tarball, and npm provenance covers it
+  (`npm audit signatures` verifies it).
+- Installing the npm package with optional dependencies omitted (`--omit=optional`,
+  `--no-optional`) now leaves an `alint` command that exits 1 and says how to reinstall, where it
+  used to download the binary. Set `ALINT_BINARY` to run a binary of your choosing instead, on any
+  platform. `ALINT_SKIP_INSTALL` no longer does anything.
+- `.env` files are parsed with adotenv 1.4.0, up from 1.3.0. Its parser and edits are unchanged; 1.4.0
+  adds a reference-rename edit that alint does not use, so findings and fixes are the same.
+
 ## [0.22.0] - 2026-11-07
 
 v0.22 completes general-linter phase 2. `cross_file` reads the values it compares through the
@@ -61,8 +96,9 @@ through a dangling symlink, and predicting many creates costs far less.
 - `fix --dry-run` and `fix --diff` read the walk's ignore files once per pass, not once per
   predicted create (ADR-0030 decision 4): the overrides, the repository boundary, the ignore
   files above the root and the global excludes file once, and each directory's ignore files once.
-  A dry run of 20 creates spends 91% fewer instructions predicting them (6.8M to 0.6M) and 40%
-  fewer in all; a single create costs the same.
+  In three 100-file repositories, a dry run of 20 creates spent 85% to 91% fewer instructions
+  predicting them (at most 6.8M to 0.6M). The whole run saved 9% to 40%, depending on how much
+  of it prediction took. A single create costs the same.
 
 ### Removed
 
@@ -8681,7 +8717,8 @@ Initial release. MVP.
   verification.
 - Dogfood `.alint.yml` exercising the tool against its own repo.
 
-[Unreleased]: https://github.com/asamarts/alint/compare/v0.22.0...HEAD
+[Unreleased]: https://github.com/asamarts/alint/compare/v0.22.1...HEAD
+[0.22.1]: https://github.com/asamarts/alint/compare/v0.22.0...v0.22.1
 [0.22.0]: https://github.com/asamarts/alint/compare/v0.21.2...v0.22.0
 [0.21.2]: https://github.com/asamarts/alint/compare/v0.21.1...v0.21.2
 [0.21.1]: https://github.com/asamarts/alint/compare/v0.21.0...v0.21.1
