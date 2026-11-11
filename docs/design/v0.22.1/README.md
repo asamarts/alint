@@ -316,5 +316,12 @@ belongs to the v0.23 track.
   all channels. `publish-npm` now waits until npm serves every platform package before publishing
   the shim, and the shim before the smoke starts. alint.org synced (alint.org#124), Action pin
   #495.
+- 2026-11-11: R3, skipped. bench-record's engine-change guard skipped both the micro gate and the
+  record because no `crates/**/*.rs` changed, and logged "byte-identical binary", which is not
+  quite true: the adotenv 1.3.0 -> 1.4.0 lock change reaches the binary. It cannot move a number.
+  adotenv's parser files are byte-identical between the two versions, `edit.rs` only gains the new
+  reference-rename edit (243 lines added, none changed) and `lib.rs` only a doc line, so the code
+  alint calls is unchanged, and no micro or macro benchmark parses or edits a `.env` file. The
+  v0.22.0 record stands for v0.22.1, and alint.org needs no bench snapshot.
 
-Next: the v0.22.1 bench record, then its alint.org snapshot.
+v0.22.1 is complete.
