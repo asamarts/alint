@@ -297,8 +297,12 @@ belongs to the v0.23 track.
   needs 2FA, so the script's piped `npm trust list` failed with EOTP and every re-run would have
   tried to add a second Trusted Publisher, which the registry refuses (one per package). The script
   now reads `npm trust list` on a pseudo-terminal (as plain text: under `--json` npm hides its 2FA
-  URL), and runs each step for all packages before the
-  next, so the 2FA prompts come together and the wait happens once.
+  URL), and runs each step for all packages before the next, so the 2FA prompts come together and
+  the wait happens once (#488).
+- 2026-11-09: R1, the release PR: `bump-version.sh 0.22.1` (the npm platform pins included), the
+  CHANGELOG summary and the ROADMAP latest-release line. Local preflight green (fmt, clippy, 4224
+  tests, docs and `docs-export --check`, version pins, dependency floors, secrets inventory,
+  dogfood), and `check-patch-compat.sh 0.22.0` passes: `alint`, `alint-lsp` and `alint-testkit`
+  0.22.0 compile against 0.22.1. No corpus replay: nothing in the relation layer changed.
 
-Next: the owner's bootstrap (N7: `ci/scripts/npm-bootstrap-platform-packages.sh`), then the release
-(R1-R3).
+Next: the owner finishes the bootstrap (N7), then the tag (R2) once the release PR is merged.

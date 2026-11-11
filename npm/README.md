@@ -20,8 +20,8 @@ npx @asamarts/alint check
 ```
 
 pnpm, Yarn (including Plug'n'Play) and Bun work the same way. The npm package
-version tracks alint releases exactly: `npm install @asamarts/alint@0.22.0`
-runs alint v0.22.0.
+version tracks alint releases exactly: `npm install @asamarts/alint@0.22.1`
+runs alint v0.22.1.
 
 ## Supported platforms
 
