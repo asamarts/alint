@@ -112,6 +112,32 @@ Rulings from batch 2, applied by the integrator to every batch:
 - **A check that only an external service makes, such as a registry at publish time, is D.**
 - **A regex read of a JSON key, or a regex that holds for one layout only, is C.**
 
+Rulings from batch 3:
+- **Agreement between two release-age settings is family `other`.** Release age is not a
+  dependency version, range, protocol or field (section 2.3).
+- **A documented requirement counts as a convention** even when a fallback hides its failure.
+  Rocket.Chat's `docs/npm-publishing.md` states its publishing requirements, so they count; the
+  registry check in tq-B05 is stated nowhere in that repository, so it is D.
+
+**Every B-adapter unit records what it needs** (`needs`), so the synthesis can rank capabilities
+as well as assertion families. Each unit gets the one capability it lacks most directly:
+- `entry-values`: (key path, value) rows, per the batch 2 ruling;
+- `version-compare`: range satisfaction, ordering or range validity;
+- `order`: key or element order, including order relative to another file;
+- `placeholder`: placeholders extracted from a message and compared per key;
+- `plural-categories`: the CLDR plural categories of each locale;
+- `icu`: the ICU message syntax tree;
+- `format-reader`: a format alint cannot read (Markdown frontmatter, CSV, JSON5, a lockfile, data
+  in a TypeScript module);
+- `base-revision`: content at the pull request's base or another revision;
+- `route-model`: a documentation site's routes;
+- `package-graph`: a graph whose edges are package names;
+- `link-type`: whether a path is a symbolic link;
+- `derived-value`: an expected value computed from other fields;
+- `normalization`: Unicode or unit normalization;
+- `key-predicate`: a predicate over key names;
+- `other`: anything else, named in the unit's reason.
+
 The "after slice" figure is also reported with the value-bearing entry adapter added, since the
 slice's dependency version policy needs it.
 
@@ -159,7 +185,8 @@ through the GitHub API. Every one:
 - has the stratum's policy under a gate found in its CI, scripts or tests.
 
 The table shows 10-character prefixes. The full SHAs go into `pins.tsv` as each configuration
-lands.
+lands. The "gate found" column is from the selection; each record has the gates its analysts
+confirmed. workers-sdk lists `@manypkg/cli` as a dependency but runs no manypkg check.
 
 ### 3.1 i18n
 
@@ -188,7 +215,7 @@ lands.
 | trpc/trpc | `8eff9ff0dd` | pnpm, Turborepo | `manypkg`, `.nvmrc` and `.tool-versions` |
 | strapi/strapi | `fcc1df0668` | Yarn, Nx, Lerna | `check-package-versions.mjs`, `syncpack lint` |
 | microsoft/rushstack | `a1d41fc46f` | Rush | consistent versions, `rush change --verify` |
-| cloudflare/workers-sdk | `3cea40b078` | pnpm, Turborepo | `check:package-deps`, catalogs, manypkg |
+| cloudflare/workers-sdk | `3cea40b078` | pnpm, Turborepo | `check:package-deps`, catalogs |
 | backstage/backstage | `bc73976a6d` | Yarn | `verify-local-dependencies.js` |
 
 Four i18n repositories are also workspaces (Ghost, Rocket.Chat, element-web, immich). Their

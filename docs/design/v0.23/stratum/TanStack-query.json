@@ -129,7 +129,15 @@
    "reason": "Range satisfaction is not equality: pnpm@12.19.0 satisfies >=12.18.0 but fails an equality rule. The stratum doc names a semver-range operator as B-adapter, and the batch-1 twin trpc-03 has the same classification. The stricter equality the repo happens to keep is recorded as value-add.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "tq-10",
@@ -177,8 +185,15 @@
       "unique-key"
      ],
      "why": "B-config requires adapters the relation layer already has. This unit also needs a name-to-similar-family transform: sherif's built-in table, such as react with react-dom. No adapter or transform today emits that grouping key, so it is a new operator (stratum 2.2 B-adapter). Sherif's table and comparison semantics are also unverified offline, and the rule is vacuous at the pin."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "derived-value"
+     }
     }
-   ]
+   ],
+   "needs": "derived-value"
   },
   {
    "id": "tq-12",
@@ -398,7 +413,15 @@
    "reason": "markdown_links_resolve's root map only applies to root-absolute routes, and its relative resolution neither appends .md nor remaps example paths, so the check cannot be expressed today (R4).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
   },
   {
    "id": "tq-37",
@@ -482,7 +505,15 @@
    "reason": "R5 counts a documented convention. The only kinds that compare a file set with a registry need the registry entries to be repo paths, and these entries are site routes.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
   },
   {
    "id": "tq-43",
@@ -496,7 +527,15 @@
    "reason": "R7: publint reads package.json, and these assertions are about key order. The stratum doc lists an order operator as B-adapter.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "tq-44",

@@ -138,8 +138,15 @@
       "none"
      ],
      "why": "R4: major equality is not range satisfaction, and I reproduced errors in both directions. With engines.pnpm ^12.5.0 and packageManager pnpm@12.4.1 the rule passes, but pnpm refuses to install. With engines.pnpm >=11 the rule fires, but pnpm accepts. The normalize matches only a caret range starting at N.0.0. Section 2.2 names a semver-range operator as B-adapter, the same gap Stage A cited for trpc-06."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
     }
-   ]
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "trpc-05",
@@ -178,7 +185,15 @@
    "reason": "Needs semver-range satisfaction (section 2.2 names a semver-range operator as B-adapter) plus a name-to-manifest join.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "trpc-07",
@@ -281,7 +296,15 @@
    "reason": "file_graph's acyclic needs path-shaped edges, and package names are a declared non-goal of that kind. A package-graph adapter is needed.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "package-graph"
+     }
+    }
+   ],
+   "needs": "package-graph"
   },
   {
    "id": "trpc-14",
@@ -309,7 +332,15 @@
    "reason": "Section 2.2 names an order operator as B-adapter.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "trpc-16",
@@ -332,8 +363,15 @@
       "none"
      ],
      "why": "R4: AGENTS.md:3 requires a .claude/skills/<name> symlink. dir_exists follows the link, so a copied directory passes and only a missing link fires. alint has only the inverse check (no_symlinks). Expressing the unit needs a symlink or symlink-target predicate, which is the v0.12 Tier-3 candidate symlink_target_equals."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "link-type"
+     }
     }
-   ]
+   ],
+   "needs": "link-type"
   },
   {
    "id": "trpc-17",
@@ -459,7 +497,15 @@
    "reason": "URL extraction is a regex, but mapping a route to a page (slug: overrides) and to its Docusaurus anchors needs an adapter. markdown_fragments_resolve covers Markdown sources with GitHub-style anchors only.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
   },
   {
    "id": "trpc-26",
@@ -473,7 +519,15 @@
    "reason": "alint's structured formats do not include Markdown frontmatter. A regex can only approximate 'has a title', not the schema.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "trpc-27",
@@ -487,7 +541,15 @@
    "reason": "The unique-key family would apply once frontmatter is readable. The missing piece is the adapter.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "trpc-28",
@@ -501,7 +563,15 @@
    "reason": "The source values live in Markdown frontmatter, which alint cannot read.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "trpc-29",
@@ -515,7 +585,15 @@
    "reason": "References come from frontmatter and resolve against docs slugs and headings.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "trpc-30",
@@ -543,7 +621,15 @@
    "reason": "One side of the set comes from frontmatter (name + package combined), which alint cannot extract.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "trpc-32",
@@ -557,7 +643,15 @@
    "reason": "The target side lives in frontmatter.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "trpc-40",
@@ -1029,7 +1123,15 @@
    "reason": "Checked on the clone and on a scratch copy. registry_paths_resolve with entries_are_globs passed a brace list with a nonexistent alternative, and passed a * wildcard. Without entries_are_globs, the literal brace path never resolves and every line fires. The wildcard ban alone would be a file_content_forbidden regex. Not D: @source is a Tailwind path list, not an import the program uses (R7). If the study rules it an import, it joins trpc-59 in D.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   },
   {
    "id": "trpc-B04",

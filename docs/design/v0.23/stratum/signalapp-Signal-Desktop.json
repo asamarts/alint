@@ -171,7 +171,15 @@
    "reason": "Needs the ICU AST (whether a literal is inside a tag element). Per the batch-1 ruling, value assertions over entries need (key, value) rows plus an ICU extractor.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    }
+   ],
+   "needs": "icu"
   },
   {
    "id": "signal-desktop-07",
@@ -185,7 +193,15 @@
    "reason": "Brace-balanced nesting of choice arguments needs an ICU parser; a regex cannot do it robustly",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    }
+   ],
+   "needs": "icu"
   },
   {
    "id": "signal-desktop-08",
@@ -223,7 +239,15 @@
    "reason": "Correlates the plural argument name with references inside its own branches, which needs the ICU AST",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "icu"
+     }
+    }
+   ],
+   "needs": "icu"
   },
   {
    "id": "signal-desktop-10",
@@ -349,7 +373,15 @@
    "reason": "Set inclusion of deprecated (name, version) rows in an allowlist map. It needs a lockfile adapter (multi-document YAML, key splitting), which neither the relation layer nor any kind has.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "signal-desktop-19",

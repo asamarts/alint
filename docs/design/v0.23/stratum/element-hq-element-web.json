@@ -115,7 +115,15 @@
    "reason": "R7 example: normalized key order is B-adapter (no order operator)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "element-web-03",
@@ -304,7 +312,15 @@
    "reason": "cross_file compares values (equals/subset) and normalize offers semver-major/minor bands, not range satisfaction; stratum doc lists a semver-range operator as B-adapter",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "element-web-15",

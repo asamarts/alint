@@ -101,7 +101,15 @@
    "reason": "Key order under ICU collation plus an integer-first partition; alint has no collation or JSON key-order operator (batch-1 precedent element-web-02, trpc-15). R4: an ordered_block probe parses but asserts a different order.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "rocketchat-02",
@@ -115,7 +123,15 @@
    "reason": "Order relative to a reference file's key order; no order operator over JSON keys (element-web-02 / trpc-15 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "rocketchat-03",
@@ -143,7 +159,15 @@
    "reason": "Per-locale CLDR category sets; key_parity plurals: cldr deliberately does not check categories per locale (forem-03 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "plural-categories"
+     }
+    }
+   ],
+   "needs": "plural-categories"
   },
   {
    "id": "rocketchat-05",
@@ -157,7 +181,15 @@
    "reason": "Same missing adapter as rocketchat-04 (forem-03).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "plural-categories"
+     }
+    }
+   ],
+   "needs": "plural-categories"
   },
   {
    "id": "rocketchat-06",
@@ -199,7 +231,15 @@
    "reason": "Per-key value comparison; the entry adapter is key-only (batch-1 ruling, forem-04 / zulip-02).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "rocketchat-09",
@@ -213,7 +253,15 @@
    "reason": "Same as rocketchat-08, in the other direction.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "rocketchat-10",
@@ -311,7 +359,15 @@
    "reason": "An exact pin must satisfy a declared range (element-web-13 / trpc-03 precedent). The two instances are one behavior (R1).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "rocketchat-17",
@@ -420,7 +476,7 @@
    "bucket": "A",
    "alint": "cross_file equals (regex extracts) — rocketchat-dependabot-cooldown-matches-age-gate",
    "assertion_family": "none",
-   "reason": "Agreement between two release-age settings (Dependabot cooldown and Yarn's npmMinimalAgeGate). Release age is not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14, ghost-b14 and wsdk-75. A: cross_file equals with a days normalization, fire-verified.",
+   "reason": "Agreement between two release-age settings (Dependabot cooldown and Yarn's npmMinimalAgeGate). Release age is not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14, ghost-b14 and wsdk-75. A: cross_file equals over the day counts both files state, fire-verified.",
    "fire_verified": "Scratch copy of .yarnrc.yml and dependabot.yml: passes. Setting npmMinimalAgeGate to 7d fires once. Passes on the clone.",
    "origin": "A",
    "changes": [
@@ -428,7 +484,7 @@
      "by": "integrator",
      "fields": {
       "family": "other",
-      "reason": "Agreement between two release-age settings (Dependabot cooldown and Yarn's npmMinimalAgeGate). Release age is not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14, ghost-b14 and wsdk-75. A: cross_file equals with a days normalization, fire-verified."
+      "reason": "Agreement between two release-age settings (Dependabot cooldown and Yarn's npmMinimalAgeGate). Release age is not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14, ghost-b14 and wsdk-75. A: cross_file equals over the day counts both files state, fire-verified."
      }
     }
    ]
@@ -647,7 +703,15 @@
    "reason": "The values are YAML lists in frontmatter on one side and markdown table rows on the other; no adapter reads either as rows.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "rocketchat-39",
@@ -661,7 +725,15 @@
    "reason": "The path half is expressible, but the anchor and the reverse (every D heading cited) need slugged headings joined with code comments.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   },
   {
    "id": "rocketchat-40",
@@ -675,7 +747,15 @@
    "reason": "Link-target convention (trpc-16 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "link-type"
+     }
+    }
+   ],
+   "needs": "link-type"
   },
   {
    "id": "rocketchat-41",
@@ -703,7 +783,15 @@
    "reason": "No kind compares file content with a base revision; treated the same as rocketchat-45.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "rocketchat-43",
@@ -731,7 +819,15 @@
    "reason": "The set of icon file stems must be covered by JSON keys; cross_file cannot take values from file names except via registered with a list target.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   },
   {
    "id": "rocketchat-45",
@@ -745,7 +841,15 @@
    "reason": "Append-only versus the base revision.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "rocketchat-46",
@@ -759,7 +863,15 @@
    "reason": "Conditional on what the PR adds; no kind relates added paths to added files.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "rocketchat-47",
@@ -773,7 +885,15 @@
    "reason": "Detecting a move needs git rename detection against a base.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "rocketchat-48",
@@ -801,7 +921,15 @@
    "reason": "alint cannot read CSV records.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "rocketchat-50",
@@ -815,7 +943,15 @@
    "reason": "Per-row field comparison over CSV.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "rocketchat-51",
@@ -829,7 +965,15 @@
    "reason": "Column-value vocabularies over CSV records.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "rocketchat-52",
@@ -1267,7 +1411,15 @@
    "reason": "A toolchain floor checked against a range string; the stratum names a semver-range operator as B-adapter. A regex approximation would be C at best and was not written.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "rocketchat-81",

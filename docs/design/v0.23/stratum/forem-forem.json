@@ -139,7 +139,15 @@
    "reason": "R7 classifies this by its assertion. It needs a new reusable plural-category operator that alint lacks.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "plural-categories"
+     }
+    }
+   ],
+   "needs": "plural-categories"
   },
   {
    "id": "forem-04",
@@ -153,7 +161,15 @@
    "reason": "R7. The stratum doc lists a placeholder extractor as an example of B-adapter.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "forem-05",
@@ -195,7 +211,15 @@
    "reason": "R7: a range floor over a lockfile alint can read. The stratum doc names a semver-range operator as B-adapter. A regex that encodes the floor is possible but is a hack, not a faithful expression.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "forem-08",
@@ -952,7 +976,15 @@
    "reason": "Stage A excluded this as history-dependent, but it compares two entries of the file at HEAD, not history. The needed operator is ordering/contiguous (general-linter 6.4), which is not one of the seven B-config families, so it is B-adapter per the stratum doc's order-operator example.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   }
  ],
  "removed": [],

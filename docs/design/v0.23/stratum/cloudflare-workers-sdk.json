@@ -194,7 +194,15 @@
    "reason": "Allowlist side needs extraction of only the EXTERNAL_DEPENDENCIES array elements; a regex would also capture IGNORED_DIST_IMPORTS (wrangler, create-cloudflare) and false-fire",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "wsdk-08",
@@ -829,7 +837,15 @@
    "reason": "Edges are package names not paths; file_graph needs path edges (trpc-13 precedent)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "package-graph"
+     }
+    }
+   ],
+   "needs": "package-graph"
   },
   {
    "id": "wsdk-52",
@@ -885,7 +901,15 @@
    "reason": "Range satisfaction, not equality",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "wsdk-56",
@@ -899,7 +923,15 @@
    "reason": "Range satisfaction",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "wsdk-57",
@@ -1146,8 +1178,15 @@
       "none"
      ],
      "why": "The unit equates Dependabot's update cooldown (.github/dependabot.yml:13-16, default-days 1) with pnpm's minimumReleaseAge (pnpm-workspace.yaml:37, 1440). Neither value is a dependency version, range, protocol or dependency field, so it falls outside the dep-version family defined in corpus-stratum.md section 2.3. It is a supply-chain timing setting, so the family is other. This moves one B-adapter from dep-version to other."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "normalization"
+     }
     }
-   ]
+   ],
+   "needs": "normalization"
   },
   {
    "id": "wsdk-76",
@@ -1273,7 +1312,15 @@
    "reason": "Split out of wsdk-39. R7 classifies a tool run over files alint reads by what it asserts. This sub-check orders the keys of a data file, which matches the stratum's own i18n-tasks normalized-key-order example (B-adapter, no order operator). Whitespace, quoting and import sorting stay in wsdk-39 as D under R2. If the integrator rules that R2 covers every oxfmt sub-check, this folds back into wsdk-39.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "wsdk-b06",
@@ -1287,7 +1334,15 @@
    "reason": "Split out of wsdk-37. The rule reads only comment text, so R7 and the element-web-18 precedent (an oxlint header-text rule classified by its logic) apply rather than D. A regex probe failed R4: for_each_match over **/*.{ts,tsx,mts,cts,jsx}, with generated and template paths excluded, gave about 30 false positives at the pin from directive-like text inside strings and from multi-line block comments. The count of about 30 was taken before a context compaction and was not re-run. So the unit is B-adapter, not A or C. The other custom rules (no-unsafe-command-execution, no-direct-recursive-rm, no-wrangler-named-imports) are AST checks and stay D.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   }
  ],
  "removed": [

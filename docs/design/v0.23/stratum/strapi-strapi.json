@@ -682,7 +682,15 @@
    "reason": "Needs a Docusaurus route model (number-prefix stripping, folder-page folding, slug frontmatter, generated tag routes). markdown_links_resolve's root map only maps directories to routes.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
   },
   {
    "id": "strapi-56",
@@ -696,7 +704,15 @@
    "reason": "A value check on Markdown frontmatter needs a frontmatter adapter (trpc-26..32 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "strapi-57",
@@ -710,7 +726,15 @@
    "reason": "A typed frontmatter value check needs a frontmatter adapter.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "strapi-58",
@@ -724,7 +748,15 @@
    "reason": "A frontmatter value referencing manifest names needs a frontmatter adapter (the relation itself is a reference).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "strapi-59",
@@ -738,7 +770,15 @@
    "reason": "Uniqueness of a frontmatter value across pages; blocked on a frontmatter adapter before any unique-key family applies.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "strapi-60",
@@ -752,7 +792,15 @@
    "reason": "Frontmatter tags list values vs tags.yml keys: needs a frontmatter adapter (and a YAML key extract).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "strapi-61",
@@ -804,7 +852,15 @@
    "reason": "Needs a TypeScript-array reader and the Docusaurus route model.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
   },
   {
    "id": "strapi-70",
@@ -874,7 +930,15 @@
    "reason": "git_commit_message reads only subject, body and whole-message patterns. Telling footer trailers from body lines needs a conventional-commit message parser.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   },
   {
    "id": "strapi-80",
@@ -1224,7 +1288,15 @@
    "reason": "Follows the trpc-26..32 precedent: frontmatter schema is B-adapter. _category_.json and the tags.yml schema may be further units of the same kind; not counted separately.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "strapi-b06",

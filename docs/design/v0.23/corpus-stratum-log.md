@@ -40,17 +40,17 @@ Through batch 3 (15 repositories).
 | microsoft/rushstack | 78 | 34 | 6 | 6 | 1 | 2 | 12 | 17 | 56% | 75% | 25% | 64% | 66% |
 | TryGhost/Ghost | 98 | 36 | 7 | 14 | 0 | 0 | 19 | 22 | 47% | 72% | 28% | 50% | 51% |
 | RocketChat/Rocket.Chat | 86 | 22 | 1 | 19 | 0 | 0 | 7 | 37 | 45% | 59% | 41% | 47% | 47% |
-| babel/babel | 68 | 27 | 3 | 5 | 0 | 2 | 6 | 25 | 63% | 77% | 23% | 67% | 70% |
+| babel/babel | 68 | 27 | 3 | 4 | 0 | 3 | 6 | 25 | 63% | 77% | 23% | 67% | 70% |
 | strapi/strapi | 78 | 16 | 4 | 10 | 0 | 0 | 22 | 26 | 31% | 73% | 27% | 37% | 38% |
 | cloudflare/workers-sdk | 83 | 32 | 1 | 9 | 1 | 0 | 5 | 35 | 67% | 77% | 23% | 67% | 67% |
-| **Pooled** | 1127 | 380 | 40 | 114 | 2 | 11 | 128 | 452 | 56% | 75% | 25% | 60% | 61% |
+| **Pooled** | 1127 | 380 | 40 | 113 | 2 | 12 | 128 | 452 | 56% | 75% | 25% | 60% | 61% |
 
 | Family | Units | A | B-config | B-adapter | B-kernel | B-delegate | C | D | Today | Tuning | Gap | After slice | With values |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
 | `locale` | 81 | 18 | 3 | 23 | 0 | 2 | 19 | 16 | 28% | 57% | 43% | 32% | 32% |
 | `dep-version` | 127 | 33 | 6 | 17 | 0 | 0 | 19 | 52 | 44% | 69% | 31% | 49% | 60% |
 | `toolchain-pin` | 58 | 30 | 0 | 13 | 0 | 0 | 2 | 13 | 67% | 71% | 29% | 67% | 67% |
-| `other` | 861 | 299 | 31 | 61 | 2 | 9 | 88 | 371 | 61% | 79% | 21% | 64% | 65% |
+| `other` | 861 | 299 | 31 | 60 | 2 | 10 | 88 | 371 | 61% | 79% | 21% | 64% | 65% |
 
 The assertion families the B-config units need, with the B-adapter units that need only entry
 values:

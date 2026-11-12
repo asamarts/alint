@@ -110,8 +110,15 @@
       "none"
      ],
      "why": "corpus-stratum.md 2.1 names this exact case as its R7 example: 'normalized key order is B-adapter (no order operator)'. Batch 1 classified nested key order the same way (element-web-02). The ordered_block trio does not express recursive sorting. It keys on 2- and 4-space indentation and on lines that trim to '},', so it covers depths 1 and 2 only. Reproduced on a scratch copy: an unsorted 3-level object inserted into en.json's admin ({\"zeta\",\"alpha\"} at 6-space indent) passes all three rules, although jsonRecursiveSort would rewrite it and fail Test i18n. Its 4-space '},' also splits the depth-2 block. Keep the rules as an approximation (C-level workaround). The unit itself is demand for a JSON key-order operator."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
     }
-   ]
+   ],
+   "needs": "order"
   },
   {
    "id": "immich-02",
@@ -174,7 +181,15 @@
    "reason": "Batch-1 ruling: the entry adapter is key-only; this asserts over the entry's value (placeholder presence) and needs an ICU placeholder extractor, both missing.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "immich-06",
@@ -268,7 +283,15 @@
    "reason": "Checking a version against a range needs a semver-range operator alint does not have. Whether pnpm 12 hard-fails on a mismatch was not verified (web/.npmrc engine-strict is probably ignored under pnpm 12).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "immich-12",
@@ -380,7 +403,15 @@
    "reason": "Needs the file's content at another revision. A depth-1 clone cannot show it, and no kind compares against a base ref's content.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "immich-22",
@@ -408,7 +439,15 @@
    "reason": "Needs the set of pages removed or renamed in a change; git kinds see only changed paths, not renames or deletions mapped to old URLs.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "immich-24",
@@ -810,7 +849,15 @@
    "reason": "R7: the plugin's sort assertion is classified by its logic, as Stage A did for immich-01. This is a separate CI job with a separate config and file set, so it can fail on its own. The integrator may fold it into immich-01 under R1. package.json files use prettier's json-stringify parser and are not sorted.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "immich-52",
@@ -824,7 +871,15 @@
    "reason": "The same shape batch 1 rated B-adapter (element-web-13, trpc-03): an exact pin that must satisfy a declared constraint. My recollection is that pub ignores upper bounds on the Flutter SDK constraint, so the effective check is >=, not equality. That was not verified from pub's source. Equality holds at the pin, so a cross_file equals rule would be stricter than the gate, which makes it value-add rather than an expression of the gate.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "immich-53",
@@ -838,7 +893,15 @@
    "reason": "A pin checked against a declared range by the tool, so it needs a range operator alint lacks (batch-1 ruling). Stage A recorded the .python-version 3.13 vs mise 3.12 drift as 'unusual' but did not record the relation uv enforces. As I recall, uv gives .python-version precedence over mise's python 3.12 on PATH; not verified from uv's source.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "immich-54",

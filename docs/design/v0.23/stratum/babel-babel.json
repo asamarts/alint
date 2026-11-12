@@ -5,9 +5,9 @@
   "counts": {
    "A": 27,
    "B-config": 3,
-   "B-adapter": 5,
+   "B-adapter": 4,
    "B-kernel": 0,
-   "B-delegate": 2,
+   "B-delegate": 3,
    "C": 6,
    "D": 25
   },
@@ -74,9 +74,9 @@
    "counts": {
     "A": 17,
     "B-config": 2,
-    "B-adapter": 3,
+    "B-adapter": 2,
     "B-kernel": 0,
-    "B-delegate": 2,
+    "B-delegate": 3,
     "C": 5,
     "D": 22
    },
@@ -569,10 +569,10 @@
    "evidence": "ci.yml:98-103 (node scripts/cleanup-fixtures.ts, then assert-dir-git-clean); scripts/cleanup-fixtures.ts",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "B-delegate",
    "alint": "(none) loader-specific option inheritance and JSON deep-equality",
    "assertion_family": "none",
-   "reason": "Repository-state logic of the fixture loader's option inheritance: suite or fixture fallback, a category level for the parser, deep equality after deleting a key. It belongs in a plugin, not core.",
+   "reason": "Repository-state logic of the fixture loader's option inheritance: suite or fixture fallback, a category level for the parser, deep equality after deleting a key. It belongs in a plugin, not core (B-delegate; the integrator moved it from B-adapter, which its own reason argued against).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -584,6 +584,13 @@
       "none"
      ],
      "why": "Moderate confidence. scripts/cleanup-fixtures.ts (run in the build job and followed by assert-dir-git-clean) is a simple script: it compares JSON.stringify of a task's options.json with its suite's options.json (fixture-level fallback; the parser has an extra category level) and fails the clean-tree check if a redundant file would be deleted or rewritten to {throws}. This is not the fixture loader's inheritance semantics that Stage A cites for B-delegate. It needs a JSON-equality operator over a parent-directory join, after deleting a key: a new reusable operator, not repository-specific plugin logic."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-delegate",
+      "reason": "Repository-state logic of the fixture loader's option inheritance: suite or fixture fallback, a category level for the parser, deep equality after deleting a key. It belongs in a plugin, not core (B-delegate; the integrator moved it from B-adapter, which its own reason argued against)."
+     }
     }
    ]
   },
@@ -613,7 +620,15 @@
    "reason": "The order is the JSON array's arbitrary order, not a sort, so ordered_block does not apply. R7's example puts order in B-adapter (no order operator).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "babel-36",
@@ -669,7 +684,15 @@
    "reason": "file_graph's acyclic needs path-shaped edges, and it drops bare package names (trpc-13 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "package-graph"
+     }
+    }
+   ],
+   "needs": "package-graph"
   },
   {
    "id": "babel-40",

@@ -458,7 +458,15 @@
    "reason": "The expected value is computed from other fields with string transforms and a branch for the type-only package list. No adapter or operator derives it.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "derived-value"
+     }
+    }
+   ],
+   "needs": "derived-value"
   },
   {
    "id": "jest-26",
@@ -485,10 +493,12 @@
     {
      "by": "integrator",
      "fields": {
-      "summary": "A TS package's tsconfig.json references equal the sorted paths of its internal TS workspace dependencies (scripts/buildTs.mjs:73-79)."
+      "summary": "A TS package's tsconfig.json references equal the sorted paths of its internal TS workspace dependencies (scripts/buildTs.mjs:73-79).",
+      "needs": "order"
      }
     }
-   ]
+   ],
+   "needs": "order"
   },
   {
    "id": "jest-27",

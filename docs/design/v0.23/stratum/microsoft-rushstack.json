@@ -182,7 +182,15 @@
    "reason": "Needs a semver-range operator; regex/equality cannot express range satisfaction. A stronger equality (matrix = range floors) is added as value-add only.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "rushstack-07",
@@ -586,7 +594,15 @@
    "reason": "Needs semver comparison between package.json versions and a policy version.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "rushstack-33",
@@ -936,7 +952,15 @@
    "reason": "Ordering, not equality: rushVersion normally lags the source, so an equality rule would over-assert.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "rushstack-56",
@@ -1182,7 +1206,15 @@
    "reason": "This is the static half of the Node pin. The section 2.2 example names a semver-range operator as B-adapter. A regex can only approximate node-semver grammar, so it is not A under R4.",
    "fire_verified": "n/a (not A)",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "rushstack-b12",

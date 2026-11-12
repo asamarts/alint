@@ -332,7 +332,15 @@
    "reason": "It needs the PR change set mapped to workspaces. pair_changed_together and changeset_requires_path are path-level and cannot read which workspace the version file names. general-linter.md 5.3 says a first-class change relation is needed. The guard 'at most one version file per branch' is the same step's guard clause and is folded in, as in the tokio ruling.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "yarnpkg-berry-17",

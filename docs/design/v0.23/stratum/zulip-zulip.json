@@ -115,7 +115,15 @@
    "reason": "Placeholder agreement needs a .po adapter and a placeholder extractor (section 2.2 B-adapter example)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "zulip-03",
@@ -165,7 +173,15 @@
    "reason": "Maintainer-run gate (counted under R5); alint has no normalization operator",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "normalization"
+     }
+    }
+   ],
+   "needs": "normalization"
   },
   {
    "id": "zulip-06",
@@ -2650,7 +2666,15 @@
    "reason": "The rule bans link text equal to its URL via a named backreference; RE2 has none and alint's equal can only require equality",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   },
   {
    "id": "zulip-cc-76",

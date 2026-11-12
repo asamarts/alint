@@ -129,7 +129,15 @@
    "reason": "Control test in scratch: dropping only it/ghost.json's `_one` form passes alint, but the parser would re-add it and fail CI. A locale-to-categories adapter is needed.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "plural-categories"
+     }
+    }
+   ],
+   "needs": "plural-categories"
   },
   {
    "id": "ghost-05",
@@ -180,8 +188,15 @@
       "none"
      ],
      "why": "generate-context.js makes one assertion: newContent !== existingContent, then exit 1. Here newContent is the en key union, sorted, serialized with JSON.stringify(...,4), keeping existing values. Key-set equality (ghost-07) and canonical form (ghost-08) are the same byte comparison, so R1 makes them one unit. Its binding part is key order and canonical serialization, which is B-adapter (element-web-02 precedent). The existing cross_file rule stays as a partial expression."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
     }
-   ]
+   ],
+   "needs": "order"
   },
   {
    "id": "ghost-09",
@@ -237,7 +252,15 @@
    "reason": "Batch-1 ruling: an assertion over a locale entry's value against its key is B-adapter, because the entry adapter is key-only.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "ghost-13",
@@ -251,7 +274,15 @@
    "reason": "Same ruling as ghost-12.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "ghost-14",
@@ -265,7 +296,15 @@
    "reason": "Depends on the B-adapter results of ghost-12 and ghost-13.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
   },
   {
    "id": "ghost-15",
@@ -730,7 +769,15 @@
    "reason": "Needs condition key order and string derivation across fields.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "ghost-51",
@@ -800,7 +847,15 @@
    "reason": "Needs an ordered version comparison across file and path.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
   },
   {
    "id": "ghost-56",
@@ -842,7 +897,15 @@
    "reason": "The hash is over re-serialized parsed data, not file bytes.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   },
   {
    "id": "ghost-59",
@@ -884,7 +947,15 @@
    "reason": "Corpus configs cannot add a schema file to the read-only clone.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
   },
   {
    "id": "ghost-62",
@@ -1080,7 +1151,15 @@
    "reason": "Precedent trpc-16.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "link-type"
+     }
+    }
+   ],
+   "needs": "link-type"
   },
   {
    "id": "ghost-76",
@@ -1440,7 +1519,15 @@
    "reason": "R7: an assertion over manifests, not tool logic, so ghost-88's D lump does not cover it. 'First key is source' needs object key order (element-web-02 and ghost-50 precedents).",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
   },
   {
    "id": "ghost-b11",
@@ -1501,10 +1588,12 @@
      "by": "integrator",
      "fields": {
       "family": "other",
-      "reason": "Needs a JSON5 reader and duration-unit normalization (minutes against '3 days'). Release-age settings are not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14 and wsdk-75."
+      "reason": "Needs a JSON5 reader and duration-unit normalization (minutes against '3 days'). Release-age settings are not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14 and wsdk-75.",
+      "needs": "format-reader"
      }
     }
-   ]
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "ghost-b15",
@@ -1523,10 +1612,12 @@
      "by": "integrator",
      "fields": {
       "family": "other",
-      "reason": "Needs a JSON5 reader for renovate.json5. Release-age settings are not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14 and wsdk-75."
+      "reason": "Needs a JSON5 reader for renovate.json5. Release-age settings are not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14 and wsdk-75.",
+      "needs": "format-reader"
      }
     }
-   ]
+   ],
+   "needs": "format-reader"
   }
  ],
  "removed": [
