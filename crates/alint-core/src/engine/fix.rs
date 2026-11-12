@@ -1166,10 +1166,10 @@ impl Engine {
                     if result_sensitive && !v.is_sensitive() {
                         let mut redacted = v.clone();
                         redacted.mark_sensitive(rid);
-                        return crate::baseline::fingerprints(rid, &redacted, None);
+                        return crate::baseline::fingerprint(rid, &redacted, None);
                     }
                     let bytes = crate::baseline::fingerprint_content(root, v, &mut fp_cache);
-                    crate::baseline::fingerprints(rid, v, bytes)
+                    crate::baseline::fingerprint(rid, v, bytes)
                 });
                 if !applied.suppressed.is_empty() {
                     let items = applied

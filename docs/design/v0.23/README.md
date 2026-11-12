@@ -221,4 +221,8 @@ The feature freeze is the point at which phases 1 to 8 are merged. Phase 9 is de
 
 ## 7. Status log
 
-- 2026-11-12: plan and ADR-0032 (phase 0).
+- 2026-11-12: plan and ADR-0032 (phase 0, #499).
+- 2026-11-12: phase 1 (#500). `check --baseline`, `fix --baseline`, the language server and
+  `alint baseline`'s regeneration guard match only the path-free hidden-path fingerprint.
+  `baseline::Fingerprints` and `baseline::fingerprints` are gone, and `baseline::apply` takes a
+  `String` fingerprinter again, as in v0.21.

@@ -380,7 +380,7 @@ fn apply_baseline(
             Some(p) if overlay.is_some_and(|(op, _)| op == p) => overlay.map(|(_, b)| b),
             _ => alint_core::baseline::fingerprint_content(&session.root, v, &mut cache),
         };
-        alint_core::baseline::fingerprints(rule_id, v, bytes)
+        alint_core::baseline::fingerprint(rule_id, v, bytes)
     });
     applied.live.results
 }
@@ -447,9 +447,14 @@ mod baseline_tests {
     }
 
     #[test]
-    fn a_v021_baseline_still_grandfathers_a_hidden_path_finding() {
+    fn a_hidden_path_finding_matches_the_path_free_fingerprint_only() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path();
+        let mut hidden = alint_core::Violation::new("m").with_path(Path::new("any.txt"));
+        hidden.path_sensitive = true;
+        hidden.redact_message("markers");
+        let current = alint_core::baseline::fingerprint("markers", &hidden, None);
+        // What v0.21 wrote: the path, hashed. v0.23 no longer matches it.
         let v021 = |path: &str| {
             alint_core::baseline::violation_fingerprint(
                 "markers",
@@ -474,10 +479,10 @@ mod baseline_tests {
         )
         .unwrap();
         std::fs::write(root.join("a.txt"), "<<<<<<< old\n").unwrap();
-        for (recorded, live) in [("a.txt", 0), ("other.txt", 1)] {
+        for (recorded, live) in [(current, 0), (v021("a.txt"), 1)] {
             let baseline = Baseline {
-                alint_version: Some("0.21.2".into()),
-                entries: vec![entry(v021(recorded))],
+                alint_version: None,
+                entries: vec![entry(recorded.clone())],
             };
             std::fs::write(root.join("base.jsonl"), baseline.to_jsonl()).unwrap();
             let session = build_session(root).unwrap().unwrap();

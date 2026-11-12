@@ -1,8 +1,8 @@
 //! ADR-0030 decision 1: the fingerprint of a finding whose path alint hides
 //! (a path chosen by a field read from the environment) leaves the path out,
-//! in the baseline file, SARIF and GitLab output alike. v0.22 still matches the
-//! v0.21 form, which hashed the path, in `check --baseline`, `fix --baseline`
-//! and `alint baseline`'s regeneration guard.
+//! in the baseline file, SARIF and GitLab output alike. v0.22 also matched the
+//! v0.21 form, which hashed the path; v0.23 does not, so a v0.21 baseline file
+//! needs regenerating.
 
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
@@ -133,55 +133,57 @@ fn the_written_fingerprint_says_nothing_about_the_path() {
 }
 
 #[test]
-fn a_v021_baseline_keeps_matching() {
+fn a_v021_baseline_no_longer_matches() {
     let root = tree(&["alpha.txt", "beta.txt"]);
     let root = root.path();
     write_v021_baseline(root, &["alpha.txt", "beta.txt"]);
 
-    let check = alint(root, &["check", "--baseline", "old.json", "."]);
-    assert_eq!(check.status.code(), Some(0), "{check:?}");
-    let stderr = String::from_utf8_lossy(&check.stderr);
-    assert!(
-        stderr.contains("2 baselined violation(s) suppressed"),
-        "{stderr}"
-    );
-    assert!(
-        !stderr.contains("no longer fire"),
-        "nothing is stale: {stderr}"
-    );
-
-    let fix = alint(root, &["fix", "--baseline", "old.json", "."]);
-    assert_eq!(fix.status.code(), Some(0), "{fix:?}");
-    let stdout = String::from_utf8_lossy(&fix.stdout);
-    assert!(stdout.contains("0 applied, 2 skipped"), "{stdout}");
-    assert_eq!(
-        std::fs::read_to_string(root.join("alpha.txt")).unwrap(),
-        "a  \nb\n"
-    );
-
-    // A finding the old file never recorded is new.
-    std::fs::write(root.join("gamma.txt"), "c  \n").unwrap();
+    // Both findings are new, and both old entries are stale.
     let check = alint(root, &["check", "--baseline", "old.json", "."]);
     assert_eq!(check.status.code(), Some(1), "{check:?}");
-    let regenerate = alint(root, &["baseline", "--output", "old.json", "."]);
+    let stderr = String::from_utf8_lossy(&check.stderr);
+    assert!(stderr.contains("2 baseline entr"), "{stderr}");
+    assert!(stderr.contains("no longer fire"), "{stderr}");
     assert!(
-        !regenerate.status.success(),
-        "the new finding needs --accept-new"
-    );
-    assert!(
-        String::from_utf8_lossy(&regenerate.stderr).contains("1 new violation(s) (+1 / -0)"),
-        "{regenerate:?}"
+        !stderr.contains("baselined violation(s) suppressed"),
+        "{stderr}"
     );
 
-    // Regenerating over the old file needs no --accept-new for what it already
-    // grandfathers, and writes the current form.
-    std::fs::remove_file(root.join("gamma.txt")).unwrap();
+    // Regenerating counts them as new debt, so it needs --accept-new, and then
+    // writes the current form.
     let regenerate = alint(root, &["baseline", "--output", "old.json", "."]);
+    assert!(!regenerate.status.success(), "{regenerate:?}");
+    assert!(
+        String::from_utf8_lossy(&regenerate.stderr).contains("2 new violation(s) (+2 / -2)"),
+        "{regenerate:?}"
+    );
+    let regenerate = alint(
+        root,
+        &["baseline", "--accept-new", "--output", "old.json", "."],
+    );
     assert!(regenerate.status.success(), "{regenerate:?}");
     let written = entries(root, "old.json");
     assert_eq!(written.len(), 1, "{written:?}");
     assert_eq!(written[0].count, 2);
     assert_ne!(written[0].fingerprint, v021("alpha.txt"));
+    let check = alint(root, &["check", "--baseline", "old.json", "."]);
+    assert_eq!(check.status.code(), Some(0), "{check:?}");
+}
+
+/// `fix --baseline` fixes what a v0.21 baseline file recorded, as new findings.
+#[test]
+fn fix_with_a_v021_baseline_fixes_the_findings() {
+    let root = tree(&["alpha.txt", "beta.txt"]);
+    let root = root.path();
+    write_v021_baseline(root, &["alpha.txt", "beta.txt"]);
+    let fix = alint(root, &["fix", "--baseline", "old.json", "."]);
+    assert_eq!(fix.status.code(), Some(0), "{fix:?}");
+    let stdout = String::from_utf8_lossy(&fix.stdout);
+    assert!(stdout.contains("2 applied, 0 skipped"), "{stdout}");
+    assert_eq!(
+        std::fs::read_to_string(root.join("alpha.txt")).unwrap(),
+        "a\nb\n"
+    );
 }
 
 /// The fix loop keys findings across passes by a fingerprint that keeps the
