@@ -134,6 +134,12 @@
       "blurb": "The relation layer becomes the only implementation of the equals relation in cross_file and the old code is deleted, with zero differences on the end-to-end suite and the case-study corpus, the performance budgets held, and the code that only the new equals runs kept within a fixed line budget. The next general-linter phase starts only if this release meets those gates."
     },
     {
+      "version": "0.23",
+      "title": "Selectors and a first constraint slice",
+      "kind": "release",
+      "blurb": "The first part of version 2 of the config format, as an experimental opt-in: named file selections and a report-only constraint rule, enough to check that locale files, dependency versions and toolchain pins agree across a repository without a dedicated rule. Version 1 configs keep working unchanged. For library users, the last planned API break before 1.0."
+    },
+    {
       "version": "1.0",
       "title": "Stability",
       "kind": "release",

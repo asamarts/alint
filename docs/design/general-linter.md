@@ -1495,10 +1495,10 @@ provisional until each phase's design document.
 | 1a. Fail-loud and finding foundations | v0.19 | L | every row of section 4.12 closed or explicitly recorded as accepted, each with a gate asserting its invariant |
 | 1b. Authoring loop | v0.20 | M | `alint test` public with a published schema; selected-rule `explain --trace`; bundled rulesets own tests; each composed config source validates `version` and optional `requires.alint` before merge |
 | 2. Internal relation IR (go / no-go) | v0.21 | L | the IR pilot ships as a v1 kind, one existing kind is ported with zero shadow diffs over one release, and the section 9.6 budgets hold (as measured per ADR-0024 decision 6) |
-| 3. Selectors, report-only constraints, and `version: 2` | after v0.22 (v0.23 or later), and only if v0.22 meets Phase 2's three gates | L | the section 12.1 measures met on the Phase 3 conformance policies (locale key parity, dependency version consistency, toolchain-pin consistency; stale exceptions are measured at Phase 4); the version-boundary ADR accepted |
+| 3. Selectors, report-only constraints, and `version: 2` | v0.23 (design and a first slice, ADR-0032) and v0.24 (the rest); v0.22 met Phase 2's three gates | L | the section 12.1 measures met on the Phase 3 conformance policies (locale key parity, dependency version consistency, toolchain-pin consistency; stale exceptions are measured at Phase 4); the version-boundary ADR accepted |
 | 4. Typed modules and exception data | unscheduled | M | decided after Phase 3 by measured reuse pressure |
 | 5. Snapshot views | unscheduled | L | the LSP overlay part first; Git index and tree views only with demand |
-| 6. Plugin hosts (parallel track, DEC-14) | contract with Phase 2 (v0.21); native Rust and `alint build` next (about v0.22); process host and Rust SDK (about v0.23); WASM host and other-language SDKs after | L (about 33-53 engineer-weeks in all, including the contract compiler; a first real plugin after about 12-18) | one adapter and one analyzer plugin validated end to end before any registry |
+| 6. Plugin hosts (parallel track, DEC-14) | contract with Phase 2 (v0.21); native Rust and `alint build` next (v0.24 at the earliest, ADR-0032 decision 4); process host and Rust SDK after that; WASM host and other-language SDKs after | L (about 33-53 engineer-weeks in all, including the contract compiler; a first real plugin after about 12-18) | one adapter and one analyzer plugin validated end to end before any registry |
 | WIT contract compiler (separate project, DEC-14d) | starts now, in parallel | MVP about 12-18 weeks; 1.0 about 26-45 | generates `alint-plugin-api` and the `.proto` with lockfile gates; alint is the first consumer |
 | v1.0 | after Phase 3 | n/a | freezes `version: 1`, `version: 2` (DEC-9), the `alint-core` API, and plugin contract 1.0 together |
 
@@ -1631,6 +1631,11 @@ Phase 3 starts. v0.22.0 (2026-11-07) met all three gates (section 11.1, "v0.22 g
 so Phase 3 starts.
 
 ### 11.6 Phase 3: selectors and report-only constraints
+
+v0.23 carries the design and a first slice: the corpus stratum, the design document and the
+version-boundary ADR, named selectors and relations, and the `constraint` kind with equality,
+unique/key and cardinality assertions, with `version: 2` experimental. The rest follows in v0.24
+([`v0.23/README.md`](v0.23/README.md), [ADR-0032](../adr/0032-v023-owner-decisions.md)).
 
 - Design and ADR the version boundary (decision DEC-9) and the cross-file selector amendment of
   constitution invariant 2 (question Q2).
