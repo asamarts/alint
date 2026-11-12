@@ -6,6 +6,15 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- `alint test` redacts a runner error's paths correctly when the test package and the temporary
+  directory overlap. It replaced the temporary directory first, so a package under `TMPDIR`
+  reported `<temporary-directory>` with the rest of its path instead of `<policy-test-package>`,
+  and a temporary directory such as `/tmp` that also occurs inside the package path, as in
+  `/home/me/tmp/policies`, left the part of the package path before it visible. The longer path
+  is now replaced first (#494).
+
 ## [0.22.1] - 2026-11-11
 
 v0.22.1 changes how alint installs, not what it checks. The npm package no longer downloads the

@@ -575,14 +575,26 @@ fn runner_error_is_operational(error: &RunnerError) -> bool {
 }
 
 fn safe_runner_error(error: &RunnerError, source: &Path) -> String {
-    let text = error.to_string();
-    let temp = std::env::temp_dir();
-    let without_temp = text.replace(temp.to_string_lossy().as_ref(), "<temporary-directory>");
     let package = source.parent().unwrap_or_else(|| Path::new("."));
-    if package.parent().is_none() {
-        return without_temp;
+    redact_runner_paths(&error.to_string(), &std::env::temp_dir(), package)
+}
+
+// Longest path first: when one root contains the other, as a checkout
+// under `TMPDIR` does, the shorter root would otherwise break up the
+// longer one before its own marker could replace it.
+fn redact_runner_paths(text: &str, temp: &Path, package: &Path) -> String {
+    let mut replacements = Vec::new();
+    if package.parent().is_some() {
+        replacements.push((package.to_string_lossy(), "<policy-test-package>"));
     }
-    without_temp.replace(package.to_string_lossy().as_ref(), "<policy-test-package>")
+    replacements.push((temp.to_string_lossy(), "<temporary-directory>"));
+    replacements.retain(|(path, _)| !path.is_empty());
+    replacements.sort_by_key(|(path, _)| std::cmp::Reverse(path.len()));
+    let mut redacted = text.to_string();
+    for (path, marker) in replacements {
+        redacted = redacted.replace(path.as_ref(), marker);
+    }
+    redacted
 }
 
 fn executed_records(
@@ -750,5 +762,48 @@ mod tests {
         assert!(!rendered.contains(std::env::temp_dir().to_string_lossy().as_ref()));
         assert!(rendered.contains("<policy-test-package>"));
         assert!(rendered.contains("<temporary-directory>"));
+    }
+
+    #[test]
+    fn runner_error_redaction_keeps_both_markers_when_roots_overlap() {
+        let scratch = Path::new("/scratch");
+        let checkout = scratch.join("checkout").join("policies");
+        let home_tmp = Path::new("/home").join("me").join("tmp").join("policies");
+        // A package under the temporary directory (#494), the reverse, and a
+        // temporary directory that occurs inside an unrelated package path.
+        for (temp, package) in [
+            (scratch, checkout.as_path()),
+            (checkout.as_path(), scratch),
+            (Path::new("/tmp"), home_tmp.as_path()),
+        ] {
+            let text = format!(
+                "package={} temp={}",
+                package.join("config.yml").display(),
+                temp.join("runner").display()
+            );
+            let rendered = redact_runner_paths(&text, temp, package);
+            assert!(
+                rendered.contains("package=<policy-test-package>"),
+                "{rendered}"
+            );
+            assert!(
+                rendered.contains("temp=<temporary-directory>"),
+                "{rendered}"
+            );
+            assert!(!rendered.contains("scratch"), "{rendered}");
+            assert!(!rendered.contains("home"), "{rendered}");
+        }
+    }
+
+    #[test]
+    fn runner_error_redaction_ignores_an_empty_temporary_directory() {
+        let package = Path::new("/work").join("policies");
+        let text = format!("package={}", package.join("config.yml").display());
+        let rendered = redact_runner_paths(&text, Path::new(""), &package);
+        assert!(!rendered.contains("<temporary-directory>"), "{rendered}");
+        assert!(
+            rendered.starts_with("package=<policy-test-package>"),
+            "{rendered}"
+        );
     }
 }
