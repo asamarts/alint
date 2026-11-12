@@ -1599,6 +1599,36 @@ After the port, in this order ([ADR-0030](https://github.com/asamarts/alint/blob
   target the create's own directories make, and the landing checks of a run's predicted creates
   share their lookups.
 
+## v0.23: Selectors and a first constraint slice
+
+Starts Phase 3 of
+[`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
+(section 11.6) with its design and a first slice. The plan is
+[`v0.23/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.23/README.md) and
+the owner decisions are
+[ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md).
+
+- **Measured demand first.** An i18n stratum and a JavaScript-monorepo stratum join the pinned
+  corpus and are scored before the design commits to operators.
+- **Design and version boundary.** A design document for selectors and constraints and an ADR
+  for the `version: 2` boundary, approved before implementation starts.
+- **Named selectors and relations** and a report-only **`constraint`** rule with equality,
+  unique/key and cardinality assertions, in `version: 2` only.
+- **Three conformance policies** expressed as `version: 2` configuration with `alint test` cases:
+  locale key parity, dependency version consistency, and toolchain-pin consistency.
+- **`version: 2` is experimental** in v0.23: opt-in, with a draft schema, and it may change before
+  it is declared stable. `version: 1` configurations are unchanged.
+- **One library API break.** YAML parser types leave the public API of `alint-core`,
+  `alint-dsl` and `alint-testkit` (#484), and `Violation`, `Context`, `RuleSpec`,
+  `NestedRuleSpec` and `WalkOptions` become `#[non_exhaustive]` with constructors.
+- **YAML groundwork.** Differential parser fuzzing (#482). The ayaml cutover (#481, #483) joins
+  only if ayaml 0.1.2 meets the criteria before the feature freeze.
+- **Baselines.** The v0.21 fingerprint of a hidden-path finding is no longer matched; re-run
+  `alint baseline` before upgrading.
+
+Later: the remaining assertion families, specialized kinds and templates, and a stable
+`version: 2` (v0.24 or later); plugin hosts start in v0.24.
+
 ## v1.0: Stability
 
 - DSL schema committed; semver on both `version: 1` and `version: 2`
@@ -1607,12 +1637,10 @@ After the port, in this order ([ADR-0030](https://github.com/asamarts/alint/blob
 - Plugin contract 1.0 committed (the WIT contract and its generated Rust
   and protobuf bindings; see [`general-linter.md`](https://github.com/asamarts/alint/blob/main/docs/design/general-linter.md)
   section 9.4).
-- `alint-core` public API frozen; breaking changes follow semver-major.
-- **Seal the remaining public `alint-core` structs** before the freeze: `Violation`, `Context`,
-  `RuleSpec` and `WalkOptions` become `#[non_exhaustive]` with constructors, as `FixContext` and
-  `Config` did in v0.22
-  ([ADR-0030](https://github.com/asamarts/alint/blob/main/docs/adr/0030-v022-owner-decisions.md)
-  decision 2), so the frozen API does not commit to struct literals.
+- `alint-core` public API frozen; breaking changes follow semver-major. The remaining public
+  structs are sealed in v0.23
+  ([ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md)
+  decision 3), so the frozen API does not commit to struct literals.
 - Documentation site.
 - **Remove the deprecated `${VAR}` interpolation path** in
   `git_commit_message.since:` (replaced by `{{env.X}}` in v0.11).
