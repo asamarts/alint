@@ -1,0 +1,1481 @@
+{
+ "repo": "strapi/strapi",
+ "sha": "fcc1df0668527c342de7f8cc5acd331434a2d505",
+ "metrics": {
+  "counts": {
+   "A": 16,
+   "B-config": 4,
+   "B-adapter": 10,
+   "B-kernel": 0,
+   "B-delegate": 0,
+   "C": 22,
+   "D": 26
+  },
+  "addressable": 52,
+  "coverage_today": 31,
+  "coverage_with_tuning": 73,
+  "gap": 27,
+  "coverage_after_slice": 37,
+  "coverage_after_slice_with_entry_values": 38
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 1,
+    "B-config": 1,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 3,
+    "D": 0
+   },
+   "addressable": 5,
+   "coverage_today": 20,
+   "coverage_with_tuning": 80,
+   "gap": 20,
+   "coverage_after_slice": 40,
+   "coverage_after_slice_with_entry_values": 40
+  },
+  "dep-version": {
+   "counts": {
+    "A": 3,
+    "B-config": 0,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 3,
+    "D": 1
+   },
+   "addressable": 7,
+   "coverage_today": 43,
+   "coverage_with_tuning": 86,
+   "gap": 14,
+   "coverage_after_slice": 43,
+   "coverage_after_slice_with_entry_values": 57
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 2,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 2,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "other": {
+   "counts": {
+    "A": 10,
+    "B-config": 3,
+    "B-adapter": 9,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 16,
+    "D": 25
+   },
+   "addressable": 38,
+   "coverage_today": 26,
+   "coverage_with_tuning": 68,
+   "gap": 32,
+   "coverage_after_slice": 32,
+   "coverage_after_slice_with_entry_values": 32
+  }
+ },
+ "units": [
+  {
+   "id": "strapi-01",
+   "summary": "Every package.json whose version has the same major as packages/core/strapi/package.json must equal that version exactly (workspace version lockstep); other majors are skipped",
+   "evidence": "package.json:51 (version:check = node scripts/check-package-versions.mjs && syncpack lint); scripts/check-package-versions.mjs:37 (globSync('**/package.json'), glob dot:false so .github/ manifests are excluded), :65-66 (major comparison); .github/workflows/checks.yml:40-51 (check-package-versions job)",
+   "mechanism": "script",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "cross_file relation: equals, source packages/core/strapi/package.json $.version, targets {package.json,[!.]*/**/package.json} with matches '^5\\.' and allow_missing_target -> strapi-package-versions-aligned",
+   "assertion_family": "none",
+   "reason": "Expressible, but the canonical major is hand-kept in the target `matches: '^5\\.'` because alint cannot derive the source's major at run time; it goes stale at the next major. The dot-dir exclusion also needs a hand-built glob. Awkward-but-expressible = C.",
+   "fire_verified": "Not required (C), done anyway: on a scratch copy, setting packages/core/utils version to 5.61.0 fired strapi-package-versions-aligned; setting it to 6.0.0 (other major) passed, matching the script; passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-02",
+   "summary": "syncpack lint: one exact version per dependency across prod+dev dependencies of every manifest (excluding docs/**, test-apps/** and, by glob default, dot dirs); catalog: and non-exact specifiers ignored",
+   "evidence": ".syncpackrc.json (source, dependencyTypes [prod, dev], versionGroups ignoring specifierTypes unsupported and !exact); package.json:51; .github/workflows/checks.yml:51",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "unique-key",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the version.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "unique-key",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the version."
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "strapi-03",
+   "summary": "Root devDependencies['@playwright/test'] must be pinned to an exact x.y.z version (it names the mcr.microsoft.com/playwright:v<version> e2e container image)",
+   "evidence": ".github/workflows/tests.yml:51-56 (conditions job, 'Read Playwright version': '@playwright/test must be pinned to an exact x.y.z version')",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_matches $.devDependencies['@playwright/test'] matches ^[0-9]+\\.[0-9]+\\.[0-9]+$ -> strapi-playwright-exact-pin",
+   "assertion_family": "none",
+   "reason": "A structured-query kind expresses it exactly; alint check confirms (R4).",
+   "fire_verified": "Scratch copy: '^1.64.1' fired strapi-playwright-exact-pin; clone (1.64.1) passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-04",
+   "summary": "lockfile-lint over yarn.lock: every resolution uses an allowed scheme (npm:, workspace:, patch:, https:) and https resolutions only come from the yarn registry host",
+   "evidence": ".github/workflows/checks.yml:29-38 (security-lockfile-analysis, allowedHosts 'yarn'); .github/actions/security/lockfile/action.yml:12-28; .github/actions/security/lockfile/script.sh (yarn dlx lockfile-lint --type yarn --allowed-hosts --allowed-urls --allowed-schemes \"npm:\" \"workspace:\" \"patch:\" \"https:\")",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "yaml_path_matches over yarn.lock $.*.resolution matches '^(?:@[^/@]+/)?[^@/]+@(?:(?:npm|workspace|patch):|https://registry\\.yarnpkg\\.com/)' -> strapi-lockfile-resolution-protocols",
+   "assertion_family": "none",
+   "reason": "R7: a tool-run over a file alint reads, classified by its assertion. The Berry lockfile parses as YAML and the allowlist is a regex over each resolution. Host and scheme validators collapse into one allowlist unit (one CI step, one policy).",
+   "fire_verified": "Scratch copy: a git+https resolution and a https://evil.example.com resolution each fired strapi-lockfile-resolution-protocols; a https://registry.yarnpkg.com/ resolution passed; clone passes (2935 resolutions: npm, workspace, patch only).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-05",
+   "summary": "Every workspace: dependency names a workspace of the monorepo (yarn install --immutable fails otherwise)",
+   "evidence": ".github/actions/yarn-nm-install/action.yml:116 (yarn install --immutable --inline-builds, used by every CI job); package.json workspaces; examples/*/package.json and tests-next/*/package.json workspace:* deps",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "cross_file relation: superset, source = union of $.name over the workspace-glob manifests, targets regex '\"([^\"]+)\"\\s*:\\s*\"workspace:' over the same manifests, allow_missing_target -> strapi-workspace-refs-resolve",
+   "assertion_family": "none",
+   "reason": "A reference lookup, not resolution semantics; same shape as batch-1 trpc-B01 (A). Confirmed by alint check.",
+   "fire_verified": "Scratch copy: renaming a workspace:* dependency in examples/getstarted/package.json to @strapi/plugin-colour-picker fired strapi-workspace-refs-resolve; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-06",
+   "summary": "Every catalog: dependency names an entry of the default catalog in .yarnrc.yml (yarn install fails otherwise)",
+   "evidence": ".yarnrc.yml catalog block (@vitest/coverage-v8, vitest); package.json:152,206 and workspace manifests using \"catalog:\"; .github/actions/yarn-nm-install/action.yml:116",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "cross_file relation: superset, source .yarnrc.yml regex \"(?m)^[ ]{2}'?([^'\\s:#][^':\\s]*)'?\\s*:\", targets regex '\"([^\"]+)\"\\s*:\\s*\"catalog:\"' over workspace manifests -> strapi-catalog-refs-resolve",
+   "assertion_family": "none",
+   "reason": "The catalog entries are YAML mapping keys, which the yaml extract cannot return. They are read with a line regex that relies on the catalog being the only indented mapping in .yarnrc.yml, and named catalogs (catalog:<name>) would go unchecked. This is the berry unit-18 precedent (YAML keys read by a line regex = C).",
+   "fire_verified": "Not required (C), done anyway: adding \"jest-nope\": \"catalog:\" to tests-next/cli/package.json fired strapi-catalog-refs-resolve; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-07",
+   "summary": "packages/ workspaces reference internal dependencies with pinned semver versions, never workspace:* (workspace:* only in examples/, tests-next/*, some root devDeps)",
+   "evidence": "AGENTS.md:260 ('Workspace deps' convention); holds at the pin (no workspace: specifier under packages/)",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_absent over packages/*/package.json, packages/*/*/package.json: $['dependencies','devDependencies','peerDependencies','optionalDependencies'][?search(@, '^workspace:')] -> strapi-packages-no-workspace-protocol",
+   "assertion_family": "none",
+   "reason": "The workspace: half is A; the pinned-exact half needs a hand-kept list of the 43 workspace names, because JSONPath cannot select dependency keys by a name set read from other files (Stage C). Hand-listing is C.",
+   "fire_verified": "Scratch copy: changing @strapi/utils to workspace:* in packages/core/admin/package.json fired strapi-packages-no-workspace-protocol; clone passes.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "C",
+      "reason": "The workspace: half is A; the pinned-exact half needs a hand-kept list of the 43 workspace names, because JSONPath cannot select dependency keys by a name set read from other files (Stage C). Hand-listing is C."
+     }
+    }
+   ]
+  },
+  {
+   "id": "strapi-08",
+   "summary": "yarn.lock is up to date with the manifests (yarn install --immutable at root; docs/ yarn install --frozen-lockfile)",
+   "evidence": ".github/actions/yarn-nm-install/action.yml:116; .github/workflows/tests.yml:114 (docs_build)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn",
+   "assertion_family": "none",
+   "reason": "Lockfile freshness needs package-manager resolution semantics (R7 keeps it D). The docs lockfile is a matrix instance (R1).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-10",
+   "summary": ".yarnrc.yml yarnPath names a committed Yarn release file",
+   "evidence": ".yarnrc.yml:7 (yarnPath: .yarn/releases/yarn-4.12.0.cjs); every yarn invocation in CI (yarn-nm-install) aborts if it is missing",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "registry_paths_resolve source .yarnrc.yml extract yaml $.yarnPath expect file -> strapi-yarnpath-exists",
+   "assertion_family": "none",
+   "reason": "A registry-to-path existence check that alint check confirms.",
+   "fire_verified": "Scratch copy: deleting .yarn/releases/yarn-4.12.0.cjs and renaming yarnPath to yarn-4.13.0.cjs each fired strapi-yarnpath-exists; clone passes. (The first draft listed .yarn/releases/** in ignore, which made the rule fire on the clone; the ignore entry was removed.)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-100",
+   "summary": "Code conventions in AGENTS.md (TypeScript style, error handling, naming)",
+   "evidence": "AGENTS.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "assertion_family": "none",
+   "reason": "Code-level review judgment.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-101",
+   "summary": "Update the docs page when changing code it describes (or set status: needs-review with a note)",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (status section, ~line 95); docs/AGENTS.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "assertion_family": "none",
+   "reason": "Semantic review judgment.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-102",
+   "summary": "Commit and PR subjects describe what changed (fix: describes the bug), not how",
+   "evidence": "CONTRIBUTING.md (Git Conventions); .ai/skills/git-conventions/SKILL.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "assertion_family": "none",
+   "reason": "Prose judgment.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-11",
+   "summary": "Root packageManager is a Corepack yarn@<x.y.z> spec (CI runs corepack enable before every install)",
+   "evidence": "package.json:210 (packageManager: yarn@4.12.0); .github/actions/yarn-nm-install/action.yml:53-66 (enable-corepack default 'true' -> corepack enable)",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_matches $.packageManager matches ^yarn@[0-9]+\\.[0-9]+\\.[0-9]+(prerelease)?(+shaN.hex)?$ if_present -> strapi-package-manager-yarn-pinned",
+   "assertion_family": "none",
+   "reason": "Corepack rejects a malformed or non-yarn spec, so the yarn shim fails. Expressed and confirmed.",
+   "fire_verified": "Scratch copy: 'yarn@4' and 'pnpm@9.0.0' each fired strapi-package-manager-yarn-pinned; 'yarn@4.12.0+sha512.abc123' passed; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-20",
+   "summary": "Every admin locale file (packages/core/admin/admin/src/translations/*.json, by stem) has a non-empty native name in languageNativeNames.ts",
+   "evidence": "packages/core/admin/admin/src/translations/tests/index.test.ts:13-16 (unit_front, .github/workflows/tests.yml:265)",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "cross_file relation: registered, register_as '{stem}', source files translations/*.json, target languageNativeNames.ts regex \"(?m)^\\s*'?([A-Za-z][A-Za-z-]*)'?\\s*:\\s*'[^']+'\" -> strapi-admin-locales-have-native-names",
+   "assertion_family": "none",
+   "reason": "R7: a test over files alint reads, classified by its assertion: locale-file coverage in a registry. The registered relation with a regex-extract target expresses it (confirmed; this was an untested shape).",
+   "fire_verified": "Scratch copy: four breaks each fired strapi-admin-locales-have-native-names: a new xx.json, removing the unquoted ca entry, emptying ca to '', and removing the quoted 'pt-BR' entry. Removing 'en-GB' (no en-GB.json) correctly passed. Clone passes (35 locale files).",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "The rule reads languageNativeNames.ts with the line regex `(?m)^\\s*'?([A-Za-z][A-Za-z-]*)'?\\s*:\\s*'[^']+'`, which depends on prettier's single-quoted, one-entry-per-line layout. On a scratch copy, a valid double-quoted value produced a false positive, and prettier itself emits double quotes for a native name that contains an apostrophe. Two entries on one line also misfire. A TS object read by line regex is C (berry-18, strapi-06); R4 confirms only the current layout."
+    }
+   ]
+  },
+  {
+   "id": "strapi-21",
+   "summary": "An en.json catalog must not contain both a X.singular and X.plural key for the same X (keys of 3+ segments); enforced in five packages",
+   "evidence": "packages/core/{admin,upload,email,content-type-builder,content-releases}/admin/src/translations/tests/plural.test.ts (admin copy lines 5-17; unit_front)",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "",
+   "assertion_family": "unique-key",
+   "reason": "Per key prefix (key minus its last segment, among keys ending .singular/.plural) at most one row: a unique-key over a key-derived projection. JSONPath cannot build a sibling key name, so no kind expresses it today. R1 collapses the five packages into one unit.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-22",
+   "summary": "In every content-manager locale that defines containers.EditView.saveHint, containers.EditView.publishHint is defined and non-empty, and saveHint does not contain the legacy {action} placeholder",
+   "evidence": "packages/core/content-manager/admin/src/translations/tests/editViewShortcutHints.test.ts:20-22 (unit_front)",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "json_path_absent over content-manager translations/*.json with a root-filter $[?($['...saveHint'] && (!$['...publishHint'] || $['...publishHint'] == '' || search($['...saveHint'], '[{]action[}]')))] -> strapi-cm-edit-view-hints",
+   "assertion_family": "none",
+   "reason": "A conditional key-presence assertion within one file. The RFC 9535 root-filter trick expresses it with absolute queries; confirmed.",
+   "fire_verified": "Scratch copy (en.json): removing publishHint, emptying it, and putting {action} into saveHint each fired strapi-cm-edit-view-hints; removing both keys passed (the condition is gated on saveHint); clone passes (10 of 31 locales define saveHint).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-24",
+   "summary": "No duplicate code values in the i18n plugin's iso-locales.json registry",
+   "evidence": "packages/plugins/i18n/server/src/constants/__tests__/index.test.ts:25-27 (unit_back)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "",
+   "assertion_family": "unique-key",
+   "reason": "Uniqueness of a field across the elements of a JSON array is unique-key; no kind asserts value uniqueness today. Tagged other: a content-locale registry, not a translation catalog.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-30",
+   "summary": "Every package.json exports subpath's source condition points at an existing file (upload and admin packages)",
+   "evidence": "packages/core/upload/server/src/__tests__/package-exports.test.ts; packages/core/admin/server/src/__tests__/package-exports.vitest.test.ts",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve source packages/core/{upload,admin}/package.json extract json $.exports.*.source expect file -> strapi-exports-source-exists",
+   "assertion_family": "none",
+   "reason": "Manifest-to-path existence; resolves relative to each package dir. Confirmed.",
+   "fire_verified": "n/a (other); fired on scratch when upload's ./server/src/index.ts source became ./server/src/main.ts.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-31",
+   "summary": "email-nodemailer: built exports targets exist",
+   "evidence": "packages/providers/email-nodemailer exports test (unit suite)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "assertion_family": "none",
+   "reason": "The targets are build outputs (dist/), so asserting them requires running the build (R2/R7 D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-32",
+   "summary": "Admin *.test.{js,jsx,ts,tsx} files live under a __tests__/ or tests/ folder (eslint check-file/folder-match-with-fex) in core/admin, core/upload, core/content-manager and core/review-workflows",
+   "evidence": "packages/core/{admin,upload,content-manager,review-workflows}/admin/.eslintrc.cjs ('check-file/folder-match-with-fex': ['error', {'*.test.{js,jsx,ts,tsx}': '**/{__tests__,tests}/**'}]); lint job .github/workflows/tests.yml:135; .husky/pre-commit lint-staged",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_absent include packages/core/{admin,upload,content-manager,review-workflows}/admin/**/*.test.{js,jsx,ts,tsx} exclude **/__tests__/**, **/tests/** -> strapi-admin-tests-in-test-folders",
+   "assertion_family": "none",
+   "reason": "A path-level lint rule is a structure invariant (element-web-18 precedent). Confirmed over 449 test files.",
+   "fire_verified": "n/a (other); fired on scratch for packages/core/upload/admin/src/components/Foo.test.tsx.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-33",
+   "summary": "Every media-library e2e spec is gated by describeOnCondition(process.env.E2E_MEDIA_LIBRARY === ...) and has no ungated top-level test()/test.describe()",
+   "evidence": "tests/utils/__tests__/e2e-domains.test.ts:65-68 (vitest via root vitest.config.ts projects; unit_back_vitest .github/workflows/tests.yml:235-255); MEDIA_LIBRARY_DOMAIN in tests/utils/runners/e2e-domains.js",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_matches + file_content_forbidden over tests/e2e/tests/media-library/**/*.spec.ts -> strapi-e2e-media-library-specs-gated, strapi-e2e-media-library-specs-no-ungated-block",
+   "assertion_family": "none",
+   "reason": "Expressible, but the domain folder is mirrored by hand from MEDIA_LIBRARY_DOMAIN in e2e-domains.js (the berry hand-enumerated-list precedent = C).",
+   "fire_verified": "n/a (C, other); scratch: a changed gate fired -gated, an appended top-level test() fired -no-ungated-block.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-34",
+   "summary": "Every spec of an Enterprise-only e2e domain (content-releases, review-workflows) is gated by describeOnCondition(edition === 'EE') and has no ungated top-level block",
+   "evidence": "tests/utils/__tests__/e2e-domains.test.ts:73-76; EE_ONLY_DOMAINS in tests/utils/runners/e2e-domains.js",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_matches + file_content_forbidden over tests/e2e/tests/{content-releases,review-workflows}/**/*.spec.ts -> strapi-e2e-ee-only-specs-gated, strapi-e2e-ee-only-specs-no-ungated-block",
+   "assertion_family": "none",
+   "reason": "The EE_ONLY_DOMAINS list is hand-mirrored into the glob = C.",
+   "fire_verified": "n/a (C, other); scratch: a new ungated review-workflows spec fired both rules.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-35",
+   "summary": "Front-end filename naming convention and no-index rules (check-file/filename-naming-convention, check-file/no-index) from the shared @strapi/eslint-config",
+   "evidence": "Inherited from the external @strapi/eslint-config (not vendored; node_modules absent); many inline eslint-disable comments for these rules in packages/",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "eslint (external config)",
+   "assertion_family": "none",
+   "reason": "The rule globs and options live in an unvendored external package and cannot be read offline, so the path-level assertion cannot be stated. Kept with the lint job (R2) and flagged as unverifiable in notes rather than guessed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "R7 was misapplied. The check-file filename-naming-convention rule in the admin .eslintrc.cjs files asserts a path name, not source code, so it is a structure invariant alint reads; classifying it D under R2 is wrong. The inferred rule is .tsx PascalCase and .ts camelCase, with middle extensions ignored, in the 14 admin dirs, and review-workflows turns it off. filename_regex fires on exactly 40 files on the clone. All 40 carry `eslint-disable check-file/filename-naming-convention` (50 files carry the disable in total), so the rule needs a hand-kept exemption list. That is C (trpc-30, element-web-28). The folder/no-index half cannot be inferred offline: 18 index files carry no disable. Split it out or leave it unverified."
+    }
+   ]
+  },
+  {
+   "id": "strapi-40",
+   "summary": "Every packages/<group>/<name> workspace has its group folder in PACKAGE_GROUPS (core, plugins, providers, utils, cli, generators); the docs build throws otherwise",
+   "evidence": "docs/plugins/workspace-packages/groups.mjs (getPackageGroup throws on an unknown group); docs_build .github/workflows/tests.yml:96-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_absent include packages/*/*/package.json exclude packages/{core,plugins,providers,utils,cli,generators}/*/package.json -> strapi-docs-package-groups-known",
+   "assertion_family": "none",
+   "reason": "Expressible, but the six group ids are hand-mirrored from groups.mjs = C.",
+   "fire_verified": "n/a (C, other); scratch: packages/weird/thing/package.json fired it.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-41",
+   "summary": "Root workspaces patterns under packages/ use only literal and * segments (docs build throws on any other pattern)",
+   "evidence": "docs/plugins/workspace-packages/workspaces.mjs (expandWorkspacePattern throws on unsupported segments); docs_build job",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches package.json $.workspaces[?search(@, '^packages/')] matches '^packages(/(\\*|[^*?\\[\\]{}!/]+))+$' -> strapi-docs-packages-workspace-patterns-simple",
+   "assertion_family": "none",
+   "reason": "A structured-query value check, confirmed.",
+   "fire_verified": "n/a (other); scratch: adding 'packages/**/x' fired it.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-42",
+   "summary": "Every packages/ workspace manifest has a non-empty name (docs build throws Missing \"name\")",
+   "evidence": "docs/plugins/workspace-packages/workspaces.mjs (readWorkspacePackages); docs_build job",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches $.name matches '.' over packages/*/package.json, packages/*/*/package.json -> strapi-docs-packages-workspaces-named",
+   "assertion_family": "none",
+   "reason": "Required non-empty field; confirmed.",
+   "fire_verified": "n/a (other); scratch: renaming the name key fired it.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-43",
+   "summary": "package frontmatter is only allowed on a folder's index page (docs build throws otherwise)",
+   "evidence": "docs/plugins/workspace-packages/index.ts (throws when package is set on a page other than index.md/index.mdx); docs_build job",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden over docs/docs/**/*.{md,mdx} minus index.md/index.mdx, frontmatter-block regex ending in package: -> strapi-docs-package-frontmatter-only-on-index",
+   "assertion_family": "none",
+   "reason": "Key presence in frontmatter, read by a regex that walks the --- block (no frontmatter reader). This is a key check, not a value check, so it is C. Value validation of frontmatter is B-adapter (trpc-26..32).",
+   "fire_verified": "n/a (C, other); scratch: package: on a non-index page fired; 'package:' in the body passed.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-44",
+   "summary": "Every docs page starts with frontmatter that sets title",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Frontmatter); docs/AGENTS.md:24; holds at the pin",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_matches frontmatter-block regex ending in title: -> strapi-docs-frontmatter-title",
+   "assertion_family": "none",
+   "reason": "Frontmatter key presence via regex = C.",
+   "fire_verified": "n/a (C, other); scratch: a page without title fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-45",
+   "summary": "Only docs/docs/api/ pages set slug; elsewhere the URL follows the file path",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Where content goes); holds at the pin (slug only in api/, 9 files)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden frontmatter regex ending in slug:, excluding docs/docs/api/** -> strapi-docs-no-slug-outside-api",
+   "assertion_family": "none",
+   "reason": "Frontmatter key absence via regex = C.",
+   "fire_verified": "n/a (C, other); scratch: slug on a contributing page fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-46",
+   "summary": "A docs page description stays under 150 characters",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Frontmatter, llms.txt cut); holds at the pin",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden frontmatter regex 'description:[ \\t]*[^\\r\\n]{153,}' -> strapi-docs-description-short",
+   "assertion_family": "none",
+   "reason": "A length bound on a frontmatter value via regex (quotes counted) = C.",
+   "fire_verified": "n/a (C, other); scratch: a 160-char description fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-47",
+   "summary": "Use .mdx only when the page imports a component",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Markdown or MDX); holds at the pin (21 .mdx, all import)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches '(?m)^import ' over docs/docs/**/*.mdx -> strapi-docs-mdx-imports-a-component",
+   "assertion_family": "none",
+   "reason": "A plain content-presence rule, confirmed.",
+   "fire_verified": "n/a (other); scratch: an .mdx without import fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-48",
+   "summary": "Docs images always have alt text",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Images); holds at the pin",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "markdown_images_have_alt over docs/docs/**/*.md -> strapi-docs-images-have-alt",
+   "assertion_family": "none",
+   "reason": "A dedicated kind; confirmed.",
+   "fire_verified": "n/a (other); scratch: ![](/img/x.png) fired.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "markdown_images_have_alt covers only CommonMark images in docs/docs/**/*.md. The docs contain 13 HTML `<img>` tags (7 of them multi-line) plus 3 Markdown images; Stage A's count of 6 `<img>` is wrong. On a scratch copy, an `<img>` without alt and an .mdx image without alt both passed. A per-line for_each_match cannot handle multi-line tags, and Rust regex has no lookahead, so covering HTML images needs an awkward workaround. That makes it C, not A."
+    }
+   ]
+  },
+  {
+   "id": "strapi-49",
+   "summary": "Package pages are plain .md (an .mdx page never sets package frontmatter)",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Package pages: 'Package pages are plain .md'); holds at the pin",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden frontmatter regex ending in package: over docs/docs/**/*.mdx -> strapi-docs-package-pages-are-md",
+   "assertion_family": "none",
+   "reason": "Frontmatter key via regex = C. The build plugin accepts index.mdx; this is the guide's narrower convention.",
+   "fire_verified": "n/a (C, other); scratch: an index.mdx with package: fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-50",
+   "summary": "AI-tool skill link dirs (.agents/skills, .claude/skills, .cursor/skills) are local-only and never committed; only .ai/skills/ content is committed",
+   "evidence": "AGENTS.md (Skills directories; yarn ai:sync maintains the links); .gitignore (.claude/, .agents/, .cursor/ except worktrees.json); holds at the pin",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "git_no_denied_paths denied [.agents/**, .claude/**, .cursor/skills/**] -> strapi-ai-tool-link-dirs-not-committed",
+   "assertion_family": "none",
+   "reason": "Index-based; works at depth 1. Confirmed on the clone.",
+   "fire_verified": "n/a (other); scratch git repo: a force-added .claude/skills/x/SKILL.md fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-51",
+   "summary": "Each packages/ workspace has one docs page at docs/docs/<repo path>/index.md",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Package pages); the docs plugin only warns when one is missing; holds at the pin (43 workspaces, 43 pages)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "pair primary packages/{*,*/*}/package.json partner docs/docs/{dir}/index.md -> strapi-docs-every-package-has-a-page",
+   "assertion_family": "none",
+   "reason": "A review convention that holds at the pin (R5); the pair kind expresses it exactly.",
+   "fire_verified": "n/a (other); scratch: deleting docs/docs/packages/core/utils/index.md fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-52",
+   "summary": "Every package page keeps the Purpose, Key concepts and Related headings",
+   "evidence": "docs/docs/contributing/07-writing-docs.md:113-124 (Package pages template); holds at the pin (43/43)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "markdown_required_headings over docs/docs/packages/{*,*/*}/index.md, headings [*, ## Purpose, *, ## Key concepts, *, ## Related, *] -> strapi-docs-package-page-headings",
+   "assertion_family": "none",
+   "reason": "The depth-limited glob selects exactly the package index pages; the dedicated kind confirms.",
+   "fire_verified": "n/a (other); scratch: renaming ## Related fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-53",
+   "summary": "Every relative link to a .md/.mdx file in the docs resolves to a file (onBrokenMarkdownLinks: 'throw')",
+   "evidence": "docs/docusaurus.config.ts:125-131 (markdown hooks onBrokenMarkdownLinks: 'throw'); docs_build job",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "registry_paths_resolve source docs/docs/**/*.{md,mdx} regex extract of ](...md|mdx) links, expect file -> strapi-docs-markdown-file-links-resolve",
+   "assertion_family": "none",
+   "reason": "markdown_links_resolve also checks extensionless route links (13 false findings at the pin: slug and route links) and has no extension filter, so the file links are read by a regex that is not CommonMark-aware. That is C (wants a link-class filter). 463 file links pass.",
+   "fire_verified": "n/a (C, other); scratch: a ./nope.md link fired.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-54",
+   "summary": "Docs images are referenced with an absolute /img/... path",
+   "evidence": "docs/docs/contributing/07-writing-docs.md (Images); holds at the pin (3 Markdown + 6 <img> references)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden with a prefix-alternation regex over Markdown images and <img src> -> strapi-docs-images-absolute-img-path",
+   "assertion_family": "none",
+   "reason": "Rust regex has no lookahead, so 'not /img/' is spelled as an alternation of prefixes = C.",
+   "fire_verified": "n/a (C, other); scratch: relative Markdown and <img> paths fired; /img/ paths passed.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-55",
+   "summary": "Route links in the docs resolve to a site route (onBrokenLinks: 'throw')",
+   "evidence": "docs/docusaurus.config.ts:106; docs/repo-root-markdown-links.ts (route model: number prefixes dropped, index/readme/folder-name pages, slug/id)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Needs a Docusaurus route model (number-prefix stripping, folder-page folding, slug frontmatter, generated tag routes). markdown_links_resolve's root map only maps directories to routes.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-56",
+   "summary": "Docs frontmatter status is one of stub, draft, needs-review (or absent)",
+   "evidence": "docs/plugins/workspace-packages/index.ts (throws on an unknown status); docs/AGENTS.md:24",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "A value check on Markdown frontmatter needs a frontmatter adapter (trpc-26..32 precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-57",
+   "summary": "review_notes is a list of non-empty strings and is only set together with status",
+   "evidence": "docs/plugins/workspace-packages/index.ts (throws on a bad review_notes); docs/AGENTS.md:24",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "A typed frontmatter value check needs a frontmatter adapter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-58",
+   "summary": "package frontmatter names an existing packages/ workspace",
+   "evidence": "docs/plugins/workspace-packages/index.ts (throws on an unknown package); docs/AGENTS.md:24",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "A frontmatter value referencing manifest names needs a frontmatter adapter (the relation itself is a reference).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-59",
+   "summary": "The same package is not set on two docs pages",
+   "evidence": "docs/plugins/workspace-packages/index.ts (throws on a duplicate package)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Uniqueness of a frontmatter value across pages; blocked on a frontmatter adapter before any unique-key family applies.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-60",
+   "summary": "Every tag used in docs frontmatter exists in docs/docs/tags.yml (onInlineTags: 'throw')",
+   "evidence": "docs/docusaurus.config.ts (tags: tags.yml, onInlineTags: 'throw'); 07-writing-docs.md (Tags); docs/AGENTS.md:28",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Frontmatter tags list values vs tags.yml keys: needs a frontmatter adapter (and a YAML key extract).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-61",
+   "summary": "The tag vocabulary stays at 35 tags max",
+   "evidence": "docs/docs/tags.yml:1 ('Keep it small (35 tags max)'); holds at the pin (17 tags)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "A count bound on the top-level keys of one YAML file; no counting kind exists.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "other",
+      "bounded-count"
+     ],
+     "why": "It is expressible today: yaml_path_absent `$[?length($) > 35]` on docs/docs/tags.yml uses an RFC 9535 root filter with length(). It passes on the clone (17 tags), does not fire at 35 entries, and fires at 36 on a scratch copy. No new bounded-count family is needed."
+    }
+   ]
+  },
+  {
+   "id": "strapi-62",
+   "summary": "No tag repeats a package folder name or a status",
+   "evidence": "docs/docs/tags.yml:2-3; 07-writing-docs.md (Tags); holds at the pin",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "",
+   "assertion_family": "set",
+   "reason": "Disjointness between the tags.yml key set and the package-leaf-folder and status sets; tags.yml keys are not extractable as values today.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-63",
+   "summary": "docs/redirects.ts: never list a from that is still a route; to names a site route (site URLs, no numeric prefixes or extensions)",
+   "evidence": "docs/docs/contributing/07-writing-docs.md:190; docs/redirects.ts header comment; holds at the pin (357 entries)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Needs a TypeScript-array reader and the Docusaurus route model.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-70",
+   "summary": "Commit header is type(scope)?: subject with type in the custom enum (chore, ci, docs, enhancement, feat, fix, release, revert, security, test, future); type-empty, type-case, subject-empty",
+   "evidence": ".commitlintrc.ts (type-enum, extends @commitlint/config-conventional); .github/workflows/commitlint.yml (npx commitlint --from base --to head); .husky/commit-msg",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_message pattern (sketched in comments, not written: depth-1 clone)",
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling: a commit-message check a git kind expresses is C (R4 cannot confirm on depth 1).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-71",
+   "summary": "Commit header max length 100",
+   "evidence": "@commitlint/config-conventional header-max-length via .commitlintrc.ts; commitlint.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_message subject_max_length: 100 (sketched)",
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling (git kind, depth 1) = C.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-72",
+   "summary": "Commit subject is not sentence-case, start-case, pascal-case or upper-case",
+   "evidence": "@commitlint/config-conventional subject-case via .commitlintrc.ts; commitlint.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_message pattern (approximation sketched)",
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling = C. The regex only approximates commitlint's case classes.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-73",
+   "summary": "Commit subject does not end with a full stop",
+   "evidence": "@commitlint/config-conventional subject-full-stop via .commitlintrc.ts; commitlint.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_message pattern (sketched)",
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling = C.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-74",
+   "summary": "Commit footer lines are at most 100 characters (body lines exempt: body-max-line-length disabled)",
+   "evidence": "@commitlint/config-conventional footer-max-line-length; .commitlintrc.ts disables body-max-line-length",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "git_commit_message reads only subject, body and whole-message patterns. Telling footer trailers from body lines needs a conventional-commit message parser.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-80",
+   "summary": "Prettier formatting (prettier:check in CI; prettier --write in lint-staged)",
+   "evidence": ".github/workflows/tests.yml:119-133; lint-staged.config.mjs / lint-staged.shared.mjs; .prettierrc.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "prettier",
+   "assertion_family": "none",
+   "reason": "R2: a formatter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-81",
+   "summary": "ESLint (nx affected lint, --max-warnings=0) across packages",
+   "evidence": ".github/workflows/tests.yml:135; .husky/pre-commit lint-staged",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint",
+   "assertion_family": "none",
+   "reason": "R2: a source linter; the path-level check-file rules are split out as strapi-32/35.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-82",
+   "summary": "oxlint",
+   "evidence": ".github/workflows/tests.yml:157 (lint_oxlint)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "oxlint",
+   "assertion_family": "none",
+   "reason": "R2: a source linter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-83",
+   "summary": "TypeScript type check",
+   "evidence": ".github/workflows/tests.yml:173 (typescript)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "assertion_family": "none",
+   "reason": "R2: a type checker.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-84",
+   "summary": "Packages build on Node 24 and on the compat matrix (22, 26)",
+   "evidence": ".github/workflows/tests.yml:65 (build), :78 (build_compat)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx build",
+   "assertion_family": "none",
+   "reason": "Runs the build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-85",
+   "summary": "Every built package under packages/ has a non-empty dist/ and its main file",
+   "evidence": ".github/actions/run-build/action.yml:41 (check-build-outputs.js)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node script",
+   "assertion_family": "none",
+   "reason": "Asserts build outputs, so it needs the build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-86",
+   "summary": "The contributor docs site builds (Docusaurus build on Node 22/24/26, MDX compile)",
+   "evidence": ".github/workflows/tests.yml:96-114 (docs_build)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "docusaurus",
+   "assertion_family": "none",
+   "reason": "Runs the site build; the file-level assertions it carries are split out as strapi-40..63.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-87",
+   "summary": "Back-end jest unit tests",
+   "evidence": ".github/workflows/tests.yml:200 (unit_back)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "assertion_family": "none",
+   "reason": "R2: a test runner. File-asserting tests are split out (R7).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-88",
+   "summary": "Vitest unit tests (root vitest.config.ts projects)",
+   "evidence": ".github/workflows/tests.yml:235-255 (unit_back_vitest)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest",
+   "assertion_family": "none",
+   "reason": "R2: a test runner (e2e-domains and exports tests split out).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-89",
+   "summary": "Front-end jest tests",
+   "evidence": ".github/workflows/tests.yml:265 (unit_front)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "assertion_family": "none",
+   "reason": "R2: a test runner (translation-data tests split out).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-90",
+   "summary": "Playwright e2e suites (CE, EE, media library, legacy media library, enterprise plugins)",
+   "evidence": ".github/workflows/tests.yml:299, 395, 456, 529, 591",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "playwright",
+   "assertion_family": "none",
+   "reason": "Runs the application; the jobs are matrix instances (R1).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-91",
+   "summary": "API integration tests (postgres, mysql, sqlite x CE/EE)",
+   "evidence": ".github/workflows/tests.yml:738-933",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "assertion_family": "none",
+   "reason": "Runs the application against databases (R1 collapses the matrix).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-92",
+   "summary": "CLI tests",
+   "evidence": ".github/workflows/tests.yml:712 (cli)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "assertion_family": "none",
+   "reason": "Runs code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-93",
+   "summary": "tests-next UI/API/CLI suites",
+   "evidence": ".github/workflows/tests.yml:1020, 1063, 1088",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vitest/playwright",
+   "assertion_family": "none",
+   "reason": "Runs code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-94",
+   "summary": "v4 to v5 migration test",
+   "evidence": ".github/workflows/tests.yml:678 (migration_v5)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node",
+   "assertion_family": "none",
+   "reason": "Runs the migration against a database.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-95",
+   "summary": "SonarQube quality gate",
+   "evidence": ".github/workflows/tests.yml:961-1008",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "sonarqube",
+   "assertion_family": "none",
+   "reason": "External service and code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-96",
+   "summary": "PR status checks: required labels and allowed base branch",
+   "evidence": ".github/workflows/checks.yml:23-27 (.github/actions/check-pr-status)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "github action",
+   "assertion_family": "none",
+   "reason": "PR metadata, external state (batch-1 PR title/body precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-97",
+   "summary": "New issues follow the issue template",
+   "evidence": ".github/workflows template-check-on-new-issue",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "github action",
+   "assertion_family": "none",
+   "reason": "Validates issue bodies, external state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-98",
+   "summary": "GitHub secret scanning / push protection",
+   "evidence": ".github/secret_scanning.yml",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "github",
+   "assertion_family": "none",
+   "reason": "External service.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-99",
+   "summary": "Contributors sign the CLA before a PR is merged (CLA bot)",
+   "evidence": "CONTRIBUTING.md:27-35",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "cla bot",
+   "assertion_family": "none",
+   "reason": "External state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "strapi-b01",
+   "summary": "Every admin translation catalog (packages/**/admin/src/translations/*.json) is valid JSON, so rollup's json() plugin and the dynamic `import(`./translations/${locale}.json`)` load it",
+   "evidence": "rollup.utils.mjs:5,7,19,43 (json() + dynamicImportVars, the build/build_compat/e2e jobs in tests.yml); dynamic imports in packages/core/admin/admin/src/StrapiApp.tsx:461 and each package's admin/src/index.ts; packages/core/content-manager/admin/src/translations/tests/editViewShortcutHints.test.ts JSON.parses every locale file (unit_front). 275 translation JSON files across 14 packages.",
+   "mechanism": "ci",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "json_path_absent `$.__never_present_key__` over `packages/**/admin/src/translations/*.json` (a parse-only probe; resource_parse fires on a syntax error)",
+   "assertion_family": "none",
+   "reason": "Expressible, but alint's JSON reader is JSONC-tolerant: on a scratch copy of content-manager fr.json a real syntax error fired, while a trailing comma and a // comment passed, though JSON.parse and rollup json() reject both. Same relaxation as the element-web-08 and zulip-04 precedents, so C, not A.",
+   "fire_verified": "Scratch copy: a broken brace fired (resource_parse); a trailing comma and a // comment did NOT fire (the relaxation); passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "strapi-b02",
+   "summary": "The content-type-builder en.json value of `form.attribute.item.privateField.description` equals the defaultMessage that attributeOptions.ts declares for it",
+   "evidence": "packages/core/content-type-builder/admin/src/components/FormModal/attributes/tests/attributeOptions.test.ts asserts that en['form.attribute.item.privateField.description'] equals a literal and equals attributeOptions.private.description.defaultMessage; source attributeOptions.ts:52-54, en.json:107; run by the unit_front job in tests.yml",
+   "mechanism": "test",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "cross_file relation equals: json `$['form.attribute.item.privateField.description']` from en.json vs a regex extract `privateField\\.description'\\),\\s*defaultMessage:\\s*'([^']*)'` over attributeOptions.ts (rule b-ctb-private-field-description-aligned)",
+   "assertion_family": "none",
+   "reason": "cross_file equals expresses it and passes on the clone, but the TS side is read with a layout-dependent regex (single quotes, a fixed key order), the berry-18 and strapi-06 precedent for TS or YAML read by line regex. So C.",
+   "fire_verified": "Scratch copy: changing the defaultMessage in attributeOptions.ts fired; passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "strapi-b03",
+   "summary": "Every docs/docs/tags.yml entry has a label and a description",
+   "evidence": "docs/docs/contributing/07-writing-docs.md:167 (\"To add a tag, add an entry with a `label` and a `description`\"); docusaurus.config.ts tags: 'tags.yml' with onInlineTags 'throw' (docs_build job, tests.yml:96-117). Holds at the pin: 17 of 17 tags have both.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent `$[?(!@.label || !@.description)]` on docs/docs/tags.yml (rule b-docs-tags-have-label-and-description)",
+   "assertion_family": "none",
+   "reason": "A kind expresses it, and alint check confirms it on the clone (R4). The convention holds at the pin, so R5 does not exclude it.",
+   "fire_verified": "n/a (family other). Still shown: removing the rbac tag's label in a scratch copy fired; passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "strapi-b04",
+   "summary": "Workspace package names are unique across every workspace glob",
+   "evidence": "Root package.json workspaces (packages/*, packages/*/*, examples/*, examples/plugins/*, examples/*/src/plugins/*, .github/actions/*, tests-next/*, scripts/*). Yarn Berry rejects a duplicate workspace name, and Nx project-graph creation also errors, on every `yarn install --immutable` (.github/actions/yarn-nm-install/action.yml:116) in every CI job. Holds at the pin: 60 distinct names, no duplicates (read-only count). The Yarn and Nx error behavior comes from tool knowledge and was not run offline.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint with a unique-key assertion over the `name` of every workspace manifest",
+   "assertion_family": "unique-key",
+   "reason": "Same shape as the trpc-B05 precedent. No current kind asserts that a JSON value is unique across a file set, so it is B-config unique-key. R7: Yarn's install-time workspace check reads manifests that alint reads, and it is not resolution semantics.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "strapi-b05",
+   "summary": "Docusaurus doc frontmatter conforms to the docs plugin's frontmatter schema (known keys have valid types), and the docs build throws otherwise",
+   "evidence": "docs_build job (tests.yml:96-117, `yarn build`); 07-writing-docs.md:203 frontmatter section; docs/AGENTS.md says the build fails on invalid frontmatter. Docusaurus internals were not verified offline.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a frontmatter adapter so frontmatter can be checked against a schema; json_schema_passes cannot read Markdown frontmatter today",
+   "assertion_family": "none",
+   "reason": "Follows the trpc-26..32 precedent: frontmatter schema is B-adapter. _category_.json and the tags.yml schema may be further units of the same kind; not counted separately.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "strapi-b06",
+   "summary": "The committed GitHub-action bundles (.github/actions/check-pr-status/dist/index.js, community-pr-triage/dist/index.cjs) are rebuilt from source after a change",
+   "evidence": ".github/actions/check-pr-status README says \"Run the build after you change this code\"; dist/index.js is committed (an ncc bundle), as is community-pr-triage/dist/index.cjs. No CI freshness diff was found.",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Codegen freshness needs the build to run (R2). It is a documented convention, recorded so it is accounted for; as D it stays out of the ratio either way.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [],
+ "rejected_stage_b": {},
+ "value_add": [
+  "strapi-va-packagemanager-matches-yarnpath (info): package.json packageManager yarn version equals the version in .yarnrc.yml yarnPath (yarn-<v>.cjs); cross_file equals, regex extracts. Fire-tested: yarn@4.13.0 fired it.",
+  "strapi-va-nvmrc-matches-engines-floor (info): .nvmrc major (22) equals the root engines.node floor (>=22); cross_file equals with regex extracts. Fire-tested: .nvmrc=20 fired it. CI does not read .nvmrc.",
+  "strapi-va-engines-node-uniform (info): every workspace that declares engines.node uses the root range '>=22.0.0 <=26.x.x' (46 manifests agree, 8 declare none); cross_file equals with allow_missing_target. Fire-tested: '>=20.0.0' in packages/core/utils fired it."
+ ],
+ "absent_categories": [
+  "License / header / SPDX checks (LICENSE present, no header rule)",
+  "Codegen freshness gates (no `git diff --exit-code` in workflows)",
+  "yarn constraints (no yarn.config.cjs) and yarn dedupe --check",
+  "Makefile / justfile / Taskfile",
+  "pre-commit framework / lefthook (husky + lint-staged only)",
+  "CODEOWNERS",
+  "Repo-local import-firewall / module-boundary tool (no dependency-cruiser; no enforce-module-boundaries in repo-local config; architecture/ LikeC4 model has no CI)",
+  "Toolchain pin files beyond .nvmrc and packageManager (.tool-versions, .node-version, Volta absent)",
+  "Git submodules",
+  "Vendored-dependency hashes / SBOM / checksum manifests",
+  "Enforced locale key parity or order (verify-translations exists but is not wired into CI and is violated at the pin)",
+  "Enforced .editorconfig conformance (~2,300 deviations at the pin)"
+ ],
+ "unusual": [
+  "scripts/front/verify-translations (key parity/order across 14 admin translation bundles) exists; its README says to wire it into CI once the debt is burned down. It is not in CI, and at the pin 99/261 locale files have extra keys and 95 are misordered. So the flagship locale-parity policy is NOT enforced here (R5). The locale gate is a few narrow jest tests instead.",
+  "Two stacked version policies: check-package-versions.mjs (lockstep with packages/core/strapi version, same major only) plus syncpack lint restricted to exact specifiers (catalog: and every non-exact range ignored), so ranges are never compared.",
+  "Both version tools silently skip dot directories (glob/syncpack default dot:false): .github/actions/community-pr-triage (5.43.0) and draft-release (5.52.3) drift freely, and @actions/github 6.0.0 vs 6.0.1 would be a syncpack mismatch if .github were included.",
+  "lockfile-lint (an npm/yarn-classic tool) runs against a Yarn Berry v8 lockfile with a Berry-protocol scheme allowlist (npm:, workspace:, patch:).",
+  "The Playwright exact-pin guard exists because the version names the e2e container image (mcr.microsoft.com/playwright:v<version>-resolute).",
+  "The contributor-docs Docusaurus plugin (docs/plugins/workspace-packages) acts as a repository validator. It throws on unsupported root workspace patterns, unnamed packages/ manifests and unknown package group folders, so monorepo structure is checked by a docs build.",
+  "AGENTS.md forbids workspace:* inside packages/ (published packages pin exact semver to each other), the inverse of the common monorepo convention.",
+  "engines.node >=22 but the migration_v5 job runs Node 20 (Yarn Berry does not enforce engines); .nvmrc (22) is not read by CI.",
+  "lerna.json (version 5.7.0) is vestigial; nx release is used and the real version is 5.62.0.",
+  "yarn-nm-install's header comment says enable-corepack defaults to 'false' while the input default is 'true' (stale comment).",
+  "Most workflows SHA-pin actions, but draft-release.yml / invalidate-qa-done use tag refs (@v1, @v6, @v9), so there is no SHA-pin policy.",
+  "Repository-data assertions live inside jest/vitest suites (native-name coverage, edit-view hint keys, singular/plural pairs, iso-locales uniqueness, exports source paths, e2e spec gating). This is the R7 pattern of tests asserting files.",
+  "tags.yml carries its own conventions in a header comment (35 tags max, no package-folder or status tags).",
+  ".cursor/worktrees.json is committed while .cursor/, .claude/ and .agents/ are otherwise gitignored; skill link dirs are maintained by yarn ai:sync."
+ ],
+ "check_result": "`alint validate-config`: config valid, 34 rules loaded: 31 error-level rules for the A and C units plus 3 info-level value-add rules. Commitlint appears only as commented sketches. `alint -c CONFIG check . --compact` on the clone: all rules passed, exit 0, no violations. The only violation during drafting was strapi-yarnpath-exists on .yarnrc.yml. My own `ignore: .yarn/releases/**` had hidden the committed yarn-4.12.0.cjs; I removed the ignore entry and the rule now passes. On a non-git scratch copy, strapi-ai-tool-link-dirs-not-committed gave an expected `resource_read` analysis failure (git_no_denied_paths needs an index). The fire tests therefore used a git-initialized scratch copy.",
+ "stage_b_config_issues": [
+  "strapi-07 (A, dep-version) expresses only the 'never workspace:' half of AGENTS.md:260, which says workspace deps use pinned semver versions (e.g. \"5.42.0\"). On a scratch copy, a caret range `^5.62.0` on an internal @strapi dep passes. At the pin, all 70+112 internal dep specifiers are exact 5.62.0, so the pinned-exact half holds and is expressible but missing. The scope also omits scripts/* and .github/actions/* manifests, which AGENTS.md's workspace:* allowlist (examples/, tests-next/*, some root devDeps) does not exempt. The fire test for the existing half reproduces: a `workspace:*` peer/dev dep in a scratch copy fired, and it passes on the clone.",
+  "strapi-40: the file_absent exclude list `packages/{core,plugins,providers,utils,cli,generators}/*/package.json` omits `other`, which docs/plugins/workspace-packages/groups.mjs PACKAGE_GROUPS includes. A valid packages/other/x/package.json would false-fire.",
+  "strapi-01: the scope differs from check-package-versions.mjs. The script globs **/package.json with dot:false and only node_modules ignored, but a package.json under a nested dot dir fires in the config while the script skips it. Also, tests/e2e/data manifests are ignored by the config, although the script checks them.",
+  "strapi-06: the catalog regex reads .yarnrc.yml by line. An indented key with the same name elsewhere in .yarnrc.yml (e.g. under npmScopes) masks a missing catalog entry, so the rule has a false-negative path. The C bucket is right, and the mask is worth noting.",
+  "strapi-46: the threshold `description:[ \\t]*[^\\r\\n]{153,}` counts raw characters including quotes, so an unquoted description of 150-152 characters passes, although the 07-writing-docs.md limit is 150.",
+  "strapi-51: the pair rule checks only that each workspace package has a docs page. It does not check that the page declares `package:` in its frontmatter, which the workspace-packages plugin uses to find undocumented packages. The mirrored-path package name holds at the pin for all 43 packages, so a frontmatter `package:` check is expressible and missing.",
+  "strapi-22: a non-string publishHint value is ignored rather than flagged (trivial).",
+  "strapi-04: lockfile-lint's --type yarn and --allowed-schemes semantics over a Berry lockfile (npm:, workspace:, patch:, https:) could not be verified offline, so the A classification rests on an unverified reading of the tool.",
+  "Commitlint unit(s): what the @commitlint/config-conventional 19.1.0 preset adds (e.g. header-trim) could not be verified offline. The custom type-enum, the disabled body-max-line-length and the merge-commit ignore in .commitlintrc.ts were read.",
+  "validate-config: OK (34 rules). check on the clone exits 0. Every A unit in the locale, dep-version and toolchain-pin families (strapi-04, strapi-07, strapi-20, strapi-22, and the toolchain-pin A rules) was reproduced in the fire direction on a scratch copy and passes on the clone. strapi-20 fires, but it also false-fires on valid layouts (see reclassify)."
+ ],
+ "stage_b_summary": "Stage B for strapi/strapi@fcc1df0668527c342de7f8cc5acd331434a2d505. Stage A's 34-rule config validates and checks clean on the clone. I reproduced the fire direction for every A unit in the locale, dep-version and toolchain-pin families on a scratch copy; each one fires when broken and passes on the clone.\n\nMissed units (6):\n- strapi-b01, C (locale): the translation catalogs must be valid JSON for rollup json() and the dynamic imports. alint's JSONC-tolerant reader accepts trailing commas and comments, the element-web-08 relaxation.\n- strapi-b02, C (locale): CTB en.json privateField.description must equal the attributeOptions.ts defaultMessage. cross_file equals expresses it via a TS regex.\n- strapi-b03, A (other): every tags.yml entry has a label and a description. The yaml_path_absent root filter fires and passes.\n- strapi-b04, B-config unique-key (other): workspace names are unique. Yarn and Nx enforce it on every install, and it holds at the pin (60 distinct names).\n- strapi-b05, B-adapter (other): Docusaurus frontmatter schema, enforced by the docs_build throw.\n- strapi-b06, D (other): the committed GitHub-action dist bundles are rebuilt from source after a change.\n\nReclassified (4):\n- strapi-20, A to C: the line regex over the TS object depends on prettier's layout and false-fires on valid double-quoted entries.\n- strapi-61, B-config to A: yaml_path_absent `$[?length($) > 35]` expresses the cap and is fire-verified.\n- strapi-35, D to C: R7 was misapplied. A filename convention is a structure invariant, but 40 files are exempt by inline disable.\n- strapi-48, A to C: CommonMark-only alt checking misses the 13 HTML `<img>` tags (7 multi-line) and .mdx pages.\n\nConfig issues:\n- strapi-07 does not enforce the pinned-exact half and leaves out scripts/* and .github/actions/*.\n- strapi-40's exclude list misses the `other` group.\n- strapi-01 has scope edges, strapi-06 can mask a missing catalog entry, and strapi-46's threshold is off by 3.\n- strapi-51 does not check the `package:` frontmatter key.\n- strapi-04 (lockfile-lint semantics on Berry) and the commitlint preset could not be verified offline.\n\nNo removals. These are not units: the em-dash, link-anchor, blob/develop, editable-image-source and tests-in-__tests__ conventions are violated at the pin, and description-required applies only to new pages. Verified absent: CODEOWNERS, yarn.config, .tool-versions, lefthook. The scratch directory was removed.",
+ "notes": "Counts: A=17, B=13 (B-config 5: unique-key x3, bounded-count, set; B-adapter 8), C=16, D=26.\n- Overall (A+B+C = 46): coverage_today 17/46 = 37%, coverage_with_tuning 33/46 = 72%, gap 13/46 = 28%.\n- dep-version (D excluded): A4 C2 B1 -> 57% / 86% / 14%.\n- toolchain-pin: A2 -> 100%.\n- locale: A2 B1 -> 67% / 67% / 33%.\n- other: A9 C14 B11.\n- If the slice's unique-key family lands: strapi-02, strapi-21 and strapi-24 move to A, so dep-version reaches A5 and locale A3.\n\nR4 fire tests: about 50 cases on a scratch copy (whole tree minus .git, then git-initialized), each a single break restored from the copy's own git.\n- Every A unit in dep-version, toolchain-pin and locale fired on its break and passed on the clone, as did the fire-tested C and value-add rules.\n- Pass-direction controls held: other-major version, registry.yarnpkg.com https, packageManager with +sha512, a removed native name without a locale file, a locale without saveHint, an absolute /img/ path, and 'package:' in a page body.\n- The scratch dir has been removed.\n\nalint observations:\n- cross_file `registered` with a regex-extract target works (first confirmation of that shape).\n- The RFC 9535 root-filter trick `$[?(abs-query conditions)]` expresses conditional key checks in flat JSON.\n- markdown_links_resolve has no link-class/extension filter; at the pin, 13 route links are false findings. This is why strapi-53 is C.\n- editorconfig_conforms was evaluated, but .editorconfig is not held at the pin (~2,300 deviations), so it is not a unit.\n\nUnverifiable offline (node_modules absent):\n- The @commitlint/config-conventional preset rule set and severities are from knowledge of v19, not read from disk. header-trim and the warning-level leading-blank rules were not counted.\n- The external @strapi/eslint-config contents are unknown; strapi-35 is recorded as D for that reason rather than guessed.\n- Whether @docusaurus/plugin-client-redirects fails the build on a dangling `to` is unknown; strapi-63 is counted as the documented convention, which holds at the pin.\n\nEvidence caveats: the docs plugin and test assertions are cited by file path, with line numbers only where I read them. The template-check-on-new-issue workflow is cited by name without a line. The strapi-01 rule hardcodes '^5\\\\.' and must be bumped at Strapi 6. C vs B-adapter for frontmatter: key presence, absence and a length bound via a frontmatter-block regex are C; typed, enum, reference and uniqueness checks on frontmatter values are B-adapter (trpc-26..32). The clone was only read: `git diff --quiet HEAD` is clean at fcc1df0668527c342de7f8cc5acd331434a2d505.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "strapi-packages-no-workspace-protocol",
+    "unit": "strapi-07",
+    "action": "modified",
+    "detail": "Scope widened to scripts/*/package.json and .github/actions/*/package.json; AGENTS.md's workspace:* allowlist does not exempt them. Fires on a scratch copy for a workspace:* devDep in scripts/front, a workspace:^ dep in .github/actions/check-pr-status, and a workspace:* peer in packages/core/admin. Passes on the clone, where none of those manifests uses workspace:."
+   },
+   {
+    "rule_id": "strapi-packages-internal-deps-pinned-exact",
+    "unit": "strapi-07",
+    "action": "added",
+    "detail": "New json_path_matches rule for the pinned-exact half: dependencies and devDependencies of packages/ manifests that name one of the 43 packages/ workspace names must be exact x.y.z (if_present). peerDependencies are left out because all 22 internal peer specifiers are ^5.0.0 at the pin, so the convention does not hold for them (R5). Stage B's '70+112 all exact' count covers deps and devDeps only. Fires on ^5.62.0 (dependency), ~5.62.0 (devDep), >=5.62.0 (vitest-config, last name in the list) and 5.62.x (a name at a folded-line start). The external @strapi/design-system ^2.3.1 passes as a control. Passes on the clone (182 exact specifiers). The workspace names are mirrored by hand, which makes this half C-shaped."
+   },
+   {
+    "rule_id": "strapi-cm-edit-view-hints",
+    "unit": "strapi-22",
+    "action": "modified",
+    "detail": "The publishHint test is now !(length(publishHint) > 0), mirroring the test's `.length > 0`, so a null or non-string publishHint is flagged. Fires on a scratch copy of the content-manager translations for: publishHint null, publishHint 5, publishHint removed, publishHint '', and saveHint containing {action}. Removing both keys passes, and so does a whitespace-only publishHint (as in jest). Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-admin-locales-have-native-names",
+    "unit": "strapi-20",
+    "action": "modified",
+    "detail": "Comment changed to C, per Stage B. The regex now accepts bare, single- or double-quoted keys, single- or double-quoted non-empty values, and entries after `{` or `,`, so two entries on one line count. The limits that remain are listed in the rule comment. Fires on a scratch copy when ca is removed, when 'pt-BR' is emptied, and when the fi entry is commented out. Stage B's false positives now pass: ca: \"Catal'à\" and two entries on one line with a double-quoted key. Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-docs-package-groups-known",
+    "unit": "strapi-40",
+    "action": "modified",
+    "detail": "Added `other` to the excluded groups (groups.mjs PACKAGE_GROUPS includes it). On a scratch copy packages/other/x/package.json passes and packages/weird/y/package.json fires. Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-package-versions-aligned",
+    "unit": "strapi-01",
+    "action": "modified",
+    "detail": "The target glob now spells each depth with dot-free [!.]* segments down to 8 directory levels, plus a deeper catch-all, to match glob's dot:false at any depth. Manifests sit at most 5 levels deep at the pin. The global ignore `tests/e2e/data/**` was removed because the script checks those manifests; there are none at the pin, and the whole config still passes. On a scratch copy: a 5.1.0 manifest under packages/core/utils/.cache passes (the script skips it); a 5.1.0 tests/e2e/data/app/package.json fires; a depth-6 template set to 5.61.0 fires; 6.0.0 passes as the other-major control. Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-docs-description-short",
+    "unit": "strapi-46",
+    "action": "modified",
+    "detail": "The regex now counts characters inside the quotes of a '…' or \"…\" value, or the whole plain value, and fires at 150 or more ('under 150'). Boundary tests on a scratch docs page: 149 passes and 150 fires for plain, single-quoted and double-quoted values. Passes on the clone (max 140)."
+   },
+   {
+    "rule_id": "strapi-docs-every-package-is-declared",
+    "unit": "strapi-51",
+    "action": "added",
+    "detail": "New cross_file superset rule: every packages/ workspace name must appear among the `package` frontmatter values of docs/docs/packages/**/index.md. The values are read with the strapi-43 frontmatter regex, quoted or bare. Fires on a scratch copy when package: is removed from core/utils/index.md, when it names @strapi/util, and when it appears only in the page body. Unquoted and double-quoted values pass as controls. Passes on the clone (43 of 43)."
+   },
+   {
+    "rule_id": "strapi-docs-images-have-alt",
+    "unit": "strapi-48",
+    "action": "modified",
+    "detail": "Comment changed to C, per Stage B. Paths widened from *.md to *.{md,mdx}. An .mdx page with ![](/img/x.png) fires on a scratch copy. Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-docs-html-images-have-alt",
+    "unit": "strapi-48",
+    "action": "added",
+    "detail": "New file_content_forbidden rule for raw HTML/JSX <img> tags with no alt attribute or an empty one. Rust regex has no lookahead, so 'no alt' is spelled as a prefix alternation over attribute names; tags that span lines are covered. On a scratch copy these fire: a multi-line <img> with alt removed, alt=\"\", and an .mdx <img src={...} width=\"300\" />. These pass as controls: uppercase ALT with an extra className, and JSX alt={label}. Passes on the clone (13 <img> tags)."
+   },
+   {
+    "rule_id": "strapi-admin-translations-parse-as-json",
+    "unit": "strapi-b01",
+    "action": "added",
+    "detail": "C (locale). A json_path_absent parse probe over packages/**/admin/src/translations/*.json (275 files). On a scratch copy, a missing closing brace in content-manager fr.json fires (resource_parse analysis failure). A trailing comma passes, which is the documented JSONC relaxation behind the C bucket. Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-ctb-private-field-description-aligned",
+    "unit": "strapi-b02",
+    "action": "added",
+    "detail": "C (locale). cross_file equals: the en.json privateField.description must equal the attributeOptions.ts defaultMessage and the test's PRIVATE_FIELD_DESCRIPTION literal. The literal target was added because the test asserts it too. On a scratch copy, changing the defaultMessage fires; changing en.json fires on both targets. Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-docs-tags-have-label-and-description",
+    "unit": "strapi-b03",
+    "action": "added",
+    "detail": "A (other). yaml_path_absent $[?(!@.label || !@.description)] on docs/docs/tags.yml. On a scratch copy these fire: rbac with its label removed, cli with its description removed, and a bare zz-bare: entry. Passes on the clone (17 of 17)."
+   },
+   {
+    "rule_id": "strapi-docs-tags-at-most-35",
+    "unit": "strapi-61",
+    "action": "added",
+    "detail": "A (other), reclassified by Stage B from B-config. yaml_path_absent $[?length($) > 35] on docs/docs/tags.yml. A scratch copy with 35 entries passes and one with 36 fires. Passes on the clone (17)."
+   },
+   {
+    "rule_id": "strapi-admin-tsx-filenames-pascal-case",
+    "unit": "strapi-35",
+    "action": "added",
+    "detail": "C (other), reclassified by Stage B from D. filename_regex: .tsx files in packages/{core,plugins}/*/admin/** and core/admin/ee/admin/** are PascalCase, review-workflows excluded. The contract is inferred: the real options live in the unvendored @strapi/eslint-config. I re-checked Stage B's evidence: on the clone the inferred convention fails exactly 40 files, and all 40 carry an inline check-file/filename-naming-convention disable. Those 40 are mirrored as exclusions (31 here). A new upload/admin fooBar.tsx fires; a review-workflows fooBar.tsx passes. Passes on the clone."
+   },
+   {
+    "rule_id": "strapi-admin-ts-filenames-camel-case",
+    "unit": "strapi-35",
+    "action": "added",
+    "detail": "C (other), the .ts half of the same inferred convention: .ts files are camelCase, with the other 9 inline-disabled files excluded. A new upload/admin my-util.ts fires. Passes on the clone. Not covered: .js/.jsx admin files (79) and the check-file/no-index half."
+   },
+   {
+    "rule_id": "strapi-catalog-refs-resolve",
+    "unit": "strapi-06",
+    "action": "comment",
+    "detail": "No fix is possible here. The rule comment now documents the false-negative path: a same-named 2-space-indented key under another .yarnrc.yml mapping masks a missing catalog entry. Scoping the regex to the catalog: block needs lookbehind or \\G, which Rust regex lacks, and the yaml extract cannot return mapping keys. Stage B confirms the C bucket."
+   },
+   {
+    "rule_id": "strapi-lockfile-resolution-protocols",
+    "unit": "strapi-04",
+    "action": "comment",
+    "detail": "Rule unchanged. A comment now records that lockfile-lint's --type yarn and --allowed-schemes semantics over a Berry v8 lockfile were not verified offline. Stage B reported this as unverified, not as a reproduced defect."
+   },
+   {
+    "rule_id": "(commitlint sketches)",
+    "unit": "strapi-70",
+    "action": "comment",
+    "detail": "The commented sketch block now says the @commitlint/config-conventional preset's rule set (e.g. header-trim) was not verified offline. Only the custom type-enum, the disabled body-max-line-length and the merge-commit ignore were read from .commitlintrc.ts. No rule written (depth-1 clone)."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "strapi-b04",
+    "action": "not-done",
+    "detail": "B-config unique-key (unique workspace names). No rule, per step 2 (only A/C units get rules); listed in the header's not-expressed list."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "strapi-b05",
+    "action": "not-done",
+    "detail": "B-adapter (Docusaurus frontmatter schema). No rule; listed in the header's not-expressed list."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "strapi-b06",
+    "action": "not-done",
+    "detail": "D (committed action dist bundles rebuilt from source). No rule; listed in the header's not-expressed list."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "strapi-07",
+    "suggested_bucket": "C",
+    "note": "The pinned-exact half Stage B asked for can be written only with a hand-kept list of the 43 packages/ workspace names, because JSONPath cannot select dependency keys by a name set read from other files. That makes the full unit C-shaped (A if the integrator scores only the workspace: half). Stage B's 'all 70+112 internal specifiers are exact' counts only dependencies and devDependencies: all 22 internal peerDependencies are ^5.0.0 at the pin, so the convention holds for deps and devDeps only and the rule leaves peers out."
+   },
+   {
+    "id": "strapi-51",
+    "suggested_bucket": "A",
+    "note": "The pair rule (page exists) is unchanged and is A. The new `package`-declared half reads frontmatter with a regex, the same shape Stage A scored C for strapi-43/44/45. If the integrator treats the declaration as part of strapi-51, the unit becomes C. If not, the new rule is extra coverage and strapi-51 stays A. The same regex-plus-cross_file shape could also express strapi-58 (package names an existing workspace, now B-adapter) as C; I did not write that rule because it was outside Stage B's issues."
+   },
+   {
+    "id": "strapi-35",
+    "suggested_bucket": "C",
+    "note": "A rule now exists for the .ts/.tsx half. Its contract is inferred, not read, because @strapi/eslint-config is not vendored. I re-verified Stage B's evidence: 40 failing files, and all 40 carry the inline disable. If the integrator keeps D because the contract is unverifiable, demote both strapi-admin-*-filenames-* rules to info as value-add. The no-index half and the .js/.jsx files are not expressed."
+   },
+   {
+    "id": "strapi-20",
+    "suggested_bucket": "C",
+    "note": "Accepted Stage B's A to C reclassification and kept the rule at error. I also widened the regex so the double-quoted and same-line false positives Stage B reproduced now pass."
+   },
+   {
+    "id": "strapi-48",
+    "suggested_bucket": "C",
+    "note": "Accepted Stage B's A to C reclassification. The C expression is now complete for the documented surface: CommonMark images in .md and .mdx, plus a regex rule for HTML/JSX <img> tags."
+   },
+   {
+    "id": "strapi-61",
+    "suggested_bucket": "A",
+    "note": "Stage B moved it from B-config bounded-count to A. The rule is written and fire-verified both ways (35 passes, 36 fires). This removes one B-config bounded-count unit from the tally."
+   },
+   {
+    "id": "strapi-b03",
+    "suggested_bucket": "A",
+    "note": "New A unit (family other), fire-verified both ways."
+   },
+   {
+    "id": "strapi-b01",
+    "suggested_bucket": "C",
+    "note": "New C unit (locale): the parse probe fires on a syntax error, and the JSONC relaxation (a trailing comma passes) is confirmed."
+   },
+   {
+    "id": "strapi-b02",
+    "suggested_bucket": "C",
+    "note": "New C unit (locale). The rule also checks the test file's PRIVATE_FIELD_DESCRIPTION literal, which the test asserts as well."
+   }
+  ],
+  "validate_output": "✓ Config valid: 43 rule(s) loaded from docs/design/v0.12/corpus/strapi-strapi.alint.yml",
+  "check_output": "exit 0: \"✓ all rules passed.\" (43 rules on the clone at fcc1df0668527c342de7f8cc5acd331434a2d505, no findings). `git status --porcelain` on the clone is empty. Scratch dir <scratch>/strapi-strapi-c removed."
+ }
+}

@@ -1,6 +1,6 @@
 # v0.23 corpus stratum: i18n and JavaScript monorepos
 
-Status: frame approved 2026-11-12; batches 1 and 2 of 4 done. Phase 2 of [`README.md`](README.md).
+Status: frame approved 2026-11-12; batches 1 to 3 of 4 done. Phase 2 of [`README.md`](README.md).
 
 Results: [`corpus-stratum-log.md`](corpus-stratum-log.md).
 

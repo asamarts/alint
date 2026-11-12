@@ -1,0 +1,1444 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config (stratum: i18n) - TryGhost/Ghost
+# Pinned @ ab272fcb6056d23e32b307264eba35ffd27a921b (depth-1 clone, 2026-11-12)
+#
+# Shape: pnpm 12 + Nx monorepo (ghost core, apps/*, koenig/*, packages/**,
+# tools/*), Node/TypeScript, single-vendor (Ghost Foundation). i18next JSON
+# catalogs at packages/i18n/locales/<locale>/<namespace>.json: 63 locales x 5
+# namespaces (ghost, portal, signup-form, comments, search), flat keys
+# (keySeparator: false) where the English string is the key, plus a translator
+# context file (locales/context.json).
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   ci.yml job_i18n - `pnpm --filter @tryghost/i18n test` = vitest
+#     (test/i18n.test.ts: locale dirs == locale-data.json codes, Stripe label
+#     <= 255) + `translate` (i18next-parser per namespace with failOnUpdate in
+#     CI, then generate-context.js: context.json fresh + no empty descriptions).
+#     `lint:translations` (test/i18n.lint.js: brace syntax, {variable} parity,
+#     unused waivers, i18n-ignores.json shape) runs through nx lint.
+#   ci.yml job_setup - "Check NODE_VERSION matches devEngines.runtime".
+#   ci.yml job_app_version_bump_check - check-app-version-bump.ts (CDN app
+#     major.minor == ghost/core defaults.json), change-check.ts (changesets),
+#     check-versioning-ignore.ts (private placeholder version, versioning.ignore).
+#   ci.yml job_lint_packages - check-internal-packages.ts (packages/** golden path).
+#   ci.yml job_lint_docs - check-agent-guidance.ts, check-agent-skill-links.ts,
+#     markdownlint, remark-validate-links.
+#   ci.yml job_migration_integrity_check + ghost unit tests (version folders,
+#     no permission migrations, schema canary hashes, legacy service inventory).
+#   .oxlintrc.json local-filenames/match-regex (file naming); oxfmt; eslint;
+#     dependency-cruiser boundaries; knip; pnpm frozen lockfile + supply-chain
+#     policies; .github/hooks (secretlint, commit-msg).
+#   .github/renovate.json5 - stated pin invariants (Node bumped as one
+#     coordinated change; @types/node at the Node major; version caps).
+#   Workflow comments - Node lockstep for the i18n-review tool, Tinybird CLI
+#     lockstep with docker/tb-cli.
+#   Added by Stage B: e2e fixtures project (ci.yml job_stripe_fixtures:
+#     Stripe api_version drift, frontend-app local-asset overrides),
+#     tools/scripts/lib/dependency-boundaries.ts (known-violations schema),
+#     ghost unit tests over repo data (ghost/bin entrypoints, staff email
+#     templates), documented conventions (no models in migrations,
+#     CONTEXT-MAP.md), and lint:doc-links (remark-validate-links).
+#
+# This config expresses the A and C units of that surface plus clearly marked
+# value-add rules (level info, outside the ratio, R3/R5). Unit ids (ghost-NN)
+# match the Stage A record; ghost-bNN are Stage B's missed units. Stage C
+# integrated Stage B's review (ghost-04/-08/-33 removed, ghost-07 to
+# B-adapter: their rules survive as info-level value-add or, for ghost-04, as
+# part of ghost-02). Expected `alint check` at the pin: no findings, and 2
+# informational notes from the value-add rule ghost-i18n-context-keys-match-en.
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE family
+  # ════════════════════════════════════════════════════════════════
+
+  # ghost-02, A - i18next-parser runs per namespace in CI (`pnpm translate`,
+  #     packages/i18n/i18next-parser.config.js `failOnUpdate: process.env.CI`):
+  #     a locale missing an en key gets it added and a key en no longer has is
+  #     removed, so either fails the job. Plural keys (i18next `_one/_other`
+  #     suffixes) differ per locale by design (ar adds _zero/_two/_few/_many,
+  #     id has only _other), so plurals: cldr collapses each plural group to one
+  #     key. One rule per namespace (key_parity takes one reference).
+  - id: ghost-i18n-key-parity-ghost
+    kind: key_parity
+    reference: packages/i18n/locales/en/ghost.json
+    peers: "packages/i18n/locales/*/ghost.json"
+    plurals: cldr
+    direction: both
+    level: error
+    message: "Locale ghost.json keys differ from en (run `pnpm translate` in packages/i18n)."
+
+  - id: ghost-i18n-key-parity-portal
+    kind: key_parity
+    reference: packages/i18n/locales/en/portal.json
+    peers: "packages/i18n/locales/*/portal.json"
+    plurals: cldr
+    direction: both
+    level: error
+    message: "Locale portal.json keys differ from en (run `pnpm translate` in packages/i18n)."
+
+  - id: ghost-i18n-key-parity-signup-form
+    kind: key_parity
+    reference: packages/i18n/locales/en/signup-form.json
+    peers: "packages/i18n/locales/*/signup-form.json"
+    plurals: cldr
+    direction: both
+    level: error
+    message: "Locale signup-form.json keys differ from en (run `pnpm translate` in packages/i18n)."
+
+  - id: ghost-i18n-key-parity-comments
+    kind: key_parity
+    reference: packages/i18n/locales/en/comments.json
+    peers: "packages/i18n/locales/*/comments.json"
+    plurals: cldr
+    direction: both
+    level: error
+    message: "Locale comments.json keys differ from en (run `pnpm translate` in packages/i18n)."
+
+  - id: ghost-i18n-key-parity-search
+    kind: key_parity
+    reference: packages/i18n/locales/en/search.json
+    peers: "packages/i18n/locales/*/search.json"
+    plurals: cldr
+    direction: both
+    level: error
+    message: "Locale search.json keys differ from en (run `pnpm translate` in packages/i18n)."
+
+  # ghost-02 (cont.), A - the five `translate:<ns>` i18next runs write
+  #     locales/$LOCALE/$NAMESPACE.json for every locale-data.json code; a
+  #     missing file would be created, which fails failOnUpdate in CI.
+  #     Stage B folded the former unit ghost-04 into ghost-02 (R1: a missing
+  #     catalog is the "every key missing" case of the same regeneration
+  #     check). This rule stays at error as part of ghost-02's expression,
+  #     because key_parity alone does not see a peer file that is absent.
+  - id: ghost-i18n-locale-has-every-namespace
+    kind: for_each_dir
+    select: "packages/i18n/locales/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/ghost.json"
+      - kind: file_exists
+        paths: "{path}/portal.json"
+      - kind: file_exists
+        paths: "{path}/signup-form.json"
+      - kind: file_exists
+        paths: "{path}/comments.json"
+      - kind: file_exists
+        paths: "{path}/search.json"
+    level: error
+    message: "Every locale directory must hold all five namespace catalogs (ghost, portal, signup-form, comments, search)."
+
+  # ghost-05, A - test/i18n.test.ts "directories and locales in i18n.js will
+  #     match": every locales/ entry except context.json is a SUPPORTED_LOCALES
+  #     code (= src/locale-data.json codes) and every code has a directory.
+  #     The orphan space looks one level down so context.json stays out.
+  - id: ghost-i18n-locale-dirs-match-locale-data
+    kind: registry_paths_resolve
+    source: packages/i18n/src/locale-data.json
+    extract: { json: "$[*].code" }
+    base: packages/i18n/locales
+    expect: dir
+    orphans:
+      space: "packages/i18n/locales/*/**"
+    level: error
+    message: "packages/i18n/locales/<code>/ directories and src/locale-data.json codes must match one to one."
+
+  # ghost-05 (cont.), A - the test readdir()s locales/ and fails on ANY entry
+  #     other than context.json that is not a supported code, including a
+  #     stray top-level file (locales/stray.json), which the orphan space
+  #     above (locales/*/**) cannot see.
+  - id: ghost-i18n-locales-no-stray-files
+    kind: file_absent
+    paths:
+      include: ["packages/i18n/locales/*"]
+      exclude: ["packages/i18n/locales/context.json"]
+    level: error
+    message: "packages/i18n/locales/ may hold only <code>/ directories and context.json (test/i18n.test.ts readdir check)."
+
+  # ghost-06, A - test/i18n.test.ts:80-85: the portal "Add a personal note"
+  #     label is passed to Stripe custom fields, so each translation is at
+  #     most 255 characters (JS .length counts UTF-16 units; the regex counts
+  #     code points - identical for the BMP text present at the pin, max 35).
+  #     Known limitation (Stage B): a value of <=255 code points with astral
+  #     characters (emoji) can exceed 255 UTF-16 units and pass here while the
+  #     test fails. No exact fix: neither regex nor RFC 9535 length() counts
+  #     UTF-16 units (an exact form would need ~129 OR'd filter terms).
+  - id: ghost-i18n-stripe-note-label-length
+    kind: json_path_matches
+    paths: "packages/i18n/locales/*/portal.json"
+    path: "$['Add a personal note']"
+    matches: '^[\s\S]{0,255}$'
+    if_present: true
+    level: error
+    message: "The portal 'Add a personal note' translation must be at most 255 characters (Stripe custom-field label limit)."
+
+  # VALUE-ADD approximation of ghost-07 (B-adapter after Stage B; not in the
+  #     ratio). generate-context.js (last step of `pnpm translate`, CI) makes
+  #     ONE assertion: the regenerated text (en key union, sorted, kept
+  #     values, JSON.stringify(..., 4)) is byte-equal to context.json. Key set
+  #     and canonical form (the former ghost-08) are that one comparison, and
+  #     its binding part is key order + canonical serialization, which needs a
+  #     key-order operator / canonical JSON compare (B-adapter). This rule only
+  #     checks the key SET, via a layout-dependent line regex (no JSON key
+  #     extractor), and it is blind to the key "Enter the phone number using
+  #     only digits, spaces and symbols like + - ( )." (skipped as non-literal
+  #     on both sides: the 2 informational notes). Kept at info.
+  - id: ghost-i18n-context-keys-match-en
+    kind: cross_file
+    source:
+      files: "packages/i18n/locales/en/*.json"
+      extract: { regex: '(?m)^    "((?:[^"\\\n]|\\.)*)": ' }
+    targets:
+      - file: packages/i18n/locales/context.json
+        extract: { regex: '(?m)^    "((?:[^"\\\n]|\\.)*)": ' }
+    relation: set_equals
+    level: info
+    message: "packages/i18n/locales/context.json keys must equal the union of the en catalog keys (run `pnpm translate`)."
+
+  # ghost-09, A - generate-context.js:44-60 exits 1 in CI when any context
+  #     description is empty after `(value ?? '').trim()`. The rule requires at
+  #     least one character outside JS trim()'s set (ECMAScript WhiteSpace +
+  #     LineTerminator: TAB, LF, VT, FF, CR, U+FEFF, U+2028, U+2029 and every
+  #     Unicode Zs, e.g. NBSP). A non-string value (on which .trim() throws, or
+  #     null) also fails match() and so fires.
+  - id: ghost-i18n-context-descriptions-non-empty
+    kind: json_path_absent
+    paths: packages/i18n/locales/context.json
+    path: '$[?!match(@, "[\\s\\S]*[^\t\n\f\r\u000B  ﻿\\p{Zs}][\\s\\S]*")]'
+    level: error
+    message: "Every context.json entry needs a non-empty description for translators."
+
+  # ghost-10, C - every catalog is JSON.parse'd (i18n.lint.js, i18next-parser,
+  #     generate-context.js require(), the vitest import). alint has no bare
+  #     "parses" kind and its reader is JSONC-tolerant, so a probe for a key that
+  #     never exists only turns a malformed file into an analysis failure.
+  - id: ghost-i18n-locale-json-parses
+    kind: json_path_absent
+    paths:
+      - "packages/i18n/locales/*/*.json"
+      - packages/i18n/locales/context.json
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "Locale catalogs must be well-formed JSON."
+
+  # ghost-11, C (values half) - i18n.lint.js no-invalid-translations: every
+  #     non-empty translation value has balanced, non-nested {variable} braces
+  #     (parseTranslationString). Exact over values via a JSONPath filter.
+  - id: ghost-i18n-values-brace-syntax
+    kind: json_path_absent
+    paths: "packages/i18n/locales/*/*.json"
+    path: "$[?!match(@, '[^{}]*([{][^{}]*[}][^{}]*)*')]"
+    level: error
+    message: "Translation has an unbalanced or nested '{' / '}' (ghost/i18n/no-invalid-translations)."
+
+  # ghost-11, C (keys half) - the same check over en keys only. Keys are not
+  #     selectable by JSONPath, so this reads the one-entry-per-line layout.
+  - id: ghost-i18n-en-keys-brace-syntax
+    kind: for_each_match
+    paths: "packages/i18n/locales/en/*.json"
+    select: '^    "'
+    require:
+      matches:
+        - '^    "(?:[^{}"\\]|\\.)*(?:\{(?:[^{}"\\]|\\.)*\}(?:[^{}"\\]|\\.)*)*": '
+    level: error
+    message: "English key has an unbalanced or nested '{' / '}' (ghost/i18n/no-invalid-translations)."
+
+  # ghost-15, A - i18n.lint.js:107-126 asserts the waiver file's shape:
+  #     overrides.<rule> is an array of {file, key, comment} with string fields
+  #     and a non-empty comment.
+  - id: ghost-i18n-ignores-entry-shape
+    kind: json_path_absent
+    paths: packages/i18n/test/i18n-ignores.json
+    path: '$.overrides[*][?!(match(@.file, "[\\s\\S]*") && match(@.key, "[\\s\\S]*") && match(@.comment, "[\\s\\S]+"))]'
+    level: error
+    message: "Each i18n-ignores.json waiver needs string file and key fields and a non-empty comment."
+
+  - id: ghost-i18n-ignores-rule-lists-are-arrays
+    kind: json_path_absent
+    paths: packages/i18n/test/i18n-ignores.json
+    path: "$.overrides[?!(@[0] || length(@) == 0)]"
+    level: error
+    message: "Each i18n-ignores.json overrides.<rule> entry must be an array of waivers."
+
+  # ════════════════════════════════════════════════════════════════
+  # TOOLCHAIN-PIN family
+  # ════════════════════════════════════════════════════════════════
+
+  # ghost-20, A - ci.yml:101-109 job_setup "Check NODE_VERSION matches
+  #     devEngines.runtime" (jq .devEngines.runtime.version vs env NODE_VERSION,
+  #     exit 1 on drift).
+  - id: ghost-node-ci-matches-devengines
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.runtime.version" }
+    targets:
+      - file: .github/workflows/ci.yml
+        extract: { yaml: "$.env.NODE_VERSION" }
+    relation: equals
+    level: error
+    message: "ci.yml env NODE_VERSION must equal package.json devEngines.runtime.version."
+
+  # ghost-21, A - .github/renovate.json5:202-216: Node is bumped manually as
+  #     one coordinated change - the engines range (root + ghost package.json)
+  #     and the NODE_VERSION ARG in Dockerfile.production and
+  #     docker/ghost-dev/Dockerfile move together.
+  - id: ghost-node-engines-root-matches-ghost
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.engines.node" }
+    targets:
+      - file: ghost/package.json
+        extract: { json: "$.engines.node" }
+    relation: equals
+    level: error
+    message: "ghost/package.json engines.node must equal the root engines.node (renovate.json5: Node is bumped as one change)."
+
+  - id: ghost-node-docker-args-match-devengines
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.runtime.version" }
+    targets:
+      - file: Dockerfile.production
+        extract: { regex: '(?m)^ARG NODE_VERSION=([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$' }
+      - file: docker/ghost-dev/Dockerfile
+        extract: { regex: '(?m)^ARG NODE_VERSION=([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$' }
+    relation: equals
+    level: error
+    message: "The NODE_VERSION ARG in Dockerfile.production and docker/ghost-dev/Dockerfile must equal devEngines.runtime.version."
+
+  # ghost-22, A - .github/renovate.json5:268-275 "Cap @types/node at the
+  #     default Node major (devEngines: 22.23.5)" ... "Raise it when we bump the
+  #     Node engine": the catalog @types/node major equals the Node major.
+  - id: ghost-types-node-major-matches-node
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.runtime.version" }
+    targets:
+      - file: pnpm-workspace.yaml
+        extract: { yaml: "$.catalog['@types/node']" }
+    relation: equals
+    normalize: semver-major
+    level: error
+    message: "The catalog @types/node major must equal the default Node major (renovate.json5 cap)."
+
+  # ghost-23, A - docs/contributing/development-setup.md:11-12: "Node.js
+  #     22.23.5 (the version in .nvmrc and .node-version)"; docs/reference/
+  #     node-compatibility.md:6 "Use the versions pinned in .nvmrc"; the dev
+  #     runtime pnpm downloads is devEngines.runtime (onFail: download).
+  - id: ghost-node-version-files-match-devengines
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.runtime.version" }
+    targets:
+      - file: .nvmrc
+        extract: { regex: '\A[ \t]*v?([0-9]+\.[0-9]+\.[0-9]+)[ \t]*\r?\n?\z' }
+      - file: .node-version
+        extract: { regex: '\A[ \t]*v?([0-9]+\.[0-9]+\.[0-9]+)[ \t]*\r?\n?\z' }
+    relation: equals
+    level: error
+    message: ".nvmrc and .node-version must both name the devEngines Node version."
+
+  # ghost-24, A - i18n-review-checks.yml:54 "Must match translation-review.yml"
+  #     and translation-review.yml:75 "Keep in lockstep with
+  #     i18n-review-checks.yml": both setup-node steps use one Node version.
+  - id: ghost-i18n-review-node-lockstep
+    kind: cross_file
+    source:
+      file: .github/workflows/translation-review.yml
+      extract: { yaml: "$.jobs.*.steps[?match(@.uses, 'actions/setup-node@.*')].with['node-version']" }
+    targets:
+      - file: .github/workflows/i18n-review-checks.yml
+        extract: { yaml: "$.jobs.*.steps[?match(@.uses, 'actions/setup-node@.*')].with['node-version']" }
+    relation: equals
+    level: error
+    message: "i18n-review-checks.yml and translation-review.yml must set up the same Node version (lockstep comments)."
+
+  # ghost-25, A - root package.json declares packageManager pnpm@X.Y.Z:
+  #     .github/actions/setup-node-pnpm runs pnpm/action-setup without a
+  #     version (it reads packageManager), and ghost/scripts/pack.mjs:105 throws
+  #     without it (ci.yml ghost-cli/publish verify the packed field).
+  - id: ghost-package-manager-pinned
+    kind: json_path_matches
+    paths: package.json
+    path: "$.packageManager"
+    matches: '^pnpm@[0-9]+\.[0-9]+\.[0-9]+(\+sha(256|512)\.[0-9a-f]+)?$'
+    level: error
+    message: "Root package.json must pin packageManager to an exact pnpm version."
+
+  # ghost-26, A - tinybird.yml:91-96 pins TINYBIRD_VERSION "keep in lockstep
+  #     with docker/tb-cli/Dockerfile" (ARG TINYBIRD_VERSION).
+  - id: ghost-tinybird-cli-lockstep
+    kind: cross_file
+    source:
+      file: docker/tb-cli/Dockerfile
+      extract: { regex: '(?m)^ARG TINYBIRD_VERSION=([0-9][0-9A-Za-z.+-]*)[ \t]*$' }
+    targets:
+      - file: .github/workflows/tinybird.yml
+        extract: { yaml: "$.jobs.*.steps[*].env.TINYBIRD_VERSION" }
+    relation: equals
+    level: error
+    message: "tinybird.yml TINYBIRD_VERSION must equal docker/tb-cli/Dockerfile ARG TINYBIRD_VERSION."
+
+  # ghost-27, C - docker/tb-cli/Dockerfile:1 "The Tinybird CLI requires
+  #     >=3.10,<3.14 - keep the base image in that range" (renovate.json5:218-227
+  #     caps it <3.14). A version range written as a hand-encoded regex, hence C.
+  - id: ghost-tb-cli-python-range
+    kind: file_content_matches
+    paths: docker/tb-cli/Dockerfile
+    pattern: '(?m)^FROM[ \t]+python:3\.1[0-3](?:[.-][^ \t\n]*)?(?:@sha256:[0-9a-f]{64})?[ \t]*$'
+    level: error
+    message: "docker/tb-cli base image must stay on Python >=3.10,<3.14 (Tinybird CLI requires_python)."
+
+  # ════════════════════════════════════════════════════════════════
+  # DEP-VERSION family
+  # ════════════════════════════════════════════════════════════════
+
+  # ghost-30, C (Stage B: was A) - check-app-version-bump.ts (ci.yml:434) and
+  #     tools/scripts/test/publish-manifest.test.ts "the major.minor invariant":
+  #     each CDN app's package.json major.minor equals ghost/core
+  #     defaults.json <cdn>.version (Ghost serves `<pkg>@~major.minor`).
+  #     The scripts derive the CDN set from publish-manifest.json entries with
+  #     a `cdn` key; these six rules hand-list it (a seventh CDN entry would go
+  #     unchecked), hence C. semver-minor normalizes BOTH sides, so the strict
+  #     `defaults === majorMinor(pkg)` string compare is completed by
+  #     ghost-cdn-defaults-version-is-major-minor below.
+  - id: ghost-cdn-app-version-portal
+    kind: cross_file
+    source:
+      file: apps/portal/package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: ghost/core/shared/config/defaults.json
+        extract: { json: "$.portal.version" }
+    relation: equals
+    normalize: semver-minor
+    level: error
+    message: "apps/portal major.minor must equal defaults.json portal.version (run `pnpm ship`)."
+
+  - id: ghost-cdn-app-version-sodo-search
+    kind: cross_file
+    source:
+      file: apps/sodo-search/package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: ghost/core/shared/config/defaults.json
+        extract: { json: "$.sodoSearch.version" }
+    relation: equals
+    normalize: semver-minor
+    level: error
+    message: "apps/sodo-search major.minor must equal defaults.json sodoSearch.version (run `pnpm ship`)."
+
+  - id: ghost-cdn-app-version-comments-ui
+    kind: cross_file
+    source:
+      file: apps/comments-ui/package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: ghost/core/shared/config/defaults.json
+        extract: { json: "$.comments.version" }
+    relation: equals
+    normalize: semver-minor
+    level: error
+    message: "apps/comments-ui major.minor must equal defaults.json comments.version (run `pnpm ship`)."
+
+  - id: ghost-cdn-app-version-signup-form
+    kind: cross_file
+    source:
+      file: apps/signup-form/package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: ghost/core/shared/config/defaults.json
+        extract: { json: "$.signupForm.version" }
+    relation: equals
+    normalize: semver-minor
+    level: error
+    message: "apps/signup-form major.minor must equal defaults.json signupForm.version (run `pnpm ship`)."
+
+  - id: ghost-cdn-app-version-announcement-bar
+    kind: cross_file
+    source:
+      file: apps/announcement-bar/package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: ghost/core/shared/config/defaults.json
+        extract: { json: "$.announcementBar.version" }
+    relation: equals
+    normalize: semver-minor
+    level: error
+    message: "apps/announcement-bar major.minor must equal defaults.json announcementBar.version (run `pnpm ship`)."
+
+  - id: ghost-cdn-app-version-admin-toolbar
+    kind: cross_file
+    source:
+      file: apps/admin-toolbar/package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: ghost/core/shared/config/defaults.json
+        extract: { json: "$.adminToolbar.version" }
+    relation: equals
+    normalize: semver-minor
+    level: error
+    message: "apps/admin-toolbar major.minor must equal defaults.json adminToolbar.version (run `pnpm ship`)."
+
+  # ghost-30 (cont.), C - majorMinor() (tools/scripts/lib/publish-manifest.ts:129)
+  #     returns `${major}.${minor}` from semver.parse, and the scripts compare
+  #     it to defaults.json <cdn>.version with !==, so the defaults value must
+  #     be exactly X.Y (no patch, no leading zeros, a string). Only the six
+  #     CDN app objects carry `version` in defaults.json at the pin.
+  - id: ghost-cdn-defaults-version-is-major-minor
+    kind: json_path_absent
+    paths: ghost/core/shared/config/defaults.json
+    path: "$[?@.version && !match(@.version, '(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)')]"
+    level: error
+    message: "A defaults.json CDN app version must be exactly major.minor (e.g. 2.72), as check-app-version-bump.ts compares it with !==."
+
+  # ghost-31, A - check-internal-packages.ts:60-70,380-388: a compliant
+  #     internal package declares exactly these devDependency specs.
+  - id: ghost-pkg-compliant-required-devdeps
+    kind: json_path_absent
+    paths:
+      include: ["packages/**/package.json"]
+      exclude: ["packages/**/node_modules/**"]
+    path: >-
+      $[?$.private == true && $.ghostPackage.goldenPath == 'compliant' && (
+      $.devDependencies['@internal/cfg-eslint'] != 'workspace:*' ||
+      $.devDependencies['@internal/cfg-typescript'] != 'workspace:*' ||
+      $.devDependencies['@internal/cfg-vitest'] != 'workspace:*' ||
+      $.devDependencies['@types/node'] != 'catalog:' ||
+      $.devDependencies['@vitest/coverage-v8'] != 'catalog:' ||
+      $.devDependencies['@typescript/native'] != 'catalog:' ||
+      $.devDependencies.eslint != 'catalog:' ||
+      $.devDependencies.typescript != 'catalog:' ||
+      $.devDependencies.vitest != 'catalog:')]
+    level: error
+    message: "Compliant internal packages must declare the standard devDependencies (@internal/cfg-* workspace:*, toolchain catalog:)."
+
+  # VALUE-ADD (former ghost-33, removed by Stage B; not in the ratio).
+  #     e2e-runner-image.yml runs only post-merge (push to main, weekly
+  #     schedule, workflow_dispatch), and its guard (lines 52-66) exits 1 only
+  #     when the catalog value and the e2e/package.json fallback are both
+  #     empty, null or 'catalog:'. A range such as ^1.65.0 passes that guard,
+  #     so this concrete-version predicate is stricter than anything the
+  #     repository checks: kept at info as a hygiene check on the pin the
+  #     runner image tag is derived from.
+  - id: ghost-playwright-catalog-pin-concrete
+    kind: yaml_path_matches
+    paths: pnpm-workspace.yaml
+    path: "$.catalog['@playwright/test']"
+    matches: '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'
+    level: info
+    message: "pnpm-workspace.yaml catalog @playwright/test must be a concrete version (the e2e runner image tag is built from it)."
+
+  # ghost-34, C - renovate.json5:229-239 "Hold the Tinybird CLI at 4.6.13
+  #     (4.6.14+ breaks fixture ingestion)", allowedVersions <4.6.14. A
+  #     hand-encoded regex ceiling, hence C.
+  - id: ghost-tinybird-cli-held
+    kind: file_content_matches
+    paths: docker/tb-cli/Dockerfile
+    pattern: '(?m)^ARG TINYBIRD_VERSION=(?:[0-3]\.[0-9]+\.[0-9]+|4\.[0-5]\.[0-9]+|4\.6\.(?:[0-9]|1[0-3]))[ \t]*$'
+    level: error
+    message: "The Tinybird CLI must stay below 4.6.14 (renovate.json5 hold)."
+
+  # ghost-35, C - renovate.json5:241-249 "Stay on the MySQL 8 line - that's
+  #     what Ghost supports and what CI and local dev run against"
+  #     (allowedVersions <9). Hand-encoded regex, hence C.
+  - id: ghost-mysql-8-line
+    kind: file_content_forbidden
+    paths:
+      - compose.dev.yaml
+      - ".github/workflows/*.yml"
+    pattern: '\bmysql:(?:9|[1-9][0-9]+)(?:[.@-]|\b)'
+    level: error
+    message: "MySQL images must stay on the 8.x line (renovate.json5 cap)."
+
+  # ghost-36, C - renovate.json5:251-258 "Cap the catalog flexsearch at 0.7"
+  #     (Admin search is tuned for FlexSearch 0.7). Hand-encoded regex.
+  - id: ghost-flexsearch-0-7
+    kind: yaml_path_matches
+    paths: pnpm-workspace.yaml
+    path: "$.catalog.flexsearch"
+    matches: '^[~^]?0\.[0-7](\.[0-9]+.*)?$'
+    level: error
+    message: "The catalog flexsearch must stay below 0.8 (renovate.json5 cap)."
+
+  # ════════════════════════════════════════════════════════════════
+  # OTHER family
+  # ════════════════════════════════════════════════════════════════
+
+  # ghost-40, A - check-versioning-ignore.ts:49-54: every private workspace
+  #     manifest (root included) carries the placeholder version "private".
+  - id: ghost-private-packages-version-placeholder
+    kind: json_path_absent
+    paths:
+      include:
+        - package.json
+        - ghost/package.json
+        - "apps/*/package.json"
+        - e2e/package.json
+        - "koenig/*/package.json"
+        - "packages/**/package.json"
+        - "tools/*/package.json"
+        - "tools/configs/*/package.json"
+      exclude:
+        - "packages/_template/**"
+        - "**/node_modules/**"
+    path: "$[?$.private == true && $.version != 'private']"
+    level: error
+    message: "Private workspace packages must carry version \"private\" (pnpm version -r skips them)."
+
+  # ghost-41, A - check-versioning-ignore.ts: versioning.ignore lists exactly
+  #     the externally versioned packages: `ghost` plus every
+  #     tools/scripts/release/publish-manifest.json entry.
+  - id: ghost-versioning-ignore-is-continuous-lane
+    kind: cross_file
+    source:
+      file: pnpm-workspace.yaml
+      extract: { yaml: "$.versioning.ignore[?@ != 'ghost']" }
+    targets:
+      - file: tools/scripts/release/publish-manifest.json
+        extract: { json: "$[*].name" }
+    relation: set_equals
+    level: error
+    message: "pnpm-workspace.yaml versioning.ignore (besides ghost) must list exactly the publish-manifest.json packages."
+
+  - id: ghost-versioning-ignore-has-ghost
+    kind: cross_file
+    source:
+      file: ghost/package.json
+      extract: { json: "$.name" }
+    targets:
+      - file: pnpm-workspace.yaml
+        extract: { yaml: "$.versioning.ignore[*]" }
+    relation: subset
+    level: error
+    message: "pnpm-workspace.yaml versioning.ignore must list ghost (versioned by the release scripts)."
+
+  # ghost-41 (cont.), A - check-versioning-ignore.ts:75-77 also fails on a
+  #     versioning.ignore entry that is not a workspace package name (root
+  #     manifest included, loadManifests). The workspace globs mirror
+  #     pnpm-workspace.yaml `packages:` (packages/_template excluded there).
+  - id: ghost-versioning-ignore-names-workspace-packages
+    kind: cross_file
+    source:
+      files: "{package.json,ghost/package.json,apps/*/package.json,e2e/package.json,koenig/*/package.json,packages/{[!_]*,[!_]*/**}/package.json,tools/*/package.json,tools/configs/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      - file: pnpm-workspace.yaml
+        extract: { yaml: "$.versioning.ignore[*]" }
+    relation: superset
+    level: error
+    message: "Every pnpm-workspace.yaml versioning.ignore entry must name a workspace package (check-versioning-ignore.ts)."
+
+  # ghost-42, C - check-versioning-ignore.ts:65-70: a published package that is
+  #     not externally versioned must carry a semver version. The externally
+  #     versioned names are repeated here by hand (alint cannot join the
+  #     publish manifest into a per-file filter), hence C.
+  - id: ghost-published-packages-semver
+    kind: json_path_absent
+    paths:
+      include:
+        - ghost/package.json
+        - "apps/*/package.json"
+        - e2e/package.json
+        - "koenig/*/package.json"
+        - "packages/**/package.json"
+        - "tools/*/package.json"
+        - "tools/configs/*/package.json"
+      exclude:
+        - "packages/_template/**"
+        - "**/node_modules/**"
+    path: >-
+      $[?$.private != true && $.name != 'ghost' &&
+      $.name != '@tryghost/portal' && $.name != '@tryghost/sodo-search' &&
+      $.name != '@tryghost/comments-ui' && $.name != '@tryghost/signup-form' &&
+      $.name != '@tryghost/announcement-bar' && $.name != '@tryghost/admin-toolbar' &&
+      $.name != '@tryghost/shade' && $.name != '@tryghost/adapter-base-upgrade' &&
+      $.name != '@tryghost/app-sdk' &&
+      !match($.version, '[=v]?(0|[1-9][0-9]*)[.](0|[1-9][0-9]*)[.](0|[1-9][0-9]*)(-[0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?([+][0-9A-Za-z-]+([.][0-9A-Za-z-]+)*)?')]
+    level: error
+    message: "Published packages versioned by changesets must carry a semver version."
+
+  # ghost-43, A - tools/scripts/lib/publish-manifest.ts:48-74 (validated at
+  #     import by every release/CI script): name/path non-empty strings,
+  #     versioning in {patch, prerelease}, a prerelease names a distTag, and
+  #     only patch entries carry a cdn key.
+  - id: ghost-publish-manifest-entries-valid
+    kind: json_path_absent
+    paths: tools/scripts/release/publish-manifest.json
+    path: >-
+      $[?!match(@.name, '[\\s\\S]+') || !match(@.path, '[\\s\\S]+') ||
+      (@.versioning != 'patch' && @.versioning != 'prerelease') ||
+      (@.versioning == 'prerelease' && !@.distTag) ||
+      (@.cdn && @.versioning != 'patch')]
+    level: error
+    message: "publish-manifest.json entry is invalid (name/path strings, versioning patch|prerelease, prerelease needs distTag, cdn only on patch)."
+
+  # ghost-44, C (Stage B: was B-config) - publish-manifest.ts:45-55 z.strictObject:
+  #     no keys beyond name, path, versioning (required, checked above) and the
+  #     optional distTag, cdn, installArgs. RFC 9535 length() on an object
+  #     counts its members, so the allowed key sets are enumerated as the
+  #     2^3 presence combinations of the optional keys (awkward, hence C).
+  - id: ghost-publish-manifest-entries-strict-keys
+    kind: json_path_absent
+    paths: tools/scripts/release/publish-manifest.json
+    path: >-
+      $[?!(
+      (length(@) == 3 && !@.distTag && !@.cdn && !@.installArgs) ||
+      (length(@) == 4 && @.distTag && !@.cdn && !@.installArgs) ||
+      (length(@) == 4 && !@.distTag && @.cdn && !@.installArgs) ||
+      (length(@) == 4 && !@.distTag && !@.cdn && @.installArgs) ||
+      (length(@) == 5 && @.distTag && @.cdn && !@.installArgs) ||
+      (length(@) == 5 && @.distTag && !@.cdn && @.installArgs) ||
+      (length(@) == 5 && !@.distTag && @.cdn && @.installArgs) ||
+      (length(@) == 6 && @.distTag && @.cdn && @.installArgs))]
+    level: error
+    message: "publish-manifest.json entries may carry only name, path, versioning, distTag, cdn and installArgs (zod strictObject)."
+
+  # ghost-46, A - every publish-manifest path is a workspace package
+  #     directory (check-app-version-bump.ts:82-85 reads <path>/package.json and
+  #     throws when it is missing; the publish job builds from it).
+  - id: ghost-publish-manifest-paths-resolve
+    kind: registry_paths_resolve
+    source: tools/scripts/release/publish-manifest.json
+    extract: { json: "$[*].path" }
+    base: lint_root
+    expect: dir
+    must_contain: package.json
+    level: error
+    message: "publish-manifest.json path must be a package directory."
+
+  # ghost-47, A - check-internal-packages.ts:466-486: a private package under
+  #     packages/** declares ghostPackage.goldenPath in {compliant, migration,
+  #     exempt}; a non-private one must not declare it.
+  - id: ghost-pkg-golden-path-status
+    kind: json_path_absent
+    paths:
+      include: ["packages/**/package.json"]
+      exclude: ["packages/_template/**", "**/node_modules/**"]
+    path: >-
+      $[?($.private == true && $.ghostPackage.goldenPath != 'compliant' &&
+      $.ghostPackage.goldenPath != 'migration' && $.ghostPackage.goldenPath != 'exempt') ||
+      ($.private != true && $.ghostPackage.goldenPath)]
+    level: error
+    message: "Private packages/** packages need ghostPackage.goldenPath compliant|migration|exempt; published ones must not set it."
+
+  # ghost-48, A - check-internal-packages.ts:488-497: migration and exempt
+  #     packages need a non-blank ghostPackage.reason.
+  - id: ghost-pkg-golden-path-reason
+    kind: json_path_absent
+    paths:
+      include: ["packages/**/package.json"]
+      exclude: ["**/node_modules/**"]
+    path: >-
+      $[?$.private == true && ($.ghostPackage.goldenPath == 'migration' ||
+      $.ghostPackage.goldenPath == 'exempt') && !match($.ghostPackage.reason, '[\\s\\S]*[^\\s][\\s\\S]*')]
+    level: error
+    message: "ghostPackage.reason is required when goldenPath is migration or exempt."
+
+  # ghost-49, A - check-internal-packages.ts:256-290,371-392: the fixed
+  #     manifest fields of a compliant internal package. (The template's
+  #     tokenised name/directory are checked by ghost-54's rule.)
+  - id: ghost-pkg-compliant-manifest-fields
+    kind: json_path_absent
+    paths:
+      include: ["packages/**/package.json"]
+      exclude: ["**/node_modules/**"]
+    path: >-
+      $[?$.private == true && $.ghostPackage.goldenPath == 'compliant' && (
+      $.version != 'private' || $.type != 'module' ||
+      $.author != 'Ghost Foundation' || $.license != 'MIT' ||
+      $.repository.type != 'git' ||
+      $.repository.url != 'git+https://github.com/TryGhost/Ghost.git' ||
+      $.publishConfig ||
+      length($.files) != 1 || $.files[0] != 'build' ||
+      length($.nx.targets.build.outputs) != 1 ||
+      $.nx.targets.build.outputs[0] != '{projectRoot}/build' ||
+      $.scripts.build != 'tsc' ||
+      $.scripts['test:unit'] != 'NODE_ENV=testing vitest run --coverage' ||
+      $.scripts['test:types'] != 'tsc --noEmit -p test/tsconfig.json' ||
+      $.scripts.test != "pnpm run '/^test:/'" ||
+      $.scripts['lint:code'] != 'eslint src/ --cache' ||
+      $.scripts['lint:test'] != 'eslint test/ --cache' ||
+      $.scripts.lint != "pnpm run '/^lint:/'")]
+    level: error
+    message: "Compliant internal package manifest deviates from the golden path (version/type/author/license/repository/files/scripts/nx outputs, no publishConfig)."
+
+  - id: ghost-pkg-compliant-name
+    kind: json_path_absent
+    paths:
+      include: ["packages/**/package.json"]
+      exclude: ["packages/_template/**", "**/node_modules/**"]
+    path: "$[?$.private == true && $.ghostPackage.goldenPath == 'compliant' && !match($.name, '@tryghost/[a-z0-9]+(-[a-z0-9]+)*')]"
+    level: error
+    message: "Compliant internal packages are named @tryghost/<kebab-case-name>."
+
+  - id: ghost-pkg-compliant-repository-directory
+    kind: for_each_file
+    select: ["packages/**/package.json", "!packages/_template/**", "!**/node_modules/**"]
+    require:
+      - kind: json_path_absent
+        paths: "{path}"
+        path: "$[?$.private == true && $.ghostPackage.goldenPath == 'compliant' && $.repository.directory != '{dir}']"
+    level: error
+    message: "A compliant package's repository.directory must be its own path."
+
+  # ghost-51, A - check-internal-packages.ts:140-154: a compliant package has
+  #     tsconfig.json, test/tsconfig.json, eslint.config.mjs and
+  #     vitest.config.ts. Written as the contrapositive (a package directory
+  #     missing one of them must not be compliant), which is exact.
+  - id: ghost-pkg-compliant-config-files
+    kind: for_each_dir
+    select: ["packages/**", "!**/node_modules/**"]
+    when_iter: 'iter.has_file("package.json") and not (iter.has_file("tsconfig.json") and iter.has_file("test/tsconfig.json") and iter.has_file("eslint.config.mjs") and iter.has_file("vitest.config.ts"))'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$[?$.private == true && $.ghostPackage.goldenPath == 'compliant']"
+    level: error
+    message: "A compliant internal package needs tsconfig.json, test/tsconfig.json, eslint.config.mjs and vitest.config.ts."
+
+  # ghost-53, A - check-internal-packages.ts:408-418: no authored JavaScript
+  #     (/\.(c|m)?jsx?$/) under a compliant package's src/ or test/.
+  #     Contrapositive form again.
+  - id: ghost-pkg-compliant-typescript-only
+    kind: for_each_dir
+    select: ["packages/**", "!**/node_modules/**"]
+    when_iter: 'iter.has_file("package.json") and (iter.has_file("src/**/*.{js,jsx,cjs,mjs,cjsx,mjsx}") or iter.has_file("test/**/*.{js,jsx,cjs,mjs,cjsx,mjsx}"))'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$[?$.private == true && $.ghostPackage.goldenPath == 'compliant']"
+    level: error
+    message: "Compliant internal packages author src/ and test/ in TypeScript only."
+
+  # ghost-52, C - check-internal-packages.ts:156-238: exact tsconfig values
+  #     and the shared eslint/vitest factories for compliant packages. alint
+  #     cannot condition one file's check on another file's content, so the
+  #     compliant package directories are listed by hand (hence C).
+  - id: ghost-pkg-compliant-tsconfig
+    kind: json_path_absent
+    paths: "packages/{_template,adapters/jobs-base,adapters/redirects-base,adapters/route-settings-base,admin-api-schema,api-framework,app-contracts,checkout,image-transform,limit-service,metafield-csv,nql-string,parse-email-address}/tsconfig.json"
+    path: >-
+      $[?$.extends != '@internal/cfg-typescript/esm.json' ||
+      $.compilerOptions.rootDir != 'src' || $.compilerOptions.outDir != 'build' ||
+      length($.include) != 1 || $.include[0] != 'src/**/*']
+    level: error
+    message: "Compliant package tsconfig.json must extend @internal/cfg-typescript/esm.json with rootDir src, outDir build, include [src/**/*]."
+
+  - id: ghost-pkg-compliant-test-tsconfig
+    kind: json_path_absent
+    paths: "packages/{_template,adapters/jobs-base,adapters/redirects-base,adapters/route-settings-base,admin-api-schema,api-framework,app-contracts,checkout,image-transform,limit-service,metafield-csv,nql-string,parse-email-address}/test/tsconfig.json"
+    path: >-
+      $[?$.extends != '../tsconfig.json' || $.compilerOptions.rootDir != '..' ||
+      $.compilerOptions.noEmit != true || length($.include) != 2 ||
+      $.include[0] != '../src/**/*' || $.include[1] != '**/*']
+    level: error
+    message: "Compliant package test/tsconfig.json must extend ../tsconfig.json with rootDir .., noEmit true, include [../src/**/*, **/*]."
+
+  - id: ghost-pkg-compliant-eslint-factory-import
+    kind: file_content_matches
+    paths: "packages/{_template,adapters/jobs-base,adapters/redirects-base,adapters/route-settings-base,admin-api-schema,api-framework,app-contracts,checkout,image-transform,limit-service,metafield-csv,nql-string,parse-email-address}/eslint.config.mjs"
+    pattern: '(?m)^\s*import\s*\{\s*nodeLibConfig\s*\}\s*from\s*[''"]@internal/cfg-eslint[''"];?\s*$'
+    level: error
+    message: "eslint.config.mjs must import nodeLibConfig from @internal/cfg-eslint."
+
+  - id: ghost-pkg-compliant-eslint-factory-export
+    kind: file_content_matches
+    paths: "packages/{_template,adapters/jobs-base,adapters/redirects-base,adapters/route-settings-base,admin-api-schema,api-framework,app-contracts,checkout,image-transform,limit-service,metafield-csv,nql-string,parse-email-address}/eslint.config.mjs"
+    pattern: '(?m)^\s*export\s+default\s+nodeLibConfig\s*\('
+    level: error
+    message: "eslint.config.mjs must export default nodeLibConfig(...)."
+
+  - id: ghost-pkg-compliant-vitest-factory-import
+    kind: file_content_matches
+    paths: "packages/{_template,adapters/jobs-base,adapters/redirects-base,adapters/route-settings-base,admin-api-schema,api-framework,app-contracts,checkout,image-transform,limit-service,metafield-csv,nql-string,parse-email-address}/vitest.config.ts"
+    pattern: '(?m)^\s*import\s*\{\s*createVitestConfig\s*\}\s*from\s*[''"]@internal/cfg-vitest[''"];?\s*$'
+    level: error
+    message: "vitest.config.ts must import createVitestConfig from @internal/cfg-vitest."
+
+  - id: ghost-pkg-compliant-vitest-factory-export
+    kind: file_content_matches
+    paths: "packages/{_template,adapters/jobs-base,adapters/redirects-base,adapters/route-settings-base,admin-api-schema,api-framework,app-contracts,checkout,image-transform,limit-service,metafield-csv,nql-string,parse-email-address}/vitest.config.ts"
+    pattern: '(?m)^\s*export\s+default\s+createVitestConfig\s*\('
+    level: error
+    message: "vitest.config.ts must export default createVitestConfig(...)."
+
+  # ghost-54, C - check-internal-packages.ts:510-536: packages/_template is
+  #     validated as a compliant package after {{NAME}}/{{DIRECTORY}} token
+  #     substitution. The token-independent fields are covered by the ghost-49,
+  #     -51, -52, -53 and ghost-31 rules (their globs include _template); this
+  #     rule accepts the tokens in the two fields they appear in.
+  - id: ghost-pkg-template-tokens
+    kind: json_path_absent
+    paths: packages/_template/package.json
+    path: >-
+      $[?!match($.name, '@tryghost/(?:[a-z0-9]+|[{][{]NAME[}][}])(?:-(?:[a-z0-9]+|[{][{]NAME[}][}]))*') ||
+      ($.repository.directory != '{{DIRECTORY}}' && $.repository.directory != 'packages/template')]
+    level: error
+    message: "packages/_template/package.json must stay a valid compliant package after token substitution."
+
+  # ghost-57, C - ghost/test/unit/server/data/migrations/
+  #     no-permission-migrations.test.ts: migrations in version folders newer
+  #     than 6.72 must not touch permissions. The semver comparison is a
+  #     hand-encoded folder glob (any 6.73+ or 7+ folder), hence C.
+  - id: ghost-no-permission-migrations
+    kind: file_content_forbidden
+    paths:
+      - "ghost/core/server/data/migrations/versions/6.7[3-9]/*.{js,ts}"
+      - "ghost/core/server/data/migrations/versions/6.[89][0-9]/*.{js,ts}"
+      - "ghost/core/server/data/migrations/versions/6.[1-9][0-9][0-9]*/*.{js,ts}"
+      - "ghost/core/server/data/migrations/versions/[7-9].*/*.{js,ts}"
+      - "ghost/core/server/data/migrations/versions/[1-9][0-9]*.*/*.{js,ts}"
+    pattern: '\b(addPermission|addPermissionToRole|addPermissionWithRoles|removePermissionFromRole|createRemovePermissionMigration)\b|\bpermissions_(roles|users)\b|[''"`]permissions[''"`.]'
+    level: error
+    message: "Permissions live in services/permissions/permissions-data.ts; do not add permission migrations after 6.72."
+
+  # ghost-59, A - migration files carry the generator's name
+  #     (docs/practices/database-migrations.md:27-45 "Always use this command
+  #     rather than creating or naming the file manually";
+  #     .github/workflows/migration-review.yml:33-60 checklist item "Filename
+  #     is in the correct format (and correctly ordered)"; .oxlintrc.json:131-145
+  #     local-filenames/match-regex for versions/** except 1.x-3.x, probably
+  #     inert).
+  - id: ghost-migration-filenames
+    kind: filename_regex
+    paths:
+      include: ["ghost/core/server/data/migrations/versions/**/*.{js,ts}"]
+      exclude:
+        - "ghost/core/server/data/migrations/versions/1.*/**"
+        - "ghost/core/server/data/migrations/versions/2.*/**"
+        - "ghost/core/server/data/migrations/versions/3.*/**"
+    stem: true
+    pattern: '^(?:\d{4}(?:-\d{2}){4,5}|\d{2})(?:-[a-zA-Z0-9]+){2,}$'
+    level: error
+    message: "Migration files must be named <timestamp>-<slug> (create them with `pnpm gx generate migration <slug>`)."
+
+  # ghost-60, C - .oxlintrc.json:146-170 local-filenames/match-regex:
+  #     lowercase file stems in ghost/core (helpers may also use '_') and
+  #     ghost/test. Three files opt out with an inline
+  #     `oxlint-disable local-filenames/match-regex`; alint has no inline
+  #     exemption, so they are excluded by name (hence C).
+  - id: ghost-core-filenames
+    kind: filename_regex
+    paths:
+      include: ["ghost/core/**/*.{js,ts}"]
+      exclude:
+        - "ghost/core/server/adapters/**"
+        - "ghost/core/built/**"
+        - "ghost/core/frontend/public/**"
+        - "ghost/core/frontend/helpers/**"
+        - "ghost/core/frontend/apps/*/lib/helpers/**"
+        - "ghost/core/server/api/endpoints/utils/validators/input/automated_emails.js"
+        - "ghost/core/server/api/endpoints/utils/validators/input/automation_email_previews.js"
+        - "ghost/core/server/api/endpoints/utils/validators/input/password_reset.js"
+    stem: true
+    pattern: '^[a-z0-9.-]+$'
+    level: error
+    message: "ghost/core file names must be lowercase kebab-case (oxlint local-filenames/match-regex)."
+
+  - id: ghost-core-helper-filenames
+    kind: filename_regex
+    paths:
+      - "ghost/core/frontend/helpers/**/*.{js,ts}"
+      - "ghost/core/frontend/apps/*/lib/helpers/**/*.{js,ts}"
+    stem: true
+    pattern: '^[a-z0-9_.-]+$'
+    level: error
+    message: "ghost/core helper file names must be lowercase (letters, digits, '.', '-', '_')."
+
+  - id: ghost-test-filenames
+    kind: filename_regex
+    paths:
+      include: ["ghost/test/**/*.{js,ts}"]
+      exclude:
+        - "ghost/test/coverage/**"
+        - "ghost/test/utils/fixtures/themes/casper/assets/**"
+        - "ghost/test/utils/fixtures/themes/source/assets/**"
+    stem: true
+    pattern: '^[a-z0-9.-]+$'
+    level: error
+    message: "ghost/test file names must be lowercase kebab-case (oxlint local-filenames/match-regex)."
+
+  # ghost-65, A - legacy-service-inventory.test.ts:255-323: every evidence path
+  #     (migration and dependency sources, contract sources, extras callers) is
+  #     a file inside ghost/; contract tests start with test/ and are files
+  #     under ghost/test.
+  - id: ghost-inventory-evidence-paths-resolve
+    kind: registry_paths_resolve
+    source: ghost/core/server/services/legacy-service-inventory.yaml
+    extract: { yaml: "$..sources[*]" }
+    base: ghost
+    expect: file
+    level: error
+    message: "Legacy service inventory evidence path must be a file under ghost/."
+
+  - id: ghost-inventory-extras-callers-resolve
+    kind: registry_paths_resolve
+    source: ghost/core/server/services/legacy-service-inventory.yaml
+    extract: { yaml: "$.followUps.*.extras.*.callers[*]" }
+    base: ghost
+    expect: file
+    level: error
+    message: "Legacy service inventory extras caller must be a file under ghost/."
+
+  - id: ghost-inventory-contract-tests-resolve
+    kind: registry_paths_resolve
+    source: ghost/core/server/services/legacy-service-inventory.yaml
+    extract: { yaml: "$.services.*.contracts.*.tests[*]" }
+    base: ghost
+    expect: file
+    level: error
+    message: "Legacy service inventory contract test must be a file under ghost/test/."
+
+  - id: ghost-inventory-contract-tests-prefix
+    kind: yaml_path_absent
+    paths: ghost/core/server/services/legacy-service-inventory.yaml
+    path: "$.services.*.contracts.*.tests[?!match(@, 'test/.*')]"
+    level: error
+    message: "Legacy service inventory contract tests must be test/ paths."
+
+  # ghost-66, A - legacy-service-inventory.test.ts:295-305: every entry point
+  #     is a file under core/server/services.
+  - id: ghost-inventory-entry-points-resolve
+    kind: registry_paths_resolve
+    source: ghost/core/server/services/legacy-service-inventory.yaml
+    extract: { yaml: "$.services.*.entryPoints[*]" }
+    expect: file
+    level: error
+    message: "Legacy service entry point must be a file under ghost/core/server/services."
+
+  # ghost-69, A - legacy-service-inventory.test.ts:259-290,325-334: status and
+  #     migration-assessment pairing rules over each legacy entry.
+  - id: ghost-inventory-status-and-assessment
+    kind: yaml_path_absent
+    paths: ghost/core/server/services/legacy-service-inventory.yaml
+    path: >-
+      $.services[?
+      (@.migration.complexity == 'not-applicable' && @.migration.modelImpact != 'not-applicable') ||
+      (@.migration.complexity != 'not-applicable' && @.migration.modelImpact == 'not-applicable') ||
+      (@.migration.complexity == 'not-applicable' && @.disposition != 'relocate') ||
+      (@.migration.modelImpact == 'may-change' && @.migration.complexity != 'complex') ||
+      (@.migration.dependencies.complexity == 'not-applicable' && @.migration.complexity != 'not-applicable') ||
+      (@.status == 'pending' && length(@.contracts) > 0) ||
+      (@.status != 'pending' && length(@.contracts) == 0) ||
+      (@.status == 'auditing' && length(@.unverified) == 0) ||
+      (@.status == 'audited' && length(@.unverified) > 0)]
+    level: error
+    message: "Legacy service entry breaks a status/evidence or migration-assessment rule (legacy-service-inventory.test.ts)."
+
+  # ghost-73, A - tools/scripts/ci/check-agent-guidance.ts (ci.yml lint:docs,
+  #     pre-commit): every tracked AGENTS.md is at most 150 lines.
+  - id: ghost-agents-md-max-lines
+    kind: file_max_lines
+    paths: "**/AGENTS.md"
+    max_lines: 150
+    level: error
+    message: "AGENTS.md files must stay within 150 lines."
+
+  # ghost-74, A - tools/scripts/ci/check-agent-skill-links.ts:35-47: every
+  #     .agents/skills/<name> holds a SKILL.md file.
+  - id: ghost-agent-skills-have-skill-md
+    kind: for_each_dir
+    select: ".agents/skills/*"
+    require:
+      - kind: file_exists
+        paths: "{path}/SKILL.md"
+    level: error
+    message: "Every .agents/skills/<name> directory needs a SKILL.md."
+
+  # ghost-92, A - .github/workflows/README.md "Supply chain": "Pin every
+  #     third-party action to a full commit SHA" (also checklist item 5). Held
+  #     at the pin for every workflow and composite action. (The README's other
+  #     rules - top-level `permissions: { contents: read }`, no
+  #     `${{ github.event.* }}` inside `run:` - are violated at the pin, so they
+  #     are not counted, R5.)
+  - id: ghost-gha-actions-pinned
+    kind: pinned_references
+    paths:
+      - ".github/workflows/*.yml"
+      - ".github/actions/*/action.yml"
+    format: github_actions
+    level: error
+    message: "Third-party actions must be pinned to a full commit SHA (.github/workflows/README.md)."
+
+  # ghost-83, C (no rule here) - .github/hooks/commit-msg.bash:39-40 rejects a
+  #     third commit-message line starting with `refs` or `ref:`. A git commit
+  #     message kind could express it, but corpus configs use no git-history
+  #     kinds (depth-1 clones), so it is recorded without a rule.
+
+  # ghost-82, C - .github/hooks/pre-commit.bash secretlint on staged files with
+  #     the custom .secretlintrc.json patterns. Two of the four patterns
+  #     translate directly; the URL-query and assignment patterns rely on a
+  #     lookahead and allowlists alint's regex cannot express, and the hook
+  #     scans only staged files, hence C.
+  - id: ghost-no-tinybird-tokens
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*"]
+      exclude: ["pnpm-lock.yaml"]
+    pattern: '\bp\.eyJ[A-Za-z0-9_-]{15,}\.[A-Za-z0-9_-]{20,}\b'
+    level: error
+    message: "Possible Tinybird token committed (secretlint pattern 'Tinybird token')."
+
+  - id: ghost-no-authorization-header-credentials
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*"]
+      exclude: ["pnpm-lock.yaml"]
+    pattern: '(?i)\bAuthorization\s*:\s*(?:Bearer|Basic)\s+[A-Za-z0-9_./+=:-]{20,}'
+    level: error
+    message: "Possible credential in an Authorization header (secretlint pattern 'authorization header')."
+
+  # ghost-80, C (Stage B: was D) - lint:doc-links (package.json:51, ci.yml lint:docs)
+  #     runs remark-validate-links --frail over `git ls-files '*.md'` minus
+  #     .changeset/**, **/fixture/** and **/fixtures/**: relative links and
+  #     heading fragments must resolve. alint walks tracked directory
+  #     symlinks that `git ls-files` does not expand, so .claude/** (all
+  #     symlinks into .agents/skills) and the six .agents/skills/shade-*
+  #     symlinks (into apps/shade/skills) are excluded to mirror the file set.
+  #     C, not A: remark-validate-links also validates links to the repo's own
+  #     github.com/TryGhost/Ghost blob/tree URLs, which alint does not resolve.
+  - id: ghost-doc-links-resolve
+    kind: markdown_links_resolve
+    paths:
+      include: ["**/*.md"]
+      exclude:
+        - ".changeset/**"
+        - "**/fixture/**"
+        - "**/fixtures/**"
+        - ".claude/**"
+        - ".agents/skills/shade-imports/**"
+        - ".agents/skills/shade-no-dark-variants/**"
+        - ".agents/skills/shade-page-header/**"
+        - ".agents/skills/shade-page-templates/**"
+        - ".agents/skills/shade-tokens-not-hex/**"
+        - ".agents/skills/shade-use-primitives/**"
+    level: error
+    message: "Markdown link does not resolve (lint:doc-links, remark-validate-links)."
+
+  - id: ghost-doc-fragments-resolve
+    kind: markdown_fragments_resolve
+    paths:
+      include: ["**/*.md"]
+      exclude:
+        - ".changeset/**"
+        - "**/fixture/**"
+        - "**/fixtures/**"
+        - ".claude/**"
+        - ".agents/skills/shade-imports/**"
+        - ".agents/skills/shade-no-dark-variants/**"
+        - ".agents/skills/shade-page-header/**"
+        - ".agents/skills/shade-page-templates/**"
+        - ".agents/skills/shade-tokens-not-hex/**"
+        - ".agents/skills/shade-use-primitives/**"
+    level: error
+    message: "Markdown link fragment names no heading in its target (lint:doc-links, remark-validate-links)."
+
+  # ghost-b01, A - e2e/tests/stripe-fixtures/drift.test.ts:24-33 (fixtures
+  #     project, ci.yml job_stripe_fixtures, needed by job_required_tests): the
+  #     captured Stripe fixtures' api_version equals ghost/core's pinned
+  #     STRIPE_API_VERSION (stripe-api.js:38). The test also hard-codes
+  #     '2020-08-27' for the manifest, so a joint bump must edit the test;
+  #     the second rule repeats that snapshot.
+  - id: ghost-stripe-fixture-api-version
+    kind: cross_file
+    source:
+      file: ghost/core/server/services/stripe/stripe-api.js
+      extract: { regex: "(?m)^const STRIPE_API_VERSION = '([^']+)';" }
+    targets:
+      - file: e2e/helpers/services/stripe/fixtures/manifest.json
+        extract: { json: "$.api_version" }
+    relation: equals
+    level: error
+    message: "e2e Stripe fixtures manifest api_version must equal STRIPE_API_VERSION in ghost/core stripe-api.js (re-capture with `pnpm stripe:fixtures`)."
+
+  - id: ghost-stripe-fixture-api-version-snapshot
+    kind: json_path_equals
+    paths: e2e/helpers/services/stripe/fixtures/manifest.json
+    path: "$.api_version"
+    equals: "2020-08-27"
+    level: error
+    message: "drift.test.ts pins the Stripe fixtures api_version to 2020-08-27; update the test with the fixtures."
+
+  # ghost-b02, C - e2e/tests/frontend-apps/local-assets.test.ts:14-81
+  #     (job_stripe_fixtures): e2e/Dockerfile.e2e, docker/ghost-dev/Dockerfile
+  #     and tools/scripts/with-ghost-dev-env.ts override exactly the
+  #     defaults.json <app>.url / <app>.styles fields that point at
+  #     https://cdn.jsdelivr.net/ghost/ (keys <app>__url / <app>__styles).
+  #     alint has no JSON key extractor and cannot compose <app>__<field>, so
+  #     the defaults.json side is a layout-dependent regex (2-space app keys,
+  #     4-space fields) and each field gets its own rule, hence C.
+  - id: ghost-frontend-overrides-cover-cdn-urls
+    kind: cross_file
+    source:
+      file: ghost/core/shared/config/defaults.json
+      extract: { regex: '(?m)^  "(\w+)": \{\r?\n(?:    [^\n]*\n)*?    "url": "https://cdn\.jsdelivr\.net/ghost/' }
+    targets:
+      - file: e2e/Dockerfile.e2e
+        extract: { regex: '(\w+)__url[=:]\s*''?/ghost/assets/[\w-]+/[^\s''\\]+' }
+      - file: docker/ghost-dev/Dockerfile
+        extract: { regex: '(\w+)__url[=:]\s*''?/ghost/assets/[\w-]+/[^\s''\\]+' }
+      - file: tools/scripts/with-ghost-dev-env.ts
+        extract: { regex: '(\w+)__url[=:]\s*''?/ghost/assets/[\w-]+/[^\s''\\]+' }
+    relation: set_equals
+    level: error
+    message: "Local frontend-app __url overrides must cover exactly the defaults.json apps served from jsDelivr (local-assets.test.ts)."
+
+  - id: ghost-frontend-overrides-cover-cdn-styles
+    kind: cross_file
+    source:
+      file: ghost/core/shared/config/defaults.json
+      extract: { regex: '(?m)^  "(\w+)": \{\r?\n(?:    [^\n]*\n)*?    "styles": "https://cdn\.jsdelivr\.net/ghost/' }
+    targets:
+      - file: e2e/Dockerfile.e2e
+        extract: { regex: '(\w+)__styles[=:]\s*''?/ghost/assets/[\w-]+/[^\s''\\]+' }
+      - file: docker/ghost-dev/Dockerfile
+        extract: { regex: '(\w+)__styles[=:]\s*''?/ghost/assets/[\w-]+/[^\s''\\]+' }
+      - file: tools/scripts/with-ghost-dev-env.ts
+        extract: { regex: '(\w+)__styles[=:]\s*''?/ghost/assets/[\w-]+/[^\s''\\]+' }
+    relation: set_equals
+    level: error
+    message: "Local frontend-app __styles overrides must cover exactly the defaults.json styles served from jsDelivr (local-assets.test.ts)."
+
+  # ghost-b03, A - local-assets.test.ts:83-91: for every asset dir an
+  #     e2e/Dockerfile.e2e override points at (/ghost/assets/<dir>/...), the
+  #     file contains `COPY apps/<dir>/umd /home/ghost/core/built/admin/assets/<dir>`.
+  #     Subset of override dirs into COPY destination dirs, plus src == dst on
+  #     every such COPY line.
+  - id: ghost-e2e-dockerfile-copies-override-assets
+    kind: cross_file
+    source:
+      file: e2e/Dockerfile.e2e
+      extract: { regex: '\w+__(?:url|styles)[=:]\s*''?/ghost/assets/([\w-]+)/[^\s''\\]+' }
+    targets:
+      - file: e2e/Dockerfile.e2e
+        extract: { regex: '(?m)^COPY apps/[\w-]+/umd /home/ghost/core/built/admin/assets/([\w-]+)' }
+    relation: subset
+    level: error
+    message: "e2e/Dockerfile.e2e must COPY apps/<dir>/umd into built/admin/assets/<dir> for every asset dir an override points at."
+
+  - id: ghost-e2e-dockerfile-copy-dirs-match
+    kind: for_each_match
+    paths: e2e/Dockerfile.e2e
+    select: '^COPY apps/(?P<src>[\w-]+)/umd /home/ghost/core/built/admin/assets/(?P<dst>[\w-]+)'
+    require:
+      equal: [src, dst]
+    level: error
+    message: "An e2e/Dockerfile.e2e frontend-app COPY must copy apps/<dir>/umd into built/admin/assets/<dir> (same dir)."
+
+  # ghost-b04, C - local-assets.test.ts:50-66,93-103: every apps/<dir> whose
+  #     package.json nx.tags has public-app is copied into the e2e image
+  #     (`COPY apps/<dir>/umd ` in e2e/Dockerfile.e2e) and listed in ci.yml's
+  #     e2e-public-apps tarball (`apps/<dir>/umd` lines, ci.yml:2230-2235).
+  #     alint cannot select manifests by content, so the six public apps at the
+  #     pin are hand-listed, hence C.
+  - id: ghost-public-apps-in-e2e-image
+    kind: cross_file
+    relation: registered
+    source:
+      files: "apps/{admin-toolbar,announcement-bar,comments-ui,portal,signup-form,sodo-search}/package.json"
+    register_as: "{parent_name}"
+    targets:
+      - file: e2e/Dockerfile.e2e
+        extract: { regex: 'COPY apps/([\w-]+)/umd ' }
+      - file: .github/workflows/ci.yml
+        extract: { regex: '(?m)^\s+apps/([\w-]+)/umd\b' }
+    level: error
+    message: "Every public app must be COPYed into e2e/Dockerfile.e2e and listed in ci.yml's e2e-public-apps tarball."
+
+  # ghost-b05, A - docs/practices/database-migrations.md:207-212 "Do not use
+  #     the model layer"; migration-review.yml checklist "Does not reference
+  #     models". Holds at the pin (no migration file mentions `models`).
+  - id: ghost-migrations-no-models
+    kind: file_content_forbidden
+    paths: "ghost/core/server/data/migrations/versions/**/*.{js,ts}"
+    pattern: '\bmodels\b'
+    level: error
+    message: "Migrations must not use the model layer; use the migration's transaction and migration utils."
+
+  # ghost-b07, A - tools/scripts/lib/dependency-boundaries.ts:13-19,54-56
+  #     (lint:boundaries, ci.yml job_lint): .dependency-cruiser-known-violations.json
+  #     parses as an array of z.strictObject({rule: enum, from:
+  #     startsWith('ghost/core/server/services/'), to: min(1)}). All three keys
+  #     are required, so length(@) == 3 expresses the strict key set.
+  - id: ghost-known-violations-entry-shape
+    kind: json_path_absent
+    paths: .dependency-cruiser-known-violations.json
+    path: >-
+      $[?!(@.rule == 'service-dependencies' || @.rule == 'service-own-root' ||
+      @.rule == 'service-unresolved') ||
+      !match(@.from, 'ghost/core/server/services/[\\s\\S]*') ||
+      !match(@.to, '[\\s\\S]+')]
+    level: error
+    message: "Known-violation entries need rule service-dependencies|service-own-root|service-unresolved, a from under ghost/core/server/services/ and a non-empty to."
+
+  - id: ghost-known-violations-strict-keys
+    kind: json_path_absent
+    paths: .dependency-cruiser-known-violations.json
+    path: "$[?length(@) != 3]"
+    level: error
+    message: "Known-violation entries carry exactly rule, from and to (zod strictObject)."
+
+  # ghost-b08, C - dependency-boundaries.ts:23-29,57-68: a known violation's
+  #     `from` service (first path segment under services/) must be a legacy
+  #     inventory service whose dependencyChecks is not deferred. The inventory
+  #     keys come from an indentation-dependent regex (no YAML key extractor);
+  #     it takes a 2-space key whose first field is a legacy-entry field, so
+  #     followUps keys (extras/futureHome/lifecycle) are not counted. The
+  #     deferred services are hand-copied from `dependencyChecks: deferred`
+  #     (no disjointness relation), hence C.
+  - id: ghost-known-violations-legacy-services
+    kind: cross_file
+    source:
+      file: .dependency-cruiser-known-violations.json
+      extract: { regex: '"from":\s*"ghost/core/server/services/([^/"]+)' }
+    targets:
+      - file: ghost/core/server/services/legacy-service-inventory.yaml
+        extract: { regex: '(?m)^  ([a-z0-9][a-z0-9._-]*):[ \t]*\r?\n    (?:kind|disposition|dependencyChecks|status|auditedAt|entryPoints|notes|migration|contracts|unverified|blockers):' }
+    relation: subset
+    level: error
+    message: "A known violation must belong to a legacy service listed in legacy-service-inventory.yaml."
+
+  - id: ghost-known-violations-not-deferred
+    kind: file_content_forbidden
+    paths: .dependency-cruiser-known-violations.json
+    pattern: '"from":\s*"ghost/core/server/services/(?:automations|members|members-metafields|stripe)[/"]'
+    level: error
+    message: "Services with dependencyChecks: deferred (automations, members, members-metafields, stripe) must have no known-violation entries."
+
+  # ghost-b11, A - docs/contributing/documentation.md:35 "Add each bounded
+  #     context and its relationships to the root CONTEXT-MAP.md": every
+  #     CONTEXT.md is listed as a `Path: ` line in CONTEXT-MAP.md.
+  - id: ghost-context-map-lists-contexts
+    kind: cross_file
+    relation: registered
+    source:
+      files: "**/CONTEXT.md"
+    register_as: "{path}"
+    targets:
+      - file: CONTEXT-MAP.md
+        extract: { regex: '(?m)^Path: `([^`]+)`' }
+    level: error
+    message: "Every CONTEXT.md must be listed in the root CONTEXT-MAP.md (docs/contributing/documentation.md)."
+
+  # ghost-b12, A - ghost/test/unit/bin/entrypoints.test.ts:5-33 (ghost
+  #     test:unit, ci.yml job_unit-tests): ghost/bin's top-level files, minus
+  #     README.md, *.d.ts and tsc's .js output beside a .ts, are exactly
+  #     generate-data.ts, validate-adapters.ts and warm-compile-cache.sh.
+  #     file_exists with several paths passes when any one exists, so one
+  #     rule per entrypoint.
+  - id: ghost-bin-entrypoints-closed
+    kind: file_absent
+    paths:
+      include: ["ghost/bin/*"]
+      exclude:
+        - ghost/bin/README.md
+        - "ghost/bin/*.d.ts"
+        - ghost/bin/generate-data.ts
+        - ghost/bin/generate-data.js
+        - ghost/bin/validate-adapters.ts
+        - ghost/bin/validate-adapters.js
+        - ghost/bin/warm-compile-cache.sh
+    level: error
+    message: "ghost/bin entrypoints are a downstream contract (entrypoints.test.ts); new ones need maintainer sign-off and a SHIPPED_ENTRYPOINTS entry."
+
+  - id: ghost-bin-entrypoint-generate-data
+    kind: file_exists
+    paths: ghost/bin/generate-data.ts
+    level: error
+    message: "ghost/bin/generate-data.ts is a shipped downstream entrypoint (entrypoints.test.ts)."
+
+  - id: ghost-bin-entrypoint-validate-adapters
+    kind: file_exists
+    paths: ghost/bin/validate-adapters.ts
+    level: error
+    message: "ghost/bin/validate-adapters.ts is a shipped downstream entrypoint (entrypoints.test.ts)."
+
+  - id: ghost-bin-entrypoint-warm-compile-cache
+    kind: file_exists
+    paths: ghost/bin/warm-compile-cache.sh
+    level: error
+    message: "ghost/bin/warm-compile-cache.sh is a shipped downstream entrypoint (entrypoints.test.ts)."
+
+  # ghost-b13, A - ghost/test/unit/server/services/staff/email-template-files.test.ts:55-66
+  #     (ghost test:unit): every staff email template (email-templates/*.hbs,
+  #     partials excluded) includes the {{> styles}} partial.
+  - id: ghost-staff-email-templates-include-styles
+    kind: file_content_matches
+    paths: "ghost/core/server/services/staff/email-templates/*.hbs"
+    pattern: '\{\{> styles\}\}'
+    level: error
+    message: "Staff email templates must include the {{> styles}} partial."
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (NOT in the enforced denominator, rulings R3/R5). Ghost does
+  # not gate on these; they extend an enforced invariant to sites nothing
+  # checks.
+  # ════════════════════════════════════════════════════════════════
+
+  # Value-add (toolchain-pin): every workflow's env NODE_VERSION equals
+  # ci.yml's (release, publish-packages, e2e-runner-image, embed-renderer,
+  # koenig-demo, shade-docs). Only ci.yml is checked against devEngines.
+  - id: ghost-va-workflow-node-versions
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.runtime.version" }
+    targets:
+      files: ".github/workflows/*.yml"
+      extract: { yaml: "$.env.NODE_VERSION" }
+    relation: equals
+    allow_missing_target: true
+    level: info
+    message: "Workflow env NODE_VERSION differs from devEngines.runtime.version."
+
+  # Value-add (toolchain-pin): the remaining NODE_VERSION ARGs (e2e runner,
+  # fake-upgrades, fake-mailgun) and the devcontainer image follow the same
+  # pin; renovate.json5 names only Dockerfile.production and docker/ghost-dev.
+  - id: ghost-va-other-docker-node-pins
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.runtime.version" }
+    targets:
+      - file: e2e/Dockerfile.runner
+        extract: { regex: '(?m)^ARG NODE_VERSION=([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$' }
+      - file: docker/fake-upgrades/Dockerfile
+        extract: { regex: '(?m)^ARG NODE_VERSION=([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$' }
+      - file: docker/fake-mailgun/Dockerfile
+        extract: { regex: '(?m)^ARG NODE_VERSION=([0-9]+\.[0-9]+\.[0-9]+)[ \t]*$' }
+      - file: .devcontainer/compose.devcontainer.yaml
+        extract: { regex: '(?m)image:[ \t]*node:([0-9]+\.[0-9]+\.[0-9]+)-' }
+    relation: equals
+    level: info
+    message: "A Docker/devcontainer Node pin differs from devEngines.runtime.version."
+
+  # Value-add (toolchain-pin): the bundled exact-pin coherence checks (.nvmrc
+  # authority vs .node-version, literal setup-node pins such as
+  # typescript-inventory.yml's '22.23.5'). Warning level inside the bundle.
+  # (Extends are listed below.)
+
+  # Value-add (locale): no catalog starts with a UTF-8 BOM (JSON.parse in
+  # i18n.lint.js rejects one; alint's JSON reader accepts it, so ghost-10 alone
+  # would not notice).
+  - id: ghost-va-locale-no-bom
+    kind: no_bom
+    paths:
+      - "packages/i18n/locales/*/*.json"
+      - packages/i18n/locales/context.json
+    level: info
+    message: "Locale catalogs should not start with a byte-order mark."
+
+extends:
+  - alint://bundled/toolchain-pins@v1

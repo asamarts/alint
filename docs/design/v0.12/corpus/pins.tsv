@@ -21,11 +21,13 @@ astral-sh/ruff	11723aeb5b9bcdbc25240c9bb04908057c862100	astral-sh-ruff.alint.yml
 astral-sh/uv	cfe5277bc4226da3a8cf51ad40b34f6a4e1746e5	astral-sh-uv.alint.yml
 AvaloniaUI/Avalonia	5ad8b75427a73721be3b6ed5c11e6aff0d7bad21	AvaloniaUI-Avalonia.alint.yml
 axios/axios	4306df21e84332fc576e98c2de549347c06bfb76	axios-axios.alint.yml
+babel/babel	2bc74adeadd1d30a56c6dc747e82b1566946e713	babel-babel.alint.yml
 bazelbuild/bazel	bda3d1c2b0dd446cfe6918c424deeda2e4efd25f	bazelbuild-bazel.alint.yml
 BurntSushi/ripgrep	4857d6fa67db69a95cd4b6f2adda5d807d4d0119	BurntSushi-ripgrep.alint.yml
 clap-rs/clap	8387c812c4b9726474b8407f81ec97f0acf570ed	clap-rs-clap.alint.yml
 cli/cli	e6fa2faf9e3203c2caaa54dcb1526c5f093fa998	cli-cli.alint.yml
 ClickHouse/ClickHouse	044a9bb554755725bed8f150ae7908709ac081a0	ClickHouse-ClickHouse.alint.yml
+cloudflare/workers-sdk	3cea40b078519222db432b5edf827ddc3e629a2a	cloudflare-workers-sdk.alint.yml
 composer/composer	7b3147f083b120846d16c3dc371e61268e0c129e	composer-composer.alint.yml
 curl/curl	ba600296d2a1d8a4e53a36eb4bd30c1f0d0152cc	curl-curl.alint.yml
 denoland/deno	351d8fbfeec253d3b590f956e32f981adad91ce2	denoland-deno.alint.yml
@@ -101,6 +103,7 @@ pytorch/pytorch	7d2d4404beef557bc5c2e1c8286e600ed30286db	pytorch-pytorch.alint.y
 quarkusio/quarkus	c8c6babb39fbc117f610cdea2f571cd22311ef7e	quarkusio-quarkus.alint.yml
 rails/rails	6c75e6d5663afa4278ee593c2d6c20c1ee396e32	rails-rails.alint.yml
 redis/redis	230c651c8907c88d43c0ba51d29f75e8eb353f66	redis-redis.alint.yml
+RocketChat/Rocket.Chat	fb1d4217d8c56957fe49310308f95b8a2cd6c926	RocketChat-Rocket.Chat.alint.yml
 rubocop/rubocop	43942e260071e869bccc7497bbba82d5d458530e	rubocop-rubocop.alint.yml
 ruby/ruby	ad14452e3bdcf255a217de7f8c64496e3428bb0f	ruby-ruby.alint.yml
 rust-lang/rust	c0bb140a37c81cf59a0b40c21c9413059644e294	rust-lang-rust.alint.yml
@@ -112,6 +115,7 @@ spf13/cobra	ad460ea8f249db69c943a365fb84f3a59042d54e	spf13-cobra.alint.yml
 spring-projects/spring-boot	bcecf922c6ee98d9451f414b4bf2213ed8f47922	spring-projects-spring-boot.alint.yml
 sqlalchemy/sqlalchemy	4fb459aaf05dd9c31ce3ece57c1bbf81ca9855de	sqlalchemy-sqlalchemy.alint.yml
 square/okhttp	0c5a45b1174b8f735cc251eb19faaed87b65d868	square-okhttp.alint.yml
+strapi/strapi	fcc1df0668527c342de7f8cc5acd331434a2d505	strapi-strapi.alint.yml
 sveltejs/svelte	5b8db1be35555fee3b938f9d7eab93f2aee48b7e	sveltejs-svelte.alint.yml
 swiftlang/swift	09dfb9b25be4a2a84e9a7d40b1128dd9cb8e7e55	swiftlang-swift.alint.yml
 symfony/symfony	9f30c2bb7f560974f408b6b1aae8e8da2000b3a8	symfony-symfony.alint.yml
@@ -121,6 +125,7 @@ tensorflow/tensorflow	803e4ccb979128484a6ef6bbe1fcf72332c28853	tensorflow-tensor
 Textualize/rich	46cebbb032f920eb096efbaf23cdc6fe9dd541f7	Textualize-rich.alint.yml
 tokio-rs/axum	4a72e063b916f39e0698a345a99a755deb8f345b	tokio-rs-axum.alint.yml
 trpc/trpc	8eff9ff0ddf4be4a682bf205fb66b00a26901075	trpc-trpc.alint.yml
+TryGhost/Ghost	ab272fcb6056d23e32b307264eba35ffd27a921b	TryGhost-Ghost.alint.yml
 valkey-io/valkey	c15ecf1dd83cd045fc3538e81df4ae91ab0ff11c	valkey-io-valkey.alint.yml
 vapor/vapor	712b0919a3ba772f7402ccaf07cdb6ca823dd650	vapor-vapor.alint.yml
 vercel/next.js	bc384860d5f0b77a3cab9769ca4b1a0d7f5ce2fe	vercel-next.js.alint.yml

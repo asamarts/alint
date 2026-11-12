@@ -80,3 +80,5 @@ repositories and JavaScript monorepos under the same protocol, pinned on
   `yarnpkg-berry`, `trpc-trpc`.
 - **Batch 2:** `signalapp-Signal-Desktop`, `immich-app-immich`,
   `TanStack-query`, `jestjs-jest`, `microsoft-rushstack`.
+- **Batch 3:** `TryGhost-Ghost`, `RocketChat-Rocket.Chat`, `babel-babel`,
+  `strapi-strapi`, `cloudflare-workers-sdk`.

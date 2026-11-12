@@ -1,0 +1,1313 @@
+{
+ "repo": "babel/babel",
+ "sha": "2bc74adeadd1d30a56c6dc747e82b1566946e713",
+ "metrics": {
+  "counts": {
+   "A": 27,
+   "B-config": 3,
+   "B-adapter": 5,
+   "B-kernel": 0,
+   "B-delegate": 2,
+   "C": 6,
+   "D": 25
+  },
+  "addressable": 43,
+  "coverage_today": 63,
+  "coverage_with_tuning": 77,
+  "gap": 23,
+  "coverage_after_slice": 67,
+  "coverage_after_slice_with_entry_values": 70
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "dep-version": {
+   "counts": {
+    "A": 7,
+    "B-config": 1,
+    "B-adapter": 2,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 2
+   },
+   "addressable": 11,
+   "coverage_today": 64,
+   "coverage_with_tuning": 73,
+   "gap": 27,
+   "coverage_after_slice": 73,
+   "coverage_after_slice_with_entry_values": 82
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 3,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 1
+   },
+   "addressable": 3,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
+  },
+  "other": {
+   "counts": {
+    "A": 17,
+    "B-config": 2,
+    "B-adapter": 3,
+    "B-kernel": 0,
+    "B-delegate": 2,
+    "C": 5,
+    "D": 22
+   },
+   "addressable": 29,
+   "coverage_today": 59,
+   "coverage_with_tuning": 76,
+   "gap": 24,
+   "coverage_after_slice": 62,
+   "coverage_after_slice_with_entry_values": 62
+  }
+ },
+ "units": [
+  {
+   "id": "babel-01",
+   "summary": "A workspace: range in dependencies or devDependencies must be exactly workspace:^",
+   "evidence": "yarn.config.cjs:16-27 (enforceWorkspaceDependencies); ci.yml:50-52 yarn constraints; .yarnrc.yml:54 enableConstraintsChecks",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent babel-workspace-ranges-caret",
+   "assertion_family": "none",
+   "reason": "R7: a yarn.config.cjs rule is classified by its assertion. A union selector over the two dependency fields with a search() filter states it exactly (782 workspace:^ ranges at the pin).",
+   "fire_verified": "Scratch copy of the files the config reads, relative paths kept. Setting @babel/traverse to workspace:* in devDependencies fired 1. Setting a dependency to workspace:~ fired 1, and to workspace:^8.0.0 fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-02",
+   "summary": "Public workspaces declare license MIT; private workspaces declare no license",
+   "evidence": "yarn.config.cjs:32-55 (enforcePackageInfo); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-workspace-license",
+   "assertion_family": "none",
+   "reason": "R7, one field of enforcePackageInfo. Split per field as in the berry precedent (enforceFieldsOnAllWorkspaces).",
+   "fire_verified": "n/a (family other). Fired anyway: license ISC on a public package fired 1, and license on private benchmark fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-03",
+   "summary": "A public workspace's repository is exactly {type: git, url: https://github.com/babel/babel.git, directory: <workspace cwd>}; private workspaces declare none",
+   "evidence": "yarn.config.cjs:32-55; ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + json_path_absent with {path} templated into the filter: babel-workspace-repository-field; json_path_absent babel-private-workspaces-no-repository",
+   "assertion_family": "none",
+   "reason": "The path-derived directory value is expressed by iterating the workspace directories and templating {path} into the filter. length()==3 enforces 'exactly'.",
+   "fire_verified": "n/a (family other). Fired anyway: a wrong directory, an extra key, a git+https url, and a repository on private benchmark each fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-04",
+   "summary": "Public workspaces set publishConfig exactly {access: public}; private ones set none",
+   "evidence": "yarn.config.cjs:32-55; ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-workspace-publish-config",
+   "assertion_family": "none",
+   "reason": "R7, a per-field split of enforcePackageInfo.",
+   "fire_verified": "n/a (family other). Fired anyway: access restricted fired 1, and an extra tag key fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-05",
+   "summary": "Public workspaces set author 'The Babel Team (https://babel.dev/team)'; private ones set none",
+   "evidence": "yarn.config.cjs:32-55; ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-workspace-author",
+   "assertion_family": "none",
+   "reason": "R7, a per-field split of enforcePackageInfo.",
+   "fire_verified": "n/a (family other). Fired anyway: a changed author fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-06",
+   "summary": "engines.node is '^22.18.0 || >=24.11.0' on every public workspace except @babel/runtime*, and unset on private workspaces and @babel/runtime*",
+   "evidence": "yarn.config.cjs:61-72 (enforceEnginesNodeForPublicUnsetForPrivate); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_absent babel-workspace-engines-node",
+   "assertion_family": "none",
+   "reason": "R7: an engines agreement across all manifests, using the constraint's own literal (berry-08 precedent). One filter covers both the set branch and the unset branch.",
+   "fire_verified": "Scratch copy: engines.node '>=22.18.0' on a public package fired 1. Removing engines fired 1. Adding engines.node to private benchmark fired 1, and adding it to @babel/runtime fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-07",
+   "summary": "A non-empty main or types path starts with './'",
+   "evidence": "yarn.config.cjs:78-88 (enforceMainAndTypes); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches (if_present) babel-main-types-relative",
+   "assertion_family": "none",
+   "reason": "A direct value regex over the two fields.",
+   "fire_verified": "n/a (family other). Fired anyway: main 'lib/index.js' on @babel/cli fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-08",
+   "summary": "A public workspace's type is module unless it is commonjs",
+   "evidence": "yarn.config.cjs:94-100 (enforceType); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-public-type-field",
+   "assertion_family": "none",
+   "reason": "A whole-document filter states it exactly (151 module, 4 commonjs).",
+   "fire_verified": "n/a (family other). Fired anyway: removing type from a public package fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-09",
+   "summary": "exports shape for public workspaces in the constraint's three classes: the special list (and @babel/runtime*) exports ./package.json; the three extended packages map '.' default/types and export ./package.json; every other package has exactly {'.': {types, default}, './package.json'}",
+   "evidence": "yarn.config.cjs:225-266 (enforceExportsAndTypes); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent x3: babel-exports-class-special, babel-exports-class-extended, babel-exports-class-standard",
+   "assertion_family": "none",
+   "reason": "The name lists are the constraint's own literals, not derived sets (berry-13 precedent), so this is A. One unit, three rules for the three classes (144 standard, 8 special, 3 extended at the pin).",
+   "fire_verified": "n/a (family other). Fired anyway: an extra './lib/*' export, a wrong default, @babel/runtime missing './package.json', and a wrong types in @babel/code-frame each fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-10",
+   "summary": "The top-level types field is unset on public workspaces outside the special class (types go through exports)",
+   "evidence": "yarn.config.cjs:225-266 (enforceExportsAndTypes, workspace.unset('types')); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-types-field-unset",
+   "assertion_family": "none",
+   "reason": "This is a distinct assertion in the same function, the docstring's second sentence. Counted separately, like berry's per-field splits (fork noted).",
+   "fire_verified": "n/a (family other). Fired anyway: adding types to a standard package fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-11",
+   "summary": "A dependency with a plain (non-workspace/catalog/link) range used by two or more non-root, non-@babel-internal workspaces (peers excluded) must use a Yarn catalog",
+   "evidence": "yarn.config.cjs:107-153 (enforceDependenciesCatalog); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "constraint unique-key: dep ident -> workspace over filtered (workspace, dep, range) rows",
+   "assertion_family": "unique-key",
+   "reason": "R7: a cross-manifest grouping. Per dependency, at most one workspace may carry a literal range, which is a functional dependency dep -> workspace. JSONPath cannot select keys and no kind groups dependency entries across manifests (berry-01 and trpc-05 precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "dep-version",
+      "unique-key"
+     ],
+     "why": "enforceDependenciesCatalog (yarn.config.cjs:107-153) joins a dependency NAME to its range VALUE: a dependency shared by several workspaces must use the catalog specifier. The batch-2 ruling is explicit: an assertion that joins a name to its value (\"one range per dependency\") is B-adapter with needs: entry-values, and keeps the assertion family it will need (unique-key). Precedent jest-23. Stage A's B-config unique-key predates that ruling."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "babel-12",
+   "summary": "A dependency must not appear in both dependencies and devDependencies of one workspace, unless the dependencies range uses condition:",
+   "evidence": "yarn.config.cjs:159-173 (enforceNoDualTypeDependencies); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-config",
+   "alint": "constraint set: keys($.dependencies) disjoint from keys($.devDependencies) per manifest, minus condition: rows",
+   "assertion_family": "unique-key",
+   "reason": "Key-set disjointness inside one document needs key selection that RFC 9535 JSONPath lacks (trpc-08 precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "dep-version",
+      "set"
+     ],
+     "why": "enforceNoDualTypeDependencies (no package in both dependencies and devDependencies) is a disjoint-dependency-fields assertion. Batch-2 ruling: disjoint dependency fields are unique-key, because (manifest, name) determines the field. Precedent jest-24. Stage A tagged it set. Caveat: the rule exempts a dependencies range containing \"condition:\", which reads the value and could argue B-adapter, but there are 0 condition: specifiers at the pin, so the key-only form is the enforced behavior."
+    }
+   ]
+  },
+  {
+   "id": "babel-13",
+   "summary": "An @babel/helper-* workspace that peer-depends on @babel/core must not list @babel/template or @babel/types in dependencies",
+   "evidence": "yarn.config.cjs:179-191 (enforceBabelHelperBabelDeps); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent babel-helpers-no-template-types-deps",
+   "assertion_family": "none",
+   "reason": "An implication within one manifest, with fixed dependency names. Absolute queries inside a root filter state it exactly (berry-04 precedent).",
+   "fire_verified": "Scratch copy: adding @babel/types, and separately @babel/template, to the dependencies of @babel/helper-builder-react-jsx (which peers on core) each fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-14",
+   "summary": "A workspace that peer-depends on @babel/core and does not list it in dependencies has devDependencies['@babel/core'] = 'workspace:^'",
+   "evidence": "yarn.config.cjs:196-205 (enforceBabelCoreNotInDeps, first branch); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent babel-core-peer-implies-dev-dep",
+   "assertion_family": "none",
+   "reason": "An implication within one manifest. Its branch is separate from babel-15 (fork noted).",
+   "fire_verified": "Scratch copy: on plugin-transform-arrow-functions, devDependencies @babel/core '^8.0.0' fired 1, and removing it fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-15",
+   "summary": "No workspace lists @babel/core in dependencies except @babel/eslint-shared-fixtures, @babel/eslint-tests, @babel/helper-transform-fixture-test-runner and @babel/standalone",
+   "evidence": "yarn.config.cjs:206-219 (enforceBabelCoreNotInDeps, second branch); CI runs constraints without BABEL_CORE_DEV_DEP_VERSION (yarn.config.cjs:313-320)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent babel-core-not-in-dependencies",
+   "assertion_family": "none",
+   "reason": "The four-name exemption is the constraint's literal. The env-only 7/8-compat branch is not run in CI and is not a unit.",
+   "fire_verified": "Scratch copy: adding @babel/core to the dependencies of @babel/types fired 1. The four exempt packages carry it on the clone and pass. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-16",
+   "summary": "Peer ranges on @babel/core and @babel/eslint-parser are ^8.0.0",
+   "evidence": "yarn.config.cjs:290-299 (enforceBabelPeerDependencyVersion); ci.yml:50-52",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_equals (union selector, if_present) babel-peer-ranges",
+   "assertion_family": "none",
+   "reason": "A literal range over two fixed peer keys (128 core peers and 1 eslint-parser peer at the pin).",
+   "fire_verified": "Scratch copy: peer @babel/core '^7.0.0-0 || ^8.0.0' fired 1, and peer @babel/eslint-parser '^7.11.0' on eslint-plugin fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-17",
+   "summary": "Every catalog: / catalog:<name> specifier names an entry for that dependency in the default or named catalog of .yarnrc.yml",
+   "evidence": ".yarnrc.yml:3-46 (catalog, catalogs dev/babel-eslint/babel-eslint--9/globals-*); every CI yarn install (e.g. ci.yml:29-36) fails on an unresolved catalog entry",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "constraint reference: (dep name, catalog name) from manifests -> keys of .yarnrc.yml catalog / catalogs.<name>",
+   "assertion_family": "reference",
+   "reason": "A manifest-to-catalog join. Both sides are map keys (the manifest dependency key and the YAML catalog key), which JSONPath cannot select, and a line regex cannot scope keys to one named catalog. R7: a lookup, not resolution (trpc-10 precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "dep-version",
+      "reference"
+     ],
+     "why": "A `catalog:` / `catalog:<name>` specifier must resolve to an entry for that dependency in the default or named catalog of .yarnrc.yml. The batch-2 ruling names \"a catalog: specifier that resolves\" as its example of a name-to-value join, so it is B-adapter with needs: entry-values, family reference. trpc-10 was retro-moved the same way. Named catalogs also need YAML map keys under catalogs.<name>."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "babel-18",
+   "summary": "Every patch: specifier (root resolutions and devDependencies) names a committed .yarn/patches file",
+   "evidence": "package.json:42,81,106-110; .yarn/patches/* (5 files); every CI yarn install",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "registry_paths_resolve (regex '#~/(.yarn/patches/...patch)') babel-patch-references-resolve",
+   "assertion_family": "none",
+   "reason": "R7: a path reference over files alint reads. The ~/ prefix is the project root.",
+   "fire_verified": "Scratch copy: renaming the interpret patch reference to a missing file fired 1, and deleting rollup-plugin-dts's patch file fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-19",
+   "summary": "Every workspace: dependency names a workspace of this project (yarn install fails with Workspace not found otherwise)",
+   "evidence": "root package.json workspaces (6 globs); every CI yarn install (ci.yml:29-36 and each job's Install step)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "cross_file superset (source.files unions $.name of the 166 manifests; targets.files regex of keys whose value starts with workspace:) babel-workspace-refs-resolve",
+   "assertion_family": "none",
+   "reason": "R7: a name lookup over files alint reads (trpc-B01 precedent). It is exact here because every workspace range is workspace:^ (babel-01), so no semver check is needed.",
+   "fire_verified": "Scratch copy: renaming a workspace dependency key to @babel/traverser fired 1. Renaming @babel/helper-plugin-utils's own name fired 110 (one per dependent). The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-20",
+   "summary": "Each eslint-version-test matrix version N has a babel-eslint--N catalog in .yarnrc.yml defining eslint, eslint-plugin-import and @eslint/js",
+   "evidence": "ci.yml:500-524 (matrix eslint-version [9]; yarn up ...@catalog:babel-eslint--N); .yarnrc.yml:33-37 ('# Used in the eslint-version-test workflow')",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "cross_file subset babel-eslint-version-catalogs-exist + yaml_path_absent babel-eslint-version-catalog-keys-present",
+   "assertion_family": "none",
+   "reason": "Expressible but awkward. The matrix regex reads the flow list's first element only. The key check names version 9 by hand, because a catalog name cannot be selected by pattern and the catalog name would need to be templated from the matrix value.",
+   "fire_verified": "C, not required. Fired anyway on the scratch copy: matrix [10] fired 1 (no catalog), and dropping @eslint/js from babel-eslint--9 fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-21",
+   "summary": "Installs are immutable and the Yarn cache is in sync (prepare-yarn-cache in hardened mode; every job's yarn install)",
+   "evidence": "ci.yml:29-36 (YARN_ENABLE_HARDENED_MODE, yarn install --mode=skip-build); .yarnrc.yml:57-58",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn install",
+   "assertion_family": "none",
+   "reason": "R7 D: lockfile freshness and package-manager resolution semantics (hardened mode also checks registry metadata over the network).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-22",
+   "summary": "No duplicate resolutions that could be deduped (yarn dedupe --check)",
+   "evidence": "ci.yml:53-55",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn dedupe --check",
+   "assertion_family": "none",
+   "reason": "R7 names yarn dedupe --check as D (resolution semantics).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-23",
+   "summary": "package.json packageManager is present and pins Yarn with an integrity hash: yarn@<x.y.z>+sha512.<hex>",
+   "evidence": "scripts/ensure-yarn-version-integrity.ts:5-21; .github/workflows/package-manager.yml (PRs touching package.json, .yarn/releases/*, .yarnrc.yml)",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_matches babel-package-manager-pinned-with-hash",
+   "assertion_family": "none",
+   "reason": "The script's packageManagerSpecRegex, with its own user-facing error and remedy ('Use corepack use yarn@<version>'). It is counted separately from the network hash comparison (babel-25). A guard-clause reading would fold it in (fork noted).",
+   "fire_verified": "Scratch copy: 'yarn@4.17.0' with no hash fired 1. Removing the field fired 1, and '+sha224.' fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-24",
+   "summary": ".yarnrc.yml sets yarnPath and it names a committed Yarn release",
+   "evidence": "scripts/ensure-yarn-version-integrity.ts:37-47 ('yarnPath is missing in .yarnrc.yml', then it reads the file); .yarnrc.yml:99; every yarn invocation loads yarnPath",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "yaml_path_matches babel-yarn-path-set + registry_paths_resolve babel-yarn-path-resolves",
+   "assertion_family": "none",
+   "reason": "Toolchain-pin file-state assertions over files alint reads (forem-11 precedent). Presence and resolution are one unit.",
+   "fire_verified": "Scratch copy: removing the yarnPath line fired babel-yarn-path-set 1. Pointing it at yarn-4.18.0.cjs fired babel-yarn-path-resolves 1, and deleting the release file fired 1. The clean copy and the clone give 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-25",
+   "summary": "The committed Yarn release's sha512 equals the official hash corepack resolves for the packageManager version",
+   "evidence": "scripts/ensure-yarn-version-integrity.ts:23-52 (corepack use yarn@<ver>, then compare against the yarnPath file); package-manager.yml",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "corepack (network)",
+   "assertion_family": "none",
+   "reason": "R7 D: the expected hash comes from the registry through corepack, which is network and external state. The offline proxy (the committed binary hashes to the committed packageManager hash) is recorded as value-add.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-26",
+   "summary": "Every .github/workflows/*.lock.yml was generated by the same gh-aw compiler version",
+   "evidence": "ci.yml:185-197 (grep of the '# This file was automatically generated by gh-aw (v...)' header | sort -u, which must give one version)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file equals (anchor .github/workflows/backport-7x.lock.yml, targets.files *.lock.yml, header regex) babel-gh-aw-single-compiler-version",
+   "assertion_family": "none",
+   "reason": "'All equal across a glob' needs an anchor file. Renaming the only agentic workflow breaks the rule loudly, which is awkward, so C. Tagged toolchain-pin as a tool-version agreement across files; 'other' is the alternative reading.",
+   "fire_verified": "C, not required. Fired anyway: a second lock file with gh-aw (v0.0.1) fired 1. Changing the single lock file's version passes, as the anchor design implies. The clone gives 0.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "Bucket unchanged (C); family only. The gh-aw single-compiler-version check (ci.yml lines 185-201) pins the GitHub agentic-workflow compiler across *.lock.yml files. gh-aw is a workflow compiler, not a Node, package-manager or language toolchain (section 2.3 lists .nvmrc, .node-version, .tool-versions, engines, packageManager, Volta and CI Node pins). It belongs to family other, so toolchain-pin should not count it."
+    }
+   ]
+  },
+  {
+   "id": "babel-27",
+   "summary": "Agentic workflows are compiled fresh (gh aw compile leaves the tree clean)",
+   "evidence": "ci.yml:198-201",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "gh aw compile + assert-dir-git-clean",
+   "assertion_family": "none",
+   "reason": "Codegen freshness by running a generator (spawning kinds are excluded); R7 D.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-29",
+   "summary": "Text files use LF line endings",
+   "evidence": ".gitattributes:1 ('* text eol=lf'); eslint.config.ts:92 (linebreak-style unix, folded in under R1)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "line_endings lf babel-text-files-lf",
+   "assertion_family": "none",
+   "reason": "Git enforces LF on check-in, and alint asserts it directly over the whole tree, vendored .yarn included (berry-25 precedent).",
+   "fire_verified": "n/a (family other). Fired anyway: a CRLF file fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-31",
+   "summary": "packages/*/README.md (except babel-helper-check-duplicate-nodes) is the readmes.ts output: name heading, description quote, babeljs.io/docs/<dir> link, an optional issues-label link from a hand-kept map, and npm/yarn install lines with --save/--save-dev chosen by isDep",
+   "evidence": "ci.yml:92-94 (make generate-readme) + 101-103 (assert-dir-git-clean); scripts/generators/readmes.ts",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_dir (whole-file regex with {basename}, cross_file name/description equality) babel-readme-generated-shape; for_each_match babel-readme-install-flags, babel-readme-pkg-label-matches-dir, babel-readme-area-label-matches-dir; file_content_matches / file_content_forbidden babel-readme-issue-link-labelled / -unlabelled",
+   "assertion_family": "none",
+   "reason": "The generator's whole output contract is expressible natively, but the 14-package issue-label map is copied into the config by hand, so a new label would go unchecked silently (berry hand-list precedent): C.",
+   "fire_verified": "C, not required. Fired anyway: a wrong title, description drift, a wrong docs dir, a swapped --save flag, a helper with --dev, a wrong pkg label, a wrong area label, a link on an unlabelled package, a missing link on a labelled package, and trailing extra text each fired. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-32",
+   "summary": "{codemods,packages,eslint}/*/.npmignore is the npm-ignore.ts output: absent for private packages or ones with files, otherwise the fixed list plus a hand-kept extra entry plus scripts when a scripts/ dir exists",
+   "evidence": "ci.yml:95-97 (node scripts/generators/npm-ignore.ts) + 101-103; scripts/generators/npm-ignore.ts",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_file/for_each_dir + json_path_absent + file_content_matches/forbidden: babel-npmignore-absent-when-private-or-files, -present-otherwise, -content, -scripts-when-dir, -no-scripts-without-dir, -extra-compat-data, -extra-node, -extra-decorators, -no-other-extras",
+   "assertion_family": "none",
+   "reason": "Fully expressible, but the extraIgnore map (3 packages) is hand-copied: C.",
+   "fire_verified": "C, not required. Fired anyway: changed content, a .npmignore on a files package, a missing .npmignore, a scripts dir not listed, scripts listed without the dir, an extra entry elsewhere, and a removed extra each fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-33",
+   "summary": "No fixture task options.json is redundant: equal to its suite (or fixture-level fallback) options, or equal apart from throws (then it must be only {throws})",
+   "evidence": "ci.yml:98-103 (node scripts/cleanup-fixtures.ts, then assert-dir-git-clean); scripts/cleanup-fixtures.ts",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "(none) loader-specific option inheritance and JSON deep-equality",
+   "assertion_family": "none",
+   "reason": "Repository-state logic of the fixture loader's option inheritance: suite or fixture fallback, a category level for the parser, deep equality after deleting a key. It belongs in a plugin, not core.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-delegate",
+      "other",
+      "none"
+     ],
+     "why": "Moderate confidence. scripts/cleanup-fixtures.ts (run in the build job and followed by assert-dir-git-clean) is a simple script: it compares JSON.stringify of a task's options.json with its suite's options.json (fixture-level fallback; the parser has an extra category level) and fails the clean-tree check if a redundant file would be deleted or rewritten to {throws}. This is not the fixture loader's inheritance semantics that Stage A cites for B-delegate. It needs a JSON-equality operator over a parent-directory join, after deleting a key: a new reusable operator, not repository-specific plugin logic."
+    }
+   ]
+  },
+  {
+   "id": "babel-34",
+   "summary": "Generated tsconfig files (per-package tsconfig.json, root tsconfig.json, tsconfig.paths.json, tsconfig.lint.json) are fresh; the generator also throws on a TS package dependency cycle",
+   "evidence": "Makefile.source.ts:323-347 (tscheck -> generate-tsconfig); ci.yml:181-184 (make lint-ci, then assert-dir-git-clean); scripts/generators/tsconfig.ts:212 ('Cycle detected')",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node scripts/generators/tsconfig.ts",
+   "assertion_family": "none",
+   "reason": "Codegen freshness by running a generator with a topological sort and special-cased edges (berry-32 precedent). The cycle throw is a guard for the sort and is folded in.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-35",
+   "summary": "lib/archived-libs.d.ts is the archived-libs-typings.ts output: the header plus one fixed declare-module block per archived-syntax-pkgs.json entry, in JSON order",
+   "evidence": "Makefile.source.ts:344-347 (generate-tsconfig runs scripts/generators/archived-libs-typings.ts); ci.yml:181-184; scripts/generators/archived-syntax-pkgs.json (29 names)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: ordered-sequence equality between a JSON array and a regex-extracted sequence (set equality and block shape are native, kept as value-add)",
+   "assertion_family": "none",
+   "reason": "The order is the JSON array's arbitrary order, not a sort, so ordered_block does not apply. R7's example puts order in B-adapter (no order operator).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-36",
+   "summary": "Build-generated committed sources are fresh after make build-standalone-ci (Linux and Windows)",
+   "evidence": "ci.yml:82-103 (build, then assert-dir-git-clean); ci.yml:132-142 (Windows)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "make build-standalone-ci + assert-dir-git-clean",
+   "assertion_family": "none",
+   "reason": "Codegen freshness by running the build (R7 D). R1 collapses the two platforms.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-37",
+   "summary": "Makefile.js is the fresh compilation of Makefile.source.ts (embedded sha1 source hash)",
+   "evidence": "ci.yml:89-90 (node ./scripts/pack-script.ts) + 101-103; package.json lint-staged (pack-script --auto + git add Makefile.js); .husky/pre-commit",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "pack-script",
+   "assertion_family": "none",
+   "reason": "It runs the bundler. alint's pair_hash supports only sha256/sha512, so even the embedded-hash half is out of reach.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-38",
+   "summary": "packages/babel-compat-data data is fresh against the pinned compat-table commit",
+   "evidence": "ci.yml:181 (make check-compat-data); packages/babel-compat-data/scripts/download-compat-table.sh:4",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "make check-compat-data",
+   "assertion_family": "none",
+   "reason": "Network (git clone of compat-table) plus running generators.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-39",
+   "summary": "No dependency cycles among public workspaces through dependencies (release order)",
+   "evidence": "ci.yml:56-64 (yarn release-tool check-cycles); .yarn/plugins/@yarnpkg/plugin-babel-release-tool.cjs:57",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: workspace package-name -> manifest resolver feeding file_graph acyclic",
+   "assertion_family": "none",
+   "reason": "file_graph's acyclic needs path-shaped edges, and it drops bare package names (trpc-13 precedent).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-40",
+   "summary": "A fixture task has at most one input, one exec and one expected-output (output or output.extended) file",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:114-129 ('Found conflicting file matches'), 152-168; run by jest in ci.yml test jobs",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "unique_by x3 (key {dir}) babel-fixture-one-input, -one-exec, -one-output",
+   "assertion_family": "none",
+   "reason": "A per-directory uniqueness over file roles. The brace globs mirror the loader's role-by-name rule.",
+   "fire_verified": "n/a (family other). Fired anyway: adding input.mjs beside input.js fired 1, and output.js plus output.mjs fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-41",
+   "summary": "Fixture input/exec files use .js/.mjs/.ts/.tsx/.cts/.mts/.vue; output files may also be .json",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:111-124 ('Unsupported input extension')",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex babel-fixture-input-exec-extension, babel-fixture-output-extension",
+   "assertion_family": "none",
+   "reason": "A file-name assertion. Multi-dot names such as input.js.map are excluded, as the loader's last-extension role split excludes them.",
+   "fire_verified": "n/a (family other). Fired anyway: input.coffee fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-42",
+   "summary": "A fixture's input file has the same extension as its exec file",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:262-268",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_file + file_absent ({dir}/input.* minus input.{ext}) babel-fixture-exec-input-same-extension",
+   "assertion_family": "none",
+   "reason": "A templated sibling-existence check.",
+   "fire_verified": "n/a (family other). Fired anyway: exec.mjs beside input.js fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-43",
+   "summary": "minNodeVersion / minNodeVersionTransform in fixture options are semver versions",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:276-306; CONTRIBUTING.md:303 ('must be in semver format')",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_matches (if_present) babel-fixture-min-node-version-semver",
+   "assertion_family": "none",
+   "reason": "Expressible, but the four process-runner fixture trees (babel-cli, babel-node, babel-register, babel-build-external-helpers via buildProcessTests) use a numeric major, a different contract, and are excluded by a hand list.",
+   "fire_verified": "C, not required. Fired anyway: minNodeVersion '22' in a transform fixture fired 1. babel-cli's numeric 10 values in the scratch copy pass. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-44",
+   "summary": "The fixture os option is a string or an array of strings",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:312-322",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-fixture-os-option-type",
+   "assertion_family": "none",
+   "reason": "A type check on one JSON value.",
+   "fire_verified": "n/a (family other). Fired anyway: os 5 fired 1, and os ['linux', 3] fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-45",
+   "summary": "Fixture options do not use the deprecated sourceMap option (use sourceMaps)",
+   "evidence": "packages/babel-helper-transform-fixture-test-runner/src/index.ts:516",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-fixture-no-source-map-option",
+   "assertion_family": "none",
+   "reason": "A banned key.",
+   "fire_verified": "n/a (family other). Fired anyway: sourceMap true fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-46",
+   "summary": "A fixture preset entry has at most three elements (name, options, alias)",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:450-462",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent babel-fixture-preset-arity",
+   "assertion_family": "none",
+   "reason": "An array-length bound via the length() filter.",
+   "fire_verified": "n/a (family other). Fired anyway: a 4-element preset fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-47",
+   "summary": "Fixture roots (and the parser's categories) contain only directories apart from ignored names (dotfiles, *.md, LICENSE*, options.*, package.json)",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:88-109 (assertDirectory, shouldIgnore), 487, 514",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "dir_only_contains babel-fixture-suites-are-directories, babel-parser-fixture-categories-are-directories",
+   "assertion_family": "none",
+   "reason": "A structure invariant with the loader's own ignore list.",
+   "fire_verified": "n/a (family other). Fired anyway: a stray file in a fixtures root fired 1, and one in a parser category fired 1. The clone gives 0.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-48",
+   "summary": "A fixture whose effective options specify throws has no expected output code or sourcemap (helper-fixtures), and no expected.json (parser runner)",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:337-347; packages/babel-parser/test/helpers/run-fixture-tests.js:99-103",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "(none) needs the loader's option inheritance (root -> suite -> task)",
+   "assertion_family": "none",
+   "reason": "throws is usually inherited from a suite options.json, so the check needs the loader's merge semantics. Two runners, one convention (R1).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-49",
+   "summary": "Log-validation options are consistent: stdout.txt/stderr.txt need validateLogs; ignoreOutput needs validateLogs and no output file",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:350-368",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "(none) needs effective (inherited) options",
+   "assertion_family": "none",
+   "reason": "Like babel-48, it needs the loader's option merge.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-50",
+   "summary": "A fixture plugin/preset that exists in the monorepo is named without its @babel/plugin- / @babel/preset- prefix",
+   "evidence": "packages/babel-helper-fixtures/src/index.ts:398-414 ('Remove the \"...\" prefix ... to load it from the monorepo')",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint reference: (stripped plugin/preset name from options.json) -> packages/babel-{plugin,preset}-<name> must not exist when prefixed",
+   "assertion_family": "reference",
+   "reason": "An existence-conditioned join from option values to package directories. A blanket 'no @babel/ prefix' regex passes at the pin but is stricter than the repo's rule, which allows prefixed names outside the monorepo.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-51",
+   "summary": "TypeScript type check passes (tscheck, including the helpers and parser typings)",
+   "evidence": "ci.yml:181 (make lint-ci); Makefile.source.ts:323-335, 478-484",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "assertion_family": "none",
+   "reason": "R2: type checker.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-52",
+   "summary": "ESLint passes (custom @babel/development rules, import restrictions, n/no-unsupported-features at 22.18.0, etc.)",
+   "evidence": "ci.yml:181 (lint-ci); eslint.config.ts; .husky/pre-commit via lint-staged",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint",
+   "assertion_family": "none",
+   "reason": "R2: linter. Import restrictions stay D (trpc-41 precedent). linebreak-style is folded into babel-29.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-53",
+   "summary": "Type tests pass (tstyche)",
+   "evidence": "Makefile.source.ts:481",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tstyche",
+   "assertion_family": "none",
+   "reason": "R2: type tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-54",
+   "summary": "Prettier formatting (prettier --check in lint-ci; prettier --write in the pre-commit hook)",
+   "evidence": "Makefile.source.ts:482, 486; package.json lint-staged",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "prettier",
+   "assertion_family": "none",
+   "reason": "R2: formatter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-55",
+   "summary": "Declaration bundling succeeds (bundle-dts in lint-ci)",
+   "evidence": "Makefile.source.ts:303-305, 483",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "gulp bundle-dts",
+   "assertion_family": "none",
+   "reason": "Build step.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-56",
+   "summary": "Jest suites pass (Node 24/22 matrix plus the allowed-failure Node 27 alpha, coverage, Windows/macOS, CircleCI standalone; Babel 9 variants advisory)",
+   "evidence": "ci.yml:204-301, 366-420; .circleci/config.yml:38-40",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "assertion_family": "none",
+   "reason": "R2: test runner. R1 collapses the matrix.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-57",
+   "summary": "ESM entry points load (yarn test:esm)",
+   "evidence": "ci.yml:222-225; test/esm/index.ts",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node test/esm/index.ts",
+   "assertion_family": "none",
+   "reason": "Runs project code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-58",
+   "summary": "@babel/node's list of Node flags is up to date",
+   "evidence": "ci.yml:267-269 (node ./packages/babel-node/scripts/list-node-flags.js)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "list-node-flags.js",
+   "assertion_family": "none",
+   "reason": "Compares against the running Node's flags (environment).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-59",
+   "summary": "Third-party parser suites (test262, Flow, TypeScript at pinned commits) match their allowlists",
+   "evidence": "ci.yml:425-450; Makefile FLOW/TEST262/TYPESCRIPT_COMMIT",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "make test-test262/test-flow/test-typescript",
+   "assertion_family": "none",
+   "reason": "Network download plus running tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-60",
+   "summary": "test262 transform results do not regress against main's previous results",
+   "evidence": "ci.yml:526-704 (test262-prepare/test262/test262-finish compare)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "test262 runner",
+   "assertion_family": "none",
+   "reason": "Running tests and comparing with external artifacts.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-61",
+   "summary": "@babel/runtime works across bundlers and Node versions",
+   "evidence": "ci.yml:452-498",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "runtime-integration scripts",
+   "assertion_family": "none",
+   "reason": "Runs bundlers and Node.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-62",
+   "summary": "@babel/eslint-* tests pass with the downgraded ESLint 9 catalog",
+   "evidence": "ci.yml:500-524",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "yarn up + jest eslint",
+   "assertion_family": "none",
+   "reason": "Resolution plus test execution. Its static precondition is babel-20.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-63",
+   "summary": "Prepublish build succeeds on Windows",
+   "evidence": "ci.yml:144-160 (make prepublish-no-lint)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "make prepublish-no-lint",
+   "assertion_family": "none",
+   "reason": "Build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-64",
+   "summary": "publint passes on the built packages",
+   "evidence": "ci.yml:724-739 (node ./scripts/publint.ts)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "publint",
+   "assertion_family": "none",
+   "reason": "R2: a linter over build output that is not committed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-65",
+   "summary": "Every public package exists on npm (advisory in CI; gating in release)",
+   "evidence": "ci.yml:706-723; release.yml:56 (node ./scripts/ensure-packages-exist.ts --check-only)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "ensure-packages-exist.ts",
+   "assertion_family": "none",
+   "reason": "Network registry state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-66",
+   "summary": "End-to-end: publish to a local verdaccio and build downstream projects (babel, create-react-app, angular-cli, prettier)",
+   "evidence": ".github/workflows/e2e-tests.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "e2e scripts",
+   "assertion_family": "none",
+   "reason": "Runs builds and tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-69",
+   "summary": "AI policy: an LLM-generated commit discloses 'Assisted-by: <LLM>' (not Co-authored-by), and LLM prose is marked",
+   "evidence": "AI_POLICY.md:7-9 (review convention)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "(none)",
+   "assertion_family": "none",
+   "reason": "The condition (whether a commit is LLM-generated) is provenance, not repository state. A git_commit_message proxy would be both a git-history kind (excluded at depth 1) and a guess.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "babel-B01",
+   "summary": "Workspace names are unique across all workspaces (Yarn refuses a duplicate workspace name).",
+   "evidence": ".yarn/releases/yarn-4.17.0.cjs addWorkspace throws `Duplicate workspace name ... conflicts with ...`; it runs on every `yarn install` / `yarn constraints` in .github/workflows/ci.yml (the yarn-validate job and every job that installs). There are 166 manifests and 0 duplicate names at the pin.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "",
+   "assertion_family": "unique-key",
+   "reason": "Same unit as jest-B02 and trpc-B05 (workspace names unique, B-config unique-key, other). It asserts uniqueness over one extracted value (manifest name) across a group, with no name-to-value join, so it stays B-config under the batch-2 ruling. Stage A catalogued the duplicate check for neither Yarn nor the release-tool.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "babel-B02",
+   "summary": "Every runtime helper source packages/babel-helpers/src/helpers/*.{js,ts} declares a `/* @minVersion X */` annotation.",
+   "evidence": "packages/babel-helpers/scripts/generate-helpers.ts:115-119 throws `@minVersion number missing in ${filePath}` for any helper file without the match /^\\s*\\/\\*\\s*@minVersion\\s+(?<minVersion>\\S+)\\s*\\*\\/\\s*$/m. IGNORED_FILES (package.json, tsconfig.json) and dotfiles are skipped. It runs from Gulpfile.ts generate-runtime-helpers inside `gulp build-dev`, inside `make -j build-standalone-ci` (ci.yml build job, a transitive prerequisite of required-checks).",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches; paths packages/babel-helpers/src/helpers/*.{js,ts}; pattern (?m)^\\s*/\\*\\s*@minVersion\\s+\\S+\\s*\\*/\\s*$. This rule is NOT in Stage A's config and should be added as e.g. babel-helpers-min-version-annotation.",
+   "assertion_family": "none",
+   "reason": "A file-content property that the build script checks before it generates anything. It is not code analysis: the script only applies a regex to the file text. file_content_matches expresses it exactly. R4: my probe rule passed on the clone and on a clean scratch copy, and fired 1 when the annotation was stripped from typeof.ts.",
+   "fire_verified": "n/a (family other). Still verified: the probe passed on the clone and a clean copy, and fired 1 on a copy with the @minVersion line removed from src/helpers/typeof.ts.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "babel-B03",
+   "summary": "Every non-syntax, non-modules plugin key in preset-env's available-plugins map is a key of @babel/compat-data's plugins.json or plugin-bugfixes.json.",
+   "evidence": "packages/babel-preset-env/test/index.skip-bundled.js:38-59, the test \"available-plugins is in sync with @babel/compat-data\" (jest in the ci.yml test jobs). It takes the keys of src/available-plugins.ts (62 keys), excluding syntax-*, transform-modules-* and transform-dynamic-import, and requires each to be a key of packages/babel-compat-data/data/plugins.json or plugin-bugfixes.json. Three bugfix keys exist only in plugins.json, so the union is required.",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file superset: the source set is files packages/babel-compat-data/data/{plugins,plugin-bugfixes}.json with regex (?m)^  \"([^\"]+)\": \\{; four targets over packages/babel-preset-env/src/available-plugins.ts with complement regexes (bugfix/..., transform-[^dm\"]..., transform-d minus dynamic-import, transform-m minus modules-) to emulate the prefix exclusions.",
+   "assertion_family": "none",
+   "reason": "A set inclusion between two named key sets, expressible today but only by reading JSON keys and TS object keys with layout-specific regexes plus hand-written complement patterns for the exclusions. The batch-2 ruling makes a regex read of a JSON key, or a regex that holds for one layout only, C. Alternative reading: D, if the TS map is treated as source extraction. The map is a flat object literal of string keys, so I classify by logic (R7). The probe passed on the clone and fired 2 on a copy with two keys added.",
+   "fire_verified": "n/a (family other). The probe passed on the clone and fired 2 on a mutated copy.",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [
+  {
+   "id": "babel-28",
+   "summary": "Every plugin .yarnrc.yml loads is committed at its path",
+   "why": "Not enforced (the config rule babel-yarn-plugins-resolve). In yarn-4.17.0.cjs plugin loading, a plugin file that is missing but has an https spec in .yarnrc.yml is re-fetched and checksum-verified; Yarn fails only on a checksum mismatch. A missing committed plugin file therefore does not fail CI, and the rule fires on a state Yarn accepts. Plugin checksums are otherwise checked only by `yarn plugin check`, which CI never runs. If a reviewer counts the fetch-time checksum, it is a network check (D), not A. Runtime behavior of the re-fetch not executed (read from the bundled source only)."
+  },
+  {
+   "id": "babel-30",
+   "summary": "A public workspace has a name and a version to be published",
+   "why": "The release-tool `publish` guard (\"Workspaces must have valid names and versions to be published on an external registry\") is a guard clause of the publish step in release.yml, not an independent check: the tokio guard-clause ruling. It is also a publish-time precondition, and the batch-2 ruling puts checks that only a publish to an external registry makes in D. Either reading takes it out of A; I remove it as a guard of the D publish unit. Fork: if the integrator keeps it, it is D, not A."
+  },
+  {
+   "id": "babel-67",
+   "summary": "CodSpeed benchmarks (advisory)",
+   "why": "CodSpeed benchmarks are advisory. The codspeed job is not in required-checks (alls-green needs: yarn-validate, prepublish-windows, publint, lint, test, test-coverage, test-windows-mac, runtime-interop, eslint-version-test, external-parser-tests, test262-finish), and it is skipped on merge_group. Not enforced (R5)."
+  },
+  {
+   "id": "babel-68",
+   "summary": "Coverage project target 90% (Codecov status)",
+   "why": "The Codecov project target (codecov.yml, 90%) is enforced only through an external Codecov status check whose required-ness lives in branch protection, which is not observable from the clone. .c8rc has no thresholds, and test-coverage only uploads. This follows the batch-1 ruling that CODEOWNERS on its own is not enforced (berry-43, removed because enforcement is unobservable). I could not verify branch protection."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "babel-valueadd-yarn-binary-hash-in-package-manager (pair_hash sha512): the committed .yarn/releases/*.cjs hashes to the packageManager hash. It is an offline proxy for babel-25, whose real check compares against corepack's registry hash. Passes at the pin.",
+  "babel-valueadd-yarn-plugin-checksums (pair_hash sha512): each vendored .yarn/plugins/@yarnpkg/*.cjs hashes to the checksum .yarnrc.yml records. It fires once at the pin, on purpose (info): plugin-conditions.cjs does not match its recorded checksum 6cf6890a..., while plugin-babel-release-tool.cjs matches. Nothing in CI runs `yarn plugin check`.",
+  "babel-valueadd-yarn-path-version-matches-package-manager (cross_file equals): the yarnPath release file name carries the packageManager version (4.17.0). Passes.",
+  "babel-valueadd-archived-libs-module-set (cross_file set_equals): lib/archived-libs.d.ts declares exactly the archived-syntax-pkgs.json names. This is the set half of B-adapter unit babel-35. Passes.",
+  "babel-valueadd-archived-libs-shape (file_content_matches): lib/archived-libs.d.ts is the generator's header plus only its fixed declare-module blocks. This is the shape half of babel-35. Passes.",
+  "babel-valueadd-agentic-workflow-has-lock (pair): every .github/workflows/*.md agentic source has its .lock.yml. Passes."
+ ],
+ "absent_categories": [
+  "locale: no translation catalogs or i18n gates (the repository has no locale files)",
+  "Node version files: no .nvmrc, .node-version, .tool-versions or Volta. Node is pinned only in engines (yarn.config.cjs literal) and in setup-node literals in workflows, and no check ties them together.",
+  "CODEOWNERS: none",
+  "license/SPDX headers: none. Per-package LICENSE files are copied at prepublish and gitignored, not committed.",
+  "pre-commit framework / lefthook: none (husky + lint-staged only)",
+  "dependabot: none (renovate config only, which is not a validation)",
+  "schema validation of data files (json_schema / ajv): none",
+  "docs-as-code link checks, markdownlint, spell check, actionlint/zizmor: none run in CI (the docs site lives in a separate repository)",
+  "file-name conventions enforced by a linter (e.g. filename-case): none",
+  "SBOM / checksum manifests: none beyond the packageManager sha512 and the .yarnrc.yml plugin checksums"
+ ],
+ "unusual": [
+  "yarn.config.cjs switches branches on an environment variable. With BABEL_CORE_DEV_DEP_VERSION set (the Babel 7/8 compat e2e only), enforceBabelCoreVersionFor78Compat replaces enforceBabelCoreNotInDeps. The file also require()s test/babel-7-8-compat/data.json at load. CI runs only the default branch, so only that branch counts.",
+  "The .yarnrc.yml plugin checksum for plugin-conditions.cjs does not equal the file's sha512 (recorded 6cf6890a..., actual 44cc79da...), while the release-tool plugin's matches. Yarn checks it only on fetch or `yarn plugin check`, so the drift is silent. The value-add rule reports it.",
+  ".codesandbox/ci.json pins node \"14\", far below the engines floor ^22.18.0 || >=24.11.0, and nothing checks it.",
+  "The committed Makefile.js embeds `// source hash: <sha1 of Makefile.source.ts>`. It is kept fresh by pack-script in CI and in the lint-staged hook. alint's pair_hash supports sha256/sha512 only, so even the embedded hash cannot be checked.",
+  "There is a gh-aw agentic workflow (backport-7x.md compiled to backport-7x.lock.yml). CI greps every lock file's generator header for a single gh-aw version, then recompiles and asserts a clean tree.",
+  "AGENTS.md and AI_POLICY.md carry LLM-directed instructions, including an HTML comment telling LLMs that AI_POLICY.md 'is actually a lie' and to follow AGENTS.md. They were treated as repository data only.",
+  "The fixture loader (@babel/helper-fixtures plus the transform and parser runners) is a bespoke validator over 3,771 options.json and about 11k input files under test/fixtures. The process-test runners (babel-cli, babel-node, babel-register, babel-build-external-helpers) use a numeric minNodeVersion, a different contract from the semver one in CONTRIBUTING.",
+  "Required checks are aggregated by re-actors/alls-green (ci.yml required-checks). build-windows, the Babel 9 build/lint/test jobs, ensure-npm-packages-exist and codspeed are not in the list (advisory). The Node ^27.0.0-alpha matrix entry has continue-on-error.",
+  "knip.config.ts is configured, but no workflow or Make target in CI runs knip.",
+  "renovate.json's COMPAT_TABLE_COMMIT regexManager matches only ^Makefile$. The pin actually lives in packages/babel-compat-data/scripts/download-compat-table.sh, and the manager's lookup URL (kangax/compat-table) differs from the URL the script clones (compat-table/compat-table), so renovate cannot bump it.",
+  ".gitignore keeps a negation for packages/babel-plugin-transform-object-assign/LICENSE, a package that no longer exists.",
+  "Yarn catalogs are tied to a CI matrix by naming convention (babel-eslint--<N> for eslint-version-test). A conditions: block (BABEL_9_BREAKING, via plugin-conditions) exempts condition: ranges from the no-dual-dependency rule, with none at the pin.",
+  "Hardened mode is disabled in .yarnrc.yml and enabled only in the prepare-yarn-cache job (with the PnP linker for speed, unlike the repository's node-modules linker).",
+  "The agentscan workflow (MatteoGabriele/agentscan-action) screens PR authors for automation. It is external account state, not a repository validation."
+ ],
+ "check_result": "validate-config: 'Config valid: 61 rule(s)'. check on the clone (--compact): exit 0; all 55 error-level rules (every A and C unit) pass. The only finding is 1 info from the value-add rule babel-valueadd-yarn-plugin-checksums on .yarn/plugins/@yarnpkg/plugin-conditions.cjs. It is correct and intended: that plugin's sha512 does not equal the checksum .yarnrc.yml records for it, a real drift that no CI step checks. The other 5 value-add rules pass. LF over '**' with nothing excluded (vendored .yarn included) gives 0.",
+ "stage_b_config_issues": [
+  "Reproduced: `alint validate-config` reports 61 rules valid. `alint check` against the clone exits 0 with 1 info finding (babel-valueadd-yarn-plugin-checksums on .yarn/plugins/plugin-conditions.cjs, the value-add drift Stage A reports). A clean scratch copy gives 0 findings. Every dep-version and toolchain-pin A rule fired as claimed on my own scratch copies: workspace-ranges-caret (devDep workspace:* and dep workspace:~; a peer-only workspace:* correctly did not fire it), helpers-no-template-types-deps, core-peer-implies-dev-dep (2 cases), core-not-in-dependencies (package and root), peer-ranges (2 cases), patch-references-resolve (ref renamed; patch file deleted), workspace-refs-resolve (key renamed fired 1; renaming helper-plugin-utils fired 110), engines-node (4 mutations; an extra engines.npm negative control gave 0), packageManager-pinned-with-hash (3 cases), yarn-path-set and yarn-path-resolves.",
+  "babel-patch-references-resolve under-scopes its unit. It reads only the root package.json and only `#~/.yarn/patches/` refs. Two probes produced 0 findings although Yarn would fail resolution: (a) a workspace manifest whose patch: protocol points to a missing file; (b) a root ref to a patch outside .yarn/patches. Fix, per jest-B03: a registry_paths_resolve glob source over all manifests and a protocol-generic regex such as `\"patch:[^\"#]*#(?:~/|\\./)?([^\"]+)\"`.",
+  "babel-fixture-os-option-type over-fires on states the loader accepts. packages/babel-helper-fixtures/src/index.ts:315-322 throws only when `taskOpts.os` is truthy AND neither an array nor a string, and array elements are never type-checked. The rule fires on `os: []`, `os: false` and `os: [\"linux\", 3]` (all verified), which the loader accepts. It should match only truthy non-string non-arrays. As written, the rule does not express its unit (R4).",
+  "babel-yarn-plugins-resolve expresses a non-enforced unit (see remove babel-28). Yarn re-fetches a missing https plugin, so the rule fires on a state CI accepts. Demote it to level info and move it to the value-add section.",
+  "babel-public-workspaces-name-version should be demoted to value-add with babel-30, as a publish-time guard clause under batch-2 D.",
+  "babel-gh-aw-single-compiler-version is tagged [toolchain-pin] in the config comment. gh-aw is not a section 2.3 toolchain, so the tag should be [other] (see reclassify babel-26).",
+  "The missed A unit babel-B02 (@minVersion annotation on every helper source) has no rule. Add a file_content_matches rule over packages/babel-helpers/src/helpers/*.{js,ts} with `(?m)^\\s*/\\*\\s*@minVersion\\s+\\S+\\s*\\*/\\s*$` (verified passing on the clone and firing on a stripped copy).",
+  "The fixture-layout rules (babel-fixture-*) scan wider than the loader: any depth under test/fixtures, including packages whose fixtures no runner processes. They pass at the pin, so this is scope noise, not a wrong verdict. babel-fixture-input-exec-extension's glob also misses extensionless input/output files, which the loader rejects as an unsupported extension.",
+  "The babel-20 eslint-version catalog rules read the matrix with a regex that sees only the first flow-list element, and they hand-code the catalog name prefix. C is the right bucket for that. It could also be read as an instance of babel-17 or as a guard of the eslint-version-test step (a granularity fork for the integrator).",
+  "babel-35 and babel-34 share one generate-tsconfig target and one assert-dir-git-clean step, so whether they are two units or one is a granularity fork. I keep Stage A's split; babel-35 stays B-adapter because archived-syntax-pkgs.json (29 entries) is unsorted and its order is mirrored in lib/archived-libs.d.ts.",
+  "The value-add rules are correctly at level info. babel-valueadd-agentic-workflow-has-lock is a partial form of babel-27 (D, the gh-aw compile freshness), so it must not count toward the ratio.",
+  "Config header comment: the 'Not expressed' list says the dual-field rule is 'B-config set' and catalog references are 'B-config reference'. After the batch-2 rulings these are B-config unique-key (babel-12) and B-adapter entry-values reference (babel-17); catalog use for shared dependencies is B-adapter entry-values unique-key (babel-11)."
+ ],
+ "stage_b_summary": "Stage B for babel/babel @ 2bc74adeadd1d30a56c6dc747e82b1566946e713. Results reproduced: validate-config passes (61 rules); check exits 0 with 1 info (the plugin-conditions checksum value-add); a clean copy gives 0 findings. Every locale/dep-version/toolchain-pin A rule fire test reproduced on my own scratch copies. Locale: none present (correct, R6).\n\nChanges:\n- 3 missed units:\n  - B01: workspace names unique (Yarn addWorkspace). B-config unique-key, other; precedents jest-B02 and trpc-B05.\n  - B02: every helper source carries /* @minVersion */ (generate-helpers.ts, inside make build-standalone-ci). A via file_content_matches, verified both ways; the config lacks this rule.\n  - B03: preset-env available-plugins keys are a subset of compat-data plugins.json ∪ plugin-bugfixes.json (jest test). C as a regex read of JSON keys.\n- 5 reclassifications, under the batch-2 rulings:\n  - babel-11: B-adapter (entry-values), unique-key.\n  - babel-12: set → unique-key.\n  - babel-17: B-adapter (entry-values), reference.\n  - babel-26: family toolchain-pin → other (stays C).\n  - babel-33: B-delegate → B-adapter, at moderate confidence.\n- 4 removals:\n  - babel-28: Yarn re-fetches a missing https plugin.\n  - babel-30: a publish-time guard clause.\n  - babel-67: CodSpeed is not required.\n  - babel-68: Codecov enforcement is unobservable.\n\nConfig issues:\n- patch-references-resolve is under-scoped: it reads only the root manifest and only ~/.yarn/patches.\n- fixture-os-option-type over-fires on states the loader accepts (os: [], false, or arrays with mixed element types; verified).\n- Two A rules should drop to value-add.\n\nRevised counts, from Stage A's A28/C5/B-config4/B-adapter2/B-delegate3/D27:\n- A 27, C 6.\n- B 10 (B-config 3: 12 unique-key, 50 reference, B01 unique-key; B-adapter 5: 11, 17, 33, 35, 39; B-delegate 2: 48, 49).\n- D 25.\n- Addressable 43: coverage_today 27/43 = 62.8%, coverage_with_tuning 33/43 = 76.7%, gap 10/43 = 23.3%.\n- dep-version: A 7, C 1, B-config 1 (12), B-adapter 2 (11, 17), D 2.\n- toolchain-pin: A 3, D 1 (C 0 after 26 moved to other).\n\nUnverified:\n- GitHub branch protection (which checks are actually required beyond the alls-green job).\n- Whether CI is green at the pin.\n- Yarn's plugin re-fetch at runtime, which was read from the bundled source only and never executed.\n\nForks for the integrator:\n- babel-30: remove it, or keep it as D.\n- babel-B03: C, or D as source extraction.\n- babel-34/35 granularity.\n\nHousekeeping: the scratch directory <scratch>/babel-babel-b has been removed, and the clone is unchanged (HEAD at the pin, clean status).",
+ "notes": "Pin 2bc74adeadd1d30a56c6dc747e82b1566946e713. It was read from a depth-1 clone; no git commands were run that change it. Workspaces: 166 manifests (the private root `babel` plus the 6 root `workspaces` globs: codemods/* 2, eslint/* 6, packages/* 150, test/esm, test/runtime-integration/* 5, benchmark). 11 are private. Every yarn.config.cjs constraint holds at the pin.\n\nCounts (Stage A): A=28, C=5, B=9 (B-config 4: unique-key, set, reference x2; B-adapter 2; B-delegate 3), D=27. 69 units in total.\n- coverage_today = 28/42 = 66.7%; coverage_with_tuning = 33/42 = 78.6%; gap = 9/42 = 21.4%.\n\nBy family:\n- dep-version: A7 C1 B3 (unique-key, set, reference) D2. Today 7/11 = 63.6%, with tuning 72.7%. After the slice, babel-11 (unique-key) moves to A: 8/11.\n- toolchain-pin: A3 C1 D1. Today 3/4 = 75%, with tuning 100%. babel-26 (gh-aw) is borderline toolchain-pin vs other.\n- other: A18 C3 B6 D24. Today 18/27 = 66.7%, with tuning 77.8%.\n- locale: none.\n- Overall after the slice: 29/42 = 69.0%. The reference, set, B-adapter and B-delegate units stay outside the slice.\n\nUnit-count forks for Stage B:\n- enforcePackageInfo is split per field into license, repository, publishConfig and author (berry precedent). One unit would give A=25.\n- enforceExportsAndTypes is split into exports (3 rules, one unit) and types-unset.\n- enforceBabelCoreNotInDeps is split into its two branches (babel-14, babel-15).\n- babel-23 (packageManager format) and babel-30 (release name/version) could be read as guard clauses of babel-25 and of publish.\n- babel-19 (workspace: refs) and babel-28 (plugin paths) are package-manager runtime failures, counted like trpc-B01.\n- The TS-graph 'Cycle detected' throw is folded into babel-34 as a guard.\n- The 'relative plugin path needs options.json' throw in helper-fixtures was not counted. Suite-level relative paths are resolved at suite level, so it is effectively unreachable.\n- The eslint linebreak-style rule is folded into babel-29.\n- Not units: the enforceBabelCoreVersionFor78Compat env-only branch; per-package LICENSE copying (prepublish only, gitignored); .editorconfig. Under R5 it is not enforced: editorconfig_conforms gave about 3,959 findings in a probe (generated tsconfig.json without a final newline, JSDoc indents, fixture whitespace). Prettier is the enforced formatter (D).\n\nR4:\n- Every A unit in dep-version (01, 13, 14, 15, 16, 18, 19) and toolchain-pin (06, 23, 24) was fired on a scratch copy of only the files the config's rules read, with relative paths kept: the 166 manifests, .yarnrc.yml, .yarn/{patches,releases,plugins}, the workflows, package READMEs, .npmignore files, the archived-libs inputs and three sample fixture trees.\n- Each mutation fired its expected rule, and each passes on the clone and on the clean copy. Negative controls are included: a change to the single gh-aw lock file, and babel-cli's numeric minNodeVersion, both pass.\n- All C rules and every other-family A rule were fired as well, 80 mutations in all. After the plugin-checksum value-add rule was added, every scratch run also shows its 1 info, because the copied plugin keeps its drift.\n- The scratch directory <scratch>/babel-babel-a was removed. Only CONFIG remains under out/.\n\nMethod:\n- Nothing from the repository was run. Files were read with cat/grep/sed/sha512sum, plus small python3 -I helpers of my own over manifests and over scratch copies. The only program run against the clone was the alint binary.\n- No network was used.\n- The config uses no spawning kinds, custom facts or git-history kinds.\n\nNot verified:\n- whether GitHub branch protection requires the 'Required Checks' job (assumed from the aggregator's name);\n- whether CI is currently green, which is relevant to the plugin checksum drift being tolerated at run time;\n- the exact semantics of Yarn's runtime plugin-checksum handling, which were inferred, not tested;\n- the option-inheritance details behind babel-48/49, which were read from the loader source, not executed.\n\nThe fixture options.json count (3,771) and the input-file count (11,007) were taken with find over {packages,codemods,eslint}/*/test/fixtures.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "babel-patch-references-resolve",
+    "unit": "babel-18",
+    "action": "modified",
+    "detail": "Stage B under-scope fix (jest-B03 form). The source is now a glob over all 166 workspace manifests (root + the 6 workspaces globs), not root package.json. The regex is protocol-generic ('\"patch:[^\"#]*#~/([^\":&]+)', base lint_root), so it no longer requires .yarn/patches/. Fires on: a ~/ patch to a missing file in packages/babel-cli/package.json (1, Stage B probe a); a root ref moved to ~/patches/ with no file (1, Stage B probe b); a deleted @codspeed-core patch (1). Passes on: the same ~/patches/ ref with the file present, a ::version=...&hash=... suffix, the clean copy and the clone."
+   },
+   {
+    "rule_id": "babel-patch-references-resolve-manifest-relative",
+    "unit": "babel-18",
+    "action": "added",
+    "detail": "Second half of the babel-18 fix. Non-~/ patch paths resolve from the declaring manifest (registry_dir), with regex '\"patch:[^\"#]*#(?:\\./)?([^~\"/][^\":&]*)'. Fires on: ./patches/foo.patch missing in babel-cli (1); ../../.yarn/patches/nope.patch (1); a root-relative .yarn/patches/... written without ~/ in a workspace manifest (1, correct base). Passes on: ./patches/foo.patch present, an existing ../../.yarn/patches/interpret patch, the clean copy and the clone. Neither patch rule handles a multi-patch & list or builtin<...> (noted in the comment; none at the pin)."
+   },
+   {
+    "rule_id": "babel-fixture-os-option-type",
+    "unit": "babel-44",
+    "action": "modified",
+    "detail": "Stage B over-fire fix. Old filter fired on os [], false and [\"linux\",3], which the loader accepts. New filter: $[?($.os == true || $.os > 0 || $.os < 0 || (count($.os.*) > 0 && !$.os[0]))], i.e. truthy and neither string nor array, as in helper-fixtures index.ts:315-322 and transform runner :777-783. Fires on 5, -1, 0.5, true, {\"a\":1}, {\"0\":\"linux\"} (1 each). Passes on [], false, 0, \"\", null, \"linux\", [\"linux\"], [\"linux\",3], [5], the clean copy and the clone. Remaining gap, in the rule comment: os {} (truthy, rejected by the loader) passes. RFC 9535 (serde_json_path 0.7, no custom functions) cannot tell {} from []. No fixture sets os at the pin, and 13 fixture options files are JS, which a JSON rule cannot read."
+   },
+   {
+    "rule_id": "babel-fixture-input-exec-extension",
+    "unit": "babel-41",
+    "action": "modified",
+    "detail": "Stage B's extensionless gap. The loader names a role by path.basename(file, extname), so an extensionless input/exec reaches checkFile with ext '' and throws. Added the glob {packages,codemods,eslint}/*/test/fixtures/**/{input,exec}. Fires on a bare input file (1), a bare exec file (1) and input.coffee (1). Passes on a fixtures/exec/ suite directory (clone directories named exec included), input.js.map, and the clone."
+   },
+   {
+    "rule_id": "babel-fixture-output-extension",
+    "unit": "babel-41",
+    "action": "modified",
+    "detail": "Same fix for outputs: added the glob .../test/fixtures/**/output. A bare output file fires 1. The clone passes."
+   },
+   {
+    "rule_id": "babel-helpers-min-version-annotation",
+    "unit": "babel-B02",
+    "action": "added",
+    "detail": "New A rule (family other). file_content_matches over packages/babel-helpers/src/helpers/*.{js,ts} minus dotfiles, using the script's own regex (?m)^\\s*/\\*\\s*@minVersion\\s+\\S+\\s*\\*/\\s*$ (generate-helpers.ts:115-119). Path verified: make build-standalone-ci -> build-no-bundle-ci -> gulp build-dev -> generate-runtime-helpers. The folder has 99 helper files plus tsconfig.json. Fires on: annotation stripped from typeof.ts (1), turned into a // comment (1), a new foo.js without one (1), annotation after code on the same line (1, which the script's ^\\s* also rejects). Passes on a dotfile .foo.js (the script skips it), the clean copy and the clone."
+   },
+   {
+    "rule_id": "babel-preset-env-available-plugins-in-compat-data",
+    "unit": "babel-B03",
+    "action": "added",
+    "detail": "New C rule (family other). cross_file superset. Source: the union of the top-level keys of packages/babel-compat-data/data/{plugins,plugin-bugfixes}.json, read with regex (49+16). Target: the keys of packages/babel-preset-env/src/available-plugins.ts (63 at the pin, 5 excluded, 58 checked), read with one (?x) regex. Its group 1 is every key shape except syntax-*, transform-modules-* and exactly transform-dynamic-import, spelled as complement alternatives because the regex engine has no lookahead. It covers every prefix, unlike Stage B's 4-target form. Fires on new keys transform-new-thing, proposal-foo, transform-dynamic-import2, transform-dynamic-imp, transform-member-thing, s-thing, t-thing, transform-, and a key split across lines (1 each); on renaming a plugins.json key (1) and a plugin-bugfixes.json key (1); and on a deleted target file (1). Passes on syntax-foo, transform-modules-foo and the clone."
+   },
+   {
+    "rule_id": "babel-yarn-plugins-resolve",
+    "unit": "babel-28",
+    "action": "demoted",
+    "detail": "babel-28 was removed by Stage B: each .yarnrc.yml plugin entry has an https spec (verified), and Yarn re-fetches a missing file. Rule id kept, moved to the VALUE-ADD section at level info, with a comment naming the limitation. The re-fetch was read from the bundled yarn-4.17.0.cjs by Stage B and not executed. Deleting plugin-conditions.cjs now gives 1 info, exit 0."
+   },
+   {
+    "rule_id": "babel-public-workspaces-name-version",
+    "unit": "babel-30",
+    "action": "demoted",
+    "detail": "babel-30 was removed by Stage B: a guard clause of the release.yml publish step, and an external-registry publish check is D under the batch-2 ruling. Rule id kept, moved to VALUE-ADD at level info with a comment. Removing version from babel-cli now gives 1 info, exit 0. The 'Release and repository conventions' section header became 'Repository conventions'."
+   },
+   {
+    "rule_id": "babel-gh-aw-single-compiler-version",
+    "unit": "babel-26",
+    "action": "comment",
+    "detail": "Family tag in the comment changed from [toolchain-pin] to [other] per Stage B's reclassification (gh-aw is a workflow compiler, not a section 2.3 toolchain). Bucket C and rule logic unchanged."
+   },
+   {
+    "rule_id": "babel-eslint-version-catalogs-exist",
+    "unit": "babel-20",
+    "action": "comment",
+    "detail": "Added Stage B's granularity fork to the comment: it could be read as an instance of the catalog-reference unit (B-adapter) or as a guard of the eslint-version-test step (D). The rule is unchanged (C)."
+   },
+   {
+    "rule_id": "(header)",
+    "unit": "babel-11,babel-12,babel-17,babel-B01",
+    "action": "comment",
+    "detail": "Rewrote the header's 'Not expressed' list for the batch-2 rulings. The dual-field rule (babel-12) and unique workspace names (babel-B01) are B-config unique-key. Catalog use for shared dependencies (babel-11) is B-adapter, needs entry-values, unique-key. catalog: references (babel-17) are B-adapter, needs entry-values, reference. cleanup-fixtures (babel-33) is now listed under B-adapter. The expressed-list now names the two new rules and drops the plugin-path and name/version guards, which the header now notes as value-add."
+   },
+   {
+    "rule_id": "babel-valueadd-agentic-workflow-has-lock",
+    "unit": "babel-27",
+    "action": "comment",
+    "detail": "Comment now states it is a partial form of the gh aw compile freshness unit (D), not in the ratio, as Stage B noted. Level info unchanged."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "babel-11,babel-12,babel-17,babel-33,babel-67,babel-68,babel-B01",
+    "action": "not-done",
+    "detail": "No rule exists or is needed for these units: babel-11, 12, 17 and 33 are reclassified among B buckets, babel-67 and 68 are removed without a config rule, and babel-B01 is a B-config missed unit. Nothing to demote."
+   },
+   {
+    "rule_id": "babel-fixture-*",
+    "unit": "babel-40..47",
+    "action": "not-done",
+    "detail": "Stage B's scope note: the fixture rules scan every test/fixtures tree, wider than the runners process. Stage B classed it as noise, not a wrong verdict, and every rule passes at the pin. The section comment already says so, and the scope was left as is. Narrowing it would need a hand list of which packages' fixtures each runner loads."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "babel-44",
+    "suggested_bucket": "A",
+    "note": "Fixed as far as RFC 9535 allows. The rule now matches the loader on true, numbers, non-empty objects, [], false, 0, \"\", null, strings and mixed arrays. One rejected value, os {}, still passes: no JSONPath query tells an empty object from an empty array, and the engine has no type function. This follows the jest/trpc precedent of A with a noted unhandled corner form (none at the pin). C is the alternative reading if the integrator treats the {} corner as not expressible."
+   },
+   {
+    "id": "babel-B02",
+    "suggested_bucket": "A",
+    "note": "Rule added (babel-helpers-min-version-annotation). R4 holds in both directions: the clone and a clean copy pass, and 4 mutations each fire 1. Family other, so the dep-version/toolchain-pin R4 requirement does not apply, but it was met anyway."
+   },
+   {
+    "id": "babel-B03",
+    "suggested_bucket": "C",
+    "note": "Rule added (babel-preset-env-available-plugins-in-compat-data). C under the batch-2 ruling (regex read of JSON keys, layout-specific key regex). It passes on the clone and fires on 11 mutations. Stage B's D-as-source-extraction fork stays open: the TS map is a flat object literal of string keys."
+   },
+   {
+    "id": "babel-18",
+    "suggested_bucket": "A",
+    "note": "Bucket unchanged. The under-scope Stage B reproduced is fixed: all manifests are read, any ~/ path is accepted, and a second rule covers manifest-relative paths. Both of Stage B's probes now fire. Unit babel-18 now has two rules."
+   },
+   {
+    "id": "babel-28",
+    "suggested_bucket": "removed",
+    "note": "Removed per Stage B. Its rule stays at level info as value-add (babel-yarn-plugins-resolve). Both .yarnrc.yml plugin entries carry an https spec, which is consistent with the re-fetch reading. The Yarn runtime behavior itself was not executed."
+   },
+   {
+    "id": "babel-30",
+    "suggested_bucket": "removed",
+    "note": "Removed per Stage B (Stage B's fork: or D). Its rule stays at level info as value-add (babel-public-workspaces-name-version)."
+   }
+  ],
+  "validate_output": "✓ Config valid: 64 rule(s) loaded from docs/design/v0.12/corpus/babel-babel.alint.yml",
+  "check_output": "exit 0. Output: \".yarn/plugins/@yarnpkg/plugin-conditions.cjs: info: babel-valueadd-yarn-plugin-checksums: A vendored Yarn plugin should hash to the checksum .yarnrc.yml records for it.\\n1 info.\" This finding is expected: it is Stage A's intended value-add report of real checksum drift (plugin-conditions.cjs does not hash to the checksum .yarnrc.yml records), and Stage B confirmed it. Every error-level rule passes, and the two demoted value-add rules pass on the clone. `git -C <clone> status --porcelain` is empty and HEAD is 2bc74adeadd1d30a56c6dc747e82b1566946e713. The scratch directory <scratch>/babel-babel-c was removed. Only docs/design/v0.12/corpus/babel-babel.alint.yml was edited."
+ }
+}

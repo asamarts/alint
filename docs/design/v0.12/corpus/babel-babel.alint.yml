@@ -1,0 +1,928 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config: babel/babel
+# Pinned @ 2bc74adeadd1d30a56c6dc747e82b1566946e713 (stratum: js-monorepo)
+#
+# Shape: the Babel compiler, a Yarn 4 (node-modules linker) TypeScript monorepo
+# of 166 manifests: the private root `babel`, packages/* (150), eslint/* (6),
+# codemods/* (2), test/esm, test/runtime-integration/* (5) and benchmark.
+# Shared ranges live in Yarn catalogs in .yarnrc.yml. Governance: community.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/ci.yml, job "Validate Yarn dependencies and constraints":
+#     yarn constraints (yarn.config.cjs), yarn dedupe --check, and
+#     `yarn release-tool check-cycles` (the vendored babel release-tool plugin).
+#   ci.yml build/lint jobs: make build-standalone-ci, the README / .npmignore
+#     generators, scripts/cleanup-fixtures.ts, then
+#     scripts/assert-dir-git-clean.ts; make lint-ci (tsc, eslint, tstyche,
+#     prettier, dts bundling, generate-tsconfig) and check-compat-data, then the
+#     same clean-tree assertion; the gh-aw lock-file version check and compile.
+#   .github/workflows/package-manager.yml: scripts/ensure-yarn-version-integrity.ts.
+#   The fixture loader (packages/babel-helper-fixtures, and the transform and
+#     parser runners) rejects malformed test fixtures while jest runs.
+#   .gitattributes (`* text eol=lf`).
+#
+# This config expresses the yarn.config.cjs rules alint can state over the
+# manifests (workspace:^ ranges, license / repository / publishConfig / author,
+# engines.node, main/types, type, exports, types, the @babel/core and helper
+# dependency rules, peer ranges), the patch-file references, the Yarn pins
+# (packageManager format, yarnPath), workspace: references, the gh-aw
+# compiler-version agreement, the eslint-version-test catalog convention,
+# the generated README and .npmignore contracts, the runtime-helper
+# @minVersion annotation, the preset-env available-plugins / compat-data
+# sync, the static fixture-layout checks and LF line endings.
+# Not expressed (B/D, see the stratum record): no dependency in both
+# dependencies and devDependencies and unique workspace names (B-config
+# unique-key), the fixture monorepo-plugin prefix check (B-config
+# reference), catalog use for shared dependencies (B-adapter, needs
+# entry-values; unique-key), catalog: references that resolve (B-adapter,
+# needs entry-values; reference), workspace dependency cycles, the
+# archived-libs typings order and cleanup-fixtures (B-adapter), the
+# inherited-options fixture checks (B-delegate), installs, dedupe, builds,
+# codegen freshness, lint, tsc, tests, publint, network checks.
+# Value-add rules (level info, outside the coverage ratio) are at the end;
+# one of them reports a real drift at the pin (plugin-conditions checksum).
+# Two of them are the rules of units Stage B removed (the Yarn plugin paths
+# and the release-tool name/version guard).
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+rules:
+  # ══════════════════════════════════════════════════════════════════════════
+  # yarn.config.cjs constraints (CI: "Check for unmet constraints (fix w/
+  # "yarn constraints --fix")"; .yarnrc.yml enableConstraintsChecks also runs
+  # them on install). Workspaces: the root package.json plus the six
+  # `workspaces` globs. Each constraint rule is one unit (R7). Yarn tests
+  # `workspace.manifest.private` for truthiness; every private manifest here
+  # uses the boolean true.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [dep-version] enforceWorkspaceDependencies: a `workspace:` range in
+  #   dependencies or devDependencies must be exactly `workspace:^`
+  #   (the constraint's /^workspace:(?!\^$)/ test). Peer and optional
+  #   dependencies are not checked by the constraint, so not here either.
+  - id: babel-workspace-ranges-caret
+    kind: json_path_absent
+    paths: &manifests
+      - "package.json"
+      - "codemods/*/package.json"
+      - "eslint/*/package.json"
+      - "packages/*/package.json"
+      - "test/esm/package.json"
+      - "test/runtime-integration/*/package.json"
+      - "benchmark/package.json"
+    path: "$['dependencies','devDependencies'][?(search(@, '^workspace:') && @ != 'workspace:^')]"
+    level: error
+    message: "A workspace: range must be exactly `workspace:^` (yarn.config.cjs enforceWorkspaceDependencies)."
+
+  # A [other] enforcePackageInfo, license: MIT on every public workspace, unset
+  #   on private ones.
+  - id: babel-workspace-license
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?(($.private != true && $.license != 'MIT') || ($.private == true && $.license))]"
+    level: error
+    message: "Public workspaces declare license MIT and private ones declare none (yarn.config.cjs enforcePackageInfo)."
+
+  # A [other] enforcePackageInfo, repository: every public workspace sets
+  #   exactly {type: git, url: https://github.com/babel/babel.git,
+  #   directory: <workspace cwd>}; private workspaces set no repository.
+  #   The directory is path-derived, so the public half iterates the workspace
+  #   directories with a templated filter (`{path}` is the workspace cwd).
+  - id: babel-workspace-repository-field
+    kind: for_each_dir
+    select: ["codemods/*", "eslint/*", "packages/*", "test/esm", "test/runtime-integration/*", "benchmark"]
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$[?($.private != true && ($.repository.type != 'git' || $.repository.url != 'https://github.com/babel/babel.git' || $.repository.directory != '{path}' || length($.repository) != 3))]"
+    level: error
+    message: "A public workspace's repository must be {type: git, url: https://github.com/babel/babel.git, directory: <its path>} (yarn.config.cjs enforcePackageInfo)."
+
+  - id: babel-private-workspaces-no-repository
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.private == true && $.repository)]"
+    level: error
+    message: "Private workspaces must not declare a repository (yarn.config.cjs enforcePackageInfo)."
+
+  # A [other] enforcePackageInfo, publishConfig: exactly {access: public} on
+  #   public workspaces, unset on private ones.
+  - id: babel-workspace-publish-config
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?(($.private != true && ($.publishConfig.access != 'public' || length($.publishConfig) != 1)) || ($.private == true && $.publishConfig))]"
+    level: error
+    message: "Public workspaces set publishConfig {access: public}; private ones set none (yarn.config.cjs enforcePackageInfo)."
+
+  # A [other] enforcePackageInfo, author: the Babel Team string on public
+  #   workspaces, unset on private ones.
+  - id: babel-workspace-author
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?(($.private != true && $.author != 'The Babel Team (https://babel.dev/team)') || ($.private == true && $.author))]"
+    level: error
+    message: "Public workspaces set author 'The Babel Team (https://babel.dev/team)'; private ones set none (yarn.config.cjs enforcePackageInfo)."
+
+  # A [toolchain-pin] enforceEnginesNodeForPublicUnsetForPrivate: every public
+  #   workspace except @babel/runtime* declares engines.node
+  #   '^22.18.0 || >=24.11.0'; private workspaces and @babel/runtime* declare
+  #   none. The literal is the constraint's own.
+  - id: babel-workspace-engines-node
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?(($.private != true && !search($.name, '^@babel/runtime') && $.engines.node != '^22.18.0 || >=24.11.0') || (($.private == true || search($.name, '^@babel/runtime')) && $.engines.node))]"
+    level: error
+    message: "engines.node must be '^22.18.0 || >=24.11.0' on public workspaces and unset on private ones and @babel/runtime* (yarn.config.cjs)."
+
+  # A [other] enforceMainAndTypes: a non-empty main or types path starts with
+  #   "./".
+  - id: babel-main-types-relative
+    kind: json_path_matches
+    paths: *manifests
+    path: "$['main','types']"
+    matches: '^(\./|$)'
+    if_present: true
+    level: error
+    message: "main and types must start with './' (yarn.config.cjs enforceMainAndTypes)."
+
+  # A [other] enforceType: a public workspace's type is module, unless it is
+  #   commonjs.
+  - id: babel-public-type-field
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.private != true && $.type != 'module' && $.type != 'commonjs')]"
+    level: error
+    message: "Public workspaces must set type to module (or commonjs) (yarn.config.cjs enforceType)."
+
+  # A [other] enforceExportsAndTypes, exports (one unit, three rules for the
+  #   constraint's three classes; the name lists are the constraint's literals).
+  #   Class 1 (JSON libraries, CLIs, standalone, @babel/runtime*): exports
+  #   './package.json'.
+  - id: babel-exports-class-special
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.private != true && ($.name == '@babel/compat-data' || $.name == '@babel/helper-globals' || $.name == '@babel/standalone' || $.name == '@babel/node' || $.name == '@babel/build-external-helpers' || $.name == '@babel/cli' || search($.name, '^@babel/runtime')) && $.exports['./package.json'] != './package.json')]"
+    level: error
+    message: "This package must export './package.json' (yarn.config.cjs enforceExportsAndTypes)."
+
+  #   Class 2 (custom extra conditions or entry points): '.' maps default to
+  #   ./lib/index.js and types to ./lib/index.d.ts, plus './package.json'.
+  - id: babel-exports-class-extended
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.private != true && ($.name == '@babel/helper-plugin-test-runner' || $.name == '@babel/plugin-transform-react-jsx' || $.name == '@babel/code-frame') && ($.exports['.'].default != './lib/index.js' || $.exports['.'].types != './lib/index.d.ts' || $.exports['./package.json'] != './package.json'))]"
+    level: error
+    message: "exports['.'] must map default to ./lib/index.js and types to ./lib/index.d.ts, and './package.json' must be exported (yarn.config.cjs enforceExportsAndTypes)."
+
+  #   Class 3 (every other public workspace): exports is exactly
+  #   {'.': {types: ./lib/index.d.ts, default: ./lib/index.js},
+  #    './package.json': './package.json'}.
+  - id: babel-exports-class-standard
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.private != true && !($.name == '@babel/compat-data' || $.name == '@babel/helper-globals' || $.name == '@babel/standalone' || $.name == '@babel/node' || $.name == '@babel/build-external-helpers' || $.name == '@babel/cli' || search($.name, '^@babel/runtime') || $.name == '@babel/helper-plugin-test-runner' || $.name == '@babel/plugin-transform-react-jsx' || $.name == '@babel/code-frame') && ($.exports['.'].types != './lib/index.d.ts' || $.exports['.'].default != './lib/index.js' || $.exports['./package.json'] != './package.json' || length($.exports) != 2 || length($.exports['.']) != 2))]"
+    level: error
+    message: "exports must be exactly {'.': {types: ./lib/index.d.ts, default: ./lib/index.js}, './package.json': './package.json'} (yarn.config.cjs enforceExportsAndTypes)."
+
+  # A [other] enforceExportsAndTypes, types: unset on every public workspace
+  #   outside class 1 (type exports go through `exports`).
+  - id: babel-types-field-unset
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.private != true && !($.name == '@babel/compat-data' || $.name == '@babel/helper-globals' || $.name == '@babel/standalone' || $.name == '@babel/node' || $.name == '@babel/build-external-helpers' || $.name == '@babel/cli' || search($.name, '^@babel/runtime')) && $.types)]"
+    level: error
+    message: "Use exports for type entry points; the top-level types field must be unset (yarn.config.cjs enforceExportsAndTypes)."
+
+  # A [dep-version] enforceBabelHelperBabelDeps: an @babel/helper-* workspace
+  #   that peer-depends on @babel/core must not list @babel/template or
+  #   @babel/types in dependencies.
+  - id: babel-helpers-no-template-types-deps
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?(search($.name, '^@babel/helper-') && $.peerDependencies['@babel/core'] && ($.dependencies['@babel/template'] || $.dependencies['@babel/types']))]"
+    level: error
+    message: "An @babel/helper-* package that peer-depends on @babel/core must not depend on @babel/template or @babel/types (yarn.config.cjs enforceBabelHelperBabelDeps)."
+
+  # A [dep-version] enforceBabelCoreNotInDeps (1/2): a workspace that
+  #   peer-depends on @babel/core and does not list it in dependencies has
+  #   devDependencies['@babel/core'] = 'workspace:^'.
+  - id: babel-core-peer-implies-dev-dep
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.peerDependencies['@babel/core'] && !$.dependencies['@babel/core'] && $.devDependencies['@babel/core'] != 'workspace:^')]"
+    level: error
+    message: "A package that peer-depends on @babel/core must devDepend on it with workspace:^ (yarn.config.cjs enforceBabelCoreNotInDeps)."
+
+  # A [dep-version] enforceBabelCoreNotInDeps (2/2): no workspace lists
+  #   @babel/core in dependencies, except the four the constraint exempts.
+  #   (CI runs constraints without BABEL_CORE_DEV_DEP_VERSION, so this branch,
+  #   not enforceBabelCoreVersionFor78Compat, is the enforced one.)
+  - id: babel-core-not-in-dependencies
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.dependencies['@babel/core'] && $.name != '@babel/eslint-shared-fixtures' && $.name != '@babel/eslint-tests' && $.name != '@babel/helper-transform-fixture-test-runner' && $.name != '@babel/standalone')]"
+    level: error
+    message: "@babel/core must not be a dependency (use a peer dependency) (yarn.config.cjs enforceBabelCoreNotInDeps)."
+
+  # A [dep-version] enforceBabelPeerDependencyVersion: peer ranges on
+  #   @babel/core and @babel/eslint-parser are ^8.0.0.
+  - id: babel-peer-ranges
+    kind: json_path_equals
+    paths: *manifests
+    path: "$.peerDependencies['@babel/core','@babel/eslint-parser']"
+    equals: "^8.0.0"
+    if_present: true
+    level: error
+    message: "Peer dependencies on @babel/core and @babel/eslint-parser must use ^8.0.0 (yarn.config.cjs enforceBabelPeerDependencyVersion)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Other dependency-specifier checks over files alint reads
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [dep-version] Every `patch:` specifier in any workspace manifest names
+  #   a patch file that exists; `yarn install` in every CI job fails
+  #   otherwise. Yarn resolves a `~/` patch path from the project root and
+  #   any other relative path from the declaring manifest, so the two forms
+  #   are two rules with different bases (jest-B03 precedent). Stage B fix:
+  #   the source was the root manifest only and the path had to sit under
+  #   .yarn/patches/. A `::` parameter suffix is cut off. A multi-patch `&`
+  #   list and a builtin<...> patch are not handled; at the pin only the
+  #   root declares patches (7 specifiers, all `~/.yarn/patches/...`).
+  - id: babel-patch-references-resolve
+    kind: registry_paths_resolve
+    source: "{package.json,codemods/*/package.json,eslint/*/package.json,packages/*/package.json,test/esm/package.json,test/runtime-integration/*/package.json,benchmark/package.json}"
+    extract:
+      regex: '"patch:[^"#]*#~/([^":&]+)'
+    base: lint_root
+    expect: file
+    level: error
+    message: "A patch: specifier names a ~/ patch file that does not exist (yarn install)."
+
+  - id: babel-patch-references-resolve-manifest-relative
+    kind: registry_paths_resolve
+    source: "{package.json,codemods/*/package.json,eslint/*/package.json,packages/*/package.json,test/esm/package.json,test/runtime-integration/*/package.json,benchmark/package.json}"
+    extract:
+      regex: '"patch:[^"#]*#(?:\./)?([^~"/][^":&]*)'
+    expect: file
+    level: error
+    message: "A patch: specifier names a patch file that does not exist relative to its manifest (yarn install)."
+
+  # A [dep-version] Every `workspace:` dependency names a workspace of this
+  #   project: `yarn install` (every CI job; immutable in prepare-yarn-cache)
+  #   fails with "Workspace not found" otherwise. The source unions $.name of
+  #   the 166 workspace manifests (the root `workspaces` globs plus the root);
+  #   each target is one manifest's set of keys whose value starts with
+  #   `workspace:` (trpc-B01 precedent). Exact here because every workspace:
+  #   range is `workspace:^` (babel-workspace-ranges-caret), which needs no
+  #   semver check.
+  - id: babel-workspace-refs-resolve
+    kind: cross_file
+    source:
+      files: "{package.json,codemods/*/package.json,eslint/*/package.json,packages/*/package.json,test/esm/package.json,test/runtime-integration/*/package.json,benchmark/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "{package.json,codemods/*/package.json,eslint/*/package.json,packages/*/package.json,test/esm/package.json,test/runtime-integration/*/package.json,benchmark/package.json}"
+      extract: { regex: '"([^"]+)"\s*:\s*"workspace:' }
+    relation: superset
+    allow_missing_target: true
+    level: error
+    message: "A workspace: dependency must name a workspace of this project (yarn install fails with Workspace not found)."
+
+  # C [dep-version] .yarnrc.yml: "# Used in the eslint-version-test workflow".
+  #   The ci.yml job runs `yarn up eslint@catalog:babel-eslint--<N>
+  #   eslint-plugin-import@catalog:babel-eslint--<N>
+  #   @eslint/js@catalog:babel-eslint--<N>` for each eslint-version matrix
+  #   value, so each needs a babel-eslint--<N> catalog with those three keys.
+  #   C: the matrix regex reads one flow-list element, and the key check names
+  #   the current version (9) by hand because JSONPath cannot select catalog
+  #   names by pattern. Granularity fork (Stage B): this could also be read
+  #   as an instance of the catalog-reference unit (B-adapter) or as a guard
+  #   of the eslint-version-test step (D).
+  - id: babel-eslint-version-catalogs-exist
+    kind: cross_file
+    relation: subset
+    source:
+      file: ".github/workflows/ci.yml"
+      extract:
+        regex: '(?m)^\s+eslint-version: \[(\d+)'
+    targets:
+      - file: ".yarnrc.yml"
+        extract:
+          regex: '(?m)^  babel-eslint--(\d+):\s*$'
+    level: error
+    message: "Each eslint-version-test matrix version needs a babel-eslint--<N> catalog in .yarnrc.yml."
+
+  - id: babel-eslint-version-catalog-keys-present
+    kind: yaml_path_absent
+    paths: [".yarnrc.yml"]
+    path: "$[?(!$.catalogs['babel-eslint--9'].eslint || !$.catalogs['babel-eslint--9']['eslint-plugin-import'] || !$.catalogs['babel-eslint--9']['@eslint/js'])]"
+    level: error
+    message: "The babel-eslint--9 catalog must define eslint, eslint-plugin-import and @eslint/js (eslint-version-test runs yarn up with them)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Toolchain pins (.github/workflows/package-manager.yml runs
+  # scripts/ensure-yarn-version-integrity.ts when package.json,
+  # .yarn/releases/* or .yarnrc.yml change)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [toolchain-pin] packageManager is present and pins Yarn with an
+  #   integrity hash: yarn@<x.y.z>+sha512.<hex> (the script's
+  #   packageManagerSpecRegex; "Use 'corepack use yarn@<version>'").
+  - id: babel-package-manager-pinned-with-hash
+    kind: json_path_matches
+    paths: ["package.json"]
+    path: "$.packageManager"
+    matches: '^yarn@\d+\.\d+\.\d+\+sha512\.[a-f0-9]+$'
+    level: error
+    message: "packageManager must be 'yarn@<version>+sha512.<hash>' (scripts/ensure-yarn-version-integrity.ts)."
+
+  # A [toolchain-pin] .yarnrc.yml sets yarnPath (the script throws "yarnPath is
+  #   missing in .yarnrc.yml") and it names a committed file (the script
+  #   hashes it).
+  - id: babel-yarn-path-set
+    kind: yaml_path_matches
+    paths: [".yarnrc.yml"]
+    path: "$.yarnPath"
+    matches: '^\S+$'
+    level: error
+    message: ".yarnrc.yml must set yarnPath (scripts/ensure-yarn-version-integrity.ts)."
+
+  - id: babel-yarn-path-resolves
+    kind: registry_paths_resolve
+    source: ".yarnrc.yml"
+    extract:
+      yaml: "$.yarnPath"
+    base: "."
+    expect: file
+    level: error
+    message: ".yarnrc.yml yarnPath must name a committed Yarn release."
+
+  # C [other] ci.yml lint job: every .github/workflows/*.lock.yml was
+  #   generated by one gh-aw version ("The agentic workflows lock files were
+  #   generated by different gh-aw versions"), which CI then pins to recompile
+  #   them. C: "all equal across a glob" needs an anchor; the one agentic
+  #   workflow today (backport-7x) is the anchor, so renaming it breaks the
+  #   rule loudly. Family other (Stage B; Stage A had toolchain-pin): gh-aw
+  #   is a workflow compiler, not a section 2.3 Node / package-manager /
+  #   language toolchain.
+  - id: babel-gh-aw-single-compiler-version
+    kind: cross_file
+    relation: equals
+    source:
+      file: ".github/workflows/backport-7x.lock.yml"
+      extract:
+        regex: '(?m)^# This file was automatically generated by gh-aw \((v[^)]*)\)'
+    targets:
+      files: ".github/workflows/*.lock.yml"
+      extract:
+        regex: '(?m)^# This file was automatically generated by gh-aw \((v[^)]*)\)'
+    level: error
+    message: "All agentic workflow lock files must be generated by the same gh-aw version (re-run gh aw compile with one version)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Build and test gates over files alint reads
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] (babel-B02) packages/babel-helpers/scripts/generate-helpers.ts
+  #   throws "@minVersion number missing in <file>" for a runtime helper
+  #   source without a `/* @minVersion X */` line. It runs as gulp
+  #   generate-runtime-helpers inside gulp build-dev, inside make
+  #   build-standalone-ci (ci.yml build job). The script reads every .js/.ts
+  #   file in src/helpers except package.json, tsconfig.json and dotfiles;
+  #   the pattern is the script's own regex (99 helper files at the pin).
+  - id: babel-helpers-min-version-annotation
+    kind: file_content_matches
+    paths:
+      - "packages/babel-helpers/src/helpers/*.{js,ts}"
+      - "!packages/babel-helpers/src/helpers/.*"
+    pattern: '(?m)^\s*/\*\s*@minVersion\s+\S+\s*\*/\s*$'
+    level: error
+    message: "A runtime helper source must declare `/* @minVersion X */` (packages/babel-helpers/scripts/generate-helpers.ts)."
+
+  # C [other] (babel-B03) packages/babel-preset-env/test/index.skip-bundled.js
+  #   "available-plugins is in sync with @babel/compat-data" (jest, ci.yml
+  #   test jobs): every key of src/available-plugins.ts except syntax-*,
+  #   transform-modules-* and transform-dynamic-import is a key of
+  #   @babel/compat-data's data/plugins.json or data/plugin-bugfixes.json
+  #   (63 keys, 5 excluded, 49 + 16 compat-data keys at the pin).
+  #   C (batch-2 ruling): both key sets are read by regex at the files'
+  #   layout (2-space-indented, double-quoted keys), and the test's
+  #   exclusions are spelled as complement alternatives, since the regex
+  #   engine has no lookahead. Group 1 is any key outside the three
+  #   excluded shapes.
+  - id: babel-preset-env-available-plugins-in-compat-data
+    kind: cross_file
+    relation: superset
+    source:
+      files: "packages/babel-compat-data/data/{plugins,plugin-bugfixes}.json"
+      extract:
+        regex: '(?m)^  "([^"]+)": \{'
+    targets:
+      - file: "packages/babel-preset-env/src/available-plugins.ts"
+        extract:
+          regex: |-
+            (?mx) ^ \x20\x20 " (
+                [^"st] [^"]*
+              # s..., but not syntax-
+              | s (?:[^y"][^"]*)? | sy (?:[^n"][^"]*)? | syn (?:[^t"][^"]*)?
+              | synt (?:[^a"][^"]*)? | synta (?:[^x"][^"]*)? | syntax (?:[^-"][^"]*)?
+              # t..., but not transform-
+              | t (?:[^r"][^"]*)? | tr (?:[^a"][^"]*)? | tra (?:[^n"][^"]*)?
+              | tran (?:[^s"][^"]*)? | trans (?:[^f"][^"]*)? | transf (?:[^o"][^"]*)?
+              | transfo (?:[^r"][^"]*)? | transfor (?:[^m"][^"]*)? | transform (?:[^-"][^"]*)?
+              # transform- followed by neither m nor d
+              | transform- (?:[^md"][^"]*)?
+              # transform-m..., but not transform-modules-
+              | transform-m (?:[^o"][^"]*)? | transform-mo (?:[^d"][^"]*)?
+              | transform-mod (?:[^u"][^"]*)? | transform-modu (?:[^l"][^"]*)?
+              | transform-modul (?:[^e"][^"]*)? | transform-module (?:[^s"][^"]*)?
+              | transform-modules (?:[^-"][^"]*)?
+              # transform-d..., but not exactly transform-dynamic-import
+              | transform-d (?:[^y"][^"]*)? | transform-dy (?:[^n"][^"]*)?
+              | transform-dyn (?:[^a"][^"]*)? | transform-dyna (?:[^m"][^"]*)?
+              | transform-dynam (?:[^i"][^"]*)? | transform-dynami (?:[^c"][^"]*)?
+              | transform-dynamic (?:[^-"][^"]*)? | transform-dynamic- (?:[^i"][^"]*)?
+              | transform-dynamic-i (?:[^m"][^"]*)? | transform-dynamic-im (?:[^p"][^"]*)?
+              | transform-dynamic-imp (?:[^o"][^"]*)? | transform-dynamic-impo (?:[^r"][^"]*)?
+              | transform-dynamic-impor (?:[^t"][^"]*)? | transform-dynamic-import [^"]+
+            ) ":
+    level: error
+    message: "A preset-env available plugin (other than syntax-*, transform-modules-* and transform-dynamic-import) must have @babel/compat-data data (plugins.json or plugin-bugfixes.json)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Generated files whose whole contract alint can state (ci.yml build job:
+  # "Generate readmes", "Generate .npmignore", then assert-dir-git-clean)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # C [other] scripts/generators/readmes.ts writes every packages/*/README.md
+  #   (except babel-helper-check-duplicate-nodes) from the manifest's name and
+  #   description, the directory name, a hand-kept issue-label map and an
+  #   isDep test. Seven rules restate the generator; C because the 14-package
+  #   label map is copied by hand (a new label silently goes unchecked).
+  - id: babel-readme-generated-shape
+    kind: for_each_dir
+    select: ["packages/*", "!packages/babel-helper-check-duplicate-nodes"]
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: file_content_matches
+        paths: "{path}/README.md"
+        pattern: '\A# \S+\n\n> .*\n\nSee our website \[\S+\]\(https://babeljs\.io/docs/{basename}\) for more information(?: or the \[issues\]\(https://github\.com/babel/babel/issues\?utf8=%E2%9C%93&q=is%3Aissue\+label%3A%22[^)\s]+%22\+is%3Aopen\) associated with this package)?\.\n\n## Install\n\nUsing npm:\n\n```sh\nnpm install --save(?:-dev)? \S+\n```\n\nor using yarn:\n\n```sh\nyarn add \S+(?: --dev)?\n```\n\z'
+      - kind: cross_file
+        relation: equals
+        source:
+          file: "{path}/package.json"
+          extract:
+            json: "$.name"
+        targets:
+          - file: "{path}/README.md"
+            extract:
+              regex: '\A# (\S+)\n'
+          - file: "{path}/README.md"
+            extract:
+              regex: 'See our website \[([^\]]+)\]\('
+          - file: "{path}/README.md"
+            extract:
+              regex: '(?m)^npm install --save(?:-dev)? (\S+)$'
+          - file: "{path}/README.md"
+            extract:
+              regex: '(?m)^yarn add (\S+)(?: --dev)?$'
+      - kind: cross_file
+        relation: equals
+        source:
+          file: "{path}/package.json"
+          extract:
+            json: "$.description"
+        targets:
+          - file: "{path}/README.md"
+            extract:
+              regex: '(?m)^> (.*)$'
+    level: error
+    message: "packages/*/README.md must match scripts/generators/readmes.ts output (run make generate-readme)."
+
+  - id: babel-readme-install-flags
+    kind: for_each_match
+    paths: ["packages/*/README.md", "!packages/babel-helper-check-duplicate-nodes/README.md"]
+    select: '^(npm install|yarn add) '
+    require:
+      matches:
+        - '^(npm install --save (@babel/runtime\S*|@babel/helper-\S+|@babel/compat-data)|npm install --save-dev @babel/\S+|yarn add (@babel/runtime\S*|@babel/helper-\S+|@babel/compat-data)|yarn add @babel/\S+ --dev)$'
+      forbid:
+        - '^npm install --save-dev @babel/(runtime|helper-|compat-data$)'
+        - '^yarn add @babel/(runtime\S*|helper-\S+|compat-data) --dev$'
+    level: error
+    message: "Install lines use --save / no --dev for runtime, helper-* and compat-data packages and --save-dev / --dev for the rest (readmes.ts isDep)."
+
+  - id: babel-readme-issue-link-labelled
+    kind: file_content_matches
+    paths:
+      - "packages/babel-preset-flow/README.md"
+      - "packages/babel-preset-node/README.md"
+      - "packages/babel-preset-react/README.md"
+      - "packages/babel-preset-typescript/README.md"
+      - "packages/babel-parser/README.md"
+      - "packages/babel-cli/README.md"
+      - "packages/babel-core/README.md"
+      - "packages/babel-generator/README.md"
+      - "packages/babel-preset-env/README.md"
+      - "packages/babel-register/README.md"
+      - "packages/babel-template/README.md"
+      - "packages/babel-traverse/README.md"
+      - "packages/babel-types/README.md"
+      - "packages/babel-standalone/README.md"
+    pattern: 'or the \[issues\]\(https://github\.com/babel/babel/issues\?utf8=%E2%9C%93&q=is%3Aissue\+label%3A%22(pkg|area)%3A%20[a-z-]+%22\+is%3Aopen\) associated with this package\.'
+    level: error
+    message: "This package's README must link its issue label (readmes.ts labels map)."
+
+  - id: babel-readme-issue-link-unlabelled
+    kind: file_content_forbidden
+    paths:
+      - "packages/*/README.md"
+      - "!packages/babel-helper-check-duplicate-nodes/README.md"
+      - "!packages/babel-preset-flow/README.md"
+      - "!packages/babel-preset-node/README.md"
+      - "!packages/babel-preset-react/README.md"
+      - "!packages/babel-preset-typescript/README.md"
+      - "!packages/babel-parser/README.md"
+      - "!packages/babel-cli/README.md"
+      - "!packages/babel-core/README.md"
+      - "!packages/babel-generator/README.md"
+      - "!packages/babel-preset-env/README.md"
+      - "!packages/babel-register/README.md"
+      - "!packages/babel-template/README.md"
+      - "!packages/babel-traverse/README.md"
+      - "!packages/babel-types/README.md"
+      - "!packages/babel-standalone/README.md"
+    pattern: 'associated with this package'
+    level: error
+    message: "Only packages in the readmes.ts labels map link an issue label."
+
+  - id: babel-readme-pkg-label-matches-dir
+    kind: for_each_match
+    paths: ["packages/*/README.md"]
+    select: 'docs/babel-(?P<a>[a-z-]+)\) for more information or the \[issues\]\(\S*label%3A%22pkg%3A%20(?P<b>[a-z-]+)%22'
+    require:
+      equal: [a, b]
+    level: error
+    message: "A 'pkg: X' issue label must name the package's own directory (readmes.ts labels map)."
+
+  - id: babel-readme-area-label-matches-dir
+    kind: for_each_match
+    paths: ["packages/*/README.md"]
+    select: 'docs/babel-preset-(?P<a>[a-z]+)\) for more information or the \[issues\]\(\S*label%3A%22area%3A%20(?P<b>[a-z]+)%22'
+    require:
+      equal: [a, b]
+    level: error
+    message: "An 'area: X' issue label must name the preset's own directory (readmes.ts labels map)."
+
+  # C [other] scripts/generators/npm-ignore.ts: a package under codemods/,
+  #   packages/ or eslint/ that is private or declares `files` has no
+  #   .npmignore; every other package's .npmignore is exactly src, test,
+  #   *.log, tsconfig.json, tsconfig.tsbuildinfo, then its extra entry (from a
+  #   hand-kept map), then `scripts` when it has a scripts/ directory.
+  #   C: the extras map is copied by hand.
+  - id: babel-npmignore-absent-when-private-or-files
+    kind: for_each_file
+    select: "{codemods,packages,eslint}/*/.npmignore"
+    require:
+      - kind: json_path_absent
+        paths: "{dir}/package.json"
+        path: "$[?($.private == true || $.files)]"
+    level: error
+    message: "Private packages and packages with a files list must not have a .npmignore (scripts/generators/npm-ignore.ts)."
+
+  - id: babel-npmignore-present-otherwise
+    kind: for_each_dir
+    select: "{codemods,packages,eslint}/*"
+    when_iter: 'iter.has_file("package.json") and not iter.has_file(".npmignore")'
+    require:
+      - kind: json_path_absent
+        paths: "{path}/package.json"
+        path: "$[?($.private != true && !$.files)]"
+    level: error
+    message: "A public package without a files list needs the generated .npmignore (scripts/generators/npm-ignore.ts)."
+
+  - id: babel-npmignore-content
+    kind: file_content_matches
+    paths: "{codemods,packages,eslint}/*/.npmignore"
+    pattern: '\Asrc\ntest\n\*\.log\ntsconfig\.json\ntsconfig\.tsbuildinfo\n(?:build\n|data\n|CONTRIB\.md\n)?(?:scripts\n)?\z'
+    level: error
+    message: ".npmignore must match scripts/generators/npm-ignore.ts output."
+
+  - id: babel-npmignore-scripts-when-dir
+    kind: for_each_dir
+    select: "{codemods,packages,eslint}/*"
+    when_iter: 'iter.has_file(".npmignore") and iter.has_file("scripts/**")'
+    require:
+      - kind: file_content_matches
+        paths: "{path}/.npmignore"
+        pattern: '(?m)^scripts$'
+    level: error
+    message: "A package with a scripts/ directory lists `scripts` in .npmignore (npm-ignore.ts)."
+
+  - id: babel-npmignore-no-scripts-without-dir
+    kind: for_each_dir
+    select: "{codemods,packages,eslint}/*"
+    when_iter: 'iter.has_file(".npmignore") and not iter.has_file("scripts/**")'
+    require:
+      - kind: file_content_forbidden
+        paths: "{path}/.npmignore"
+        pattern: '(?m)^scripts$'
+    level: error
+    message: "Only a package with a scripts/ directory lists `scripts` in .npmignore (npm-ignore.ts)."
+
+  - id: babel-npmignore-extra-compat-data
+    kind: file_content_matches
+    paths: ["packages/babel-compat-data/.npmignore"]
+    pattern: '(?m)^build$'
+    level: error
+    message: "npm-ignore.ts extraIgnore: babel-compat-data ignores build."
+
+  - id: babel-npmignore-extra-node
+    kind: file_content_matches
+    paths: ["packages/babel-node/.npmignore"]
+    pattern: '(?m)^data$'
+    level: error
+    message: "npm-ignore.ts extraIgnore: babel-node ignores data."
+
+  - id: babel-npmignore-extra-decorators
+    kind: file_content_matches
+    paths: ["packages/babel-plugin-proposal-decorators/.npmignore"]
+    pattern: '(?m)^CONTRIB\.md$'
+    level: error
+    message: "npm-ignore.ts extraIgnore: babel-plugin-proposal-decorators ignores CONTRIB.md."
+
+  - id: babel-npmignore-no-other-extras
+    kind: file_content_forbidden
+    paths:
+      - "{codemods,packages,eslint}/*/.npmignore"
+      - "!packages/babel-compat-data/.npmignore"
+      - "!packages/babel-node/.npmignore"
+      - "!packages/babel-plugin-proposal-decorators/.npmignore"
+    pattern: '(?m)^(build|data|CONTRIB\.md)$'
+    level: error
+    message: "Only the packages in npm-ignore.ts extraIgnore carry an extra .npmignore entry."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Test-fixture layout (packages/babel-helper-fixtures and the transform /
+  # process runners reject a malformed fixture while jest runs in CI). The
+  # loader reads <fixtures>/<suite>/<task>/ (the parser adds a category
+  # level); a file's role is its name without the LAST extension, so
+  # input.js.map is not an input. These rules scan every fixture tree, which
+  # is wider than the loader; all pass at the pin.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] "Found conflicting file matches": a task has at most one input,
+  #   one exec and one expected-output file (output and output.extended both
+  #   count as the expected output).
+  - id: babel-fixture-one-input
+    kind: unique_by
+    select: "{packages,codemods,eslint}/*/test/fixtures/**/input.{js,mjs,ts,tsx,cts,mts,vue}"
+    key: "{dir}"
+    level: error
+    message: "A fixture task has at most one input file (helper-fixtures: conflicting file matches)."
+
+  - id: babel-fixture-one-exec
+    kind: unique_by
+    select: "{packages,codemods,eslint}/*/test/fixtures/**/exec.{js,mjs,ts,tsx,cts,mts,vue}"
+    key: "{dir}"
+    level: error
+    message: "A fixture task has at most one exec file (helper-fixtures: conflicting file matches)."
+
+  - id: babel-fixture-one-output
+    kind: unique_by
+    select: "{packages,codemods,eslint}/*/test/fixtures/**/{output,output.extended}.{json,js,mjs,ts,tsx,cts,mts,vue}"
+    key: "{dir}"
+    level: error
+    message: "A fixture task has at most one expected-output file (helper-fixtures: conflicting file matches)."
+
+  # A [other] "Unsupported input extension": input and exec files use .js,
+  #   .mjs, .ts, .tsx, .cts, .mts or .vue; output files may also be .json.
+  #   An extensionless input / exec / output file has role "input" (etc.)
+  #   with extension "" and is rejected too (Stage B fix: the globs now
+  #   include the bare names).
+  - id: babel-fixture-input-exec-extension
+    kind: filename_regex
+    paths: ["{packages,codemods,eslint}/*/test/fixtures/**/{input,exec}.*", "!**/{input,exec}.*.*", "{packages,codemods,eslint}/*/test/fixtures/**/{input,exec}"]
+    pattern: '^(input|exec)\.(js|mjs|ts|tsx|cts|mts|vue)$'
+    level: error
+    message: "Fixture input/exec files must use a supported extension (helper-fixtures checkFile)."
+
+  - id: babel-fixture-output-extension
+    kind: filename_regex
+    paths: ["{packages,codemods,eslint}/*/test/fixtures/**/output.*", "!**/output.*.*", "{packages,codemods,eslint}/*/test/fixtures/**/output.extended.*", "!**/output.extended.*.*", "{packages,codemods,eslint}/*/test/fixtures/**/output"]
+    pattern: '^output(\.extended)?\.(json|js|mjs|ts|tsx|cts|mts|vue)$'
+    level: error
+    message: "Fixture output files must use a supported extension (helper-fixtures checkFile)."
+
+  # A [other] "Input file extension should match exec file extension".
+  - id: babel-fixture-exec-input-same-extension
+    kind: for_each_file
+    select: ["{packages,codemods,eslint}/*/test/fixtures/**/exec.*", "!**/exec.*.*"]
+    require:
+      - kind: file_absent
+        paths: ["{dir}/input.*", "!{dir}/input.{ext}", "!{dir}/input.*.*"]
+    level: error
+    message: "A fixture's input file must have the same extension as its exec file (helper-fixtures)."
+
+  # C [other] CONTRIBUTING: minNodeVersion / minNodeVersionTransform "must be in
+  #   semver format" (helper-fixtures semver.clean() check). C: the process
+  #   runners (babel-cli, babel-node, babel-register,
+  #   babel-build-external-helpers) take a numeric major instead, so their
+  #   fixture trees are excluded by hand.
+  - id: babel-fixture-min-node-version-semver
+    kind: json_path_matches
+    paths:
+      - "{packages,codemods,eslint}/*/test/fixtures/**/options.json"
+      - "!packages/babel-cli/test/fixtures/**"
+      - "!packages/babel-node/test/fixtures/**"
+      - "!packages/babel-register/test/fixtures/**"
+      - "!packages/babel-build-external-helpers/test/fixtures/**"
+    path: "$['minNodeVersion','minNodeVersionTransform']"
+    matches: '^\s*[=v]*\s*\d+\.\d+\.\d+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?\s*$'
+    if_present: true
+    level: error
+    message: "minNodeVersion must be a semver version (CONTRIBUTING, helper-fixtures)."
+
+  # A [other] "'os' should be either string or string array" (helper-fixtures
+  #   and the process runner). Both throw only when os is truthy AND neither
+  #   an array nor a string; array elements are never type-checked, and a
+  #   falsy os (false, 0, "", null) is skipped. A JSON options file only (13
+  #   fixture options files at the pin are JS). Stage B fix: the rule fired
+  #   on os [], os false and os ["linux", 3], which the loader accepts. It
+  #   now fires on true, a non-zero number and a non-empty object.
+  #   Not expressible: os {} (truthy, rejected). RFC 9535 has no type test,
+  #   and an empty object selects exactly what an empty array selects, so
+  #   {} passes. No fixture sets os at the pin.
+  - id: babel-fixture-os-option-type
+    kind: json_path_absent
+    paths: "{packages,codemods,eslint}/*/test/fixtures/**/options.json"
+    path: "$[?($.os == true || $.os > 0 || $.os < 0 || (count($.os.*) > 0 && !$.os[0]))]"
+    level: error
+    message: "The fixture os option must be a string or an array of strings."
+
+  # A [other] transform runner: "`sourceMap` option is deprecated. Use
+  #   `sourceMaps` instead."
+  - id: babel-fixture-no-source-map-option
+    kind: json_path_absent
+    paths: "{packages,codemods,eslint}/*/test/fixtures/**/options.json"
+    path: "$.sourceMap"
+    level: error
+    message: "Fixture options must use sourceMaps, not the deprecated sourceMap."
+
+  # A [other] helper-fixtures: "Unexpected extra options passed to preset": a
+  #   preset entry array has at most 3 elements (name, options, alias).
+  - id: babel-fixture-preset-arity
+    kind: json_path_absent
+    paths: "{packages,codemods,eslint}/*/test/fixtures/**/options.json"
+    path: "$..presets[?(@[0] && length(@) > 3)]"
+    level: error
+    message: "A fixture preset entry takes at most [name, options, alias]."
+
+  # A [other] helper-fixtures assertDirectory: under a fixtures root (and, for
+  #   the parser's categories, one level down) every entry the loader does not
+  #   skip (dotfiles, *.md, LICENSE, options.*, package.json) is a directory.
+  - id: babel-fixture-suites-are-directories
+    kind: dir_only_contains
+    select: "{packages,codemods,eslint}/*/test/fixtures"
+    allow: [".*", "*.md", "LICENSE", "LICENSE.*", "options.*", "package.json"]
+    level: error
+    message: "Fixture suites and categories must be directories (helper-fixtures assertDirectory)."
+
+  - id: babel-parser-fixture-categories-are-directories
+    kind: dir_only_contains
+    select: "packages/babel-parser/test/fixtures/*"
+    allow: [".*", "*.md", "LICENSE", "LICENSE.*", "options.*", "package.json"]
+    level: error
+    message: "Parser fixture categories must contain only suite directories (helper-fixtures assertDirectory)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Repository conventions
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] .gitattributes `* text eol=lf`: git normalizes every file to LF
+  #   (eslint.config.ts linebreak-style unix states the same for linted code,
+  #   folded in under R1). Passes over the whole tree, vendored .yarn included.
+  - id: babel-text-files-lf
+    kind: line_endings
+    target: lf
+    paths: "**"
+    level: error
+    message: "Files use LF line endings (.gitattributes * text eol=lf)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not enforced by the repository; outside the coverage ratio,
+  # R3/R5). Level info.
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # Value-add: the committed Yarn binary's sha512 is the hash packageManager
+  #   records. The repo's own check (unit D) compares the binary with the hash
+  #   corepack fetches from the registry instead.
+  - id: babel-valueadd-yarn-binary-hash-in-package-manager
+    kind: pair_hash
+    source: ".yarn/releases/*.cjs"
+    target: "package.json"
+    algorithm: sha512
+    format: contains
+    level: info
+    message: "The vendored Yarn release's sha512 should be the packageManager hash."
+
+  # Value-add: each vendored Yarn plugin's sha512 is the checksum .yarnrc.yml
+  #   records for it. Yarn compares these only when it fetches a plugin or on
+  #   `yarn plugin check`, which no workflow runs. FIRES ON THE PIN (by
+  #   design, info): plugin-conditions.cjs does not hash to its recorded
+  #   checksum (6cf6890a...); the release-tool plugin matches.
+  - id: babel-valueadd-yarn-plugin-checksums
+    kind: pair_hash
+    source: ".yarn/plugins/@yarnpkg/*.cjs"
+    target: ".yarnrc.yml"
+    algorithm: sha512
+    format: contains
+    level: info
+    message: "A vendored Yarn plugin should hash to the checksum .yarnrc.yml records for it."
+
+  # Value-add: the yarnPath release file's version is the packageManager
+  #   version.
+  - id: babel-valueadd-yarn-path-version-matches-package-manager
+    kind: cross_file
+    relation: equals
+    source:
+      file: "package.json"
+      extract:
+        regex: '"packageManager":\s*"yarn@(\d+\.\d+\.\d+)\+'
+    targets:
+      - file: ".yarnrc.yml"
+        extract:
+          regex: '(?m)^yarnPath:\s*\.yarn/releases/yarn-(\d+\.\d+\.\d+)\.cjs\s*$'
+    level: info
+    message: "yarnPath should point at the release packageManager pins."
+
+  # Value-add (partial form of the archived-libs typings unit, which also needs
+  #   the order): lib/archived-libs.d.ts declares exactly the modules
+  #   scripts/generators/archived-syntax-pkgs.json lists.
+  - id: babel-valueadd-archived-libs-module-set
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: "scripts/generators/archived-syntax-pkgs.json"
+      extract:
+        json: "$[*]"
+    targets:
+      - file: "lib/archived-libs.d.ts"
+        extract:
+          regex: '(?m)^declare module "([^"]+)" \{$'
+    level: info
+    message: "lib/archived-libs.d.ts should declare exactly the archived syntax packages (run make generate-tsconfig)."
+
+  # Value-add (the block-shape half of the same partial): the file is the
+  #   generator's header followed only by its fixed declare-module blocks.
+  - id: babel-valueadd-archived-libs-shape
+    kind: file_content_matches
+    paths: ["lib/archived-libs.d.ts"]
+    pattern: '\A/\* This file is automatically generated by scripts/generators/archived-libs-typings\.ts \*/\n\n(?:declare module "[^"]+" \{\n  import \{ declare \} from "@babel/helper-plugin-utils";\n  let exports: \{default: ReturnType<typeof declare>\};\n  export = exports;\n\}\n)+\z'
+    level: info
+    message: "lib/archived-libs.d.ts should be exactly the generator's header and declare-module blocks (run make generate-tsconfig)."
+
+  # VALUE-ADD (former babel-28, removed by Stage B; not in the ratio). Every
+  #   plugin .yarnrc.yml lists is committed at its path. Not enforced: each
+  #   plugin entry also carries an https `spec`, and Yarn 4.17's plugin
+  #   loader re-fetches a missing plugin file from it (checking the recorded
+  #   checksum), so a missing file does not fail CI. That behavior was read
+  #   from the bundled .yarn/releases/yarn-4.17.0.cjs by Stage B, not
+  #   executed. Kept at info: a vendored plugin should not need a fetch.
+  - id: babel-yarn-plugins-resolve
+    kind: registry_paths_resolve
+    source: ".yarnrc.yml"
+    extract:
+      yaml: "$.plugins[*].path"
+    base: "."
+    expect: file
+    level: info
+    message: "A plugin listed in .yarnrc.yml should be committed at its path (otherwise Yarn fetches it from its spec URL)."
+
+  # VALUE-ADD (former babel-30, removed by Stage B; not in the ratio). The
+  #   release-tool `publish` guard ("Workspaces must have valid names and
+  #   versions to be published on an external registry") is a guard clause of
+  #   the publish step in release.yml, and a check made only when publishing
+  #   to an external registry is D (batch-2 ruling). Kept at info: a public
+  #   workspace without a name or version could not be released.
+  - id: babel-public-workspaces-name-version
+    kind: json_path_absent
+    paths: *manifests
+    path: "$[?($.private != true && (!$.name || !$.version))]"
+    level: info
+    message: "A public workspace needs a name and a version to be published (release-tool publish)."
+
+  # Value-add: every agentic workflow source has its compiled lock file.
+  #   A partial form of the gh aw compile freshness unit (D); not in the
+  #   ratio.
+  - id: babel-valueadd-agentic-workflow-has-lock
+    kind: pair
+    primary: ".github/workflows/*.md"
+    partner: "{dir}/{stem}.lock.yml"
+    level: info
+    message: "An agentic workflow source should have its compiled .lock.yml (gh aw compile)."
