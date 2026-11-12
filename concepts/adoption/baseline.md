@@ -57,6 +57,7 @@ So inserting or deleting unrelated lines never churns the baseline. **Editing th
 
 A finding whose path alint hides (`<redacted>`, because a field that chooses files was [read from the environment](/docs/configuration/variable-interpolation/)) is the exception: from v0.22 its fingerprint leaves out the path and the content, so a rule's hidden-path findings share one fingerprint and the baseline matches them by count.
 
+
 ## The baseline file
 
 `.alint-baseline.json` is **JSON Lines**: a header, then one sorted entry per grandfathered finding.
