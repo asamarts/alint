@@ -226,3 +226,9 @@ The feature freeze is the point at which phases 1 to 8 are merged. Phase 9 is de
   `alint baseline`'s regeneration guard match only the path-free hidden-path fingerprint.
   `baseline::Fingerprints` and `baseline::fingerprints` are gone, and `baseline::apply` takes a
   `String` fingerprinter again, as in v0.21.
+- 2026-11-12: phase 2. The corpus stratum: 20 repositories (10 i18n, 10 JavaScript
+  monorepos), 1,546 units, configurations in the pinned corpus. Today, after the slice, and with
+  entry values: `locale` 26%, 31%, 32%; `dep-version` 44%, 48%, 58%; `toolchain-pin` 65%, 65%,
+  65%. The ranking and the inputs to phase 3 are in `general-linter.md` section 12.4. Two of
+  them are for the owner: entry values for the dependency version policy, and `set` against
+  `cardinality` in the slice.

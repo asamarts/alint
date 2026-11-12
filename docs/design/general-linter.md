@@ -1757,7 +1757,106 @@ locked backlog contains no locale, i18n, key-parity, dependency-version-consiste
 duplicate-key findings. The flagship Phase 3 policies rest on outside tools (syncpack, manypkg,
 i18n-tasks, compare-locales, yamllint) and on the 30-repository examples set, whose analyses
 are v0.9.17 snapshots. Before Phase 3 is scheduled, the corpus should gain an i18n and
-JavaScript-monorepo stratum so the claim can be measured rather than assumed.
+JavaScript-monorepo stratum so the claim can be measured rather than assumed. Section 12.4
+records that stratum.
+
+### 12.4 The v0.23 stratum: measured demand
+
+The stratum was measured on 2026-11-12. The frame is
+[`v0.23/corpus-stratum.md`](v0.23/corpus-stratum.md), the results are in
+[`v0.23/corpus-stratum-log.md`](v0.23/corpus-stratum-log.md), and each repository's record is in
+[`v0.23/stratum/`](v0.23/stratum/).
+- **The sample:** 10 i18n repositories and 10 JavaScript monorepos, each with the stratum's policy
+  under a gate in CI, giving 1,546 units.
+- **The protocol:** the v0.12 protocol, with ruling R7. A tool run over files alint reads is
+  classified by what it asserts, not as D. The figures are therefore not comparable with v0.12's
+  61%.
+- **The configurations** join the pinned corpus, so `xtask corpus-replay` replays them.
+
+| Family | Units | Today | With tuning | After the v0.23 slice | Slice plus entry values |
+|---|--:|--:|--:|--:|--:|
+| `locale` | 141 | 26% | 56% | 31% | 32% |
+| `dep-version` | 172 | 44% | 73% | 48% | 58% |
+| `toolchain-pin` | 79 | 65% | 78% | 65% | 65% |
+| other | 1,154 | 57% | 78% | 61% | 62% |
+| Pooled | 1,546 | 52% | 75% | 56% | 58% |
+
+"After the v0.23 slice" counts a B-config unit as A when it needs `equality`, `unique-key` or
+`cardinality` (ADR-0032 decision 1). "Plus entry values" also counts B-adapter units that need
+only (key path, value) rows in one of those families. Phase 8 confirms these projections.
+
+**The demand is real.**
+- Locale checks are gated in all ten i18n repositories.
+- "One range per dependency across workspaces" is gated in 8 of the 10 JavaScript monorepos,
+  and a ninth enforces it through a catalog.
+- Pins that must agree are mostly expressible today. `toolchain-pin` is the best-covered family,
+  at 65%.
+
+**Assertion families**, by B-config units plus B-adapter units that need only entry values:
+
+| Rank | Family | Units |
+|--:|---|--:|
+| 1 | `unique-key` | 39 (30 + 9) |
+| 2 | `set` | 17 (13 + 4) |
+| 3 | `reference` | 12 (8 + 4) |
+| 4 | `equality` | 9 (0 + 9) |
+| 5 | `cardinality` | 2 |
+| 6 | `bounded-count`, `group` | 1 each |
+
+**Capabilities**, by the B-adapter units that need them:
+
+| Rank | Need | Units | Repositories |
+|--:|---|--:|--:|
+| 1 | value-bearing entry rows (`entry-values`) | 27 | 16 |
+| 2 | version comparison: range satisfaction, ordering, validity | 22 | 12 |
+| 2 | a format reader (14 of 22 are Markdown frontmatter) | 22 | 7 |
+| 4 | key or element order | 20 | 13 |
+| 5 | placeholders compared per key | 11 | 7 |
+| 6 | content at the pull request's base | 10 | 5 |
+| 7 | a documentation site's routes | 9 | 6 |
+| 8 | CLDR plural categories per locale | 7 | 5 |
+
+The log's capability table adds each in turn:
+- entry values take `dep-version` from 48% to 58%;
+- version comparison takes `toolchain-pin` from 65% to 87%;
+- `set` and `reference` add 6 points to `locale` and 7 to `dep-version`;
+- adapters for placeholders, plural categories and ICU take `locale` from 38% to 57%.
+
+**Inputs to the Phase 3 design** (`v0.23/selectors-and-constraints.md`, which the owner approves
+before implementation):
+1. **The dependency version policy needs entry values.** Its most common form joins each
+   dependency name to its range. No relation adapter emits those rows today: `entry`, TOML and
+   XML are key-only, and `extract` carries no pointer. Without such an adapter, the slice's
+   policy cannot express the form 8 of the 10 monorepos enforce.
+2. **`cardinality` is needed to re-express locale key parity, but adds little coverage.** Key
+   parity is already A through `key_parity`, and only 2 units need `cardinality`. `set` and
+   `reference`, which ADR-0032 defers to v0.24, account for 29.
+   - Keeping the slice as decided serves the conformance-policy goal.
+   - Bringing `set` forward serves coverage.
+   - Either choice is the owner's. A change to the slice's families needs a new ADR, since
+     ADR-0032 is accepted.
+3. **The toolchain-pin policy's remaining gap is version comparison, not an assertion family.**
+   The pins that must agree are A today. All 14 B-adapter units in the family need version
+   comparison, most of them to ask whether an exact pin satisfies a declared range.
+4. **The locale family's gap is format knowledge.** Placeholders, plural categories, ICU
+   structure and order make up most of its B units. These are adapters (B-adapter), not
+   `constraint` configuration.
+5. **Two cheap wins sit outside Phase 3:**
+   - a strict-JSON option for the parse checks, which would turn 10 locale C units in 8
+     repositories into A;
+   - selecting JSON member names, which would turn line-regex readings of map keys into exact
+     rules.
+
+**Stop rule baseline.** The pooled figures above are the baseline for section 11.1's stop rule.
+Phase 8 re-scores the stratum with the shipped slice.
+
+**Limits of the measurement:**
+- Analysts were agents under the v0.12 protocol. Each repository had an adversarial
+  verification pass, and the integrator re-validated every configuration. The rulings that
+  needed judgment are in the frame's section 2.2, and each unit's reason is in its record.
+- One repository (zulip) contributes 188 units, so the family tables, not the pooled figure, are
+  the measure.
+- The per-repository median `coverage_today` is 46%, with a range from 28% to 86%.
 
 ## 13. Open decisions
 

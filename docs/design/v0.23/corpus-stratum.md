@@ -1,6 +1,8 @@
 # v0.23 corpus stratum: i18n and JavaScript monorepos
 
-Status: frame approved 2026-11-12; batches 1 to 3 of 4 done. Phase 2 of [`README.md`](README.md).
+Status: complete (2026-11-12). Frame approved 2026-11-12; all four batches done. Phase 2 of
+[`README.md`](README.md); the synthesis is in [`general-linter.md`](../general-linter.md) section
+12.4.
 
 Results: [`corpus-stratum-log.md`](corpus-stratum-log.md).
 
