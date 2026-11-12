@@ -1,0 +1,517 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — yarnpkg/berry
+# Pinned @ f359f65c1f8bb2efb051b3e55edcdc3cb461d159 (stratum: js-monorepo)
+#
+# Shape: Yarn 4 (Berry) itself — a TypeScript monorepo of 45 workspaces under
+# packages/* plus the private root `@yarnpkg/monorepo`, run from sources through
+# scripts/run-yarn.js. Governance: community (stewards + core contributors).
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/integration-workflow.yml `chore` job — every step a gate:
+#     yarn install --immutable (+ --check-cache), six codegen-freshness diffs
+#     (patches, libzip, PnP hook, zip worker, pluginCommands, grammars), yarn
+#     version check (deferred versioning), eslint, YARN CONSTRAINTS
+#     (yarn.config.cjs), tsc, yarn dedupe --check, and the README e2e status list.
+#   yarn.config.cjs — nine constraint calls (ten units: the fields call splits
+#     into license / engines / repository, the two forbidDependency calls are
+#     one banned list); under ruling R7 each is its own unit
+#     and is classified by what it asserts, not by the fact that yarn runs it.
+#   Conventions: the engines.node comment in yarn.config.cjs, the contributing
+#     guide (packages/docusaurus/docs/advanced/04-technical/contributing.mdx),
+#     "keep in sync" source comments, .editorconfig / .gitattributes.
+#
+# This config expresses the constraint rules alint can state over the
+# manifests (banned deps, workspace:^ ranges, typescript->tslib, prepack and
+# update-local scripts, license / engines / repository fields), the version-file
+# integrity and default-plugin convention of the deferred-versioning flow, the
+# toolchain-pin conventions (engines.node, CI minimum Node) and the ES-target
+# sites they drive, the README e2e list freshness, the sortMap and
+# MountFS/fspatch fd-constant sync comments, and the .editorconfig /
+# .gitattributes / .gitignore conventions.
+# Not expressed (B/C/D, see the stratum log): one-range-per-dependency (B-config
+# unique-key), peer-dependency presence (resolution), version check's
+# changed-workspace and dependent decisions, the docs JSON-Schema meta-validation
+# test (C: needs an out-of-root shim schema, see the unit 23 note below),
+# installs, builds, tests, lint, tsc.
+
+version: 1
+
+# Test fixtures, vendored caches and generated bundles are inputs or outputs, not
+# the validated surface.
+ignore:
+  - ".yarn/cache/**"
+  - "**/node_modules/**"
+  - "packages/acceptance-tests/pkg-tests-fixtures/**"
+  - "packages/yarnpkg-doctor/fixtures/**"
+
+rules:
+  # ══════════════════════════════════════════════════════════════════════════
+  # yarn.config.cjs constraints (CI: "Check for unmet constraints"). The Yarn
+  # workspaces are the root package.json and every packages/*/package.json
+  # (root `workspaces: ["packages/*"]`). Each constraint rule is one unit (R7).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [dep-version] forbidDependency(inquirer) + forbidDependency(lodash):
+  #   no workspace may depend on a banned package in any dependency field.
+  - id: yarnpkg-berry-banned-dependencies
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json"]
+    path: "$['dependencies','devDependencies','peerDependencies','optionalDependencies']['inquirer','lodash']"
+    level: error
+    message: "Banned dependency: use enquirer instead of inquirer, and es-toolkit instead of lodash (yarn.config.cjs forbidDependency)."
+
+  # C [dep-version] enforceWorkspaceDependenciesWhenPossible: a dependency on
+  #   any workspace must use the `workspace:^` range. alint cannot read object
+  #   KEYS with JSONPath, so the workspace set is enumerated by hand (the
+  #   constraint derives it from the project): the tuning cost that makes this C.
+  #   The 46 names match the clone today; a NEW workspace is simply not covered
+  #   (the list goes stale as a silent false negative, nothing fires).
+  - id: yarnpkg-berry-workspace-deps-use-workspace-protocol
+    kind: json_path_equals
+    paths: ["package.json", "packages/*/package.json"]
+    path: "$['dependencies','devDependencies','peerDependencies','optionalDependencies']['@yarnpkg/builder','@yarnpkg/cli','@yarnpkg/core','@yarnpkg/doctor','@yarnpkg/docusaurus','@yarnpkg/eslint-config','@yarnpkg/extensions','@yarnpkg/fslib','@yarnpkg/libui','@yarnpkg/libzip','@yarnpkg/monorepo','@yarnpkg/nm','@yarnpkg/parsers','@yarnpkg/plugin-catalog','@yarnpkg/plugin-compat','@yarnpkg/plugin-constraints','@yarnpkg/plugin-dlx','@yarnpkg/plugin-essentials','@yarnpkg/plugin-exec','@yarnpkg/plugin-file','@yarnpkg/plugin-git','@yarnpkg/plugin-github','@yarnpkg/plugin-http','@yarnpkg/plugin-init','@yarnpkg/plugin-interactive-tools','@yarnpkg/plugin-jsr','@yarnpkg/plugin-link','@yarnpkg/plugin-nm','@yarnpkg/plugin-npm','@yarnpkg/plugin-npm-cli','@yarnpkg/plugin-pack','@yarnpkg/plugin-patch','@yarnpkg/plugin-pnp','@yarnpkg/plugin-pnpm','@yarnpkg/plugin-stage','@yarnpkg/plugin-typescript','@yarnpkg/plugin-version','@yarnpkg/plugin-workspace-tools','@yarnpkg/pnp','@yarnpkg/pnpify','@yarnpkg/sdks','@yarnpkg/shell','@yarnpkg/types','acceptance-tests','make-fetch-smaller','vscode-zipfs']"
+    equals: "workspace:^"
+    if_present: true
+    level: error
+    message: "A dependency on a workspace must use the `workspace:^` range (yarn.config.cjs enforceWorkspaceDependenciesWhenPossible)."
+
+  # A [dep-version] enforceDependencyRelationship(typescript, tslib, true): a
+  #   workspace with a non-peer dependency on typescript must also depend on
+  #   tslib (any field). RFC 9535 absolute queries inside the filter test the
+  #   whole manifest; json_path_absent fires once per offending manifest.
+  - id: yarnpkg-berry-typescript-requires-tslib
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json"]
+    path: "$[?(($.dependencies.typescript || $.devDependencies.typescript || $.optionalDependencies.typescript) && !$.dependencies.tslib && !$.devDependencies.tslib && !$.peerDependencies.tslib && !$.optionalDependencies.tslib)]"
+    level: error
+    message: "A workspace that depends on typescript must also depend on tslib (yarn.config.cjs enforceDependencyRelationship)."
+
+  # A [other] enforceUpdateLocalScripts: every `@yarnpkg/plugin-*` workspace
+  #   that is NOT in the CLI's standard bundle must declare an `update-local`
+  #   script. Equivalently: the set of plugin idents lacking the script is a
+  #   subset of packages/yarnpkg-cli/package.json's bundles.standard list.
+  - id: yarnpkg-berry-unbundled-plugins-have-update-local
+    kind: cross_file
+    relation: subset
+    source:
+      files: "packages/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && search(@, '^@yarnpkg/plugin-') && !$.scripts['update-local'])]"
+    targets:
+      - file: "packages/yarnpkg-cli/package.json"
+        extract:
+          json: "$['@yarnpkg/builder'].bundles.standard[*]"
+    level: error
+    message: "A plugin workspace outside the CLI standard bundle needs an `update-local` script (yarn.config.cjs enforceUpdateLocalScripts)."
+
+  # A [other] enforcePrepackScripts: every non-private named workspace other
+  #   than the three listed exceptions must set exactly these pack scripts.
+  - id: yarnpkg-berry-prepack-postpack-scripts
+    kind: json_path_absent
+    paths: ["package.json", "packages/*/package.json"]
+    path: "$[?($.private != true && $.name && $.name != '@yarnpkg/pnp' && $.name != '@yarnpkg/eslint-config' && $.name != '@yarnpkg/libui' && ($.scripts.prepack != 'run build:compile \"$(pwd)\"' || $.scripts.postpack != 'rm -rf lib'))]"
+    level: error
+    message: "Published workspaces must set scripts.prepack = 'run build:compile \"$(pwd)\"' and scripts.postpack = 'rm -rf lib' (yarn.config.cjs enforcePrepackScripts)."
+
+  # A [other] enforceFieldsOnAllWorkspaces license: every workspace's license
+  #   equals the value the constraint sets (read from yarn.config.cjs itself).
+  - id: yarnpkg-berry-workspace-license
+    kind: cross_file
+    relation: equals
+    source:
+      file: "yarn.config.cjs"
+      extract:
+        regex: 'license:\s*`([^`]+)`'
+    targets:
+      files: "{package.json,packages/*/package.json}"
+      extract:
+        json: "$.license"
+    level: error
+    message: "Every workspace must declare the license the constraints set (yarn.config.cjs enforceFieldsOnAllWorkspaces)."
+
+  # A [toolchain-pin] enforceFieldsOnAllWorkspaces engines.node: every
+  #   workspace declares the same Node floor as yarn.config.cjs (`>=18.12.0`).
+  - id: yarnpkg-berry-workspace-engines-node
+    kind: cross_file
+    relation: equals
+    source:
+      file: "yarn.config.cjs"
+      extract:
+        regex: '\[`engines\.node`\]:\s*`([^`]+)`'
+    targets:
+      files: "{package.json,packages/*/package.json}"
+      extract:
+        json: "$.engines.node"
+    level: error
+    message: "Every workspace's engines.node must equal the floor set in yarn.config.cjs (enforceFieldsOnAllWorkspaces)."
+
+  # A [other] enforceFieldsOnAllWorkspaces repository.{type,url,directory}:
+  #   every workspace points at the monorepo, with directory = its own path
+  #   (contributing guide: "Workspaces must point our repository through the
+  #   repository field"). Two rules: the packages/* members and the root.
+  - id: yarnpkg-berry-workspace-repository-field
+    kind: for_each_dir
+    select: "packages/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: json_path_equals
+        paths: "{path}/package.json"
+        path: "$.repository.type"
+        equals: git
+      - kind: json_path_equals
+        paths: "{path}/package.json"
+        path: "$.repository.url"
+        equals: "git+https://github.com/yarnpkg/berry.git"
+      - kind: json_path_equals
+        paths: "{path}/package.json"
+        path: "$.repository.directory"
+        equals: "{path}"
+    level: error
+    message: "Workspace repository field must be {type: git, url: git+https://github.com/yarnpkg/berry.git, directory: <workspace path>} (yarn.config.cjs)."
+
+  - id: yarnpkg-berry-root-repository-field
+    kind: json_path_absent
+    paths: ["package.json"]
+    path: "$[?($.repository.type != 'git' || $.repository.url != 'git+https://github.com/yarnpkg/berry.git' || $.repository.directory != '.')]"
+    level: error
+    message: "Root repository field must point at the monorepo with directory '.' (yarn.config.cjs)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Deferred versioning (.yarn/versions/*.yml; CI "yarn version check", and
+  # `yarn version apply --all` at release time).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # C [other] version-file integrity (unit 18, two rules; C because of part 2
+  #   below). Part 1: each release strategy is one of Yarn's decisions or a
+  #   strict semver (versionUtils.validateReleaseDecision -> node-semver strict
+  #   valid()). The prerelease identifiers mirror node-semver's
+  #   PRERELEASEIDENTIFIER: a purely numeric identifier has no leading zero
+  #   (`4.10.0-01` is rejected; `4.10.0-0`, `4.10.0-rc.1`, `4.10.0-0a` pass).
+  - id: yarnpkg-berry-version-file-strategies-valid
+    kind: yaml_path_matches
+    paths: [".yarn/versions/*.yml"]
+    path: "$.releases.*"
+    matches: '^(decline|major|minor|patch|premajor|preminor|prepatch|prerelease|v?(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(-(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(\.(0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?)$'
+    if_present: true
+    level: error
+    message: "Invalid release strategy in a deferred version file (expected a semver or decline/major/minor/patch/pre*)."
+
+  # C [other] version-file integrity, part 2 (unit 18): every ident a version
+  #   file releases or declines names an existing versioned workspace
+  #   (getWorkspaceByIdent / "Expected a release definition file to only
+  #   reference existing workspaces"). Release keys are YAML mapping KEYS, so
+  #   they are read with a line regex rather than JSONPath (the same key gap as
+  #   units 02 and 19). That makes the unit C, and the regex is not faithful in
+  #   both directions: Yarn parses version files with js-yaml, so a flow-style
+  #   `releases: {...}` or `declined: [...]` naming an unknown ident is MISSED;
+  #   and the source requires `version`, so an existing but unversioned
+  #   workspace listed under `declined:` (which Yarn accepts) is OVER-FLAGGED.
+  - id: yarnpkg-berry-version-file-idents-exist
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{package.json,packages/*/package.json}"
+      extract:
+        json: "$[?(@ == $.name && $.version)]"
+    targets:
+      files: ".yarn/versions/*.yml"
+      extract:
+        regex: '(?m)^[ \t]+(?:-[ \t]+)?"?(@?[A-Za-z0-9][A-Za-z0-9._/-]*)"?[ \t]*(?::|$)'
+    level: error
+    message: "A deferred version file references a workspace that does not exist (or has no version)."
+
+  # C [other] contributing guide (contributing.mdx:120): "If you modify one of
+  #   the default plugins, you will also need to bump @yarnpkg/cli." A version
+  #   file that releases a standard-bundle plugin must also release
+  #   @yarnpkg/cli. The plugin list mirrors packages/yarnpkg-cli/package.json
+  #   bundles.standard by hand (C); a plugin added to the bundle and not to
+  #   this list goes stale SILENTLY (a false negative, nothing fires). The rule
+  #   is also narrower than the guide: it triggers on a RELEASED plugin, so a
+  #   modified default plugin whose release is declined is not caught (a
+  #   faithful form needs the change relation of unit 16).
+  - id: yarnpkg-berry-default-plugin-release-bumps-cli
+    kind: yaml_path_absent
+    paths: [".yarn/versions/*.yml"]
+    path: "$[?(($.releases['@yarnpkg/plugin-essentials'] || $.releases['@yarnpkg/plugin-catalog'] || $.releases['@yarnpkg/plugin-compat'] || $.releases['@yarnpkg/plugin-constraints'] || $.releases['@yarnpkg/plugin-dlx'] || $.releases['@yarnpkg/plugin-exec'] || $.releases['@yarnpkg/plugin-file'] || $.releases['@yarnpkg/plugin-git'] || $.releases['@yarnpkg/plugin-github'] || $.releases['@yarnpkg/plugin-http'] || $.releases['@yarnpkg/plugin-init'] || $.releases['@yarnpkg/plugin-interactive-tools'] || $.releases['@yarnpkg/plugin-jsr'] || $.releases['@yarnpkg/plugin-link'] || $.releases['@yarnpkg/plugin-nm'] || $.releases['@yarnpkg/plugin-npm'] || $.releases['@yarnpkg/plugin-npm-cli'] || $.releases['@yarnpkg/plugin-pack'] || $.releases['@yarnpkg/plugin-patch'] || $.releases['@yarnpkg/plugin-pnp'] || $.releases['@yarnpkg/plugin-pnpm'] || $.releases['@yarnpkg/plugin-stage'] || $.releases['@yarnpkg/plugin-typescript'] || $.releases['@yarnpkg/plugin-version'] || $.releases['@yarnpkg/plugin-workspace-tools']) && (!$.releases['@yarnpkg/cli'] || $.releases['@yarnpkg/cli'] == 'decline'))]"
+    level: warning
+    message: "Releasing a default (standard-bundle) plugin requires bumping @yarnpkg/cli too (contributing guide)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Toolchain-pin conventions
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] yarn.config.cjs comment on engines.node: "check
+  #   node.green for which ECMAScript version is fully supported and update
+  #   tsconfig.json, packages/eslint-config/index.js and
+  #   packages/yarnpkg-builder/sources/commands/new/plugin.ts". The three
+  #   ES-level sites are updated together and must agree (ES2021 today). Which
+  #   ES level the engines.node floor supports is a node.green lookup: a
+  #   separate unit, D (external data, human judgment), not asserted here.
+  #   Family `other`: three ES-target sites agreeing with each other is not a
+  #   Node / package-manager pin (the node.green link to engines.node is the
+  #   D unit). It sits here because the engines.node comment drives it.
+  - id: yarnpkg-berry-es-target-sites-agree
+    kind: cross_file
+    relation: equals
+    source:
+      file: "tsconfig.json"
+      extract:
+        regex: '"target":\s*"[Ee][Ss](\d{4})"'
+    targets:
+      - file: "packages/eslint-config/index.js"
+        extract:
+          regex: 'globals\.es(\d{4})'
+      - file: "packages/yarnpkg-builder/sources/commands/new/plugin.ts"
+        extract:
+          regex: 'target:\s*`ES(\d{4})`'
+    level: warning
+    message: "The ECMAScript level must agree across tsconfig.json, @yarnpkg/eslint-config and the builder's plugin scaffold (yarn.config.cjs engines.node comment)."
+
+  # A [toolchain-pin] integration-workflow.yml: the acceptance matrix runs "on
+  #   the minimum Node version we support" and filters LTS majors with
+  #   `select(. >= N)`; both must be the engines.node major from the root.
+  - id: yarnpkg-berry-ci-min-node-matches-engines
+    kind: cross_file
+    relation: equals
+    normalize: semver-major
+    source:
+      file: "package.json"
+      extract:
+        json: "$.engines.node"
+    targets:
+      - file: ".github/workflows/integration-workflow.yml"
+        extract:
+          regex: '\{node: (\d+), platform:'
+      - file: ".github/workflows/integration-workflow.yml"
+        extract:
+          regex: 'select\(\. >= (\d+)\)'
+    level: warning
+    message: "CI's minimum-Node acceptance matrix and LTS filter must use the engines.node major."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # Other enforced checks over files alint reads
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] CI "Check for outdated e2e status list": README's generated block
+  #   lists exactly the .github/workflows/e2e-*.yml files, sorted, one badge
+  #   line each (scripts/generate-e2e-status-list.mjs + git diff --exit-code).
+  #   Three rules: set equality, order, line shape.
+  - id: yarnpkg-berry-readme-e2e-list-matches-workflows
+    kind: registry_paths_resolve
+    source: "README.md"
+    extract:
+      regex: '(?m)^- \[!\[\]\(https://github\.com/yarnpkg/berry/actions/workflows/(e2e-[^/)]+\.yml)/badge\.svg\?event=schedule\)\]'
+    base: ".github/workflows"
+    expect: file
+    orphans:
+      space: ".github/workflows/e2e-*.yml"
+    level: error
+    message: "README's e2e status list must name exactly the e2e-*.yml workflows (run node ./scripts/generate-e2e-status-list.mjs)."
+
+  - id: yarnpkg-berry-readme-e2e-list-sorted
+    kind: ordered_block
+    paths: ["README.md"]
+    start: "<!-- start generated list -->"
+    end: "<!-- end generated list -->"
+    comparator: lexical
+    unique: true
+    level: error
+    message: "README's generated e2e status list must stay sorted and duplicate-free."
+
+  - id: yarnpkg-berry-readme-e2e-list-line-shape
+    kind: for_each_match
+    paths: ["README.md"]
+    select: '^- \[!\[\]\(https://github\.com/yarnpkg/berry/actions/workflows/(?P<a>[^/)]+)/badge\.svg[^)]*\)\]\(https://github\.com/yarnpkg/berry/actions/workflows/(?P<b>[^)]+)\)'
+    require:
+      matches:
+        - '^- \[!\[\]\(https://github\.com/yarnpkg/berry/actions/workflows/e2e-[^/)]+\.yml/badge\.svg\?event=schedule\)\]\(https://github\.com/yarnpkg/berry/actions/workflows/e2e-[^/)]+\.yml\)$'
+      equal: [a, b]
+    level: error
+    message: "Each generated e2e line must be the badge + link for the same workflow."
+
+  # A [other] packages/yarnpkg-pnp/sources/generateSerializedState.ts:
+  #   "Keep this function in sync with its implementation in
+  #   @yarnpkg/core/sources/miscUtils.ts" — sortMap is byte-identical today.
+  - id: yarnpkg-berry-sortmap-copy-in-sync
+    kind: cross_file
+    relation: equals
+    source:
+      file: "packages/yarnpkg-core/sources/miscUtils.ts"
+      extract:
+        regex: '(?s)(export function sortMap<T>\(.*?\n\})\n'
+    targets:
+      - file: "packages/yarnpkg-pnp/sources/generateSerializedState.ts"
+        extract:
+          regex: '(?s)(export function sortMap<T>\(.*?\n\})\n'
+    level: warning
+    message: "sortMap in @yarnpkg/pnp must stay in sync with @yarnpkg/core miscUtils.sortMap (source comment)."
+
+  # A [other] packages/yarnpkg-fslib/sources/MountFS.ts:17 "Those values must
+  #   be synced with packages/yarnpkg-pnp/sources/esm-loader/fspatch.ts" (and
+  #   the reciprocal comment at fspatch.ts:57, which still names the removed
+  #   fslib ZipOpenFS.ts). The PnP ESM loader routes a file descriptor to the
+  #   zip layer by the same mask and magic MountFS stamps on it. One
+  #   convention, two literal pairs, two rules: MOUNT_MASK == ZIP_MASK, and
+  #   MountFS's default magicByte (0x2a, which libzip's ZipOpenFS inherits
+  #   through a super() call without a magicByte) == ZIP_MAGIC's high byte.
+  #   `lower` makes the hex-digit case irrelevant. A spelling the regexes do
+  #   not recognise (e.g. a decimal `magicByte = 42`) reports "canonical value
+  #   not found" rather than passing silently.
+  - id: yarnpkg-berry-fd-mask-synced
+    kind: cross_file
+    relation: equals
+    normalize: lower
+    source:
+      file: "packages/yarnpkg-fslib/sources/MountFS.ts"
+      extract:
+        regex: 'const MOUNT_MASK\s*=\s*(0x[0-9a-fA-F]+);'
+    targets:
+      - file: "packages/yarnpkg-pnp/sources/esm-loader/fspatch.ts"
+        extract:
+          regex: 'const ZIP_MASK\s*=\s*(0x[0-9a-fA-F]+);'
+    level: warning
+    message: "MountFS MOUNT_MASK must equal the PnP ESM loader's ZIP_MASK (fspatch.ts); the source comments say these values must be synced."
+
+  - id: yarnpkg-berry-fd-magic-synced
+    kind: cross_file
+    relation: equals
+    normalize: lower
+    source:
+      file: "packages/yarnpkg-fslib/sources/MountFS.ts"
+      extract:
+        regex: 'magicByte\s*=\s*0x([0-9a-fA-F]{2}),'
+    targets:
+      - file: "packages/yarnpkg-pnp/sources/esm-loader/fspatch.ts"
+        extract:
+          regex: 'const ZIP_MAGIC\s*=\s*0x([0-9a-fA-F]{2})000000;'
+    level: warning
+    message: "MountFS's default magicByte must equal the high byte of the PnP ESM loader's ZIP_MAGIC (fspatch.ts); the source comments say these values must be synced."
+
+  # C [other] (unit 23, no rule) packages/docusaurus/tests/schema.test.ts
+  #   meta-validates the website's configuration schemas
+  #   (static/configuration/manifest.json, yarnrc.json) as draft 2019-09 JSON
+  #   Schemas. json_schema_passes CAN do this offline against its bundled
+  #   2019-09 meta-schema, but only through a shim schema that sets both
+  #   `$schema` and `$ref` to the 2019-09 URI (Stage B's probe; not re-run for
+  #   this config); the repository has no such file,
+  #   so the shim would have to live outside the root (allow_out_of_root). That
+  #   is tuning (C: wants an inline `schema:` or a meta-schema preset), and the
+  #   corpus config, which edits nothing outside itself, carries no rule for it.
+
+  # C [other] .editorconfig (root = true): [*] trim_trailing_whitespace,
+  #   insert_final_newline, indent_style=space, indent_size=2; [*.md] keeps
+  #   trailing whitespace; [*.patch] neither trims nor adds a final newline.
+  #   Editor- and review-enforced convention (R5). The natural kind,
+  #   editorconfig_conforms, reports 93 JSDoc ` * ` continuation lines (one
+  #   space, not a multiple of indent_size) that no editor or eslint rule
+  #   rewrites, so the convention is expressed in tuned form: three rules,
+  #   space indentation without a width (C: wants a block-comment alignment
+  #   relaxation in editorconfig_conforms / indent_style).
+  - id: yarnpkg-berry-editorconfig-trim-trailing-whitespace
+    kind: no_trailing_whitespace
+    paths:
+      include: ["**/*.{ts,tsx,js,cjs,mjs,json,yml,yaml,mdx,sh}", "**/.editorconfig", "**/.gitattributes", "**/.gitignore"]
+      exclude:
+        - ".pnp.cjs"
+        - ".pnp.loader.mjs"
+        - "packages/*/bin/**"
+        - "packages/yarnpkg-pnp/sources/hook.js"
+        - "packages/yarnpkg-pnp/sources/esm-loader/built-loader.js"
+        - "packages/yarnpkg-core/sources/worker-zip/index.js"
+        - "packages/yarnpkg-libzip/sources/libzipAsync.js"
+        - "packages/yarnpkg-libzip/sources/libzipSync.js"
+        # Line 21 ends a multi-line template-literal test title with a
+        # significant trailing space; trimming it would change the test name.
+        - "packages/yarnpkg-libzip/tests/ZipParsers.test.ts"
+    level: info
+
+  - id: yarnpkg-berry-editorconfig-final-newline
+    kind: final_newline
+    paths:
+      include: ["**/*.{ts,tsx,js,cjs,mjs,json,yml,yaml,md,mdx,sh}"]
+      exclude:
+        - ".pnp.cjs"
+        - ".pnp.loader.mjs"
+        - "packages/*/bin/**"
+        - "packages/yarnpkg-pnp/sources/hook.js"
+        - "packages/yarnpkg-pnp/sources/esm-loader/built-loader.js"
+        - "packages/yarnpkg-core/sources/worker-zip/index.js"
+        - "packages/yarnpkg-libzip/sources/libzipAsync.js"
+        - "packages/yarnpkg-libzip/sources/libzipSync.js"
+    level: info
+
+  - id: yarnpkg-berry-editorconfig-indent-spaces
+    kind: indent_style
+    style: spaces
+    paths:
+      include: ["**/*.{ts,tsx,js,cjs,mjs,json,yml,yaml,mdx}"]
+      exclude:
+        - ".pnp.cjs"
+        - ".pnp.loader.mjs"
+        - "packages/*/bin/**"
+        - "packages/yarnpkg-pnp/sources/hook.js"
+        - "packages/yarnpkg-pnp/sources/esm-loader/built-loader.js"
+        - "packages/yarnpkg-core/sources/worker-zip/index.js"
+        - "packages/yarnpkg-libzip/sources/libzipAsync.js"
+        - "packages/yarnpkg-libzip/sources/libzipSync.js"
+    level: info
+
+  # A [other] .gitattributes `* text=auto eol=lf`: git normalizes text files
+  #   to LF on check-in.
+  - id: yarnpkg-berry-text-files-lf
+    kind: line_endings
+    target: lf
+    paths:
+      include: ["**/*.{ts,tsx,js,cjs,mjs,json,yml,yaml,md,mdx,sh,patch}"]
+      exclude:
+        - ".pnp.cjs"
+        - ".pnp.loader.mjs"
+        - "packages/yarnpkg-pnp/sources/hook.js"
+        - "packages/yarnpkg-pnp/sources/esm-loader/built-loader.js"
+        - "packages/yarnpkg-core/sources/worker-zip/index.js"
+        - "packages/yarnpkg-libzip/sources/libzipAsync.js"
+        - "packages/yarnpkg-libzip/sources/libzipSync.js"
+    level: info
+
+  # C [other] .gitignore: "Those folders are meant to contain the prepack build
+  #   artifacts; we don't commit them", "the artifacts must not be checked-in",
+  #   "never kept" (pack tarballs, release artifacts), "local-only" bundles.
+  #   git skips them on add; the rule catches a force-added artifact. C: the
+  #   walk-based kinds (file_absent, dir_absent) never see a tracked-but-ignored
+  #   file, and git_no_denied_paths globs let `*` cross `/` (so
+  #   `packages/*/lib/**` would hit packages/docusaurus/src/lib and the fixture
+  #   trees), so the workspace directories are enumerated by hand. A NEW
+  #   package directory is not in the list, so its artifacts go uncovered (the
+  #   list goes stale as a silent false negative, nothing fires).
+  - id: yarnpkg-berry-no-committed-build-artifacts
+    kind: git_no_denied_paths
+    denied:
+      - "packages/{acceptance-tests,berry-cli,docusaurus,esbuild-plugin-pnp,eslint-config,make-fetch-smaller,plugin-catalog,plugin-compat,plugin-constraints,plugin-dlx,plugin-essentials,plugin-exec,plugin-file,plugin-git,plugin-github,plugin-http,plugin-init,plugin-interactive-tools,plugin-jsr,plugin-link,plugin-nm,plugin-npm-cli,plugin-npm,plugin-pack,plugin-patch,plugin-pnp,plugin-pnpm,plugin-stage,plugin-typescript,plugin-version,plugin-workspace-tools,vscode-zipfs,yarnpkg-builder,yarnpkg-cli,yarnpkg-core,yarnpkg-doctor,yarnpkg-extensions,yarnpkg-fslib,yarnpkg-libui,yarnpkg-libzip,yarnpkg-nm,yarnpkg-parsers,yarnpkg-pnp,yarnpkg-pnpify,yarnpkg-sdks,yarnpkg-shell,yarnpkg-types}/lib/**"
+      - "packages/{acceptance-tests,berry-cli,docusaurus,esbuild-plugin-pnp,eslint-config,make-fetch-smaller,plugin-catalog,plugin-compat,plugin-constraints,plugin-dlx,plugin-essentials,plugin-exec,plugin-file,plugin-git,plugin-github,plugin-http,plugin-init,plugin-interactive-tools,plugin-jsr,plugin-link,plugin-nm,plugin-npm-cli,plugin-npm,plugin-pack,plugin-patch,plugin-pnp,plugin-pnpm,plugin-stage,plugin-typescript,plugin-version,plugin-workspace-tools,vscode-zipfs,yarnpkg-builder,yarnpkg-cli,yarnpkg-core,yarnpkg-doctor,yarnpkg-extensions,yarnpkg-fslib,yarnpkg-libui,yarnpkg-libzip,yarnpkg-nm,yarnpkg-parsers,yarnpkg-pnp,yarnpkg-pnpify,yarnpkg-sdks,yarnpkg-shell,yarnpkg-types}/bundles/**"
+      - "packages/yarnpkg-libui/sources/**/*.js"
+      - "packages/yarnpkg-libui/sources/**/*.d.ts"
+      - "packages/yarnpkg-pnp/sources/hook.raw.js"
+      - "artifacts/**"
+      - "dist/**"
+      - "package.tgz"
+      - "merge-conflict-resolution.patch"
+    level: error
+    message: "Build and release artifacts are gitignored and must not be committed (.gitignore)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not counted; R3/R5). Both dynamicRequire.ts copies say "This
+  # file is copied from miscUtils.ts - make sure your changes are synced
+  # there". The miscUtils.ts original has drifted textually (realRequire,
+  # dynamicRequireNode), so the enforced convention is semantic (D); alint can
+  # still hold the two copies byte-identical, which they are today.
+  # ══════════════════════════════════════════════════════════════════════════
+  - id: yarnpkg-berry-valueadd-dynamic-require-copies-identical
+    kind: cross_file
+    relation: identical
+    source:
+      file: "packages/yarnpkg-pnpify/sources/dynamicRequire.ts"
+    targets:
+      - file: "packages/yarnpkg-sdks/sources/dynamicRequire.ts"
+    level: info
+    message: "The two dynamicRequire.ts copies (pnpify, sdks) should stay identical."

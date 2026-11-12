@@ -5,7 +5,9 @@
 # and the config file. Resolved through the GitHub API on 2026-10-24; every
 # SHA a config's header names matches its row. tokio-rs/tokio, the
 # calibration repo, has no row: its config is examples/tokio-rs-tokio/ and
-# tracks upstream rather than the pin. Read by `xtask corpus-replay`.
+# tracks upstream rather than the pin. The v0.23 corpus stratum
+# (docs/design/v0.23/corpus-stratum.md) adds its rows, resolved the same way
+# on 2026-11-12. Read by `xtask corpus-replay`.
 #
 # repo	sha	config
 Alamofire/Alamofire	7595cbcf59809f9977c5f6378500de2ad73b7ddb	Alamofire-Alamofire.alint.yml
@@ -34,6 +36,7 @@ dotnet/roslyn	4dad8409c1e4ebf99a53df235df76d86083c2ddc	dotnet-roslyn.alint.yml
 dotnet/runtime	0dfd787f3c16e18e1641d20d8cce1789c9488b00	dotnet-runtime.alint.yml
 duckdb/duckdb	0a8a19486d7177e74df8c886ef78fd4d49fb1f0e	duckdb-duckdb.alint.yml
 elastic/elasticsearch	79aea6d6378fe67b43c124b4589945fe0e94e10a	elastic-elasticsearch.alint.yml
+element-hq/element-web	e84183a6b20027fb9567d789acd0c59588641f27	element-hq-element-web.alint.yml
 elixir-lang/elixir	55da97b9a329638ed5dfdbb1f8e10c9895829655	elixir-lang-elixir.alint.yml
 encode/httpx	b5addb64f0161ff6bfe94c124ef76f6a1fba5254	encode-httpx.alint.yml
 eslint/eslint	f99b47a6799be25321552402a49303bb06a43fe4	eslint-eslint.alint.yml
@@ -44,6 +47,7 @@ facebook/react	557e28fae7cbd4cf2714d556f6d8a3a42f7d8ce2	facebook-react.alint.yml
 fastapi/fastapi	3d2aace42fdfe34077647e47f3ee9688161e2651	fastapi-fastapi.alint.yml
 fastlane/fastlane	c30e449d26dc99fa3841f94f3a2a505a676aedbf	fastlane-fastlane.alint.yml
 flutter/flutter	2fc403d857f0f06791c25bb6c496d584702c3220	flutter-flutter.alint.yml
+forem/forem	75faefce59112dd91df07f84c0b446f51088c911	forem-forem.alint.yml
 gin-gonic/gin	5f4f9643258dc2a65e684b63f12c8d543c936c67	gin-gonic-gin.alint.yml
 git/git	1666c1265231b0bc5f613fbbf3f0a9896cdef76e	git-git.alint.yml
 gohugoio/hugo	b01ecd4cd4377921efe427fed8a16326b85f2ace	gohugoio-hugo.alint.yml
@@ -111,6 +115,7 @@ systemd/systemd	414fc6e3b200eea45ee97eddb79c7496e01db16c	systemd-systemd.alint.y
 tensorflow/tensorflow	803e4ccb979128484a6ef6bbe1fcf72332c28853	tensorflow-tensorflow.alint.yml
 Textualize/rich	46cebbb032f920eb096efbaf23cdc6fe9dd541f7	Textualize-rich.alint.yml
 tokio-rs/axum	4a72e063b916f39e0698a345a99a755deb8f345b	tokio-rs-axum.alint.yml
+trpc/trpc	8eff9ff0ddf4be4a682bf205fb66b00a26901075	trpc-trpc.alint.yml
 valkey-io/valkey	c15ecf1dd83cd045fc3538e81df4ae91ab0ff11c	valkey-io-valkey.alint.yml
 vapor/vapor	712b0919a3ba772f7402ccaf07cdb6ca823dd650	vapor-vapor.alint.yml
 vercel/next.js	bc384860d5f0b77a3cab9769ca4b1a0d7f5ce2fe	vercel-next.js.alint.yml
@@ -118,3 +123,5 @@ vercel/turborepo	468a9ddd2e181ea77c77c9c3d1519c628521cc9d	vercel-turborepo.alint
 vim/vim	fd30a736cc4acbefe3a1b05e6051f8df13aa6b2b	vim-vim.alint.yml
 vitejs/vite	f94df87ff03b40b65e29bacdc04cc18c7bccaa4a	vitejs-vite.alint.yml
 withastro/astro	fa7a26410e487e390e89b1302994aaea150b5bdd	withastro-astro.alint.yml
+yarnpkg/berry	f359f65c1f8bb2efb051b3e55edcdc3cb461d159	yarnpkg-berry.alint.yml
+zulip/zulip	39bd5f2f40a647af06b1cc0267cddd34f88ed2e9	zulip-zulip.alint.yml

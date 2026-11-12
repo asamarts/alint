@@ -1,0 +1,393 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config (stratum: i18n) — element-hq/element-web
+# Pinned @ e84183a6b20027fb9567d789acd0c59588641f27 (depth-1 clone, 2026-11-12)
+#
+# Shape: pnpm 12 + nx monorepo (apps/web, apps/desktop, packages/*, modules/*),
+# TypeScript/React, single-vendor (Element). Three nested-JSON locale catalogs
+# (apps/web, apps/desktop, packages/shared-components; 41 locales each) with
+# en_EN.json as the source language; translations arrive from Localazy.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   static_analysis.yaml  — tsc, oxfmt, oxlint (incl. element-call/copyright-header),
+#     stylelint, action-validator, knip, rethemendex + git diff, module-api
+#     api-extractor + git diff, vitepress docs build, find-unused-settings, zizmor,
+#     and the pinned reusable matrix-org/matrix-web-i18n i18n_check.yml per
+#     locale package (`pnpm i18n` = matrix-gen-i18n + matrix-sort-i18n +
+#     matrix-i18n-lint + oxfmt, then git diff; hardcoded-words "Element" with
+#     per-package allowed-hardcoded-keys; non-en_EN edits only via Localazy).
+#   tests.yml / build*.yml / build-and-test.yaml / docker.yaml — vitest + diff
+#     coverage, Playwright (incl. the stale-screenshot reporter), web/desktop/
+#     storybook/docker builds and artifact asserts.
+#   .husky/pre-commit -> lint-staged (oxfmt, oxlint).
+#   pnpm itself — `--frozen-lockfile`, minimumReleaseAgeStrict, and the root
+#     project's engines.node check on every install.
+#   docs/release.md + docs/monorepo.md — documented release invariants.
+#
+# This config expresses the A and C units of that surface (locale key charset,
+# locale JSON well-formedness incl. no BOM, the rethemendex index, the JS/TS
+# copyright header, workflow path filters, checkout credential hygiene, action
+# pinning, Linux-only Playwright baselines, web/desktop version lockstep) plus
+# clearly-marked value-add rules (outside the ratio, R3/R5).
+# Most of the enforced surface is D (tool execution / code analysis) or B
+# (locale key order, key != value, the brand-word key-path allowlist, the
+# Node-vs-engines semver range, the GitHub workflow schema).
+# Expected `alint check` at the pin: every enforced-unit rule passes; the only
+# findings are 6 info from the value-add element-web-i18n-no-inverted-plurals
+# (real inverted plural maps in cy/hu/nb_NO translations, ungated upstream).
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+rules:
+  # ════════════════════════════════════════════════════════════════
+  # LOCALE family
+  # ════════════════════════════════════════════════════════════════
+
+  # element-web-04, C — matrix-i18n-lint (run by `pnpm i18n` -> `i18n:lint` in
+  #     apps/web and packages/shared-components, gated by the i18n_check reusable
+  #     workflow's git diff): en_EN.json keys may contain only [A-Za-z0-9_], with
+  #     `@` and `.` tolerated for legacy keys (docs/translating-dev.md key naming
+  #     rule 5 is the stricter review-tier form for new keys). alint has no JSON
+  #     key-name predicate, so this is a line regex over the oxfmt-normalized
+  #     layout (one `"key":` per line): awkward, hence C. It depends on that
+  #     layout: a single-line (minified) en_EN.json evades it entirely (a key
+  #     "bad key x" then passes silently); only oxfmt plus the i18n git diff keep
+  #     the layout in place.
+  - id: element-web-i18n-en-key-charset
+    kind: file_content_forbidden
+    paths:
+      - apps/web/src/i18n/strings/en_EN.json
+      - packages/shared-components/src/i18n/strings/en_EN.json
+    pattern: '(?m)^[ \t]*"[^"\n]*[^A-Za-z0-9_@."\n][^"\n]*"[ \t]*:'
+    level: error
+    message: "en_EN.json translation keys may contain only letters, digits and '_' ('@' and '.' tolerated for legacy keys)."
+
+  # element-web-08, C — every locale strings file must be valid JSON:
+  #     I18nWebpackPlugin (apps/web build, merges shared-components strings),
+  #     copy-res.ts (apps/desktop build) and storybook-build-i18n.ts JSON.parse
+  #     each file and fail the build otherwise. alint has no bare "parses" kind;
+  #     a structured query for a key that never exists turns a malformed file
+  #     into a resource_parse analysis failure. Awkward, and alint's JSON reader
+  #     is JSONC-tolerant (trailing commas and // comments pass here although
+  #     JSON.parse rejects them), hence C.
+  - id: element-web-i18n-locale-json-parses
+    kind: json_path_absent
+    paths:
+      - apps/web/src/i18n/strings/*.json
+      - apps/desktop/src/i18n/strings/*.json
+      - packages/shared-components/src/i18n/strings/*.json
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "Locale strings files must be well-formed JSON (the web/desktop/storybook builds JSON.parse every one)."
+
+  # element-web-08 (second rule), C — the same builds read each file with
+  #     readFile(..., "utf-8") / Buffer.toString(), which keep a leading U+FEFF,
+  #     and JSON.parse rejects it; alint's JSON reader accepts a BOM, so the parse
+  #     probe above misses it. no_bom over the same paths closes the BOM part of
+  #     unit 08. The trailing-comma / comment part still needs a strict-JSON
+  #     reader option, so the unit stays C.
+  - id: element-web-i18n-locale-json-no-bom
+    kind: no_bom
+    paths:
+      - apps/web/src/i18n/strings/*.json
+      - apps/desktop/src/i18n/strings/*.json
+      - packages/shared-components/src/i18n/strings/*.json
+    level: error
+    message: "Locale strings files must not start with a byte-order mark (JSON.parse rejects a leading U+FEFF)."
+
+  # ════════════════════════════════════════════════════════════════
+  # TOOLCHAIN-PIN family
+  # ════════════════════════════════════════════════════════════════
+  # No enforced-unit rule: element-web-13 (Node vs engines.node) is B-adapter
+  # (no semver-range operator), and the pnpm pin coherence rule is value-add
+  # (see element-web-pnpm-pin-docker-coherent below).
+
+  # ════════════════════════════════════════════════════════════════
+  # OTHER family
+  # ════════════════════════════════════════════════════════════════
+
+  # element-web-18, A — oxlint `element-call/copyright-header` (error,
+  #     maxWarnings 0; CI lint:js + lint-staged): every linted JS/TS file starts
+  #     with a copyright header comment (`/* ... */` or `//` lines, optionally
+  #     after a shebang; "Copyright [(c)] YYYY ..." — the tree carries several
+  #     historical header forms, so only the leading copyright comment is
+  #     asserted, not the exact template). Excludes the oxlint ignorePatterns,
+  #     minified vendored JS, and one generated file that disables every lint
+  #     rule (`/* eslint-disable */`).
+  - id: element-web-js-copyright-header
+    kind: file_header
+    paths:
+      include: ["**/*.{ts,tsx,js,jsx,mjs,cjs,mts,cts}"]
+      exclude:
+        - "**/node_modules/**"
+        - "**/lib/**"
+        - "**/dist/**"
+        - "**/coverage/**"
+        - "**/test-results/**"
+        - "**/html-report/**"
+        - "**/*.min.js"
+        - "apps/web/src/vector/modernizr.cjs"
+        - "apps/web/src/component-index.js"
+        - "apps/web/src/modules.{ts,js}"
+        - "packages/shared-components/src/i18n/i18nKeys.d.ts"
+        - "packages/shared-components/typedoc/**"
+        - "packages/playwright-common/src/testcontainers/mas-config.ts"
+    lines: 8
+    pattern: '\A(?:#![^\n]*\n)?\s*(?:/\*|//)[\s\S]*?Copyright (?:\(c\) )?[0-9]{4}'
+    level: error
+    message: "JS/TS sources must start with the Element copyright/SPDX header comment (oxlint element-call/copyright-header)."
+
+  # element-web-24, C — Rethemendex Check (static_analysis.yaml: `rethemendex` =
+  #     apps/web/res/css/rethemendex.sh, then `git diff --exit-code`):
+  #     res/css/_components.pcss must @import exactly the set of `_*.pcss`
+  #     partials under res/css (minus _components/_index themselves), every
+  #     import must resolve, and (next rule) in LC_ALL=C order. Awkward, hence C:
+  #     `orphans.space` is one glob with no exclude, so the two index files are
+  #     kept out by a hand-built brace/class glob that would also miss a future
+  #     top-level partial named `_c*`/`_i*` (only `_common` is listed back in).
+  - id: element-web-rethemendex-index-complete
+    kind: registry_paths_resolve
+    source: apps/web/res/css/_components.pcss
+    extract: { regex: '(?m)^@import "([^"]+)";$' }
+    expect: file
+    orphans:
+      space: "apps/web/res/css/{_[!ci]*.pcss,_common.pcss,*/**/_*.pcss}"
+    level: error
+    message: "apps/web/res/css/_components.pcss is stale: re-run `pnpm rethemendex` (every _*.pcss partial must be imported, every import must exist)."
+
+  # element-web-24 (second rule), C — the LC_ALL=C order half of the same unit.
+  - id: element-web-rethemendex-index-sorted
+    kind: ordered_block
+    paths: apps/web/res/css/_components.pcss
+    select: '^@import '
+    comparator: lexical
+    unique: true
+    level: error
+    message: "apps/web/res/css/_components.pcss imports must stay in LC_ALL=C sorted order (re-run `pnpm rethemendex`)."
+
+  # element-web-21, A — action-validator (`pnpm lint:workflows`,
+  #     static_analysis.yaml "Workflow Lint") checks that every `paths` /
+  #     `paths-ignore` glob in a workflow trigger matches at least one file (its
+  #     schema check is the separate B-delegate unit element-web-20).
+  - id: element-web-gha-path-filters-match
+    kind: registry_paths_resolve
+    source: ".github/workflows/*.{yml,yaml}"
+    extract: { yaml: "$.on.*['paths','paths-ignore'][*]" }
+    base: lint_root
+    entries_are_globs: true
+    expect: any
+    level: error
+    message: "A workflow path filter glob matches no file in the repository (action-validator)."
+
+  # element-web-27, A — zizmor `artipacked` (static_analysis.yaml zizmor job):
+  #     every actions/checkout step sets persist-credentials explicitly (false
+  #     unless the job pushes, as release_prepare.yml does with `true`).
+  - id: element-web-gha-checkout-persist-credentials
+    kind: yaml_path_absent
+    paths:
+      - ".github/workflows/*.{yml,yaml}"
+      - ".github/actions/*/action.{yml,yaml}"
+    path: "$..steps[?match(@.uses, 'actions/checkout@.*') && !@.with['persist-credentials']]"
+    level: error
+    message: "actions/checkout must set persist-credentials explicitly (false unless the job must push) — zizmor artipacked."
+
+  # element-web-28, C — zizmor `unpinned-uses`: every external action /
+  #     reusable workflow is pinned to a full commit SHA. The repo exempts 9 refs
+  #     inline with `# zizmor: ignore[unpinned-uses]`; alint has no inline
+  #     exemption, so the files that carry one are excluded wholesale (awkward,
+  #     hence C).
+  - id: element-web-gha-actions-pinned
+    kind: pinned_references
+    paths:
+      include:
+        - ".github/workflows/*.{yml,yaml}"
+        - ".github/actions/*/action.{yml,yaml}"
+      exclude:
+        - .github/workflows/build_debian.yaml
+        - .github/workflows/build_desktop_and_deploy.yaml
+        - .github/workflows/pull_request.yaml
+        - .github/workflows/release-drafter.yml
+        - .github/workflows/release-gitflow.yml
+        - .github/workflows/release.yml
+        - .github/workflows/release_prepare.yml
+        - .github/workflows/triage-priority.yml
+    format: github_actions
+    level: error
+    message: "External actions and reusable workflows must be pinned to a full commit SHA (zizmor unpinned-uses)."
+
+  # element-web-47, A — the Playwright stale-screenshot reporter
+  #     (packages/playwright-common/src/stale-screenshot-reporter.ts:73-80,
+  #     registered by playwright-merge.config.ts and run in build-and-test.yaml's
+  #     "Merge into HTML Report" step; any error ends in process.exit(1)) rejects
+  #     every .png under a Playwright project's snapshotDir whose name does not
+  #     end in `-linux.png` ("Found screenshot belonging to different platform,
+  #     this should not be checked in"; AGENTS.md: baselines are only committed
+  #     for Linux). snapshotDirs: apps/web/playwright.config.ts:107 and
+  #     apps/desktop/playwright.config.ts:24 (`playwright/snapshots`),
+  #     modules/playwright.config.ts:70 (`<module>/e2e/snapshots`, one project
+  #     per `modules/*/e2e`). The reporter's stale-file half needs test results
+  #     (D, unit element-web-32).
+  - id: element-web-playwright-baselines-linux-only
+    kind: file_absent
+    paths:
+      include:
+        - "apps/web/playwright/snapshots/**/*.png"
+        - "apps/desktop/playwright/snapshots/**/*.png"
+        - "modules/*/e2e/snapshots/**/*.png"
+      exclude:
+        - "**/*-linux.png"
+    level: error
+    message: "Only Linux Playwright screenshot baselines (*-linux.png) may be committed (stale-screenshot reporter: 'Found screenshot belonging to different platform')."
+
+  # element-web-48, A — documented invariant: "Element Web & Element Desktop
+  #     do not follow semver and always have matching version numbers"
+  #     (docs/release.md:29); apps "are in lock-step versions with each other"
+  #     (docs/monorepo.md:14). release.yml passes `version-dirs: apps/web
+  #     apps/desktop` to release-make, which bumps both together.
+  - id: element-web-app-versions-lockstep
+    kind: cross_file
+    source:
+      file: apps/web/package.json
+      extract: { json: "$.version" }
+    targets:
+      - file: apps/desktop/package.json
+        extract: { json: "$.version" }
+    relation: equals
+    level: error
+    message: "apps/web and apps/desktop package versions must match (docs/release.md: Element Web and Element Desktop always have matching version numbers)."
+
+  # ════════════════════════════════════════════════════════════════
+  # VALUE-ADD (NOT in the enforced denominator, rulings R3/R5). These assert
+  # invariants element-web does not gate on, or approximate a B unit.
+  # ════════════════════════════════════════════════════════════════
+
+  # Value-add (locale, plural-form agreement): a CLDR plural object maps a
+  # category (zero/one/two/few/many/other) to a string. Nothing in the repo
+  # validates translations, and at the pin six Localazy-exported files carry
+  # INVERTED plural maps ("<text>": "one"): apps/web cy.json (176 entries),
+  # hu.json (141), nb_NO.json (4); apps/desktop cy.json (3), hu.json (1);
+  # packages/shared-components hu.json (5). This rule therefore FIRES at the pin
+  # (6 info findings) — real latent defects, not config noise.
+  - id: element-web-i18n-no-inverted-plurals
+    kind: file_content_forbidden
+    paths:
+      - apps/web/src/i18n/strings/*.json
+      - apps/desktop/src/i18n/strings/*.json
+      - packages/shared-components/src/i18n/strings/*.json
+    pattern: '(?m)^[ \t]*"[^"\n]*"[ \t]*:[ \t]*"(?:zero|one|two|few|many|other)",?[ \t]*$'
+    level: info
+    message: "Plural object is inverted (string -> CLDR category); it must map category -> translated string."
+
+  # Value-add (locale): no hardcoded brand word "Element" in the apps/desktop
+  # en_EN.json values. Plain value-add, not an instance of an enforced check:
+  # apps/desktop's i18n:lint is only `oxfmt src/i18n/strings/`, so
+  # matrix-i18n-lint (which consumes the i18n_check hardcoded-words input) never
+  # runs for desktop. It currently passes vacuously: the desktop en_EN.json
+  # contains no "element" in any case.
+  - id: element-web-i18n-brand-word-desktop
+    kind: file_content_forbidden
+    paths: apps/desktop/src/i18n/strings/en_EN.json
+    pattern: '(?mi)^[ \t]*"[^"\n]*"[ \t]*:[ \t]*"[^\n]*\belement\b'
+    level: info
+    message: "Use %(brand)s instead of hardcoding 'Element' in en_EN.json (i18n_check hardcoded-words)."
+
+  # Value-add (locale): approximation of B-adapter unit element-web-06
+  # (i18n_check `hardcoded-words: Element` + per-package
+  # `allowed-hardcoded-keys`) for apps/web. The real check allows by full key
+  # PATH (`devtools|settings|elementCallUrl`); a line regex only sees the leaf
+  # key, so this form is loose (`invalid_json` occurs twice, only
+  # `error|invalid_json` is allowlisted). Outside the ratio.
+  - id: element-web-i18n-brand-word-web-approx
+    kind: for_each_match
+    paths: apps/web/src/i18n/strings/en_EN.json
+    select: '(?i)^[ \t]*"[^"]*"[ \t]*:[ \t]*".*\belement\b'
+    require:
+      matches:
+        - '^[ \t]*"(?:console_dev_note|element_call_video_rooms|feature_matrixrtc_slots|feature_matrixrtc_slots_description|element_call|invalid_json|misconfigured|title_element|elementCallUrl|sliding_sync_description|noise_suppression_description|echo_cancellation_description|feature_element_call_react|elementCallMockComponent)"[ \t]*:'
+    level: info
+    message: "Hardcoded 'Element' outside the static_analysis.yaml allowed-hardcoded-keys list (leaf-key approximation)."
+
+  # Value-add (locale): the three catalogs ship the same locale set (Localazy
+  # downloads every language into all three; I18nWebpackPlugin merges the
+  # shared-components file of the same name into each apps/web language).
+  - id: element-web-i18n-locale-sets-aligned
+    kind: for_each_file
+    select: "apps/web/src/i18n/strings/*.json"
+    require:
+      - kind: file_exists
+        paths: "apps/desktop/src/i18n/strings/{basename}"
+      - kind: file_exists
+        paths: "packages/shared-components/src/i18n/strings/{basename}"
+    level: info
+    message: "Every apps/web locale file should have apps/desktop and shared-components counterparts."
+
+  # Value-add (dep-version, workspace protocol): internal packages are always
+  # consumed with `workspace:*` (linkWorkspacePackages: true); nothing gates it.
+  - id: element-web-internal-deps-workspace-protocol
+    kind: json_path_matches
+    paths:
+      include: ["package.json", "apps/*/package.json", "packages/*/package.json", "modules/package.json", "modules/*/package.json"]
+    path: "$['dependencies','devDependencies']['@element-hq/element-web-module-api','@element-hq/element-web-shared-utils','@element-hq/web-shared-components','@element-hq/element-web-playwright-common','shared-types','eslint-plugin-element-web']"
+    matches: '^workspace:'
+    if_present: true
+    level: info
+    message: "Internal workspace packages must be depended on with the workspace: protocol."
+
+  # Value-add (toolchain-pin; was unit element-web-14, removed by the
+  # integrator because nothing enforces it): the pnpm pin in root package.json
+  # devEngines.packageManager.version equals the ghcr.io/pnpm/pnpm image tag in
+  # every Dockerfile that copies pnpm from it. .github/renovate.json only
+  # groups `pnpm` and `ghcr.io/pnpm/pnpm` updates ("Group all pnpm updates"),
+  # which states no equality, and no CI gate fails on drift.
+  # Known false negative: with allow_missing_target and a literal-version
+  # regex, a Dockerfile that switches to `ghcr.io/pnpm/pnpm:${PNPM_VERSION}`
+  # (or any non-literal tag) extracts nothing and passes silently.
+  - id: element-web-pnpm-pin-docker-coherent
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.packageManager.version" }
+    targets:
+      files: "**/Dockerfile*"
+      extract:
+        regex: '(?mi)^[ \t]*FROM(?:[ \t]+--platform=\S+)?[ \t]+ghcr\.io/pnpm/pnpm:([0-9]+\.[0-9]+\.[0-9]+)(?:@sha256:[a-f0-9]{64})?(?:[ \t]+AS[ \t]+\S+)?[ \t]*$'
+    relation: equals
+    allow_missing_target: true
+    level: info
+    message: "The ghcr.io/pnpm/pnpm image tag should match package.json devEngines.packageManager.version (renovate groups these updates)."
+
+  # Value-add (toolchain-pin): the Node major agrees across the root
+  # .node-version ("26"), apps/desktop/.node-version (exact, read by the desktop
+  # workflows' node-version-file and dockerbuild/setup.sh) and the apps/web
+  # builder image. Not gated; the bundled toolchain-pins@v1 stays silent here
+  # because its Node authority is .nvmrc, which this repo does not have.
+  - id: element-web-node-major-coherent
+    kind: cross_file
+    source:
+      file: .node-version
+      extract: { regex: '\A[ \t]*v?([0-9]+)' }
+    targets:
+      - file: apps/desktop/.node-version
+        extract: { regex: '\A[ \t]*v?([0-9]+)' }
+      - file: apps/web/Dockerfile
+        extract: { regex: '(?m)^FROM(?:[ \t]+--platform=\S+)?[ \t]+node:([0-9]+)[-.@ ]' }
+    relation: equals
+    level: info
+    message: "Node major differs between .node-version, apps/desktop/.node-version and the apps/web builder image."
+
+  # Value-add (toolchain-pin): the desktop screenshot image's Playwright release
+  # equals the catalog @playwright/test pin (browsers and runner must match).
+  - id: element-web-playwright-image-matches-catalog
+    kind: cross_file
+    source:
+      file: pnpm-workspace.yaml
+      extract: { yaml: "$.catalog['@playwright/test']" }
+    targets:
+      - file: apps/desktop/playwright/Dockerfile
+        extract: { regex: '(?m)^FROM[ \t]+mcr\.microsoft\.com/playwright:v([0-9]+\.[0-9]+\.[0-9]+)-' }
+    relation: equals
+    level: info
+    message: "apps/desktop/playwright/Dockerfile Playwright image differs from the catalog @playwright/test version."

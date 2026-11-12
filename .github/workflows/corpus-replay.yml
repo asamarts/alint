@@ -1,5 +1,6 @@
-# Corpus replay: `alint check` over the 110-repository v0.12 case-study corpus
-# at its pinned commits (docs/design/v0.12/corpus/pins.tsv). Nothing from a
+# Corpus replay: `alint check` over the case-study corpus (the v0.12 study's
+# 110 repositories and the v0.23 corpus stratum's) at its pinned commits
+# (docs/design/v0.12/corpus/pins.tsv). Nothing from a
 # corpus repository runs: spawning and keyring rules, spawning fix operations,
 # and configs with custom facts are removed or refused first. See
 # `cargo run -p xtask -- corpus-replay --help`.
@@ -37,7 +38,7 @@ jobs:
   replay:
     name: Corpus replay
     runs-on: [self-hosted, linux, bench]
-    # First run fetches 110 repositories at depth 1 and builds two release
+    # First run fetches every pinned repository at depth 1 and builds two release
     # binaries; later runs reuse the cache.
     timeout-minutes: 240
     steps:

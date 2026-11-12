@@ -1,8 +1,9 @@
-//! `corpus-replay` — run `alint check` over the v0.12 case-study corpus at its
+//! `corpus-replay` — run `alint check` over the case-study corpus at its
 //! pinned commits, and optionally diff two binaries' reports.
 //!
-//! The corpus is 110 real repositories, each with the config a v0.12 analyst
-//! wrote for it (`docs/design/v0.12/corpus/`), pinned by full commit SHA in
+//! The corpus is real repositories (the v0.12 study's 110 and the v0.23 corpus
+//! stratum's), each with the config an analyst wrote for it
+//! (`docs/design/v0.12/corpus/`), pinned by full commit SHA in
 //! `pins.tsv`. Each repository is fetched once, at depth 1, into the cache and
 //! reused by later runs. `--compare` runs a second binary over the same trees
 //! and reports every repository whose JSON report (proposed edits included) or
@@ -1172,7 +1173,18 @@ mod tests {
     fn committed_pins_parse_and_name_existing_configs() {
         let root = crate::workspace_root().unwrap();
         let pins = parse_pins(&std::fs::read_to_string(root.join(PINS)).unwrap()).unwrap();
-        assert_eq!(pins.len(), 110);
+        let configs = std::fs::read_dir(root.join("docs/design/v0.12/corpus"))
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .ends_with(".alint.yml")
+            })
+            .count();
+        assert_eq!(pins.len(), configs, "a corpus config has no pin row");
         for pin in &pins {
             assert!(
                 root.join("docs/design/v0.12/corpus")
