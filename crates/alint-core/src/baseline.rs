@@ -120,43 +120,10 @@ pub fn fingerprint(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> S
 /// What stands for the path in a hidden-path finding's fingerprint.
 const HIDDEN_PATH: &[u8] = b"\0hidden-path";
 
-/// A finding's baseline fingerprints, as [`apply`] matches them: the one
-/// `alint baseline` writes, and, for a finding whose path alint hides, the
-/// v0.21 fingerprint an existing baseline file may still hold. v0.22 matches
-/// both so those files keep working; v0.23 drops the old form (ADR-0030
-/// decision 1).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fingerprints {
-    /// What `alint baseline`, SARIF and GitLab output carry.
-    pub current: String,
-    /// The v0.21 fingerprint of a hidden-path finding; `None` for any other
-    /// finding, whose fingerprint did not change.
-    pub v021: Option<String>,
-}
-
-impl From<String> for Fingerprints {
-    fn from(current: String) -> Self {
-        Self {
-            current,
-            v021: None,
-        }
-    }
-}
-
-/// [`fingerprint`], plus the v0.21 form for a finding whose path alint hides.
-#[must_use]
-pub fn fingerprints(rule_id: &str, v: &Violation, file_bytes: Option<&[u8]>) -> Fingerprints {
-    Fingerprints {
-        current: fingerprint(rule_id, v, file_bytes),
-        v021: v
-            .path_is_sensitive()
-            .then(|| path_identity_fingerprint(rule_id, v, file_bytes)),
-    }
-}
-
 /// [`fingerprint`] as if no path were hidden: `rule_id` and path always take
-/// part. It is the v0.21 fingerprint of a hidden-path finding, and the engine
-/// keys findings by it within a run, where two hidden paths must stay apart.
+/// part. The engine keys findings by it within a run, where two hidden paths
+/// must stay apart. (It is also the fingerprint v0.21 wrote for a hidden-path
+/// finding, which baselines stopped matching in v0.23.)
 #[must_use]
 pub(crate) fn path_identity_fingerprint(
     rule_id: &str,
@@ -513,17 +480,10 @@ pub struct AppliedBaseline {
 /// below the current count) does not depend on the engine's parallel
 /// collection order. `fingerprint_of(rule_id, violation)` is supplied by
 /// the caller, which holds the file bytes the line-content discriminator
-/// needs (typically `|rid, v| fingerprints(rid, v, file_bytes_for(v))`).
-///
-/// A hidden-path finding draws first on an entry with its v0.21 fingerprint,
-/// which names one path, then on the shared current one, so a file that mixes
-/// both forms grandfathers as many findings as it can. Suppressed and live
-/// findings carry the current fingerprint either way. A caller that returns a
-/// plain `String` gets no v0.21 matching.
-pub fn apply<F, P>(report: &Report, baseline: &Baseline, mut fingerprint_of: F) -> AppliedBaseline
+/// needs (typically `|rid, v| fingerprint(rid, v, file_bytes_for(v))`).
+pub fn apply<F>(report: &Report, baseline: &Baseline, mut fingerprint_of: F) -> AppliedBaseline
 where
-    F: FnMut(&str, &Violation) -> P,
-    P: Into<Fingerprints>,
+    F: FnMut(&str, &Violation) -> String,
 {
     use std::collections::HashMap;
 
@@ -550,22 +510,18 @@ where
         let mut live = Vec::new();
         let mut live_fps = Vec::new();
         for v in ordered {
-            let Fingerprints { current, v021 } = fingerprint_of(&result.rule_id, v).into();
-            let matched = v021
-                .iter()
-                .chain(std::iter::once(&current))
-                .find(|fp| remaining.get(fp.as_str()).is_some_and(|c| *c > 0));
-            if let Some(count) = matched.and_then(|fp| remaining.get_mut(fp.as_str())) {
+            let fp = fingerprint_of(&result.rule_id, v);
+            if let Some(count) = remaining.get_mut(fp.as_str()).filter(|c| **c > 0) {
                 *count -= 1;
                 suppressed_total += 1;
                 suppressed.push(SuppressedViolation {
                     rule_id: result.rule_id.clone(),
                     violation: v.clone(),
-                    fingerprint: current,
+                    fingerprint: fp,
                 });
             } else {
                 live.push(v.clone());
-                live_fps.push(current);
+                live_fps.push(fp);
             }
         }
 
@@ -1038,30 +994,11 @@ mod tests {
         named.redact_message("rule");
         assert_ne!(fingerprint("rule", &named, None), current);
 
-        // The v0.21 form hashed the path; the engine's run-local key still does.
-        let both = fingerprints("rule", &one, None);
-        assert_eq!(both.current, current);
-        let old = fp(
-            "rule",
-            Some("secret-one.txt"),
-            None,
-            Some("sensitive"),
-            "",
-            None,
-        );
-        assert_eq!(both.v021, Some(old));
+        // The engine's run-local key keeps the path.
         assert_ne!(
             path_identity_fingerprint("rule", &one, None),
             path_identity_fingerprint("rule", &two, None)
         );
-        // No other finding has a second form.
-        let mut plain = Violation::new("m".to_string()).with_path(Path::new("a.txt"));
-        assert_eq!(
-            fingerprints("rule", &plain, None),
-            Fingerprints::from(fingerprint("rule", &plain, None))
-        );
-        plain.redact_message("rule");
-        assert_eq!(fingerprints("rule", &plain, None).v021, None);
     }
 
     fn item(rule: &str, path: Option<&str>, fp: &str) -> FingerprintedViolation {
@@ -1267,7 +1204,7 @@ mod tests {
     }
 
     #[test]
-    fn apply_matches_a_hidden_path_by_either_form_and_reports_the_current_one() {
+    fn apply_matches_hidden_paths_by_count_and_not_by_the_v021_form() {
         let report = |paths: &[&str]| Report {
             results: vec![RuleResult::new(
                 std::sync::Arc::from("rule"),
@@ -1278,36 +1215,31 @@ mod tests {
             )],
         };
         let current = fingerprint("rule", &hidden("a.txt"), None);
-        let v021 = |path: &str| path_identity_fingerprint("rule", &hidden(path), None);
-        let both = |rule: &str, v: &Violation| fingerprints(rule, v, None);
+        let by_fingerprint = |rule: &str, v: &Violation| fingerprint(rule, v, None);
         let baseline = |entries: Vec<BaselineEntry>| Baseline {
             alint_version: None,
             entries,
         };
 
-        // A v0.21 file: one entry per path.
-        let old = baseline(vec![entry(&v021("a.txt"), 1), entry(&v021("b.txt"), 1)]);
-        let out = apply(&report(&["a.txt", "b.txt", "c.txt"]), &old, both);
+        // The shared fingerprint grandfathers as many findings as it counts.
+        let shared = baseline(vec![entry(&current, 2)]);
+        let out = apply(
+            &report(&["a.txt", "b.txt", "c.txt"]),
+            &shared,
+            by_fingerprint,
+        );
         assert_eq!(out.suppressed_total, 2);
         assert_eq!(out.stale, Vec::new());
         assert!(out.suppressed.iter().all(|s| s.fingerprint == current));
-        assert_eq!(
-            out.live_fingerprints,
-            [vec![current.clone()]],
-            "c.txt is new"
-        );
-        // A plain `String` fingerprinter gets no v0.21 matching.
-        let out = apply(&report(&["a.txt", "b.txt"]), &old, |rule, v| {
-            fingerprint(rule, v, None)
-        });
-        assert_eq!((out.suppressed_total, out.stale.len()), (0, 2));
+        assert_eq!(out.live_fingerprints, [vec![current.clone()]], "one is new");
 
-        // A mixed file: the entry naming a.txt goes first, so the shared one
-        // still covers b.txt.
-        let mixed = baseline(vec![entry(&current, 1), entry(&v021("a.txt"), 1)]);
-        let out = apply(&report(&["a.txt", "b.txt"]), &mixed, both);
-        assert_eq!(out.suppressed_total, 2);
-        assert_eq!(out.stale, Vec::new());
+        // A v0.21 file hashed each path. v0.23 no longer matches that form
+        // (ADR-0030 decision 1): its entries are stale and the findings new.
+        let v021 = |path: &str| path_identity_fingerprint("rule", &hidden(path), None);
+        let old = baseline(vec![entry(&v021("a.txt"), 1), entry(&v021("b.txt"), 1)]);
+        let out = apply(&report(&["a.txt", "b.txt"]), &old, by_fingerprint);
+        assert_eq!((out.suppressed_total, out.stale.len()), (0, 2));
+        assert_eq!(out.live_fingerprints, [vec![current.clone(), current]]);
     }
 
     #[test]

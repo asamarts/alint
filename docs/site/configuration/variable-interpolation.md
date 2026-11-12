@@ -64,6 +64,9 @@ A value read from the environment may be a secret, so alint keeps it out of what
 - A selector with a dotted name (`targets.files`, `source.file`) and a nested rule's `when_iter:` choose files too, including a `when_iter:` that reads `env.X` as it runs or a var that holds a value from the environment, and `alint explain` shows the `fix:` line of a rule with redacted findings as `<redacted>`, since a fixer's description can quote its other fields.
 - A redaction marker (`<redacted:...>`) leaves out a `<redacted>` path, so it says nothing about which file a finding is in, and the warning `alint baseline`, `check --baseline`, `fix` and the language server print for a file they cannot fingerprint shows such a path as `<redacted>`.
 - From v0.22, the fingerprint of a finding with a `<redacted>` path leaves the path out, in the baseline file and in SARIF (`partialFingerprints`) and GitLab output, so someone holding one of them cannot test a guessed path against it. A rule's findings with `<redacted>` paths share one fingerprint, and a baseline grandfathers them by count. v0.22 still matches a baseline file v0.21 wrote for them; v0.23 will not, so re-run `alint baseline` before upgrading to it.
+<!-- alint:since=0.23 -->
+- From v0.23, a baseline no longer matches the fingerprints v0.21 wrote for these findings: the findings count as new and those entries as stale. Regenerate such a file once with `alint baseline --accept-new`.
+<!-- /alint:since -->
 - A `JSONPath`, or a `when_iter:` or nested rule's `when:` expression, is masked with one that still parses, so an unrelated error after it stays readable.
 - `alint baseline`'s confirmation, and `alint facts` for a fact value (a `custom:` command given the value as an argument can print it), show `<redacted>` in its place.
 

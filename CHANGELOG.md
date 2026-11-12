@@ -6,6 +6,19 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Removed
+
+- **A baseline no longer matches the fingerprint v0.21 wrote for a hidden-path finding**
+  (ADR-0030 decision 1). A finding's path is hidden when a field that chooses files was read from
+  the environment. v0.22 gave such findings a fingerprint without the path and, for one minor
+  release, still matched the v0.21 form, which hashed the path. If your baseline file was last
+  written by v0.21 or earlier, `check --baseline` and `fix --baseline` now treat those findings as
+  new and their entries as stale. Regenerate the file once with `alint baseline --accept-new`; the
+  flag is needed because the findings count as new. A file written by v0.22 is unaffected.
+- **Breaking (library API):** `alint-core` drops `baseline::Fingerprints` and
+  `baseline::fingerprints`, which existed only to match the v0.21 form. `baseline::apply` takes a
+  fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
+
 ### Fixed
 
 - `alint test` redacts a runner error's paths correctly when the test package and the temporary

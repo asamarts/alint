@@ -275,12 +275,12 @@ No path contains a NUL byte, so no finding with a real path shares it. A rule's
 hidden-path findings share the fingerprint and are matched by count (§3.2), and
 SARIF and GitLab carry the same value. v0.21 hashed the path
 (`sha256(lp(rule_id) ‖ lp(path) ‖ lp("sensitive"))`), so whoever held a baseline,
-SARIF or GitLab file could confirm a guessed path. For one minor release,
-`check --baseline`, `fix --baseline`, the language server and `alint baseline`'s
-regeneration guard also accept that form: a finding draws first on an entry with
-its v0.21 fingerprint, then on the shared one. `alint baseline` writes only the
-new form; v0.23 drops the old one. The engine's own per-finding key within a
-`fix` run keeps the path, so two hidden-path findings stay apart there.
+SARIF or GitLab file could confirm a guessed path. v0.22 still matched that form,
+for one minor release, in `check --baseline`, `fix --baseline`, the language
+server and `alint baseline`'s regeneration guard. v0.23 matches only the
+path-free form, so an entry in the old form is stale and its finding is new until
+`alint baseline --accept-new` rewrites the file. The engine's own per-finding key
+within a `fix` run keeps the path, so two hidden-path findings stay apart there.
 
 ### 3.2 Counting identical fingerprints
 
