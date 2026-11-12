@@ -78,3 +78,5 @@ repositories and JavaScript monorepos under the same protocol, pinned on
 
 - **Batch 1:** `forem-forem`, `zulip-zulip`, `element-hq-element-web`,
   `yarnpkg-berry`, `trpc-trpc`.
+- **Batch 2:** `signalapp-Signal-Desktop`, `immich-app-immich`,
+  `TanStack-query`, `jestjs-jest`, `microsoft-rushstack`.

@@ -15,7 +15,8 @@
   "coverage_today": 86,
   "coverage_with_tuning": 94,
   "gap": 6,
-  "coverage_after_slice": 87
+  "coverage_after_slice": 87,
+  "coverage_after_slice_with_entry_values": 87
  },
  "by_family": {
   "locale": {
@@ -32,7 +33,8 @@
    "coverage_today": 29,
    "coverage_with_tuning": 57,
    "gap": 43,
-   "coverage_after_slice": 29
+   "coverage_after_slice": 29,
+   "coverage_after_slice_with_entry_values": 29
   },
   "dep-version": {
    "counts": {
@@ -48,7 +50,8 @@
    "coverage_today": 50,
    "coverage_with_tuning": 100,
    "gap": 0,
-   "coverage_after_slice": 50
+   "coverage_after_slice": 50,
+   "coverage_after_slice_with_entry_values": 50
   },
   "toolchain-pin": {
    "counts": {
@@ -64,7 +67,8 @@
    "coverage_today": null,
    "coverage_with_tuning": null,
    "gap": null,
-   "coverage_after_slice": null
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
   },
   "other": {
    "counts": {
@@ -80,7 +84,8 @@
    "coverage_today": 90,
    "coverage_with_tuning": 97,
    "gap": 3,
-   "coverage_after_slice": 91
+   "coverage_after_slice": 91,
+   "coverage_after_slice_with_entry_values": 91
   }
  },
  "units": [

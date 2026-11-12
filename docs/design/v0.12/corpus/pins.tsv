@@ -59,8 +59,10 @@ guzzle/guzzle	3137dc55ae12f19bb3d6d744189947b37d18b954	guzzle-guzzle.alint.yml
 hashicorp/terraform	581ffab924bb71871e34b6198767202799957c36	hashicorp-terraform.alint.yml
 helm/helm	59b57c5c31a009d069f9318c9d3ba8b784f1fe97	helm-helm.alint.yml
 Homebrew/brew	43039a4500e6eca03c829a269d7b14aac08c0a24	Homebrew-brew.alint.yml
+immich-app/immich	7f13ab5e139e68308c67a709fc90d8bebd20ba7d	immich-app-immich.alint.yml
 istio/istio	5112958faa0bec6129a806fc6e4b361b5f11ebe3	istio-istio.alint.yml
 jekyll/jekyll	202df571314ba1d18e9fccd81d12aaad4a703c38	jekyll-jekyll.alint.yml
+jestjs/jest	aa88f7cf0bfc7a3a2efbfcab97914886b22d4454	jestjs-jest.alint.yml
 JetBrains/kotlin	155ca706b548d7d1c7c007d2689400800b0440f1	JetBrains-kotlin.alint.yml
 jgm/pandoc	90384394817b6cfb7776bdfa4d25453e5450d2fb	jgm-pandoc.alint.yml
 junegunn/fzf	7d647c70c286720c225ebb8ab75896e5dbee6af6	junegunn-fzf.alint.yml
@@ -69,6 +71,7 @@ kubernetes/kubernetes	14f9f7e9e565dd83e3fa043fdccabf9075b0cdac	kubernetes-kubern
 laravel/framework	42b494e1ed2bc80511bca064c8a395b776ff1516	laravel-framework.alint.yml
 llvm/llvm-project	d7ee01c0fa3113b0b2d98e77273f794a182bf2dd	llvm-llvm-project.alint.yml
 mastodon/mastodon	facb552c9cdbe8a2ebff0b94ebf2c9e9ec385347	mastodon-mastodon.alint.yml
+microsoft/rushstack	a1d41fc46f3fa4951eef79ec0eabd2173db7dd55	microsoft-rushstack.alint.yml
 microsoft/TypeScript	f3d3968058b5ee0f1c78dc1484a287d9f33bf638	microsoft-TypeScript.alint.yml
 microsoft/vscode	07cee71da6523e7dedab6c4ed83a2c41cd5149a6	microsoft-vscode.alint.yml
 neovim/neovim	fb5aad1d07d68b3da38bc7ba5c6a7896b3dfcda5	neovim-neovim.alint.yml
@@ -104,6 +107,7 @@ rust-lang/rust	c0bb140a37c81cf59a0b40c21c9413059644e294	rust-lang-rust.alint.yml
 scikit-learn/scikit-learn	65ab405b996c10c22392b3118f26d35ccf8e49a0	scikit-learn-scikit-learn.alint.yml
 serde-rs/serde	fa7da4a93567ed347ad0735c28e439fca688ef26	serde-rs-serde.alint.yml
 signalapp/Signal-Android	ae2477356bbbd9171b0c2e4ba35f7e6d78297fcf	signalapp-Signal-Android.alint.yml
+signalapp/Signal-Desktop	848443afc3fcc74a0e127ba4f4d8554b95da856e	signalapp-Signal-Desktop.alint.yml
 spf13/cobra	ad460ea8f249db69c943a365fb84f3a59042d54e	spf13-cobra.alint.yml
 spring-projects/spring-boot	bcecf922c6ee98d9451f414b4bf2213ed8f47922	spring-projects-spring-boot.alint.yml
 sqlalchemy/sqlalchemy	4fb459aaf05dd9c31ce3ece57c1bbf81ca9855de	sqlalchemy-sqlalchemy.alint.yml
@@ -112,6 +116,7 @@ sveltejs/svelte	5b8db1be35555fee3b938f9d7eab93f2aee48b7e	sveltejs-svelte.alint.y
 swiftlang/swift	09dfb9b25be4a2a84e9a7d40b1128dd9cb8e7e55	swiftlang-swift.alint.yml
 symfony/symfony	9f30c2bb7f560974f408b6b1aae8e8da2000b3a8	symfony-symfony.alint.yml
 systemd/systemd	414fc6e3b200eea45ee97eddb79c7496e01db16c	systemd-systemd.alint.yml
+TanStack/query	9b528b5e51844197a6cb795822edc38569f1dff9	TanStack-query.alint.yml
 tensorflow/tensorflow	803e4ccb979128484a6ef6bbe1fcf72332c28853	tensorflow-tensorflow.alint.yml
 Textualize/rich	46cebbb032f920eb096efbaf23cdc6fe9dd541f7	Textualize-rich.alint.yml
 tokio-rs/axum	4a72e063b916f39e0698a345a99a755deb8f345b	tokio-rs-axum.alint.yml

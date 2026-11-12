@@ -1,0 +1,1348 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config — microsoft/rushstack
+# Pinned @ a1d41fc46f3fa4951eef79ec0eabd2173db7dd55 (stratum: js-monorepo)
+#
+# Shape: Rush (pnpm 10, two subspaces) monorepo of 196 projects at a fixed
+# depth of two (apps/, libraries/, heft-plugins/, webpack/, rigs/, eslint/,
+# rush-plugins/, build-tests*/, vscode-extensions/, repo-scripts/). The repo is
+# Rush's own home: CI runs the published Rush 5.182.0 through
+# common/scripts/install-run-rush.js, and the in-repo rush-lib source
+# (5.182.1, which differs from 5.182.0 only in HTTP cache retries) is the
+# readable reference for what each Rush command asserts.
+# Governance: single-vendor (Microsoft).
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   .github/workflows/ci.yml (Node 22/24/26 x Linux, Node 26 x Windows) and the
+#   Azure DevOps build template (common/config/azure-pipelines/templates/
+#   build.yaml, used by the release pipelines):
+#     rush change --verify      change files for changed published projects;
+#                               strictChangefileValidation checks every file
+#     rush install              RushConfiguration load (rush.json integrity,
+#                               nodeSupportedVersionRange, config-folder
+#                               allowlist, JSON schemas), ensureConsistentVersions
+#                               per subspace, approved-packages policy,
+#                               preventManualShrinkwrapChanges hash, the
+#                               workspace:-protocol rule for local projects,
+#                               lockfile freshness, strict peers, cycles,
+#                               install-run script freshness, git-email policy
+#     rush retest --production  tsc / ESLint / Jest / API Extractor / bundlers,
+#                               warnings fail (allowWarningsOnSuccess: false)
+#     npm run test              package-manager integration tests
+#     repo-toolbox readme --verify, collect-project-files (collision check)
+#     a second clone: rush update + rush test twice (build-cache hits)
+#     INSTALL_RUN_RUSH_LOCKFILE_PATH -> npm ci of the pinned Rush
+#   common/git-hooks/pre-commit: rush prettier (pretty-quick --staged)
+#   Conventions: .gitattributes (bin scripts MUST be LF), PR template checklist.
+#
+# This config expresses the Rush configuration-integrity checks over rush.json,
+# version-policies.json, subspaces.json, rush-plugins.json and the project
+# manifests; the JSON-schema validation Rush applies to its config and change
+# files; the change-file target checks; the rushVersion and pnpmVersion pins;
+# the workspace:-protocol / decoupledLocalDependencies contract (tuned, C);
+# the command-line.json loader checks (phase names and references, parameters,
+# build/rebuild kind, built-in names, autoinstallers); Heft's rig.json and
+# heft-plugin.json load validation; the release pipeline's .npmrc-publish
+# registry line; and the .gitattributes LF convention for npm bin scripts.
+# Not expressed (B/D, see the stratum log): ensureConsistentVersions
+# (B-config unique-key), the approved-packages policy (B-config reference),
+# duplicate project, phase and command names (B-config unique-key), the phase
+# self-dependency cycle check (B-kernel), CI Node versions inside
+# nodeSupportedVersionRange, the range's own validity and lockstep versions
+# not above the policy version (B-adapter, semver operators), the README
+# project tables and the shrinkwrap hash (B-delegate), and every
+# build/test/lint/lockfile/package-manager check (D).
+# Stage C (2026-11-12) applied the Stage B review: fixes to rules 03, 07, 23
+# and 57, the 09 schema set completed, 09b's rule relabelled as its own unit,
+# 10 marked C, and rules for the missed A/C units b01, b03-b06, b08-b10, b13
+# and b14.
+
+version: 1
+
+# Test fixtures, sandboxes and vendored trees are inputs, not the validated surface.
+ignore:
+  - "**/node_modules/**"
+  - "build-tests/rush-redis-cobuild-plugin-integration-test/sandbox/**"
+  - "libraries/rush-lib/src/**/test/**"
+  - "**/temp/**"
+
+rules:
+  # ══════════════════════════════════════════════════════════════════════════
+  # dep-version
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # C [dep-version] rushstack-03 (rush install, WorkspaceInstallManager): a
+  #   dependency or devDependency on a local Rush project must use the
+  #   `workspace:` protocol unless the project lists it in its
+  #   decoupledLocalDependencies. Part 1: the 189 local projects that no
+  #   project decouples. alint cannot read object KEYS, so the local-project set
+  #   is restated by hand from rush.json (the tuning that makes this C; a new
+  #   project is unchecked until it is added here).
+  #   Rush applies the check only to Version and Range specifiers
+  #   (WorkspaceInstallManager.ts ~250-252, npm-package-arg types; ~226 skips
+  #   peers), so the regex accepts every other specifier form: workspace:, anything with ':' or '/'
+  #   (npm: aliases, file:, link:, catalog:, git and URL specs, paths), and
+  #   tag-shaped values (a first character that cannot start a node-semver
+  #   range; x/X/v only when not followed by a range character). Known
+  #   approximation: a tag or tarball path that starts with a digit
+  #   (e.g. "2024-beta", "1.0.0.tgz") is treated as a range. Peer dependencies
+  #   are not listed, as in Rush. (Stage C fix of Stage B's over-assertion report.)
+  - id: rushstack-local-deps-use-workspace-protocol
+    kind: json_path_matches
+    paths: ["*/*/package.json"]
+    path: "$['dependencies','devDependencies','optionalDependencies']['@microsoft/api-documenter','@microsoft/api-extractor-model','@microsoft/load-themed-styles','@microsoft/loader-load-themed-styles','@microsoft/rush','@microsoft/rush-lib','@microsoft/rushell','@microsoft/webpack5-load-themed-styles-loader','@rushstack/cpu-profile-summarizer','@rushstack/credential-cache','@rushstack/debug-certificate-manager','@rushstack/eslint-bulk','@rushstack/eslint-plugin-packlets','@rushstack/eslint-plugin-security','@rushstack/hashed-folder-copy-plugin','@rushstack/heft-api-extractor-plugin','@rushstack/heft-config-file','@rushstack/heft-dev-cert-plugin','@rushstack/heft-isolated-typescript-transpile-plugin','@rushstack/heft-jest-plugin','@rushstack/heft-json-schema-typings-plugin','@rushstack/heft-lint-plugin','@rushstack/heft-localization-typings-plugin','@rushstack/heft-rspack-plugin','@rushstack/heft-sass-load-themed-styles-plugin','@rushstack/heft-sass-plugin','@rushstack/heft-serverless-stack-plugin','@rushstack/heft-static-asset-typings-plugin','@rushstack/heft-storybook-plugin','@rushstack/heft-typescript-plugin','@rushstack/heft-vscode-extension-plugin','@rushstack/heft-vscode-extension-rig','@rushstack/heft-web-rig','@rushstack/heft-webpack4-plugin','@rushstack/heft-webpack5-plugin','@rushstack/loader-raw-script','@rushstack/localization-utilities','@rushstack/lockfile-explorer','@rushstack/lockfile-explorer-web','@rushstack/lookup-by-path','@rushstack/mcp-server','@rushstack/module-minifier','@rushstack/node-core-library','@rushstack/npm-check-fork','@rushstack/operation-graph','@rushstack/package-deps-hash','@rushstack/package-extractor','@rushstack/playwright-browser-tunnel','@rushstack/problem-matcher','@rushstack/rig-package','@rushstack/rundown','@rushstack/rush-amazon-s3-build-cache-plugin','@rushstack/rush-azure-storage-build-cache-plugin','@rushstack/rush-bridge-cache-plugin','@rushstack/rush-buildxl-graph-plugin','@rushstack/rush-cli-client','@rushstack/rush-client-core','@rushstack/rush-daemon','@rushstack/rush-daemon-protocol','@rushstack/rush-daemon-transport','@rushstack/rush-http-build-cache-plugin','@rushstack/rush-litewatch-plugin','@rushstack/rush-mcp-docs-plugin','@rushstack/rush-pnpm-kit-v10','@rushstack/rush-pnpm-kit-v8','@rushstack/rush-pnpm-kit-v9','@rushstack/rush-published-versions-json-plugin','@rushstack/rush-redis-cobuild-plugin','@rushstack/rush-reporter','@rushstack/rush-resolver-cache-plugin','@rushstack/rush-sdk','@rushstack/rush-serve-dashboard','@rushstack/rush-serve-plugin','@rushstack/rush-terminal-renderer','@rushstack/rush-themed-ui','@rushstack/rush-vscode-command-webview','@rushstack/stream-collator','@rushstack/terminal','@rushstack/trace-import','@rushstack/tree-pattern','@rushstack/ts-command-line','@rushstack/typings-generator','@rushstack/vscode-shared','@rushstack/webpack-deep-imports-plugin','@rushstack/webpack-embedded-dependencies-plugin','@rushstack/webpack-plugin-utilities','@rushstack/webpack-preserve-dynamic-require-plugin','@rushstack/webpack-workspace-resolve-plugin','@rushstack/webpack4-localization-plugin','@rushstack/webpack4-module-minifier-plugin','@rushstack/webpack5-localization-plugin','@rushstack/webpack5-module-minifier-plugin','@rushstack/worker-pool','@rushstack/zipsync','api-documenter-scenarios','api-documenter-test','api-extractor-d-cts-test','api-extractor-d-mts-test','api-extractor-lib1-test','api-extractor-lib2-test','api-extractor-lib3-test','api-extractor-lib4-test','api-extractor-lib5-test','api-extractor-scenarios','api-extractor-test-01','api-extractor-test-02','api-extractor-test-03','api-extractor-test-04','api-extractor-test-05','debug-certificate-manager','decoupled-local-node-rig','doc-plugin-rush-stack','eslint-7-11-test','eslint-7-7-test','eslint-7-test','eslint-8-test','eslint-9-test','eslint-bulk-suppressions-test','eslint-bulk-suppressions-test-flat','eslint-bulk-suppressions-test-legacy','esm-node-import-test','generate-api-docs','hashed-folder-copy-plugin-webpack5-test','heft-copy-files-test','heft-example-lifecycle-plugin','heft-example-plugin-01','heft-example-plugin-02','heft-fastify-test','heft-jest-preset-test','heft-jest-reporters-test','heft-json-schema-typings-plugin-test','heft-minimal-rig-test','heft-minimal-rig-usage-test','heft-node-basic-tutorial','heft-node-everything-esm-module-test','heft-node-everything-test','heft-node-jest-tutorial','heft-node-rig-tutorial','heft-parameter-plugin','heft-parameter-plugin-test','heft-rspack-everything-test','heft-sass-test','heft-serverless-stack-tutorial','heft-storybook-v6-react-tutorial','heft-storybook-v6-react-tutorial-app','heft-storybook-v6-react-tutorial-storykit','heft-storybook-v9-react-tutorial','heft-storybook-v9-react-tutorial-app','heft-storybook-v9-react-tutorial-storykit','heft-swc-test','heft-typescript-composite-test','heft-typescript-v2-test','heft-typescript-v3-test','heft-typescript-v4-test','heft-web-rig-app-tutorial','heft-web-rig-library-test','heft-web-rig-library-tutorial','heft-webpack-basic-tutorial','heft-webpack4-everything-test','heft-webpack5-everything-test','local-eslint-config','local-node-rig','local-web-rig','localization-plugin-test-01','localization-plugin-test-02','localization-plugin-test-03','package-extractor-test-01','package-extractor-test-02','package-extractor-test-03','package-extractor-test-04','package-extractor-test-05','packlets-tutorial','playwright-local-browser-server','repo-toolbox','run-scenarios-helpers','rush-amazon-s3-build-cache-plugin-integration-test','rush-lib-declaration-paths-test','rush-lib-test','rush-mcp-example-plugin','rush-package-manager-integration-test','rush-project-change-analyzer-test','rush-redis-cobuild-plugin-integration-test','rush-sdk-test','rushd-wire-e2e-test','rushstack','set-webpack-public-path-plugin-test','typescript-newest-test','typescript-v4-test','webpack-local-version-test']"
+    matches: '^workspace:|[:/]|^[^0-9^~<>=* |xXv]|^[xX][^. |-]|^v(?:$|[^0-9xX* =.])'
+    if_present: true
+    level: error
+    message: "A version or range dependency on a local Rush project must use the workspace: protocol (or be listed in the project's decoupledLocalDependencies in rush.json)."
+
+  # C [dep-version] rushstack-03, part 2: for each of the seven decoupled
+  #   targets, a manifest that depends on it with a Version or Range spec must
+  #   be a project that decouples it (rush.json). The source is the union of
+  #   the offending manifests' names (the `$[?(@ == $.name && ...)]` idiom
+  #   selects the name value of a manifest that matches the condition). The
+  #   search() regex is the positive form of part 1's: it selects Version/Range
+  #   specifiers only (empty string included, which npm-package-arg reads as
+  #   '*'), so aliases, tags, file:/link:/catalog:/git specs pass as in Rush.
+  - id: rushstack-non-workspace-dep-is-decoupled-api-extractor
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@microsoft/api-extractor'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.devDependencies['@microsoft/api-extractor'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.optionalDependencies['@microsoft/api-extractor'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.decoupledLocalDependencies[?(@ == '@microsoft/api-extractor')] || @.cyclicDependencyProjects[?(@ == '@microsoft/api-extractor')])].packageName"
+    level: error
+    message: "A project that depends on @microsoft/api-extractor without workspace: must list it in decoupledLocalDependencies (rush.json)."
+
+  - id: rushstack-non-workspace-dep-is-decoupled-eslint-config
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/eslint-config'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.devDependencies['@rushstack/eslint-config'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.optionalDependencies['@rushstack/eslint-config'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.decoupledLocalDependencies[?(@ == '@rushstack/eslint-config')] || @.cyclicDependencyProjects[?(@ == '@rushstack/eslint-config')])].packageName"
+    level: error
+    message: "A project that depends on @rushstack/eslint-config without workspace: must list it in decoupledLocalDependencies (rush.json)."
+
+  - id: rushstack-non-workspace-dep-is-decoupled-eslint-patch
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/eslint-patch'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.devDependencies['@rushstack/eslint-patch'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.optionalDependencies['@rushstack/eslint-patch'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.decoupledLocalDependencies[?(@ == '@rushstack/eslint-patch')] || @.cyclicDependencyProjects[?(@ == '@rushstack/eslint-patch')])].packageName"
+    level: error
+    message: "A project that depends on @rushstack/eslint-patch without workspace: must list it in decoupledLocalDependencies (rush.json)."
+
+  - id: rushstack-non-workspace-dep-is-decoupled-eslint-plugin
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/eslint-plugin'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.devDependencies['@rushstack/eslint-plugin'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.optionalDependencies['@rushstack/eslint-plugin'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.decoupledLocalDependencies[?(@ == '@rushstack/eslint-plugin')] || @.cyclicDependencyProjects[?(@ == '@rushstack/eslint-plugin')])].packageName"
+    level: error
+    message: "A project that depends on @rushstack/eslint-plugin without workspace: must list it in decoupledLocalDependencies (rush.json)."
+
+  - id: rushstack-non-workspace-dep-is-decoupled-heft
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/heft'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.devDependencies['@rushstack/heft'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.optionalDependencies['@rushstack/heft'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.decoupledLocalDependencies[?(@ == '@rushstack/heft')] || @.cyclicDependencyProjects[?(@ == '@rushstack/heft')])].packageName"
+    level: error
+    message: "A project that depends on @rushstack/heft without workspace: must list it in decoupledLocalDependencies (rush.json)."
+
+  - id: rushstack-non-workspace-dep-is-decoupled-heft-node-rig
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/heft-node-rig'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.devDependencies['@rushstack/heft-node-rig'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.optionalDependencies['@rushstack/heft-node-rig'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.decoupledLocalDependencies[?(@ == '@rushstack/heft-node-rig')] || @.cyclicDependencyProjects[?(@ == '@rushstack/heft-node-rig')])].packageName"
+    level: error
+    message: "A project that depends on @rushstack/heft-node-rig without workspace: must list it in decoupledLocalDependencies (rush.json)."
+
+  - id: rushstack-non-workspace-dep-is-decoupled-set-webpack-public-path-plugin
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/set-webpack-public-path-plugin'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.devDependencies['@rushstack/set-webpack-public-path-plugin'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$') || search($.optionalDependencies['@rushstack/set-webpack-public-path-plugin'], '^(?:[0-9^~<>=* |][^:/]*|[xX](?:[. |-][^:/]*)?|v[0-9xX* =.][^:/]*)?$')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.decoupledLocalDependencies[?(@ == '@rushstack/set-webpack-public-path-plugin')] || @.cyclicDependencyProjects[?(@ == '@rushstack/set-webpack-public-path-plugin')])].packageName"
+    level: error
+    message: "A project that depends on @rushstack/set-webpack-public-path-plugin without workspace: must list it in decoupledLocalDependencies (rush.json)."
+
+  # C [dep-version] rushstack-04 (rush install): the reverse contract — a
+  #   project that lists a package in decoupledLocalDependencies must not depend
+  #   on it with `workspace:` notation. Exact per decoupled target, but the
+  #   seven targets are restated by hand (C).
+  - id: rushstack-decoupled-dep-not-workspace-api-extractor
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@microsoft/api-extractor'], '^workspace:') || search($.devDependencies['@microsoft/api-extractor'], '^workspace:') || search($.optionalDependencies['@microsoft/api-extractor'], '^workspace:')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!(@.decoupledLocalDependencies[?(@ == '@microsoft/api-extractor')] || @.cyclicDependencyProjects[?(@ == '@microsoft/api-extractor')]))].packageName"
+    level: error
+    message: "A project that lists @microsoft/api-extractor in decoupledLocalDependencies must not depend on it with workspace: (rush install)."
+
+  - id: rushstack-decoupled-dep-not-workspace-eslint-config
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/eslint-config'], '^workspace:') || search($.devDependencies['@rushstack/eslint-config'], '^workspace:') || search($.optionalDependencies['@rushstack/eslint-config'], '^workspace:')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!(@.decoupledLocalDependencies[?(@ == '@rushstack/eslint-config')] || @.cyclicDependencyProjects[?(@ == '@rushstack/eslint-config')]))].packageName"
+    level: error
+    message: "A project that lists @rushstack/eslint-config in decoupledLocalDependencies must not depend on it with workspace: (rush install)."
+
+  - id: rushstack-decoupled-dep-not-workspace-eslint-patch
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/eslint-patch'], '^workspace:') || search($.devDependencies['@rushstack/eslint-patch'], '^workspace:') || search($.optionalDependencies['@rushstack/eslint-patch'], '^workspace:')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!(@.decoupledLocalDependencies[?(@ == '@rushstack/eslint-patch')] || @.cyclicDependencyProjects[?(@ == '@rushstack/eslint-patch')]))].packageName"
+    level: error
+    message: "A project that lists @rushstack/eslint-patch in decoupledLocalDependencies must not depend on it with workspace: (rush install)."
+
+  - id: rushstack-decoupled-dep-not-workspace-eslint-plugin
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/eslint-plugin'], '^workspace:') || search($.devDependencies['@rushstack/eslint-plugin'], '^workspace:') || search($.optionalDependencies['@rushstack/eslint-plugin'], '^workspace:')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!(@.decoupledLocalDependencies[?(@ == '@rushstack/eslint-plugin')] || @.cyclicDependencyProjects[?(@ == '@rushstack/eslint-plugin')]))].packageName"
+    level: error
+    message: "A project that lists @rushstack/eslint-plugin in decoupledLocalDependencies must not depend on it with workspace: (rush install)."
+
+  - id: rushstack-decoupled-dep-not-workspace-heft
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/heft'], '^workspace:') || search($.devDependencies['@rushstack/heft'], '^workspace:') || search($.optionalDependencies['@rushstack/heft'], '^workspace:')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!(@.decoupledLocalDependencies[?(@ == '@rushstack/heft')] || @.cyclicDependencyProjects[?(@ == '@rushstack/heft')]))].packageName"
+    level: error
+    message: "A project that lists @rushstack/heft in decoupledLocalDependencies must not depend on it with workspace: (rush install)."
+
+  - id: rushstack-decoupled-dep-not-workspace-heft-node-rig
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/heft-node-rig'], '^workspace:') || search($.devDependencies['@rushstack/heft-node-rig'], '^workspace:') || search($.optionalDependencies['@rushstack/heft-node-rig'], '^workspace:')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!(@.decoupledLocalDependencies[?(@ == '@rushstack/heft-node-rig')] || @.cyclicDependencyProjects[?(@ == '@rushstack/heft-node-rig')]))].packageName"
+    level: error
+    message: "A project that lists @rushstack/heft-node-rig in decoupledLocalDependencies must not depend on it with workspace: (rush install)."
+
+  - id: rushstack-decoupled-dep-not-workspace-set-webpack-public-path-plugin
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && (search($.dependencies['@rushstack/set-webpack-public-path-plugin'], '^workspace:') || search($.devDependencies['@rushstack/set-webpack-public-path-plugin'], '^workspace:') || search($.optionalDependencies['@rushstack/set-webpack-public-path-plugin'], '^workspace:')))]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!(@.decoupledLocalDependencies[?(@ == '@rushstack/set-webpack-public-path-plugin')] || @.cyclicDependencyProjects[?(@ == '@rushstack/set-webpack-public-path-plugin')]))].packageName"
+    level: error
+    message: "A project that lists @rushstack/set-webpack-public-path-plugin in decoupledLocalDependencies must not depend on it with workspace: (rush install)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # toolchain-pin
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [toolchain-pin] rushstack-05: CI sets INSTALL_RUN_RUSH_LOCKFILE_PATH, so
+  #   install-run-rush.js runs `npm ci` with the committed lockfile against a
+  #   generated package.json whose only dependency is @microsoft/rush at
+  #   rush.json's rushVersion; npm ci fails unless the lockfile pins that same
+  #   version (the release pipeline's comment: "install-run-rush.js would fail
+  #   lockfile validation" after a Rush bump).
+  - id: rushstack-rush-version-matches-ci-lockfile
+    kind: cross_file
+    relation: equals
+    source:
+      file: "rush.json"
+      extract:
+        json: "$.rushVersion"
+    targets:
+      - file: "common/config/validation/rush-package-lock.json"
+        extract:
+          json: "$.packages[''].dependencies['@microsoft/rush']"
+    level: error
+    message: "common/config/validation/rush-package-lock.json must pin @microsoft/rush at rush.json's rushVersion (npm ci in install-run-rush)."
+
+  # A [toolchain-pin] rushstack-07: SetupChecks (rush install) rejects a
+  #   pnpmVersion below Rush's MINIMUM_SUPPORTED_PNPM_VERSION (5.0.0):
+  #   semver.lt(pnpmVersion, '5.0.0'), run only when pnpm is the package
+  #   manager (SetupChecks.ts ~46-52). The regex encodes semver order against
+  #   5.0.0: any 6+ major, 5.x.y above 5.0.0 (prereleases included), and 5.0.0
+  #   itself with optional build metadata; 5.0.0-<prerelease> sorts below
+  #   5.0.0 and is rejected. if_present: an npm or yarn repo has no pnpmVersion
+  #   and Rush skips the check (rushstack-52 asserts that one pin exists).
+  - id: rushstack-pnpm-version-supported
+    kind: json_path_matches
+    paths: ["rush.json"]
+    path: "$.pnpmVersion"
+    matches: '^(?:(?:[6-9]|[1-9][0-9]+)\.[0-9]+\.[0-9]+|5\.[1-9][0-9]*\.[0-9]+|5\.0\.[1-9][0-9]*|5\.0\.0(?:\+[0-9A-Za-z.-]+)?$)'
+    if_present: true
+    level: error
+    message: "rush.json pnpmVersion must be at least 5.0.0, the minimum Rush supports."
+
+  # A [toolchain-pin] rushstack-52: RushConfiguration (RushConfiguration.ts
+  #   ~752-764) requires exactly one of npmVersion, pnpmVersion and yarnVersion.
+  #   The filter selects the rushVersion value (required by the schema) when
+  #   none or more than one package-manager pin is present.
+  - id: rushstack-one-package-manager-pin
+    kind: json_path_absent
+    paths: ["rush.json"]
+    path: "$[?(@ == $.rushVersion && ((!$.npmVersion && !$.pnpmVersion && !$.yarnVersion) || ($.npmVersion && $.pnpmVersion) || ($.npmVersion && $.yarnVersion) || ($.pnpmVersion && $.yarnVersion)))]"
+    level: error
+    message: "rush.json must pin exactly one package manager: npmVersion, pnpmVersion or yarnVersion."
+
+  # B-adapter [toolchain-pin] rushstack-55 (no rule): CI's second clone runs the
+  #   in-repo Rush (apps/rush/lib-commonjs/start-dev.js update/test), whose
+  #   rush-lib refuses a rush.json whose rushVersion has a different
+  #   major.minor and is newer than rush-lib's own version
+  #   (RushConfiguration.ts ~1058-1069). Needs a semver order operator; an
+  #   equality on major.minor would over-assert once the source moves ahead.
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: Rush configuration integrity (checked when Rush loads its config,
+  # i.e. by every rush command CI runs)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] rushstack-09: Rush loads each config file through
+  #   JsonFile.loadAndValidate with its JSON schema. The schemas are the
+  #   in-repo rush-lib sources (the published 5.182.0 copies are not offline).
+  #   One unit, one rule per schema; command-line.json is rushstack-09b below.
+  - id: rushstack-schema-rush-json
+    kind: json_schema_passes
+    paths: ["rush.json"]
+    schema_path: "libraries/rush-lib/src/schemas/rush.schema.json"
+    level: error
+    message: "rush.json must validate against Rush's rush.schema.json."
+
+  - id: rushstack-schema-common-versions
+    kind: json_schema_passes
+    paths: ["common/config/subspaces/*/common-versions.json", "common/config/rush/common-versions.json"]
+    schema_path: "libraries/rush-lib/src/schemas/common-versions.schema.json"
+    level: error
+    message: "common-versions.json must validate against Rush's schema."
+
+  - id: rushstack-schema-version-policies
+    kind: json_schema_passes
+    paths: ["common/config/rush/version-policies.json"]
+    schema_path: "libraries/rush-lib/src/schemas/version-policies.schema.json"
+    level: error
+    message: "version-policies.json must validate against Rush's schema."
+
+  - id: rushstack-schema-pnpm-config
+    kind: json_schema_passes
+    paths: ["common/config/rush/pnpm-config.json", "common/config/subspaces/*/pnpm-config.json"]
+    schema_path: "libraries/rush-lib/src/schemas/pnpm-config.schema.json"
+    level: error
+    message: "pnpm-config.json must validate against Rush's schema."
+
+  - id: rushstack-schema-experiments
+    kind: json_schema_passes
+    paths: ["common/config/rush/experiments.json"]
+    schema_path: "libraries/rush-lib/src/schemas/experiments.schema.json"
+    level: error
+    message: "experiments.json must validate against Rush's schema."
+
+  # C [other] rushstack-09b (no rule): command-line.json is validated only
+  #   after Rush merges its built-in build/rebuild defaults into the file
+  #   (_applyBuildCommandDefaults), so the raw file fails the schema
+  #   (`build` here has no summary or enableParallelism). A raw-file
+  #   json_schema_passes rule would need a shim schema that relaxes those two
+  #   commands (the tuning, C); a shim outside the repository cannot replay
+  #   standalone, so no rule is kept for this unit.
+  #
+  # A [other] (separate unit, split from rushstack-09b by the Stage B review):
+  #   _prepareRepoCommandLineJson (CommandLineConfiguration.ts ~749-770)
+  #   rejects the globalPlugin command kind in the repo's command-line.json
+  #   (plugins' own command-line.json files may use it). A plain query.
+  - id: rushstack-command-line-no-global-plugin-commands
+    kind: json_path_absent
+    paths: ["common/config/rush/command-line.json"]
+    path: "$.commands[?(@.commandKind == 'globalPlugin')]"
+    level: error
+    message: "The globalPlugin command kind may only be used by Rush plugins, not the repo's command-line.json."
+
+  - id: rushstack-schema-build-cache
+    kind: json_schema_passes
+    paths: ["common/config/rush/build-cache.json"]
+    schema_path: "libraries/rush-lib/src/schemas/build-cache.schema.json"
+    level: error
+    message: "build-cache.json must validate against Rush's schema."
+
+  - id: rushstack-schema-cobuild
+    kind: json_schema_passes
+    paths: ["common/config/rush/cobuild.json"]
+    schema_path: "libraries/rush-lib/src/schemas/cobuild.schema.json"
+    level: error
+    message: "cobuild.json must validate against Rush's schema."
+
+  - id: rushstack-schema-subspaces
+    kind: json_schema_passes
+    paths: ["common/config/rush/subspaces.json"]
+    schema_path: "libraries/rush-lib/src/schemas/subspaces.schema.json"
+    level: error
+    message: "subspaces.json must validate against Rush's schema."
+
+  - id: rushstack-schema-custom-tips
+    kind: json_schema_passes
+    paths: ["common/config/rush/custom-tips.json"]
+    schema_path: "libraries/rush-lib/src/schemas/custom-tips.schema.json"
+    level: error
+    message: "custom-tips.json must validate against Rush's schema."
+
+  - id: rushstack-schema-artifactory
+    kind: json_schema_passes
+    paths: ["common/config/rush/artifactory.json"]
+    schema_path: "libraries/rush-lib/src/schemas/artifactory.schema.json"
+    level: error
+    message: "artifactory.json must validate against Rush's schema."
+
+  - id: rushstack-schema-rush-plugins
+    kind: json_schema_passes
+    paths: ["common/config/rush/rush-plugins.json"]
+    schema_path: "libraries/rush-lib/src/schemas/rush-plugins.schema.json"
+    level: error
+    message: "rush-plugins.json must validate against Rush's schema."
+
+  - id: rushstack-schema-approved-packages
+    kind: json_schema_passes
+    paths: ["common/config/rush/browser-approved-packages.json", "common/config/rush/nonbrowser-approved-packages.json"]
+    schema_path: "libraries/rush-lib/src/schemas/approved-packages.schema.json"
+    level: error
+    message: "The approved-packages files must validate against Rush's schema."
+
+  - id: rushstack-schema-repo-state
+    kind: json_schema_passes
+    paths: ["common/config/subspaces/*/repo-state.json"]
+    schema_path: "libraries/rush-lib/src/schemas/repo-state.schema.json"
+    level: error
+    message: "repo-state.json must validate against Rush's schema."
+
+  - id: rushstack-schema-plugin-manifests
+    kind: json_schema_passes
+    paths: ["common/autoinstallers/*/rush-plugins/**/rush-plugin-manifest.json"]
+    schema_path: "libraries/rush-lib/src/schemas/rush-plugin-manifest.schema.json"
+    level: error
+    message: "A cached Rush plugin manifest must validate against Rush's schema."
+
+  # A [other] rushstack-09, completed per the Stage B review (its b15; one
+  #   unit under R1): Rush also schema-validates
+  #   - each project's config/rush-project.json and the rig-profile copies it
+  #     inherits (RushProjectConfiguration.ts, rush-project.schema.json; loaded
+  #     by every phased command CI runs). Rush validates the object it gets
+  #     after merging the extends/rig chain; validating each file raw is the
+  #     per-file approximation (56 project files, 16 of them with "extends",
+  #     plus 8 rig-profile files; each passes on its own at the pin, and the
+  #     schema forbids additional properties at every level, so a stray key
+  #     fails either way);
+  #   - the cached plugin command-line.json, raw (tryLoadFromFile validates
+  #     before any defaults are applied, unlike the repo's file, 09b);
+  #   - every CHANGELOG.json during `rush version --bump` / `rush publish`
+  #     (ChangelogGenerator.ts ~184, the release pipeline's bump step).
+  - id: rushstack-schema-rush-project
+    kind: json_schema_passes
+    paths: ["*/*/config/rush-project.json", "rigs/*/profiles/*/config/rush-project.json"]
+    schema_path: "libraries/rush-lib/src/schemas/rush-project.schema.json"
+    level: error
+    message: "config/rush-project.json must validate against Rush's rush-project.schema.json."
+
+  - id: rushstack-schema-plugin-command-line
+    kind: json_schema_passes
+    paths: ["common/autoinstallers/*/rush-plugins/**/command-line.json"]
+    schema_path: "libraries/rush-lib/src/schemas/command-line.schema.json"
+    level: error
+    message: "A cached Rush plugin's command-line.json must validate against Rush's command-line schema."
+
+  - id: rushstack-schema-changelog
+    kind: json_schema_passes
+    paths: ["*/*/CHANGELOG.json"]
+    schema_path: "libraries/rush-lib/src/schemas/changelog.schema.json"
+    level: error
+    message: "CHANGELOG.json must validate against Rush's changelog schema (rush version --bump)."
+
+  # C [other] rushstack-10 (reclassified A -> C by the Stage B review):
+  #   projectFolderMinDepth = projectFolderMaxDepth = 2, and
+  #   validateRelativePathField: relative, '/'-separated, no trailing '/',
+  #   normalized (no '.' or '..' segment). The depth (2) is restated in the
+  #   regex instead of being read from rush.json's projectFolderMinDepth /
+  #   projectFolderMaxDepth (a regex cannot be built from another value), the
+  #   same tuning as rushstack-58/59. The min >= 1 and max >= min sanity checks
+  #   (RushConfiguration.ts ~797-811, defaults min 1 / max 2) read rush.json
+  #   directly: rushstack-project-folder-depth-bounds below.
+  - id: rushstack-project-folder-depth
+    kind: json_path_matches
+    paths: ["rush.json"]
+    path: "$.projects[*].projectFolder"
+    matches: '^(?:[^/\\:.][^/\\:]*|\.[^/\\.][^/\\]*|\.\.[^/\\]+)/(?:[^/\\.][^/\\]*|\.[^/\\.][^/\\]*|\.\.[^/\\]+)$'
+    level: error
+    message: "projectFolder must be a normalized relative path exactly two folders deep (rush.json projectFolderMinDepth/MaxDepth = 2)."
+
+  - id: rushstack-project-folder-depth-bounds
+    kind: json_path_absent
+    paths: ["rush.json"]
+    path: "$[?(@ == $.rushVersion && ($.projectFolderMinDepth < 1 || $.projectFolderMaxDepth < $.projectFolderMinDepth || (!$.projectFolderMaxDepth && $.projectFolderMinDepth > 2) || (!$.projectFolderMinDepth && $.projectFolderMaxDepth < 1)))]"
+    level: error
+    message: "rush.json projectFolderMinDepth must be at least 1 and projectFolderMaxDepth at least projectFolderMinDepth (defaults 1 and 2)."
+
+  # A [other] rushstack-11: every projectFolder holds a package.json
+  #   ("Could not find package.json for ...").
+  - id: rushstack-project-folders-resolve
+    kind: registry_paths_resolve
+    source: rush.json
+    extract:
+      json: "$.projects[*].projectFolder"
+    base: "."
+    expect: dir
+    must_contain: "package.json"
+    level: error
+    message: "Every rush.json projectFolder must exist and contain a package.json."
+
+  # A [other] rushstack-12: the package.json name in each project folder must
+  #   equal the packageName rush.json gives that folder. Folders that rush.json
+  #   does not register (repo-scripts/tombstone) have no target value and pass.
+  - id: rushstack-package-name-matches-rush-json
+    kind: for_each_dir
+    select: "*/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: cross_file
+        relation: equals
+        source:
+          file: "{path}/package.json"
+          extract:
+            json: "$.name"
+        targets:
+          - file: "rush.json"
+            extract:
+              json: "$.projects[?(@.projectFolder == '{path}')].packageName"
+        allow_missing_target: true
+    level: error
+    message: "The package.json name must equal the packageName rush.json registers for this folder."
+
+  # A [other] rushstack-14: with approvedPackagesPolicy enabled every project
+  #   needs a reviewCategory, and it must be one of the declared categories.
+  - id: rushstack-review-category-present
+    kind: json_path_absent
+    paths: ["rush.json"]
+    path: "$.projects[?(!@.reviewCategory)]"
+    level: error
+    message: "approvedPackagesPolicy is enabled, so every rush.json project needs a reviewCategory."
+
+  - id: rushstack-review-category-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: "rush.json"
+      extract:
+        json: "$.projects[*].reviewCategory"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.approvedPackagesPolicy.reviewCategories[*]"
+    level: error
+    message: "A project's reviewCategory must be one of approvedPackagesPolicy.reviewCategories."
+
+  # A [other] rushstack-15: decoupledLocalDependencies (and the legacy
+  #   cyclicDependencyProjects) must name projects that exist.
+  - id: rushstack-decoupled-dependencies-exist
+    kind: cross_file
+    relation: subset
+    source:
+      file: "rush.json"
+      extract:
+        json: "$.projects[*]['decoupledLocalDependencies','cyclicDependencyProjects'][*]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[*].packageName"
+    level: error
+    message: "decoupledLocalDependencies must reference projects that exist in rush.json."
+
+  # A [other] rushstack-16: a project's subspaceName must be a declared
+  #   subspace (the implicit "default" subspace always exists).
+  - id: rushstack-subspace-name-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: "rush.json"
+      extract:
+        json: "$.projects[?(@.subspaceName && @.subspaceName != 'default')].subspaceName"
+    targets:
+      - file: "common/config/rush/subspaces.json"
+        extract:
+          json: "$.subspaceNames[*]"
+    level: error
+    message: "A project's subspaceName must be listed in common/config/rush/subspaces.json."
+
+  # A [other] rushstack-17: a project's versionPolicyName must name a policy
+  #   (getVersionPolicy throws; reached by rush change --verify and readme).
+  - id: rushstack-version-policy-name-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: "rush.json"
+      extract:
+        json: "$.projects[*].versionPolicyName"
+    targets:
+      - file: "common/config/rush/version-policies.json"
+        extract:
+          json: "$[*].policyName"
+    level: error
+    message: "A project's versionPolicyName must name a policy in version-policies.json."
+
+  # A [other] rushstack-18: a lockstep policy's mainProject must be a project.
+  - id: rushstack-version-policy-main-project-exists
+    kind: cross_file
+    relation: subset
+    source:
+      file: "common/config/rush/version-policies.json"
+      extract:
+        json: "$[*].mainProject"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[*].packageName"
+    level: error
+    message: "A version policy's mainProject must be a project in rush.json."
+
+  # A [other] rushstack-19: every project's package.json version must be a
+  #   valid SemVer (semver.valid). repo-scripts/tombstone is matched too; it is
+  #   not a Rush project but its version is valid.
+  - id: rushstack-project-version-semver
+    kind: json_path_matches
+    paths: ["*/*/package.json"]
+    path: "$.version"
+    matches: '^v?(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)(-[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?(\+[0-9A-Za-z-]+(\.[0-9A-Za-z-]+)*)?$'
+    level: error
+    message: "A Rush project's package.json version must be a valid SemVer version."
+
+  # A [other] rushstack-20: a project with shouldPublish must not be private.
+  #   The names of private manifests must all be projects without shouldPublish.
+  - id: rushstack-published-projects-not-private
+    kind: cross_file
+    relation: subset
+    source:
+      files: "*/*/package.json"
+      extract:
+        json: "$[?(@ == $.name && $.private == true)]"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(@.shouldPublish != true)].packageName"
+    level: error
+    message: "A project with shouldPublish: true in rush.json must not be private in its package.json."
+
+  # A [other] rushstack-21: a project may not set both the legacy
+  #   cyclicDependencyProjects and decoupledLocalDependencies.
+  - id: rushstack-no-cyclic-and-decoupled
+    kind: json_path_absent
+    paths: ["rush.json"]
+    path: "$.projects[?(@.cyclicDependencyProjects && @.decoupledLocalDependencies)]"
+    level: error
+    message: "Use decoupledLocalDependencies or the legacy cyclicDependencyProjects, not both, on one project."
+
+  # A [other] rushstack-22: gitPolicy.allowedEmailRegExps requires a
+  #   non-blank gitPolicy.sampleEmail.
+  - id: rushstack-git-policy-sample-email
+    kind: json_path_absent
+    paths: ["rush.json"]
+    path: '$[?($.gitPolicy.allowedEmailRegExps && !search($.gitPolicy.sampleEmail, ''\\S''))]'
+    level: error
+    message: "rush.json gitPolicy.sampleEmail is required when allowedEmailRegExps is set."
+
+  # A [other] rushstack-23: _validateCommonRushConfigFolder. common/config/rush
+  #   may hold only the config files Rush recognizes (deploy-*.json scenarios,
+  #   harmless .bak/.disabled/.md/.old/.orig files and hidden files excepted),
+  #   and, with subspaces enabled, no pnpmfile; pinned-versions.json is
+  #   rejected outright.
+  #   Rush compares the known names case-insensitively (toUpperCase on both
+  #   sides) but the harmless extensions and the deploy- prefix
+  #   case-sensitively; dir_only_contains globs are case-sensitive, so each
+  #   known name is spelled as a per-letter character class (Stage C fix of
+  #   Stage B's case-sensitivity report). The known set is Rush's
+  #   knownRushConfigFilenames plus pnpm's shrinkwrap (pnpm-lock.yaml); the
+  #   hidden .npmrc, .npmrc-publish and .pnpmfile.cjs are covered by ".*".
+  #   pinned-versions.json stays out of the allowlist: Rush's later
+  #   exists() check rejects it, case-insensitively on the Windows CI leg.
+  - id: rushstack-config-folder-known-files
+    kind: dir_only_contains
+    select: "common/config/rush"
+    allow:
+      - "[dD][eE][pP][lL][oO][yY].[jJ][sS][oO][nN]"  # deploy.json
+      - "deploy-*.json"
+      - "[aA][rR][tT][iI][fF][aA][cC][tT][oO][rR][yY].[jJ][sS][oO][nN]"  # artifactory.json
+      - "[bB][rR][oO][wW][sS][eE][rR]-[aA][pP][pP][rR][oO][vV][eE][dD]-[pP][aA][cC][kK][aA][gG][eE][sS].[jJ][sS][oO][nN]"  # browser-approved-packages.json
+      - "[bB][uU][iI][lL][dD]-[cC][aA][cC][hH][eE].[jJ][sS][oO][nN]"  # build-cache.json
+      - "[cC][oO][bB][uU][iI][lL][dD].[jJ][sS][oO][nN]"  # cobuild.json
+      - "[cC][oO][mM][mM][aA][nN][dD]-[lL][iI][nN][eE].[jJ][sS][oO][nN]"  # command-line.json
+      - "[cC][oO][mM][mM][oO][nN]-[vV][eE][rR][sS][iI][oO][nN][sS].[jJ][sS][oO][nN]"  # common-versions.json
+      - "[cC][uU][sS][tT][oO][mM]-[tT][iI][pP][sS].[jJ][sS][oO][nN]"  # custom-tips.json
+      - "[eE][xX][pP][eE][rR][iI][mM][eE][nN][tT][sS].[jJ][sS][oO][nN]"  # experiments.json
+      - "[nN][oO][nN][bB][rR][oO][wW][sS][eE][rR]-[aA][pP][pP][rR][oO][vV][eE][dD]-[pP][aA][cC][kK][aA][gG][eE][sS].[jJ][sS][oO][nN]"  # nonbrowser-approved-packages.json
+      - "[rR][eE][pP][oO]-[sS][tT][aA][tT][eE].[jJ][sS][oO][nN]"  # repo-state.json
+      - "[vV][eE][rR][sS][iI][oO][nN]-[pP][oO][lL][iI][cC][iI][eE][sS].[jJ][sS][oO][nN]"  # version-policies.json
+      - "[rR][uU][sS][hH]-[pP][lL][uU][gG][iI][nN][sS].[jJ][sS][oO][nN]"  # rush-plugins.json
+      - "[pP][nN][pP][mM]-[cC][oO][nN][fF][iI][gG].[jJ][sS][oO][nN]"  # pnpm-config.json
+      - "[sS][uU][bB][sS][pP][aA][cC][eE][sS].[jJ][sS][oO][nN]"  # subspaces.json
+      - "[rR][uU][sS][hH]-[aA][lL][eE][rR][tT][sS].[jJ][sS][oO][nN]"  # rush-alerts.json
+      - "[pP][nN][pP][mM]-[lL][oO][cC][kK].[yY][aA][mM][lL]"  # pnpm-lock.yaml
+      - "*.bak"
+      - "*.disabled"
+      - "*.md"
+      - "*.old"
+      - "*.orig"
+      - ".*"
+    level: error
+    message: "common/config/rush may contain only files Rush recognizes (an unrecognized file stops every rush command)."
+
+  - id: rushstack-config-folder-forbidden-files
+    kind: file_absent
+    paths: ["common/config/rush/.pnpmfile.cjs", "common/config/rush/pnpmfile.js", "common/config/rush/pinned-versions.json"]
+    level: error
+    message: "With subspaces enabled the pnpmfile lives in each subspace folder, and pinned-versions.json is no longer supported."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: change files (rush change --verify, strictChangefileValidation)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] rushstack-24: every change file loads through the change-file
+  #   schema (strict validation reads all of them, not only this branch's).
+  - id: rushstack-change-files-schema
+    kind: json_schema_passes
+    paths: ["common/changes/**/*.json"]
+    schema_path: "libraries/rush-lib/src/schemas/change-file.schema.json"
+    level: error
+    message: "A change file must validate against Rush's change-file schema."
+
+  # A [other] rushstack-25: a change file may only reference projects that
+  #   exist in rush.json.
+  - id: rushstack-change-files-reference-projects
+    kind: cross_file
+    relation: subset
+    source:
+      files: "common/changes/**/*.json"
+      extract:
+        json: "$.changes[*].packageName"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[*].packageName"
+    level: error
+    message: "A change file references a project that is not in rush.json (strictChangefileValidation)."
+
+  # C [other] rushstack-26: a change file must not name a lockstep-policy member
+  #   other than the policy's mainProject. The mainProject of the one lockstep
+  #   policy ("rush" -> @microsoft/rush) is restated from version-policies.json
+  #   by hand, which makes this C.
+  - id: rushstack-change-files-lockstep-main-project
+    kind: cross_file
+    relation: subset
+    source:
+      files: "common/changes/**/*.json"
+      extract:
+        json: "$.changes[*].packageName"
+    targets:
+      - file: "rush.json"
+        extract:
+          json: "$.projects[?(!@.versionPolicyName || @.packageName == '@microsoft/rush')].packageName"
+    level: error
+    message: "Change files for the lockstepped \"rush\" policy must be written for its mainProject @microsoft/rush."
+
+  # C [other] rushstack-27 (no rule): changed published projects need a change
+  #   file (rush change --verify against the target branch). A per-project
+  #   pair_changed_together (project folder -> common/changes/<packageName>/)
+  #   expresses it, with the published projects and the folder-to-name map
+  #   restated by hand and the lockstep host mapping spelled out; the clone is
+  #   depth 1, so a git-diff kind cannot be confirmed here (batch-1 ruling).
+
+  # C [other] rushstack-33 (no rule): the PR template asks that a change to a
+  #   JSON schema also update the init templates (libraries/rush-lib/assets/
+  #   rush-init/**, api-extractor-template.json); review enforces it. A
+  #   pair_changed_together per schema/template pair expresses the co-change,
+  #   but the clone is depth 1 and git-diff kinds cannot be confirmed here.
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: Rush plugins
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # C [other] rushstack-30: every plugin in rush-plugins.json loads from the
+  #   manifest cached under common/autoinstallers/<autoinstaller>/rush-plugins/
+  #   <package>/, and that manifest must provide the configured pluginName.
+  #   The autoinstaller is fixed to "plugins" in the base path (the only one
+  #   that hosts plugins), the tuning that makes this C.
+  - id: rushstack-plugin-manifests-cached
+    kind: registry_paths_resolve
+    source: "common/config/rush/rush-plugins.json"
+    extract:
+      json: "$.plugins[?(@.autoinstallerName == 'plugins')].packageName"
+    base: "common/autoinstallers/plugins/rush-plugins"
+    expect: dir
+    must_contain: "rush-plugin-manifest.json"
+    level: error
+    message: "A configured Rush plugin needs its cached manifest (run rush update-autoinstaller)."
+
+  - id: rushstack-plugin-manifests-provide-plugins
+    kind: cross_file
+    relation: superset
+    source:
+      files: "common/autoinstallers/*/rush-plugins/**/rush-plugin-manifest.json"
+      extract:
+        json: "$.plugins[*].pluginName"
+    targets:
+      - file: "common/config/rush/rush-plugins.json"
+        extract:
+          json: "$.plugins[*].pluginName"
+    level: error
+    message: "Every pluginName in rush-plugins.json must be provided by a cached plugin manifest."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: conventions
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] rushstack-31: .gitattributes — "NPM 'bin' scripts MUST have LF,
+  #   or else the executable fails to run on Mac" (/*/*/bin/+([!.]) -text, so
+  #   git does not normalize them).
+  - id: rushstack-bin-scripts-lf
+    kind: line_endings
+    target: lf
+    paths:
+      include: ["*/*/bin/*"]
+      exclude: ["*/*/bin/*.*"]
+    level: error
+    message: "npm bin scripts must use LF line endings (.gitattributes)."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: further RushConfiguration / Subspace / build-cache loader checks
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] rushstack-53: when common/config/rush/pnpm-config.json is used,
+  #   rush.json may not keep the old "pnpmOptions" (RushConfiguration.ts ~716).
+  - id: rushstack-no-legacy-pnpm-options
+    kind: for_each_dir
+    select: "common/config/rush"
+    when_iter: 'iter.has_file("pnpm-config.json")'
+    require:
+      - kind: json_path_absent
+        paths: ["rush.json"]
+        path: "$.pnpmOptions"
+    level: error
+    message: "With common/config/rush/pnpm-config.json present, remove the old pnpmOptions setting from rush.json."
+
+  # A [other] rushstack-54: repository.url and repository.urls are mutually
+  #   exclusive (RushConfiguration.ts ~872).
+  - id: rushstack-repository-url-or-urls
+    kind: json_path_absent
+    paths: ["rush.json"]
+    path: "$.repository[?(@ == $.repository.url && $.repository.urls)]"
+    level: error
+    message: "rush.json repository may set url or urls, not both."
+
+  # A [other] rushstack-56: every declared subspace name must be lowercase
+  #   letters and digits separated by hyphens (SUBSPACE_NAME_REGEXP, used when
+  #   splitWorkspaceCompatibility is off, as it is here).
+  - id: rushstack-subspace-names-valid
+    kind: json_path_matches
+    paths: ["common/config/rush/subspaces.json"]
+    path: "$.subspaceNames[?($.splitWorkspaceCompatibility != true)]"
+    matches: '^[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+    if_present: true
+    level: error
+    message: "Subspace names must consist of lowercase letters and numbers separated by hyphens."
+
+  # A [other] rushstack-57: with subspaces enabled, each declared subspace needs
+  #   its configuration folder common/config/subspaces/<name> (Subspace.ts
+  #   ~152). Rush always adds the implicit "default" subspace
+  #   (SubspacesConfiguration.ts ~75), whose folder is covered by the second
+  #   rule: its regex captures an empty entry only when subspacesEnabled is
+  #   true, and the empty entry resolves to the base folder itself
+  #   (common/config/subspaces/default). The regex reads the raw text, so a
+  #   one-line (minified) subspaces.json would not trigger it.
+  - id: rushstack-subspace-config-folders-exist
+    kind: registry_paths_resolve
+    source: common/config/rush/subspaces.json
+    extract:
+      json: "$.subspaceNames[?($.subspacesEnabled == true)]"
+    base: "common/config/subspaces"
+    expect: dir
+    level: error
+    message: "Each subspace in subspaces.json needs a folder under common/config/subspaces/."
+
+  - id: rushstack-default-subspace-config-folder-exists
+    kind: registry_paths_resolve
+    source: common/config/rush/subspaces.json
+    extract:
+      regex: '(?m)^\s*"subspacesEnabled"\s*:\s*true\b()'
+    base: "common/config/subspaces/default"
+    expect: dir
+    level: error
+    message: "With subspaces enabled, the implicit default subspace needs the folder common/config/subspaces/default."
+
+  # C [other] rushstack-58: the subspaces feature requires useWorkspaces=true
+  #   in pnpm-config.json (Subspace.ts ~107). cross_file compares strings only
+  #   (a boolean extract is an error), so the condition in subspaces.json
+  #   cannot be joined; it is restated as the pin's fact (subspacesEnabled:
+  #   true) and the rule asserts useWorkspaces unconditionally.
+  - id: rushstack-subspaces-require-workspaces
+    kind: json_path_equals
+    paths: ["common/config/rush/pnpm-config.json"]
+    path: "$.useWorkspaces"
+    equals: true
+    level: error
+    message: "The Rush subspaces feature is enabled: set useWorkspaces=true in common/config/rush/pnpm-config.json."
+
+  # C [other] rushstack-59: with subspaces enabled, ensureConsistentVersions
+  #   lives in each subspace's common-versions.json and may not stay in
+  #   rush.json (CommonVersionsConfiguration.ts ~150). alint cannot condition a
+  #   rule on another file's boolean without a custom fact, so the condition is
+  #   restated as the pin's fact (subspacesEnabled: true).
+  - id: rushstack-no-rush-json-ensure-consistent-versions
+    kind: json_path_absent
+    paths: ["rush.json"]
+    path: "$.ensureConsistentVersions"
+    level: error
+    message: "With subspaces enabled, define ensureConsistentVersions in each subspace's common-versions.json, not in rush.json."
+
+  # A [other] rushstack-61: the build cache's cacheEntryNamePattern must parse
+  #   (CacheEntryId.parsePattern): no leading '/', only [A-z0-9-_/] outside
+  #   tokens, known tokens with valid attributes, and a [hash] token. Loaded by
+  #   every rush build/test CI runs with buildCacheEnabled.
+  - id: rushstack-cache-entry-name-pattern
+    kind: json_path_matches
+    paths: ["common/config/rush/build-cache.json"]
+    path: "$.cacheEntryNamePattern"
+    matches: '^\s*(?:(?:[A-Za-z0-9_\\^`-]|\[(?:hash|projectName(?::normalize)?|phaseName:(?:normalize|trimPrefix)|os|arch)\])(?:[A-Za-z0-9_/\\^`-]|\[(?:hash|projectName(?::normalize)?|phaseName:(?:normalize|trimPrefix)|os|arch)\])*)?\[hash\](?:[A-Za-z0-9_/\\^`-]|\[(?:hash|projectName(?::normalize)?|phaseName:(?:normalize|trimPrefix)|os|arch)\])*\s*$'
+    if_present: true
+    level: error
+    message: "cacheEntryNamePattern must use only known tokens ([hash], [projectName(:normalize)], [phaseName:normalize|trimPrefix], [os], [arch]), include [hash], and not start with '/'."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: command-line.json loader checks (CommandLineConfiguration and
+  # RushCommandLineParser; units added by the Stage B review, b01-b09). Every
+  # rush command CI runs loads common/config/rush/command-line.json and the
+  # cached plugin command-line.json files, and the constructor applies these
+  # checks to both (the plugin file through tryLoadFromFile).
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] rushstack-b01: phase names must be "_phase:" followed by
+  #   lowercase words separated by hyphens (CommandLineConfiguration.ts
+  #   ~250-268; the schema only describes the prefix).
+  - id: rushstack-cmdline-phase-name-syntax
+    kind: json_path_matches
+    paths: ["common/config/rush/command-line.json", "common/autoinstallers/*/rush-plugins/**/command-line.json"]
+    path: "$.phases[*].name"
+    matches: '^_phase:[a-z][a-z0-9]*(-[a-z0-9]+)*$'
+    if_present: true
+    level: error
+    message: "A phase name must be _phase: followed by lowercase letters, digits and single hyphens, starting with a letter."
+
+  # A [other] rushstack-b03: every phase that command-line.json references
+  #   must be declared: phase dependencies.self/upstream (~300-326), a phased
+  #   command's phases (~370-378), watchOptions.watchPhases (~405-413) and
+  #   parameter associatedPhases (~570-578). One loader behavior (R1), four
+  #   reference sites. associatedPhases is resolved after the commands, so a
+  #   bulk command's synthetic phase (named after the command) also counts
+  #   there; the other three sites see only declared phases.
+  - id: rushstack-cmdline-phase-dependencies-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: "common/config/rush/command-line.json"
+      extract:
+        json: "$.phases[*].dependencies['self','upstream'][*]"
+    targets:
+      - file: "common/config/rush/command-line.json"
+        extract:
+          json: "$.phases[*].name"
+    level: error
+    message: "A phase's self/upstream dependency must name a phase declared in command-line.json."
+
+  - id: rushstack-cmdline-command-phases-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: "common/config/rush/command-line.json"
+      extract:
+        json: "$.commands[?(@.commandKind == 'phased')].phases[*]"
+    targets:
+      - file: "common/config/rush/command-line.json"
+        extract:
+          json: "$.phases[*].name"
+    level: error
+    message: "A phased command's phases must be declared in command-line.json."
+
+  - id: rushstack-cmdline-watch-phases-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: "common/config/rush/command-line.json"
+      extract:
+        json: "$.commands[?(@.commandKind == 'phased')].watchOptions.watchPhases[*]"
+    targets:
+      - file: "common/config/rush/command-line.json"
+        extract:
+          json: "$.phases[*].name"
+    level: error
+    message: "watchOptions.watchPhases must name phases declared in command-line.json."
+
+  - id: rushstack-cmdline-parameter-phases-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: "common/config/rush/command-line.json"
+      extract:
+        json: "$.parameters[*].associatedPhases[*]"
+    targets:
+      - file: "common/config/rush/command-line.json"
+        extract:
+          json: "$['phases','commands'][?(!@.commandKind || @.commandKind == 'bulk')].name"
+    level: error
+    message: "A parameter's associatedPhases must name phases declared in command-line.json."
+
+  # C [other] rushstack-b04: every parameter lists at least one associated
+  #   command (~583-586), and each names a defined command (~554-566). The
+  #   first rule is exact. The second restates the build and rebuild commands
+  #   Rush synthesizes when the repo's file does not define them (they are
+  #   always present for the repo's file); that restated list is the tuning
+  #   that makes the unit C. A plugin's file gets no synthesized commands, so
+  #   the reference rule covers the repo's file only.
+  - id: rushstack-cmdline-parameters-have-commands
+    kind: json_path_absent
+    paths: ["common/config/rush/command-line.json", "common/autoinstallers/*/rush-plugins/**/command-line.json"]
+    path: "$.parameters[?(!@.associatedCommands || length(@.associatedCommands) == 0)]"
+    level: error
+    message: "Every command-line.json parameter must list at least one associatedCommands entry."
+
+  - id: rushstack-cmdline-parameter-commands-defined
+    kind: cross_file
+    relation: subset
+    source:
+      file: "common/config/rush/command-line.json"
+      extract:
+        json: "$.parameters[*].associatedCommands[?(@ != 'build' && @ != 'rebuild')]"
+    targets:
+      - file: "common/config/rush/command-line.json"
+        extract:
+          json: "$.commands[*].name"
+    level: error
+    message: "A parameter's associatedCommands must name commands defined in command-line.json (build and rebuild always exist)."
+
+  # A [other] rushstack-b05: a phase may not set both ignoreMissingScript and
+  #   missingScriptBehavior (~271, `!== undefined` on both, so the filter is
+  #   an existence test: a present `false` still counts).
+  - id: rushstack-cmdline-missing-script-exclusive
+    kind: json_path_absent
+    paths: ["common/config/rush/command-line.json", "common/autoinstallers/*/rush-plugins/**/command-line.json"]
+    path: "$.phases[?(@.ignoreMissingScript && @.missingScriptBehavior)]"
+    level: error
+    message: "A phase may set ignoreMissingScript or missingScriptBehavior, not both."
+
+  # A [other] rushstack-b06: a build or rebuild command may not be global
+  #   (globalPlugin normalizes to global) or safeForSimultaneousRushProcesses
+  #   (~455-468; RushCommandLineParser.ts repeats the global check).
+  - id: rushstack-cmdline-build-not-global
+    kind: json_path_absent
+    paths: ["common/config/rush/command-line.json", "common/autoinstallers/*/rush-plugins/**/command-line.json"]
+    path: "$.commands[?((@.name == 'build' || @.name == 'rebuild') && (@.commandKind == 'global' || @.commandKind == 'globalPlugin' || @.safeForSimultaneousRushProcesses == true))]"
+    level: error
+    message: "The build and rebuild commands must be bulk or phased, and may not set safeForSimultaneousRushProcesses."
+
+  # C [other] rushstack-b08: a custom command may not reuse a built-in Rush
+  #   action name (RushCommandLineParser.ts ~566-593 registers the built-in
+  #   actions first; ~630-635 then throws "using a name that already
+  #   exists"). The 26 built-in names live in rush-lib code, not in a
+  #   configuration file, so they are restated here (the tuning, C).
+  - id: rushstack-cmdline-no-builtin-action-names
+    kind: json_path_absent
+    paths: ["common/config/rush/command-line.json", "common/autoinstallers/*/rush-plugins/**/command-line.json"]
+    path: "$.commands[?(match(@.name, 'add|alert|bridge-package|change|check|deploy|init|init-autoinstaller|init-deploy|init-subspace|install|install-autoinstaller|link|link-package|list|publish|purge|remove|scan|setup|unlink|update|update-autoinstaller|update-cloud-credentials|upgrade-interactive|version'))]"
+    level: error
+    message: "A custom command may not reuse the name of a built-in Rush command."
+
+  # [other] rushstack-b09: a global command's autoinstallerName must be a
+  #   valid unscoped package name (Autoinstaller.validateName: PackageName
+  #   rules, no scope), name an existing common/autoinstallers/<name> folder
+  #   with a package.json, and that package.json's name must equal it
+  #   (GlobalScriptAction.ts ~63-102). The third rule iterates every
+  #   autoinstaller folder but takes its target from the global commands that
+  #   reference the folder, so an unreferenced autoinstaller has no target and
+  #   passes: no over-assertion (Stage B proposed C for a for_each_dir form
+  #   that asserted every folder).
+  - id: rushstack-cmdline-autoinstaller-name-valid
+    kind: json_path_matches
+    paths: ["common/config/rush/command-line.json"]
+    path: "$.commands[?(@.commandKind == 'global')].autoinstallerName"
+    matches: '^[A-Za-z0-9-][A-Za-z0-9._-]{0,213}$'
+    if_present: true
+    level: error
+    message: "autoinstallerName must be a valid unscoped package name."
+
+  - id: rushstack-cmdline-autoinstaller-exists
+    kind: registry_paths_resolve
+    source: common/config/rush/command-line.json
+    extract:
+      json: "$.commands[?(@.commandKind == 'global' && @.autoinstallerName)].autoinstallerName"
+    base: "common/autoinstallers"
+    expect: dir
+    must_contain: "package.json"
+    level: error
+    message: "A global command's autoinstallerName must name a common/autoinstallers/<name> folder with a package.json."
+
+  - id: rushstack-autoinstaller-name-matches-folder
+    kind: for_each_dir
+    select: "common/autoinstallers/*"
+    when_iter: 'iter.has_file("package.json")'
+    require:
+      - kind: cross_file
+        relation: equals
+        source:
+          file: "{path}/package.json"
+          extract:
+            json: "$.name"
+        targets:
+          - file: "common/config/rush/command-line.json"
+            extract:
+              json: "$.commands[?(@.commandKind == 'global' && @.autoinstallerName == '{basename}')].autoinstallerName"
+        allow_missing_target: true
+    level: error
+    message: "An autoinstaller used by a global command must have a package.json whose name equals its folder name."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: Heft-side loader checks run by every build in CI (rush retest)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] rushstack-b10: Heft loads each project's config/rig.json through
+  #   RigConfig (libraries/rig-package/src/RigConfig.ts ~512-545): only
+  #   $schema/rigPackageName/rigProfile, rigPackageName required, a valid
+  #   package name ending in -rig or -rig-test (~179-183), and a rigProfile
+  #   matching ~186. The first rule uses the in-repo rig.schema.json (it
+  #   covers the allowed and required fields). Not expressed: that the
+  #   profile folder exists inside the rig package, which RigConfig resolves
+  #   through node_modules (package resolution). The two rig.json files under
+  #   src/test of rig-package and heft-config-file are fixtures, outside
+  #   */*/config.
+  - id: rushstack-rig-json-schema
+    kind: json_schema_passes
+    paths: ["*/*/config/rig.json"]
+    schema_path: "libraries/rig-package/src/schemas/rig.schema.json"
+    level: error
+    message: "config/rig.json must validate against rig.schema.json (only rigPackageName and rigProfile)."
+
+  - id: rushstack-rig-json-package-name
+    kind: json_path_matches
+    paths: ["*/*/config/rig.json"]
+    path: "$.rigPackageName"
+    matches: '^(@[A-Za-z0-9_.-]+/)?[A-Za-z0-9_.-]*-rig(-test)?$'
+    level: error
+    message: "rigPackageName must be a valid package name ending in -rig or -rig-test."
+
+  - id: rushstack-rig-json-profile
+    kind: json_path_matches
+    paths: ["*/*/config/rig.json"]
+    path: "$.rigProfile"
+    matches: '^[a-z0-9_.]+(-[a-z0-9_.]+)*$'
+    if_present: true
+    level: error
+    message: "rigProfile must be lowercase words separated by hyphens."
+
+  # A [other] rushstack-b14: Heft loads every plugin package's heft-plugin.json
+  #   with JsonFile.loadAndValidateAsync against heft-plugin.schema.json
+  #   (apps/heft/src/configuration/HeftPluginConfiguration.ts ~69). The same
+  #   loader's duplicate-pluginName check (~200-232) is a unique-key relation
+  #   within one file and is not expressed.
+  - id: rushstack-heft-plugin-manifest-schema
+    kind: json_schema_passes
+    paths: ["*/*/heft-plugin.json"]
+    schema_path: "apps/heft/src/schemas/heft-plugin.schema.json"
+    level: error
+    message: "heft-plugin.json must validate against Heft's heft-plugin.schema.json."
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # other: release pipeline
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # A [other] rushstack-b13: the release pipeline's pack template runs
+  #   `node common/scripts/publish-cohort.js filter-packages`, which throws
+  #   "Unable to determine the publish registry from .npmrc-publish." unless
+  #   common/config/rush/.npmrc-publish has a line matching
+  #   /^registry=(.+)$/m (publish-cohort.js ~199-202).
+  - id: rushstack-npmrc-publish-registry
+    kind: file_content_matches
+    paths: ["common/config/rush/.npmrc-publish"]
+    pattern: '(?m)^registry=(.+)$'
+    level: error
+    message: "common/config/rush/.npmrc-publish must declare a registry= line (publish-cohort.js filter-packages)."
+
+  # B-config [dep-version] rushstack-51 (no rule): PackageJsonEditor refuses a
+  #   package listed in both dependencies and optionalDependencies, both
+  #   dependencies and peerDependencies, or both optionalDependencies and
+  #   peerDependencies (devDependencies may overlap). Needs the keys of two
+  #   maps per manifest (set: disjoint); JSONPath cannot read member names.
+  # B-config [other] rushstack-60 (no rule): a name may appear only once in
+  #   each approved-packages file (ApprovedPackagesConfiguration.ts ~190):
+  #   unique-key within one array.
+  # B-config [dep-version] rushstack-01 (no rule): ensureConsistentVersions
+  #   per subspace; rush install runs it per selected subspace from
+  #   cli/actions/BaseInstallAction.ts ~175-187 (doBasicInstallAsync.ts ~39
+  #   calls it too).
+  # B-config [other] rushstack-b02 (no rule): phase names and command names
+  #   are each unique within command-line.json (CommandLineConfiguration.ts
+  #   ~254, ~345): unique-key within one array.
+  # B-kernel [other] rushstack-b07 (no rule): no cycle through phases' self
+  #   dependencies (CommandLineConfiguration.ts ~336, ~602-633): graph-cycle
+  #   detection over a JSON-internal edge list.
+  # B-adapter [toolchain-pin] rushstack-b11 (no rule): nodeSupportedVersionRange
+  #   must be a valid node-semver range (RushConfiguration.ts ~637-643,
+  #   semver.validRange): needs a semver-range parser; a regex only
+  #   approximates the grammar.
+  # [other] rushstack-b12 (no rule): the keys of preferredVersions and
+  #   allowedAlternativeVersions in common-versions.json must be valid package
+  #   names (CommonVersionsConfiguration.ts ~283, ~295). Stage B proposed a
+  #   shim schema with propertyNames; json_schema_passes takes only a schema
+  #   file, and a shim outside the repository cannot replay standalone, while
+  #   JSONPath cannot read member names. Not expressed here.
+  # D [other] rushstack-46 (narrowed by the Stage B review): only the merged
+  #   extends/rig validation of heft.json and the other Heft config files
+  #   remains (heft-config-file merge semantics); the rig.json load checks
+  #   are rushstack-b10 above.
+  # B-config [other] rushstack-47 (reclassified from D by the Stage B review,
+  #   no rule): rush-project.json's schema half is in rushstack-09 above; the
+  #   remaining loader checks (duplicate operationName, unique-key; output
+  #   folder overlap) need key/set relations.
+
+  # ══════════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (not enforced by the repo as written; outside the ratio, R3/R5)
+  # ══════════════════════════════════════════════════════════════════════════
+
+  # value-add: partial approximation of rushstack-28 (B-delegate). The README
+  #   "Published Packages" table lists exactly the projects repo-toolbox treats
+  #   as published (shouldPublish or a versionPolicyName). It does not check
+  #   order, badges, changelog links or descriptions.
+  - id: rushstack-valueadd-readme-published-folders
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: "rush.json"
+      extract:
+        json: "$.projects[?(@.shouldPublish == true || @.versionPolicyName)].projectFolder"
+    targets:
+      - file: "README.md"
+        extract:
+          regex: '(?m)^\| \[/([^\]]+)\]\(\./[^)]*\) \| \[!\[npm version\]'
+    level: info
+    message: "README's Published Packages table should list exactly the published rush.json projects (repo-toolbox readme)."
+
+  - id: rushstack-valueadd-readme-unpublished-folders
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: "rush.json"
+      extract:
+        json: "$.projects[?(@.shouldPublish != true && !@.versionPolicyName)].projectFolder"
+    targets:
+      - file: "README.md"
+        extract:
+          regex: '(?m)^\| \[/([^\]]+)\]\(\./[^)]*\) \| (?:[^\[\n][^\n]*)?\|$'
+    level: info
+    message: "README's Unpublished Local Projects table should list exactly the unpublished rush.json projects."
+
+  # value-add: stronger than rushstack-06 (B-adapter). CI tests each supported
+  #   Node major at exactly the floor nodeSupportedVersionRange declares; the
+  #   repo only requires each CI version to satisfy the range.
+  - id: rushstack-valueadd-ci-node-matrix-at-range-floors
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: "rush.json"
+      extract:
+        regex: '>=([0-9]+\.[0-9]+\.[0-9]+)'
+    targets:
+      - file: ".github/workflows/ci.yml"
+        extract:
+          regex: '(?m)^\s*- NodeVersion: ([0-9]+\.[0-9]+\.[0-9]+)'
+    level: info
+    message: "ci.yml's Node matrix should test the floor of each nodeSupportedVersionRange band."
+
+  # value-add: the two subspaces carry identical .npmrc and .pnpmfile.cjs files.
+  - id: rushstack-valueadd-subspace-npmrc-identical
+    kind: cross_file
+    relation: identical
+    source:
+      file: "common/config/subspaces/default/.npmrc"
+    targets:
+      - file: "common/config/subspaces/build-tests-subspace/.npmrc"
+    level: info
+    message: "The subspaces' .npmrc files are kept identical."
+
+  - id: rushstack-valueadd-subspace-pnpmfile-identical
+    kind: cross_file
+    relation: identical
+    source:
+      file: "common/config/subspaces/default/.pnpmfile.cjs"
+    targets:
+      - file: "common/config/subspaces/build-tests-subspace/.pnpmfile.cjs"
+    level: info
+    message: "The subspaces' .pnpmfile.cjs files are kept identical."

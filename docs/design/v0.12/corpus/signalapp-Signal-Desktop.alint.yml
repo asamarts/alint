@@ -1,0 +1,674 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# signalapp/Signal-Desktop @ 848443afc3fcc74a0e127ba4f4d8554b95da856e
+# Stratum: i18n (v0.23 corpus stratum, docs/design/v0.23/corpus-stratum.md), batch 2.
+# Summary: Smartling ICU catalogs in _locales/*/messages.json, linted (en only) by
+#   build/intl-linter; a pnpm 11 workspace whose dependency policy lives in Danger,
+#   .pnpmfile.mjs and pnpm-workspace.yaml; license headers, file-suffix naming and
+#   import zones enforced by tsx scripts and custom oxlint rules.
+#
+# Where enforcement lives at the pin:
+#   - .github/workflows/ci.yml: jobs dependencies, lint, macos/linux/windows,
+#     sticker-creator, check-min-os-version, danger (pull requests), storybook,
+#     axo, axo-visual (mock-tests and benchmark run only in Signal-Desktop-Private);
+#   - package.json scripts lint-intl, lint-deps, lint-license-comments, oxlint:ci,
+#     generate (gen-policy-files, generate-compact-locales) and prepare-beta-build;
+#   - danger/rules/*.mjs (4 rules, run by `pnpm run danger:ci`);
+#   - .pnpmfile.mjs (afterAllResolved hook) and pnpm-workspace.yaml settings;
+#   - .oxlintrc.json with the custom rules under .oxlint/rules/.
+#
+# Each rule names its unit (signal-desktop-NN from Stage A, signal-desktop-bNN
+# from Stage B) and bucket. Rules under VALUE-ADD assert things the repository
+# does not enforce, or approximate units classified D (outside the ratio).
+# Expected `alint check` result on the pinned clone: every rule passes.
+
+version: 1
+
+ignore:
+  - "**/node_modules/**"
+
+# Walk every file of the checkout, including the two tracked files that
+# .gitignore excludes (ts/windows/main/tsx.preload.js, matched by `ts/**/*.js`,
+# and stylesheets/webrtc_internals.css). On a fresh clone the walk then equals
+# `git ls-files`, which is the scope of license_comments.node.ts (units 30, 31).
+# The rules that mirror oxlint (which honours .gitignore) exclude
+# tsx.preload.js explicitly, so their scope is unchanged.
+respect_gitignore: false
+
+rules:
+  # ── LOCALE ──────────────────────────────────────────────────────
+  # Unit 01 (C): build/intl-linter/rules/icuPrefix.std.ts. The linter reads only
+  # _locales/en/messages.json and skips the "smartling" key. No kind asserts a
+  # pattern over JSON key names, so this is a per-line regex that relies on the
+  # prettier-enforced two-space layout of the top-level keys.
+  - id: signal-desktop-intl-icu-prefix
+    kind: for_each_match
+    paths: _locales/en/messages.json
+    select: '^  "'
+    require:
+      matches:
+        - '^  "(?:icu:[^"]*|smartling)":'
+    level: error
+    message: "ICU message IDs must start with \"icu:\" (build/intl-linter icuPrefix)."
+
+  # Units 02-05 and 08 (C): intl-linter noLegacyVariables, noOffset, noOrdinal,
+  # onePlural and noOneChoice walk the ICU AST. A regex over each messageformat
+  # value approximates them; it is not ICU-aware beyond what each rule notes.
+  #
+  # Unit 02: the linter tests /(\$.+?\$)/ on each literal node. The
+  # placeholder_format_custom '(\$.+?\$)' it guards lives in the "smartling"
+  # block of _locales/en/messages.json, not in .smartling.yml. Literals hold no
+  # unquoted braces, so the regex spans non-brace characters plus ICU-quoted
+  # sections ('{...', '}...', '<...', '>...', '#...'). It still crosses `#` and
+  # tag boundaries that split literals, and it ignores '' escapes inside quotes.
+  - id: signal-desktop-intl-no-legacy-variables
+    kind: json_path_absent
+    paths: _locales/en/messages.json
+    path: >-
+      $[?search(@.messageformat, "\\$(?:[^{}\\n\\r]|'[{}<>#][^'\\n\\r]*')+\\$")]
+    level: error
+    message: "String must not contain legacy $variables$ (build/intl-linter noLegacyVariables)."
+
+  # Unit 03: noOffset reports a plural element (plural or selectordinal) whose
+  # offset is not 0, so an explicit offset:0 passes.
+  - id: signal-desktop-intl-no-offset
+    kind: json_path_absent
+    paths: _locales/en/messages.json
+    path: '$[?search(@.messageformat, ",\\s*(?:plural|selectordinal)\\s*,\\s*offset\\s*:\\s*[-+]?0*[1-9]")]'
+    level: error
+    message: "{plural} with offset is not supported by Smartling (build/intl-linter noOffset)."
+
+  - id: signal-desktop-intl-no-ordinal
+    kind: json_path_absent
+    paths: _locales/en/messages.json
+    path: '$[?search(@.messageformat, "\\{\\s*[^{}\\s,]+\\s*,\\s*selectordinal\\s*,")]'
+    level: error
+    message: "{selectordinal} is not supported by Smartling (build/intl-linter noOrdinal)."
+
+  - id: signal-desktop-intl-one-plural
+    kind: json_path_absent
+    paths: _locales/en/messages.json
+    path: '$[?search(@.messageformat, "\\{\\s*[^{}\\s,]+\\s*,\\s*plural\\s*,[\\s\\S]*\\{\\s*[^{}\\s,]+\\s*,\\s*plural\\s*,")]'
+    level: error
+    message: "Multiple {plural} is not supported by Smartling (build/intl-linter onePlural)."
+
+  # Unit 08 (C, Stage B reclassification): noOneChoice reports a plural element
+  # (plural or selectordinal, not select) with fewer than two options. The
+  # regex matches an argument with exactly one `selector {...}` option whose
+  # body nests at most one brace level, which noNestedChoice keeps sufficient.
+  - id: signal-desktop-intl-no-one-choice
+    kind: json_path_absent
+    paths: _locales/en/messages.json
+    path: '$[?search(@.messageformat, "\\{\\s*[^{}\\s,]+\\s*,\\s*(?:plural|selectordinal)\\s*,\\s*(?:offset\\s*:\\s*[-+]?[0-9]+\\s*)?=?[A-Za-z0-9_]+\\s*\\{(?:[^{}]|\\{[^{}]*\\})*\\}\\s*\\}")]'
+    level: error
+    message: "{plural} requires multiple options for Smartling (build/intl-linter noOneChoice)."
+
+  # Unit 11 (A): scripts/generate-compact-locales.mjs (CI lint job,
+  # `pnpm run generate`) runs readdir(_locales) and reads
+  # <entry>/messages.json for every entry. A locale directory without one
+  # fails the build, and so does a plain file directly under _locales.
+  - id: signal-desktop-locale-dir-has-messages
+    kind: dir_contains
+    select: "_locales/*"
+    require: ["messages.json"]
+    level: error
+    message: "Every _locales/<locale> directory must hold a messages.json (generate-compact-locales reads one per directory)."
+
+  - id: signal-desktop-locale-no-stray-files
+    kind: file_absent
+    paths: "_locales/*"
+    level: error
+    message: "Only locale directories may sit directly under _locales (generate-compact-locales reads <entry>/messages.json for every entry)."
+
+  # Unit 12 (C): the same script JSON.parse()s every catalog, and the
+  # sticker-creator vite build imports its own catalogs. alint's JSON reader
+  # is more tolerant than JSON.parse, so a probe path stands in for
+  # "the file parses".
+  - id: signal-desktop-locale-json-parses
+    kind: json_path_absent
+    paths:
+      - "_locales/*/messages.json"
+      - "sticker-creator/src/assets/locales/*/messages.json"
+    path: "$['__alint_parse_probe__']"
+    level: error
+    message: "Locale catalogs must be well-formed JSON (generate-compact-locales / the sticker-creator vite build parse every one)."
+
+  # Unit b01 (A): scripts/gen-policy-files.mjs:55-65 (`pnpm run generate`,
+  # build:policy-files, in the CI lint and per-OS jobs) asserts that the en
+  # catalog holds the strings it embeds in the three Linux polkit policies:
+  # each description key needs a non-empty string messageformat, each message
+  # key a string messageformat. One rule per key, because a missing key must
+  # fire on its own.
+  - id: signal-desktop-policy-strings-enable-backups-description
+    kind: json_path_matches
+    paths: _locales/en/messages.json
+    path: "$['icu:Preferences__local-backups--enable--os-prompt-description--linux'].messageformat"
+    matches: '[\s\S]'
+    level: error
+    message: "Must have english string for key icu:Preferences__local-backups--enable--os-prompt-description--linux (scripts/gen-policy-files.mjs)."
+
+  - id: signal-desktop-policy-strings-enable-backups-message
+    kind: json_path_matches
+    paths: _locales/en/messages.json
+    path: "$['icu:Preferences__local-backups--enable--os-prompt-message--linux'].messageformat"
+    matches: '^[\s\S]*$'
+    level: error
+    message: "Must have english string for key icu:Preferences__local-backups--enable--os-prompt-message--linux (scripts/gen-policy-files.mjs)."
+
+  - id: signal-desktop-policy-strings-plaintext-export-description
+    kind: json_path_matches
+    paths: _locales/en/messages.json
+    path: "$['icu:PlaintextExport--OSPrompt--description--Linux'].messageformat"
+    matches: '[\s\S]'
+    level: error
+    message: "Must have english string for key icu:PlaintextExport--OSPrompt--description--Linux (scripts/gen-policy-files.mjs)."
+
+  - id: signal-desktop-policy-strings-plaintext-export-message
+    kind: json_path_matches
+    paths: _locales/en/messages.json
+    path: "$['icu:PlaintextExport--OSPrompt--message--Linux'].messageformat"
+    matches: '^[\s\S]*$'
+    level: error
+    message: "Must have english string for key icu:PlaintextExport--OSPrompt--message--Linux (scripts/gen-policy-files.mjs)."
+
+  - id: signal-desktop-policy-strings-view-aep-description
+    kind: json_path_matches
+    paths: _locales/en/messages.json
+    path: "$['icu:Preferences--local-backups--view-recovery-key--os-prompt-description--linux'].messageformat"
+    matches: '[\s\S]'
+    level: error
+    message: "Must have english string for key icu:Preferences--local-backups--view-recovery-key--os-prompt-description--linux (scripts/gen-policy-files.mjs)."
+
+  - id: signal-desktop-policy-strings-view-aep-message
+    kind: json_path_matches
+    paths: _locales/en/messages.json
+    path: "$['icu:Preferences--local-backups--view-recovery-key--os-prompt-message--linux'].messageformat"
+    matches: '^[\s\S]*$'
+    level: error
+    message: "Must have english string for key icu:Preferences--local-backups--view-recovery-key--os-prompt-message--linux (scripts/gen-policy-files.mjs)."
+
+  # ── DEP-VERSION ─────────────────────────────────────────────────
+  # Unit 16 (A): danger/rules/enforcePackageJsonPinnedDeps.mjs. Root package.json
+  # only. A spec passes if it is semver.valid, workspace:*, npm:<name>@<semver>,
+  # or https:...#<ref>.
+  - id: signal-desktop-root-deps-pinned
+    kind: json_path_matches
+    paths: package.json
+    path: "$['dependencies','devDependencies','peerDependencies','optionalDependencies'].*"
+    matches: '^(?:v?(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?|workspace:\*|npm:.+@v?(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?|https:[^#]*#.*)$'
+    if_present: true
+    level: error
+    message: "All package.json versions should be pinned to a specific version (danger enforcePackageJsonPinnedDeps)."
+
+  # Unit 17 (C): danger/rules/enforceTailwindDepsMatch.mjs. On the package.json
+  # side Danger checks tailwindcss and @tailwindcss/* in both dependencies and
+  # devDependencies; the regex reads every such key. pnpm-lock.yaml holds two
+  # YAML documents, which the structured YAML reader rejects, so the lockfile
+  # side is a text regex over the two-space-indented package keys.
+  - id: signal-desktop-tailwind-versions-match
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devDependencies.tailwindcss" }
+    targets:
+      - file: package.json
+        extract: { regex: '"(?:tailwindcss|@tailwindcss/[^"]+)"\s*:\s*"([^"]+)"' }
+      - file: pnpm-lock.yaml
+        extract: { regex: "(?m)^  '?(?:tailwindcss|@tailwindcss/[^@'\\s]+)@([^'(:\\s]+)" }
+    relation: equals
+    level: error
+    message: "Tailwind package versions must all match devDependencies.tailwindcss (danger enforceTailwindDepsMatch)."
+
+  # ── TOOLCHAIN-PIN ───────────────────────────────────────────────
+  # Unit 28 (A, convention): CONTRIBUTING.md:55 names .nvmrc as the current
+  # Node version. CI provisions Node via pnpm/setup and package.json devEngines;
+  # reproducible-builds.yml:100 reads .nvmrc. The four root pins agree at the pin.
+  - id: signal-desktop-node-pin-coherent
+    kind: cross_file
+    source:
+      file: .nvmrc
+      extract: { regex: '\A[ \t]*v?([0-9]+\.[0-9]+\.[0-9]+)[ \t]*(?:\r?\n)?\z' }
+    targets:
+      - file: package.json
+        extract: { json: "$.engines.node" }
+      - file: package.json
+        extract: { json: "$.devEngines.runtime.version" }
+      - file: package.json
+        extract: { json: "$.volta.node" }
+    relation: equals
+    level: error
+    message: "The Node version must agree across .nvmrc and package.json engines.node, devEngines.runtime.version and volta.node."
+
+  # ── OTHER ───────────────────────────────────────────────────────
+  # Unit 30 (A): ts/util/lint/license_comments.node.ts (CI lint job). Scope is
+  # git ls-files with the script's extension list, minus its ignore list. Its
+  # dotfile extensions (.eslintrc etc.) never match, because the extension is
+  # taken from the full path. The top-level respect_gitignore: false brings in
+  # ts/windows/main/tsx.preload.js, which is tracked but gitignored and which
+  # the script checks.
+  - id: signal-desktop-license-comments
+    kind: file_header
+    paths:
+      include: ["**/*.{ts,tsx,js,scss,yml,html,md,plist,snyk}"]
+      exclude:
+        - ".changeset/*.md"
+        - "packages/*/CHANGELOG.md"
+        - ".github/ISSUE_TEMPLATE/bug_report.md"
+        - ".github/PULL_REQUEST_TEMPLATE.md"
+        - "packages/mock-server/protos/README.md"
+        - "packages/mute-state-change/dist/acknowledgments.md"
+        - "packages/clonefile/dist/acknowledgments.md"
+        - "packages/lame/dist/acknowledgments.md"
+        - "sticker-creator/src/util/protos.d.ts"
+        - "sticker-creator/src/util/protos.js"
+    lines: 2
+    pattern: '\A[^\n]*Copyright [0-9]{4} Signal Messenger, LLC[^\n]*\n[^\n]*SPDX-License-Identifier: AGPL-3.0-only'
+    level: error
+    message: "Line 1 must carry \"Copyright YYYY Signal Messenger, LLC\" and line 2 \"SPDX-License-Identifier: AGPL-3.0-only\" (pnpm run lint-license-comments)."
+
+  - id: signal-desktop-license-comments-sh
+    kind: file_header
+    paths:
+      include: ["**/*.sh"]
+      exclude: [".smartling-source.sh"]
+    lines: 3
+    pattern: '\A[^\n]*\n[^\n]*Copyright [0-9]{4} Signal Messenger, LLC[^\n]*\n[^\n]*SPDX-License-Identifier: AGPL-3.0-only'
+    level: error
+    message: "Shell scripts carry the copyright on line 2 and the SPDX line on line 3 (pnpm run lint-license-comments)."
+
+  # Unit 31 (A): the same script's "Copyright should not include end year".
+  # Same scope as unit 30.
+  - id: signal-desktop-license-no-end-year
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.{ts,tsx,js,scss,yml,html,md,plist,snyk}"]
+      exclude:
+        - ".changeset/*.md"
+        - "packages/*/CHANGELOG.md"
+        - ".github/ISSUE_TEMPLATE/bug_report.md"
+        - ".github/PULL_REQUEST_TEMPLATE.md"
+        - "packages/mock-server/protos/README.md"
+        - "packages/mute-state-change/dist/acknowledgments.md"
+        - "packages/clonefile/dist/acknowledgments.md"
+        - "packages/lame/dist/acknowledgments.md"
+        - "sticker-creator/src/util/protos.d.ts"
+        - "sticker-creator/src/util/protos.js"
+    pattern: '\A[^\n]*[0-9]{4}-[0-9]{4}'
+    level: error
+    message: "Copyright should not include end year (pnpm run lint-license-comments)."
+
+  - id: signal-desktop-license-no-end-year-sh
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.sh"]
+      exclude: [".smartling-source.sh"]
+    pattern: '\A[^\n]*\n[^\n]*[0-9]{4}-[0-9]{4}'
+    level: error
+    message: "Copyright should not include end year (pnpm run lint-license-comments)."
+
+  # Unit 32 (A): oxlint signal-desktop/enforce-license-comments
+  # (.oxlintrc.json:46, .oxlint/rules/enforceLicenseComments.mjs). It is
+  # stricter than unit 30: two `//` line comments, exact text. Scope is
+  # oxlint's JS/TS set minus ignorePatterns, the mock-server override that
+  # turns the rule off, and the gitignored ts/windows/main/tsx.preload.js.
+  - id: signal-desktop-oxlint-license-comments
+    kind: file_header
+    paths:
+      include: ["**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"]
+      exclude:
+        - "sticker-creator/**"
+        - "packages/lame/wrapper.mjs"
+        - "ts/windows/main/tsx.preload.js"
+        - "packages/mock-server/src/**/*.ts"
+        - "packages/mock-server/test/**/*.ts"
+        - "packages/mock-server/certs/**/*.js"
+    lines: 3
+    pattern: '\A(?:#![^\n]*\n)?// Copyright [0-9]{4} Signal Messenger, LLC\r?\n// SPDX-License-Identifier: AGPL-3.0-only(?:\r?\n|\z)'
+    level: error
+    message: "JS/TS files start with the two-line `// Copyright YYYY Signal Messenger, LLC` / `// SPDX-License-Identifier: AGPL-3.0-only` comment (oxlint signal-desktop/enforce-license-comments)."
+
+  # Unit 33 (A): oxlint signal-desktop/enforce-file-suffix, filename half
+  # (missingFileSuffixMustBeOneOf). Exclusions mirror the .oxlintrc.json
+  # override at line 1990 that turns the rule off, plus the gitignored
+  # tsx.preload.js. Unit 34, the import/environment half, is D.
+  - id: signal-desktop-file-suffix-naming
+    kind: filename_regex
+    paths:
+      include: ["**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"]
+      exclude:
+        - "**/*.d.ts"
+        - "**/*.d.mts"
+        - "sticker-creator/**"
+        - "packages/lame/wrapper.mjs"
+        - "ts/windows/main/tsx.preload.js"
+        - ".oxlint/**"
+        - ".storybook/**"
+        - "codemods/**"
+        - "danger/**"
+        - "packages/types/tsdown.config.mjs"
+        - "packages/lame/**"
+        - "packages/mute-state-change/**"
+        - "packages/clonefile/**"
+        - "packages/windows-ucv/**"
+        - "packages/mock-server/**"
+        - "scripts/**"
+        - ".github/scripts/**"
+        - "test/test.mjs"
+        - ".pnpmfile.mjs"
+        - ".babelrc.mjs"
+        - ".prettierrc.mjs"
+        - ".stylelintrc.mjs"
+        - "ci.js"
+        - "dangerfile.mjs"
+        - "knip.js"
+        - "preload.wrapper.ts"
+        - "rolldown.config.ts"
+        - "vitest.config.mts"
+    pattern: '.*\.(?:std|node|dom|preload|main)(?:\.stories|\.test|\.visual\.test|\.bench)?\.(?:ts|tsx|mts|js|mjs)'
+    level: error
+    message: "Missing file suffix: must be <name>.{std,node,dom,preload,main}[.stories|.test|.visual.test|.bench].<ext> (oxlint signal-desktop/enforce-file-suffix)."
+
+  # Unit 35 (A): oxlint eslint/unicode-bom "error", default "never"
+  # (.oxlintrc.json:952). It is not turned off in any override. Scope is
+  # oxlint's JS/TS set minus ignorePatterns and the gitignored tsx.preload.js.
+  - id: signal-desktop-js-no-bom
+    kind: no_bom
+    paths:
+      include: ["**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"]
+      exclude:
+        - "sticker-creator/**"
+        - "packages/lame/wrapper.mjs"
+        - "ts/windows/main/tsx.preload.js"
+    level: error
+    message: "JS/TS files must not start with a byte-order mark (oxlint eslint/unicode-bom)."
+
+  # Unit 36 (A): ts/util/lint/linter.node.ts with rules.json (`pnpm run lint-deps`),
+  # first-party half. exceptions.json lists only node_modules paths, so any hit
+  # in first-party code fails. Scope is fast-glob **/*.{js,mjs,ts,tsx} (dot:
+  # false) minus excludedFilesRegexp, approximated by globs. Its
+  # '^ts/textsecure/[^./]+.ts' has an unescaped dot and no end anchor, and on
+  # this tree matches exactly the three ts/textsecure files listed below, not
+  # every direct ts/textsecure/*.ts. Checked: the rule's scope on the clone is
+  # the same 2,116 files as an emulation of the script's walk.
+  - id: signal-desktop-lint-deps-first-party
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.{js,mjs,ts,tsx}"]
+      exclude:
+        - ".*"
+        - "**/.*/**"
+        - "**/.*"
+        - "release/**"
+        - "bundles/**"
+        - "storybook-static/**"
+        - "preload.bundle.js*"
+        - "**/*.d.ts"
+        - "**/*.stories.js*"
+        - "**/*.stories.tsx*"
+        - "ts/**/*.js"
+        - "app/**"
+        - "ts/models/messages.ts"
+        - "ts/models/conversations.ts"
+        - "ts/views/conversation_view.ts"
+        - "ts/background.ts"
+        - "ts/Crypto.ts"
+        - "ts/textsecure/MessageReceiver.ts"
+        - "ts/ConversationController.ts"
+        - "ts/SignalProtocolStore.ts"
+        - "ts/textsecure/ContactsParser.preload.ts"
+        - "ts/textsecure/messageReceiverEvents.std.ts"
+        - "ts/textsecure/syncRequests.preload.ts"
+        - "js/**"
+        - "ts/workers/heicConverter.bundle.js"
+        - "ts/sql/mainWorker.bundle.js"
+        - "libtextsecure/test/**"
+        - "test/**"
+        - "ts/test*/**"
+        - "packages/**"
+        - "sticker-creator/**"
+    pattern: '\beval\(|\binnerHTML\b|\bouterHTML\b|\bdocument.write(?:ln)?\(|\bfindDOMNode\(|\bdangerouslySetInnerHTML\b|\bcreateNodesFromMarkup\b|\bmultiArgs\b|\btoFastProperties\b'
+    level: error
+    message: "Questionable DOM/eval API in first-party code (pnpm run lint-deps, ts/util/lint/rules.json; no first-party exceptions exist)."
+
+  # Unit 40 (C): danger/rules/enforcePackageJsonPublishConfig.mjs, a zod union over
+  # every package.json from fastGlob (dot: false, so dot-directories are
+  # skipped): either { private: true } with no publishConfig, or no private and
+  # an exact publishConfig. alint composes it from four rules.
+  - id: signal-desktop-pkg-publish-config-exact
+    kind: json_path_equals
+    paths:
+      include: ["**/package.json"]
+      exclude: ["**/.*/**"]
+    path: "$.publishConfig"
+    equals:
+      access: public
+      registry: "https://registry.npmjs.org/"
+      provenance: false
+    if_present: true
+    level: error
+    message: "publishConfig must be exactly { access: public, registry: https://registry.npmjs.org/, provenance: false } (danger enforcePackageJsonPublishConfig)."
+
+  - id: signal-desktop-pkg-private-true-only
+    kind: json_path_equals
+    paths:
+      include: ["**/package.json"]
+      exclude: ["**/.*/**"]
+    path: "$.private"
+    equals: true
+    if_present: true
+    level: error
+    message: "\"private\" may only be true (danger enforcePackageJsonPublishConfig)."
+
+  - id: signal-desktop-pkg-private-or-publish-config
+    kind: file_content_matches
+    paths:
+      include: ["**/package.json"]
+      exclude: ["**/.*/**"]
+    pattern: '"private"\s*:\s*true|"publishConfig"\s*:\s*\{'
+    level: error
+    message: "Every package.json must have either \"private\": true or a publishConfig (danger enforcePackageJsonPublishConfig)."
+
+  - id: signal-desktop-pkg-not-both-private-and-publish
+    kind: file_content_forbidden
+    paths:
+      include: ["**/package.json"]
+      exclude: ["**/.*/**"]
+    pattern: '(?s)"private"\s*:\s*true.*"publishConfig"\s*:|"publishConfig"\s*:.*"private"\s*:\s*true'
+    level: error
+    message: "A private package must not carry publishConfig (danger enforcePackageJsonPublishConfig)."
+
+  # Unit 41 (C): danger/rules/enforcePnpmLockfileDepsIntegrity.mjs (every
+  # packages entry's resolution has integrity). Because the lockfile has two
+  # YAML documents, this is a per-line text check.
+  - id: signal-desktop-lockfile-integrity
+    kind: for_each_match
+    paths: pnpm-lock.yaml
+    select: '^\s+resolution:'
+    require:
+      matches: ['\bintegrity:']
+    level: error
+    message: "All dependencies should have a resolution with an integrity field (danger enforcePnpmLockfileDepsIntegrity)."
+
+  # Unit 42 (A): pnpm install (CI setup action, --frozen-lockfile) fails when a
+  # pnpm-workspace.yaml patchedDependencies entry names a missing patch file.
+  - id: signal-desktop-patched-dependencies-exist
+    kind: registry_paths_resolve
+    source: pnpm-workspace.yaml
+    extract: { yaml: "$.patchedDependencies.*" }
+    expect: file
+    level: error
+    message: "Every pnpm-workspace.yaml patchedDependencies entry must name an existing patch file (pnpm install fails otherwise)."
+
+  # Unit b02 (A): scripts/utils/parseVersion.mjs, called unconditionally by
+  # scripts/prepare_beta_build.mjs (the "Prepare beta build" step of the CI
+  # linux and windows jobs on every push and pull request, macOS on main).
+  # semver.parse (strict, after trim) must accept the version, and its first
+  # prerelease identifier must be beta|alpha|staging|axolotl|adhoc followed by
+  # a numeric prepatch; a version without a prerelease must carry no build
+  # metadata.
+  - id: signal-desktop-app-version-format
+    kind: json_path_matches
+    paths: package.json
+    path: "$.version"
+    matches: '^\s*v?(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)(?:-(?:beta|alpha|staging|axolotl|adhoc)\.(?:0|[1-9][0-9]*)(?:\.(?:0|[1-9][0-9]*|[0-9]*[A-Za-z-][0-9A-Za-z-]*))*(?:\+[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?)?\s*$'
+    level: error
+    message: "package.json version must be X.Y.Z or X.Y.Z-{beta|alpha|staging|axolotl|adhoc}.N, with no build metadata on a prod version (scripts/utils/parseVersion.mjs)."
+
+  # Unit b03 (C): scripts/prepare_beta_build.mjs:59-73 checks that package.json
+  # holds the production identity before it rewrites it, but only when the
+  # version channel is beta (it exits early otherwise), so the gate is dormant
+  # at this alpha pin and enforced on beta release branches. alint cannot
+  # condition on the version channel without a custom fact, so these six rules
+  # assert the values unconditionally: stronger than the gate, and they hold at
+  # the pin.
+  - id: signal-desktop-beta-prep-name
+    kind: json_path_equals
+    paths: package.json
+    path: "$.name"
+    equals: "signal-desktop"
+    level: error
+    message: "name must be signal-desktop before prepare-beta-build rewrites it (scripts/prepare_beta_build.mjs)."
+
+  - id: signal-desktop-beta-prep-product-name
+    kind: json_path_equals
+    paths: package.json
+    path: "$.productName"
+    equals: "Signal"
+    level: error
+    message: "productName must be Signal before prepare-beta-build rewrites it (scripts/prepare_beta_build.mjs)."
+
+  - id: signal-desktop-beta-prep-app-id
+    kind: json_path_equals
+    paths: package.json
+    path: "$.build.appId"
+    equals: "org.whispersystems.signal-desktop"
+    level: error
+    message: "build.appId must be org.whispersystems.signal-desktop before prepare-beta-build rewrites it (scripts/prepare_beta_build.mjs)."
+
+  - id: signal-desktop-beta-prep-startup-wm-class
+    kind: json_path_equals
+    paths: package.json
+    path: "$.build.linux.desktop.entry.StartupWMClass"
+    equals: "signal"
+    level: error
+    message: "build.linux.desktop.entry.StartupWMClass must be signal before prepare-beta-build rewrites it (scripts/prepare_beta_build.mjs)."
+
+  - id: signal-desktop-beta-prep-desktop-name
+    kind: json_path_equals
+    paths: package.json
+    path: "$.desktopName"
+    equals: "signal.desktop"
+    level: error
+    message: "desktopName must be signal.desktop before prepare-beta-build rewrites it (scripts/prepare_beta_build.mjs)."
+
+  - id: signal-desktop-beta-prep-executable-name
+    kind: json_path_equals
+    paths: package.json
+    path: "$.build.linux.executableName"
+    equals: "signal-desktop"
+    level: error
+    message: "build.linux.executableName must be signal-desktop before prepare-beta-build rewrites it (scripts/prepare_beta_build.mjs)."
+
+  # ── VALUE-ADD (not enforced by the repository, or approximating a D unit;
+  #    outside the ratio) ──
+  # Key parity holds at the pin (every locale = en minus "smartling"), but
+  # Smartling generates the catalogs and no gate checks them.
+  - id: signal-desktop-va-locale-key-parity
+    kind: key_parity
+    reference: _locales/en/messages.json
+    peers: "_locales/*/messages.json"
+    ignore_keys: ["smartling.**", "*.description"]
+    direction: both
+    level: info
+    message: "VALUE-ADD: every locale carries the en message set."
+
+  # build/available-locales.json is regenerated only by the manual `get-strings`.
+  - id: signal-desktop-va-available-locales-registered
+    kind: cross_file
+    source:
+      files: "_locales/*/messages.json"
+    register_as: "{parent_name}"
+    targets:
+      - file: build/available-locales.json
+        extract: { json: "$[*]" }
+    relation: registered
+    level: info
+    message: "VALUE-ADD: every _locales/<locale> is listed in build/available-locales.json."
+
+  # Unit 29 is pnpm's own self-management and env-lockfile check (D). This rule
+  # states the equality that reproducible-builds.yml:106 relies on.
+  - id: signal-desktop-va-pnpm-pin-lockfile
+    kind: cross_file
+    source:
+      file: package.json
+      extract: { json: "$.devEngines.packageManager.version" }
+    targets:
+      - file: pnpm-lock.yaml
+        extract: { regex: "(?s)\\A.*?\\n      pnpm:\\n        specifier: ([^\\n]+)\\n" }
+    relation: equals
+    level: info
+    message: "VALUE-ADD: the lockfile's pnpm packageManagerDependencies entry (read by reproducible-builds) matches devEngines.packageManager.version."
+
+  # Unit 38 is D (Stage B, R7: an AST import-zone firewall; trpc-41 precedent).
+  # VALUE-ADD approximation of oxlint signal-desktop/no-restricted-paths
+  # (.oxlintrc.json:61), 3 zones. Limitations: only relative specifiers in a
+  # content regex resolve (no aliases, no bare or absolute paths), and the
+  # repository's 11 inline `oxlint-disable-next-line
+  # signal-desktop/no-restricted-paths` suppressions are emulated by a regex
+  # alternative that consumes the comment and the line after it without
+  # capturing. Value-add rules do not mirror the oxlint scope exactly (this
+  # one also sees the gitignored ts/windows/main/tsx.preload.js).
+  - id: signal-desktop-restricted-import-zones
+    kind: file_graph
+    nodes: "{ts,scripts,codemods}/**/*.{ts,tsx,mts,js,mjs}"
+    edges:
+      from_content:
+        extract: { regex: "//[ \\t]*oxlint-disable-next-line[^\\n]*\\bsignal-desktop/no-restricted-paths\\b[^\\n]*\\n[^\\n]*|(?:\\bfrom|\\bimport\\(|\\brequire\\(|\\brequire\\.resolve\\()\\s*['\"](\\.\\.?/[^'\"]+)['\"]" }
+        resolve: relative_to_file
+    require:
+      forbidden_edges:
+        - { from: "ts/{util,types}/**", to: "ts/components/**" }
+        - { from: "ts/{util,types}/**", to: "ts/axo/**/*.dom.*" }
+        - { from: "{scripts,codemods}/**", to: "ts/**" }
+        - { from: "ts/**", to: "{scripts,codemods}/**" }
+    level: info
+    message: "VALUE-ADD: import crosses a restricted zone (approximates oxlint signal-desktop/no-restricted-paths)."
+
+  # Unit 39 is D (Stage B, R7: an oxlint eslint/no-restricted-imports pattern
+  # over import specifiers; trpc-41, yarnpkg-berry-34, zulip-62 precedents).
+  # VALUE-ADD approximation of the .oxlintrc.json override for
+  # .github/scripts/**, group ["*", "!node:*", "!node:*/*", "!./*"]. The forbid
+  # regex is the complement of `node:...` and `./<file>`. Limitation:
+  # import_gate sees specifiers only, not oxlint's per-file override semantics.
+  - id: signal-desktop-github-scripts-node-builtins-only
+    kind: import_gate
+    paths: ".github/scripts/**/*.{js,mjs,ts}"
+    language: js
+    forbid: '^(?:$|[^.n]|n$|n[^o]|no$|no[^d]|nod$|nod[^e]|node$|node[^:]|\.$|\.[^/]|\./$|\./[^/]*/)'
+    level: info
+    message: "VALUE-ADD: only import node: builtins and files in this folder; these scripts run without node_modules (approximates the .oxlintrc.json override for .github/scripts/**)."
+
+  # Unit 46 is D (Stage B, R7: a named-import-specifier ban with
+  # allowTypeImports; trpc-41 precedent). VALUE-ADD approximation of
+  # .oxlintrc.json:928 eslint/no-restricted-imports (chai expect/should/Should,
+  # "Please use assert"); sticker-creator/.eslintrc.cjs:172-185 bans the same
+  # names, so its eslint scope (minus its .eslintignore) is included too.
+  # Limitations: a regex over import/export-from statements stands in for
+  # specifier parsing and type-import semantics, and the one inline
+  # suppression (ts/test-node/util/uploads/tusProtocol_test.node.ts) is
+  # emulated by a path exclude.
+  - id: signal-desktop-no-chai-expect-should
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.{js,mjs,cjs,jsx,ts,mts,cts,tsx}"]
+      exclude:
+        - "packages/lame/wrapper.mjs"
+        - "ts/windows/main/tsx.preload.js"
+        - "ts/test-node/util/uploads/tusProtocol_test.node.ts"
+        - "sticker-creator/src/util/protos.*"
+        - "sticker-creator/dist/**"
+        - "sticker-creator/public/**"
+        - "sticker-creator/src/assets/**"
+    pattern: '\b(?:import|export)\s*(?:[\w$]+\s*,\s*)?\{(?:[^}]*,)?\s*(?:expect|should|Should)\b(?:\s+as\s+[\w$]+)?\s*(?:,[^}]*)?\}\s*from\s*[''"]chai[''"]'
+    level: info
+    message: "VALUE-ADD: do not import expect/should from chai; use assert (approximates eslint/no-restricted-imports in .oxlintrc.json and sticker-creator/.eslintrc.cjs)."

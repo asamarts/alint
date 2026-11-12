@@ -15,7 +15,8 @@
   "coverage_today": 36,
   "coverage_with_tuning": 64,
   "gap": 36,
-  "coverage_after_slice": 36
+  "coverage_after_slice": 36,
+  "coverage_after_slice_with_entry_values": 36
  },
  "by_family": {
   "locale": {
@@ -32,7 +33,8 @@
    "coverage_today": 0,
    "coverage_with_tuning": 40,
    "gap": 60,
-   "coverage_after_slice": 0
+   "coverage_after_slice": 0,
+   "coverage_after_slice_with_entry_values": 0
   },
   "dep-version": {
    "counts": {
@@ -48,7 +50,8 @@
    "coverage_today": null,
    "coverage_with_tuning": null,
    "gap": null,
-   "coverage_after_slice": null
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
   },
   "toolchain-pin": {
    "counts": {
@@ -64,7 +67,8 @@
    "coverage_today": 0,
    "coverage_with_tuning": 0,
    "gap": 100,
-   "coverage_after_slice": 0
+   "coverage_after_slice": 0,
+   "coverage_after_slice_with_entry_values": 0
   },
   "other": {
    "counts": {
@@ -80,7 +84,8 @@
    "coverage_today": 62,
    "coverage_with_tuning": 88,
    "gap": 12,
-   "coverage_after_slice": 62
+   "coverage_after_slice": 62,
+   "coverage_after_slice_with_entry_values": 62
   }
  },
  "units": [
@@ -161,8 +166,15 @@
       "equality"
      ],
      "why": "Stage A says the entry-json row adapter exists, so this is B-config. That is wrong. EntryRowsAdapter is key-only by design: crates/alint-core/src/relation/adapters/entry.rs:11-17 says 'values are not parsed, because key_parity never needs them' and emits RowState::Key. ExtractAdapter rows carry pointer None (adapters/extract.rs:88-93), so values cannot be joined back to key paths. general-linter.md 7.3 calls json_entries (key+value rows) a proposed extractor, and the v0.23 README lists only entry, extract, TOML and XML adapters. key != '|'-joined key path therefore needs a new value-bearing entry adapter plus a path-join transform. Consequence: Stage A's 'after the slice, 05 moves to A' projection is invalid; this repo has no B-config unit."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values"
+     }
     }
-   ]
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "element-web-06",
@@ -172,7 +184,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "constraint over entry-json rows: {key path : value matches (?i)\\belement\\b} subset of the allowlist (value-add rules give an exact desktop instance and a leaf-key approximation for apps/web)",
-   "assertion_family": "none",
+   "assertion_family": "set",
    "reason": "The allowlist is keyed by full key path; a line regex sees only leaf keys ('invalid_json' occurs twice in apps/web, 'title' 7 times in shared-components), so no current kind expresses it exactly; entry-json rows exist",
    "fire_verified": "n/a",
    "origin": "A",
@@ -185,8 +197,16 @@
       "set"
      ],
      "why": "Same root cause as element-web-05. Selecting rows by value (matches (?i)\\belement\\b) and asserting their key paths are a subset of the allowlist needs (key path, value) rows, and no adapter emits them today. Once that adapter exists, the assertion would be set. Scope correction: apps/desktop's i18n:lint is only 'oxfmt src/i18n/strings/' (apps/desktop/package.json), so matrix-i18n-lint, which consumes hardcoded-words, never runs for desktop. The unit applies to apps/web and packages/shared-components only, not to 'none for apps/desktop'."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "set"
+     }
     }
-   ]
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "element-web-07",

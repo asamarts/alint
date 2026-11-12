@@ -4,8 +4,8 @@
  "metrics": {
   "counts": {
    "A": 10,
-   "B-config": 7,
-   "B-adapter": 13,
+   "B-config": 5,
+   "B-adapter": 15,
    "B-kernel": 0,
    "B-delegate": 1,
    "C": 5,
@@ -15,7 +15,8 @@
   "coverage_today": 28,
   "coverage_with_tuning": 42,
   "gap": 58,
-  "coverage_after_slice": 36
+  "coverage_after_slice": 36,
+  "coverage_after_slice_with_entry_values": 39
  },
  "by_family": {
   "locale": {
@@ -32,13 +33,14 @@
    "coverage_today": null,
    "coverage_with_tuning": null,
    "gap": null,
-   "coverage_after_slice": null
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
   },
   "dep-version": {
    "counts": {
     "A": 2,
-    "B-config": 4,
-    "B-adapter": 1,
+    "B-config": 2,
+    "B-adapter": 3,
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 1,
@@ -48,7 +50,8 @@
    "coverage_today": 25,
    "coverage_with_tuning": 38,
    "gap": 62,
-   "coverage_after_slice": 38
+   "coverage_after_slice": 38,
+   "coverage_after_slice_with_entry_values": 50
   },
   "toolchain-pin": {
    "counts": {
@@ -64,7 +67,8 @@
    "coverage_today": 67,
    "coverage_with_tuning": 67,
    "gap": 33,
-   "coverage_after_slice": 67
+   "coverage_after_slice": 67,
+   "coverage_after_slice_with_entry_values": 67
   },
   "other": {
    "counts": {
@@ -80,7 +84,8 @@
    "coverage_today": 24,
    "coverage_with_tuning": 40,
    "gap": 60,
-   "coverage_after_slice": 32
+   "coverage_after_slice": 32,
+   "coverage_after_slice_with_entry_values": 32
   }
  },
  "units": [
@@ -142,13 +147,24 @@
    "evidence": ".github/workflows/lint.yml:38 `pnpm manypkg fix` + :52-54 `git diff --exit-code` in the merge queue (@manypkg/cli 0.25.1, no manypkg config); clone state: every external dep has at most one semver specifier (e.g. typescript ^5.9.2 x34, @types/node ^24.19.2 x29) alongside catalog: refs",
    "mechanism": "ci",
    "family": "dep-version",
-   "bucket": "B-config",
+   "bucket": "B-adapter",
    "alint": "constraint unique-key over workspace manifests' dependency entries (selector: semver-valued specifiers, non-workspace names, non-peer fields)",
    "assertion_family": "unique-key",
-   "reason": "R7: a tool check over files alint reads, classified by its logic. One range per dependency name across a group is a functional dependency (unique-key). No kind today groups dependency entries by key across manifests.",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "unique-key",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range."
+     }
+    }
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "trpc-06",
@@ -186,11 +202,19 @@
    "family": "dep-version",
    "bucket": "B-config",
    "alint": "constraint set: pairwise-disjoint key sets of the dependency fields per manifest",
-   "assertion_family": "set",
-   "reason": "Key-set disjointness inside one document. It needs key selection that RFC 9535 JSONPath lacks.",
+   "assertion_family": "unique-key",
+   "reason": "Key rows suffice: a dependency's key path carries its field. (manifest, name) determines the field, a functional dependency, so unique-key (batch 2 ruling aligns trpc-08, jest-24 and rushstack-51).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "assertion_family": "unique-key",
+      "reason": "Key rows suffice: a dependency's key path carries its field. (manifest, name) determines the field, a functional dependency, so unique-key (batch 2 ruling aligns trpc-08, jest-24 and rushstack-51)."
+     }
+    }
+   ]
   },
   {
    "id": "trpc-10",
@@ -198,13 +222,24 @@
    "evidence": "pnpm-workspace.yaml:48 (catalog), :100 (catalogs ts-api, www); every CI `pnpm install` fails on an unresolved catalog entry; tooling/subtree/src/standalone.ts:100-124 standaloneVersion throws 'not in the <catalog> catalog' (subtree.yml:83-88 on PRs touching examples/**)",
    "mechanism": "ci",
    "family": "dep-version",
-   "bucket": "B-config",
+   "bucket": "B-adapter",
    "alint": "constraint reference: (dep name, catalog name) from manifests -> keys of pnpm-workspace.yaml catalog/catalogs.<name>",
    "assertion_family": "reference",
-   "reason": "A manifest-to-catalog join. Its source is a manifest key whose value is catalog:X, and its target is a YAML map key, so JSONPath cannot select either side. R7: a lookup, not registry resolution, so it is not D.",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The (dependency name, catalog name) pair comes from the manifest entry's key and its catalog: value.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "reference",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The (dependency name, catalog name) pair comes from the manifest entry's key and its catalog: value."
+     }
+    }
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "trpc-11",

@@ -4,8 +4,8 @@
  "metrics": {
   "counts": {
    "A": 21,
-   "B-config": 7,
-   "B-adapter": 4,
+   "B-config": 5,
+   "B-adapter": 6,
    "B-kernel": 0,
    "B-delegate": 0,
    "C": 4,
@@ -15,7 +15,8 @@
   "coverage_today": 58,
   "coverage_with_tuning": 69,
   "gap": 31,
-  "coverage_after_slice": 69
+  "coverage_after_slice": 67,
+  "coverage_after_slice_with_entry_values": 69
  },
  "by_family": {
   "locale": {
@@ -32,7 +33,8 @@
    "coverage_today": 40,
    "coverage_with_tuning": 40,
    "gap": 60,
-   "coverage_after_slice": 60
+   "coverage_after_slice": 60,
+   "coverage_after_slice_with_entry_values": 60
   },
   "dep-version": {
    "counts": {
@@ -48,7 +50,8 @@
    "coverage_today": 67,
    "coverage_with_tuning": 67,
    "gap": 33,
-   "coverage_after_slice": 67
+   "coverage_after_slice": 67,
+   "coverage_after_slice_with_entry_values": 67
   },
   "toolchain-pin": {
    "counts": {
@@ -64,13 +67,14 @@
    "coverage_today": 100,
    "coverage_with_tuning": 100,
    "gap": 0,
-   "coverage_after_slice": 100
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
   },
   "other": {
    "counts": {
     "A": 15,
-    "B-config": 6,
-    "B-adapter": 1,
+    "B-config": 4,
+    "B-adapter": 3,
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 4,
@@ -80,7 +84,8 @@
    "coverage_today": 58,
    "coverage_with_tuning": 73,
    "gap": 27,
-   "coverage_after_slice": 69
+   "coverage_after_slice": 65,
+   "coverage_after_slice_with_entry_values": 69
   }
  },
  "units": [
@@ -513,13 +518,24 @@
    "evidence": "config/field_test.yml:19-20 (review checklist)",
    "mechanism": "convention",
    "family": "other",
-   "bucket": "B-config",
+   "bucket": "B-adapter",
    "alint": "Missing: extraction of the variants arrays under entries whose key matches a prefix, with a reference to a path template.",
    "assertion_family": "reference",
-   "reason": "A reference from YAML values to files. It needs a key-prefix selector feeding a path-template reference.",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The variants array values must be tied to the feed_strategy* entry they sit under.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "reference",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The variants array values must be tied to the feed_strategy* entry they sit under."
+     }
+    }
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "forem-30",
@@ -905,13 +921,24 @@
    "evidence": "config/field_test.yml:12-14 (checklist: \"rename to feed_strategy_starting_CCYYMMDD\" / \"Update the started_at to CCYY-MM-DD\", same placeholders); upheld at HEAD (20240805 → 2024-08-05, 20240701 → 2024-07-01)",
    "mechanism": "convention",
    "family": "other",
-   "bucket": "B-config",
+   "bucket": "B-adapter",
    "alint": "Missing: a per-entry equality between a capture from the map key and a sibling field, with a digits-only normalize. for_each_match sees only the key line, and Rust regex has no backreferences.",
    "assertion_family": "equality",
-   "reason": "It comes from the same load-bearing checklist Stage A used for forem-28 and forem-29, and it is a file-state invariant at HEAD, so consistency requires counting it. The assertion is row-level equality, which is in the v0.23 slice. It may also need a date-normalizing transform.",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The experiment's key and its started_at value must be joined per entry.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "equality",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The experiment's key and its started_at value must be joined per entry."
+     }
+    }
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "forem-b09",

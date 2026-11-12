@@ -1,6 +1,6 @@
 # v0.23 corpus stratum: i18n and JavaScript monorepos
 
-Status: frame approved 2026-11-12; batch 1 of 4 done. Phase 2 of [`README.md`](README.md).
+Status: frame approved 2026-11-12; batches 1 and 2 of 4 done. Phase 2 of [`README.md`](README.md).
 
 Results: [`corpus-stratum-log.md`](corpus-stratum-log.md).
 
@@ -95,6 +95,25 @@ Rulings from batch 1, applied to every later batch:
   - `key_parity` nested under `for_each_file` stops with an internal error;
   - `git_tracked_only: true` on `file_absent` and `dir_absent` does not see a force-added file
     that `.gitignore` excludes.
+
+Rulings from batch 2, applied by the integrator to every batch:
+- **An assertion that joins a name to its value is B-adapter.**
+  - Examples: one range per dependency, a `catalog:` specifier that resolves, and a map key that
+    must agree with a sibling field.
+  - Each needs (key path, value) rows. The structured adapters (`entry`, TOML, XML) are key-only,
+    and `extract`'s values carry no pointer.
+  - Such a unit records `needs: entry-values` and keeps the assertion family it will need once
+    the adapter exists.
+  - Uniqueness or inclusion over key paths alone, or over extracted values alone, stays B-config.
+- **Disjoint dependency fields are `unique-key`:** (manifest, name) determines the field.
+- **A linter rule that asserts a property of the file rather than its code is classified by its
+  logic.** Examples are a name, a header, an encoding or a fixed attribute. Import restrictions
+  and the rest of the linter run are code analysis (D).
+- **A check that only an external service makes, such as a registry at publish time, is D.**
+- **A regex read of a JSON key, or a regex that holds for one layout only, is C.**
+
+The "after slice" figure is also reported with the value-bearing entry adapter added, since the
+slice's dependency version policy needs it.
 
 **Before and after the slice.** v0.23 ships `constraint` with the `equality`, `unique-key` and
 `cardinality` families (ADR-0032 decision 1). The "after" figure moves each B-config unit tagged

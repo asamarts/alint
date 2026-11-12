@@ -1,0 +1,1471 @@
+{
+ "repo": "microsoft/rushstack",
+ "sha": "a1d41fc46f3fa4951eef79ec0eabd2173db7dd55",
+ "metrics": {
+  "counts": {
+   "A": 34,
+   "B-config": 6,
+   "B-adapter": 6,
+   "B-kernel": 1,
+   "B-delegate": 2,
+   "C": 12,
+   "D": 17
+  },
+  "addressable": 61,
+  "coverage_today": 56,
+  "coverage_with_tuning": 75,
+  "gap": 25,
+  "coverage_after_slice": 64,
+  "coverage_after_slice_with_entry_values": 66
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "dep-version": {
+   "counts": {
+    "A": 0,
+    "B-config": 2,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 2,
+    "D": 2
+   },
+   "addressable": 5,
+   "coverage_today": 0,
+   "coverage_with_tuning": 40,
+   "gap": 60,
+   "coverage_after_slice": 20,
+   "coverage_after_slice_with_entry_values": 40
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 3,
+    "B-config": 0,
+    "B-adapter": 3,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 1
+   },
+   "addressable": 6,
+   "coverage_today": 50,
+   "coverage_with_tuning": 50,
+   "gap": 50,
+   "coverage_after_slice": 50,
+   "coverage_after_slice_with_entry_values": 50
+  },
+  "other": {
+   "counts": {
+    "A": 31,
+    "B-config": 4,
+    "B-adapter": 2,
+    "B-kernel": 1,
+    "B-delegate": 2,
+    "C": 10,
+    "D": 14
+   },
+   "addressable": 50,
+   "coverage_today": 62,
+   "coverage_with_tuning": 82,
+   "gap": 18,
+   "coverage_after_slice": 70,
+   "coverage_after_slice_with_entry_values": 70
+  }
+ },
+ "units": [
+  {
+   "id": "rushstack-01",
+   "summary": "ensureConsistentVersions per subspace: one version specifier per dependency across all projects of a subspace (allowedAlternativeVersions excepted; preferredVersions participate)",
+   "evidence": "common/config/subspaces/{default,build-tests-subspace}/common-versions.json (ensureConsistentVersions: true, lines 68/65); libraries/rush-lib/src/logic/installManager/doBasicInstallAsync.ts:39 VersionMismatchFinder.ensureConsistentVersions; ci.yml:65 rush install",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "needs constraint over dependency entries grouped by (subspace, package name) with an allowlist of alternative versions",
+   "assertion_family": "unique-key",
+   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key per subspace: dependency name determines the specifier, with an allowlist of alternatives.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "entry-values",
+      "assertion_family": "unique-key",
+      "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key per subspace: dependency name determines the specifier, with an allowlist of alternatives."
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "rushstack-02",
+   "summary": "Approved-packages policy: every dependency (all four fields, alias-resolved, @types skipped) must be listed in browser-/nonbrowser-approved-packages.json with the depending project's reviewCategory in allowedCategories",
+   "evidence": "rush.json approvedPackagesPolicy (reviewCategories [libraries,tests,vscode-extensions], ignoredNpmScopes [@types]); libraries/rush-lib/src/logic/ApprovedPackagesChecker.ts:11; ci.yml:65 rush install",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-config",
+   "alint": "needs a join of dependency-key rows (per manifest, with the project's reviewCategory from rush.json) against approved-packages entries",
+   "assertion_family": "reference",
+   "reason": "Reference from dependency names (object keys) plus category to an allowlist; JSONPath cannot emit member names, so no A/C form. Verified 0 misses at the pin.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-03",
+   "summary": "A dependency on a local Rush project must use the workspace: protocol unless the depending project lists it in decoupledLocalDependencies",
+   "evidence": "libraries/rush-lib/src/logic/installManager/WorkspaceInstallManager.ts:246-301 (dependencyList+devDependencyList, Version/Range specifiers); ci.yml:65 rush install",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_matches rushstack-local-deps-use-workspace-protocol (189 non-decoupled local names restated by hand) + 7 cross_file subset rules rushstack-non-workspace-dep-is-decoupled-<pkg>",
+   "assertion_family": "none",
+   "reason": "Expressible only by restating the local-project name set from rush.json in the config and generating one rule per decoupled target; a new project is unchecked until added (tuning, C). Slight over-assertion across subspaces, where exemptDecoupledDependenciesBetweenSubspaces exempts cross-subspace refs (all current ones use workspace:*).",
+   "fire_verified": "Fires (rc=1): libraries/rush-lib node-core-library 'workspace:*'->'^5.0.0' (local-deps rule); rush-lib @rushstack/heft 'workspace:*'->'1.3.4' (non-workspace-dep-is-decoupled-heft); removing decoupledLocalDependencies from libraries/terminal in rush.json (same rule); rush-lib api-extractor -> 7.60.0 (api-extractor rule). Passes on the clone (alint check rc=0).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-04",
+   "summary": "A project that lists a package in decoupledLocalDependencies must not depend on it with workspace: notation",
+   "evidence": "libraries/rush-lib/src/logic/installManager/WorkspaceInstallManager.ts:303-315; ci.yml:65 rush install",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "cross_file subset x7 rushstack-decoupled-dep-not-workspace-<pkg> (one rule per decoupled target, generated)",
+   "assertion_family": "none",
+   "reason": "Expressible only with one generated rule per decoupled package name (the set of decoupled targets restated by hand); tuning, C.",
+   "fire_verified": "Fires (rc=1): apps/heft @rushstack/heft '1.3.4'->'workspace:*' (decoupled-dep-not-workspace-heft); libraries/terminal same mutation. Passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-05",
+   "summary": "rush.json rushVersion must equal the @microsoft/rush version pinned in common/config/validation/rush-package-lock.json (CI npm ci's install-run-rush from that lockfile)",
+   "evidence": ".github/workflows/ci.yml:30 INSTALL_RUN_RUSH_LOCKFILE_PATH; rush.json:19 rushVersion 5.182.0; common/config/validation/rush-package-lock.json packages[''].dependencies['@microsoft/rush'] 5.182.0",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "cross_file equals rushstack-rush-version-matches-ci-lockfile",
+   "assertion_family": "none",
+   "reason": "Direct equality between two JSON values; cross_file equals expresses it and check confirms (R4).",
+   "fire_verified": "Fires rc=1 with the lockfile pin changed to 5.181.0, and with rush.json rushVersion changed to 5.183.0; passes on the clone (rc=0).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-06",
+   "summary": "CI Node versions (ci.yml matrix 22.23.4/24.22.1/26.12.1, Azure install-node default 24.22.1) must satisfy rush.json nodeSupportedVersionRange, else Rush throws",
+   "evidence": "rush.json nodeSupportedVersionRange '>=22.23.4 <23.0.0 || >=24.22.1 <25.0.0 || >=26.12.1 <27.0.0'; libraries/rush-lib/src/api/RushConfiguration.ts:637-659 (throws unless allowUnsupportedNodeVersion); ci.yml:15-25,58; common/config/azure-pipelines/templates/install-node.yaml",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "B-adapter",
+   "alint": "semver-range satisfaction operator (version in node-semver range)",
+   "assertion_family": "none",
+   "reason": "Needs a semver-range operator; regex/equality cannot express range satisfaction. A stronger equality (matrix = range floors) is added as value-add only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-07",
+   "summary": "rush.json pnpmVersion must be at least Rush's MINIMUM_SUPPORTED_PNPM_VERSION 5.0.0",
+   "evidence": "libraries/rush-lib/src/logic/SetupChecks.ts:20,47-51; rush.json:29 pnpmVersion 10.27.0",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_matches rushstack-pnpm-version-supported (major >= 5 regex)",
+   "assertion_family": "none",
+   "reason": "A fixed lower bound on a major version is expressible as a regex; confirmed by check.",
+   "fire_verified": "Fires rc=1 with pnpmVersion 4.14.4; passes with 5.0.0 and on the clone (10.27.0).",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-08",
+   "summary": "Committed common/scripts/install-run*.js must match the copies shipped in the pinned Rush release (StandardScriptUpdater.validateAsync)",
+   "evidence": "libraries/rush-lib/src/logic/StandardScriptUpdater.ts:131 validateAsync; run by rush install in ci.yml:65",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Compares repo files against the content of an external package (the installed Rush release): package-manager / external state (R7 D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-09",
+   "summary": "Rush config files validate against Rush's JSON schemas (rush.json, common-versions, version-policies, pnpm-config, experiments, build-cache, cobuild, subspaces, custom-tips, artifactory, rush-plugins, approved-packages, repo-state, plugin manifests)",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:240,1074; api/ApprovedPackagesConfiguration.ts:53,131; logic/RepoStateFile.ts:41,151; api/SubspacesConfiguration.ts:30,138; schemas in libraries/rush-lib/src/schemas/*.schema.json",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_schema_passes rushstack-schema-* (13 rules: rush-json, common-versions, version-policies, pnpm-config, experiments, build-cache, cobuild, subspaces, custom-tips, artifactory, rush-plugins, approved-packages, repo-state, plugin-manifests)",
+   "assertion_family": "none",
+   "reason": "One unit (R1), one rule per schema; each confirmed passing and firing on a schema-breaking mutation.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-09b",
+   "summary": "command-line.json validates against the command-line schema after Rush merges its built-in build/rebuild defaults",
+   "evidence": "libraries/rush-lib/src/api/CommandLineConfiguration.ts (_applyBuildCommandDefaults before validation); common/config/rush/command-line.json",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "none: the schema-after-defaults check needs a shim schema outside the repository; the rule rushstack-command-line-no-global-plugin-commands expresses rushstack-c01 instead",
+   "assertion_family": "none",
+   "reason": "The raw file fails the schema (build command lacks summary/enableParallelism, filled by defaults); expressing it needs a shim schema outside the repo (batch-1 precedent: shim schema is C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "other",
+      "none"
+     ],
+     "why": "Keep C for the schema-after-defaults unit. But its only rule (rushstack-command-line-no-global-plugin-commands) expresses a different, A-expressible loader check: the globalPlugin rejection in _prepareRepoCommandLineJson (CommandLineConfiguration.ts:750-770). Record that as its own A unit, or relabel the rule, so the C unit is not credited with a rule."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "alint": "none: the schema-after-defaults check needs a shim schema outside the repository; the rule rushstack-command-line-no-global-plugin-commands expresses rushstack-c01 instead"
+     }
+    }
+   ]
+  },
+  {
+   "id": "rushstack-10",
+   "summary": "Every projectFolder is a normalized relative '/'-separated path exactly two levels deep (projectFolderMinDepth = MaxDepth = 2; validateRelativePathField)",
+   "evidence": "libraries/rush-lib/src/api/RushConfigurationProject.ts:219-235,524-551; rush.json projectFolderMinDepth/MaxDepth 2",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_matches rushstack-project-folder-depth",
+   "assertion_family": "none",
+   "reason": "Regex over each projectFolder value; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "The rule hardcodes depth 2 in a regex instead of reading projectFolderMinDepth/MaxDepth from rush.json. It also does not express the min>=1 and max>=min sanity checks (RushConfiguration.ts:800-811) that its comment claims. Restating a config value is the treatment Stage A gives rushstack-58 and -59 (C), so keep it consistent."
+    }
+   ]
+  },
+  {
+   "id": "rushstack-11",
+   "summary": "Every rush.json projectFolder exists and contains package.json",
+   "evidence": "libraries/rush-lib/src/api/RushConfigurationProject.ts:248",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve rushstack-project-folders-resolve (expect dir, must_contain package.json)",
+   "assertion_family": "none",
+   "reason": "Registry-to-path resolution; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-12",
+   "summary": "The package.json name in each project folder equals the packageName rush.json gives that folder",
+   "evidence": "libraries/rush-lib/src/api/RushConfigurationProject.ts:285-288",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + cross_file equals rushstack-package-name-matches-rush-json",
+   "assertion_family": "none",
+   "reason": "Per-folder templated JSONPath join; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-13",
+   "summary": "A project name may appear only once in rush.json projects",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:997-998",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "uniqueness of $.projects[*].packageName",
+   "assertion_family": "unique-key",
+   "reason": "No kind asserts duplicate-free values within one array.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-14",
+   "summary": "With approvedPackagesPolicy enabled every project declares a reviewCategory, and it is one of the declared reviewCategories",
+   "evidence": "libraries/rush-lib/src/api/RushConfigurationProject.ts:270-279",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent rushstack-review-category-present + cross_file subset rushstack-review-category-declared",
+   "assertion_family": "none",
+   "reason": "Presence filter and set reference within rush.json; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-15",
+   "summary": "decoupledLocalDependencies (and legacy cyclicDependencyProjects) entries must name existing projects",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:1008-1009",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset rushstack-decoupled-dependencies-exist",
+   "assertion_family": "none",
+   "reason": "Set reference within rush.json; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-16",
+   "summary": "A project's subspaceName must be a declared subspace",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:975-976",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset rushstack-subspace-name-declared",
+   "assertion_family": "none",
+   "reason": "Cross-file set reference; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-17",
+   "summary": "A project's versionPolicyName must name a policy in version-policies.json",
+   "evidence": "libraries/rush-lib/src/api/VersionPolicyConfiguration.ts:116,158",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset rushstack-version-policy-name-declared",
+   "assertion_family": "none",
+   "reason": "Cross-file set reference; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-18",
+   "summary": "A lockstep policy's mainProject must be an existing project",
+   "evidence": "libraries/rush-lib/src/api/VersionPolicyConfiguration.ts:101-102",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset rushstack-version-policy-main-project-exists",
+   "assertion_family": "none",
+   "reason": "Cross-file set reference; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-19",
+   "summary": "Every project's package.json version is valid SemVer",
+   "evidence": "libraries/rush-lib/src/api/RushConfigurationProject.ts:292-294",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches rushstack-project-version-semver",
+   "assertion_family": "none",
+   "reason": "Regex on a value; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-20",
+   "summary": "A project with shouldPublish: true must not be private in package.json",
+   "evidence": "libraries/rush-lib/src/api/RushConfigurationProject.ts:332-334",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset rushstack-published-projects-not-private",
+   "assertion_family": "none",
+   "reason": "Private manifest names must be a subset of non-published projects; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-21",
+   "summary": "A project may not set both cyclicDependencyProjects and decoupledLocalDependencies",
+   "evidence": "libraries/rush-lib/src/api/RushConfigurationProject.ts:317-319",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent rushstack-no-cyclic-and-decoupled",
+   "assertion_family": "none",
+   "reason": "Filter on co-presence; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-22",
+   "summary": "gitPolicy.allowedEmailRegExps requires a sampleEmail",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:832-833",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent rushstack-git-policy-sample-email",
+   "assertion_family": "none",
+   "reason": "Conditional presence; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-23",
+   "summary": "common/config/rush may hold only files Rush recognizes (deploy-*.json, .bak/.disabled/.md/.old/.orig and hidden files excepted); with subspaces enabled no pnpmfile; pinned-versions.json rejected",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:59 knownRushConfigFilenames, 1555-1632 _validateCommonRushConfigFolder",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "dir_only_contains rushstack-config-folder-known-files + file_absent rushstack-config-folder-forbidden-files",
+   "assertion_family": "none",
+   "reason": "Directory allowlist plus forbidden files; confirmed (hidden .DS_Store passes, unknown file fires).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-24",
+   "summary": "Every change file under common/changes loads through the change-file schema (strictChangefileValidation)",
+   "evidence": "libraries/rush-lib/src/logic/ChangeFiles.ts:52,96; common/config/rush/experiments.json strictChangefileValidation; ci.yml:61 rush change --verify",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_schema_passes rushstack-change-files-schema",
+   "assertion_family": "none",
+   "reason": "Schema validation over a glob; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-25",
+   "summary": "A change file may only reference projects that exist in rush.json",
+   "evidence": "libraries/rush-lib/src/logic/ChangeFiles.ts (strict validation loop, getProjectByName ~line 102)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file subset rushstack-change-files-reference-projects",
+   "assertion_family": "none",
+   "reason": "Set reference from a file glob to rush.json; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-26",
+   "summary": "A change file must not name a lockstep-policy member other than the policy's mainProject",
+   "evidence": "libraries/rush-lib/src/logic/ChangeFiles.ts (~line 120, LockStepVersionPolicy mainProject check)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file subset rushstack-change-files-lockstep-main-project",
+   "assertion_family": "none",
+   "reason": "Expressed with the mainProject name (@microsoft/rush) hardcoded in the JSONPath because a filter cannot join version-policies.json; tuning, C.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-27",
+   "summary": "Changed published projects need a change file (rush change --verify against the target branch; also re-run in the release pipeline)",
+   "evidence": ".github/workflows/ci.yml:61; common/config/azure-pipelines/templates/build.yaml; bump-versions-stages.yaml:136-141",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "pair_changed_together per project folder -> common/changes/<packageName>/ (no rule: depth-1 clone)",
+   "assertion_family": "none",
+   "reason": "Git-diff kind expresses it with the folder-to-name map restated by hand; depth 1 cannot confirm (batch-1 ruling: git kinds are C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-28",
+   "summary": "README project tables are generated from rush.json and package.json (repo-toolbox readme --verify)",
+   "evidence": ".github/workflows/ci.yml:84; repo-scripts/repo-toolbox/src/cli/actions/ReadmeAction.ts:23-62; README.md GENERATED PROJECT SUMMARY markers",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "generator logic (join with descriptions, URL-encoding, ordering) belongs in a plugin/command",
+   "assertion_family": "none",
+   "reason": "Codegen freshness of a bespoke formatter; a partial approximation is kept as value-add only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-29",
+   "summary": "preventManualShrinkwrapChanges: repo-state.json pnpmShrinkwrapHash must equal the hash of Rush's re-serialized lockfile (merge-conflict guard folded in)",
+   "evidence": "common/config/rush/pnpm-config.json preventManualShrinkwrapChanges; libraries/rush-lib/src/logic/RepoStateFile.ts:16-30,181",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-delegate",
+   "alint": "pair_hash cannot reproduce Rush's re-serialization minus importers",
+   "assertion_family": "none",
+   "reason": "The hash is over a tool-specific normalization of the lockfile; repository-state logic for a plugin.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-30",
+   "summary": "Every plugin in rush-plugins.json loads from the cached manifest under common/autoinstallers/<name>/rush-plugins/<package>/, and that manifest provides the configured pluginName",
+   "evidence": "common/config/rush/rush-plugins.json; libraries/rush-lib/src/pluginFramework (autoinstaller plugin loader)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "registry_paths_resolve rushstack-plugin-manifests-cached + cross_file superset rushstack-plugin-manifests-provide-plugins",
+   "assertion_family": "none",
+   "reason": "The autoinstaller name is fixed to 'plugins' in the base path because registry_paths_resolve cannot template the base per entry; tuning, C.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-31",
+   "summary": ".gitattributes convention: npm bin scripts (*/*/bin/<no extension>) must have LF line endings",
+   "evidence": ".gitattributes comment 'NPM bin scripts MUST have LF' with /*/*/bin/+([!.]) -text",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "line_endings lf rushstack-bin-scripts-lf",
+   "assertion_family": "none",
+   "reason": "Line-ending assertion over a glob; confirmed (bin/x.js with CRLF correctly ignored).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-32",
+   "summary": "Lockstep members' versions must not exceed the policy version (rush version --bump in release pipeline)",
+   "evidence": "common/config/rush/version-policies.json (lockstep 'rush', version 5.182.1); libraries/rush-lib/src/api/VersionPolicy.ts (LockStepVersionPolicy ensure); bump-versions*.yaml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "semver order operator",
+   "assertion_family": "none",
+   "reason": "Needs semver comparison between package.json versions and a policy version.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-33",
+   "summary": "PR template: a JSON schema change must also update the init templates (rush-lib/assets/rush-init/*.json, api-extractor-template.json)",
+   "evidence": ".github/PULL_REQUEST_TEMPLATE.md STEP 7",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "pair_changed_together per schema/template pair (no rule: depth-1 clone)",
+   "assertion_family": "none",
+   "reason": "Co-change convention enforced in review; a git-diff kind expresses it but depth 1 cannot confirm (batch-1 ruling). Soft 'remember to' wording; Stage B may judge it unenforced.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-34",
+   "summary": "Git email policy: committer email must match gitPolicy.allowedEmailRegExps",
+   "evidence": "rush.json gitPolicy; rush install/commands check the local git config",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Environment/git-config state, not repository files.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-35",
+   "summary": "Lockfile freshness: shrinkwrap up to date with package.json, overrides, preferredVersionsHash, dependenciesMeta, packageExtensionsChecksum, injected deps, autoinstaller lockfiles",
+   "evidence": "libraries/rush-lib/src/logic/installManager/WorkspaceInstallManager.ts (isWorkspaceProjectModifiedAsync), RepoStateFile.ts; ci.yml:65",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Package-manager resolution semantics (R7 D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-36",
+   "summary": "strictPeerDependencies: pnpm fails install on unmet peers",
+   "evidence": "common/config/rush/pnpm-config.json strictPeerDependencies",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Package-manager resolution (R7 D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-37",
+   "summary": "Workspace dependency cycles are rejected",
+   "evidence": "rush install / build graph",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Package-name dependency graph resolution, an alint non-goal.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-38",
+   "summary": "Build (tsc and bundlers) with warnings failing the build",
+   "evidence": "ci.yml:74 rush retest --production; common/config/rush/command-line.json allowWarningsOnSuccess false",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Build/type-check execution (R2).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-39",
+   "summary": "ESLint via rigs (including headers/header-format Microsoft copyright, packlets, security rules)",
+   "evidence": "rigs/decoupled-local-node-rig/profiles/default/includes/eslint/flat/profile/_common.js:10,76,149",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Linter (R2 as narrowed by R7: code-analysis tools stay D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-40",
+   "summary": "Jest test suites",
+   "evidence": "rush retest (heft test)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Test execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-41",
+   "summary": "API Extractor report freshness (*.api.md) in production builds",
+   "evidence": "rush retest --production (heft api-extractor plugin)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Requires type analysis of built declarations.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-42",
+   "summary": "Package-manager integration tests",
+   "evidence": "ci.yml:80 npm run test (build-tests/rush-package-manager-integration-test)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Test execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-43",
+   "summary": "Build cache verification: second clone rebuilds from cache with the in-repo Rush (start-dev update/test twice)",
+   "evidence": "ci.yml:96-121",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Build execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-44",
+   "summary": "collect-project-files collision check over built json-schemas/api outputs",
+   "evidence": "ci.yml:88,92; repo-scripts/repo-toolbox CollectProjectFilesAction",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Operates on build outputs under temp/.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-45",
+   "summary": "Prettier on staged files at pre-commit",
+   "evidence": "common/git-hooks/pre-commit:9 (install-run-rush prettier -> pretty-quick --staged)",
+   "mechanism": "hook",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Formatter (R2).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-46",
+   "summary": "Heft and rig config validation after rig resolution",
+   "evidence": "heft config loading during rush retest",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Requires the tool's rig/inheritance resolution at build time.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Narrow, don't move. The rig.json load validation it lumps in is A-expressible on its own (see missed rushstack-b10, fire-verified). Only the merged extends/rig validation of heft.json (heft-config-file ConfigurationFileBase.ts:720-760) stays D/B, because it needs the merge semantics."
+    }
+   ]
+  },
+  {
+   "id": "rushstack-47",
+   "summary": "rush-project.json operationSettings integrity after rig resolution",
+   "evidence": "rush retest phased commands",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "",
+   "assertion_family": "unique-key",
+   "reason": "Requires rig resolution (tool semantics).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "D is too broad. The rush-project.json schema half is A per file (it belongs with 09; see b15). The remaining loader checks are duplicate operationName (RushProjectConfiguration.ts:1150-1214, unique-key) and outputFolderNames overlap / parameterNamesToIgnore (440-535, B-adapter for the overlap). None needs build execution."
+    }
+   ]
+  },
+  {
+   "id": "rushstack-48",
+   "summary": "PR title prefixed with the package name in brackets",
+   "evidence": ".github/PULL_REQUEST_TEMPLATE.md STEP 3",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "PR metadata is external (GitHub) state, not repository files.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-49",
+   "summary": "VSIX signature verification before publishing VS Code extensions",
+   "evidence": "common/config/azure-pipelines/vscode-extension-publish.yaml:107 verify-signature",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Operates on build artifacts and signatures.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-50",
+   "summary": "Release 'Verify package artifact': a version bump must produce unpublished package tarballs",
+   "evidence": "common/config/azure-pipelines/templates/bump-versions-stages.yaml:151-159",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Needs packing output and git diff at release time.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-51",
+   "summary": "A package may not be listed in both dependencies and optionalDependencies, dependencies and peerDependencies, or optionalDependencies and peerDependencies",
+   "evidence": "libraries/rush-lib/src/api/PackageJsonEditor.ts:76-79,111-142 (throws on load)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-config",
+   "alint": "disjointness of the key sets of two dependency maps per manifest",
+   "assertion_family": "unique-key",
+   "reason": "Key rows suffice. (manifest, name) determines the field within each forbidden pair of fields, a functional dependency (batch 2 ruling aligns trpc-08, jest-24 and rushstack-51).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "assertion_family": "unique-key",
+      "reason": "Key rows suffice. (manifest, name) determines the field within each forbidden pair of fields, a functional dependency (batch 2 ruling aligns trpc-08, jest-24 and rushstack-51)."
+     }
+    }
+   ]
+  },
+  {
+   "id": "rushstack-52",
+   "summary": "rush.json must pin exactly one package manager: npmVersion, pnpmVersion or yarnVersion",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:752-764",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_absent rushstack-one-package-manager-pin",
+   "assertion_family": "none",
+   "reason": "Root-level filter over field presence; confirmed.",
+   "fire_verified": "Fires rc=1 with pnpmVersion removed and with npmVersion added next to pnpmVersion; passes with npmVersion only and on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-53",
+   "summary": "When common/config/rush/pnpm-config.json is used, rush.json may not keep the old pnpmOptions",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:710-718",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir (when_iter has_file pnpm-config.json) + json_path_absent rushstack-no-legacy-pnpm-options",
+   "assertion_family": "none",
+   "reason": "Conditional on file presence; confirmed both ways (fires with pnpmOptions, passes when pnpm-config.json is removed).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-54",
+   "summary": "rush.json repository may set url or urls, not both",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:872",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent rushstack-repository-url-or-urls",
+   "assertion_family": "none",
+   "reason": "Co-presence filter; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-55",
+   "summary": "rush.json rushVersion's major.minor may not be newer than the in-repo rush-lib version, which CI's second clone runs via start-dev.js",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:1058-1069; ci.yml:108,112,118 (apps/rush/lib-commonjs/start-dev.js); libraries/rush-lib/package.json version 5.182.1",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "B-adapter",
+   "alint": "semver order operator on major.minor",
+   "assertion_family": "none",
+   "reason": "Ordering, not equality: rushVersion normally lags the source, so an equality rule would over-assert.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-56",
+   "summary": "Subspace names must be lowercase letters and digits separated by hyphens (non-split mode)",
+   "evidence": "libraries/rush-lib/src/api/SubspacesConfiguration.ts:16,70,85-110",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches rushstack-subspace-names-valid",
+   "assertion_family": "none",
+   "reason": "Regex over values, conditioned on splitWorkspaceCompatibility != true; confirmed.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-57",
+   "summary": "With subspaces enabled, each declared subspace needs a configuration folder common/config/subspaces/<name>",
+   "evidence": "libraries/rush-lib/src/api/Subspace.ts:152-156",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve rushstack-subspace-config-folders-exist",
+   "assertion_family": "none",
+   "reason": "Registry-to-directory resolution; confirmed. The implicit default subspace's folder is not covered (no extraction yields the literal name).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-58",
+   "summary": "The subspaces feature requires useWorkspaces=true in pnpm-config.json",
+   "evidence": "libraries/rush-lib/src/api/Subspace.ts:106-110",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_equals rushstack-subspaces-require-workspaces",
+   "assertion_family": "none",
+   "reason": "cross_file accepts string extracts only, so the subspacesEnabled condition in another file cannot be joined; restated as the pin's fact (tuning, C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-59",
+   "summary": "With subspaces enabled, ensureConsistentVersions must live in common-versions.json, not rush.json",
+   "evidence": "libraries/rush-lib/src/api/CommonVersionsConfiguration.ts:150-163",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_absent rushstack-no-rush-json-ensure-consistent-versions",
+   "assertion_family": "none",
+   "reason": "Condition on another file's boolean cannot be expressed without a custom fact; restated as the pin's fact (C).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-60",
+   "summary": "A package name may appear only once in each approved-packages file",
+   "evidence": "libraries/rush-lib/src/api/ApprovedPackagesConfiguration.ts:190-195",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "uniqueness of $.packages[*].name per file",
+   "assertion_family": "unique-key",
+   "reason": "No kind asserts duplicate-free array values.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-61",
+   "summary": "build-cache.json cacheEntryNamePattern must parse: no leading '/', only [A-z0-9-_/] outside tokens, known tokens with valid attributes, includes [hash]",
+   "evidence": "libraries/rush-lib/src/logic/buildCache/CacheEntryId.ts:46-161; common/config/rush/build-cache.json (buildCacheEnabled true)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches rushstack-cache-entry-name-pattern",
+   "assertion_family": "none",
+   "reason": "The token grammar is regular; confirmed (fires without [hash], with bare [phaseName] or a leading '/'; passes for a valid alternative pattern).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b01",
+   "summary": "Every phase name in command-line.json must match ^_phase:[a-z][a-z0-9]*(-[a-z0-9]+)*$ (the command-line schema has no pattern for it; only the loader checks it)",
+   "evidence": "libraries/rush-lib/src/api/CommandLineConfiguration.ts:250-270 (phase-name regex + duplicate check); loaded by every rush command CI runs (.github/workflows/ci.yml:61,65,74); schema command-line.schema.json:320 only describes the prefix",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches common/config/rush/command-line.json $.phases[*].name '^_phase:[a-z][a-z0-9]*(-[a-z0-9]+)*$' (proposed id b-cmdline-phase-name-syntax)",
+   "assertion_family": "none",
+   "reason": "A single-file value regex, so A. alint check passed on the clone. Renaming _phase:test (line 273) to an invalid name fired the rule on a scratch copy.",
+   "fire_verified": "n/a (family other); fired anyway on scratch mutation of line 273",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b02",
+   "summary": "Phase names and command names are each unique within command-line.json",
+   "evidence": "CommandLineConfiguration.ts:250-270 (duplicate phase), :346 (duplicate command); RushCommandLineParser.ts:632 ('using a name that already exists')",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over $.phases[*].name and $.commands[*].name",
+   "assertion_family": "unique-key",
+   "reason": "No kind asserts that values within one array are unique, so this needs the unique-key family. Same shape as Stage A's rushstack-60, but a different file and loader, so it is a distinct unit.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b03",
+   "summary": "Every phase referenced in command-line.json must be declared: phase dependencies.self/upstream, phased-command phases, watchOptions.watchPhases and parameter associatedPhases",
+   "evidence": "CommandLineConfiguration.ts:309,322 (self/upstream deps exist), :373 (command phases exist), :408 (watchPhases exist), :574 (associatedPhases exist); command-line.json ~line 55 watchPhases",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file relation: subset, source $.phases[*].dependencies['self','upstream'][*] (and $.commands[?(@.commandKind=='phased')].phases[*], $.commands[*].watchOptions.watchPhases[*], $.parameters[*].associatedPhases[*]) vs target $.phases[*].name in the same file (proposed b-cmdline-phase-dep-refs and siblings)",
+   "assertion_family": "none",
+   "reason": "This is one loader behavior ('a referenced phase exists'), so R1 collapses the four reference sites into one unit. All four cross_file rules passed on the clone, and the phase rename fired three of them.",
+   "fire_verified": "n/a (family other); fired on scratch phase rename",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b04",
+   "summary": "Every parameter must list associatedCommands, and each must name a defined command, including the build and rebuild commands that Rush synthesizes",
+   "evidence": "CommandLineConfiguration.ts:558 (associatedCommands exist), :583 (no associated commands); command-line.json parameters list 'rebuild', which the file does not define",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_absent $.parameters[?(!@.associatedCommands || length(@.associatedCommands)==0)] (A part) + cross_file subset of $.parameters[*].associatedCommands[*] vs $.commands[*].name with a restated literal for the synthesized build/rebuild",
+   "assertion_family": "none",
+   "reason": "The reference half has to restate Rush's synthesized command names, because 'rebuild' is not in the file. That is a tuning case (C), consistent with Stage A's 09b treatment of _applyBuildCommandDefaults.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b05",
+   "summary": "A phase may not set both ignoreMissingScript and missingScriptBehavior",
+   "evidence": "CommandLineConfiguration.ts:272",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent common/config/rush/command-line.json $.phases[?(@.ignoreMissingScript && @.missingScriptBehavior)] (proposed b-cmdline-missing-script-exclusive)",
+   "assertion_family": "none",
+   "reason": "A plain mutual-exclusion query, and it passes on the clone. The filter must be an existence test: '!= null' matches when the member is absent.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b06",
+   "summary": "A custom build or rebuild command may not be commandKind global or safeForSimultaneousRushProcesses",
+   "evidence": "CommandLineConfiguration.ts:459,465; RushCommandLineParser.ts:680",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent $.commands[?((@.name=='build'||@.name=='rebuild') && (@.commandKind=='global'||@.safeForSimultaneousRushProcesses==true))] (proposed b-cmdline-build-not-global)",
+   "assertion_family": "none",
+   "reason": "A single-file query that passes on the clone. The parser repeats the loader's check, so it is one unit.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b07",
+   "summary": "The phase dependency graph has no cycle that passes through a phase's self dependencies",
+   "evidence": "CommandLineConfiguration.ts:614 (self-dependency cycle detection)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-kernel",
+   "alint": "needs graph-cycle detection over a JSON-internal edge list (phase -> dependencies.self)",
+   "assertion_family": "none",
+   "reason": "Cycle detection needs a graph kernel. file_graph-style kinds work on file edges, not JSON-internal edges.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b08",
+   "summary": "A custom command in the repo's or a plugin's command-line.json may not reuse a built-in Rush action name",
+   "evidence": "RushCommandLineParser.ts:632 (#populateActions eagerly constructs every built-in action, then custom ones; 'using a name that already exists'); plugin command-line.json is loaded at startup (:336)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path_absent with the built-in action names (install, update, add, change, version, publish, ...) restated as a literal list",
+   "assertion_family": "none",
+   "reason": "Expressible, but only by restating Rush's built-in action list, which lives in code and not in any file in the repo. That makes it C.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b09",
+   "summary": "A global command's autoinstallerName must resolve: a valid unscoped package name, an existing common/autoinstallers/<name> folder with a package.json, and that package.json's name equal to the folder name",
+   "evidence": "libraries/rush-lib/src/cli/scriptActions/GlobalScriptAction.ts:55-105 (Autoinstaller.validateName, folder + package.json exist, name match); command-line.json ~line 244 (prettier -> rush-prettier); the pre-commit hook common/git-hooks/pre-commit runs it",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve source command-line.json extract $.commands[?(@.commandKind=='global')].autoinstallerName base common/autoinstallers expect dir must_contain package.json (b-cmdline-autoinstaller-exists) + for_each_dir common/autoinstallers/* require json_path_equals {path}/package.json $.name == {basename} (b-autoinstaller-name-matches-folder)",
+   "assertion_family": "none",
+   "reason": "Stage C expressed all three parts against the global commands in command-line.json (name regex, folder with package.json, name match) and fire-tested them; unreferenced autoinstallers pass.",
+   "fire_verified": "n/a (family other)",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "A",
+      "reason": "Stage C expressed all three parts against the global commands in command-line.json (name regex, folder with package.json, name match) and fire-tested them; unreferenced autoinstallers pass."
+     }
+    }
+   ]
+  },
+  {
+   "id": "rushstack-b10",
+   "summary": "Each project's config/rig.json is validated when loaded: it must pass rig.schema.json, rigPackageName must match the package-name regex and end in -rig or -rig-test, rigProfile must match the profile regex, and the profile folder must exist",
+   "evidence": "libraries/rig-package/src/RigConfig.ts (allowed fields rigPackageName/rigProfile, rigPackageName required, name regex /^(@[A-Za-z0-9\\-_\\.]+\\/)?[A-Za-z0-9\\-_\\.]+$/, /-rig(-test)?$/, profile regex /^[a-z0-9_\\.]+(\\-[a-z0-9_\\.]+)*$/, profile folder exists); schema libraries/rig-package/src/schemas/rig.schema.json; 149 */*/config/rig.json files, all pointing at local rigs; runs on every Heft build in CI",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_schema_passes */*/config/rig.json vs libraries/rig-package/src/schemas/rig.schema.json + json_path_matches $.rigPackageName '^(@[A-Za-z0-9\\-_\\.]+/)?[A-Za-z0-9\\-_\\.]+-rig(-test)?$' + json_path_matches $.rigProfile (if_present) (proposed b-rig-json-schema/-name/-profile)",
+   "assertion_family": "none",
+   "reason": "Under R7 this is a loader check over files alint reads, classified by what it asserts. The schema and regex rules passed on all 149 files and fired on mutations. Stage A folds it into rushstack-46 as D, but the rig.json load validation is independent of the merged heft.json check. The profile-folder check needs a node_modules-style resolution; because every rig is local, a registry_paths_resolve on rigs/<pkg>/profiles/<profile> approximates it.",
+   "fire_verified": "n/a (family other); fired on scratch mutation",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b11",
+   "summary": "rush.json nodeSupportedVersionRange must be a valid node-semver range",
+   "evidence": "libraries/rush-lib/src/api/RushConfiguration.ts:637-643 (semver.validRange, throws on an invalid range); the runtime satisfies check follows at :644-659 (that part depends on the running node, so it is D)",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "B-adapter",
+   "alint": "needs a semver-range parse/validity operator; a regex (passes on the clone: '>=22.23.4 <23.0.0 || >=24.22.1 <25.0.0 || >=26.12.1 <27.0.0') only approximates it",
+   "assertion_family": "none",
+   "reason": "This is the static half of the Node pin. The section 2.2 example names a semver-range operator as B-adapter. A regex can only approximate node-semver grammar, so it is not A under R4.",
+   "fire_verified": "n/a (not A)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b12",
+   "summary": "In common-versions.json, the keys of preferredVersions and allowedAlternativeVersions must be valid package names",
+   "evidence": "libraries/rush-lib/src/api/CommonVersionsConfiguration.ts:283,295 (PackageNameParsers.permissive.validate on each key)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "json_schema_passes with a shim schema adding propertyNames {pattern: package-name regex} to preferredVersions/allowedAlternativeVersions",
+   "assertion_family": "none",
+   "reason": "JSONPath cannot read member names and json_schema_passes takes no inline schema, so no standalone form exists. Needs a predicate over key rows (the entry adapter has the keys).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "B-adapter",
+      "needs": "key-predicate",
+      "reason": "JSONPath cannot read member names and json_schema_passes takes no inline schema, so no standalone form exists. Needs a predicate over key rows (the entry adapter has the keys)."
+     }
+    }
+   ],
+   "needs": "key-predicate"
+  },
+  {
+   "id": "rushstack-b13",
+   "summary": "common/config/rush/.npmrc-publish must declare a registry= line; the release pipeline's filter-packages step throws without it",
+   "evidence": "common/scripts/publish-cohort.js filterPackages (throws 'Unable to determine the publish registry from .npmrc-publish.' when /^registry=(.+)$/m does not match); run by common/config/azure-pipelines/templates/pack.yaml; the file has the line at line 20",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches common/config/rush/.npmrc-publish '(?m)^registry=(.+)$'",
+   "assertion_family": "none",
+   "reason": "A plain content regex. It passed on the clone and fired when the line was removed on a scratch copy. This is a release-time gate that Stage A's catalogue does not mention.",
+   "fire_verified": "n/a (family other)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b14",
+   "summary": "Every heft-plugin.json manifest validates against Heft's heft-plugin.schema.json, and plugin names are unique within a manifest",
+   "evidence": "apps/heft/src/configuration/HeftPluginConfiguration.ts (loadAndValidate against apps/heft/src/schemas/heft-plugin.schema.json; duplicate plugin names at :216,:228); 22 */*/heft-plugin.json files; run by every heft build in rush retest (ci.yml:74)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_schema_passes */*/heft-plugin.json vs apps/heft/src/schemas/heft-plugin.schema.json",
+   "assertion_family": "none",
+   "reason": "Under R7 this is a loader validation of static files. The schema rule passed on all 22 files and fired when pluginName was renamed. The duplicate-name sub-check is part of the same loader, so one unit; a stricter count would add a unique-key B-config.",
+   "fire_verified": "n/a (family other); fired on scratch mutation",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-b15",
+   "summary": "Rush validates three more files against its schemas beyond Stage A's rushstack-09 set: each project's config/rush-project.json (and the rig-profile copies), the cached plugin command-line.json (raw, through tryLoadFromFile), and every CHANGELOG.json during a version bump",
+   "evidence": "libraries/rush-lib/src/api/RushProjectConfiguration.ts (loader + schema); CommandLineConfiguration.tryLoadFromFile (validates the raw plugin command-line.json); libraries/rush-lib/src/logic/ChangelogGenerator.ts:184 (loadAndValidate of CHANGELOG.json during rush version --bump, templates/bump-versions.yaml)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_schema_passes rules added to the rushstack-09 family: */*/config/rush-project.json + rigs/*/profiles/*/config/rush-project.json vs rush-project.schema.json; the cached plugin command-line.json vs command-line.schema.json; */*/CHANGELOG.json (83 files) vs changelog.schema.json",
+   "assertion_family": "none",
+   "reason": "By R1 these belong to the rushstack-09 unit ('Rush schema-validates the config it loads'). They are listed so the 09 rule set can be completed, not as an extra count. If the integrator counts 09 as one unit, merge this one into it. Every rule passed on the clone.",
+   "fire_verified": "n/a (family other)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "rushstack-c01",
+   "summary": "A command in a plugin's or the repo's command-line.json may not be commandKind globalPlugin (only plugins define those through their manifests)",
+   "evidence": "libraries/rush-lib/src/api/CommandLineConfiguration.ts ~749-770 (_prepareRepoCommandLineJson rejects globalPlugin); loaded by every rush command CI runs",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "rushstack-command-line-no-global-plugin-commands",
+   "assertion_family": "none",
+   "reason": "Split out of rushstack-09b by Stage B; Stage C confirmed the rule passes on the clone and fires on mutation (R4).",
+   "fire_verified": "Stage C: fires on a scratch command-line.json with a globalPlugin command, passes on the clone.",
+   "origin": "integrator",
+   "changes": []
+  }
+ ],
+ "removed": [],
+ "rejected_stage_b": {},
+ "value_add": [
+  "rushstack-valueadd-readme-published-folders / -unpublished-folders (info): README project tables list exactly the published / unpublished project folders from rush.json; a partial approximation of rushstack-28 (B-delegate)",
+  "rushstack-valueadd-ci-node-matrix-at-range-floors (info): ci.yml NodeVersion values set-equal the floors of rush.json nodeSupportedVersionRange; stronger than rushstack-06 (B-adapter)",
+  "rushstack-valueadd-subspace-npmrc-identical and rushstack-valueadd-subspace-pnpmfile-identical (info): the two subspaces' .npmrc and .pnpmfile.cjs are identical"
+ ],
+ "absent_categories": [
+  "locale: no locale files or i18n gate (the localization plugins are product features, not a repo policy)",
+  "toolchain-pin files: no .nvmrc, .node-version, .tool-versions, Volta, engines policy or packageManager field; Node is pinned only through rush.json nodeSupportedVersionRange and the CI matrix; engines.node in manifests is inconsistent and ungated",
+  "lockfile-lint: common/config/rush/lockfile-lint.json has no active rules",
+  "commit-message hooks: commit-msg is only a .sample; no conventional-commit gate",
+  "no .editorconfig",
+  "codegen git-diff gates: none apart from repo-toolbox readme --verify",
+  "license header: no standalone gate; only through ESLint headers/header-format (D)",
+  "CODEOWNERS present, no enforcement of its own",
+  "allowedProjectTags, installation variants, custom tips, globalAllowBuilds/minimumReleaseAge exclusivity: Rush checks for features the repo does not configure, so not counted",
+  "no import or layering firewall beyond ESLint packlets (D)"
+ ],
+ "unusual": [
+  "Rush dogfoods itself: CI installs the published Rush 5.182.0 through install-run-rush with a pinned npm lockfile (common/config/validation/rush-package-lock.json). CI's second clone then runs the in-repo Rush 5.182.1 (start-dev.js), so both the release's and the source's config checks apply.",
+  "The README project tables are generated from rush.json by a bespoke repo-toolbox command and verified in CI.",
+  "The workspace: / decoupledLocalDependencies contract: 7 packages (heft, api-extractor, the ESLint packages, heft-node-rig, set-webpack-public-path-plugin) are consumed from npm by 26 projects to break bootstrap cycles.",
+  "exemptDecoupledDependenciesBetweenSubspaces exempts cross-subspace local deps from the workspace: rule.",
+  "Two dependency specs are written 'workspace: *' with a space.",
+  "The ESLint rig enforces a two-line Microsoft copyright header, and warnings fail the build. 45 src files under build-tests and similar lack it or carry a shebang first, so header compliance is not repository-wide.",
+  ".prettierignore says 'Keep this section in sync with .gitignore' but has drifted (violated at the pin, not enforced, R5).",
+  "eslint-patch wrap-words-to-lines.ts says 'KEEP IT IN SYNC' with libraries/terminal PrintUtilities but has drifted (violated, not enforced).",
+  "The repo-toolbox collect-project-files command fails on output-file collisions across projects.",
+  "The Azure pipelines are mostly release-time (version bump, publish, VSIX signature verification); PR gating is GitHub Actions plus the same build template."
+ ],
+ "check_result": "On the clone, 'alint validate-config' loaded 66 rules and 'alint check .' passed every rule (rc=0, zero violations). The clone was unmodified afterwards (git status empty).",
+ "stage_b_config_issues": [
+  "rushstack-pnpm-version-supported (07) has no if_present. Removing pnpmVersion from rush.json fires it, which is a false positive for an npm or yarn repo, where Rush does not run this check. The regex also passes a prerelease such as 5.0.0-beta.1, which Rush rejects (semver.lt against MINIMUM_SUPPORTED_PNPM_VERSION '5.0.0' in SetupChecks.ts). R4 holds on the clone, but the rule is looser and stricter than the unit in different places.",
+  "rushstack-local-deps-use-workspace-protocol (03) over-asserts. WorkspaceInstallManager.ts:195-316 applies the workspace: check only to Version and Range specifiers, and skips npm: aliases, tags, file: and catalog: specifiers (and peer dependencies). The rule fires on those specifier forms too. It passes at the pin, so this is a latent false positive.",
+  "rushstack-command-line-no-global-plugin-commands is labelled under 09b (schema validation after defaults). It expresses a different loader check, the globalPlugin rejection in _prepareRepoCommandLineJson (CommandLineConfiguration.ts:750-770).",
+  "The rushstack-09 schema rule set is incomplete. Rush also schema-validates per-project config/rush-project.json (and the rigs/*/profiles/*/config copies), the cached plugin command-line.json (raw, through tryLoadFromFile), and CHANGELOG.json during rush version --bump (ChangelogGenerator.ts:184). I checked that all three pass at the pin with json_schema_passes.",
+  "rushstack-57 (subspace config folder exists) covers only subspaceNames. Subspace.ts:154 also requires the folder of the implicit default subspace. A dir_exists on common/config/subspaces/default would cover that (the name is Rush's constant).",
+  "rushstack-23 uses dir_only_contains, which is case-sensitive. Rush's _validateCommonRushConfigFolder (RushConfiguration.ts:1555-1632) builds its known set case-insensitively, so a differently-cased known file name gives a false positive.",
+  "rushstack-01 evidence: the per-subspace ensureConsistentVersions call that install runs is in cli/actions/BaseInstallAction.ts:175-187, not doBasicInstallAsync.ts:39.",
+  "Reproduced: validate-config loads 66 rules; alint check rc=0 on the clone and on the scratch copy. Fire tests on a scratch copy: toolchain-pin A units 05, 07 and 52 fired; dep-version C units 03 and 04 fired; other-family A spot checks 09 (schemas), 22, 24, 25, 26, 54, 56, 57 and 61 fired. Rule 03's name list is complete: 189 names = 196 projects minus 7 decoupled targets."
+ ],
+ "stage_b_summary": "Stage B for microsoft/rushstack@a1d41fc46f. Stage A's config is sound: validate-config loads 66 rules, and check exits rc=0 on the clone and on a scratch copy. Every locale, dep-version and toolchain-pin unit with a rule fired when I broke it on a scratch copy (toolchain-pin A units 05, 07 and 52; dep-version C units 03 and 04), and other-family spot checks fired too.\n\nThe main completeness gap is Rush's CommandLineConfiguration loader. Beyond the schema, it validates:\n- phase-name syntax (b01);\n- unique phase and command names (b02, B-config unique-key);\n- that every referenced phase exists (b03, A, four cross_file rules);\n- parameter associatedCommands (b04, C);\n- that ignoreMissingScript and missingScriptBehavior are exclusive (b05);\n- that build and rebuild are not global (b06);\n- that phase self-dependencies have no cycle (b07, B-kernel);\n- that custom commands do not reuse built-in action names (b08, C);\n- that autoinstallers resolve (b09, C).\n\nStage A covered only the globalPlugin rejection, and under the wrong unit label (09b).\n\nOther missed units:\n- rig.json load validation (b10, A, fire-verified), which Stage A lumped into D unit 46;\n- the static validity of nodeSupportedVersionRange as a semver range (b11, toolchain-pin, B-adapter; the one missed unit in a target family);\n- package-name keys in common-versions.json (b12, C);\n- the registry= line that the release pipeline requires in .npmrc-publish (b13, A);\n- heft-plugin.json schema validation (b14, A);\n- three schema files the 09 rule set leaves out (b15; by R1 they belong to 09).\n\nSuggested reclassifications:\n- rushstack-10 to C: it hardcodes depth 2.\n- rushstack-46: narrow it, since rig.json validation is A.\n- rushstack-47 from D to B-config unique-key: the remainder needs no build.\n\nConfig issues:\n- rule 07 lacks if_present;\n- rule 03 over-asserts on alias, tag, file and catalog specifiers;\n- rule 57 misses the default subspace folder;\n- rule 23 is case-sensitive where Rush is not.\n\nNothing to remove.\n\nNot units:\n- The .npmignore 'DO NOT MODIFY ABOVE THIS LINE' template is violated at the pin by rush-plugins/rush-published-versions-json-plugin/.npmignore (R5).\n- The copilot, trae and cursor rule files carry generic Rush advice.\n- common/config/rush-plugins/rush-serve-plugin.json configures a plugin that rush-plugins.json does not list, so it is dead config.\n- catalogs appear only in rush-lib test fixtures.\n\nThe scratch directory is removed.",
+ "notes": "Counts: 61 units (rushstack-01..61, plus 09b; rushstack-62 was not used). By family:\n- dep-version: 7 (A 0, C 2, B-config 3, D 2).\n- toolchain-pin: 6 (A 3, B-adapter 2, D 1).\n- other: 49 (A 22, C 7, B-config 2, B-adapter 1, B-delegate 2, D 15).\n- Totals: A 25, C 9, B 10, D 17. coverage_today = 25/44 (57%), coverage_with_tuning = 34/44 (77%), gap = 10/44 (23%).\n\nReference source: Rush's behavior is read from the in-repo rush-lib 5.182.1 source. CI's first job runs the published 5.182.0. The CHANGELOG shows 5.182.1 changes only HTTP cache retries, but this cannot be confirmed from git history because the clone is depth 1. The second CI job runs the in-repo source directly.\n\nUnit-specific caveats:\n- rushstack-03/04 rules are generated from rush.json. A new project or decoupled target needs regeneration, which is why they are C. Rule 03 over-asserts for cross-subspace deps that exemptDecoupledDependenciesBetweenSubspaces exempts, though none exist at the pin.\n- rushstack-26 hardcodes the mainProject name.\n- rushstack-30 fixes the autoinstaller name in the base path.\n- rushstack-57 does not cover the default subspace's folder.\n- rushstack-10 folds validateRelativePathField and the min/max depth sanity checks into one unit.\n- The JSONPath existence pitfall: `!$.x` tests absence, not falsiness. It was caught by a fire test and fixed in rushstack-56.\n- cross_file rejects non-string extracts, which made rushstack-58 C.\n\nClone hygiene:\n- Globs */*/package.json include the unregistered repo-scripts/tombstone, which passes every rule.\n- Ignores cover node_modules, the redis cobuild sandbox, rush-lib test fixtures and temp/.\n\nFire tests (R4): every A and C rule was fire-tested on a scratch copy and passes on the clone. The toolchain-pin and dep-version results are listed per unit. The config uses no spawning kinds, custom facts or git kinds.\n\nValue-add rules (5) are level info and outside the ratio.\n\nA value-add copyright-header rule was probed and dropped: 45 hits, mostly in build-tests. The header is part of ESLint unit rushstack-39 (D).\n\nScratch dir removed; CONFIG kept.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "rushstack-pnpm-version-supported",
+    "unit": "rushstack-07",
+    "action": "modified",
+    "detail": "Added if_present: true, so a repo without pnpmVersion (npm or yarn) passes, as in Rush. The regex now encodes semver order against 5.0.0: 6+ majors, 5.x.y above 5.0.0 including prereleases, and 5.0.0 with optional +build. Fires on 4.14.4 and on 5.0.0-beta.1. Passes on 5.0.0, 5.0.1-beta.1, 6.0.0-rc.0 and the clone (10.27.0). With pnpmVersion replaced by npmVersion or removed it does not fire; rushstack-52 still fires on the removal."
+   },
+   {
+    "rule_id": "rushstack-local-deps-use-workspace-protocol",
+    "unit": "rushstack-03",
+    "action": "modified",
+    "detail": "matches now accepts every non-Version/Range specifier: workspace:, anything containing ':' or '/', and tag-shaped values. Peers were already excluded. Fires on ^5.0.0, 5.0.0, x, *, '', v5.0.0 and ~5.0.0 for rush-lib's node-core-library dep. Passes on latest, next, xyz, npm:..., file:..., catalog:, link:..., ../path, github:..., 'workspace: *' and the clone. Documented approximation: a tag or tarball starting with a digit is treated as a range."
+   },
+   {
+    "rule_id": "rushstack-non-workspace-dep-is-decoupled-* (7 rules)",
+    "unit": "rushstack-03",
+    "action": "modified",
+    "detail": "Changed the source filter from !search(...,'^workspace:') to search(..., <positive Version/Range regex>), so aliases, tags and file/catalog/git specs no longer count as non-workspace. This carries the same over-assertion fix to part 2. For -heft: fires when rush-lib's dep goes workspace:* -> 1.3.4, ^1.3.4 or ''; passes on latest, npm:@rushstack/heft@1.3.4 and file:...; passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-config-folder-known-files",
+    "unit": "rushstack-23",
+    "action": "modified",
+    "detail": "Rush matches known names case-insensitively, so each known name is now a per-letter character-class glob. Harmless extensions and deploy-*.json stay case-sensitive, as in Rush. Explicit .npmrc entries were dropped because '.*' covers them. Experiments.JSON now passes (Stage A's rule fired on it), as do PNPM-LOCK.YAML, deploy-x.json, notes.md and .DS_Store. foo.json and Readme.MD fire. Passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-default-subspace-config-folder-exists",
+    "unit": "rushstack-57",
+    "action": "added",
+    "detail": "New registry_paths_resolve rule. A regex over subspaces.json captures an empty entry only when \"subspacesEnabled\": true, and that entry resolves against base common/config/subspaces/default. This covers the implicit default subspace that rule 57 missed. Fires when that folder is removed; passes once subspacesEnabled is set false; passes on the clone. Limitation, noted in a comment: a raw-text match, so a minified one-line file would not trigger it."
+   },
+   {
+    "rule_id": "rushstack-schema-rush-project / rushstack-schema-plugin-command-line / rushstack-schema-changelog",
+    "unit": "rushstack-09 (Stage B b15 merged in)",
+    "action": "added",
+    "detail": "Completes the 09 schema set:\n- rushstack-schema-rush-project: */*/config/rush-project.json (56) and rigs/*/profiles/*/config/rush-project.json (8) vs rush-project.schema.json. Raw per-file validation approximates Rush's validation of the merged extends chain; this is noted in a comment.\n- rushstack-schema-plugin-command-line: the cached plugin command-line.json vs command-line.schema.json.\n- rushstack-schema-changelog: */*/CHANGELOG.json (83) vs changelog.schema.json.\nAll pass on the clone. Each fires on a mutation: an unknown key in a project file and in a rig-profile file, commandKind 'nonsense', and a renamed 'entries'."
+   },
+   {
+    "rule_id": "rushstack-command-line-no-global-plugin-commands",
+    "unit": "rushstack-09b",
+    "action": "comment",
+    "detail": "Relabelled as its own A unit: the globalPlugin rejection in _prepareRepoCommandLineJson, CommandLineConfiguration.ts ~749-770. 09b (C, schema after defaults) now has no rule, because a shim schema cannot replay standalone. Rule unchanged; fires when the prettier command's kind is changed to globalPlugin; passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-project-folder-depth",
+    "unit": "rushstack-10",
+    "action": "comment",
+    "detail": "Comment now marks the unit C (Stage B reclassification): depth 2 is restated in the regex instead of read from projectFolderMinDepth/MaxDepth. Rule unchanged; passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-project-folder-depth-bounds",
+    "unit": "rushstack-10",
+    "action": "added",
+    "detail": "json_path_absent for the min >= 1 and max >= min sanity checks, using Rush's defaults (min 1, max 2) when a field is absent. Fires with projectFolderMinDepth 3 (max 2) and with 0. Passes with min removed, with max 5, and on the clone."
+   },
+   {
+    "rule_id": "rushstack-cmdline-phase-name-syntax",
+    "unit": "rushstack-b01",
+    "action": "added",
+    "detail": "json_path_matches $.phases[*].name '^_phase:[a-z][a-z0-9]*(-[a-z0-9]+)*$' over the repo command-line.json and the cached plugin command-line.json (if_present). Fires on _phase:Test; passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-cmdline-phase-dependencies-declared / -command-phases-declared / -watch-phases-declared / -parameter-phases-declared",
+    "unit": "rushstack-b03",
+    "action": "added",
+    "detail": "Four cross_file subset rules (self/upstream deps, phased-command phases, watchPhases, associatedPhases) against $.phases[*].name. For associatedPhases the target also includes bulk-command names, which become synthetic phases. Each fires on its own mutation (self dep -> _phase:nope, pack phases -> _phase:packx, watchPhases -> _phase:nope, associatedPhases -> _phase:packx), and the phase rename fires the three that reference _phase:test. A bulk command named in associatedPhases passes. All pass on the clone."
+   },
+   {
+    "rule_id": "rushstack-cmdline-parameters-have-commands / rushstack-cmdline-parameter-commands-defined",
+    "unit": "rushstack-b04",
+    "action": "added",
+    "detail": "json_path_absent for a missing or empty associatedCommands, over the repo and plugin files. Plus a cross_file subset of associatedCommands (build and rebuild excluded as restated synthesized commands, the C tuning) against $.commands[*].name. Fires with [] or a renamed key, with 'startx', and when the plugin parameter's associatedCommands is removed. 'rebuild' passes. Passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-cmdline-missing-script-exclusive",
+    "unit": "rushstack-b05",
+    "action": "added",
+    "detail": "json_path_absent $.phases[?(@.ignoreMissingScript && @.missingScriptBehavior)] (existence semantics, like Rush's !== undefined). Fires when ignoreMissingScript: false is added next to missingScriptBehavior; passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-cmdline-build-not-global",
+    "unit": "rushstack-b06",
+    "action": "added",
+    "detail": "json_path_absent for a build/rebuild that is global, globalPlugin or safeForSimultaneousRushProcesses == true. Fires with build's commandKind set to global and with safeForSimultaneousRushProcesses: true; passes on the clone."
+   },
+   {
+    "rule_id": "rushstack-cmdline-no-builtin-action-names",
+    "unit": "rushstack-b08",
+    "action": "added",
+    "detail": "json_path_absent with match() against the 26 built-in action names, read from rush-lib's actions and restated (C), over the repo and plugin command-line files. Fires when prettier is renamed to install and when the plugin command is renamed to publish; passes on installx and the clone."
+   },
+   {
+    "rule_id": "rushstack-cmdline-autoinstaller-name-valid / rushstack-cmdline-autoinstaller-exists / rushstack-autoinstaller-name-matches-folder",
+    "unit": "rushstack-b09",
+    "action": "added",
+    "detail": "Three rules:\n- name-valid: unscoped package-name regex. Fires on @scope/rush-prettier and _rush-prettier.\n- exists: registry_paths_resolve into common/autoinstallers, expect dir, must_contain package.json. Fires on rush-prettierx.\n- name-matches-folder: for_each_dir with cross_file equals; the target is filtered to global commands that reference {basename}. Fires when rush-prettier/package.json's name is changed to foo. Renaming the unreferenced plugins autoinstaller passes, so there is no over-assertion.\nAll pass on the clone."
+   },
+   {
+    "rule_id": "rushstack-rig-json-schema / rushstack-rig-json-package-name / rushstack-rig-json-profile",
+    "unit": "rushstack-b10",
+    "action": "added",
+    "detail": "Over the 149 */*/config/rig.json files:\n- schema: in-repo rig.schema.json. Fires on an extra rigFoo and on a misspelled rigPackageName.\n- package-name: Rush's package-name regex plus the -rig(-test) suffix. Fires on local-node and on '@Scope/x y-rig'.\n- profile: profile regex, if_present. Fires on Bad-Profile; passes on good-profile.\nAll pass on the clone. Not expressed: the profile folder existing inside the rig package (resolved through node_modules)."
+   },
+   {
+    "rule_id": "rushstack-heft-plugin-manifest-schema",
+    "unit": "rushstack-b14",
+    "action": "added",
+    "detail": "json_schema_passes over the 22 */*/heft-plugin.json files vs apps/heft/src/schemas/heft-plugin.schema.json. Fires on a renamed pluginName in apps/heft/heft-plugin.json; passes on the clone. The duplicate-pluginName sub-check (unique-key) is noted as not expressed."
+   },
+   {
+    "rule_id": "rushstack-npmrc-publish-registry",
+    "unit": "rushstack-b13",
+    "action": "added",
+    "detail": "file_content_matches common/config/rush/.npmrc-publish '(?m)^registry=(.+)$'. Fires when the registry line is commented out; passes on the clone."
+   },
+   {
+    "rule_id": "(no rule) rushstack-b12",
+    "unit": "rushstack-b12",
+    "action": "not-done",
+    "detail": "Stage B's form is a shim schema with propertyNames. json_schema_passes accepts only a schema_path, a shim outside the clone cannot replay standalone, and JSONPath cannot read member names. A comment at the no-rule block records this."
+   },
+   {
+    "rule_id": "(no rule) rushstack-01, b02, b07, b11, 46, 47",
+    "unit": "rushstack-01/b02/b07/b11/46/47",
+    "action": "comment",
+    "detail": "Added no-rule comments:\n- 01: corrected evidence. The per-subspace call is in BaseInstallAction.ts ~175-187; doBasicInstallAsync.ts ~39 also calls it.\n- b02: B-config unique-key (CommandLineConfiguration.ts ~254, ~345).\n- b07: B-kernel cycle check (~336, ~602-633).\n- b11: B-adapter semver-range validity (RushConfiguration.ts ~637-643).\n- 46: narrowed D; rig.json is now b10.\n- 47: B-config remainder; schema half is in 09.\nThe header now lists the new coverage and the Stage C changes."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "rushstack-09b",
+    "suggested_bucket": "C (no rule) + new A unit",
+    "note": "Its only rule, rushstack-command-line-no-global-plugin-commands, expresses a different loader check: the globalPlugin rejection at CommandLineConfiguration.ts ~749-770. That check should be recorded as its own A unit (other); the rule passes on the clone and fires on mutation. 09b (schema validation after build defaults) keeps C but now has no rule, because the shim schema it needs cannot live outside the repo and still replay standalone."
+   },
+   {
+    "id": "rushstack-b09",
+    "suggested_bucket": "A",
+    "note": "Stage B proposed C because its for_each_dir form over-asserted on unreferenced autoinstallers. The integrated rule takes its target from command-line.json, keeping only global commands whose autoinstallerName equals the folder's basename, with allow_missing_target. Unreferenced autoinstallers therefore pass (verified: renaming the plugins autoinstaller's package name does not fire). Together with the name-regex and registry_paths_resolve rules, this expresses GlobalScriptAction.ts ~63-102 exactly."
+   },
+   {
+    "id": "rushstack-b12",
+    "suggested_bucket": "B-config",
+    "note": "No in-repo, standalone form exists. json_schema_passes has no inline schema, a shim schema outside the clone cannot replay, and JSONPath cannot read member names, so the C form Stage B proposed cannot be built under the standalone-replay rule. It needs key access (the entry adapter) with a regex predicate. The integrator decides between B-config and keeping C with no rule."
+   },
+   {
+    "id": "rushstack-b10",
+    "suggested_bucket": "A (partial)",
+    "note": "Schema, rigPackageName and rigProfile checks are expressed and fire-verified. The profile-folder-exists sub-check is not expressed, because RigConfig resolves the rig package through node_modules (package resolution) and registry_paths_resolve cannot template a base per file. If the integrator counts that sub-check as part of the unit, it stays unexpressed."
+   },
+   {
+    "id": "rushstack-57",
+    "suggested_bucket": "A",
+    "note": "The implicit default subspace folder is now covered by rushstack-default-subspace-config-folder-exists. Its condition reads subspacesEnabled from the raw text of subspaces.json through a regex, so the bucket stays A with that caveat."
+   }
+  ],
+  "validate_output": "✓ Config valid: 89 rule(s) loaded from docs/design/v0.12/corpus/microsoft-rushstack.alint.yml",
+  "check_output": "exit 0: \"✓ all rules passed.\" (alint -c docs/design/v0.12/corpus/microsoft-rushstack.alint.yml check . --compact on the clone; 89 rules: Stage A's 66 plus 23 new). `git -C <clone> status --porcelain` is empty. Scratch directory <scratch>/microsoft-rushstack-c removed."
+ }
+}
