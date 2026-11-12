@@ -1,0 +1,1465 @@
+{
+ "repo": "thunderbird/thunderbird-android",
+ "sha": "ac1f0e85f63c1b600ac443d1fb2d939bffff7de5",
+ "metrics": {
+  "counts": {
+   "A": 17,
+   "B-config": 1,
+   "B-adapter": 6,
+   "B-kernel": 0,
+   "B-delegate": 1,
+   "C": 15,
+   "D": 27
+  },
+  "addressable": 40,
+  "coverage_today": 42,
+  "coverage_with_tuning": 80,
+  "gap": 20,
+  "coverage_after_slice": 45,
+  "coverage_after_slice_with_entry_values": 48
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 6,
+    "B-config": 1,
+    "B-adapter": 3,
+    "B-kernel": 0,
+    "B-delegate": 1,
+    "C": 4,
+    "D": 3
+   },
+   "addressable": 15,
+   "coverage_today": 40,
+   "coverage_with_tuning": 67,
+   "gap": 33,
+   "coverage_after_slice": 47,
+   "coverage_after_slice_with_entry_values": 47
+  },
+  "dep-version": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 2,
+    "D": 1
+   },
+   "addressable": 3,
+   "coverage_today": 33,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 33,
+   "coverage_after_slice_with_entry_values": 33
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 0
+   },
+   "addressable": 1,
+   "coverage_today": 0,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 0,
+   "coverage_after_slice_with_entry_values": 0
+  },
+  "other": {
+   "counts": {
+    "A": 10,
+    "B-config": 0,
+    "B-adapter": 3,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 8,
+    "D": 23
+   },
+   "addressable": 21,
+   "coverage_today": 48,
+   "coverage_with_tuning": 86,
+   "gap": 14,
+   "coverage_after_slice": 48,
+   "coverage_after_slice_with_entry_values": 52
+  }
+ },
+ "units": [
+  {
+   "id": "thunderbird-android-01",
+   "summary": "Android lint ExtraTranslation: a translation may not declare a string/string-array/plurals the module's default values/strings.xml lacks",
+   "evidence": "config/lint/lint.xml:6 (severity error); build-plugin/src/main/kotlin/thunderbird.app.android.gradle.kts:37-41 and thunderbird.library.android.gradle.kts:30-34 (warningsAsErrors=false, abortOnError=true, checkDependencies=true, lintConfig); .github/workflows/build-android.yml:187 `./gradlew lint`",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "key_parity (format android-strings, direction extra) x34, one per lint-checked res module: thunderbird-android-translations-no-extra-keys-<module>",
+   "assertion_family": "none",
+   "reason": "R7: a lint check over files alint reads, classified by logic; one-way key inclusion per module is exactly key_parity direction extra. One rule per module because key_parity under for_each_file is a known defect (batch-1 ruling), not counted against the unit.",
+   "fire_verified": "Scratch tree with app-thunderbird values/values-de/values-fr and legacy/ui/legacy values/values-de/values-cs strings.xml: base passed; adding <string name=\"probe_extra_key_not_in_default\"> to legacy values-de fired at values-de/strings.xml:968:19; adding an extra <plurals> also fired; restored copy passed. Full config passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-02",
+   "summary": "Android lint Untranslatable: a translatable=\"false\" string may not be translated in values-*",
+   "evidence": "config/lint/lint.xml:11 (severity error); same lint wiring as -01; build-android.yml:187",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "same 34 key_parity rules (android-strings dialect skips translatable=\"false\" keys in the reference, so a translated one is an extra key)",
+   "assertion_family": "none",
+   "reason": "R7 logic classification; the android-strings adapter drops translatable=false entries from the reference, so direction extra fires on a translated one. Separate unit (separate lint issue id) sharing the rules of -01.",
+   "fire_verified": "Adding <string name=\"app_name\">Thunderbird FR</string> (translatable=false in default) to app-thunderbird values-fr fired at values-fr/strings.xml:3:23; restored passed; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-03",
+   "summary": "Android lint MissingQuantity: every <plurals> in a locale defines every quantity CLDR requires for that locale",
+   "evidence": "config/lint/lint.xml:5 (severity error); build-android.yml:187",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "missing: a per-locale CLDR plural-category table (locale -> required quantities) joined to each plurals group",
+   "assertion_family": "none",
+   "reason": "The required set differs per locale (cs needs one/few/many/other, ja only other); no adapter maps a locale qualifier to its CLDR categories. The cs/lt/sk subset is expressible (unit -09).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "Bucket correct; record needs: plural-categories (per-locale CLDR required quantity table)."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "plural-categories"
+     }
+    }
+   ],
+   "needs": "plural-categories"
+  },
+  {
+   "id": "thunderbird-android-04",
+   "summary": "Android lint StringFormatInvalid: format strings in resources are valid printf syntax (and call-site argument use)",
+   "evidence": "config/lint/lint.xml:9 (severity error); build-android.yml:187",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "B-delegate",
+   "alint": "missing: printf/format-string syntax validator (plugin or command)",
+   "assertion_family": "none",
+   "reason": "Validating a message format's own syntax is the B-delegate example in section 2.2; the call-site half (String.format argument counts) is code analysis (D) and folded here per R1.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-05",
+   "summary": "Android lint StringEscaping: string resources use only valid Android escape sequences",
+   "evidence": "config/lint/lint.xml:10 (severity error); build-android.yml:187",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "missing: Android string-resource escape grammar validator",
+   "assertion_family": "none",
+   "reason": "Syntax validation of the resource string format itself (escapes, unicode escapes) is format-syntax logic, B-delegate per section 2.2.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-delegate",
+      "locale",
+      "none"
+     ],
+     "why": "lint StringEscaping (local `lint --show`: \"Apostrophes must always be escaped unless the string is in double quotes\", plus bad \\u escapes) is not a full grammar validator. Two file_content_forbidden regexes over **/res/values*/*.xml express it: an unescaped apostrophe outside a quoted region, and a \\u not followed by 4 hex digits. The clone passes both. The apostrophe regex holds only for one layout (it stops at a child element or quote), so C under the batch-2 ruling, not B-delegate. composeResources must be excluded (6 legitimate unescaped apostrophes; Compose resources are not linted by StringEscaping)."
+    }
+   ]
+  },
+  {
+   "id": "thunderbird-android-06",
+   "summary": "Android lint LocaleFolder: res folders use the legacy codes iw/in/ji, never he/id/yi",
+   "evidence": "config/lint/lint.xml:12 (severity error); docs/contributing/managing-strings.md:277 (iw in Android vs he in Weblate); build-android.yml:187",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "dir_absent: thunderbird-android-res-locale-folder-legacy-codes",
+   "assertion_family": "none",
+   "reason": "R7: a folder-name property of files alint walks; dir_absent over **/res/*-he, *-he-*, *-id, *-id-*, *-yi, *-yi-* expresses it.",
+   "fire_verified": "Scratch tree with real values-iw/values-in strings.xml (app-thunderbird, core/ui/setting/impl-dialog, a composeResources values-iw): base passed; adding feature/x/src/main/res/values-he fired; values-id-rID fired; drawable-yi fired; restored passed; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-07",
+   "summary": "Android lint HardcodedText: layout/menu/xml resources reference @string for user-visible text",
+   "evidence": "config/lint/lint.xml:8 (severity error) with lint.xml:17-20 ignore paths; element-level tools:ignore=\"HardcodedText\" in legacy/ui/legacy/src/main/res/layout/changelog_list_change_item.xml and feature/funding/googleplay/src/main/res/layout/funding_googleplay_contribution_reminder.xml",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "file_content_forbidden: thunderbird-android-res-no-hardcoded-text",
+   "assertion_family": "none",
+   "reason": "Expressible only as a regex over the android: attribute layout (batch-2: regex holding for one layout is C); element-level tools:ignore cannot be seen, so two files are excluded wholesale; xml_path_absent cannot be used because the XML mapping flattens namespaces (tools:text collides with android:text, 75 false positives in a probe).",
+   "fire_verified": "n/a (C; also fired in scratch: android:text=\"Hello world\" in legacy/ui/legacy/src/main/res/layout/message_compose_recipients.xml, restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-08",
+   "summary": "Android lint StringFormatMatches: a key's format placeholders agree in type across the default and every translation",
+   "evidence": "Android lint default issue (severity error, recalled; not overridden in config/lint/lint.xml), run by build-android.yml:187 with abortOnError=true",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "missing: (key, value) rows from the android-strings adapter plus a printf placeholder extractor (needs: entry-values)",
+   "assertion_family": "none",
+   "reason": "Batch-1/2 rulings: an assertion over a locale entry's value (placeholders kept per key) needs value-bearing rows and a placeholder extractor; neither exists. Default severity is recalled from the lint registry, which is not in the clone.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "Bucket correct; record needs: placeholder (printf placeholder extraction and typing per key; it also needs entry-values rows)."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "placeholder"
+     }
+    }
+   ],
+   "needs": "placeholder"
+  },
+  {
+   "id": "thunderbird-android-09",
+   "summary": "cs, lt and sk <plurals> carry both quantity=\"many\" and quantity=\"other\" (Weblate drops many)",
+   "evidence": "docs/contributing/managing-strings.md:187-189 (Merging Translations review step); backed at build time by lint MissingQuantity (lint.xml:5)",
+   "mechanism": "convention",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "xml_path_absent x2: thunderbird-android-plurals-cs-lt-sk-have-many, thunderbird-android-plurals-cs-lt-sk-have-other",
+   "assertion_family": "none",
+   "reason": "A documented, held review convention over files alint reads; JSONPath nested filters over the XML mapping find a plurals object lacking the quantity (second disjunct handles single-item plurals collapsed to an object). Overlaps -03 for these three locales; kept separate as its own documented rule (integrator may collapse).",
+   "fire_verified": "Scratch copies of legacy/ui/legacy values-cs/lt/sk strings.xml: base passed; deleting the many item of a cs multi-item plurals fired have-many; adding a single-item plurals with only other to sk fired have-many; single-item with only many in lt fired have-other; deleting an other item in lt fired have-other; restored passed; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-10",
+   "summary": "androidResources.localeFilters in both apps agree with each other and with the supported_languages string-array",
+   "evidence": "app-thunderbird/build.gradle.kts:27 and app-k9mail/build.gradle.kts:28 (\"Keep in sync with the resource string array supported_languages\"); docs/contributing/managing-strings.md:250-262",
+   "mechanism": "convention",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "cross_file set_equals x2: thunderbird-android-locale-filters-apps-agree, thunderbird-android-locale-filters-match-supported-languages",
+   "assertion_family": "none",
+   "reason": "C: the Gradle side is a regex read of the Kotlin DSL layout (batch-2 ruling), and the two sides spell regions differently (en-rGB vs en_GB) with no normalize:, so region-qualified entries are compared app-to-app only.",
+   "fire_verified": "n/a (C; also fired in scratch: an extra \"xx\" in app-k9mail localeFilters fired apps-agree; dropping <item>de</item> from supported_languages fired match-supported-languages; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-12",
+   "summary": "language_entries and language_values have matching indexes (same length, position i names the same language)",
+   "evidence": "docs/contributing/managing-strings.md:266-269 (IMPORTANT: order must match exactly); legacy/core/src/main/res/values/arrays_general_settings_values.xml (language_values, 85) vs legacy/ui/legacy/.../arrays_general_settings_strings.xml (language_entries, 85)",
+   "mechanism": "convention",
+   "family": "locale",
+   "bucket": "B-adapter",
+   "alint": "missing: positional zip of two value arrays plus a code-to-display-name mapping",
+   "assertion_family": "none",
+   "reason": "Joins positions and values across two files; cross_file compares sets/equality only and no adapter emits (index, value) rows.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "Bucket correct; record needs: other (positional zip of two arrays across files plus a code-to-display-name mapping). Checked: positions align at the pin (language_values starts with <item /> for the system default)."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "thunderbird-android-13",
+   "summary": "Translations are changed only through Weblate and merged by the Translation - Update workflow",
+   "evidence": "docs/contributing/managing-strings.md:16,25; .github/workflows/translation-update.yml",
+   "mechanism": "convention",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Depends on the provenance of a change and an external service (Weblate), not on repository state.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-14",
+   "summary": "Languages are added at 70% translation and removed below 60%",
+   "evidence": "docs/contributing/managing-strings.md:17,208-213 (threshold tool with a Weblate API token)",
+   "mechanism": "script",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Translation completeness comes from the Weblate API (external state, R7). A repository-side ratio would also be B, but the documented gate is the external one.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-16",
+   "summary": "dependencyGuard: resolved release runtime classpaths match the committed baselines",
+   "evidence": ".github/workflows/quality-checks.yml:85 `./gradlew dependencyGuard`; app-*/dependencies/*RuntimeClasspath.txt; .github/workflows/pr-dependabot-dependency-guard-update.yml",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "dependency-guard (Gradle)",
+   "assertion_family": "none",
+   "reason": "Needs Gradle dependency resolution (R7: package-manager resolution semantics).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-17",
+   "summary": "Every scripts/requirements.txt dependency is pinned to an exact version with ==",
+   "evidence": "scripts/requirements.txt:4 (\"Direct dependencies - all pinned by version and hash\"); scripts/README.md (pinned to specific versions); installed by scripts/test_python_scripts.sh via build-scripts.yml:37",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "for_each_match: thunderbird-android-python-requirements-pinned",
+   "assertion_family": "none",
+   "reason": "Held convention over a file alint reads; each requirement line must match name==version. The \"and hash\" half is violated at the pin (no --hash), so not enforced (R5) and not asserted.",
+   "fire_verified": "Scratch copy of scripts/requirements.txt: base passed; PyYAML==6.0.3 -> PyYAML>=6.0.3 fired at 12:1; appending an unpinned `requests` line fired at 25:1; restored passed; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-18",
+   "summary": "Dependency and plugin versions live only in gradle/libs.versions.toml; build scripts carry no literal coordinates or plugin versions",
+   "evidence": "docs/engineering/adr/0005-central-project-configuration.md (Accepted, Decision: Dependency Management via the Gradle Version Catalog); held at the pin except settings scripts (settings.gradle.kts:21-22, components/settings.gradle.kts:21)",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "file_content_forbidden: thunderbird-android-deps-from-version-catalog",
+   "assertion_family": "none",
+   "reason": "C: a regex over the Kotlin DSL layout (batch-2 ruling); settings scripts excluded as the documented-by-necessity exception.",
+   "fire_verified": "n/a (C; also fired in scratch: implementation(\"com.squareup.okio:okio:3.9.0\") in app-k9mail/build.gradle.kts fired at 146:1; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-30",
+   "summary": "Every `uses:` in .github/workflows with @ is pinned to a 40-hex commit SHA (docker:// to a sha256 digest)",
+   "evidence": ".github/workflows/validate-workflows.yml -> scripts/ci/validate-github-actions-pinned.sh (--no-dry-run on pull_request; its jobs: precondition is a guard clause)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "pinned_references: thunderbird-android-workflow-actions-sha-pinned",
+   "assertion_family": "none",
+   "reason": "R7: the script checks file content alint reads; pinned_references expresses SHA pinning; local ./ actions are exempt in both.",
+   "fire_verified": "n/a (also fired in scratch: actions/checkout@<sha> -> @v4 in build-android.yml fired; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-31",
+   "summary": "Gradle wrapper jar matches an official Gradle release checksum",
+   "evidence": ".github/workflows/validate-gradle.yml (gradle wrapper-validation action)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "gradle/actions wrapper-validation",
+   "assertion_family": "none",
+   "reason": "Needs the published Gradle checksum list (network/external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-32",
+   "summary": "The downloaded Gradle distribution matches distributionSha256Sum",
+   "evidence": "gradle/wrapper/gradle-wrapper.properties (gradle-9.7.0-all.zip with distributionSha256Sum)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "D",
+   "alint": "gradle wrapper",
+   "assertion_family": "none",
+   "reason": "Verified by the wrapper against downloaded bytes at runtime (network).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-33",
+   "summary": "Exactly three open milestones exist",
+   "evidence": ".github/workflows/validate-milestones.yml (gh API)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "gh api",
+   "assertion_family": "none",
+   "reason": "GitHub state, not repository files (external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-34",
+   "summary": "PR title is a conventional commit (feat|fix|docs|style|refactor|test|chore|revert, scope regex)",
+   "evidence": ".github/workflows/pr-sentinel.yml -> scripts/ci/pr-sentinel/evaluate-pr.sh, checks.sh",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "PR Sentinel",
+   "assertion_family": "none",
+   "reason": "PR metadata held by GitHub (external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-35",
+   "summary": "PR body links an issue with a closing keyword",
+   "evidence": "scripts/ci/pr-sentinel/checks.sh, evaluate-pr.sh",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "PR Sentinel",
+   "assertion_family": "none",
+   "reason": "PR metadata (external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-36",
+   "summary": "PR body ticks exactly one AI-disclosure box",
+   "evidence": "scripts/ci/pr-sentinel/checks.sh; .github/pull_request_template.md",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "PR Sentinel",
+   "assertion_family": "none",
+   "reason": "PR metadata (external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-37",
+   "summary": "Commit subjects are conventional commits with a description of at most 70 characters",
+   "evidence": "scripts/ci/pr-sentinel/checks.sh (commit checks); docs/contributing/git-commit-guide.md",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_message (pattern + subject length); not in config",
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling: a commit-message check a git kind expresses is C; the clone is depth 1 so R4 cannot confirm and git-history kinds are barred from the config.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-38",
+   "summary": ".gitignore files carry no trailing whitespace",
+   "evidence": "build-plugin/plugin/src/main/kotlin/net/thunderbird/gradle/plugin/quality/spotless/SpotlessPlugin.kt (misc target .gitignore, trimTrailingWhitespace); quality-checks.yml:42 spotlessCheck",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "no_trailing_whitespace: thunderbird-android-gitignore-no-trailing-whitespace",
+   "assertion_family": "none",
+   "reason": "R7/batch-2: a formatter step that asserts a plain text property of a file alint reads.",
+   "fire_verified": "n/a (also fired in scratch: two trailing spaces on .gitignore line 1; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-39",
+   "summary": "Kotlin and Gradle Kotlin DSL sources are ktlint-formatted",
+   "evidence": "SpotlessPlugin.kt (kotlin/kotlinGradle ktlint); .editorconfig; quality-checks.yml:42",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "spotless ktlint",
+   "assertion_family": "none",
+   "reason": "R2: formatting source code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Bucket unchanged, scope narrowed: the ktlint file-property rules no-trailing-spaces and no-consecutive-blank-lines are split out as A units (b08, b09), matching how -41 was split from detekt."
+    }
+   ]
+  },
+  {
+   "id": "thunderbird-android-40",
+   "summary": "detekt ForbiddenComment: no FIXME: or STOPSHIP: comment markers",
+   "evidence": "config/detekt/detekt.yml:629; quality-checks.yml:59 detekt; 5 baseline entries in */detekt-baseline.xml; class-level @Suppress(\"ForbiddenComment\") in MessageListFragment.kt and LegacyMessageListFragment.kt",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden: thunderbird-android-kotlin-no-fixme-stopship-comments",
+   "assertion_family": "none",
+   "reason": "Batch-2: a comment-marker property; C because baselines and @Suppress become whole-file excludes and comment scope is a line-level regex approximation.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-41",
+   "summary": "detekt NewLineAtEndOfFile: Kotlin sources end with a newline",
+   "evidence": "config/detekt/detekt.yml:721; quality-checks.yml:59",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "final_newline: thunderbird-android-kotlin-final-newline",
+   "assertion_family": "none",
+   "reason": "Batch-2: a linter rule asserting a file property is classified by logic.",
+   "fire_verified": "n/a (also fired in scratch: build-plugin/src/main/kotlin/TestExtension.kt without final newline; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-42",
+   "summary": "detekt PackageNaming: package names match [a-z]+(\\.[a-z][A-Za-z0-9]*)*",
+   "evidence": "config/detekt/detekt.yml:377; quality-checks.yml:59",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_match: thunderbird-android-kotlin-package-naming",
+   "assertion_family": "none",
+   "reason": "Batch-2: a header-line property checkable by regex on the package line.",
+   "fire_verified": "n/a (also fired in scratch: package net.Thunderbird.core in a core/logging file; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-43",
+   "summary": "detekt InvalidPackageDeclaration: the package declaration matches the source directory path",
+   "evidence": "config/detekt/detekt.yml:341; quality-checks.yml:59",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a path-to-package transform (slash to dot after the source root) comparable with a captured package",
+   "assertion_family": "none",
+   "reason": "Joins a file's path with a captured value under a transform; no adapter does that.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "Bucket correct; record needs: derived-value (path-to-package transform compared with the captured package)."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "derived-value"
+     }
+    }
+   ],
+   "needs": "derived-value"
+  },
+  {
+   "id": "thunderbird-android-44",
+   "summary": "detekt MatchingDeclarationName: a file with one top-level class is named after it",
+   "evidence": "config/detekt/detekt.yml:349; quality-checks.yml:59",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "detekt",
+   "assertion_family": "none",
+   "reason": "Needs Kotlin parsing to find the single top-level declaration (code analysis).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-45",
+   "summary": "The rest of detekt's active ruleset (incl. MaxLineLength 120)",
+   "evidence": "config/detekt/detekt.yml; 17 detekt-baseline.xml files; quality-checks.yml:59 (the KMP detekt step is continue-on-error)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "detekt",
+   "assertion_family": "none",
+   "reason": "R2 linting source; MaxLineLength excludes raw strings, package/import lines, @Suppress and baselines (146 lines over 120 exist), which needs a Kotlin parse.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Bucket unchanged, scope narrowed: MaxLineLength is split out as its own C unit (b07), so -45 should read 'the rest of detekt's active ruleset' without '(incl. MaxLineLength 120)'. Its '146 lines over 120' figure does not match my count of 69 lines over 120 (package/import lines excluded) in 31 files under detekt's source sets."
+    }
+   ]
+  },
+  {
+   "id": "thunderbird-android-46",
+   "summary": "The rest of Android lint (default-severity errors over code and resources)",
+   "evidence": "build-android.yml:187; lint.xml:17-20 ignores",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "Android lint",
+   "assertion_family": "none",
+   "reason": "R2 code analysis; the file-property and resource-key issues are split out as their own units.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-47",
+   "summary": "Konsist: no java.util.logging, android.util.Log or Timber imports (use the project logger)",
+   "evidence": "quality/konsist/src/test/kotlin/net/thunderbird/quality/logging/ValidateLogger.kt; quality-checks.yml:102",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "Konsist",
+   "assertion_family": "none",
+   "reason": "Batch-2: import restrictions are code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-48",
+   "summary": "Konsist: tests assert with assertk only",
+   "evidence": "quality/konsist/src/test/kotlin/net/thunderbird/quality/testing/ValidateTestAssertions.kt; ADR-0003; quality-checks.yml:102",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "Konsist",
+   "assertion_family": "none",
+   "reason": "Import restriction / code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-49",
+   "summary": "Unit tests pass",
+   "evidence": "build-android.yml:170 `./gradlew testsOnCi --parallel`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "Gradle test",
+   "assertion_family": "none",
+   "reason": "Running the project's tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-50",
+   "summary": "The feature-flag catalog validates against its JSON schema (draft-07, formats on)",
+   "evidence": "build-plugin/plugin/src/main/kotlin/net/thunderbird/gradle/plugin/featureflag/FeatureFlagRootPlugin.kt + validator/SchemaValidator.kt; config/featureflag/thunderbird_mobile_featureflag.{catalog,schema}.json; every Gradle CI job",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_schema_passes: thunderbird-android-featureflag-catalog-schema",
+   "assertion_family": "none",
+   "reason": "R7: a build-time check over a file alint reads; json_schema_passes with schema_path expresses it.",
+   "fire_verified": "n/a (also fired in scratch: first \"default\": true -> \"yes\"; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-51",
+   "summary": "All apps, the UI catalog and the CLI tools build",
+   "evidence": "build-android.yml:53,73,111,153; build-cli-tools.yml (buildCliTools); build-daily.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "Gradle build",
+   "assertion_family": "none",
+   "reason": "Running the build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-52",
+   "summary": "App badging (permissions, features, SDK levels) matches the committed badging files",
+   "evidence": "build-android.yml:91,129 checkFoss*/checkFull*Badging",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "Gradle badging task",
+   "assertion_family": "none",
+   "reason": "Compares output generated from a build (aapt2 dump) with the committed file.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-53",
+   "summary": "Every feature-flag override key (thunderbird/k9 x debug/daily/beta/...) names a flag declared in $.flags",
+   "evidence": "build-plugin/plugin/src/main/kotlin/net/thunderbird/gradle/plugin/featureflag/validator/CatalogValidator.kt:22-62",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "missing: inclusion of map key paths ($.overrides.*.*  keys) in the extracted set of $.flags[*].key",
+   "assertion_family": "none",
+   "reason": "Inclusion over key paths vs extracted values stays B-config (batch-2); RFC 9535 JSONPath cannot extract map keys, so cross_file cannot express it today.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-config",
+      "other",
+      "reference"
+     ],
+     "why": "The override map keys are extractable today with a line regex on the catalog's fixed layout: cross_file subset with source regex (?m)^        \"([a-z][a-z0-9_]+)\": (?:true|false) and target json $.flags[*].key. That is the strapi-06/wsdk-74 precedent (map keys via a line regex = C), not B-config. Fired in scratch when one override key was renamed; clone passes."
+    }
+   ]
+  },
+  {
+   "id": "thunderbird-android-54",
+   "summary": "Every chapter docs/SUMMARY.md links exists (mdbook create-missing = false)",
+   "evidence": "docs/book.toml (create-missing = false); quality-markdown.yml:33 `mdbook test docs`; build-docs.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "markdown_links_resolve: thunderbird-android-docs-summary-chapters-exist",
+   "assertion_family": "none",
+   "reason": "R7: the book build fails on a missing chapter file, a link-resolution property alint checks.",
+   "fire_verified": "n/a (also fired in scratch: appended a link to contributing/ghost-page.md; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-55",
+   "summary": "A feature-flag override value differs from that flag's default",
+   "evidence": "CatalogValidator.kt:22-31 (keyRegistry maps key to default; overrides must not duplicate default values)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: (key path, value) rows (needs: entry-values)",
+   "assertion_family": "equality",
+   "reason": "Batch-2 ruling: an assertion joining a name to its value is B-adapter (needs: entry-values; would then need equality).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "equality"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "thunderbird-android-56",
+   "summary": "Changelog release and index JSON validate against schemas/changelog-{release,index}.schema.json",
+   "evidence": "scripts/ci/render-notes.py:177-193 (shippable_builds.yml Render Release Notes); scripts/changelog/generate_changelog_json.py:257-273; app-*/src/*/res/raw/changelog_*.json",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_schema_passes x2: thunderbird-android-changelog-release-schema, thunderbird-android-changelog-index-schema",
+   "assertion_family": "none",
+   "reason": "R7: the scripts validate files alint reads against committed Draft 2020-12 schemas.",
+   "fire_verified": "n/a (also fired in scratch: schemaVersion 1 -> \"one\"; an extra property and an empty array in changelog_index.json; restored passed)",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-57",
+   "summary": "Python scripts compile and the changelog unit tests pass",
+   "evidence": "build-scripts.yml:37 -> scripts/test_python_scripts.sh (py_compile, unittest)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "python",
+   "assertion_family": "none",
+   "reason": "Running the project's code and tests.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-58",
+   "summary": "notification_light_values lists exactly the NotificationLight enum constants",
+   "evidence": "legacy/core/src/main/res/values/arrays_account_settings_values.xml:112 (\"Must be kept in sync with `NotificationLight` enum\")",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file set_equals: thunderbird-android-notification-light-values-match-enum",
+   "assertion_family": "none",
+   "reason": "Load-bearing sync comment (R5); C because the enum side is a regex read of the ktlint layout.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-59",
+   "summary": "ContributionIdStringMapper maps exactly the IDs ContributionIdProvider offers",
+   "evidence": "feature/funding/googleplay/.../ui/contribution/ContributionIdStringMapper.kt:12 (\"Ids need to be kept in sync with ContributionIdProvider.kt\")",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file set_equals: thunderbird-android-contribution-ids-in-sync",
+   "assertion_family": "none",
+   "reason": "Load-bearing sync comment; both sides are regex reads of Kotlin literals.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-60",
+   "summary": "Project build scripts declare no repositories (RepositoriesMode.FAIL_ON_PROJECT_REPOS)",
+   "evidence": "settings.gradle.kts, build-plugin/settings.gradle.kts, components/settings.gradle.kts (FAIL_ON_PROJECT_REPOS)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden: thunderbird-android-no-project-repositories",
+   "assertion_family": "none",
+   "reason": "Gradle fails configuration on a project repository; C as a regex over the Kotlin DSL layout.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-61",
+   "summary": "Android lint ByteOrderMark: no U+FEFF in resource or source files",
+   "evidence": "Android lint default issue (i18n category, severity fatal, recalled; not overridden in config/lint/lint.xml), run by build-android.yml:187 and lintVital during release assembles",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "file_content_forbidden: thunderbird-android-res-no-byte-order-mark",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a linter rule asserting an encoding property of the file is classified by logic; a content pattern for U+FEFF over res XML, .kt and .java expresses it (no BOM bytes anywhere in the clone).",
+   "fire_verified": "Scratch copy of app-thunderbird/src/main/res/values/strings.xml: a leading UTF-8 BOM fired at 1:1; a BOM appended to line 3 fired at 3:1; restored passed; clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-62",
+   "summary": "Android lint EnforceUTF8: an XML resource that declares an encoding declares UTF-8",
+   "evidence": "Android lint default issue (i18n, severity fatal, recalled); all 2838 XML prologs in the clone declare utf-8/UTF-8",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "A",
+   "alint": "file_content_forbidden: thunderbird-android-res-xml-encoding-utf8",
+   "assertion_family": "none",
+   "reason": "C: RE2 has no negative lookahead, so \"anything but utf-8 (case-insensitive)\" is a character-by-character complement regex.",
+   "fire_verified": "n/a (C; also fired in scratch for ISO-8859-1, utf-16, utf8, utf-8x; UTF-8/utf-8/Utf-8 passed)",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "locale",
+      "none"
+     ],
+     "why": "Stage A's C reason (RE2 lacks negative lookahead, so a complement regex is needed) does not hold. for_each_match with select '<\\?xml[^>]*\\bencoding\\s*=' and require matches '<\\?xml[^>]*\\bencoding\\s*=\\s*[\"'](?i:utf-8)[\"']' states the rule directly. Fired in my scratch copy on encoding=\"ISO-8859-1\" and encoding='utf-16' at app-thunderbird/src/main/res/values/strings.xml:1:1, passed for UTF-8, restored passed, clone passes."
+    }
+   ]
+  },
+  {
+   "id": "thunderbird-android-63",
+   "summary": "No commit carries a Co-authored-by trailer",
+   "evidence": "scripts/ci/pr-sentinel/checks.sh",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_message with a complement pattern; not in config",
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling (git kind expresses it, depth-1 clone); awkward because the kind asserts a match, so the ban needs an RE2 complement.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-64",
+   "summary": "A PR contains no merge commits",
+   "evidence": "scripts/ci/pr-sentinel/checks.sh",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a commit parent-count predicate",
+   "assertion_family": "none",
+   "reason": "No git kind exposes parent count; message heuristics are not the check.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "Bucket correct; record needs: other (commit parent count over the PR range)."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "thunderbird-android-65",
+   "summary": "A PR carries exactly one report label; the feature-flag label requires `feature-flag: `key`` in the body",
+   "evidence": ".github/workflows/pr-request-report-labels.yml -> scripts/ci/validate-pr-report-labels.sh",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "PR labels and body (external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-66",
+   "summary": "Markdown is flexmark-formatted",
+   "evidence": "SpotlessPlugin.kt (flexmark *.md); quality-markdown.yml:30 spotlessFlexmarkCheck",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "spotless flexmark",
+   "assertion_family": "none",
+   "reason": "R2: a formatter run.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-67",
+   "summary": "mdbook doc tests (code samples) pass",
+   "evidence": "quality-markdown.yml:33 `mdbook test docs`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "mdbook",
+   "assertion_family": "none",
+   "reason": "Runs code blocks.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-69",
+   "summary": "Rendered store release notes are at most 500 characters",
+   "evidence": "shippable_builds.yml (release), scripts/ci/render-notes.py",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Checks content generated at release time by the project's script.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-70",
+   "summary": "Release version code stays under the 2100000000 ceiling",
+   "evidence": "shippable_builds.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Computed at release time.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-71",
+   "summary": "AGENTS.md / code-quality guide code conventions (Material components only via the design system, Kotlin for new code, fakes over mocks, testSubject naming)",
+   "evidence": "AGENTS.md; docs/contributing/code-quality-guide.md; ADR-0001, ADR-0002",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Code-level conventions (imports, language choice, test style): code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b01",
+   "summary": "Android lint DuplicateDefinition: a resource name (string, string-array, plurals, etc.) is defined at most once across the files of one res/values* folder, including every values-<locale> folder",
+   "evidence": "Android lint default issue (Severity: Error, Correctness; checked offline with local SDK `lint --show`, lint 9.3.0), not overridden in config/lint/lint.xml; run by build-android.yml:187 `./gradlew lint` with abortOnError=true (build-plugin thunderbird.app.android.gradle.kts / thunderbird.library.android.gradle.kts lint{} blocks). Holds at the pin: 0 duplicate (type,name) pairs within any values* folder over 2691 values XML files.",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "B-config",
+   "alint": "missing: uniqueness of extracted (type,name) keys across all files of one resource folder; key_parity's android-strings adapter treats duplicates as non-violations",
+   "assertion_family": "unique-key",
+   "reason": "Batch-2 ruling: classify a linter resource-key rule by its logic. The logic is key uniqueness over a group of files, which the android-strings adapter already reads. What is missing is the unique-key assertion, so this is B-config, not B-adapter.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b02",
+   "summary": "Android lint InvalidResourceFolder: every res/ subfolder name is a valid type plus qualifier chain (locale qualifiers values-xx, values-xx-rYY, values-b+tag, density, night, vNN, swNNdp ...)",
+   "evidence": "Android lint default issue (Severity: Error, Correctness; local `lint --show`), not overridden in config/lint/lint.xml; build-android.yml:187 with abortOnError=true",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "C",
+   "alint": "dir_absent over **/src/*/res/* with an exclude allowlist of type and qualifier globs (rule b-res-folder-valid-qualifiers in my scratch config)",
+   "assertion_family": "none",
+   "reason": "It can be written today, but only as a hand-kept allowlist of qualifier globs that approximates the real qualifier grammar (order and ranges). That makes it awkward, so C. In scratch the clone passed, and a new values-english folder fired.",
+   "fire_verified": "n/a (C; fired in scratch on app-thunderbird/src/main/res/values-english; restored passed; clone passes)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b03",
+   "summary": "Every version.ref in gradle/libs.versions.toml names a [versions] key and every [bundles] member names a [libraries] alias (Gradle refuses to load the catalog otherwise)",
+   "evidence": "gradle/libs.versions.toml (version.ref in [libraries] and [plugins], [bundles]); every Gradle invocation in CI (build-android.yml, quality-checks.yml) loads the catalog",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "cross_file subset x2: source regex version\\.ref\\s*=\\s*\"([^\"]+)\" -> target regex (?m)^([A-Za-z0-9_-]+)\\s*=\\s*\" ; source toml $.bundles.*[*] -> target regex of [libraries] alias keys",
+   "assertion_family": "none",
+   "reason": "The target side is a set of TOML map keys, and JSONPath cannot extract map keys, so a line regex over one layout stands in for them. That is the strapi-06/wsdk-74 precedent (map keys via a line regex = C).",
+   "fire_verified": "n/a (C; fired in scratch when version.ref \"androidGradlePlugin\" was renamed to \"androidGradlePlugin-nope\"; restored passed; clone passes)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b04",
+   "summary": "The pinned Gradle daemon JDK (gradle/gradle-daemon-jvm.properties toolchainVersion) satisfies the build's Java 21+ floor in settings.gradle.kts",
+   "evidence": "settings.gradle.kts:322 check(JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_21)); gradle/gradle-daemon-jvm.properties toolchainVersion=21 (generated by updateDaemonJvm); also .java-version 21, mise.toml java temurin-21, .github/actions/setup-gradle java-version 21",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "C",
+   "alint": "properties_path_matches $.toolchainVersion matches ^(2[1-9]|[3-9][0-9]|[1-9][0-9]{2,})$ plus file_content_matches pinning the VERSION_21 floor line in settings.gradle.kts",
+   "assertion_family": "none",
+   "reason": "A regex stands in for a numeric version comparison (rocketchat-17/ghost-27 precedent = C). Stage A has no toolchain-pin unit at all.",
+   "fire_verified": "n/a (C; clone passes)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b05",
+   "summary": "Weblate rejects translations that fail its enforced checks (double_space, translated, java_printf_format, plurals, placeholders)",
+   "evidence": "cli/weblate-cli/default-component-config.json enforced_checks; translations arrive only through Weblate (unit -13)",
+   "mechanism": "tool-config",
+   "family": "locale",
+   "bucket": "D",
+   "alint": "Weblate",
+   "assertion_family": "none",
+   "reason": "Enforced by an external service when a translation is saved (D).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b06",
+   "summary": "buildCliTools in build.gradle.kts lists every module under cli/",
+   "evidence": "build.gradle.kts:37-45 (\"Keep this list up to date with the CLI tools in the project. This is used by the CI to build all CLI tools.\"); .github/workflows/build-cli-tools.yml:36 ./gradlew buildCliTools; holds at the pin (cli/ has exactly 5 dirs, all listed)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir select cli/* require file_content_matches build.gradle.kts pattern \":cli:{basename}:build\"",
+   "assertion_family": "none",
+   "reason": "A held convention over files alint reads, expressed with one templated rule.",
+   "fire_verified": "n/a (fired in scratch when cli/b-cli was missing from the list; passed with it listed; clone passes)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b07",
+   "summary": "detekt MaxLineLength: Kotlin lines are at most 120 characters (package/import lines and raw strings excluded)",
+   "evidence": "config/detekt/detekt.yml:700-706 (maxLineLength 120, excludePackageStatements, excludeImportStatements, excludeRawStrings true); .github/workflows/quality-checks.yml:59 ./gradlew detekt",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_match over src/{main,test}/{java,kotlin}/**/*.kt, select ^.{121,}$, require ^(import|package) , with 27 whole-file excludes standing in for @Suppress(\"MaxLineLength\"), detekt-baseline entries and raw-string lines",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a linter file-property rule is classified by its logic, and line length is a file property. Element-scope suppressions and raw-string exclusions can only be approximated with file excludes, the same shape as Stage A's own -40 (C). The clone has 69 lines over 120 characters in 31 files.",
+   "fire_verified": "n/a (fired in scratch on a 130-character line in a new core/x/src/main/kotlin/x/A.kt; clone passes)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b08",
+   "summary": "ktlint no-trailing-spaces on Kotlin sources and Gradle Kotlin DSL scripts",
+   "evidence": "build-plugin/plugin/src/main/kotlin/net/thunderbird/gradle/plugin/quality/spotless/SpotlessPlugin.kt:28-44 (kotlin target src/*/kotlin/**/*.kt + kotlinGradle, ktlint()); SpotlessExtension.kt:4-11 disables 5 other standard rules but not this one; quality-checks.yml:42 ./gradlew spotlessCheck",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "no_trailing_whitespace over **/src/*/kotlin/**/*.kt and **/*.gradle.kts",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a linter file-property rule is split out and classified by its logic, as Stage A did for detekt NewLineAtEndOfFile (-41). Unit -39 (ktlint D) was left lumping it in.",
+   "fire_verified": "n/a (fired in scratch at core/logging/src/main/kotlin/x/A.kt:3:1; restored passed; clone passes)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b09",
+   "summary": "ktlint no-consecutive-blank-lines on Kotlin sources and Gradle Kotlin DSL scripts",
+   "evidence": "SpotlessPlugin.kt:28-44 (ktlint()); SpotlessExtension.kt:4-11 (not disabled); quality-checks.yml:42 spotlessCheck",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "max_consecutive_blank_lines (max 1) over **/src/*/kotlin/**/*.kt and **/*.gradle.kts",
+   "assertion_family": "none",
+   "reason": "Same as b08: a file-property linter rule that alint expresses directly.",
+   "fire_verified": "n/a (fired in scratch with two blank lines; restored passed; clone passes)",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "thunderbird-android-b10",
+   "summary": "A new general setting is wired into GeneralSettingsManager (write function) and GeneralSettingsDescriptions",
+   "evidence": "core/preference/api/.../GeneralSettings.kt:14 KDoc (\"When adding a setting here, make sure to also add it in these places...\")",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Correspondence between Kotlin declarations (code analysis). Recorded so the denominator is honest; it does not change coverage.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [
+  {
+   "id": "thunderbird-android-11",
+   "summary": "language_entries display names are sorted by Unicode default collation order",
+   "why": "R5: the convention is violated at the pin. legacy/ui/legacy/src/main/res/values/arrays_general_settings_strings.xml lists Malayalam (line 77 of the extracted entries) before Telugu and Kannada, but Unicode default (DUCET) script order is Telugu < Kannada < Malayalam. docs/contributing/managing-strings.md:265 says 'sorted by Unicode default collation order', so the rule is not enforced. (glibc en_US sort also moves Korean, but that part is a glibc quirk, not DUCET; the Indic inversion holds under both.)"
+  },
+  {
+   "id": "thunderbird-android-68",
+   "summary": "Scheduled security analysis (CodeQL, Fluid Attacks, OpenSSF Scorecard)",
+   "why": "Not an enforced behavior. CodeQL and Fluid Attacks run only on a weekly schedule or manual dispatch, and Scorecard runs on schedule and on push to main. All three upload SARIF. config/fluidattacks/*.yaml sets no strict/fail mode, and the unit's own reason says 'none gates a PR'. It also lumps three tools into one unit (R1)."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "thunderbird-android-va-jdk-pins-agree (toolchain-pin): JDK major agrees across .java-version, mise.toml, .github/actions/setup-gradle/action.yml and gradle/gradle-daemon-jvm.properties (all 21 at the pin); level info",
+  "thunderbird-android-va-python-pins-agree (toolchain-pin): Python version agrees between mise.toml and build-scripts.yml setup-python (3.14); level info",
+  "thunderbird-android-va-versions-plugin-matches-catalog (dep-version): ben-manes versions plugin literal in settings.gradle.kts equals libs.versions.toml dependencyCheckPlugin (0.67.0); level info",
+  "thunderbird-android-va-dependency-guard-baselines-present (other): the eight dependencyGuard baselines in app-k9mail/dependencies and app-thunderbird/dependencies exist; level info"
+ ],
+ "absent_categories": [
+  "Pre-commit / hooks: no .pre-commit-config.yaml, husky, lefthook or committed git hooks",
+  "Build-tool task runners other than Gradle: no Makefile, justfile, Taskfile, nox/tox, npm scripts, Bazel, Nix",
+  "Non-GitHub CI: no GitLab CI, CircleCI, Azure, Jenkins, Buildkite",
+  "License / SPDX header checks: none enforced (detekt AbsentOrWrongFileLicense inactive)",
+  "Lockfiles: no Gradle dependency locking (gradle.lockfile); dependency-guard baselines play that role (D)",
+  "Codegen freshness via `gen && git diff --exit-code`: none (badging comparison needs a build)",
+  "Enforced toolchain-pin agreement: JDK 21 and Python 3.14 are each written in several places but nothing checks agreement (value-add only); no .nvmrc/.tool-versions/engines/packageManager",
+  "JavaScript workspace / package.json: none",
+  "Enforced import/layering firewall: the ADR-0009 api/internal boundary is violated at the pin (not enforced); Konsist covers only logger and assertion imports",
+  "CODEOWNERS present (.github/CODEOWNERS) but not enforced on its own (batch-1 ruling)"
+ ],
+ "unusual": [
+  "Two translation trees exist outside any linted Android source set and so have no default values/: core/ui/compose/designsystem/src/main/res (16 locales, module deleted) and feature/mail/message/reader/api/src/main/res (31 locales, KMP module where src/main/res is not a source set); Weblate's managed-components list still names core-ui-compose-designsystem",
+  "Dependabot PRs get dependency-guard baselines regenerated and committed automatically (pr-dependabot-dependency-guard-update.yml), so the dep-version gate self-heals on bot PRs",
+  "PR Sentinel scripts enforce PR title, linked issue, AI-disclosure checkbox, commit subjects, no Co-authored-by and no merge commits, then auto-close non-compliant PRs after 3 days (pr-sentinel-autoclose.yml); bots exempt, drafts skipped",
+  "Feature-flag schema and catalog validation runs during Gradle configuration of every build (FeatureFlagRootPlugin), not as a separate CI step",
+  "Gradle wrapper (9.7.0) and the libs.versions.toml `gradle` entry (9.6.1) used by the root wrapper task disagree at the pin",
+  "`metadata` is a symlink to app-metadata/com.fsck.k9; app-metadata en-US changelogs 38000.txt and 39002.txt exceed 500 bytes although release notes are capped at 500 chars at render time",
+  "Custom git merge driver merge_gradle for both app build.gradle.kts files and merge=ours for changelog_index.json (.gitattributes, scripts/ci/merges)",
+  "managing-strings.md cites stale paths app/core/... and app/ui/legacy/... (actual legacy/core and legacy/ui/legacy)",
+  "The bundled toolchain-pins@v1 JVM rule fires on a major-only .java-version and does not read composite actions, so a custom value-add rule was used instead",
+  "lint.xml downgrades MissingTranslation to warning: a key_parity direction:missing probe reported 37,963 missing-translation lines at HEAD"
+ ],
+ "check_result": "`alint validate-config`: \"Config valid: 60 rule(s)\". `alint -c CONFIG check . --compact` on the clone: \"all rules passed.\" (exit 0), no violations, including the 4 info-level value-add rules. The 60 rules are 34 key_parity plus 26 others.",
+ "stage_b_config_issues": [
+  "-61 (thunderbird-android-res-no-byte-order-mark): over-asserts. lint ByteOrderMark (local `lint --show`) flags BOM characters 'in the middle of a file'. Stage A's pattern \\x{FEFF} also fires on a legitimate leading BOM, as Stage A's own fire test at 1:1 shows. Pattern '(?s).\\x{FEFF}' expresses the rule: in my scratch copy a leading BOM passed, a mid-file BOM fired at 3:1, and the clone passes. The evidence also says 'severity fatal, recalled'; local lint 9.3.0 reports ByteOrderMark as Severity: Error (EnforceUTF8 is the one that is Fatal).",
+  "-01/-02 key_parity rules: the reference is the single file values/strings.xml, but lint ExtraTranslation and Untranslatable compare against every default values/*.xml in the module (for example app-k9mail values/funding_strings.xml and legacy/ui/legacy values/arrays*.xml). A translation in values-*/strings.xml of a key that is defined in another default file would false-fire. No such key exists at the pin, so the clone passes.",
+  "-17 (thunderbird-android-python-requirements-pinned): the require regex '==version\\s*(#.*)?$' rejects the hash-pinned form that requirements.txt:4 says the file intends ('pinned by version and hash'). A pip-compile style 'PyNaCl==1.6.2 \\' line, an inline --hash, or an environment marker would fire.",
+  "-30 (thunderbird-android-workflow-actions-sha-pinned): over-asserts relative to scripts/ci/validate-github-actions-pinned.sh. The script checks only `uses` values that contain '@' (assert_uses_version), but pinned_references fired in scratch on 'uses: docker://alpine:3.20'. No docker:// uses exist at the pin, so the clone is unaffected. Also, the script finds workflow files recursively and skips files without 'jobs:'; no nested files exist.",
+  "-50 (thunderbird-android-featureflag-catalog-schema): json_schema_passes accepts JSONC (comments, trailing commas), but FeatureFlagRootPlugin parses the catalog as strict JSON. A comment would pass alint and fail the build (under-assertion).",
+  "-38: paths **/.gitignore also covers docs/.gitignore. Spotless misc checks only module-root .gitignore files and the root one, and docs is not a Gradle project in settings.gradle.kts (slight over-scope; passes at the pin).",
+  "-40/-41/-42: paths **/*.kt include 15 tracked .kt test fixtures under library/pii-safe/compiler-plugin/src/test/resources/fixtures/ that detekt never scans (it scans src/*/kotlin and src/*/java). Over-scope that passes at the pin.",
+  "-56: the changelog JSON under app-*/src/*/res/raw is produced by scripts/changelog/generate_changelog_json.py and validated inside that script and render-notes.py at release time. A is acceptable under R7, but the rule checks generated output rather than an authored file, which the record should note.",
+  "Verification: validate-config reports 'Config valid: 60 rule(s)'; alint check on the clone returns rc 0. I reproduced Stage A's locale and dep-version A fire tests (-01, -02, -06, -09, -61, -17) and the -62 rule in a scratch copy; all fire and restore cleanly. The clone was left unmodified (git status clean)."
+ ],
+ "stage_b_summary": "Stage A's thunderbird-android record is mostly sound. Its 60-rule config validates and passes on the clone, and every locale and dep-version A fire test reproduces in my scratch copy. It still has gaps:\n\n- **Missed units (10):** two default-severity Android lint resource checks (DuplicateDefinition: B-config unique-key; InvalidResourceFolder: C); Gradle catalog ref/bundle resolution (dep-version C); the JDK 21 floor vs gradle-daemon-jvm.properties (toolchain-pin C; Stage A had no toolchain-pin unit); Weblate enforced checks (locale D); the buildCliTools list (A); detekt MaxLineLength (C); two ktlint file-property rules (A); one code-level checklist (D).\n- **Reclassified:** -62 C->A, because for_each_match select/require expresses it, fire-verified. -05 B-delegate->C, a regex that holds for one layout. -53 B-config->C, map keys via a line regex. B-adapter needs recorded for -03, -08, -12, -43 and -64. Scopes of -45 and -39 narrowed.\n- **Removed:** -11 (R5: Malayalam is sorted before Telugu and Kannada, against DUCET order) and -68 (advisory scans that gate nothing).\n\nProposed locale family: 18 units = A 6 / C 4 / B 5 (B-config 1, B-adapter 3, B-delegate 1) / D 3, giving coverage_today 6/15 = 40%, with_tuning 10/15 = 67%, gap 33%. dep-version: 4 units = A 1 / C 2 / D 1. toolchain-pin: 1 C. Other: A 10 / C 8 / B-adapter 3 / D 23.\n\nConfig issues: the BOM rule fires on a legitimate leading BOM (lint flags only mid-file BOMs), and its evidence gives the wrong severity. The key_parity reference uses a single file where lint uses all default values files. The requirements regex rejects the documented hash-pinned form. pinned_references is stricter than the project's script on docker:// tags. json_schema_passes tolerates JSONC where the Gradle parse is strict. There are minor **/*.kt and **/.gitignore over-scopes.\n\nHow I checked: lint severities come from an offline local Android SDK `lint --show` (lint 9.3.0), never run against the clone. All candidate rules were run with the alint binary only. My scratch dir <scratch>/thunderbird-thunderbird-android-b has been removed.",
+ "notes": "Counts: 59 units. A 13, B 10, C 10, D 26. Within B: B-adapter 7, B-delegate 2, B-config 1 (reference). coverage_today = 13/33 = 39%, coverage_with_tuning = 23/33 = 70%, gap = 10/33 = 30%. Per family: locale 16 units (A 5, C 3, B 6, D 2), so 5/14 = 36% today and 8/14 = 57% with tuning. dep-version 3 units (A 1, C 1, D 1), so 50% and 100%. toolchain-pin has no enforced units. other 40 units (A 7, C 6, B 4, D 23), so 7/17 = 41% and 13/17 = 76%. Units 01 and 02 share the same 34 key_parity rules, one per lint-checked res module: nesting key_parity under for_each_file is a known defect, so each module has its own rule. Unit ids are not contiguous. 61, 62 and 63-71 were added after the config comments had fixed the anchor numbers.\n\nCaveats, not verifiable offline: (1) the default severities of StringFormatMatches (error), ByteOrderMark (fatal) and EnforceUTF8 (fatal), and the LocaleFolder semantics, come from my knowledge of Android lint's issue registry, which is not in the clone. (2) Unit 09 (cs/lt/sk many+other) is a documented review step that lint MissingQuantity (unit 03) also enforces for those locales. I kept it separate; the integrator may fold it into 03. (3) InvalidResourceFolder and WrongRegion (lint defaults over res folder names) are not catalogued because I could not confirm their severities. Stage B may want to check them.\n\nNot enforced at the pin, so no unit (R5): MissingTranslation, ImpliedQuantity and UnusedResources are warnings with warningsAsErrors=false. The libs.versions.toml header says entries are sorted, but there are 38 adjacent inversions (versions 6, plugins 3, libraries 15, bundles 14). \"AGP and tools updated together\" is not held (AGP 9.5.1, androidTools 32.5.0). The wrapper task's catalog source is 9.6.1 while the wrapper is 9.7.0. requirements.txt says \"pinned by ... hash\" but has no hashes. \"Every page in SUMMARY.md\" is not held (security/incident-response-plan.md is missing). HOW-TO-DOCUMENT.md asks for uppercase top-level doc names, which docs/about.md and others break. The ADR-0009 api/internal boundary is broken: legacy/ui/legacy -> feature.changelog.internal and account.avatar.impl, legacy/core -> core.preference.impl. ADR-0008 asks for net.thunderbird packages, but com.fsck.k9 remains in shared modules. Kover is off by default. The KMP detekt step is continue-on-error. The PiiSafe compiler plugin is not applied to modules. The Maestro e2e tests are not in CI. The pr-sentinel shell tests are not run by any workflow. scripts/README.md says 4 dependencies, but requirements.txt has 5.\n\nR4: every A unit in the locale and dep-version families (01, 02, 06, 09, 61, 17) fired on a scratch copy with the invariant broken, and passed on the restored copy and on the clone. I also fired the other-family A rules (30, 38, 41, 42, 50, 54, 56) and the C rules 07, 10, 18 and 62 in scratch. C units 37 and 63 (commit messages) are not in the config because git-history kinds are barred on depth-1 clones.\n\nHousekeeping: the scratch dir <scratch>/thunderbird-thunderbird-android-a has been removed. To confirm the clone was unchanged, I ran only read-only `git status --porcelain` (empty output) and `git rev-parse HEAD` (ac1f0e85f63c1b600ac443d1fb2d939bffff7de5). Nothing from the repository was executed.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "thunderbird-android-res-no-byte-order-mark",
+    "unit": "thunderbird-android-61",
+    "action": "modified",
+    "detail": "Pattern changed from \\x{FEFF} to (?s).\\x{FEFF}, so only a mid-file BOM fires, as lint ByteOrderMark does. The severity comment now gives Stage B's offline lint 9.3.0 value (Error) next to Stage A's recalled Fatal. R4 in scratch: a leading BOM passes; a BOM appended to line 3 of app-thunderbird/src/main/res/values/strings.xml fires at 3:1; the restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-res-xml-encoding-utf8",
+    "unit": "thunderbird-android-62",
+    "action": "modified",
+    "detail": "Rewritten from the C complement regex to for_each_match (A, per Stage B). select '<\\?xml[^>]*\\bencoding\\s*=', require matches encoding=[\"'](?i:utf-8)[\"']. Fires at 1:1 on ISO-8859-1, utf-16 (double- and single-quoted) and utf8. Passes on UTF-8, Utf-8 and 'utf-8'. The restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-translations-no-extra-keys-legacy-ui-legacy",
+    "unit": "thunderbird-android-01",
+    "action": "modified",
+    "detail": "Reproduced the Stage B reference-scope defect. The old key_parity (reference values/strings.xml) fired on a translated <string-array name=\"theme_entries\"> in legacy values-de/strings.xml at 968:25, a key lint accepts because it is defined in arrays_general_settings_strings.xml. Replaced with cross_file superset: source is the union of legacy/ui/legacy/src/main/res/values/*.xml names minus translatable=\"false\", and each target is a values-*/strings.xml. R4: the theme_entries translation now passes. Fires on an extra <string>, an extra <plurals>, and a translated language_entries (translatable=false, so -02 Untranslatable). The restored copy passes; the clone passes. The other 32 key_parity rules are unchanged. A comment explains why values/strings.xml is an exact reference there (their other default files hold no strings or only translatable=false ones) and records the checkDependencies limitation."
+   },
+   {
+    "rule_id": "thunderbird-android-translations-no-extra-keys-app-k9mail",
+    "unit": "thunderbird-android-02",
+    "action": "modified",
+    "detail": "Same fix for app-k9mail, whose funding_strings.xml holds 7 translatable strings: cross_file superset over the union of app-k9mail/src/main/res/values/*.xml minus translatable=false. R4: translating funding_googleplay_contribution_title in values-de/strings.xml passes, as lint does. Fires on app_webpage_url (translatable=false in constants.xml: Untranslatable), on an extra <string> and on an extra <plurals>. The restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-python-requirements-pinned",
+    "unit": "thunderbird-android-17",
+    "action": "modified",
+    "detail": "The require regex now accepts the hash-pinned form that requirements.txt:4 intends: an inline --hash=algo:hex, a pip-compile trailing backslash (indented --hash continuation lines are not selected), an environment marker, extras, and spaces around ==. R4: fires on PyYAML>=6.0.3 at 12:1, on an appended unpinned 'requests' at 25:1 and on PyYAML==6.0.*. Passes on the pip-compile backslash+--hash form, an inline --hash, a '; python_version >= \"3.8\"' marker and 'jinja2[i18n] == 3.1.6  # c'. The restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-workflow-actions-sha-pinned",
+    "unit": "thunderbird-android-30",
+    "action": "modified",
+    "detail": "Changed from pinned_references to a for_each_match that mirrors scripts/ci/validate-github-actions-pinned.sh. Scope is .github/workflows/**/*.y*ml. It selects uses lines with '@' before any ':' and requires @ plus 40 lowercase hex. Reproduced the Stage B defect: pinned_references fired on 'uses: docker://alpine:3.20', which the script accepts. R4: fires on checkout@v4, on a quoted \"actions/checkout@v4\" and on a reusable workflow @main (all at build-android.yml:34:1). Passes on docker://alpine:3.20; the restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-va-workflow-references-immutable",
+    "unit": "thunderbird-android-30",
+    "action": "demoted",
+    "detail": "Stage A's pinned_references rule is kept as a value-add at level info, with a comment that it is stricter than the script (it also flags docker:// without a digest and job/service images). Fires as info on checkout@v4 and on docker://alpine:3.20 in scratch; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-gitignore-no-trailing-whitespace",
+    "unit": "thunderbird-android-38",
+    "action": "modified",
+    "detail": "Scope fixed to project-root .gitignore files: for_each_file select [**/build.gradle.kts, !build-plugin/**, !components/**] requiring no_trailing_whitespace on {dir}/.gitignore. The root build.gradle.kts covers the root .gitignore. R4: trailing spaces fire on .gitignore:1:1 and feature/funding/common/.gitignore:1:1; docs/.gitignore (not a Gradle project) passes; the restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-kotlin-final-newline",
+    "unit": "thunderbird-android-41",
+    "action": "modified",
+    "detail": "Scope narrowed from **/*.kt to **/src/{main,test}/{kotlin,java}/**/*.kt, excluding build-plugin/** and components/**. That is the gated `./gradlew detekt` default source, inferred; KMP source sets run only in the continue-on-error step. This drops the 15 pii-safe test fixtures Stage B flagged. R4: removing the final newline of legacy/core/src/main/java/com/fsck/k9/AppConfig.kt fires. A fixture under src/test/resources and a components/ file pass. The restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-kotlin-package-naming",
+    "unit": "thunderbird-android-42",
+    "action": "modified",
+    "detail": "Same scope narrowing as -41. R4: 'package com.Fsck.k9' in legacy/core AppConfig.kt fires at 1:1. A bad package in the fixture copy passes (out of scope). The restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-kotlin-no-fixme-stopship-comments",
+    "unit": "thunderbird-android-40",
+    "action": "modified",
+    "detail": "Same scope narrowing (C), with the existing baseline and @Suppress excludes kept. Fires on '// FIXME: probe' in legacy/core AppConfig.kt at 10:1. The fixture and components/ copies pass; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-featureflag-catalog-strict-json",
+    "unit": "thunderbird-android-50",
+    "action": "added",
+    "detail": "Strict-JSON companion to json_schema_passes, which is JSONC-tolerant while FeatureFlagRootPlugin decodes with strict kotlinx Json. Reproduced: json_schema_passes alone passed a catalog with a // comment and with a trailing comma. The file_content_forbidden '(?m)^\\s*(?://|/\\*)|,\\s*[\\]}]' fires at catalog.json:2:1 (comment) and 85:1 (trailing comma). The schema rule still fires on \"default\": \"yes\". The restored copy passes; the clone passes. Line-start comments and trailing commas only; a comment after a value is not caught."
+   },
+   {
+    "rule_id": "thunderbird-android-changelog-release-schema",
+    "unit": "thunderbird-android-56",
+    "action": "comment",
+    "detail": "Added the Stage B note that the changelog JSON under app-*/src/*/res/raw is committed generated output (generate_changelog_json.py), so the rule checks generated output, not an authored file. No rule change."
+   },
+   {
+    "rule_id": "thunderbird-android-res-folder-valid-qualifiers",
+    "unit": "thunderbird-android-b02",
+    "action": "added",
+    "detail": "C: dir_absent over **/src/*/res/* with an exclude allowlist of 14 resource types times qualifier globs (2/3-letter language, -rXX region, b+tag, densities with optional -vN, night/notnight/land/port/ldrtl/ldltr, vN, sw/w/h N dp with optional orientation). The clone passes over its 2605 tracked res folders. Fires in scratch on app-thunderbird/src/main/res/values-english, valuess and values-de-DE. Passes on drawable-hdpi, values-sw600dp-land, mipmap-anydpi-v26, values-b+sr+Latn, values-zh-rTW and values-night."
+   },
+   {
+    "rule_id": "thunderbird-android-res-strings-escape-apostrophes",
+    "unit": "thunderbird-android-05",
+    "action": "added",
+    "detail": "C (Stage B reclassified from B-delegate): file_content_forbidden '>(?:[^<\"'\\\\]|\\\\.)*'' over **/res/values*/*.xml (composeResources is outside **/res/). Clone passes. Fires on <string>Don't</string> and on text after </xliff:g> with 's (values-de/strings.xml:968:1). Passes on \"Don't\" and Don\\'t."
+   },
+   {
+    "rule_id": "thunderbird-android-res-strings-unicode-escapes",
+    "unit": "thunderbird-android-05",
+    "action": "added",
+    "detail": "C: a \\u not followed by 4 hex digits (escaped backslashes skipped). Clone passes. Fires on 'bad \\u12G4'. Passes on A and on an escaped \\\\u12."
+   },
+   {
+    "rule_id": "thunderbird-android-featureflag-override-keys-declared",
+    "unit": "thunderbird-android-53",
+    "action": "added",
+    "detail": "C (Stage B reclassified from B-config): cross_file subset. Source is the 8-space-indented boolean override keys read by line regex; the target is json $.flags[*].key. Clone passes. Fires when the debug override message_view_action_export_eml is renamed to ..._emlx."
+   },
+   {
+    "rule_id": "thunderbird-android-catalog-version-refs-resolve",
+    "unit": "thunderbird-android-b03",
+    "action": "added",
+    "detail": "C: cross_file subset from version.ref values to top-level `key = \"` lines of libs.versions.toml (only [versions] uses that form at the pin). Clone passes. Fires when version.ref \"androidGradlePlugin\" becomes \"androidGradlePlugin-nope\"."
+   },
+   {
+    "rule_id": "thunderbird-android-catalog-bundle-members-resolve",
+    "unit": "thunderbird-android-b03",
+    "action": "added",
+    "detail": "C: cross_file subset from toml $.bundles.*[*] to [libraries] aliases read as `alias = { module|group =` lines. Clone passes. Fires when bundle member koin-core becomes koin-coree. Gradle's alias separator normalization is not modelled (noted)."
+   },
+   {
+    "rule_id": "thunderbird-android-daemon-jvm-meets-java-floor",
+    "unit": "thunderbird-android-b04",
+    "action": "added",
+    "detail": "C (toolchain-pin): properties_path_matches $.toolchainVersion against ^(2[1-9]|[3-9][0-9]|[1-9][0-9]{2,})$ on gradle/gradle-daemon-jvm.properties. Clone passes (21). Fires on toolchainVersion=17; passes on 25."
+   },
+   {
+    "rule_id": "thunderbird-android-java-floor-is-21",
+    "unit": "thunderbird-android-b04",
+    "action": "added",
+    "detail": "C companion: file_content_matches pins the check(JavaVersion.current().isCompatibleWith(JavaVersion.VERSION_21)) line in settings.gradle.kts, so the regex bound is revisited when the floor moves. Clone passes; fires when VERSION_21 becomes VERSION_25."
+   },
+   {
+    "rule_id": "thunderbird-android-build-cli-tools-lists-every-cli-module",
+    "unit": "thunderbird-android-b06",
+    "action": "added",
+    "detail": "A: for_each_dir select cli/* with when_iter iter.has_file(\"build.gradle.kts\"), requiring file_content_matches build.gradle.kts '\":cli:{basename}:build\"'. Paths verified: cli/ has 5 module dirs, all listed at build.gradle.kts:41-45. R4: dropping the :cli:translation-cli:build line fires; an unlisted cli/new-cli with build.gradle.kts fires; cli/notes without a build file passes; the restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-kotlin-max-line-length",
+    "unit": "thunderbird-android-b07",
+    "action": "added",
+    "detail": "C: for_each_match over **/src/{main,test}/{kotlin,java}/**/*.kt (excluding build-plugin/** and components/**), select ^.{121,}$, require ^(?:(?:import|package) |.*https?://). It has 23 whole-file excludes, each verified to carry @Suppress(\"MaxLineLength\") or a MaxLineLength detekt-baseline entry. The three unsuppressed over-long lines in scope are URL comment lines, so URL lines are exempted (inferred). Clone passes. Fires on a 130-character line in a new core/x/src/main/kotlin/x/A.kt at 3:1; a long URL comment line passes."
+   },
+   {
+    "rule_id": "thunderbird-android-ktlint-no-trailing-spaces",
+    "unit": "thunderbird-android-b08",
+    "action": "added",
+    "detail": "A: no_trailing_whitespace over **/src/*/kotlin/**/*.kt and **/*.gradle.kts, excluding build-plugin/src/** and components/** (not reached by the root spotlessCheck). R4: fires on core/x/src/main/kotlin/x/A.kt:3:1 and on core/logging/api/build.gradle.kts:1:1. A precompiled script under build-plugin/src passes. The restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "thunderbird-android-ktlint-no-consecutive-blank-lines",
+    "unit": "thunderbird-android-b09",
+    "action": "added",
+    "detail": "A: max_consecutive_blank_lines max 1 with the same scope. R4: two blank lines fire in core/x/src/main/kotlin/x/A.kt at 3:1 and in core/logging/api/build.gradle.kts at 3:1. The restored copy passes; the clone passes."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "thunderbird-android-11",
+    "action": "not-done",
+    "detail": "Stage B removes it (R5). Stage A had no rule for it (B-adapter, missing), so there was nothing to keep as value-add."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "thunderbird-android-68",
+    "action": "not-done",
+    "detail": "Stage B removes it (advisory scans, gates nothing). It had no rule (D)."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "thunderbird-android-b01",
+    "action": "not-done",
+    "detail": "DuplicateDefinition is B-config (unique-key), so no rule is added."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "thunderbird-android-b05",
+    "action": "not-done",
+    "detail": "Weblate enforced checks are D, so no rule is added."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "thunderbird-android-b10",
+    "action": "not-done",
+    "detail": "The GeneralSettings wiring checklist is D, so no rule is added."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "thunderbird-android-62",
+    "suggested_bucket": "A",
+    "note": "Applied Stage B's C->A. The rule is now for_each_match select/require and passes R4 both ways in scratch (locale-family A)."
+   },
+   {
+    "id": "thunderbird-android-05",
+    "suggested_bucket": "C",
+    "note": "Applied Stage B's B-delegate->C: two file_content_forbidden rules were added. The apostrophe regex holds for one layout only; it does not see &apos; or text after a closing quote, and it covers all values*/*.xml, not just string resources."
+   },
+   {
+    "id": "thunderbird-android-53",
+    "suggested_bucket": "C",
+    "note": "Applied Stage B's B-config->C: a cross_file subset reads the override keys with a fixed-indent line regex, because JSONPath cannot extract map keys. The B-config assertion_family 'reference' no longer applies."
+   },
+   {
+    "id": "thunderbird-android-01",
+    "suggested_bucket": "A",
+    "note": "The fix for the multi-file default reference was made inside the clone. 32 modules keep key_parity, which is exact at the pin. app-k9mail and legacy/ui/legacy now use cross_file superset over the union of default values/*.xml. That union is name-keyed (not type-keyed) and includes non-string resource names, so it is a small under-assertion. One limitation remains for all 34 rules: with checkDependencies=true lint also accepts keys defined in a dependency's defaults, which a per-module rule cannot see (no such key at the pin). I suggest A stays; the integrator may weigh these two edges."
+   },
+   {
+    "id": "thunderbird-android-02",
+    "suggested_bucket": "A",
+    "note": "It shares the -01 rules. Untranslatable still fires in the two cross_file modules: the source drops translatable=\"false\" names, verified with language_entries and app_webpage_url."
+   },
+   {
+    "id": "thunderbird-android-50",
+    "suggested_bucket": "A",
+    "note": "Schema validation is A as before. alint has no strict-JSON parse, so the build's strict-JSON half is covered by a line-regex companion. It catches line-start comments and trailing commas, not a comment after a value. If the integrator counts the strict parse as part of the unit, that half is C."
+   },
+   {
+    "id": "thunderbird-android-30",
+    "suggested_bucket": "A",
+    "note": "The gate is now a for_each_match line rule that mirrors the line-based script exactly, including its quirk that docker:// passes because the script splits the value at ':'. pinned_references was demoted to an info value-add because it is stricter than the gate."
+   },
+   {
+    "id": "thunderbird-android-45",
+    "suggested_bucket": "D",
+    "note": "Count check for Stage A's '146 lines over 120' and Stage B's '69 in 31 files'. grep over src/{main,test}/{java,kotlin}/**/*.kt, with package/import lines excluded, finds 61 lines in 27 files. alint b07, with URL lines exempt, finds 56 lines in 23 files, all of which carry @Suppress or a baseline entry. MaxLineLength is now its own C unit (b07)."
+   },
+   {
+    "id": "thunderbird-android-41",
+    "suggested_bucket": "A",
+    "note": "Scope narrowed to the gated `./gradlew detekt` default source (src/{main,test}/{java,kotlin}), excluding the included builds build-plugin/ and components/. The default source is inferred from the workflow's KMP comment, not verifiable offline. Stage A's earlier fire test on build-plugin/src/main/kotlin/TestExtension.kt is out of scope now. R4 was redone on legacy/core."
+   }
+  ],
+  "validate_output": "✓ Config valid: 74 rule(s) loaded from docs/design/v0.12/corpus/thunderbird-thunderbird-android.alint.yml",
+  "check_output": "exit 0: \"✓ all rules passed.\" (74 rules: 32 key_parity, 42 others, including 5 info value-add rules, none reporting). `git status --porcelain` on the clone is empty and HEAD is ac1f0e85f63c1b600ac443d1fb2d939bffff7de5. The scratch dir <scratch>/thunderbird-thunderbird-android-c was removed."
+ }
+}

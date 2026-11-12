@@ -1,0 +1,1180 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/asamarts/alint/main/schemas/v1/config.json
+#
+# alint v0.23 corpus-stratum config: thunderbird/thunderbird-android
+# Pinned @ ac1f0e85f63c1b600ac443d1fb2d939bffff7de5 (stratum: i18n)
+#
+# Covers: Android lint's translation checks that alint can read (ExtraTranslation and
+# Untranslatable as android-strings key_parity per module, LocaleFolder,
+# InvalidResourceFolder, HardcodedText, StringEscaping, ByteOrderMark, EnforceUTF8),
+# the cs/lt/sk plural review rule, the localeFilters / supported_languages sync, the
+# version-catalog reference integrity Gradle needs, the JDK 21 floor of the daemon
+# toolchain, the SHA-pin workflow gate, the feature-flag and changelog JSON schemas and
+# the feature-flag override keys, detekt's and ktlint's file properties, the
+# requirements.txt pin convention, ADR-0005 (versions only in the version catalog), the
+# buildCliTools list and three load-bearing sync comments.
+#
+# Stage C (integration of the Stage B review) changed: the BOM pattern (mid-file only),
+# EnforceUTF8 as a for_each_match (A), the requirements regex (hash-pinned form allowed),
+# the SHA-pin gate as a line rule that mirrors scripts/ci/validate-github-actions-pinned.sh
+# (pinned_references kept as value-add), the .gitignore and detekt scopes, the two
+# key_parity modules whose other default values files hold translatable keys
+# (cross_file superset over the union of default files), a strict-JSON companion for the
+# feature-flag catalog, and added rules for StringEscaping (C), the feature-flag override
+# keys (C), InvalidResourceFolder (C), catalog refs (C), the JDK floor (C), buildCliTools
+# (A), detekt MaxLineLength (C) and ktlint no-trailing-spaces / no-consecutive-blank-lines
+# (A).
+#
+# Shape: Android / Kotlin (KMP in places) white-label mail client (Thunderbird for
+# Android + K-9 Mail), Gradle Kotlin DSL with an included `build-plugin` build, a
+# `components` included build, gradle/libs.versions.toml version catalog, ~70 locales
+# per module synced from Weblate into ~34 Android res modules plus Compose Multiplatform
+# resources.
+#
+# WHERE THE ENFORCED VALIDATION LIVES
+#   quality-checks.yml   spotlessCheck (ktlint, flexmark, .gitignore misc) / detekt /
+#                        dependencyGuard / Konsist import tests            (mostly D)
+#   build-android.yml    assemble x4, badging checks, testsOnCi, `./gradlew lint` with
+#                        config/lint/lint.xml (abortOnError=true, warningsAsErrors=false,
+#                        so only severity="error" issues gate)
+#   validate-*.yml       SHA-pinned actions (scripts/ci/validate-github-actions-pinned.sh),
+#                        Gradle wrapper validation, open milestones (GitHub API)
+#   pr-sentinel.yml      PR title / linked issue / AI disclosure / commit subjects /
+#                        no Co-authored-by / no merge commits (PR metadata + history)
+#   build-scripts.yml    Python py_compile + changelog unittest
+#   quality-markdown.yml spotlessFlexmarkCheck + `mdbook test docs` (create-missing=false)
+#   root build.gradle.kts featureFlag plugin: schema + catalog validation on every build
+#   shippable_builds.yml release-time: changelog JSON validated against schemas/*.json,
+#                        release notes <= 500 chars, version-code ceiling
+#   docs/contributing/*.md + load-bearing comments: language-list sync and ordering,
+#                        cs/lt/sk plural forms, Weblate-only translations
+#
+# Not enforced at the pin (R5, so no rule): lint.xml MissingTranslation, ImpliedQuantity
+# and UnusedResources are severity="warning" with warningsAsErrors=false (~38k missing
+# translations at HEAD); the catalog header's "sorted alphabetically within their
+# section" (38 inversions); "AGP and tools should be updated together" (AGP 9.5.1 vs
+# androidTools 32.5.0); the wrapper task's catalog source (libs `gradle` 9.6.1 vs wrapper
+# 9.7.0); requirements.txt "pinned by ... hash" (no hashes); docs "every page in
+# SUMMARY.md" (security/incident-response-plan.md is not); the API/internal module
+# boundary (legacy/* and the drawer dropdown depend on :impl modules); Kover thresholds
+# (disabled unless CODE_COVERAGE_DISABLED=false); the KMP detekt step (continue-on-error).
+
+version: 1
+
+rules:
+  # ══════════════════════════════════════════════════════════════════════
+  # LOCALE family
+  # ══════════════════════════════════════════════════════════════════════
+
+  # thunderbird-android-01 / -02 (A): Android lint ExtraTranslation (severity error) and
+  # Untranslatable (severity error), config/lint/lint.xml:6,11, run by
+  # build-android.yml `./gradlew lint` with abortOnError=true
+  # (build-plugin/src/main/kotlin/thunderbird.{app,library}.android.gradle.kts).
+  # The android-strings dialect keys (element type, name) and skips translatable="false"
+  # entries, so with direction: extra a peer key the default file lacks fires
+  # (ExtraTranslation) and a translated translatable="false" string fires too
+  # (Untranslatable). One rule per lint-checked res module: key_parity cannot be nested
+  # under for_each_* (known defect), and lint compares each module's translations with
+  # that module's default strings. Two directories with translations but no default
+  # values/ are not Android source sets and are not linted (the deleted
+  # core/ui/compose/designsystem module and the KMP feature/mail/message/reader/api
+  # src/main/res), so they get no rule.
+  # Reference scope (Stage B): lint compares a translation with EVERY default values/*.xml
+  # of the module, key_parity takes one reference file. In 32 modules the other default
+  # files hold no string resources, or only translatable="false" ones (constants.xml),
+  # whose translation lint reports as Untranslatable anyway, so values/strings.xml is an
+  # exact reference at the pin. app-k9mail (funding_strings.xml, 7 translatable strings)
+  # and legacy/ui/legacy (arrays*.xml, translatable string-arrays) are different: a
+  # translation of such a key in values-*/strings.xml passes lint but fired key_parity
+  # (reproduced in scratch with theme_entries in legacy values-de). Those two modules use
+  # cross_file superset over the union of their default files instead; it keys by name
+  # only (not element type) and its source also holds non-string resource names, so a
+  # translated string named like a style or color would not fire. Remaining limitation for
+  # all 34: with checkDependencies=true lint also accepts a key defined in a dependency's
+  # default values, which a per-module rule cannot see (no such key at the pin).
+  - id: thunderbird-android-translations-no-extra-keys-app-common
+    kind: key_parity
+    format: android-strings
+    reference: app-common/src/main/res/values/strings.xml
+    peers: "app-common/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that app-common/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  # app-k9mail: default strings live in strings.xml and funding_strings.xml (translatable)
+  # plus constants.xml (translatable="false"); the source is their union minus
+  # translatable="false" entries. `..` handles one-element (object) and many-element
+  # (array) cardinality alike.
+  - id: thunderbird-android-translations-no-extra-keys-app-k9mail
+    kind: cross_file
+    relation: superset
+    source:
+      files: "app-k9mail/src/main/res/values/*.xml"
+      extract: { xml: "$.resources..[?(@['@name'] && @['@translatable'] != 'false')]['@name']" }
+    targets:
+      files: "app-k9mail/src/main/res/values-*/strings.xml"
+      extract: { xml: "$.resources..[?(@['@name'])]['@name']" }
+    level: error
+    message: >-
+      A translation declares a resource name that no default app-k9mail/src/main/res/values/*.xml
+      declares (lint ExtraTranslation), or translates a translatable="false" one
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-app-thunderbird
+    kind: key_parity
+    format: android-strings
+    reference: app-thunderbird/src/main/res/values/strings.xml
+    peers: "app-thunderbird/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that app-thunderbird/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-core-ui-setting-impl-dialog
+    kind: key_parity
+    format: android-strings
+    reference: core/ui/setting/impl-dialog/src/main/res/values/strings.xml
+    peers: "core/ui/setting/impl-dialog/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that core/ui/setting/impl-dialog/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-common
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/common/src/main/res/values/strings.xml
+    peers: "feature/account/common/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/common/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-edit
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/edit/src/main/res/values/strings.xml
+    peers: "feature/account/edit/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/edit/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-oauth
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/oauth/src/main/res/values/strings.xml
+    peers: "feature/account/oauth/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/oauth/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-server-certificate
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/server/certificate/src/main/res/values/strings.xml
+    peers: "feature/account/server/certificate/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/server/certificate/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-server-settings
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/server/settings/src/main/res/values/strings.xml
+    peers: "feature/account/server/settings/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/server/settings/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-server-validation
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/server/validation/src/main/res/values/strings.xml
+    peers: "feature/account/server/validation/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/server/validation/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-settings-impl
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/settings/impl/src/main/res/values/strings.xml
+    peers: "feature/account/settings/impl/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/settings/impl/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-account-setup
+    kind: key_parity
+    format: android-strings
+    reference: feature/account/setup/src/main/res/values/strings.xml
+    peers: "feature/account/setup/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/account/setup/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-debug-settings
+    kind: key_parity
+    format: android-strings
+    reference: feature/debug-settings/src/main/res/values/strings.xml
+    peers: "feature/debug-settings/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/debug-settings/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-funding-googleplay
+    kind: key_parity
+    format: android-strings
+    reference: feature/funding/googleplay/src/main/res/values/strings.xml
+    peers: "feature/funding/googleplay/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/funding/googleplay/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-mail-message-composer-internal
+    kind: key_parity
+    format: android-strings
+    reference: feature/mail/message/composer/internal/src/main/res/values/strings.xml
+    peers: "feature/mail/message/composer/internal/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/mail/message/composer/internal/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-mail-message-list-api
+    kind: key_parity
+    format: android-strings
+    reference: feature/mail/message/list/api/src/main/res/values/strings.xml
+    peers: "feature/mail/message/list/api/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/mail/message/list/api/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-mail-message-list-internal
+    kind: key_parity
+    format: android-strings
+    reference: feature/mail/message/list/internal/src/main/res/values/strings.xml
+    peers: "feature/mail/message/list/internal/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/mail/message/list/internal/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-mail-message-reader-api
+    kind: key_parity
+    format: android-strings
+    reference: feature/mail/message/reader/api/src/androidMain/res/values/strings.xml
+    peers: "feature/mail/message/reader/api/src/androidMain/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/mail/message/reader/api/src/androidMain/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-migration-qrcode
+    kind: key_parity
+    format: android-strings
+    reference: feature/migration/qrcode/src/main/res/values/strings.xml
+    peers: "feature/migration/qrcode/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/migration/qrcode/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-navigation-drawer-dropdown
+    kind: key_parity
+    format: android-strings
+    reference: feature/navigation/drawer/dropdown/src/main/res/values/strings.xml
+    peers: "feature/navigation/drawer/dropdown/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/navigation/drawer/dropdown/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-onboarding-migration-thunderbird
+    kind: key_parity
+    format: android-strings
+    reference: feature/onboarding/migration/thunderbird/src/main/res/values/strings.xml
+    peers: "feature/onboarding/migration/thunderbird/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/onboarding/migration/thunderbird/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-onboarding-permissions
+    kind: key_parity
+    format: android-strings
+    reference: feature/onboarding/permissions/src/main/res/values/strings.xml
+    peers: "feature/onboarding/permissions/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/onboarding/permissions/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-onboarding-welcome
+    kind: key_parity
+    format: android-strings
+    reference: feature/onboarding/welcome/src/main/res/values/strings.xml
+    peers: "feature/onboarding/welcome/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/onboarding/welcome/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-settings-import
+    kind: key_parity
+    format: android-strings
+    reference: feature/settings/import/src/main/res/values/strings.xml
+    peers: "feature/settings/import/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/settings/import/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-thundermail-api
+    kind: key_parity
+    format: android-strings
+    reference: feature/thundermail/api/src/main/res/values/strings.xml
+    peers: "feature/thundermail/api/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/thundermail/api/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-thundermail-internal-common
+    kind: key_parity
+    format: android-strings
+    reference: feature/thundermail/internal/common/src/main/res/values/strings.xml
+    peers: "feature/thundermail/internal/common/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/thundermail/internal/common/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-widget-message-list-glance
+    kind: key_parity
+    format: android-strings
+    reference: feature/widget/message-list-glance/src/main/res/values/strings.xml
+    peers: "feature/widget/message-list-glance/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/widget/message-list-glance/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-widget-message-list
+    kind: key_parity
+    format: android-strings
+    reference: feature/widget/message-list/src/main/res/values/strings.xml
+    peers: "feature/widget/message-list/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/widget/message-list/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-widget-shortcut
+    kind: key_parity
+    format: android-strings
+    reference: feature/widget/shortcut/src/main/res/values/strings.xml
+    peers: "feature/widget/shortcut/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/widget/shortcut/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-feature-widget-unread
+    kind: key_parity
+    format: android-strings
+    reference: feature/widget/unread/src/main/res/values/strings.xml
+    peers: "feature/widget/unread/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that feature/widget/unread/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-legacy-ui-base
+    kind: key_parity
+    format: android-strings
+    reference: legacy/ui/base/src/main/res/values/strings.xml
+    peers: "legacy/ui/base/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that legacy/ui/base/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-legacy-ui-folder
+    kind: key_parity
+    format: android-strings
+    reference: legacy/ui/folder/src/main/res/values/strings.xml
+    peers: "legacy/ui/folder/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that legacy/ui/folder/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  # legacy/ui/legacy: default strings live in strings.xml and the translatable string-arrays
+  # of arrays.xml, arrays_account_settings_strings.xml and arrays_general_settings_strings.xml
+  # (language_entries there is translatable="false"), plus constants.xml.
+  - id: thunderbird-android-translations-no-extra-keys-legacy-ui-legacy
+    kind: cross_file
+    relation: superset
+    source:
+      files: "legacy/ui/legacy/src/main/res/values/*.xml"
+      extract: { xml: "$.resources..[?(@['@name'] && @['@translatable'] != 'false')]['@name']" }
+    targets:
+      files: "legacy/ui/legacy/src/main/res/values-*/strings.xml"
+      extract: { xml: "$.resources..[?(@['@name'])]['@name']" }
+    level: error
+    message: >-
+      A translation declares a resource name that no default legacy/ui/legacy/src/main/res/values/*.xml
+      declares (lint ExtraTranslation), or translates a translatable="false" one
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+  - id: thunderbird-android-translations-no-extra-keys-plugins-openpgp-api-lib-openpgp-api
+    kind: key_parity
+    format: android-strings
+    reference: plugins/openpgp-api-lib/openpgp-api/src/main/res/values/strings.xml
+    peers: "plugins/openpgp-api-lib/openpgp-api/src/main/res/values-*/strings.xml"
+    direction: extra
+    level: error
+    message: >-
+      A translation declares a string, string-array or plurals that plugins/openpgp-api-lib/openpgp-api/src/main/res/values/strings.xml
+      does not declare (lint ExtraTranslation), or translates a translatable="false" string
+      (lint Untranslatable). Remove the stale key from the translation (it comes back from Weblate).
+
+  # thunderbird-android-06 (A): Android lint LocaleFolder (severity error, lint.xml:12).
+  # Android resolves Hebrew, Indonesian and Yiddish resources under the legacy ISO codes
+  # iw / in / ji, so a res folder qualified with he / id / yi is never used.
+  # docs/contributing/managing-strings.md "Language Code Differences" records the
+  # iw-in-Android / he-in-Weblate mapping the Weblate sync relies on.
+  - id: thunderbird-android-res-locale-folder-legacy-codes
+    kind: dir_absent
+    paths:
+      - "**/res/*-he"
+      - "**/res/*-he-*"
+      - "**/res/*-id"
+      - "**/res/*-id-*"
+      - "**/res/*-yi"
+      - "**/res/*-yi-*"
+    level: error
+    message: >-
+      Android resource folders must use the legacy language codes iw / in / ji, not
+      he / id / yi (lint LocaleFolder is severity error in config/lint/lint.xml).
+
+  # thunderbird-android-b02 (C): Android lint InvalidResourceFolder (default severity
+  # error per Stage B's offline `lint --show`, lint 9.3.0; not overridden in lint.xml):
+  # every res/ subfolder is a resource type plus a valid qualifier chain. C: a hand-kept
+  # allowlist of type and qualifier globs approximates the qualifier grammar (order and
+  # value ranges are not checked; any 2- or 3-letter token passes as a language). It covers
+  # the types and qualifiers the clone uses plus the common neighbours. Compose
+  # Multiplatform composeResources/ folders are not Android res folders and are not matched.
+  - id: thunderbird-android-res-folder-valid-qualifiers
+    kind: dir_absent
+    paths:
+      include: ["**/src/*/res/*"]
+      exclude:
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-[a-z][a-z]"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-[a-z][a-z][a-z]"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-[a-z][a-z]-r[A-Z][A-Z]"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-[a-z][a-z][a-z]-r[A-Z][A-Z]"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-b+*"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-{ldpi,mdpi,tvdpi,hdpi,xhdpi,xxhdpi,xxxhdpi,nodpi,anydpi}"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-{ldpi,mdpi,tvdpi,hdpi,xhdpi,xxhdpi,xxxhdpi,nodpi,anydpi}-v[0-9]*"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-{night,notnight,land,port,ldrtl,ldltr}"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-v[0-9]*"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-{sw,w,h}[0-9]*dp"
+        - "**/src/*/res/{anim,animator,color,drawable,font,interpolator,layout,menu,mipmap,navigation,raw,transition,values,xml}-{sw,w,h}[0-9]*dp-{land,port}"
+    level: error
+    message: >-
+      A res/ subfolder name is not a resource type with a valid qualifier chain (lint
+      InvalidResourceFolder), e.g. values-de-rDE, not values-de-DE or values-german.
+
+  # thunderbird-android-05 (C, Stage B reclassified from B-delegate): Android lint
+  # StringEscaping (severity error, lint.xml:10): an apostrophe in a string resource is
+  # escaped (\') unless the string is in double quotes, and a \u escape is followed by
+  # four hex digits. C: the apostrophe regex holds for one layout only; a run starts after
+  # a tag's `>` and stops at a child element or a double quote, so text after a closing
+  # quote and XML-entity apostrophes (&apos;, none at the pin) are not seen, and the scope
+  # is every values*/*.xml file rather than string resources alone. Compose Multiplatform
+  # composeResources/ (6 legitimate unescaped apostrophes) is outside **/res/.
+  - id: thunderbird-android-res-strings-escape-apostrophes
+    kind: file_content_forbidden
+    paths: ["**/res/values*/*.xml"]
+    pattern: '>(?:[^<"''\\]|\\.)*'''
+    level: error
+    message: >-
+      Unescaped apostrophe in a string resource: write \' or wrap the whole string in
+      double quotes (lint StringEscaping).
+  - id: thunderbird-android-res-strings-unicode-escapes
+    kind: file_content_forbidden
+    paths: ["**/res/values*/*.xml"]
+    pattern: '(?:^|[^\\])(?:\\\\)*\\u(?:[^0-9A-Fa-f]|[0-9A-Fa-f][^0-9A-Fa-f]|[0-9A-Fa-f]{2}[^0-9A-Fa-f]|[0-9A-Fa-f]{3}[^0-9A-Fa-f])'
+    level: error
+    message: >-
+      A \u escape in a string resource is not followed by four hex digits (lint StringEscaping).
+
+  # thunderbird-android-07 (C): Android lint HardcodedText (severity error, lint.xml:8):
+  # layout, menu and xml resources reference @string resources for user-visible text.
+  # C: the two literal bullets carry an element-level tools:ignore="HardcodedText", which
+  # a regex cannot see across lines, so their files are excluded wholesale; the regex
+  # assumes the `android:` prefix. xml_path_absent is not usable because the XML mapping
+  # flattens namespaces, so the allowed tools:text sample values collide with android:text.
+  - id: thunderbird-android-res-no-hardcoded-text
+    kind: file_content_forbidden
+    paths:
+      include:
+        - "**/res/layout*/**/*.xml"
+        - "**/res/menu*/**/*.xml"
+        - "**/res/xml*/**/*.xml"
+      exclude:
+        # lint.xml <issue id="all"> ignore paths
+        - "**/ui-utils/ItemTouchHelper/**"
+        - "**/ui-utils/LinearLayoutManager/**"
+        # element-level tools:ignore="HardcodedText" suppressions
+        - "legacy/ui/legacy/src/main/res/layout/changelog_list_change_item.xml"
+        - "feature/funding/googleplay/src/main/res/layout/funding_googleplay_contribution_reminder.xml"
+    pattern: 'android:(text|contentDescription|hint|label|prompt|title)="[^@?"][^"]*"'
+    level: error
+    message: >-
+      Hardcoded user-visible text in a resource layout. Move it to res/values/strings.xml
+      and reference it as @string/... (lint HardcodedText is severity error).
+
+  # thunderbird-android-61 (A): Android lint ByteOrderMark (i18n category; not overridden
+  # in config/lint/lint.xml), run by build-android.yml `./gradlew lint` with
+  # abortOnError=true: no U+FEFF in the MIDDLE of a resource or source file (lint flags
+  # BOM characters inside the file, not a leading BOM). Severity: Stage B's offline
+  # `lint --show` (lint 9.3.0) reports Error; Stage A had recalled Fatal. Either gates.
+  # `(?s).` requires a character before the U+FEFF, so a leading BOM passes.
+  - id: thunderbird-android-res-no-byte-order-mark
+    kind: file_content_forbidden
+    paths:
+      - "**/res/**/*.xml"
+      - "**/*.kt"
+      - "**/*.java"
+    pattern: '(?s).\x{FEFF}'
+    level: error
+    message: >-
+      A byte-order mark (U+FEFF) inside a resource or source file (lint ByteOrderMark).
+      Remove the stray U+FEFF character.
+
+  # thunderbird-android-62 (A, Stage B reclassified from C): Android lint EnforceUTF8
+  # (i18n category, Fatal per Stage B's offline `lint --show`): an XML resource that
+  # declares an encoding declares UTF-8 (case-insensitive). for_each_match states it
+  # directly: every XML prolog line that declares an encoding must declare utf-8.
+  - id: thunderbird-android-res-xml-encoding-utf8
+    kind: for_each_match
+    paths: ["**/res/**/*.xml"]
+    select: '<\?xml[^>]*\bencoding\s*='
+    require:
+      matches: ['<\?xml[^>]*\bencoding\s*=\s*["''](?i:utf-8)["'']']
+    level: error
+    message: >-
+      An XML resource declares an encoding other than UTF-8 (lint EnforceUTF8, fatal).
+
+  # thunderbird-android-09 (A): docs/contributing/managing-strings.md "Merging
+  # Translations": when reviewing a Weblate PR, check plural forms for cs, lt and sk
+  # (Weblate drops `many`) and ensure both `many` and `other` are present. A plurals
+  # group is an object whose `item` children carry @quantity; the second disjunct catches
+  # a single-item plurals, which the XML mapping collapses to an object.
+  - id: thunderbird-android-plurals-cs-lt-sk-have-many
+    kind: xml_path_absent
+    paths:
+      - "**/values-cs/strings.xml"
+      - "**/values-lt/strings.xml"
+      - "**/values-sk/strings.xml"
+    path: "$..[?((@.item[?(@['@quantity'])] || @.item['@quantity']) && !@.item[?(@['@quantity'] == 'many')] && @.item['@quantity'] != 'many')]"
+    level: error
+    message: >-
+      A cs / lt / sk <plurals> lacks quantity="many". Weblate drops it for these locales;
+      add it (reusing the `other` text is acceptable), per managing-strings.md.
+  - id: thunderbird-android-plurals-cs-lt-sk-have-other
+    kind: xml_path_absent
+    paths:
+      - "**/values-cs/strings.xml"
+      - "**/values-lt/strings.xml"
+      - "**/values-sk/strings.xml"
+    path: "$..[?((@.item[?(@['@quantity'])] || @.item['@quantity']) && !@.item[?(@['@quantity'] == 'other')] && @.item['@quantity'] != 'other')]"
+    level: error
+    message: >-
+      A cs / lt / sk <plurals> lacks quantity="other" (managing-strings.md: both `many`
+      and `other` must be present).
+
+  # thunderbird-android-10 (C): "Keep in sync with the resource string array
+  # supported_languages" (app-thunderbird/build.gradle.kts:27, app-k9mail/build.gradle.kts:28)
+  # and managing-strings.md "Managing Languages": androidResources.localeFilters in both
+  # apps equals supported_languages in legacy/core/.../arrays_general_settings_values.xml.
+  # C: the two sides spell a region differently (en-rGB vs en_GB) and no normalize: maps
+  # one to the other, so the rules compare the two apps exactly and the region-free
+  # languages exactly; the six region-qualified entries are only covered app to app.
+  - id: thunderbird-android-locale-filters-apps-agree
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: app-thunderbird/build.gradle.kts
+      extract: { regex: '(?m)^\s+"([a-z]{2,3}(?:-r[A-Z]{2})?)",\s*$' }
+    targets:
+      - file: app-k9mail/build.gradle.kts
+        extract: { regex: '(?m)^\s+"([a-z]{2,3}(?:-r[A-Z]{2})?)",\s*$' }
+    level: error
+    message: >-
+      androidResources.localeFilters differs between app-thunderbird and app-k9mail; add
+      or remove the language in both app modules (managing-strings.md).
+  - id: thunderbird-android-locale-filters-match-supported-languages
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: app-thunderbird/build.gradle.kts
+      extract: { regex: '(?m)^\s+"([a-z]{2,3})",\s*$' }
+    targets:
+      - file: legacy/core/src/main/res/values/arrays_general_settings_values.xml
+        extract: { xml: "$.resources['string-array'][?(@['@name'] == 'supported_languages')].item[?(@ != null)]" }
+        matches: '^[a-z]{2,3}$'
+    level: error
+    message: >-
+      The region-free languages in androidResources.localeFilters must equal those in the
+      string-array supported_languages (Keep in sync comment, managing-strings.md).
+
+  # ══════════════════════════════════════════════════════════════════════
+  # DEP-VERSION family
+  # ══════════════════════════════════════════════════════════════════════
+
+  # thunderbird-android-17 (A): scripts/requirements.txt:4 "Direct dependencies - all
+  # pinned by version" and scripts/README.md "(all pinned to specific versions)". The
+  # same comment's "and hash" half is violated at the pin (no --hash lines), so it is
+  # not enforced and not asserted. The require regex still accepts the hash-pinned form the
+  # comment intends (Stage B): an inline `--hash=algo:hex`, a pip-compile trailing `\`
+  # (its indented --hash continuation lines are not selected), an environment marker
+  # (`; python_version ...`), extras and spaces around ==.
+  - id: thunderbird-android-python-requirements-pinned
+    kind: for_each_match
+    paths: ["scripts/requirements.txt"]
+    select: '^[A-Za-z0-9]'
+    require:
+      matches: ['^[A-Za-z0-9][A-Za-z0-9._-]*(\[[A-Za-z0-9,._ -]+\])?\s*==\s*[A-Za-z0-9._+!-]+(\s*;[^#\\]*)?(\s+--hash=[A-Za-z0-9]+:[0-9A-Fa-f]+)*\s*\\?\s*(#.*)?$']
+    level: error
+    message: >-
+      Every scripts/requirements.txt dependency is pinned to one exact version with ==
+      (scripts/README.md).
+
+  # thunderbird-android-18 (C): docs/engineering/adr/0005-central-project-configuration.md
+  # (Accepted), "Decision": dependencies and plugins are managed centrally in the Gradle
+  # version catalog (gradle/libs.versions.toml) so every module uses the same versions.
+  # Held at the pin: no build or convention script names a literal group:artifact:version
+  # or a plugin version. Settings scripts are the exception (their plugins resolve before
+  # the catalog: foojay 1.0.0, ben-manes versions 0.67.0). C: a regex over the Kotlin DSL.
+  - id: thunderbird-android-deps-from-version-catalog
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.gradle.kts", "**/*.gradle"]
+      exclude: ["**/settings.gradle.kts", "**/settings.gradle"]
+    pattern: '"[A-Za-z0-9_.-]+:[A-Za-z0-9_.-]+:[0-9][^"]*"|\bid\("[^"]+"\)\s*version\s*"'
+    level: error
+    message: >-
+      Declare the dependency or plugin version in gradle/libs.versions.toml and reference
+      it through libs.* (ADR-0005), not as a literal in a build script.
+
+  # thunderbird-android-b03 (C): Gradle refuses to load gradle/libs.versions.toml when a
+  # version.ref names no [versions] key or a [bundles] member names no [libraries] alias,
+  # so every Gradle invocation in CI gates it. C: map keys cannot be extracted with
+  # JSONPath, so the [versions] keys are read as top-level `key = "` lines (only [versions]
+  # uses that form at the pin) and the [libraries] aliases as `alias = { module|group =`
+  # lines (plugins use `{ id =`). Gradle's alias separator normalization (- _ .) is not
+  # applied, so a bundle member spelled with a different separator would fire.
+  - id: thunderbird-android-catalog-version-refs-resolve
+    kind: cross_file
+    relation: subset
+    source:
+      file: gradle/libs.versions.toml
+      extract: { regex: 'version\.ref\s*=\s*"([^"]+)"' }
+    targets:
+      - file: gradle/libs.versions.toml
+        extract: { regex: '(?m)^([A-Za-z0-9_.-]+)\s*=\s*"' }
+    level: error
+    message: "Every version.ref in gradle/libs.versions.toml must name a [versions] key."
+  - id: thunderbird-android-catalog-bundle-members-resolve
+    kind: cross_file
+    relation: subset
+    source:
+      file: gradle/libs.versions.toml
+      extract: { toml: "$.bundles.*[*]" }
+    targets:
+      - file: gradle/libs.versions.toml
+        extract: { regex: '(?m)^([A-Za-z0-9_.-]+)\s*=\s*\{\s*(?:module|group)\s*=' }
+    level: error
+    message: "Every [bundles] member in gradle/libs.versions.toml must name a [libraries] alias."
+
+  # ══════════════════════════════════════════════════════════════════════
+  # TOOLCHAIN-PIN family
+  # ══════════════════════════════════════════════════════════════════════
+
+  # thunderbird-android-b04 (C): settings.gradle.kts fails the build unless
+  # JavaVersion.current() is compatible with VERSION_21, and the Gradle daemon runs on the
+  # toolchain pinned in gradle/gradle-daemon-jvm.properties (toolchainVersion, written by
+  # updateDaemonJvm). C: a regex (21 or higher) stands in for the numeric comparison, and
+  # the second rule pins the VERSION_21 floor line so the first one is revisited when the
+  # floor moves.
+  - id: thunderbird-android-daemon-jvm-meets-java-floor
+    kind: properties_path_matches
+    paths: ["gradle/gradle-daemon-jvm.properties"]
+    path: "$.toolchainVersion"
+    matches: '^(2[1-9]|[3-9][0-9]|[1-9][0-9]{2,})$'
+    level: error
+    message: >-
+      gradle-daemon-jvm.properties toolchainVersion must be 21 or newer
+      (settings.gradle.kts requires JavaVersion.VERSION_21).
+  - id: thunderbird-android-java-floor-is-21
+    kind: file_content_matches
+    paths: ["settings.gradle.kts"]
+    pattern: '(?m)^\s*check\(JavaVersion\.current\(\)\.isCompatibleWith\(JavaVersion\.VERSION_21\)\)'
+    level: error
+    message: >-
+      The Java floor in settings.gradle.kts changed: update the toolchainVersion bound in
+      thunderbird-android-daemon-jvm-meets-java-floor to match.
+
+  # ══════════════════════════════════════════════════════════════════════
+  # OTHER family
+  # ══════════════════════════════════════════════════════════════════════
+
+  # thunderbird-android-30 (A): validate-workflows.yml runs
+  # scripts/ci/validate-github-actions-pinned.sh with --no-dry-run on every pull_request
+  # (`!inputs.dryRun` is true when there are no inputs): every `uses:` in
+  # .github/workflows/*.y*ml that carries @ must end in a 40-hex SHA (docker:// in a
+  # sha256 digest); local ./ actions and reusable workflows are exempt. The script's
+  # "workflow contains jobs:" precondition is its guard clause, not a separate unit.
+  # Stage C: the script reads each `uses:` / `- uses:` line, takes the text up to the
+  # next ':' (awk -F:), and only when that text holds '@' requires the part after '@' to
+  # be 40 lowercase hex. So `docker://...` (split at its ':') and tags without '@' pass,
+  # and job/service images are not read. pinned_references fired on
+  # `uses: docker://alpine:3.20`, which the script accepts (reproduced in scratch), so the
+  # gate is now this line rule mirroring the script, and pinned_references stays as a
+  # value-add (VALUE-ADD section). The script finds workflow files recursively.
+  - id: thunderbird-android-workflow-actions-sha-pinned
+    kind: for_each_match
+    paths: [".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
+    select: '^\s*(?:-\s+)?uses:\s*["'']?[^\s:"''#]*@'
+    require:
+      matches: ['^\s*(?:-\s+)?uses:\s*["'']?[^\s:"''#@]*@[a-f0-9]{40}(?:["'']?\s|["'']?$)']
+    level: error
+    message: >-
+      GitHub Actions in workflows must be pinned to a full-length commit SHA
+      (scripts/ci/validate-github-actions-pinned.sh).
+
+  # thunderbird-android-38 (A): spotless `misc` format (SpotlessPlugin.kt: target
+  # ".gitignore", trimTrailingWhitespace) run by quality-checks.yml `spotlessCheck`, on
+  # the root and on every project that applies the spotless convention plugin. The target
+  # is relative to each project directory, so only a project-root .gitignore is checked
+  # (Stage B: docs/ is not a Gradle project, so docs/.gitignore is out of scope). A project
+  # is a directory holding build.gradle.kts; the root build.gradle.kts covers the root
+  # .gitignore. The included builds build-plugin/ and components/ are not reached by the
+  # root build's `spotlessCheck`.
+  - id: thunderbird-android-gitignore-no-trailing-whitespace
+    kind: for_each_file
+    select: ["**/build.gradle.kts", "!build-plugin/**", "!components/**"]
+    require:
+      - kind: no_trailing_whitespace
+        paths: "{dir}/.gitignore"
+    level: error
+    message: "Project .gitignore files carry no trailing whitespace (spotless misc format)."
+
+  # Detekt scope (Stage C): quality-checks.yml gates `./gradlew detekt`, whose default
+  # source is src/{main,test}/{java,kotlin} of each root-build project; the KMP source sets
+  # (commonMain, androidMain, ...) run only in the continue-on-error "Running Detekt
+  # including KMP" step, and the included builds build-plugin/ and components/ are not
+  # reached. This also drops the 15 .kt test fixtures under
+  # library/pii-safe/compiler-plugin/src/test/resources/fixtures/ (Stage B). The default
+  # source is detekt Gradle plugin behaviour inferred from the workflow comment, not
+  # verifiable offline.
+
+  # thunderbird-android-41 (A): detekt NewLineAtEndOfFile (config/detekt/detekt.yml:721,
+  # active), quality-checks.yml `./gradlew detekt`.
+  - id: thunderbird-android-kotlin-final-newline
+    kind: final_newline
+    paths:
+      include:
+        - "**/src/main/kotlin/**/*.kt"
+        - "**/src/main/java/**/*.kt"
+        - "**/src/test/kotlin/**/*.kt"
+        - "**/src/test/java/**/*.kt"
+      exclude: ["build-plugin/**", "components/**"]
+    level: error
+    message: "Kotlin sources end with a newline (detekt NewLineAtEndOfFile)."
+
+  # thunderbird-android-42 (A): detekt PackageNaming (detekt.yml:377, packagePattern
+  # '[a-z]+(\.[a-z][A-Za-z0-9]*)*').
+  - id: thunderbird-android-kotlin-package-naming
+    kind: for_each_match
+    paths:
+      include:
+        - "**/src/main/kotlin/**/*.kt"
+        - "**/src/main/java/**/*.kt"
+        - "**/src/test/kotlin/**/*.kt"
+        - "**/src/test/java/**/*.kt"
+      exclude: ["build-plugin/**", "components/**"]
+    select: '^package\s'
+    require:
+      matches: ['^package [a-z]+(\.[a-z][A-Za-z0-9]*)*\s*$']
+    level: error
+    message: "Package names match [a-z]+(\\.[a-z][A-Za-z0-9]*)* (detekt PackageNaming)."
+
+  # thunderbird-android-40 (C): detekt ForbiddenComment (detekt.yml:629): no `FIXME:` or
+  # `STOPSHIP:` marker in a comment. C: detekt's per-finding baselines
+  # (*/detekt-baseline.xml) and class-level @Suppress("ForbiddenComment") become whole-file
+  # excludes here, and the comment scope is a line-level approximation.
+  - id: thunderbird-android-kotlin-no-fixme-stopship-comments
+    kind: file_content_forbidden
+    paths:
+      include:
+        - "**/src/main/kotlin/**/*.kt"
+        - "**/src/main/java/**/*.kt"
+        - "**/src/test/kotlin/**/*.kt"
+        - "**/src/test/java/**/*.kt"
+      exclude:
+        # outside the gated `./gradlew detekt` scope (see the detekt scope note above)
+        - "build-plugin/**"
+        - "components/**"
+        # detekt-baseline.xml entries
+        - "backend/api/src/main/java/com/fsck/k9/backend/api/BackendFolder.kt"
+        - "backend/jmap/src/main/java/com/fsck/k9/backend/jmap/CommandSync.kt"
+        - "legacy/ui/legacy/src/main/java/com/fsck/k9/ui/messagedetails/MessageDetailsFragment.kt"
+        - "mail/protocols/smtp/src/test/java/com/fsck/k9/mail/transport/smtp/SmtpTransportTest.kt"
+        - "legacy/core/src/test/java/com/fsck/k9/mailstore/K9BackendFolderTest.kt"
+        # class-level @Suppress("ForbiddenComment")
+        - "legacy/ui/legacy/src/main/java/com/fsck/k9/ui/messagelist/MessageListFragment.kt"
+        - "legacy/ui/legacy/src/main/java/com/fsck/k9/ui/messagelist/LegacyMessageListFragment.kt"
+    pattern: '(?m)(//|/\*|^\s*\*).*(FIXME|STOPSHIP):'
+    level: error
+    message: >-
+      FIXME: / STOPSHIP: comment markers are forbidden (detekt ForbiddenComment); fix the
+      problem or use a TODO.
+
+  # thunderbird-android-b07 (C): detekt MaxLineLength (detekt.yml:700-706: maxLineLength
+  # 120, excludePackageStatements, excludeImportStatements, excludeRawStrings,
+  # excludeCommentStatements false), quality-checks.yml `./gradlew detekt`. C: element-level
+  # @Suppress("MaxLineLength"), detekt-baseline entries and raw-string lines can only be
+  # approximated by whole-file excludes (the 23 files below, each carrying a
+  # @Suppress("MaxLineLength") or a MaxLineLength baseline entry at the pin). The three
+  # unsuppressed over-long lines in the gated scope are comment lines holding a URL
+  # (SettingsProvider.kt:95, StorageMigrationTo5.kt:33, FolderTypeAttribute.kt:7) while CI
+  # passes, so lines with a URL are treated as exempt; that exemption is inferred from the
+  # pin, not verified against detekt's source.
+  - id: thunderbird-android-kotlin-max-line-length
+    kind: for_each_match
+    paths:
+      include:
+        - "**/src/main/kotlin/**/*.kt"
+        - "**/src/main/java/**/*.kt"
+        - "**/src/test/kotlin/**/*.kt"
+        - "**/src/test/java/**/*.kt"
+      exclude:
+        - "build-plugin/**"
+        - "components/**"
+        # @Suppress("MaxLineLength") / detekt-baseline.xml MaxLineLength entries
+        - "app-common/src/test/kotlin/net/thunderbird/app/common/account/DefaultAccountDefaultsProviderTest.kt"
+        - "backend/imap/src/main/java/com/fsck/k9/backend/imap/ImapSync.kt"
+        - "feature/account/server/settings/src/test/kotlin/app/k9mail/feature/account/server/settings/ui/incoming/IncomingServerSettingsStateMapperKtTest.kt"
+        - "feature/account/server/settings/src/test/kotlin/app/k9mail/feature/account/server/settings/ui/outgoing/OutgoingServerSettingsStateMapperKtTest.kt"
+        - "feature/mail/message/list/api/src/test/kotlin/net/thunderbird/feature/mail/message/list/domain/model/SortCriteriaTest.kt"
+        - "feature/mail/message/list/internal/src/test/kotlin/net/thunderbird/feature/mail/message/list/internal/domain/usecase/BuildSwipeActionsTest.kt"
+        - "feature/mail/message/list/internal/src/test/kotlin/net/thunderbird/feature/mail/message/list/internal/domain/usecase/CreateArchiveFolderTest.kt"
+        - "feature/mail/message/list/internal/src/test/kotlin/net/thunderbird/feature/mail/message/list/internal/ui/MessageListScreenRendererTest.kt"
+        - "feature/mail/message/list/internal/src/test/kotlin/net/thunderbird/feature/mail/message/list/internal/ui/state/machine/MessageListStateMachineTest.kt"
+        - "feature/mail/message/list/internal/src/test/kotlin/net/thunderbird/feature/mail/message/list/internal/ui/state/sideeffect/LoadFolderInformationSideEffectTest.kt"
+        - "feature/mail/message/list/internal/src/test/kotlin/net/thunderbird/feature/mail/message/list/internal/ui/state/sideeffect/ui/SetMessageActiveSideEffectTest.kt"
+        - "legacy/mailstore/src/test/java/app/k9mail/legacy/mailstore/folder/DefaultFolderDetailsRepositoryTest.kt"
+        - "legacy/mailstore/src/test/java/app/k9mail/legacy/mailstore/folder/DefaultRemoteFolderDetailsRepositoryTest.kt"
+        - "legacy/mailstore/src/test/java/app/k9mail/legacy/mailstore/folder/DefaultRemoteFolderQueryRepositoryTest.kt"
+        - "legacy/mailstore/src/test/java/app/k9mail/legacy/mailstore/folder/push/DefaultPushFoldersQueryRepositoryTest.kt"
+        - "legacy/storage/src/test/java/com/fsck/k9/storage/messages/RetrieveMessageListOperationsTest.kt"
+        - "legacy/storage/src/test/java/com/fsck/k9/storage/migrations/MigrationTo90Test.kt"
+        - "legacy/ui/legacy/src/test/java/com/fsck/k9/view/RecipientSelectViewLayoutTest.kt"
+        - "library/pii-safe/compiler-plugin/src/test/kotlin/net/thunderbird/piisafe/compiler/fir/checkers/HasPiiRequiresAnnotatedPropertyCheckerTest.kt"
+        - "mail/common/src/test/java/com/fsck/k9/mail/AddressTest.kt"
+        - "mail/protocols/imap/src/main/java/com/fsck/k9/mail/store/imap/RealImapFolder.kt"
+        - "mail/protocols/imap/src/test/java/com/fsck/k9/mail/store/imap/RealImapFolderTest.kt"
+        - "mail/protocols/imap/src/test/java/com/fsck/k9/mail/store/imap/RealImapStoreTest.kt"
+    select: '^.{121,}$'
+    require:
+      matches: ['^(?:(?:import|package) |.*https?://)']
+    level: error
+    message: "Kotlin lines are at most 120 characters (detekt MaxLineLength)."
+
+  # thunderbird-android-b08 / -b09 (A): ktlint (spotless `kotlin` target src/*/kotlin/**/*.kt
+  # and `kotlinGradle` target *.gradle.kts per project, SpotlessPlugin.kt:28-55; the root
+  # adds build-plugin/plugin/src/*/kotlin and build-plugin{,/plugin}/*.gradle.kts), run by
+  # quality-checks.yml `spotlessCheck`. SpotlessExtension.kt disables five standard rules,
+  # not no-trailing-spaces or no-consecutive-blank-lines. Kotlin under src/*/java is not a
+  # spotless target. build-plugin/src (precompiled convention scripts) and the components/
+  # included build are not reached by the root build's spotlessCheck.
+  - id: thunderbird-android-ktlint-no-trailing-spaces
+    kind: no_trailing_whitespace
+    paths:
+      include: ["**/src/*/kotlin/**/*.kt", "**/*.gradle.kts"]
+      exclude: ["build-plugin/src/**", "components/**"]
+    level: error
+    message: "Kotlin sources and Gradle scripts carry no trailing whitespace (ktlint no-trailing-spaces)."
+  - id: thunderbird-android-ktlint-no-consecutive-blank-lines
+    kind: max_consecutive_blank_lines
+    max: 1
+    paths:
+      include: ["**/src/*/kotlin/**/*.kt", "**/*.gradle.kts"]
+      exclude: ["build-plugin/src/**", "components/**"]
+    level: error
+    message: "No two consecutive blank lines in Kotlin sources and Gradle scripts (ktlint no-consecutive-blank-lines)."
+
+  # thunderbird-android-50 (A): the root featureFlag plugin
+  # (build-plugin/plugin/.../featureflag/FeatureFlagRootPlugin.kt) validates
+  # config/featureflag/thunderbird_mobile_featureflag.catalog.json against the draft-07
+  # schema with format assertions on, during every Gradle configuration, so every CI
+  # Gradle job gates it.
+  - id: thunderbird-android-featureflag-catalog-schema
+    kind: json_schema_passes
+    paths: ["config/featureflag/thunderbird_mobile_featureflag.catalog.json"]
+    schema_path: "config/featureflag/thunderbird_mobile_featureflag.schema.json"
+    level: error
+    message: >-
+      The feature-flag catalog must validate against
+      config/featureflag/thunderbird_mobile_featureflag.schema.json.
+  # Strict-JSON companion (Stage B): json_schema_passes parses JSONC (comments, trailing
+  # commas), but FeatureFlagRootPlugin decodes the catalog with kotlinx Json, which is
+  # strict, so a comment or trailing comma fails the build while json_schema_passes
+  # passes (reproduced in scratch). No alint kind parses strict JSON; this line regex
+  # catches line-start comments and trailing commas (not a comment after a value).
+  - id: thunderbird-android-featureflag-catalog-strict-json
+    kind: file_content_forbidden
+    paths: ["config/featureflag/thunderbird_mobile_featureflag.catalog.json"]
+    pattern: '(?m)^\s*(?://|/\*)|,\s*[\]}]'
+    level: error
+    message: >-
+      The feature-flag catalog is parsed as strict JSON (kotlinx Json): no comments and no
+      trailing commas.
+
+  # thunderbird-android-53 (C, Stage B reclassified from B-config): CatalogValidator.kt
+  # rejects an override key (overrides.{thunderbird,k9}.{debug,daily,beta,release}) that is
+  # not declared in $.flags[*].key. C: the override map keys are read with a line regex on
+  # the catalog's fixed layout (8-space indent, boolean value), since JSONPath cannot
+  # extract map keys. The second CatalogValidator check (an override value must differ from
+  # the flag's default, unit -55) is B-adapter and not expressed.
+  - id: thunderbird-android-featureflag-override-keys-declared
+    kind: cross_file
+    relation: subset
+    source:
+      file: config/featureflag/thunderbird_mobile_featureflag.catalog.json
+      extract: { regex: '(?m)^        "([a-z][a-z0-9_]+)": (?:true|false)' }
+    targets:
+      - file: config/featureflag/thunderbird_mobile_featureflag.catalog.json
+        extract: { json: "$.flags[*].key" }
+    level: error
+    message: "Every feature-flag override key must name a flag declared in $.flags (CatalogValidator)."
+
+  # thunderbird-android-56 (A): scripts/ci/render-notes.py:177-193 (shippable_builds.yml
+  # "Render Release Notes") and scripts/changelog/generate_changelog_json.py:257-273
+  # validate the release and index JSON they write into app-*/src/<type>/res/raw against
+  # schemas/changelog-{release,index}.schema.json (Draft 2020-12) before writing.
+  # Note (Stage B): these JSON files are generated by generate_changelog_json.py and
+  # committed; the rule checks the committed generated output, not an authored file.
+  - id: thunderbird-android-changelog-release-schema
+    kind: json_schema_passes
+    paths: ["app-*/src/*/res/raw/changelog_release_*.json"]
+    schema_path: "schemas/changelog-release.schema.json"
+    level: error
+    message: "Changelog release resources must validate against schemas/changelog-release.schema.json."
+  - id: thunderbird-android-changelog-index-schema
+    kind: json_schema_passes
+    paths: ["app-*/src/*/res/raw/changelog_index.json"]
+    schema_path: "schemas/changelog-index.schema.json"
+    level: error
+    message: "Changelog indexes must validate against schemas/changelog-index.schema.json."
+
+  # thunderbird-android-54 (A): docs/book.toml `create-missing = false`, so `mdbook test
+  # docs` (quality-markdown.yml on PRs touching **.md) and `mdbook build` (build-docs.yml)
+  # fail when a chapter in docs/SUMMARY.md points at a missing file.
+  - id: thunderbird-android-docs-summary-chapters-exist
+    kind: markdown_links_resolve
+    paths: ["docs/SUMMARY.md"]
+    level: error
+    message: "Every chapter docs/SUMMARY.md links must exist (book.toml create-missing = false)."
+
+  # thunderbird-android-b06 (A): build.gradle.kts:37-45 buildCliTools ("Keep this list up
+  # to date with the CLI tools in the project. This is used by the CI to build all CLI
+  # tools."), run by build-cli-tools.yml `./gradlew buildCliTools`. Every Gradle module
+  # directly under cli/ (a directory with build.gradle.kts) is listed as
+  # ":cli:<name>:build". Holds at the pin (5 modules, 5 entries).
+  - id: thunderbird-android-build-cli-tools-lists-every-cli-module
+    kind: for_each_dir
+    select: "cli/*"
+    when_iter: 'iter.has_file("build.gradle.kts")'
+    require:
+      - kind: file_content_matches
+        paths: "build.gradle.kts"
+        pattern: '":cli:{basename}:build"'
+    level: error
+    message: >-
+      A cli/ module is missing from the buildCliTools dependsOn list in build.gradle.kts.
+
+  # thunderbird-android-58 (C): legacy/core/src/main/res/values/arrays_account_settings_values.xml:112
+  # "Must be kept in sync with `NotificationLight` enum". C: the enum side is a regex over
+  # the ktlint-formatted Kotlin layout (one constant per line).
+  - id: thunderbird-android-notification-light-values-match-enum
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: legacy/core/src/main/res/values/arrays_account_settings_values.xml
+      extract: { xml: "$.resources['string-array'][?(@['@name'] == 'notification_light_values')].item[*]" }
+    targets:
+      - file: feature/notification/api/src/commonMain/kotlin/net/thunderbird/feature/notification/NotificationLight.kt
+        extract: { regex: '(?m)^    ([A-Z][A-Za-z0-9]*),$' }
+    level: error
+    message: >-
+      notification_light_values must list exactly the NotificationLight enum constants
+      (comment at arrays_account_settings_values.xml:112).
+
+  # thunderbird-android-59 (C): ContributionIdStringMapper.kt:12 "Ids need to be kept in
+  # sync with ContributionIdProvider.kt". C: both sides are regex reads of Kotlin literals.
+  - id: thunderbird-android-contribution-ids-in-sync
+    kind: cross_file
+    relation: set_equals
+    source:
+      file: feature/funding/googleplay/src/main/kotlin/net/thunderbird/feature/funding/googleplay/domain/ContributionIdProvider.kt
+      extract: { regex: 'ContributionId\("([a-z0-9_]+)"\)' }
+    targets:
+      - file: feature/funding/googleplay/src/main/kotlin/net/thunderbird/feature/funding/googleplay/ui/contribution/ContributionIdStringMapper.kt
+        extract: { regex: '"(contribution_[a-z0-9_]+)" ->' }
+    level: error
+    message: >-
+      The contribution IDs ContributionIdStringMapper maps must equal those
+      ContributionIdProvider offers (comment at ContributionIdStringMapper.kt:12).
+
+  # thunderbird-android-60 (C): settings.gradle.kts, build-plugin/settings.gradle.kts and
+  # components/settings.gradle.kts set RepositoriesMode.FAIL_ON_PROJECT_REPOS, so Gradle
+  # fails when a project build script (or a precompiled convention script) declares
+  # repositories. C: a regex over the Kotlin DSL.
+  - id: thunderbird-android-no-project-repositories
+    kind: file_content_forbidden
+    paths:
+      include: ["**/*.gradle.kts", "**/*.gradle"]
+      exclude: ["**/settings.gradle.kts", "**/settings.gradle"]
+    pattern: '(?m)^\s*repositories\s*(\{|\.)'
+    level: error
+    message: >-
+      Repositories are declared only in settings.gradle.kts
+      (repositoriesMode = FAIL_ON_PROJECT_REPOS).
+
+  # ══════════════════════════════════════════════════════════════════════
+  # VALUE-ADD (R3/R5): alint can assert these, the repository does not gate or document
+  # them. Outside the coverage ratio; level info.
+  # ══════════════════════════════════════════════════════════════════════
+
+  # toolchain-pin: JDK 21 is written four times: .java-version, mise.toml
+  # (java = "temurin-21"), the setup-gradle composite action (actions/setup-java
+  # java-version '21') and gradle/gradle-daemon-jvm.properties (toolchainVersion=21).
+  # Nothing checks that they agree. The bundled toolchain-pins@v1 JVM rules stay inactive
+  # here: .java-version holds a major-only pin, and they do not read composite actions.
+  - id: thunderbird-android-va-jdk-pins-agree
+    kind: cross_file
+    source:
+      file: .java-version
+      extract: { regex: '\A\s*([0-9]+)\s*\z' }
+    targets:
+      - file: mise.toml
+        extract: { regex: '(?m)^java\s*=\s*"(?:[a-z]+-)?([0-9]+)' }
+      - file: .github/actions/setup-gradle/action.yml
+        extract: { regex: "java-version:\\s*'([0-9]+)'" }
+      - file: gradle/gradle-daemon-jvm.properties
+        extract: { regex: '(?m)^toolchainVersion=([0-9]+)\s*$' }
+    level: info
+    message: >-
+      VALUE-ADD: the JDK major differs across .java-version, mise.toml, the setup-gradle
+      action and gradle-daemon-jvm.properties.
+
+  # toolchain-pin: Python 3.14 in mise.toml and in build-scripts.yml's setup-python.
+  - id: thunderbird-android-va-python-pins-agree
+    kind: cross_file
+    source:
+      file: mise.toml
+      extract: { regex: '(?m)^python\s*=\s*"([0-9.]+)"' }
+    targets:
+      - file: .github/workflows/build-scripts.yml
+        extract: { regex: "python-version:\\s*'([0-9.]+)'" }
+    level: info
+    message: "VALUE-ADD: the Python version differs between mise.toml and build-scripts.yml."
+
+  # dep-version: settings.gradle.kts applies io.github.ben-manes.versions with a literal
+  # version (settings plugins cannot use the catalog), while build-plugin compiles the
+  # thunderbird.dependency.check convention script against libs.plugins.dependency.check.
+  - id: thunderbird-android-va-versions-plugin-matches-catalog
+    kind: cross_file
+    source:
+      file: gradle/libs.versions.toml
+      extract: { toml: "$.versions.dependencyCheckPlugin" }
+    targets:
+      - file: settings.gradle.kts
+        extract: { regex: 'id\("io\.github\.ben-manes\.versions"\) version "([^"]+)"' }
+    level: info
+    message: >-
+      VALUE-ADD: the ben-manes versions plugin in settings.gradle.kts differs from
+      libs.versions.toml dependencyCheckPlugin.
+
+  # other: the dependency-guard baselines the two app modules configure exist.
+  - id: thunderbird-android-va-dependency-guard-baselines-present
+    kind: file_exists
+    paths:
+      - "app-k9mail/dependencies/fossReleaseRuntimeClasspath.txt"
+      - "app-k9mail/dependencies/fullReleaseRuntimeClasspath.txt"
+      - "app-thunderbird/dependencies/fossDailyRuntimeClasspath.txt"
+      - "app-thunderbird/dependencies/fossBetaRuntimeClasspath.txt"
+      - "app-thunderbird/dependencies/fossReleaseRuntimeClasspath.txt"
+      - "app-thunderbird/dependencies/fullDailyRuntimeClasspath.txt"
+      - "app-thunderbird/dependencies/fullBetaRuntimeClasspath.txt"
+      - "app-thunderbird/dependencies/fullReleaseRuntimeClasspath.txt"
+    level: info
+    message: "VALUE-ADD: a dependencyGuard configuration has no committed baseline."
+
+  # other: Stage A's pinned_references form of unit -30, kept as a value-add. It is
+  # stricter than scripts/ci/validate-github-actions-pinned.sh (it also requires a sha256
+  # digest on docker:// references written without '@', and checks job/service images),
+  # so the gate is thunderbird-android-workflow-actions-sha-pinned.
+  - id: thunderbird-android-va-workflow-references-immutable
+    kind: pinned_references
+    paths: [".github/workflows/**/*.yml", ".github/workflows/**/*.yaml"]
+    level: info
+    message: >-
+      VALUE-ADD: a workflow reference (action, reusable workflow, docker:// or job image) is
+      not pinned to an immutable SHA or digest.

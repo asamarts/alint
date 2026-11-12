@@ -22,6 +22,7 @@ astral-sh/uv	cfe5277bc4226da3a8cf51ad40b34f6a4e1746e5	astral-sh-uv.alint.yml
 AvaloniaUI/Avalonia	5ad8b75427a73721be3b6ed5c11e6aff0d7bad21	AvaloniaUI-Avalonia.alint.yml
 axios/axios	4306df21e84332fc576e98c2de549347c06bfb76	axios-axios.alint.yml
 babel/babel	2bc74adeadd1d30a56c6dc747e82b1566946e713	babel-babel.alint.yml
+backstage/backstage	bc73976a6de26df49b2bc2eefe689ee5b3ed0af1	backstage-backstage.alint.yml
 bazelbuild/bazel	bda3d1c2b0dd446cfe6918c424deeda2e4efd25f	bazelbuild-bazel.alint.yml
 BurntSushi/ripgrep	4857d6fa67db69a95cd4b6f2adda5d807d4d0119	BurntSushi-ripgrep.alint.yml
 clap-rs/clap	8387c812c4b9726474b8407f81ec97f0acf570ed	clap-rs-clap.alint.yml
@@ -73,11 +74,14 @@ kubernetes/kubernetes	14f9f7e9e565dd83e3fa043fdccabf9075b0cdac	kubernetes-kubern
 laravel/framework	42b494e1ed2bc80511bca064c8a395b776ff1516	laravel-framework.alint.yml
 llvm/llvm-project	d7ee01c0fa3113b0b2d98e77273f794a182bf2dd	llvm-llvm-project.alint.yml
 mastodon/mastodon	facb552c9cdbe8a2ebff0b94ebf2c9e9ec385347	mastodon-mastodon.alint.yml
+mattermost/mattermost	69102aba22607b2fc21a72d1958373563650223d	mattermost-mattermost.alint.yml
+microsoft/fluentui	b4f5c3cca4e95ab5d271657cbf440cc8bf7427f6	microsoft-fluentui.alint.yml
 microsoft/rushstack	a1d41fc46f3fa4951eef79ec0eabd2173db7dd55	microsoft-rushstack.alint.yml
 microsoft/TypeScript	f3d3968058b5ee0f1c78dc1484a287d9f33bf638	microsoft-TypeScript.alint.yml
 microsoft/vscode	07cee71da6523e7dedab6c4ed83a2c41cd5149a6	microsoft-vscode.alint.yml
 neovim/neovim	fb5aad1d07d68b3da38bc7ba5c6a7896b3dfcda5	neovim-neovim.alint.yml
 netty/netty	e067b6e3376afee7629481d46333c3acf7f95943	netty-netty.alint.yml
+nextcloud/server	d04a299b92c744b6a22255f01032fa755208bef0	nextcloud-server.alint.yml
 NixOS/nix	d212b92f1eaa6fa8d2cbfaaebf5dcf613e2cd02c	NixOS-nix.alint.yml
 NixOS/nixpkgs	d9a85a232f55de20407277a09f475ba52d568f24	NixOS-nixpkgs.alint.yml
 nodejs/node	7af433b68e97471a94e665ffde63633d73849ce2	nodejs-node.alint.yml
@@ -123,6 +127,7 @@ systemd/systemd	414fc6e3b200eea45ee97eddb79c7496e01db16c	systemd-systemd.alint.y
 TanStack/query	9b528b5e51844197a6cb795822edc38569f1dff9	TanStack-query.alint.yml
 tensorflow/tensorflow	803e4ccb979128484a6ef6bbe1fcf72332c28853	tensorflow-tensorflow.alint.yml
 Textualize/rich	46cebbb032f920eb096efbaf23cdc6fe9dd541f7	Textualize-rich.alint.yml
+thunderbird/thunderbird-android	ac1f0e85f63c1b600ac443d1fb2d939bffff7de5	thunderbird-thunderbird-android.alint.yml
 tokio-rs/axum	4a72e063b916f39e0698a345a99a755deb8f345b	tokio-rs-axum.alint.yml
 trpc/trpc	8eff9ff0ddf4be4a682bf205fb66b00a26901075	trpc-trpc.alint.yml
 TryGhost/Ghost	ab272fcb6056d23e32b307264eba35ffd27a921b	TryGhost-Ghost.alint.yml

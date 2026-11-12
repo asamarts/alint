@@ -1,0 +1,1600 @@
+{
+ "repo": "microsoft/fluentui",
+ "sha": "b4f5c3cca4e95ab5d271657cbf440cc8bf7427f6",
+ "metrics": {
+  "counts": {
+   "A": 19,
+   "B-config": 4,
+   "B-adapter": 10,
+   "B-kernel": 0,
+   "B-delegate": 0,
+   "C": 9,
+   "D": 35
+  },
+  "addressable": 42,
+  "coverage_today": 45,
+  "coverage_with_tuning": 67,
+  "gap": 33,
+  "coverage_after_slice": 52,
+  "coverage_after_slice_with_entry_values": 57
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "dep-version": {
+   "counts": {
+    "A": 1,
+    "B-config": 1,
+    "B-adapter": 3,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 3,
+    "D": 4
+   },
+   "addressable": 8,
+   "coverage_today": 12,
+   "coverage_with_tuning": 50,
+   "gap": 50,
+   "coverage_after_slice": 12,
+   "coverage_after_slice_with_entry_values": 25
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 4,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 1,
+    "D": 1
+   },
+   "addressable": 5,
+   "coverage_today": 80,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 80,
+   "coverage_after_slice_with_entry_values": 80
+  },
+  "other": {
+   "counts": {
+    "A": 14,
+    "B-config": 3,
+    "B-adapter": 7,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 5,
+    "D": 30
+   },
+   "addressable": 29,
+   "coverage_today": 48,
+   "coverage_with_tuning": 66,
+   "gap": 34,
+   "coverage_after_slice": 59,
+   "coverage_after_slice_with_entry_values": 62
+  }
+ },
+ "units": [
+  {
+   "id": "fluentui-01",
+   "summary": "Root package.json packageManager pins one exact Yarn 4 release (yarn@4.X.Y), the version source of truth",
+   "evidence": "package.json:396 (\"packageManager\": \"yarn@4.18.0\"); docs/react-v9/contributing/dev-env.md:16,31",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "json_path_matches microsoft-fluentui-package-manager-yarn4-exact",
+   "assertion_family": "none",
+   "reason": "A structured read of one JSON key against an exact-version pattern. It holds at the pin (R5).",
+   "fire_verified": "Scratch package.json with packageManager yarn@^4.18.0, then yarn@3.6.4: the rule fired each time. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-02",
+   "summary": ".yarnrc.yml yarnPath names a committed Yarn release file",
+   "evidence": ".yarnrc.yml:21 (yarnPath: .yarn/releases/yarn-4.18.0.cjs); every CI job runs yarn through it; .devops/templates/tools.yml:44 (no corepack, yarn is checked in)",
+   "mechanism": "tool-config",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "registry_paths_resolve (yaml $.yarnPath, expect file) microsoft-fluentui-yarnpath-resolves",
+   "assertion_family": "none",
+   "reason": "A path reference from a structured YAML value to the filesystem.",
+   "fire_verified": "Removed .yarn/releases/yarn-4.18.0.cjs in a scratch copy: the rule fired. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-03",
+   "summary": "The checked-in Yarn release named by yarnPath is the same version as packageManager",
+   "evidence": "docs/react-v9/contributing/dev-env.md:16 (packageManager is the exact version source of truth; .yarnrc.yml configures the binary path), :31; package.json:396; .yarnrc.yml:21",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "C",
+   "alint": "cross_file equals (regex on package.json, regex on .yarnrc.yml) microsoft-fluentui-yarnpath-matches-package-manager",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a regex read of a JSON key is C. No normalize turns yarn@4.18.0 and .yarn/releases/yarn-4.18.0.cjs into the same full version; semver-minor would drop the patch digit.",
+   "fire_verified": "n/a (C). It was fired anyway: in a scratch copy, the release renamed to 4.17.1 in yarnPath fired the rule. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-04",
+   "summary": "The Azure 1ES UseNode@1 step requests a floating major (22.x) with checkLatest: true",
+   "evidence": ".devops/templates/tools.yml:9,16,19,20 (a load-bearing comment says checkLatest is required because @microsoft/fast-build needs node >=22.18.0)",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "yaml_path_matches microsoft-fluentui-azure-usenode-major-x + yaml_path_equals microsoft-fluentui-azure-usenode-check-latest",
+   "assertion_family": "none",
+   "reason": "Two structured YAML reads of one step that the template comment declares load-bearing. R1 makes them one unit.",
+   "fire_verified": "In scratch tools.yml, version 22.14.0 fired the major-x rule and checkLatest false fired the check-latest rule. Both pass on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-05",
+   "summary": "syncpack and beachball are declared in root devDependencies (the CI guard reads that version and runs npx <tool>@<version>)",
+   "evidence": ".github/workflows/check-packages.yml:57-60 and :84-87 (core.setFailed when the devDependency is missing), :67, :94; package.json:182,312",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_matches microsoft-fluentui-syncpack-is-root-devdependency + microsoft-fluentui-beachball-is-root-devdependency",
+   "assertion_family": "none",
+   "reason": "R7: the github-script guard asserts that a string-valued key exists. One guard pattern applied to two tools, collapsed under R1.",
+   "fire_verified": "Removed syncpack, then beachball, from root devDependencies in a scratch copy: each rule fired. Both pass on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-06",
+   "summary": "Every patch: descriptor's ~/ patch file is committed",
+   "evidence": "package.json:307 (storywright patch:...#~/.yarn/patches/storywright-npm-0.0.27-storybook7.14-bfcc4eb382.patch); yarn install --immutable in every CI job",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "registry_paths_resolve (regex over workspace manifests, base lint_root) microsoft-fluentui-yarn-patches-resolve",
+   "assertion_family": "none",
+   "reason": "R7 classifies the assertion yarn install makes over files alint reads. Batch-2 ruling: the path is pulled from the specifier with a regex over manifest text, and a JSONPath extract returns the whole descriptor, so this is C.",
+   "fire_verified": "n/a (C). It was fired anyway: deleting the .patch file in a scratch copy fired the rule. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-07",
+   "summary": "Every peerDependencies range is a valid semver range (verify-peer-dependencies invalid-peer-range)",
+   "evidence": ".github/workflows/pr.yml:57 (verify-peer-dependencies --tag=vNext); tools/workspace-plugin/src/generators/verify-peer-dependencies/index.ts:13,320 (NON_SEMVER_RANGE or semver.validRange null)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_matches ($.peerDependencies.*, a regex of node-semver's range grammar) microsoft-fluentui-peer-ranges-valid-semver",
+   "assertion_family": "none",
+   "reason": "alint has no semver-range operator, so the grammar is spelled as a regex. The generator scopes by project.json tags (publishable, vNext), which package.json cannot see, so the rule covers every workspace manifest. All 32 distinct peer ranges at the pin match.",
+   "fire_verified": "n/a (C). It was fired anyway: the scratch ranges 'latest' and '||| 21' fired. The control '1.2.3 - 2.x || >=3.0.0-rc.1 <4' did not fire. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-08",
+   "summary": "The root tar-fs resolution stays within the security floor ^2.1.3",
+   "evidence": ".github/instructions/dependabot-security-fixes.instructions.md:52; package.json:389 (\"tar-fs\": \"2.1.4\" in resolutions)",
+   "mechanism": "convention",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_matches ($.resolutions['tar-fs'], range spelled as a regex) microsoft-fluentui-tar-fs-security-resolution",
+   "assertion_family": "none",
+   "reason": "A documented security-maintained resolution that holds at the pin (R5). With no semver operator, ^2.1.3 is spelled as a regex.",
+   "fire_verified": "n/a (C). It was fired anyway: 2.1.2 fired and removing the key fired. The control ^2.1.3 did not fire. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-09",
+   "summary": "Every change/*.json type (and dependentChangeType when present) is a beachball change type",
+   "evidence": ".github/workflows/check-packages.yml:94 (beachball check); beachball.config.js -> scripts/beachball/base.config.js; change/*.json (12 files at the pin)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches microsoft-fluentui-change-file-type-valid + microsoft-fluentui-change-file-dependent-type-valid",
+   "assertion_family": "none",
+   "reason": "R7: an enum check over JSON files alint reads.",
+   "fire_verified": "n/a (family other). It was fired anyway: type 'feature' and dependentChangeType 'bogus' each fired in scratch. Both pass on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-10",
+   "summary": "A change file's type is not disallowed for its package (repo default ['major']; a package's own beachball.disallowedChangeTypes replaces it)",
+   "evidence": "scripts/beachball/base.config.js:8; package.json#beachball.disallowedChangeTypes in workspace manifests; check-packages.yml:94; docs/workflows/contributing.md:44",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file superset x8 (one rule per change type) microsoft-fluentui-change-type-{major,premajor,minor,preminor,patch,prepatch,prerelease,none}-allowed",
+   "assertion_family": "none",
+   "reason": "Expressible today, but only as one rule per change type, with JSONPath filters that join packageName to the manifests whose list allows that type, and with the repo default restated in the major rule.",
+   "fire_verified": "n/a (family other). It was fired anyway in scratch: prerelease on react-aria (disallowed) fired, major on @fluentui/azure-themes (default list) fired, and minor on @fluentui/react-theme-sass (own list includes minor) fired. Controls: minor on react-aria and major on react-aria did not fire, since react-aria's own list lacks major. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-12",
+   "summary": "No tslint:disable / tslint:enable comments in linted sources (@fluentui/no-tslint-comments)",
+   "evidence": "packages/eslint-plugin/src/configs/core.js:142; pr.yml:78 (nx affected -t lint); .husky/pre-commit (nano-staged)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden microsoft-fluentui-no-tslint-comments",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a linter rule that asserts a text property of the file, not its code, is classified by its logic. packages/eslint-plugin is excluded because its tests quote the directive.",
+   "fire_verified": "n/a (family other). It was fired anyway: a tslint:disable comment added in packages/react/src in scratch fired. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-13",
+   "summary": "*-preview packages stay on 0.x (0.major.(minor|patch))",
+   "evidence": "docs/react-v9/contributing/release-cycle.md:30",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent (match() filter on name and version) microsoft-fluentui-preview-packages-zero-major",
+   "assertion_family": "none",
+   "reason": "A documented convention that holds at the pin (R5). The filter expresses it.",
+   "fire_verified": "n/a (family other). It was fired anyway: a preview package set to 1.0.0 in scratch fired. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-14",
+   "summary": "The react-components/unstable API is frozen: its API report does not change",
+   "evidence": "docs/react-v9/contributing/release-cycle.md:26; packages/react-components/react-components/etc/react-components.unstable.api.md (kept fresh by the build and the clean-tree check at pr.yml:83)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_hash microsoft-fluentui-react-components-unstable-api-frozen",
+   "assertion_family": "none",
+   "reason": "A documented freeze. The API report is the committed surface, and its digest pins it.",
+   "fire_verified": "n/a (family other). It was fired anyway: editing the api.md in scratch fired. It passes on the clone.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "R4. packages/react-components/react-components/src/unstable/index.ts:4-6 states the rule precisely: adding new exports is FORBIDDEN except react-virtualizer, and modifying existing exports is FORBIDDEN. file_hash on the api.md report forbids every change, including the react-virtualizer additions the rule allows and cosmetic api-extractor output changes. It is stricter than the unit. The precise form (existing export lines unchanged, and new lines only from @fluentui/react-virtualizer) is expressible only awkwardly, so the unit is C. It passes at the pin."
+    }
+   ]
+  },
+  {
+   "id": "fluentui-15",
+   "summary": ".yarnrc.yml keeps its explanatory comments (Yarn strips them on automatic updates; the header asks to bring them back)",
+   "evidence": ".yarnrc.yml:1-2 (header), :4-5, :10, :13-15",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches microsoft-fluentui-yarnrc-comments-kept",
+   "assertion_family": "none",
+   "reason": "A load-bearing comment that states a file-text invariant. It holds at the pin.",
+   "fire_verified": "n/a (family other). It was fired anyway: removing a comment in scratch fired. It passes on the clone.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-16",
+   "summary": "API report files (*.api.md) are checked in with LF line endings",
+   "evidence": ".gitattributes:4-5 (*.api.md text=auto)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "C",
+   "alint": "line_endings (lf) microsoft-fluentui-api-reports-lf",
+   "assertion_family": "none",
+   "reason": ".gitattributes sets `*.api.md text=auto` without eol=lf, so Git keeps only the committed blob LF. alint reads the working tree, which is CRLF on a Windows checkout with core.autocrlf=true, so the rule holds for one checkout layout only (C, batch 2 ruling). It passes on the clone and fires on CRLF.",
+   "fire_verified": "n/a (family other). It was fired anyway: CRLF in a scratch api.md fired. It passes on the clone.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "bucket": "C",
+      "reason": ".gitattributes sets `*.api.md text=auto` without eol=lf, so Git keeps only the committed blob LF. alint reads the working tree, which is CRLF on a Windows checkout with core.autocrlf=true, so the rule holds for one checkout layout only (C, batch 2 ruling). It passes on the clone and fires on CRLF."
+     }
+    }
+   ]
+  },
+  {
+   "id": "fluentui-17",
+   "summary": "syncpack list-mismatches: one version per dependency across the syncpack source manifests (prod and dev fields), outside the carve-out version groups",
+   "evidence": ".github/workflows/check-packages.yml:67; syncpack.config.js:5-6 (dependencyTypes prod/dev, source = 66 of 267 manifests), :12 (semverGroups), :20 (versionGroups)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values. Later: constraint unique-key over (manifest, field, dependency, version) rows of the source manifests, with the version groups as partitions",
+   "assertion_family": "unique-key",
+   "reason": "Batch-2 ruling: one version per dependency joins a dependency name to its value, which needs (key path, value) rows. The non-default groups have at most one instance per dependency because peerDependencies are excluded, so they act as carve-outs. The semverGroups entry is an ignored group and is inert for list-mismatches. A simulation found 0 mismatches at the pin.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "fluentui-18",
+   "summary": "normalize-package-dependencies --verify: a dependency on a workspace @fluentui project uses '*' (or >=X.Y.Z-alpha when the target is a prerelease). This covers devDependencies for libraries, and also dependencies/peerDependencies for applications",
+   "evidence": ".github/workflows/pr.yml:56; tools/workspace-plugin/src/generators/normalize-package-dependencies/index.ts",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values. Later: constraint reference from (manifest, field, dep name, range) rows to the target workspace's version",
+   "assertion_family": "reference",
+   "reason": "Joins a dependency name (a key) to its range (a value) and to the target workspace's version. Batch-2 ruling: B-adapter (entry-values).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "fluentui-19",
+   "summary": "tsconfig.base.all.json equals the merge of the v8 and v9 base tsconfig paths plus fixed compilerOptions",
+   "evidence": ".github/workflows/pr.yml:55 (tsconfig-base-all --verify); tools/workspace-plugin/src/generators/tsconfig-base-all (lodash isEqual)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values (a map union of compilerOptions.paths entries across two files, compared with a third)",
+   "assertion_family": "equality",
+   "reason": "Needs (key, value) rows of the paths maps to compare a derived union. Key-only adapters cannot carry the values.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "equality"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "fluentui-20",
+   "summary": "export-maps-sync: each in-scope package.json exports map equals the map derived from metadata.exportMap globs over the package's files",
+   "evidence": ".github/workflows/pr.yml:54 (nx sync:check); tools/workspace-plugin/src/generators/export-maps-sync/lib/export-map.ts",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values plus a directory-listing join",
+   "assertion_family": "equality",
+   "reason": "The derived map pairs export keys with path values computed from globs over the package directory. No adapter emits those rows.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "derived-value"
+     }
+    }
+   ],
+   "needs": "derived-value"
+  },
+  {
+   "id": "fluentui-21",
+   "summary": "beachball check: every published package changed since the target branch has a change file naming it",
+   "evidence": ".github/workflows/check-packages.yml:94; AGENTS.md:25; scripts/beachball/base.config.js:11 (ignorePatterns)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a change relation (merge-base diff mapped to workspaces, minus ignorePatterns) joined to the packageName inside change/*.json",
+   "assertion_family": "none",
+   "reason": "Follows berry-16: path-level git kinds (changeset_requires_path, pair_changed_together) cannot read which package a flat change/*.json names. Unlike rushstack-27, there is no per-package change folder.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
+  },
+  {
+   "id": "fluentui-22",
+   "summary": "A PR contains at most one beachball change file per package",
+   "evidence": "AGENTS.md:26",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a change relation (the change files this PR adds) plus unique-key over their packageName",
+   "assertion_family": "none",
+   "reason": "The scope is per PR. The change files at the pin accumulate across PRs, so the assertion needs the PR's added-file set (a change relation).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "base-revision"
+     }
+    }
+   ],
+   "needs": "base-revision"
+  },
+  {
+   "id": "fluentui-23",
+   "summary": "@fluentui/max-len 120 (with ignore patterns) in the legacy ESLint configs",
+   "evidence": "packages/eslint-plugin/src/configs/core.js:112 (max-len off), :128-141 (@fluentui/max-len); still on in the legacy configs used by 43 projects; test-utilities turns it off",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: suppression-comment awareness (eslint-disable / eslint-disable-next-line) for line-width kinds; no rule",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling classifies a file-property lint rule by its logic. A for_each_match probe found 74 long lines in 42 files. 73 of them are exempted by eslint-disable comments that alint cannot honor, so a rule would be all false positives.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "fluentui-24",
+   "summary": "No orphaned peerDependenciesMeta entry: every key has a matching peerDependencies key (verify-peer-dependencies orphaned-peer-meta)",
+   "evidence": ".github/workflows/pr.yml:57; tools/workspace-plugin/src/generators/verify-peer-dependencies/index.ts:14,532,780",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-config",
+   "alint": "constraint set: per manifest, keys of peerDependenciesMeta are a subset of keys of peerDependencies",
+   "assertion_family": "set",
+   "reason": "Inclusion over key paths alone stays B-config (batch-2 ruling). No current kind compares the key sets of two objects in one file. It holds at the pin.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-25",
+   "summary": "Yarn workspace package names are unique across all 266 workspaces plus the root",
+   "evidence": "package.json:345 (workspaces); Yarn refuses duplicate workspace names on every yarn install in CI",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over workspace manifests ($.name -> manifest path)",
+   "assertion_family": "unique-key",
+   "reason": "Same as jest-B02, babel-B01 and strapi-b04: unique_by keys on path templates only. Verified unique at the pin (267 manifests).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-26",
+   "summary": "Nx project names are unique across the 267 projects",
+   "evidence": "nx.json / project.json files (Nx 22 builds the project graph and rejects duplicate project names on every nx command in pr.yml)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over **/project.json $.name",
+   "assertion_family": "unique-key",
+   "reason": "Same as tq-35. A separate tool and a separate name source (project.json, not package.json), so it is a separate unit. Verified unique at the pin.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-27",
+   "summary": "yarn install --immutable: yarn.lock is fresh for the manifests",
+   "evidence": "every CI job's install step (pr.yml, check-packages.yml); .devops/templates/tools.yml",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn",
+   "assertion_family": "none",
+   "reason": "R7: package-manager resolution semantics (lockfile freshness).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-28",
+   "summary": "yarn dedupe --check: no dedupable resolutions when yarn.lock changes",
+   "evidence": ".github/workflows/check-packages.yml:34-36",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn",
+   "assertion_family": "none",
+   "reason": "R7 names dedupe --check as D.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-29",
+   "summary": "Installed dependency versions satisfy the declared ranges (satisfied --no-peers --skip-invalid)",
+   "evidence": "package.json:18; .github/workflows/pr.yml:68-70",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "satisfied",
+   "assertion_family": "none",
+   "reason": "Needs the installed node_modules tree (resolution state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-30",
+   "summary": "Installed packages are at least 7 days old unless preapproved (quarantine policy)",
+   "evidence": ".yarnrc.yml:10-11,13-19",
+   "mechanism": "tool-config",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn",
+   "assertion_family": "none",
+   "reason": "Needs registry publish dates (external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-31",
+   "summary": "verify-peer-dependencies incompatible-peer-range: a declared peer range is compatible with what the dependency requires",
+   "evidence": ".github/workflows/pr.yml:57; tools/workspace-plugin/src/generators/verify-peer-dependencies/index.ts:12,443-445",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "nx generator",
+   "assertion_family": "reference",
+   "reason": "Stage B: getDependencyManifest reads workspace dependencies from the committed manifests, which cover most peer chains at fluentui, and node_modules only for external ones, which it skips when absent. The static half intersects semver ranges (needs: version-compare), so the unit is B-adapter rather than D.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Moderate confidence. Stage A says the check reads the installed dependencies, but getDependencyManifest (verify-peer-dependencies/index.ts) reads workspace dependencies from the tree, meaning the committed manifests. It reads node_modules only for external ones, and it skips an unresolvable dependency instead of reporting it. At fluentui, the forwarding chains are mostly workspace-internal: react-button depends on react-aria, react-tabster and others, which all declare react and @types/react peers. The code itself calls the check 'version math, not resolution mechanics'. The assertion is that the declared peer range is a subset of each workspace dependency's required peer range. It needs a semver-range subset operator plus a name-to-manifest join (needs: entry-values), so it is B-adapter (reference). If the integrator prefers, split off the external-dependency half as D."
+    },
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare",
+      "reason": "Stage B: getDependencyManifest reads workspace dependencies from the committed manifests, which cover most peer chains at fluentui, and node_modules only for external ones, which it skips when absent. The static half intersects semver ranges (needs: version-compare), so the unit is B-adapter rather than D."
+     }
+    }
+   ],
+   "needs": "version-compare"
+  },
+  {
+   "id": "fluentui-32",
+   "summary": "The ts-minbar apps compile against the TypeScript 5.4 floor",
+   "evidence": "apps/ts-minbar-test-react/package.json and apps/ts-minbar-test-react-components/package.json (test-integration); src/index.ts const tsVersion = '5.4'; pr.yml:78",
+   "mechanism": "test",
+   "family": "toolchain-pin",
+   "bucket": "D",
+   "alint": "nx test-integration",
+   "assertion_family": "none",
+   "reason": "R2: a compile against an installed toolchain. The textual agreement of the floor across the apps and READMEs is value-add only (microsoft-fluentui-va-ts-minbar-floor-agrees).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-33",
+   "summary": "Nx dependency-graph check (workspace-plugin:check-graph)",
+   "evidence": ".github/workflows/pr.yml:53; tools/workspace-plugin/scripts/check-dep-graph.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx",
+   "assertion_family": "none",
+   "reason": "The graph is computed by Nx from source imports (code analysis).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-34",
+   "summary": "bundle-size fixtures are in sync with each package's exports (bundle-size-fixtures-sync via nx sync:check)",
+   "evidence": ".github/workflows/pr.yml:54; tools/workspace-plugin/src/generators/bundle-size-fixtures-sync",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx",
+   "assertion_family": "none",
+   "reason": "Parses TypeScript sources with the TS compiler API (code analysis).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-35",
+   "summary": "Type checks (affected type-check and tsc over just.config.ts files)",
+   "evidence": ".github/workflows/pr.yml:59-66,78",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "assertion_family": "none",
+   "reason": "R2: type checker.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-36",
+   "summary": "Prettier formatting (nx format:check; nano-staged pre-commit)",
+   "evidence": ".github/workflows/pr.yml:74; .husky/pre-commit",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "prettier",
+   "assertion_family": "none",
+   "reason": "R2: formatter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-37",
+   "summary": "The rest of the ESLint run (code rules, import restrictions)",
+   "evidence": ".github/workflows/pr.yml:78 (lint); packages/eslint-plugin/src/configs/*; .husky/pre-commit",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint",
+   "assertion_family": "none",
+   "reason": "R2 and the batch-2 ruling: code rules and import restrictions are code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-38",
+   "summary": "Jest unit tests (including beachball config tests and public-API tests)",
+   "evidence": ".github/workflows/pr.yml:78 (test)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest",
+   "assertion_family": "none",
+   "reason": "R2: test runner.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-39",
+   "summary": "Affected projects build",
+   "evidence": ".github/workflows/pr.yml:78 (build)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx build",
+   "assertion_family": "none",
+   "reason": "Build execution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-40",
+   "summary": "The tree is clean after build (API reports and generated files committed fresh)",
+   "evidence": ".github/workflows/pr.yml:83 (git diff-index --quiet HEAD)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "git diff-index",
+   "assertion_family": "none",
+   "reason": "Codegen freshness that needs the build (api-extractor) to run.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-41",
+   "summary": "SSR tests",
+   "evidence": ".github/workflows/pr.yml:78 (test-ssr)",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx test-ssr",
+   "assertion_family": "none",
+   "reason": "R2: runs project code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-42",
+   "summary": "Integration tests in other projects (cra-template, react-storybook-addon-export-to-sandbox)",
+   "evidence": ".github/workflows/pr.yml:78 (test-integration); packages/cra-template/package.json; packages/react-components/react-storybook-addon-export-to-sandbox/project.json",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx test-integration",
+   "assertion_family": "none",
+   "reason": "R2: runs project code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-43",
+   "summary": "verify-packaging: the published file set is as expected",
+   "evidence": ".github/workflows/pr.yml:78",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx verify-packaging",
+   "assertion_family": "none",
+   "reason": "Needs build output (npm pack).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-44",
+   "summary": "verify-bundle-isolation",
+   "evidence": ".github/workflows/pr.yml:78",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx verify-bundle-isolation",
+   "assertion_family": "none",
+   "reason": "Needs build output (bundling).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-45",
+   "summary": "Are-the-types-wrong (attw) on the built packages",
+   "evidence": ".github/workflows/pr.yml:78",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "attw",
+   "assertion_family": "none",
+   "reason": "Type resolution over build output.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-46",
+   "summary": "React Compiler analyzer lint",
+   "evidence": ".github/workflows/pr.yml:85,111",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx react-compiler-analyzer--lint",
+   "assertion_family": "none",
+   "reason": "Code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-47",
+   "summary": "React 17/18 integration (rit): type-check, tests and Cypress e2e",
+   "evidence": ".github/workflows/pr.yml:136-162",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "rit",
+   "assertion_family": "none",
+   "reason": "R2: runs project code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-48",
+   "summary": "e2e tests",
+   "evidence": ".github/workflows/pr.yml:164,200",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx e2e",
+   "assertion_family": "none",
+   "reason": "R2: runs project code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-49",
+   "summary": "Bundle-size threshold (monosize compare-reports)",
+   "evidence": ".github/workflows/bundle-size.yml:48-59",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "monosize",
+   "assertion_family": "none",
+   "reason": "Needs build output and a base report (external state).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-50",
+   "summary": "Visual regression threshold 0.04",
+   "evidence": ".github/workflows/pr-vrt-comment.yml:125",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vr tool",
+   "assertion_family": "none",
+   "reason": "Rendering plus external baselines.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-51",
+   "summary": "Workspace-plugin generator smoke tests",
+   "evidence": ".github/workflows/check-tooling.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx generators",
+   "assertion_family": "none",
+   "reason": "Runs the repository's tooling.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-52",
+   "summary": "v8 lint-imports task (import paths, AMD-only checks)",
+   "evidence": "scripts/tasks/src/lint-imports.ts:62-68; scripts/tasks/src/presets.ts:14",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "just-scripts task",
+   "assertion_family": "none",
+   "reason": "Import restrictions are code analysis (batch-2 ruling).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-53",
+   "summary": "1ES pipeline compliance scans on release pipelines (CredScan and the like)",
+   "evidence": "azure-pipelines.release*.yml (1ES pipeline templates)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "1ES",
+   "assertion_family": "none",
+   "reason": "External pipeline service.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-54",
+   "summary": "beachball publish validation at release (registry state, bump computation)",
+   "evidence": "azure-pipelines.release-vnext.yml:68; azure-pipelines.release.headless.yml:75; azure-pipelines.release-vnext-nightly.yml:89",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "beachball publish",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a check only an external service makes (the registry at publish time) is D.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-55",
+   "summary": "Workflow input validation for experimental branches and release inputs",
+   "evidence": ".github/workflows/create-experimental-branch.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "github-script",
+   "assertion_family": "none",
+   "reason": "Validates workflow-dispatch inputs (external state), not repository files.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-56",
+   "summary": "preinstall guard: installs must go through yarn",
+   "evidence": "package.json:24 (scripts/package-manager/src/preinstall.js)",
+   "mechanism": "script",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node script",
+   "assertion_family": "none",
+   "reason": "Inspects the invoking package manager at run time.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-57",
+   "summary": "PR body links the issue with 'Fixes #<number>'",
+   "evidence": "docs/workflows/contributing.md:54",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "PR state on GitHub (external), as in immich-47.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-58",
+   "summary": "Change type semantics: patch for fixes, minor for features",
+   "evidence": "docs/workflows/contributing.md:44",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Human judgment, as in rocketchat-27. The 'never major' part is fluentui-10.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-59",
+   "summary": "AGENTS.md code-pattern rules (component structure, hooks, styling and similar)",
+   "evidence": "AGENTS.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "",
+   "assertion_family": "none",
+   "reason": "Code semantics, reviewed by humans.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b01",
+   "summary": "Azure pipelines never run `corepack enable`. Yarn must come from the checked-in yarnPath, because corepack would download Yarn over the network, and the 1ES pipeline forbids that.",
+   "evidence": ".devops/templates/tools.yml:44-45 ('Do NOT run `corepack enable` - it's not needed since yarn is checked into the repo, and it causes a network request attempting to download yarn, which is not allowed'). Every azure-pipelines.release*.yml includes tools.yml@self.",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "file_content_forbidden over {.devops/**/*.yml,azure-pipelines*.yml}, pattern '(?m)^[^#\\n]*\\bcorepack\\s+enable\\b' (suggested id microsoft-fluentui-azure-no-corepack-enable)",
+   "assertion_family": "none",
+   "reason": "This is a load-bearing comment in CI config that states a file-text invariant. Stage A counted the same kind of comment for fluentui-04 (the same file) and fluentui-15, under R5. It is distinct from fluentui-02: yarnPath can resolve while a corepack step still breaks the 1ES install. It holds at the pin, because only the comment mentions corepack.",
+   "fire_verified": "On a scratch copy of tools.yml and azure-pipelines.release.yml, I added a `- script: corepack enable` step to tools.yml and the rule fired at tools.yml:47:1. Prefixing `corepack enable &&` to the v8 build script fired at azure-pipelines.release.yml:71:1. The comment line does not match. The rule passes on the clone and on the restored copy.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b02",
+   "summary": "A change file description (change/*.json comment) starts with feat:, fix:, chore:, docs: or refactor:, optionally with a scope, in semantic commit format.",
+   "evidence": "docs/react-v9/contributing/dev-workflow.md:95. docs/workflows/contributing.md:41 shows the example 'fix(react-button): description'. All 12 change/*.json files at the pin use 'fix:' or 'fix(scope):'.",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_matches on change/*.json, $.comment, '^(feat|fix|chore|docs|refactor)(\\([^)]*\\))?!?: \\S'",
+   "assertion_family": "none",
+   "reason": "A documented convention that holds at the pin (R5). Stage A read dev-workflow.md (it cites :18 for branch naming) but missed :95.",
+   "fire_verified": "n/a (family other). I fired it anyway: rewriting one change file's comment to 'Fixed ...' in scratch fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b03",
+   "summary": "AGENTS.md (CLAUDE.md is a symlink to it) keeps its `<!-- nx configuration start-->` and `<!-- nx configuration end-->` markers, so Nx can keep updating the block between them.",
+   "evidence": "AGENTS.md:1-2 ('Leave the start & end comments to automatically receive updates.'), :11",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches on AGENTS.md, '(?s)<!-- nx configuration start-->.*<!-- nx configuration end-->'",
+   "assertion_family": "none",
+   "reason": "A load-bearing comment that states a file-text invariant, the same kind as fluentui-15 (.yarnrc.yml comments kept). It holds at the pin.",
+   "fire_verified": "n/a (family other). I fired it anyway: removing the end marker in scratch fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b04",
+   "summary": "The Copilot setup workflow's job is named exactly copilot-setup-steps.",
+   "evidence": ".github/workflows/copilot-setup-steps.yml:8 ('The job MUST be called `copilot-setup-steps` or it will not be picked up by Copilot.')",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_matches on .github/workflows/copilot-setup-steps.yml, $.jobs['copilot-setup-steps']['runs-on'], '.+'",
+   "assertion_family": "none",
+   "reason": "A load-bearing comment (R5), the same standard Stage A used for fluentui-04 and fluentui-15. If the job is renamed, Copilot silently ignores it.",
+   "fire_verified": "n/a (family other). I fired it anyway: renaming the job in scratch fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b05",
+   "summary": "The npm entry in dependabot.yml keeps `dependency-type: production` in `allow`, so security updates still apply to production dependencies.",
+   "evidence": ".github/dependabot.yml:35-41 ('Production dependencies must stay in `allow` so security updates still apply'); .github/instructions/dependabot-security-fixes.instructions.md:14,21",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_matches on .github/dependabot.yml, $.updates[?(@['package-ecosystem'] == 'npm')].allow[?(@['dependency-type'] == 'production')]['dependency-type'], '^production$'",
+   "assertion_family": "none",
+   "reason": "Stage A excluded dependabot.yml as 'bot configuration, not a gate'. This entry, though, carries a 'must stay' load-bearing comment of the same kind Stage A counted in tools.yml (fluentui-04) and .yarnrc.yml (fluentui-15). It holds at the pin. Family other, at moderate confidence: dependency-update policy is arguably dep-version.",
+   "fire_verified": "n/a (family other). I fired it anyway: deleting the production allow entry in scratch fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b06",
+   "summary": "Every file in packages/react-icons-mdl2/src/components is named <Name>Icon.tsx.",
+   "evidence": "packages/react-icons-mdl2/src/components.test.tsx:9-15 (readdirSync of src/components; expects componentName.endsWith('Icon')). The test target comes from project.json and the workspace-plugin, whose nx.json include covers packages/react-icons-mdl2/**. It runs in the pr.yml:78 affected test step.",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex on packages/react-icons-mdl2/src/components/*, '.+Icon\\.tsx'",
+   "assertion_family": "none",
+   "reason": "Under R7 and its precedents (the babel fixture tests and wsdk-b02), a test assertion over a file name is classified by its logic, not lumped into fluentui-38. The same file's other three assertions (exported, valid element type, displayName) evaluate the module, so they stay D in fluentui-38. All 1736 files pass.",
+   "fire_verified": "n/a (family other). I fired it anyway: adding Accept.tsx to a scratch components dir fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b07",
+   "summary": "Each v8 migration guide (FromV8/Components/**/*.mdx) has one <Meta title> and one top-level heading outside code fences. It opens with '# Title' then '## Overview' then a non-empty paragraph, and has exactly one '## Prop Mapping' heading. Charts, GroupedList and Theme have none.",
+   "evidence": "apps/public-docsite-v9/src/Concepts/Migration/FromV8/migrationGuides.test.ts:128-150. Its test target is apps/public-docsite-v9/package.json scripts.test (jest), run by pr.yml:78.",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_matches/file_content_forbidden pairs (one Meta title, the Overview opening, Prop Mapping present except in 3 files and at most one), plus a markdown_required_headings template per guide for the one-H1 part",
+   "assertion_family": "none",
+   "reason": "The Meta, Overview and Prop Mapping parts pass on the clone as regex rules. The one-top-level-heading count needs fence awareness, which the test gets by stripping fences first. A fence-blind '(?ms)^#[ \\t]+\\S.*^#[ \\t]+\\S' forbid rule false-fires at the pin on Icon.mdx, which has two '# ' lines inside code fences. markdown_required_headings is fence-aware, but its entries are exact text, so it would need one template per guide (about 53). That is awkward, so the unit is C.",
+   "fire_verified": "n/a (family other). The regex parts pass on the clone. The fence-blind H1 rule fires falsely on Icon.mdx:5, which is why this unit is C.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b08",
+   "summary": "v8 migration guides have unique Storybook routes: the slugged <Meta title> plus '--docs' is unique across all guides.",
+   "evidence": "migrationGuides.test.ts:111-126 and :128-141 (expect(new Set(docsIds).size).toBe(docsIds.length))",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the <Meta title> values extracted from FromV8/Components/**/*.mdx",
+   "assertion_family": "unique-key",
+   "reason": "Uniqueness over extracted values is B-config under the batch-2 ruling, and unique_by keys only on path templates. Exact title uniqueness is the faithful key, up to slug collisions between titles that differ only in case or punctuation.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b09",
+   "summary": "The migration links in ComponentMapping.mdx resolve to an existing guide's docs id, and each of the 28 listed new guides is linked from ComponentMapping.mdx.",
+   "evidence": "migrationGuides.test.ts:111-126 and :166-185; addedGuideFiles at :14-43; toDocsId at :54-58",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs a slug normalize (lower-case, runs of non-alphanumerics to '-', trim dashes) to join each <Meta title> to the /docs/<id> links. cross_file normalize offers only trim, lower, semver-major and semver-minor.",
+   "assertion_family": "reference",
+   "reason": "A reference in both directions between two extracted value sets. The join needs a value transform that no adapter or normalize has, so it is B-adapter, keeping its future family (batch-2 ruling).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
+  },
+  {
+   "id": "fluentui-b10",
+   "summary": "ColorMapping.mdx opens with '# Color Mapping', a blank line, one '---' divider, a blank line and then text.",
+   "evidence": "migrationGuides.test.ts:152-156",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches on apps/public-docsite-v9/src/Concepts/Migration/FromV8/ThemeColors/ColorMapping.mdx, '(?m)^# Color Mapping\\r?\\n\\r?\\n---\\r?\\n\\r?\\n\\S'",
+   "assertion_family": "none",
+   "reason": "A fixed text shape at the top of one file (R7: classified by its logic). It passes on the clone.",
+   "fire_verified": "n/a (family other). It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b11",
+   "summary": "The public-docsite-v9 Storybook storySort lists 'Components' before 'Component Mapping' under 'from v8'.",
+   "evidence": "migrationGuides.test.ts:158-164; apps/public-docsite-v9/.storybook/preview.js:37-38",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_matches on apps/public-docsite-v9/.storybook/preview.js, \"'from v8',\\s*\\[[^\\]]*'Components'[^\\]]*'Component Mapping'\"",
+   "assertion_family": "none",
+   "reason": "The test asserts this with the same regex over file text, so alint expresses it directly.",
+   "fire_verified": "n/a (family other). I fired it anyway: swapping the two entries in scratch fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b12",
+   "summary": "The 28 newly added migration guides use inline ```tsx examples. They contain no <Canvas, no <Source, no `import * as Examples` and no ./examples/ reference.",
+   "evidence": "migrationGuides.test.ts:187-196; addedGuideFiles at :14-43",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden '<Canvas|<Source|import\\s+\\*\\s+as\\s+Examples\\b|\\./examples/' plus file_content_matches '```tsx\\s*\\r?\\n', both over the 28 listed .mdx paths",
+   "assertion_family": "none",
+   "reason": "These are text properties of a fixed file list. Both rules pass on the clone.",
+   "fire_verified": "n/a (family other). I fired it anyway: appending <Canvas of={X} /> to Dialog.mdx in scratch fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b13",
+   "summary": "No v8 migration guide contains an empty code fence.",
+   "evidence": "migrationGuides.test.ts:198-210 (codeBlocks.every(block => block.trim().length > 0))",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_content_forbidden over FromV8/Components/**/*.mdx, '(?m)^```[a-z0-9-]*[ \\t]*\\r?\\n(?:[ \\t]*\\r?\\n)*```[ \\t]*$'",
+   "assertion_family": "none",
+   "reason": "A text property. The regex mirrors extractCodeBlocks and agrees with it at the pin.",
+   "fire_verified": "n/a (family other). I fired it anyway: appending an empty tsx fence to Dialog.mdx in scratch fired at :201. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b14",
+   "summary": "The TSX code blocks in v8 migration guides are syntactically valid (ts.transpileModule reports no error diagnostics).",
+   "evidence": "migrationGuides.test.ts:85-108 and :198-210",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest (TypeScript transpiler)",
+   "assertion_family": "none",
+   "reason": "This parses code with the TypeScript compiler, which is code analysis (R2, R7).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b15",
+   "summary": "The beachball release-scope test asserts membership. The 21 named v8 packages are in the v8 scope, and no packages/react-components path is. The named packages are in the web-components, headless and tools scopes, and the named non-members are not. Scopes derive from project.json tags and package.json version and private.",
+   "evidence": "scripts/beachball/src/config.test.ts:99-196; scripts/beachball/src/utils.ts (getPackagePaths predicates); scripts/monorepo/src/isConvergedPackage.js. It runs as the scripts-beachball test in pr.yml:78 when that project is affected.",
+   "mechanism": "test",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_path rules per named project: project.json $.tags includes v8, web-components, react-headless or tools, and package.json $.version is below 9.x and not 0.0.0. Plus json_path_absent over packages/react-components/**/project.json for a v8 tag without vNext.",
+   "assertion_family": "none",
+   "reason": "Stage A folded this into fluentui-38 (D). Under R7 and wsdk-b02, membership assertions over committed manifests are classified by their logic. It is awkward, so C: the 'converged' predicate spans project.json and package.json of the same project and needs a major-version comparison. It holds at the pin, where react-migration-v8-v9 is the only react-components project tagged v8, and it is also vNext. Its trigger is weak, since it runs only when scripts-beachball is affected.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b16",
+   "summary": "Every Nx implicitDependencies entry that is not a tag: or ! pattern names an existing project.",
+   "evidence": "implicitDependencies in **/project.json (3 at the pin: tag:type:stories, react-headless-components-preview-stories, !eslint-plugin). Nx builds the project graph on every nx command in pr.yml.",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file relation superset. The source is files **/project.json with json $.name (unioned). The targets are files **/project.json with json $.implicitDependencies[?(!match(@, '(tag:|!).*'))]. allow_missing_target: true.",
+   "assertion_family": "none",
+   "reason": "This applies the same tool-enforced-structure standard Stage A used for fluentui-25 and fluentui-26. Unlike uniqueness, the superset-against-a-union form expresses it today. PLAUSIBLE only: I believe Nx raises a configuration error for implicitDependencies that match no project, but I could not confirm this in the Nx 22.7.9 source because node_modules is absent.",
+   "fire_verified": "n/a (family other). I fired it anyway on a scratch copy of all 267 project.json files: renaming the referenced stories project fired the rule. It passes on the clone.",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b17",
+   "summary": "@typescript-eslint/ban-ts-comment: no // @ts-ignore or @ts-nocheck in linted sources, and @ts-expect-error needs a description.",
+   "evidence": "packages/eslint-plugin/src/configs/core.js, second config block ('@typescript-eslint/ban-ts-comment': 'error', no files restriction); pr.yml:78 (lint); .husky/pre-commit (nano-staged eslint)",
+   "mechanism": "tool-config",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: suppression-comment awareness (eslint-disable / eslint-disable-next-line). No rule.",
+   "assertion_family": "none",
+   "reason": "Under the batch-2 ruling, a directive-comment rule is a file-text property of the same kind as @fluentui/no-tslint-comments (fluentui-12). There are 52 @ts-ignore/@ts-nocheck matches under src/ at the pin, by a heuristic count. About 27 of them carry an eslint-disable for this rule. 21 are codemods test mocks, where packages/codemods/eslint.config.js turns the rule off, which a path exclusion can mirror. 2 are web-components benchmark wrappers and 2 are string literals in tools code. As with fluentui-23, the suppressions block a native rule.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "fluentui-b18",
+   "summary": "The Cypress binary installs and verifies (yarn cypress verify, and the rit temp-workspace verify).",
+   "evidence": ".github/workflows/pr.yml:139-142, :196-197. It depends on package.json dependenciesMeta.cypress.built, because .yarnrc.yml sets enableScripts: false.",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "cypress verify",
+   "assertion_family": "none",
+   "reason": "Install state, a downloaded binary (R7).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "fluentui-b19",
+   "summary": "The PR website builds: affected bundles, affected Storybooks and the pr-deploy-site generation succeed.",
+   "evidence": ".github/workflows/pr-website-deploy.yml:49-56 (pull_request workflow)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "nx bundle / build-storybook",
+   "assertion_family": "none",
+   "reason": "Build execution, distinct from the fluentui-39 build targets (R1: separate targets and workflow).",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  }
+ ],
+ "removed": [
+  {
+   "id": "fluentui-11",
+   "summary": "Non-private web vNext libraries keep the canonical entry fields main lib-commonjs/index.cjs, module lib/index.js, typings ./dist/index.d.ts",
+   "why": "R1 duplicate of fluentui-20. export-maps-sync checks the entry fields and the exports map in one syncProject call (export-maps-sync/index.ts: fieldsInSync && the JSON.stringify(exports) comparison), with one outOfSync message: 'out of date package.json entry point setup (`exports`, `main`, `module`, `typings`)'. buildEntryPointFields is commented as 'must stay in lockstep with the export map'. It is one maintainer-level rule, already counted as fluentui-20 (B-adapter). Keep microsoft-fluentui-export-maps-entry-fields as partial coverage of fluentui-20, outside the ratio."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "microsoft-fluentui-va-ci-node-within-engines (cross_file subset, normalize semver-major, level info): every .github/workflows/*.yml setup-node major is one of the root engines.node majors (^22 || ^24). Nothing gates this. The unused composite action .github/actions/run-publish-vr-screenshot asks for Node 20 and is left out of the glob. Fired on a scratch workflow with node 20; passes on the clone.",
+  "microsoft-fluentui-va-ts-minbar-floor-agrees (cross_file equals, level info): the TypeScript floor const tsVersion in both ts-minbar apps' src/index.ts agrees with each app's README ('compatible back to Typescript X.Y'). Passes on the clone (5.4 everywhere).",
+  "Scope broadening inside a C unit, not a separate rule: microsoft-fluentui-peer-ranges-valid-semver checks every workspace manifest, not only the vNext publishable projects verify-peer-dependencies scopes to. All 32 distinct ranges pass."
+ ],
+ "absent_categories": [
+  "locale family entirely: no translation catalogs under any gate",
+  ".nvmrc / .node-version / .tool-versions / Volta: Node is pinned only by engines, the Azure UseNode 22.x step and per-workflow setup-node",
+  ".editorconfig",
+  "Other CI systems: CircleCI, GitLab CI, Jenkins, Buildkite, Prow (only GitHub Actions and Azure Pipelines)",
+  ".pre-commit-config.yaml / lefthook (husky + nano-staged only; post-checkout and post-merge hooks only notify)",
+  "Makefile / justfile / Taskfile",
+  "commitlint / commit-message checks (no commit-msg hook)",
+  "License header / SPDX checks",
+  "manypkg / sherif / knip / yarn constraints (no yarn.config.cjs)",
+  "Yarn catalogs and the workspace: protocol (internal deps use '*' ranges)",
+  "Bazel / CMake / Gradle / Nix",
+  "Changesets (.changeset/): beachball change/*.json is used instead"
+ ],
+ "unusual": [
+  "The CI guard reads the tool version from root devDependencies (check-packages.yml:57-60, :84-87) and then runs npx syncpack@<v> / beachball@<v>. A missing devDependency fails the job with setFailed, so the tool's presence in package.json is itself a gate.",
+  "syncpack covers only 66 of 267 manifests (syncpack.config.js source). Its non-default version groups (react-conformance, test-utilities, a11y-testing, codemods) never have more than one instance per dependency because peerDependencies are excluded, so they work as carve-outs. The semverGroups entry is an ignored group and does nothing for list-mismatches.",
+  "beachball disallowedChangeTypes: the repo default ['major'] (scripts/beachball/base.config.js:8) is replaced, not extended, by a package's own package.json#beachball.disallowedChangeTypes. A package whose own list omits major may therefore ship a major (confirmed by a negative control on react-aria).",
+  ".yarnrc.yml opens with a load-bearing header asking humans to restore the comments Yarn deletes on automatic updates. .devops/templates/tools.yml carries load-bearing comments (checkLatest required because @microsoft/fast-build needs node >=22.18.0; 'Do NOT run corepack enable').",
+  "The supply-chain quarantine is in .yarnrc.yml: npmMinimalAgeGate 7d with an npmPreapprovedPackages exemption list, plus enableScripts: false.",
+  "Documented conventions violated at the pin, and therefore not counted (R5): AGENTS.md:24 'never add dependencies between component packages' (react-toolbar depends on react-button); release-cycle.md:27 'always use ^' (pinned prerelease versions in react-components and react-theme).",
+  "Branch naming is contradictory: docs/workflows/contributing.md:56 has a Branch Naming section, while docs/react-v9/contributing/dev-workflow.md:18 says there is no official policy. Not counted.",
+  "Toolchain drift with no gate: .github/instructions/copilot.instructions.md:15 says Node ^22.0.0 while engines allow ^22 || ^24. The unused composite action run-publish-vr-screenshot requests node-version '20'.",
+  ".gitattributes:2 marks '.yarn/releases/*.js' linguist-vendored, but the checked-in release is a .cjs file, so the pattern matches nothing.",
+  "tools/workspace-plugin/eslint.config.js has an @nx/nx-plugin-checks block that is dead config: the project's lint target is 'eslint src', so it never sees the JSON files that block targets.",
+  "@fluentui/max-len (120) is off in the base config but still on in the legacy configs used by 43 projects. 73 of the 74 long lines at the pin carry eslint-disable comments.",
+  "The export-maps-sync and bundle-size-fixtures-sync generators run as Nx sync generators under 'nx sync:check', so codegen freshness is enforced without a diff step, alongside the post-build clean-tree check.",
+  "AGENTS.md doubles as CLAUDE.md, and .github/instructions/*.instructions.md files encode policy (the tar-fs security resolution, Node version) for AI assistants."
+ ],
+ "check_result": "From the clone root, using target/release/alint: validate-config printed '✓ Config valid: 28 rule(s) loaded' (exit 0), and check . --compact printed '✓ all rules passed.' (exit 0). There were no violations. Every rule was also fired against a mutated scratch copy, and negative controls were checked: the change-type controls on react-aria, a complex valid peer range, and tar-fs ^2.1.3. The scratch directory has been removed. GIT_OPTIONAL_LOCKS=0 git status --porcelain on the clone is empty, and HEAD is the pin.",
+ "stage_b_config_issues": [
+  "fluentui-02 / microsoft-fluentui-yarnpath-resolves does not fire when the yarnPath key is deleted. registry_paths_resolve is silent on an absent field, as rules.md documents. I reproduced this in scratch: with yarnPath removed, only the C rule microsoft-fluentui-yarnpath-matches-package-manager fired. The A unit is only partly expressed. A yaml_path_matches on $.yarnPath, for example '^\\.yarn/releases/yarn-[^/]+\\.cjs$', would close the gap.",
+  "microsoft-fluentui-export-maps-entry-fields has the wrong scope. It includes packages/react-components/react-jsx-runtime/package.json, which is type module and not private but tagged vNext + platform:any, and export-maps-sync skips it (REQUIRED_TAGS is vNext and platform:web). The rule covers 82 manifests, not the 81 its comment and fluentui-11 claim. It would false-fire if react-jsx-runtime changed its entry fields.",
+  "microsoft-fluentui-react-components-unstable-api-frozen does not express its unit (R4). The digest forbids the react-virtualizer additions that src/unstable/index.ts:5 explicitly allows, and any cosmetic api-extractor change. See the reclassify of fluentui-14 to C.",
+  "microsoft-fluentui-peer-ranges-valid-semver is broader than invalid-peer-range in two ways its comment does not mention. The generator skips private packages and NON_SEMVER_RANGE protocol ranges (workspace:, portal:, link:, file:, npm:, patch:; index.ts:100 and :519-521), so the rule would false-fire on an npm: alias peer range or a private package's range. Its evidence cites index.ts:320, which is getUnverifiedFloor (the opt-in unverified-peer-range). The invalid-peer-range check is in getManifestViolations, index.ts:510-529.",
+  "microsoft-fluentui-api-reports-lf: .gitattributes:5 is `*.api.md text=auto` with no eol=lf. Git normalizes only the committed blob, and alint reads the working tree. A Windows checkout with core.autocrlf=true has CRLF api.md files, and this rule would fire although the repository content is LF. It passes on the Linux clone. The jest-19 precedent had eol=lf.",
+  "microsoft-fluentui-no-tslint-comments is a text regex, not comment-token aware. It fires on `/// tslint:disable`, where ESLint's comment.value '/ tslint...' does not match ^\\s*tslint. It also fires on the directive inside string literals outside packages/eslint-plugin. It passes at the pin, which is acceptable under the batch-2 ruling.",
+  "microsoft-fluentui-syncpack-is-root-devdependency and -beachball-is-root-devdependency use '^\\S+$', which fires on an empty string that the github-script guard (typeof === 'string') accepts. This is slightly stricter than the gate, and the difference is negligible.",
+  "microsoft-fluentui-tar-fs-security-resolution rejects the in-range '>=2.1.3 <3.0.0' (I reproduced this). That is expected for a C regex range.",
+  "Reproduced independently on scratch copies, every fire claimed for the toolchain-pin and dep-version A units holds. fluentui-01 fired on yarn@^4.18.0, yarn@3.6.4, the key removed and pnpm@4.18.0. fluentui-02 fired on the release file removed and yarnPath renamed to 4.17.1. fluentui-04 fired on 22.14.0, checkLatest false, removed or quoted, the version key renamed and UseNode@1 swapped for NodeTool@0. fluentui-05 fired on syncpack removed, beachball moved to dependencies and a numeric value. The C rules 03 and 08 also fired. On the clone, validate-config loaded 28 rules (exit 0), check reported all rules passed (exit 0), git status is clean and HEAD is the pin.",
+  "The value-add rules (va-ci-node-within-engines, va-ts-minbar-floor-agrees) are level info and correctly outside the ratio. They are not presented as enforced.",
+  "Evidence nits. fluentui-52 cites scripts/tasks/src/presets.ts:14, which is an import. The tasks are registered at :71-72 and wired into build at :144-145, and in apps/public-docsite-resources/just.config.ts:9 and packages/react-monaco-editor/just.config.ts:11. fluentui-38's 'Jest unit tests (including beachball config tests...)' should carve out the repo-state assertions now recorded as fluentui-b06 and b07-b15.",
+  "The record understates the syncpack version groups. The largest non-default version group is the root @fluentui/fluentui-repo group (about 60 dependencies), which the 'unusual' notes leave out. It is also a single-package carve-out, so the B-adapter conclusion for fluentui-17 is unaffected. I verified that the syncpack source covers 66 manifests."
+ ],
+ "stage_b_summary": "I found 19 enforced behaviors that Stage A missed. Most are bespoke Jest tests and load-bearing comments that Stage A either folded into \"tests pass\" (fluentui-38, D) or skipped, against R7 and its own standard for fluentui-04 and fluentui-15.\n\n**Missed units:**\n- **Azure corepack ban (toolchain-pin, A, fired).** tools.yml:44-45 says never to run `corepack enable`.\n- **Change-file comment prefix (other, A).** dev-workflow.md:95 asks for feat:/fix:/chore:/docs:/refactor:.\n- **Three more load-bearing comments (other, A):**\n  - the Nx markers in AGENTS.md;\n  - the copilot-setup-steps job name;\n  - dependabot's production `allow` entry.\n- **The react-icons-mdl2 *Icon.tsx file-name test (other, A).**\n- **Eight units from apps/public-docsite-v9's migrationGuides.test.ts:**\n  - A: the ColorMapping header, the storySort order, inline TSX in the added guides, and no empty code fences;\n  - C: guide structure, because a fence-blind one-H1 regex false-fires on Icon.mdx at the pin;\n  - B-config unique-key: unique Storybook routes;\n  - B-adapter: the ComponentMapping links need a slug normalize;\n  - D: the TSX snippets must parse.\n- **Beachball release-scope membership test (C).**\n- **Nx implicitDependencies resolve (A by cross_file superset).** I am not sure Nx 22 enforces it; node_modules is absent.\n- **@typescript-eslint/ban-ts-comment (B-adapter).** Suppression comments block a native rule, as with max-len.\n- **Two D units:** `cypress verify`, and the PR website bundle and Storybook build.\n\n**Reclassifications:**\n- fluentui-14 goes from A to C. The unstable index.ts allows react-virtualizer additions, so a file digest is stricter than the rule.\n- fluentui-31 goes from D to B-adapter (reference), at moderate confidence. For workspace dependencies, incompatible-peer-range reads the committed manifests. It needs a semver-subset operator and an entry-values join. The external-dependency half could be split off as D.\n\n**Removal:** fluentui-11 is an R1 duplicate of fluentui-20. export-maps-sync checks the entry fields and the exports map together, with one message.\n\n**Config:**\n- yarnpath-resolves passes silently when the yarnPath key is deleted.\n- The entry-fields rule is over-scoped: it includes react-jsx-runtime, which is tagged platform:any.\n- The peer-range rule ignores the generator's private-package and protocol-range skips, and its evidence cites the wrong line.\n- The LF rule is working-tree based while .gitattributes uses text=auto.\n- Every toolchain-pin and dep-version fire claim reproduced. validate-config and check pass on the clone.\n\n**Revised counts:** 77 units: A 20, B 14 (B-adapter 10, B-config 4), C 8, D 35. That gives coverage_today 20/42 = 48%, coverage_with_tuning 28/42 = 67% and gap 14/42 = 33%.\n\nPer family (A/B/C/D):\n- toolchain-pin: 4/0/1/1;\n- dep-version: 1/4/3/4;\n- other: 15/10/4/30.\n\nIf fluentui-b16 is not accepted, other A is 14. The scratch directory has been removed and the clone is untouched.",
+ "notes": "Counts: 59 units in total: A 10, B 10 (B-adapter 7, B-config 3, B-kernel 0, B-delegate 0), C 6, D 33. Of the 26 addressable units: coverage_today 10/26 = 38%, coverage_with_tuning 16/26 = 62%, gap 10/26 = 38%.\n\nPer family (A/B/C/D):\n- toolchain-pin: 3/0/1/1. Today 3/4; with tuning 4/4.\n- dep-version: 1/3/3/5. Today 1/7; with tuning 4/7. B is fluentui-17 B-adapter unique-key, fluentui-18 B-adapter reference, fluentui-24 B-config set.\n- other: 6/7/2/27. Today 6/15; with tuning 8/15.\n- locale: none.\n\nAfter the slice (constraint with equality, unique-key and cardinality): fluentui-25 and fluentui-26 (B-config unique-key) move to A, giving today 12/26 = 46%. If the value-bearing entry adapter is also added, fluentui-17 (unique-key) and fluentui-19 (equality) become expressible. fluentui-20 also needs a directory-listing join, and fluentui-18 needs reference.\n\nBatch-2 rulings applied:\n- Regex reads of a JSON key are C. This moved yarnPath == packageManager (fluentui-03) and the patch: file (fluentui-06) from A to C.\n- Name-to-value joins are B-adapter with needs: entry-values, keeping their future family.\n- A lint rule on a file property is classified by its logic: no-tslint-comments is A, max-len is B-adapter.\n- Publish-time registry checks are D.\n\nBeachball: split into two units, the enum check (A) and disallowed types (C), because they fail independently with different messages.\n\nUncertainties (could not be verified because node_modules is absent and nothing from the repo was run):\n- beachball 3.0.0-alpha.10 internals: whether a missing dependentChangeType is accepted (the rule uses if_present), and whether change files for unknown or private packages only warn.\n- Whether the merge-styles lint (just-scripts, ESLINT_USE_FLAT_CONFIG=false) applies @fluentui/max-len to the one unsuppressed long line (packages/merge-styles/src/server.test.ts:80).\n- Whether nx format:check also enforces tsconfig paths ordering (believed not; not counted).\n\nNot counted under R5: conventions violated at the pin (component-to-component dependencies, always ^), branch naming (contradictory docs), CODEOWNERS on its own, dependabot.yml (bot configuration, not a gate), and the post-checkout/post-merge notify hooks.\n\nConfig:\n- 28 rules: 26 for units (A and C) and 2 value-add rules at level info.\n- No spawning kinds, custom facts or git-history kinds.\n- The header was corrected to describe max-len as B-adapter and to flag the two regex-read C rules.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "microsoft-fluentui-yarnpath-present",
+    "unit": "fluentui-02",
+    "action": "added",
+    "detail": "Stage B config issue reproduced: in scratch, with yarnPath deleted, microsoft-fluentui-yarnpath-resolves stayed silent. Added yaml_path_matches $.yarnPath '^\\.yarn/releases/yarn-[^/]+\\.cjs$'. It passes on the clone. It fired on yarnPath removed, on yarnPath set to tools/yarn.js and on yarnPath \"\". Together with yarnpath-resolves it now expresses the A unit."
+   },
+   {
+    "rule_id": "microsoft-fluentui-azure-no-corepack-enable",
+    "unit": "fluentui-b01",
+    "action": "added",
+    "detail": "A toolchain-pin. file_content_forbidden over {.devops/**/*.yml,azure-pipelines*.yml}, pattern (?m)^[^#\\n]*\\bcorepack\\s+enable\\b. It passes on the clone; the tools.yml:44 comment does not match. It fired on a `- script: corepack enable` step added to tools.yml (tools.yml:47) and on `corepack enable && yarn generate-version-files` in azure-pipelines.release.yml (:67). Control: a commented '# corepack enable' line did not fire."
+   },
+   {
+    "rule_id": "microsoft-fluentui-syncpack-is-root-devdependency",
+    "unit": "fluentui-05",
+    "action": "modified",
+    "detail": "The matches pattern changed from ^\\S+$ to ^(?s:.*)$, so it accepts any string, like the github-script guard's typeof === 'string' test. It passes on the clone. It fired with syncpack removed. Control: an empty string did not fire (the guard accepts it)."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-is-root-devdependency",
+    "unit": "fluentui-05",
+    "action": "modified",
+    "detail": "Same change as the syncpack rule (^(?s:.*)$). It passes on the clone. It fired on a numeric value and on beachball moved to dependencies. Control: '^2.0.0 || ^3.0.0' did not fire."
+   },
+   {
+    "rule_id": "microsoft-fluentui-peer-ranges-valid-semver",
+    "unit": "fluentui-07",
+    "action": "modified",
+    "detail": "C. The query is now $.peerDependencies[?($.private != true && !match(@, '(workspace|portal|link|file|npm|patch):.*'))]. This mirrors the generator's private-package skip (getSkipReason, index.ts:479-494) and its NON_SEMVER_RANGE skip (index.ts:100, :522). The evidence citation was corrected from :320 (getUnverifiedFloor) to getManifestViolations, index.ts:510-529. It passes on the clone. It fired on react-button peer 'latest' and on '||| 21' with private:false. Controls: 'latest' in a private manifest, and 'npm:react@^18' / 'workspace:*', did not fire."
+   },
+   {
+    "rule_id": "microsoft-fluentui-tar-fs-security-resolution",
+    "unit": "fluentui-08",
+    "action": "comment",
+    "detail": "Added a comment: the regex accepts only exact, ^ and ~ forms, so an in-range '>=2.1.3 <3.0.0' fires. Stage B reproduced this. It is expected for a C range-as-regex, and no fix is possible without a semver operator. The rule is unchanged and passes on the clone."
+   },
+   {
+    "rule_id": "microsoft-fluentui-change-file-comment-prefix",
+    "unit": "fluentui-b02",
+    "action": "added",
+    "detail": "A other. json_path_matches on change/*.json $.comment, '^(feat|fix|chore|docs|refactor)(\\([^)]*\\))?!?: \\S'. It passes on the clone (12 files). It fired on 'Fixed the focus ring' and on 'perf: faster'. Control: 'feat(react-aria)!: drop x' did not fire."
+   },
+   {
+    "rule_id": "microsoft-fluentui-export-maps-entry-fields",
+    "unit": "fluentui-11",
+    "action": "demoted",
+    "detail": "Stage B removed fluentui-11 as an R1 duplicate of fluentui-20 (B-adapter). The rule is kept at level info as a value-add, with a comment that it partly covers fluentui-20 (the main/module/typings half only, not the exports map). Stage B's scope defect was confirmed by a script over project.json tags: the rule covered 82 manifests against 81 in scope, the extra being react-jsx-runtime (tagged platform:any). It is now excluded, so the rule covers exactly the 81. It passes on the clone. Changing typings on react-button gave an info finding. Control: the same change on react-jsx-runtime gave none."
+   },
+   {
+    "rule_id": "microsoft-fluentui-no-tslint-comments",
+    "unit": "fluentui-12",
+    "action": "modified",
+    "detail": "The pattern is now (?:\\A|[^/])(?://[^\\S\\n]*|/\\*\\s*)tslint ?: ?(?:disable|enable), which mirrors the ESLint rule's comment.value /^\\s*tslint .../ test. `///` and `/**` comments no longer match, and line-comment whitespace stays on its line. Its string-literal blindness is documented in a comment. It passes on the clone. It fired on `// tslint:disable` and on a multi-line `/*\\n tslint:enable */`. Controls: `/// tslint:disable`, `/** tslint:enable */`, `//* tslint:disable` and `//\\ntslint:disable` did not fire."
+   },
+   {
+    "rule_id": "microsoft-fluentui-react-components-unstable-exports-frozen",
+    "unit": "fluentui-14",
+    "action": "added",
+    "detail": "C, following Stage B's reclassification. It replaces the file_hash rule as the unit's rule. It is one anchored file_content_matches over src/unstable/index.ts, generated from the file at the pin, and about 10 KB long. The alert, infobutton, tree and drawer export blocks are pinned name by name, in order. The existing react-virtualizer names must stay, but new names may be inserted in their blocks. Between blocks only comments and further @fluentui/react-virtualizer exports may appear. It passes on the clone. It fired on: a new name in the alert block; a removed alert export; a new export from @fluentui/react-button; a renamed alias (DrawerOverlayProps); and a removed existing virtualizer export (scrollToItemStatic). Controls: a new name inside the virtualizer block, and a new `export { VirtualizerNew } from '@fluentui/react-virtualizer'` at the end of the file, both pass."
+   },
+   {
+    "rule_id": "microsoft-fluentui-va-react-components-unstable-api-report-digest",
+    "unit": "fluentui-14",
+    "action": "demoted",
+    "detail": "Stage A's file_hash on etc/react-components.unstable.api.md, renamed with a va- prefix and set to level info. Its comment says it matches release-cycle.md's literal 'cannot be changed in any way', but it is stricter than the src/unstable/index.ts:4-6 rule (it fires on allowed react-virtualizer additions and on cosmetic api-extractor changes). It passes on the clone. Appending a newline to the report gave an info finding."
+   },
+   {
+    "rule_id": "microsoft-fluentui-api-reports-lf",
+    "unit": "fluentui-16",
+    "action": "comment",
+    "detail": "No fix is possible. .gitattributes:5 is `*.api.md text=auto` without eol=lf. alint reads the working tree, which is CRLF on a Windows checkout with core.autocrlf=true, and has no index or blob read. A comment at the rule records the limitation. The rule is unchanged and passes on the Linux clone. See unit_notes."
+   },
+   {
+    "rule_id": "microsoft-fluentui-agents-md-nx-markers",
+    "unit": "fluentui-b03",
+    "action": "added",
+    "detail": "A other. file_content_matches on AGENTS.md, (?s)<!-- nx configuration start-->.*<!-- nx configuration end-->. It passes on the clone. It fired when the end marker was deleted and when the start marker was reworded."
+   },
+   {
+    "rule_id": "microsoft-fluentui-copilot-setup-steps-job-name",
+    "unit": "fluentui-b04",
+    "action": "added",
+    "detail": "A other. yaml_path_absent $[?(!$.jobs['copilot-setup-steps'])], used instead of Stage B's runs-on '.+' so that any job content is accepted. It passes on the clone. It fired when the job was renamed to copilot-setup."
+   },
+   {
+    "rule_id": "microsoft-fluentui-dependabot-npm-allows-production",
+    "unit": "fluentui-b05",
+    "action": "added",
+    "detail": "A other, using Stage B's yaml_path_matches form on .github/dependabot.yml. It passes on the clone. It fired when the production allow entry was deleted and when it was changed to 'all'."
+   },
+   {
+    "rule_id": "microsoft-fluentui-icons-mdl2-component-files-icon-suffix",
+    "unit": "fluentui-b06",
+    "action": "added",
+    "detail": "A other. filename_regex on packages/react-icons-mdl2/src/components/*, pattern '.*Icon(?:\\.tsx)?'. This mirrors path.basename(file, '.tsx').endsWith('Icon') more exactly than Stage B's .+Icon\\.tsx. It passes on the clone (1736 files). It fired on Accept.tsx and on AcceptIcon.ts. Control: AcceptIcon with no extension passes, as it does in the test."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-has-meta-title",
+    "unit": "fluentui-b07",
+    "action": "added",
+    "detail": "C (one of 7 rules for the unit). file_content_matches <Meta\\s+title=\"[^\"]+\"\\s*/> over FromV8/Components/**/*.mdx (53 guides). It passes on the clone. It fired when the Meta line was removed from Dialog.mdx."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-one-meta-title",
+    "unit": "fluentui-b07",
+    "action": "added",
+    "detail": "C. file_content_forbidden for two Meta titles. It passes on the clone. It fired when a second Meta was appended to Card/Card.mdx."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-one-h1",
+    "unit": "fluentui-b07",
+    "action": "added",
+    "detail": "C. A fence-aware forbid that walks from \\A, skipping lines and fenced blocks, and looks for a second '#' heading outside fences. It replaces Stage B's markdown_required_headings-per-guide idea. It passes on the clone, including Icon.mdx, where the fence-blind form false-fires. It fired on '# Another Title' appended to Dialog.mdx. Control: '# Inside a fence' in an appended ```md block did not fire. It equals the test's character-level stripCodeFences only while ``` never appears mid-line; at the pin there is no mid-line ``` and every guide has an even number of fence lines."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-overview-opening",
+    "unit": "fluentui-b07",
+    "action": "added",
+    "detail": "C. A fence-aware file_content_matches for '# Title', blank line, '## Overview', blank line, then a non-blank line that does not open a fence. It passes on the clone. It fired on Dialog.mdx with a fence placed right after Overview, and on Link.mdx with Overview renamed to Summary."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-has-prop-mapping",
+    "unit": "fluentui-b07",
+    "action": "added",
+    "detail": "C. A fence-aware matches rule for '## Prop Mapping', excluding Charts, GroupedList and Theme. It passes on the clone. It fired when Dialog.mdx's heading was renamed to '## Props'."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-prop-mapping-count",
+    "unit": "fluentui-b07",
+    "action": "added",
+    "detail": "C. A fence-aware forbid on a second '## Prop Mapping'. It passes on the clone. It fired on a second heading appended to Dialog.mdx. Control: a second heading inside a ```md fence did not fire."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-no-prop-mapping-listed",
+    "unit": "fluentui-b07",
+    "action": "added",
+    "detail": "C. A fence-aware forbid on any '## Prop Mapping' in Charts, GroupedList and Theme. It passes on the clone. It fired when the heading was appended to Charts.mdx."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-color-mapping-divider",
+    "unit": "fluentui-b10",
+    "action": "added",
+    "detail": "A other. file_content_matches on ThemeColors/ColorMapping.mdx, (?m)^# Color Mapping\\r?\\n\\r?\\n---\\r?\\n\\r?\\n\\S. It passes on the clone. It fired when the --- divider was replaced with ***."
+   },
+   {
+    "rule_id": "microsoft-fluentui-docsite-storysort-components-first",
+    "unit": "fluentui-b11",
+    "action": "added",
+    "detail": "A other. file_content_matches on apps/public-docsite-v9/.storybook/preview.js, 'from v8',\\s*\\[[^\\]]*'Components'[^\\]]*'Component Mapping'. It passes on the clone. It fired when the two entries were swapped. Note: the test also passes when 'Components' is absent (indexOf gives -1), and the rule does not."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-added-guides-no-example-imports",
+    "unit": "fluentui-b12",
+    "action": "added",
+    "detail": "A other. file_content_forbidden over the 28 listed guides (all 28 exist at Components/ top level), pattern <Canvas|<Source|import\\s+\\*\\s+as\\s+Examples\\b|\\./examples/. It passes on the clone. It fired on <Canvas appended to Dialog.mdx (:201) and on `import * as Examples from './examples'` appended to Tooltip.mdx (:170)."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-added-guides-inline-tsx",
+    "unit": "fluentui-b12",
+    "action": "added",
+    "detail": "A other. file_content_matches (?s)```tsx\\s*\\r?\\n.*?``` over the same 28 guides. This mirrors extractTsxBlocks, including the closing fence that Stage B's form omitted. It passes on the clone. It fired when Dialog.mdx's ```tsx fences became ```jsx."
+   },
+   {
+    "rule_id": "microsoft-fluentui-migration-guide-no-empty-fence",
+    "unit": "fluentui-b13",
+    "action": "added",
+    "detail": "A other. An anchored regex that reproduces extractCodeBlocks' line state machine exactly: the opener is /^```[a-z0-9-]*\\s*$/i, the closer is /^```\\s*$/, and an empty block is all-whitespace lines. Stage B's fence-blind regex false-fires on a closing fence, a blank line, then a bare opener; this one does not. It passes on the clone. It fired on an empty ```tsx block appended to Dialog.mdx and on a whitespace-only block appended to Button.mdx. Controls: two adjacent bare-fenced non-empty blocks, and a non-empty ```TSX block, did not fire."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-v8-scope-members-tags",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C (one of 8 rules for the unit). json_path_absent over the 21 named v8 project.json files: fires when the v8 tag is missing or the project is tagged vNext / web-components. It passes on the clone. It fired when vNext was added to packages/utilities."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-v8-scope-members-version",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C. json_path_matches on the 21 package.json $.version, accepting only non-converged versions (major 1-8, or 0.x but not 0.0.0). It passes on the clone. It fired on packages/react at 9.0.0 and at 0.0.0-nightly."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-v8-scope-excludes-react-components",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C. json_path_absent over packages/react-components/**/project.json for a v8 tag without vNext or web-components. This is tag-only, so it is stricter than isConvergedPackage, which also accepts a version of 9 or higher. It passes on the clone (react-migration-v8-v9 is tagged v8 and vNext). It fired on react-button/library tagged ['v8','platform:web']."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-web-components-scope-members",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C. json_path_absent: apps/vr-tests-web-components and packages/web-components must carry the web-components tag. It passes on the clone. It fired when vr-tests-web-components had its tags emptied."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-headless-scope-member",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C. react-headless-components-preview/library must carry the react-headless tag. It passes on the clone. It fired when the tag was removed."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-tools-scope-members",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C. The 6 named tools projects must carry the tools tag and not the v8 tag. This is tag-only, so it is stricter than isV8Package. It passes on the clone. It fired when the tools tag was removed from react-conformance."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-headless-tools-scope-members-public",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C. The headless and tools members' package.json must not be private:true. It passes on the clone. It fired when private:true was set on the headless library."
+   },
+   {
+    "rule_id": "microsoft-fluentui-beachball-scope-non-members",
+    "unit": "fluentui-b15",
+    "action": "added",
+    "detail": "C. packages/react and react-components/react-components must have neither the tools nor the react-headless tag. It passes on the clone. It fired when tools was added to react-components. The react-button, react-text and react-card non-member paths are not project roots, so those assertions are vacuous and have no rule."
+   },
+   {
+    "rule_id": "microsoft-fluentui-nx-implicit-dependencies-resolve",
+    "unit": "fluentui-b16",
+    "action": "added",
+    "detail": "A other (PLAUSIBLE), using Stage B's form: a cross_file superset of the unioned **/project.json $.name over the targets' $.implicitDependencies[?(!match(@, '(tag:|!).*'))], with allow_missing_target. It passes on the clone. On a scratch copy of all 267 project.json files, it fired when the react-headless-components-preview-stories project was renamed (reported at apps/public-docsite-v9-headless/project.json) and when 'no-such-project' was added to the workspace-plugin list. The tag:nope and !eslint-plugin entries in that list were not reported. Whether Nx 22 itself rejects such a name is unverified, because node_modules is absent."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "fluentui-31",
+    "action": "not-done",
+    "detail": "Stage B reclassified D -> B-adapter (reference). No rule existed, so there was nothing to demote, and no rule was added. The B units Stage B found (b08 B-config, b09 B-adapter, b17 B-adapter) and the D units (b14, b18, b19) also get no rule."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "fluentui-16",
+    "suggested_bucket": "C",
+    "note": "Not fixable inside the clone. .gitattributes:5 is `*.api.md text=auto` with no eol=lf, so Git keeps only the committed blob LF. microsoft-fluentui-api-reports-lf reads the working tree, which is CRLF on a Windows checkout with core.autocrlf=true, so there the rule fires although the repository content is LF. It passes on the Linux clone and fires on CRLF. This is a layout-dependent expression in the sense of the batch-2 ruling ('a regex that holds for one layout only is C'), so C is suggested. Keeping A is defensible if the corpus replay is always a Linux clone; the integrator decides."
+   },
+   {
+    "id": "fluentui-14",
+    "suggested_bucket": "C",
+    "note": "This confirms Stage B's A -> C. The unit is now carried by microsoft-fluentui-react-components-unstable-exports-frozen: a 10 KB anchored regex over src/unstable/index.ts that allows the react-virtualizer additions the file permits. It passes on the clone and fires on additions, removals and renames outside react-virtualizer. Stage A's file_hash is kept as value-add info."
+   },
+   {
+    "id": "fluentui-11",
+    "suggested_bucket": "removed (R1 duplicate of fluentui-20)",
+    "note": "Stage B's removal stands. Its rule, microsoft-fluentui-export-maps-entry-fields, is now level info and only partly covers fluentui-20 (B-adapter), outside the ratio. Its scope was also fixed: react-jsx-runtime is excluded, which gives exactly the 81 manifests in the generator's scope."
+   },
+   {
+    "id": "fluentui-b16",
+    "suggested_bucket": "A",
+    "note": "The rule passes and fires, but the underlying enforcement is only PLAUSIBLE. Nobody verified that Nx 22.7.9 errors on an implicitDependencies name with no project, because node_modules is absent. If the integrator does not accept the enforcement, drop the unit or treat the rule as value-add."
+   },
+   {
+    "id": "fluentui-b11",
+    "suggested_bucket": "A",
+    "note": "There is no bucket change, but the rule is slightly stricter than the test. The test's indexOf comparison also passes when 'Components' is missing from the from-v8 list (-1 < index), and the rule requires 'Components' before 'Component Mapping'. That matches the unit as worded."
+   }
+  ],
+  "validate_output": "✓ Config valid: 57 rule(s) loaded from docs/design/v0.12/corpus/microsoft-fluentui.alint.yml",
+  "check_output": "exit 0: '✓ all rules passed.' (run from the clone root with -c docs/design/v0.12/corpus/microsoft-fluentui.alint.yml check . --compact). git -C <clone> status --porcelain is empty, and HEAD is b4f5c3cca4e95ab5d271657cbf440cc8bf7427f6. The scratch directory <scratch>/microsoft-fluentui-c/ has been removed."
+ }
+}

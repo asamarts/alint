@@ -1,6 +1,6 @@
 # v0.23 corpus stratum: log
 
-Status: batches 1 to 3 of 4 complete (2026-11-12). Frame and method:
+Status: complete (2026-11-12): 20 repositories in four batches. Frame and method:
 [`corpus-stratum.md`](corpus-stratum.md).
 
 Each repository has a record in [`stratum/`](stratum/), named by its slug. A record holds:
@@ -22,9 +22,9 @@ The coverage figures apply R7, so they are not comparable with v0.12's 61%
 
 Phase 8 confirms each such unit before either figure is final.
 
-## Running totals
+## Totals
 
-Through batch 3 (15 repositories).
+All 20 repositories, 1,546 units.
 
 | Repository | Units | A | B-config | B-adapter | B-kernel | B-delegate | C | D | Today | Tuning | Gap | After slice | With values |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
@@ -43,84 +43,168 @@ Through batch 3 (15 repositories).
 | babel/babel | 68 | 27 | 3 | 4 | 0 | 3 | 6 | 25 | 63% | 77% | 23% | 67% | 70% |
 | strapi/strapi | 78 | 16 | 4 | 10 | 0 | 0 | 22 | 26 | 31% | 73% | 27% | 37% | 38% |
 | cloudflare/workers-sdk | 83 | 32 | 1 | 9 | 1 | 0 | 5 | 35 | 67% | 77% | 23% | 67% | 67% |
-| **Pooled** | 1127 | 380 | 40 | 113 | 2 | 12 | 128 | 452 | 56% | 75% | 25% | 60% | 61% |
+| mattermost/mattermost | 122 | 33 | 7 | 20 | 0 | 3 | 19 | 40 | 40% | 63% | 37% | 44% | 48% |
+| nextcloud/server | 53 | 11 | 0 | 5 | 0 | 0 | 7 | 30 | 48% | 78% | 22% | 48% | 52% |
+| thunderbird/thunderbird-android | 67 | 17 | 1 | 6 | 0 | 1 | 15 | 27 | 42% | 80% | 20% | 45% | 48% |
+| microsoft/fluentui | 77 | 19 | 4 | 10 | 0 | 0 | 9 | 35 | 45% | 67% | 33% | 52% | 57% |
+| backstage/backstage | 100 | 30 | 3 | 10 | 0 | 0 | 29 | 28 | 42% | 82% | 18% | 43% | 46% |
+| **Pooled** | 1546 | 490 | 55 | 164 | 2 | 16 | 207 | 612 | 52% | 75% | 25% | 56% | 58% |
 
 | Family | Units | A | B-config | B-adapter | B-kernel | B-delegate | C | D | Today | Tuning | Gap | After slice | With values |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| `locale` | 81 | 18 | 3 | 23 | 0 | 2 | 19 | 16 | 28% | 57% | 43% | 32% | 32% |
-| `dep-version` | 127 | 33 | 6 | 17 | 0 | 0 | 19 | 52 | 44% | 69% | 31% | 49% | 60% |
-| `toolchain-pin` | 58 | 30 | 0 | 13 | 0 | 0 | 2 | 13 | 67% | 71% | 29% | 67% | 67% |
-| `other` | 861 | 299 | 31 | 60 | 2 | 10 | 88 | 371 | 61% | 79% | 21% | 64% | 65% |
+| `locale` | 141 | 30 | 10 | 36 | 0 | 5 | 36 | 24 | 26% | 56% | 44% | 31% | 32% |
+| `dep-version` | 172 | 46 | 7 | 21 | 0 | 0 | 30 | 68 | 44% | 73% | 27% | 48% | 58% |
+| `toolchain-pin` | 79 | 41 | 0 | 14 | 0 | 0 | 8 | 16 | 65% | 78% | 22% | 65% | 65% |
+| `other` | 1154 | 373 | 38 | 93 | 2 | 11 | 133 | 504 | 57% | 78% | 22% | 61% | 62% |
+
+The per-repository median `coverage_today` is 46% (range 28% to 86%). zulip contributes 188 units;
+108 of its A units are custom regex rules in its own linter, each a unit under R1. The family
+tables are the stratum's measure; the pooled figure is context.
+
+### By stratum
+
+| Stratum | Family | Units | Today | After slice | With values |
+|---|---|--:|--:|--:|--:|
+| i18n | `locale` | 136 | 26% | 30% | 32% |
+| i18n | `dep-version` | 61 | 48% | 48% | 57% |
+| i18n | `toolchain-pin` | 37 | 66% | 66% | 66% |
+| i18n | `other` | 613 | 65% | 66% | 67% |
+| i18n | **all** | 847 | 55% | 57% | 59% |
+| JavaScript monorepo | `locale` | 5 | 20% | 40% | 40% |
+| JavaScript monorepo | `dep-version` | 111 | 43% | 48% | 58% |
+| JavaScript monorepo | `toolchain-pin` | 42 | 65% | 65% | 65% |
+| JavaScript monorepo | `other` | 541 | 50% | 55% | 56% |
+| JavaScript monorepo | **all** | 699 | 49% | 54% | 57% |
+
+The JavaScript monorepos' 5 `locale` units are incidental; the stratum's locale evidence is the
+i18n half's 136.
+
+### What each capability would add
+
+Each step adds one capability to the previous ones and counts the units it would move to A. The
+first two steps are the "after slice" and "with values" columns.
+
+| Step | `locale` | `dep-version` | `toolchain-pin` | `other` | Pooled |
+|---|--:|--:|--:|--:|--:|
+| Today | 26% | 44% | 65% | 57% | 52% |
+| + slice | 31% | 48% | 65% | 61% | 56% |
+| + entry values | 32% | 58% | 65% | 62% | 58% |
+| + version comparison | 32% | 61% | 87% | 62% | 60% |
+| + `set` and `reference` | 38% | 68% | 87% | 65% | 63% |
+| + locale format adapters | 57% | 68% | 87% | 65% | 66% |
+
+- **+ slice:** B-config units in `equality`, `unique-key` or `cardinality`.
+- **+ entry values:** B-adapter units with `needs: entry-values` in one of those families.
+- **+ version comparison:** B-adapter units with `needs: version-compare`.
+- **+ `set` and `reference`:** B-config units in those families, and entry-values units that
+  need them.
+- **+ locale format adapters:** B-adapter units that need `placeholder`, `plural-categories` or
+  `icu`.
+
+### Assertion families
 
 The assertion families the B-config units need, with the B-adapter units that need only entry
 values:
 
 | Assertion family | B-config | B-adapter, entry values | locale | dep-version | toolchain-pin | other |
 |---|--:|--:|--:|--:|--:|--:|
-| `unique-key` | 22 | 7 | 2 | 11 | 0 | 16 |
-| `set` | 8 | 3 | 1 | 3 | 0 | 7 |
-| `reference` | 7 | 3 | 0 | 3 | 0 | 7 |
+| `unique-key` | 30 | 9 | 5 | 12 | 0 | 22 |
+| `set` | 13 | 4 | 6 | 4 | 0 | 7 |
+| `reference` | 8 | 4 | 0 | 4 | 0 | 8 |
+| `equality` | 0 | 9 | 2 | 2 | 0 | 5 |
 | `cardinality` | 2 | 0 | 1 | 0 | 0 | 1 |
-| `equality` | 0 | 2 | 0 | 1 | 0 | 1 |
 | `bounded-count` | 1 | 0 | 0 | 0 | 0 | 1 |
+| `group` | 1 | 0 | 0 | 0 | 0 | 1 |
 | `none` | 0 | 1 | 1 | 0 | 0 | 0 |
 
-The per-repository median `coverage_today` is 48%. zulip contributes 188 of the 1,127 units; 108
-of its A units are custom regex rules in its own linter, each a unit under R1. The family tables
-are the stratum's measure; the pooled figure is context.
+### What the B-adapter units need
 
-## Signals so far
+Each B-adapter unit records the one capability it lacks most directly (frame section 2.2):
 
-1. **The slice's dependency version policy needs a value-bearing entry adapter.**
-   - "One range per dependency across workspaces" is enforced in 7 of the 8 JavaScript monorepos
-     so far: trpc-05, yarnpkg-berry-01, tq-10, jest-23, rushstack-01, strapi-02 and babel-11.
-     babel's variant allows a literal range in one workspace only and sends the rest to catalogs.
-   - workers-sdk enforces the same policy another way: a dependency named in the pnpm catalog
-     must use `catalog:` (wsdk-09).
-   - Each needs (dependency name, range) rows. No adapter emits them today: `entry`, TOML and XML
-     are key-only, and `extract` drops the pointer (batch 2 ruling).
-   - With that adapter, `dep-version` moves from 44% today to 60% after the slice. Without it,
-     the move stops at 49%.
-2. **Version comparison is the most requested operator:** 15 B-adapter units in 8 repositories.
-   - It covers range satisfaction, ordering and range validity: forem-07, element-web-13,
-     trpc-03, trpc-06, immich-11, -52 and -53, tq-03, rushstack-06, -55 and -b11, rocketchat-16
-     and -80, wsdk-55 and -56.
-   - These 15 include all 13 `toolchain-pin` B-adapter units. The pins that must agree are
-     already A; the rest is "this exact pin satisfies that range". So the slice leaves
-     `toolchain-pin` at 67% unless it adds the operator.
-   - Five more units are C because a regex stands in for the operator: version ceilings in
-     ghost-27, -34, -35 and -36, and rocketchat-17, which holds only while `engines.yarn` is exact.
-3. **`unique-key` leads the assertion families**, with 22 B-config units and 7 more once entry
-   values exist.
-   - Workspace names that must be unique (trpc-B05, jest-B02, tq-35, babel-B01) are the common
-     B-config case: the values are there, and alint has no uniqueness relation over them.
-   - Duplicate keys in one locale file (zulip-28, rocketchat-10) and disjoint dependency fields
-     (trpc-08, jest-24, rushstack-51, babel-12) are the others.
-4. **The locale family barely moves with the slice:** from 28% to 32%. Its B units need format
-   knowledge, not new assertion families:
+| Need | Units | Repositories | `locale` | `dep-version` | `toolchain-pin` | `other` |
+|---|--:|--:|--:|--:|--:|--:|
+| `entry-values` | 27 | 16 | 5 | 15 | 0 | 7 |
+| `format-reader` | 22 | 7 | 0 | 2 | 0 | 20 |
+| `version-compare` | 22 | 12 | 0 | 3 | 14 | 5 |
+| `order` | 20 | 13 | 7 | 0 | 0 | 13 |
+| `other` | 17 | 11 | 0 | 0 | 0 | 17 |
+| `placeholder` | 11 | 7 | 11 | 0 | 0 | 0 |
+| `base-revision` | 10 | 5 | 0 | 0 | 0 | 10 |
+| `route-model` | 9 | 6 | 0 | 0 | 0 | 9 |
+| `plural-categories` | 7 | 5 | 7 | 0 | 0 | 0 |
+| `derived-value` | 5 | 5 | 0 | 1 | 0 | 4 |
+| `icu` | 5 | 2 | 5 | 0 | 0 | 0 |
+| `link-type` | 3 | 3 | 0 | 0 | 0 | 3 |
+| `package-graph` | 3 | 3 | 0 | 0 | 0 | 3 |
+| `normalization` | 2 | 2 | 1 | 0 | 0 | 1 |
+| `key-predicate` | 1 | 1 | 0 | 0 | 0 | 1 |
+| **Total** | 164 | | 36 | 21 | 14 | 93 |
 
-   | Need | Units |
-   |---|---|
-   | Placeholders kept per key | forem-04, zulip-02, immich-05, ghost-12, -13, -14, rocketchat-08, -09 |
-   | Plural categories per locale | forem-03, ghost-03, rocketchat-04, -05 |
-   | Key order | element-web-02, immich-01, ghost-07, rocketchat-01, -02 |
-   | ICU message structure | signal-desktop-06, -07, -09 |
-   | Message syntax (B-delegate) | zulip-01 (gettext), signal-desktop-10 (ICU) |
-   | Values of entries | element-web-05, -06 |
-   | Unicode normalization | zulip-05 |
+## Findings
 
-   Its 19 C units are mostly:
-   - regex approximations of ICU or placeholder rules;
-   - JSON parse checks that alint's JSONC-tolerant reader relaxes (zulip-04, element-web-08,
-     ghost-10, rocketchat-11, strapi-b01);
-   - key-name regexes.
-5. **Predicates over JSON key names recur:**
-   - expressed today only as layout-dependent line regexes (C): signal-desktop-01, element-web-04,
-     immich-49, ghost-11;
-   - or not at all: rushstack-b12, B-adapter `key-predicate`.
-6. **Map keys as a selector recur in C units.** Catalog entries are YAML or JSON map keys, which
-   JSONPath cannot select, so `catalog:` references are checked with line regexes (strapi-06,
-   wsdk-74) or wait for entry values (trpc-10, babel-17).
+1. **`unique-key` is the assertion family with the most demand; `cardinality` has little.**
+   - `unique-key` has 30 B-config units and 9 more once entry values exist. The common cases:
+     - unique workspace names (trpc-B05, jest-B02, tq-35, babel-B01);
+     - duplicate keys or ids in one locale file (zulip-28, rocketchat-10, mattermost-03,
+       thunderbird-android-b01);
+     - disjoint dependency fields (trpc-08, jest-24, rushstack-51, babel-12).
+   - `cardinality` has 2. Locale key parity is mostly A already, through `key_parity`. The one
+     locale unit left for the slice's group-parity form is forem-01, where each locale's keys
+     are merged from several files.
+   - `equality` has no B-config unit. Its 9 units all need entry values first.
+   - `set` (13 B-config, 4 entry values) and `reference` (8 and 4) come next. Neither is in the
+     slice. Together they would add 6 points to `locale`, 7 to `dep-version` and 3 pooled.
+2. **The slice's dependency version policy needs a value-bearing entry adapter.**
+   - One range per dependency across workspaces is enforced in 8 of the 10 JavaScript
+     monorepos: trpc-05, yarnpkg-berry-01, tq-10, jest-23, rushstack-01, strapi-02, babel-11 and
+     fluentui-17. workers-sdk enforces it through its catalog instead (wsdk-09). backstage does
+     not enforce it.
+   - Each needs (dependency name, range) rows. No adapter emits them: `entry`, TOML and XML are
+     key-only, and `extract` drops the pointer.
+   - `entry-values` is the most common need: 27 B-adapter units in 16 of the 20 repositories.
+   - With it, `dep-version` goes from 44% today to 58%. The slice alone reaches 48%.
+3. **Version comparison is the operator with the most demand.**
+   - 22 B-adapter units in 12 repositories need range satisfaction, ordering or range validity.
+     They include all 14 `toolchain-pin` B-adapter units.
+   - The pins that must agree are already A; what remains is "this exact pin satisfies that
+     range". With the operator, `toolchain-pin` goes from 65% to 87%. Without it, the slice
+     leaves the family where it is.
+   - More units are C because a regex or a normalization stands in for the operator. Examples
+     are Ghost's version ceilings (ghost-27, -34, -35, -36), rocketchat-17,
+     thunderbird-android-b04 and backstage-15.
+4. **The locale family needs format knowledge, not new assertion families.**
+   - It goes from 26% to 31% with the slice, and 32% with entry values.
+   - Its 41 B-adapter and B-delegate units, by need:
+
+     | Need | Units | Repositories |
+     |---|--:|--:|
+     | Placeholders kept per key | 11 | 7 |
+     | Plural categories per locale | 7 | 5 |
+     | Key or element order | 7 | 6 |
+     | ICU message structure | 5 | 2 |
+     | Values of entries | 5 | 2 |
+     | Message syntax (B-delegate) | 5 | 4 |
+     | Unicode normalization | 1 | 1 |
+
+   - Adapters for placeholders, plural categories and ICU would take `locale` from 38% to 57%,
+     after the steps before them in the capability table.
+5. **A strict-JSON option would turn C units into A.** alint's JSON reader accepts comments and
+   trailing commas, which `JSON.parse`, i18next and rollup's `json()` reject. 10 locale C units in
+   8 repositories approximate a strict parse check because of this, such as zulip-04, ghost-10,
+   rocketchat-11 and mattermost-01.
+6. **JSONPath cannot select member names.** Map keys, such as catalog entries, dependency names
+   chosen by a name set and JSON key names, are read with layout-dependent line regexes (C):
+   strapi-06, wsdk-74, thunderbird-android-53, signal-desktop-01 and ghost-11. Or they are not
+   expressible at all (rushstack-b12, `key-predicate`). The relation layer's `entry` adapter
+   already has the key rows, so this is a selector gap more than an adapter gap.
+7. **Format readers are a common need, but concentrated.** 22 units in 7 repositories. 14 of
+   them read Markdown frontmatter, in four repositories (strapi, trpc, backstage and
+   Rocket.Chat). The rest are CSV (3), JSON5 (2), CODEOWNERS, a lockfile and a TypeScript data
+   module.
+8. **Change-aware checks need the pull request's base.** 10 units in 5 repositories:
+   append-only files, renames that need redirects, release-branch migrations and one change file
+   per package. A depth-1 clone cannot confirm them, and no kind compares content with a base
+   revision.
 
 ## Batch 1 (2026-11-12): forem, zulip, element-web, yarnpkg/berry, trpc
 
@@ -352,3 +436,89 @@ trpc-08 from `set` to `unique-key`.
   wsdk-12 splits one date equality into three normalizations.
 - **`markdown_fragments_resolve` does not know HTML anchors** (rocketchat-29), and
   `markdown_links_resolve` does not read `<a href>` (rocketchat-28).
+
+## Batch 4 (2026-11-12): mattermost, nextcloud/server, thunderbird-android, fluentui, backstage
+
+### The three families
+
+- **`locale`** (60 units): 12 A, 7 B-config, 13 B-adapter, 3 B-delegate, 17 C, 8 D.
+  - **mattermost alone has 37 locale units.** It has two catalogs, server go-i18n and webapp
+    react-intl, plus a glossary and a style guide with their own checker:
+    - B-config: duplicate ids and glossary forms (mattermost-03, -27, `unique-key`), and locale
+      lists that must match the catalog files (mattermost-09, -28, -33, -b01, `set`);
+    - B-adapter: placeholders (mattermost-06, -19), plural categories (-08, -10), ICU argument
+      roles and escaping (-20, -21), and values of entries (-07, -32, -35);
+    - C: JSON parse checks (mattermost-01, -13, -23). Also blank-value checks that cannot skip
+      keys absent from en.json, which both checkers only warn about (mattermost-05, -14, -17).
+  - **thunderbird-android runs Android lint over `strings.xml`.**
+    - `key_parity` across 34 modules is A (thunderbird-android-01, -02). So are the cs, lt and
+      sk plural subset (-09) and the legacy locale folder names (-06).
+    - Duplicate resource names across a folder's files are B-config `unique-key` (-b01).
+    - Plural categories (-03) and placeholder types (-08) are B-adapter.
+    - Weblate's own checks are D (-b05).
+  - **nextcloud's `translation-checker.php`** gives A units: an l10n directory and Transifex
+    resource per app (nextcloud-01), and no RTL-limited characters in non-RTL catalogs (-02).
+- **`dep-version`** (45 units): 13 A, 1 B-config, 4 B-adapter, 11 C, 16 D.
+  - **backstage's React peer policy is six A units** (backstage-01 to -06). Its package-role
+    dependency rules are A where the rule names its targets (-12, -13). They are C where the
+    target's role lives in the target's manifest, so the targets are hand-listed (-08 to -11).
+  - **fluentui:**
+    - syncpack's one version per dependency (fluentui-17) and `*` for workspace dependencies
+      (-18) need entry values;
+    - peer-range compatibility (fluentui-31) needs version comparison;
+    - valid peer ranges (-07) and the `tar-fs` floor (-08) are regex stand-ins (C).
+  - nextcloud's override of a direct dependency (nextcloud-b02) needs entry values.
+- **`toolchain-pin`** (21 units): 11 A, 1 B-adapter, 6 C, 3 D.
+  - **mattermost's Node and Go pins** agree across `.nvmrc`, `mise.toml`, the buildenv
+    Dockerfiles, the Cursor image and `package-lock.json` (mattermost-38 to -40, -b03, -b04,
+    -b10).
+  - **fluentui** runs Yarn from the committed release (fluentui-01, -02, -b01).
+  - **backstage's C units need version comparison:**
+    - `@types/node` follows the lowest supported major, which the rule reads from the first
+      alternative of `engines.node` (backstage-15);
+    - the CI matrices list the supported majors (-17).
+
+### Stage B and integration
+
+- **Stage B:** added 48 units, reclassified 28 and removed 7.
+  - It removed checks nobody runs: nextcloud's opt-in pre-commit hooks (nextcloud-21, -22) and
+    thunderbird-android's scheduled security scans (-68). It also removed a collation order the
+    pin violates (-11).
+  - It reproduced false positives that moved units from A to C:
+    - mattermost-05, -14 and -17: extra keys;
+    - fluentui-14: a digest that forbids the additions the file allows;
+    - backstage-15, -46, -49, -53 and -55: range order, slug style and code blocks.
+  - It moved two units the other way. thunderbird-android-62 is A with a select/require pair.
+    thunderbird-android-05 moved from B-delegate to C.
+- **Stage C** fixed the scope gaps Stage B reproduced:
+  - backstage-14 now also checks the create-app templates;
+  - backstage-17 now reads three more workflows;
+  - nextcloud-01 and -14 now also cover a missing `.tx/config` and `psalm.xml`;
+  - fluentui-02 now has a rule that `yarnPath` is present.
+- **The integrator's changes:**
+  - **`needs` tags for all 51 B-adapter units.** Eleven need entry values, with the assertion
+    family each will need.
+  - **fluentui-16 to C:** `*.api.md text=auto` keeps the committed blob LF, but alint reads the
+    working tree, which is CRLF on a Windows checkout with `core.autocrlf`.
+  - **mattermost-88 and fluentui-31 reasons rewritten** to match Stage B's B-adapter
+    reclassification: base-revision and version comparison.
+  - **Kept:**
+    - mattermost-b10: the lockfile is a separate pin site that `mise.toml` names;
+    - backstage-b06 as C: the OpenAPI meta-schema is not in the clone (the rushstack-09b
+      precedent);
+    - fluentui-b16 as A. That Nx rejects an unknown implicit dependency was not confirmed
+      offline.
+- **Validation.** Every configuration validates and passes on its clone. The only findings are
+  4 `info` findings from value-add rules (mattermost 1, nextcloud 1, backstage 2).
+  `xtask corpus-replay --only` replays all five.
+
+### Sharp edges (C)
+
+- **A value check cannot be scoped to keys the reference file has.** mattermost's checkers skip
+  ids absent from en.json, and alint's rules apply to every entry (mattermost-05, -14, -17).
+- **Raw-text kinds read Markdown code blocks.** backstage's link checker strips them first
+  (backstage-49, -53, -55). `markdown_fragments_resolve` has one slug style, GitHub's
+  (backstage-46).
+- **Working-tree line endings depend on the checkout** when `.gitattributes` does not pin
+  `eol` (fluentui-16).
+- **The lowest major of a range** needs version comparison (backstage-15).

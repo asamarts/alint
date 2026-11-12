@@ -1,0 +1,1893 @@
+{
+ "repo": "backstage/backstage",
+ "sha": "bc73976a6de26df49b2bc2eefe689ee5b3ed0af1",
+ "metrics": {
+  "counts": {
+   "A": 30,
+   "B-config": 3,
+   "B-adapter": 10,
+   "B-kernel": 0,
+   "B-delegate": 0,
+   "C": 29,
+   "D": 28
+  },
+  "addressable": 72,
+  "coverage_today": 42,
+  "coverage_with_tuning": 82,
+  "gap": 18,
+  "coverage_after_slice": 43,
+  "coverage_after_slice_with_entry_values": 46
+ },
+ "by_family": {
+  "locale": {
+   "counts": {
+    "A": 0,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 0,
+    "D": 0
+   },
+   "addressable": 0,
+   "coverage_today": null,
+   "coverage_with_tuning": null,
+   "gap": null,
+   "coverage_after_slice": null,
+   "coverage_after_slice_with_entry_values": null
+  },
+  "dep-version": {
+   "counts": {
+    "A": 9,
+    "B-config": 0,
+    "B-adapter": 0,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 6,
+    "D": 4
+   },
+   "addressable": 15,
+   "coverage_today": 60,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 60,
+   "coverage_after_slice_with_entry_values": 60
+  },
+  "toolchain-pin": {
+   "counts": {
+    "A": 1,
+    "B-config": 0,
+    "B-adapter": 1,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 3,
+    "D": 0
+   },
+   "addressable": 5,
+   "coverage_today": 20,
+   "coverage_with_tuning": 80,
+   "gap": 20,
+   "coverage_after_slice": 20,
+   "coverage_after_slice_with_entry_values": 20
+  },
+  "other": {
+   "counts": {
+    "A": 20,
+    "B-config": 3,
+    "B-adapter": 9,
+    "B-kernel": 0,
+    "B-delegate": 0,
+    "C": 20,
+    "D": 24
+   },
+   "addressable": 52,
+   "coverage_today": 38,
+   "coverage_with_tuning": 77,
+   "gap": 23,
+   "coverage_after_slice": 40,
+   "coverage_after_slice_with_entry_values": 44
+  }
+ },
+ "units": [
+  {
+   "id": "backstage-01",
+   "summary": "A non-standalone package (role not cli/frontend/backend) that references react, react-dom or @types/react in any dependency field declares all three as peerDependencies (one peer group)",
+   "evidence": "ci.yml:110-111 `yarn lint:peer-deps`; packages/repo-tools/src/commands/peer-deps/peer-deps.ts (peerDependencies table, groupsOfPeerDependencies, isStandaloneApplication, 'Missing peer dependency' / 'Peer dependency ... is missing')",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent whole-document filter with a union existence test: backstage-react-peer-group-declared",
+   "assertion_family": "none",
+   "reason": "R7: a per-manifest assertion over fixed key paths, expressed and confirmed on the clone.",
+   "fire_verified": "Scratch copy of the manifests. Removing peerDependencies['react-dom'] from plugins/catalog/package.json gave +1 finding. 0 findings on the clone and on the unmodified scratch base.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-02",
+   "summary": "peerDependenciesMeta marks @types/react as optional and does not mark react / react-dom optional",
+   "evidence": "peer-deps.ts optionalPeerDependencies + isMarkedAsOptional checks; ci.yml:110-111",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-react-peer-optional-marking",
+   "assertion_family": "none",
+   "reason": "Fixed-path value tests in one manifest.",
+   "fire_verified": "Two cases on plugins/catalog/package.json each gave +1: dropping the @types/react optional flag, and marking react optional. The clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-03",
+   "summary": "Each React peer dependency is also listed in devDependencies",
+   "evidence": "peer-deps.ts isDevDependency check ('is not listed as a devDependency'); ci.yml:110-111",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-react-peer-also-dev",
+   "assertion_family": "none",
+   "reason": "Key-presence implication within one manifest.",
+   "fire_verified": "Removing devDependencies.react from plugins/catalog gave +1 (backstage-react-dev-ranges also fired, as expected). The clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-04",
+   "summary": "A React peer dependency is never also a runtime dependency",
+   "evidence": "peer-deps.ts isProdDependency check ('is listed as a dependency'); ci.yml:110-111",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-react-peer-not-runtime",
+   "assertion_family": "none",
+   "reason": "Disjoint dependency fields for three fixed names, so it is expressible per manifest with no key extraction.",
+   "fire_verified": "Adding dependencies.react to plugins/catalog gave +1. The clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-05",
+   "summary": "devDependencies pin react/react-dom to ^18.0.2 and @types/react to ^18.0.0 wherever they are peers",
+   "evidence": "peer-deps.ts desiredLocalVersionsOfDependencies + matchesDependency ('Incorrect dependency'); ci.yml:110-111; .github/renovate.json5:15-17 ignoreDeps comment",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-react-dev-ranges",
+   "assertion_family": "none",
+   "reason": "Value at a fixed key path, so no name-to-value join is needed.",
+   "fire_verified": "Setting devDependencies.react to ^18.2.0 in plugins/catalog gave +1. The clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-06",
+   "summary": "React peer ranges are '^17.0.0 || ^18.0.0', or '^18.0.0' for the three React-18-only packages",
+   "evidence": "peer-deps.ts peerDependencies / peerDependenciesReact18Only / react18OnlyPackages + matchesPeerDependency; ci.yml:110-111",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-react-peer-ranges",
+   "assertion_family": "none",
+   "reason": "Fixed-path value tests, with the script's own three-package list as a parameter.",
+   "fire_verified": "Two cases each gave +1: peer react ^18.0.0 on plugins/catalog, and '^17.0.0 || ^18.0.0' on packages/ui. The clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-07",
+   "summary": "Every dependency on a workspace package, in all four dependency fields, uses the range `workspace:^` ('' and link: are skipped)",
+   "evidence": "scripts/verify-local-dependencies.js:130-137; ci.yml:107-108",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "file_content_forbidden regex over the raw JSON with the workspace names as an alternation: backstage-local-deps-workspace-caret",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a regex read of a JSON key is C. JSONPath cannot test object keys, so the local package names (@backstage/*, @internal/* and 8 unscoped names) are kept in a regex. A clean form needs entry-values (name to range rows), then reference into the workspace names.",
+   "fire_verified": "n/a (C). Fired anyway: workspace:* and ^1.0.0 on a local dependency of plugins/catalog each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-08",
+   "summary": "Role rule 1: frontend-plugin / web-library packages have no runtime dependency on a backend-plugin / node-library / backend-plugin-module package",
+   "evidence": "scripts/verify-local-dependencies.js:36-41 roleRules[0], role lookup via the dependency's own package.json; ci.yml:107-108",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_absent with a 128-name union generated from the manifests at the pin: backstage-role-frontend-no-backend-deps",
+   "assertion_family": "none",
+   "reason": "The target's role lives in the target manifest (a join). JSONPath cannot read keys, so the target names are hand-listed and drift when a package is added (berry precedent: C). The list-free form is B-config reference: dependency names (keys) resolved to manifests filtered by role.",
+   "fire_verified": "n/a (C). Fired anyway: plugins/catalog depending on plugin-catalog-backend gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "dep-version",
+      "reference"
+     ],
+     "why": "Schema: assertion_family applies to B-config only. A C unit carries 'none', not 'reference'. The bucket is unchanged."
+    }
+   ]
+  },
+  {
+   "id": "backstage-09",
+   "summary": "Role rule 2: backend-plugin / node-library / backend-plugin-module packages have no runtime dependency on a frontend-plugin / web-library package",
+   "evidence": "verify-local-dependencies.js:42-46 roleRules[1]; ci.yml:107-108",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_absent with a 58-name union: backstage-role-backend-no-frontend-deps",
+   "assertion_family": "none",
+   "reason": "Same as backstage-08: a role join, so the names are hand-listed.",
+   "fire_verified": "n/a (C). Fired anyway: catalog-backend depending on plugin-catalog-react gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "dep-version",
+      "reference"
+     ],
+     "why": "Same as 08: a C unit must carry assertion_family none."
+    }
+   ]
+  },
+  {
+   "id": "backstage-10",
+   "summary": "Role rule 3: common-library packages have no runtime dependency on a frontend or backend role package",
+   "evidence": "verify-local-dependencies.js:47-57 roleRules[2]; ci.yml:107-108",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_absent with a 186-name union: backstage-role-common-no-platform-deps",
+   "assertion_family": "none",
+   "reason": "Same as backstage-08.",
+   "fire_verified": "n/a (C). Fired anyway: catalog-common depending on plugin-catalog-node gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "dep-version",
+      "reference"
+     ],
+     "why": "Same as 08: a C unit must carry assertion_family none."
+    }
+   ]
+  },
+  {
+   "id": "backstage-11",
+   "summary": "Role rule 4: frontend-plugin / web-library packages, except 6 exempt sources, have no runtime dependency on another frontend-plugin package",
+   "evidence": "verify-local-dependencies.js:58-71 roleRules[3]; ci.yml:107-108",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "json_path_absent with a 23-name union: backstage-role-no-plugin-to-plugin-deps",
+   "assertion_family": "none",
+   "reason": "Same as backstage-08.",
+   "fire_verified": "n/a (C). Fired anyway: plugins/catalog depending on plugin-techdocs gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "C",
+      "dep-version",
+      "reference"
+     ],
+     "why": "Same as 08: a C unit must carry assertion_family none."
+    }
+   ]
+  },
+  {
+   "id": "backstage-12",
+   "summary": "Role rule 5: frontend-plugin / web-library packages, except the 11 listed, have no runtime dependency on @backstage/core-app-api or @backstage/frontend-app-api",
+   "evidence": "verify-local-dependencies.js:72-91 roleRules[4]; ci.yml:107-108",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-role-frontend-no-app-api-deps",
+   "assertion_family": "none",
+   "reason": "Target names are fixed in the rule, so there is no join. Source role and the exemptions come from the manifest and the script.",
+   "fire_verified": "Adding @backstage/core-app-api to plugins/catalog dependencies gave +1. The clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-13",
+   "summary": "Role rule 6: backend-plugin / node-library packages, except 4, have no runtime dependency on @backstage/backend-app-api",
+   "evidence": "verify-local-dependencies.js:92-103 roleRules[5]; ci.yml:107-108",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-role-backend-no-backend-app-api-deps",
+   "assertion_family": "none",
+   "reason": "Fixed target name, so a per-manifest test works.",
+   "fire_verified": "Adding @backstage/backend-app-api to plugins/catalog-backend dependencies gave +1. The clone passes.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-14",
+   "summary": "Yarn runs from the committed release named by .yarnrc.yml yarnPath",
+   "evidence": ".yarnrc.yml:18 yarnPath: .yarn/releases/yarn-4.18.1.cjs; every CI job runs yarn (ci.yml install/verify/test, backstage/actions/yarn-install)",
+   "mechanism": "ci",
+   "family": "toolchain-pin",
+   "bucket": "A",
+   "alint": "registry_paths_resolve (yaml $.yarnPath, base lint_root, expect file): backstage-yarnpath-resolves",
+   "assertion_family": "none",
+   "reason": "Path resolution of a pinned package-manager binary.",
+   "fire_verified": "Two cases each gave +1: yarnPath renamed to yarn-4.18.2.cjs (the value-add packageManager rule also fired), and the release file deleted. The clone and the scratch base pass.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-15",
+   "summary": "@types/node stays on the lowest supported Node major (root engines.node), in the root and every package that uses it",
+   "evidence": ".github/renovate.json5:15-17 ('These need to stay pinned to match the React/Node versions we support'); package.json:179 engines.node; @types/node ^24.0.0 in the root and 8 workspace devDependencies",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "C",
+   "alint": "cross_file equals, normalize semver-major, allow_missing_target: backstage-types-node-major-matches-engines",
+   "assertion_family": "none",
+   "reason": "R5 load-bearing comment. The semver-major of '^24.15.0 || ^26.13.0' is 24, which matches ^24.0.0.",
+   "fire_verified": "Three cases each fired: root @types/node ^26 (+1), packages/cli ^22 (+1), engines changed to '^26.13.0 || ^28.0.0' (+9, all 9 users). The clone passes.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "R4 fails: the rule reads the first major in engines.node as the 'lowest supported major', so it depends on the order of the range. Reproduced on a scratch copy: reordering engines.node to '^26.13.0 || ^24.15.0' (the same supported set) gives a +9 false positive, and the equivalent form '>=24.15.0 <25 || >=26.13.0' gives no finding at all. The semantics (minimum major of a semver range) need a version-compare step. alint gets the answer for one spelling only, which the batch ruling makes C."
+    }
+   ]
+  },
+  {
+   "id": "backstage-16",
+   "summary": "Supported Node minimums agree: createApp.ts MINIMUM_NODE_VERSIONS equals the minimums in root engines.node, and the create-app templates' engines.node equals the root's",
+   "evidence": "packages/create-app/src/createApp.ts:37-40 ('Keep in sync with the engines.node field in the root package.json'); templates/default-app and legacy-app package.json.hbs:6; docs/overview/versioning-policy.md:171-181",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "C",
+   "alint": "cross_file equals (root json vs template regex) + two cross_file subset rules with per-line regexes: backstage-node-engines-templates-match-root, backstage-node-minimum-first-line, backstage-node-minimum-second-line",
+   "assertion_family": "none",
+   "reason": "engines.node holds two ranges in one string. Splitting them needs regexes that hold for this two-line layout only (batch-2 ruling: C).",
+   "fire_verified": "n/a (C). Fired anyway: template engines drift, root first minimum raised, and createApp second minimum changed each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-17",
+   "summary": "The CI node-version matrices test exactly the supported Node majors",
+   "evidence": "ci.yml:24,72,214 matrix [24.x, 26.x]; verify_e2e-linux.yml:42; verify_e2e-windows.yml:32; the noop twins' matrices; versioning-policy.md:178-180 ('The CI pipeline ... tests towards the supported releases')",
+   "mechanism": "convention",
+   "family": "toolchain-pin",
+   "bucket": "C",
+   "alint": "cross_file set_equals, normalize semver-major (createApp.ts minimums vs yaml matrix values): backstage-ci-node-matrix-matches-supported",
+   "assertion_family": "none",
+   "reason": "The supported-majors set is read from createApp.ts by regex, because the engines string cannot be split structurally. backstage-16 ties it to engines.node. Layout-specific regex, so C.",
+   "fire_verified": "n/a (C). Fired anyway: dropping 26.x from ci.yml's three matrices and adding 22.x to e2e-linux each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-18",
+   "summary": "Every `backstage` field names a known package role",
+   "evidence": "ci.yml:113-114 `yarn fix --check` = backstage-cli repo fix --publish; PackageRoles.getRoleFromPackage throws on unknown roles (readFixablePackages, fix.ts:47)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-role-is-known",
+   "assertion_family": "none",
+   "reason": "Enum check at a fixed path.",
+   "fire_verified": "n/a (family other). Fired on scratch: role 'frontend-plugin-x' gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-19",
+   "summary": "A package `exports` field is an object with a './package.json' entry",
+   "evidence": "fix.ts:98-120 fixPackageExports; ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-exports-expose-package-json",
+   "assertion_family": "none",
+   "reason": "Fixed-key presence.",
+   "fire_verified": "n/a (other). Fired on scratch: removing exports['./package.json'] gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-20",
+   "summary": "typesVersions['*'] is exactly derived from exports: each subpath maps to its types, or to its script default",
+   "evidence": "fix.ts:122-166 fixPackageExports; ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "needs: entry-values (each exports key joined to its value, compared with the typesVersions key/value), then equality",
+   "assertion_family": "equality",
+   "reason": "Batch-2 ruling: an assertion that joins a map key to its value is B-adapter (needs entry-values). The structured adapters are key-only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "equality"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  },
+  {
+   "id": "backstage-21",
+   "summary": "Once a package has `exports`, publishConfig carries no legacy main/module/browser/types fields",
+   "evidence": "fix.ts:168-185 (inside fixPackageExports, which returns early without exports); ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-publishconfig-no-legacy-entry-fields",
+   "assertion_family": "none",
+   "reason": "Per-manifest key test. The exports gate mirrors the fixer's early return: 110 manifests without exports keep these fields legitimately.",
+   "fire_verified": "n/a (other). Fired on scratch: adding publishConfig.main to plugins/catalog (which has exports) gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-22",
+   "summary": "Web and common, non-bundled roles (web-library, common-library, frontend-plugin, frontend-plugin-module) declare `sideEffects`",
+   "evidence": "fix.ts:188-219 fixSideEffects; ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-side-effects-declared",
+   "assertion_family": "none",
+   "reason": "Role-conditional key presence.",
+   "fire_verified": "n/a (other). Fired on scratch: removing sideEffects gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-23",
+   "summary": "Every package has an object `repository`. When its type and url are the root's, `directory` is the package's own path",
+   "evidence": "fix.ts:221-269 createRepositoryFieldFixer (--publish); ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + json_path_absent with the {path} token: backstage-repository-directory",
+   "assertion_family": "none",
+   "reason": "Path token compared with a fixed-path value.",
+   "fire_verified": "n/a (other). Fired on scratch: a wrong directory and a string repository each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-24",
+   "summary": "backstage.pluginId is set (string or null) on plugin and plugin-module roles, and on library roles whose name matches the plugin naming pattern",
+   "evidence": "fix.ts:271-352 guessPluginId / fixPluginId (--publish); ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent with search() on $.name: backstage-plugin-id-declared",
+   "assertion_family": "none",
+   "reason": "Presence and type tests conditioned on role and a name regex in the same manifest.",
+   "fire_verified": "n/a (other). Fired on scratch: a dropped pluginId and a numeric pluginId each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-25",
+   "summary": "A non-module plugin package's backstage.pluginPackages equals the sorted names of all plugin/library packages that share its pluginId",
+   "evidence": "fix.ts:362-449 fixPluginPackages (else branch); ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint group over workspace manifests: group by $.backstage.pluginId (filtered by role), compare members' $.name with each member's $.backstage.pluginPackages",
+   "assertion_family": "group",
+   "reason": "Group-by over extracted values across 239 manifests, which no current kind expresses. The comparison also requires the list to be sorted.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-26",
+   "summary": "A plugin module's backstage.pluginPackage names the package with the same pluginId and the matching plugin role",
+   "evidence": "fix.ts:390-425 fixPluginPackages (module branch, knownBackend/FrontendPluginPackageNameByPluginId fallback); ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint reference: module manifest (pluginId, pluginPackage) resolved against plugin manifests (pluginId, role, name)",
+   "assertion_family": "reference",
+   "reason": "A cross-manifest join on pluginId and role, over values only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-27",
+   "summary": "backstage.peerModules appears only on backend-plugin / frontend-plugin packages, as an array of non-empty strings",
+   "evidence": "fix.ts:452-505 fixPeerModules; ci.yml:113-114",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "json_path_absent: backstage-peer-modules-valid",
+   "assertion_family": "none",
+   "reason": "Role-conditional presence plus element type tests.",
+   "fire_verified": "n/a (other). Fired on scratch: peerModules on a node-library and an empty entry each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-28",
+   "summary": "Every package with a `backstage` field has a catalog-info.yaml",
+   "evidence": "packages/repo-tools/src/commands/generate-catalog-info/generate-catalog-info.ts:60-80; ci.yml:129-130; lint-staged runs it on package.json, CODEOWNERS and catalog-info.yaml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_dir + file_exists with one hand exclusion (packages/eslint-plugin): backstage-catalog-info-exists",
+   "assertion_family": "none",
+   "reason": "Whether a package carries the field is content, not a path. when_iter cannot read JSON, so the one package without it is excluded by hand.",
+   "fire_verified": "n/a (other). Fired on scratch: deleting plugins/catalog/catalog-info.yaml gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-29",
+   "summary": "catalog-info.yaml metadata.title equals the package name",
+   "evidence": "generate-catalog-info.ts:179 badTitle; ci.yml:129-130",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + cross_file equals: backstage-catalog-info-title",
+   "assertion_family": "none",
+   "reason": "Sibling-file value equality.",
+   "fire_verified": "n/a (other). Fired on scratch: title drift gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-30",
+   "summary": "catalog-info.yaml metadata.name equals safeEntityName(package name): leading symbols stripped, other runs replaced by '-', camelCase kebabbed",
+   "evidence": "generate-catalog-info.ts:169,180 badName; utils.ts safeEntityName; ci.yml:129-130",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a slug/transform normalize (only trim, lower, semver-major and semver-minor exist)",
+   "assertion_family": "none",
+   "reason": "Needs a value transform operator.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "derived-value"
+     }
+    }
+   ],
+   "needs": "derived-value"
+  },
+  {
+   "id": "backstage-31",
+   "summary": "catalog-info.yaml spec.type is `backstage-<role>`",
+   "evidence": "generate-catalog-info.ts:181-182 badType; ci.yml:129-130",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_dir + cross_file equals, with the target read by a layout-specific regex: backstage-catalog-info-type",
+   "assertion_family": "none",
+   "reason": "No normalize can add or strip the prefix, so the YAML value is read by a regex that assumes the generated layout (batch-2 ruling).",
+   "fire_verified": "n/a (other). Fired on scratch: type drift gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-32",
+   "summary": "catalog-info.yaml spec.owner is one of the owners CODEOWNERS assigns to that path (last matching entry)",
+   "evidence": "generate-catalog-info.ts:171-178 badOwner; codeowners.ts; ci.yml:129-130",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a CODEOWNERS adapter (last-match glob semantics yielding the owners of a path)",
+   "assertion_family": "none",
+   "reason": "Needs a new adapter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "backstage-33",
+   "summary": "No changeset releases one of the five private packages (example-app, example-backend, e2e-test, storybook, techdocs-cli-embedded-app)",
+   "evidence": "scripts/verify-changesets.js:24-50; ci.yml:104-105",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden over .changeset/*.md frontmatter: backstage-changesets-no-private-packages",
+   "assertion_family": "none",
+   "reason": "alint has no frontmatter adapter. A regex read of YAML keys inside Markdown is C (batch-2 ruling).",
+   "fire_verified": "n/a (other). Fired on scratch: a changeset releasing example-app gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-34",
+   "summary": "Changesets name only workspace packages, each with a patch/minor/major bump",
+   "evidence": "sync_version-packages.yml:43-47 changesets/action runs `changeset version` on every master push; CONTRIBUTING.md:225-242",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file superset (workspace names vs each changeset's frontmatter keys, by regex) + for_each_match: backstage-changesets-name-workspace-packages, backstage-changesets-valid-bump",
+   "assertion_family": "none",
+   "reason": "Frontmatter is read by regex. This is the TanStack tq-31 twin, classified C under the batch-2 regex ruling.",
+   "fire_verified": "n/a (other). Fired on scratch: an unknown package and bump 'bugfix' each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-35",
+   "summary": "Packages still at 0.x get no `major` bump in a changeset (breaking -> minor), except an agreed 1.0 graduation",
+   "evidence": "REVIEWING.md:115-130 bump table; AGENTS.md:53; CONTRIBUTING.md:239",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: frontmatter adapter, then a reference join from changeset entry to the manifest's $.version",
+   "assertion_family": "none",
+   "reason": "Joins frontmatter keys to another file's version. A regex would need the ~0.x package names hand-listed, and that list changes every release.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "format-reader"
+     }
+    }
+   ],
+   "needs": "format-reader"
+  },
+  {
+   "id": "backstage-36",
+   "summary": "A change to a published package in packages/ or plugins/ comes with a changeset",
+   "evidence": "CONTRIBUTING.md:227-231; automate_changeset_feedback.yml only comments",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "changeset_requires_path (if_changed {packages,plugins}/*/src/**, then .changeset/*.md); not used, because the clone is depth 1",
+   "assertion_family": "none",
+   "reason": "A change-set rule that a git kind expresses. By the batch-1 commit-message ruling it is C, since R4 cannot run on a depth-1 clone (TanStack tq-57 twin).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-37",
+   "summary": "Every file in microsite/data/plugins has '.yaml' in its name (case-insensitive)",
+   "evidence": "scripts/verify-plugin-directory.js ('.yaml' extension check); ci.yml:138-139",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex: backstage-plugin-directory-yaml-extension",
+   "assertion_family": "none",
+   "reason": "File-name property.",
+   "fire_verified": "n/a (other). Fired on scratch: a .yml copy gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-38",
+   "summary": "Each plugin-directory entry satisfies the zod schema: required strings, URL fields, status enum, addedDate, optional order number and iconUrl",
+   "evidence": "scripts/verify-plugin-directory.js configSchema (zod); ci.yml:138-139",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "three yaml_path_absent filter rules: backstage-plugin-directory-required-strings, -urls, -status-and-dates",
+   "assertion_family": "none",
+   "reason": "The schema exists only as zod code. It is hand-copied into structured-query rules, because json_schema_passes needs a schema file and a corpus config cannot ship one. Coerced-date validity is approximated by presence.",
+   "fire_verified": "n/a (other). Fired on scratch: a missing title, a non-URL authorUrl and status 'deprecated' each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-39",
+   "summary": "Every .agents/skills/<dir> contains SKILL.md",
+   "evidence": "scripts/verify-skills.js (readdir loop, 'has no SKILL.md'); ci.yml:141-142",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_dir + file_exists: backstage-skills-have-skill-md",
+   "assertion_family": "none",
+   "reason": "Directory structure.",
+   "fire_verified": "n/a (other). Fired on scratch: a skill dir without SKILL.md gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-40",
+   "summary": "SKILL.md frontmatter `name` equals the directory name, and `description` is non-empty",
+   "evidence": "verify-skills.js readFrontMatter + name/description check; ci.yml:141-142",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_dir + file_content_matches with the {basename} token: backstage-skills-frontmatter-name",
+   "assertion_family": "none",
+   "reason": "No frontmatter adapter. A regex read of YAML keys is C.",
+   "fire_verified": "n/a (other). Fired on scratch: a name mismatch gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-41",
+   "summary": "Every skill listed in .agents/skills/index.json exists as a skill directory",
+   "evidence": "verify-skills.js index filter ('lists ..., which does not exist'); ci.yml:141-142",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve (json $.skills[*].name, expect dir): backstage-skills-index-names-resolve",
+   "assertion_family": "none",
+   "reason": "Registry-entry resolution.",
+   "fire_verified": "n/a (other). Fired on scratch: adding a missing skill to index.json gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-42",
+   "summary": "index.json's description for a published skill equals the SKILL.md description (whitespace-normalized)",
+   "evidence": "verify-skills.js description comparison; ci.yml:141-142",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_dir + cross_file equals: frontmatter regex vs a templated JSONPath; backstage-skills-index-description",
+   "assertion_family": "none",
+   "reason": "Frontmatter is read by a regex anchored to the first block. Single-line descriptions only, and no whitespace normalization.",
+   "fire_verified": "n/a (other). Fired on scratch: index description drift gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-43",
+   "summary": "index.json `files` for a published skill equals the skill directory's file list",
+   "evidence": "verify-skills.js files comparison; ci.yml:141-142",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_dir + registry_paths_resolve with a templated JSONPath, base {path}, orphans space {path}/**/*.*: backstage-skills-index-files",
+   "assertion_family": "none",
+   "reason": "Both directions are expressible. The script checks only skills that index.json publishes, and which ones those are is content, so the 2 unpublished skill dirs are excluded by hand.",
+   "fire_verified": "n/a (other). Fired on scratch: an unlisted reference file and a listed file deleted each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-44",
+   "summary": "docs/ai/well-known-skills.md lists exactly the skills index.json publishes",
+   "evidence": "verify-skills.js documented vs published sets (regex /^- `([^`]+)`:/gm); ci.yml:141-142",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "cross_file set_equals (the script's own regex vs json $.skills[*].name): backstage-skills-documented",
+   "assertion_family": "none",
+   "reason": "Set equality. The Markdown side uses the script's own regex, not a stand-in for structured data.",
+   "fire_verified": "n/a (other). Fired on scratch: un-listing one skill gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-45",
+   "summary": "verify-links 'missing': every link in a Markdown file resolves to an existing file or directory (relative from the file; root-absolute via microsite/static or the repo root)",
+   "evidence": "scripts/verify-links.js:263-306; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "markdown_links_resolve with root map '/' -> '.', 2 files excluded: backstage-md-links-resolve",
+   "assertion_family": "none",
+   "reason": "alint's CommonMark scanner is stricter than the script's regex. It also flags an undefined reference label and a parenthesised destination that the script skips, so two files are excluded by hand. The microsite/static fallback is not modelled.",
+   "fire_verified": "n/a (other). Fired on scratch: a broken relative link gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-46",
+   "summary": "verify-links 'bad-anchor': same-file and cross-file .md link fragments name a heading anchor",
+   "evidence": "verify-links.js:48-104 (headingToSlug, extractHeadingAnchors), 229, 302, 329; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "markdown_fragments_resolve: backstage-md-fragments-resolve",
+   "assertion_family": "none",
+   "reason": "Native kind with GitHub-style slugs and -N suffixes. It passes on all .md files at the pin.",
+   "fire_verified": "n/a (other). Fired on scratch: a bad sibling fragment and a bad same-file fragment each gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "R4 fails both ways. verify-links.js headingToSlug strips [*_] and [^\\w\\s-], which differs from the GitHub slugger that markdown_fragments_resolve uses. Reproduced: a link '#myheading' to '## my_heading' fires in alint but passes the script (false positive), and './a.md#my_heading' passes alint but fails the script (false negative). The rule covers the unit only after tuning, for example a slug-style option."
+    }
+   ]
+  },
+  {
+   "id": "backstage-47",
+   "summary": "verify-links 'out-of-docs': a relative link from docs/ stays inside docs/ (outside targets use absolute GitHub URLs)",
+   "evidence": "verify-links.js:284-292; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_graph forbidden_edges from docs/** to a hand-listed set of the other top-level dirs plus root files: backstage-docs-relative-links-stay-in-docs",
+   "assertion_family": "none",
+   "reason": "forbidden_edges `to` takes one glob without negation, so 'not under docs/' is the other top-level directories, hand-listed. That list drifts when a new top-level directory appears.",
+   "fire_verified": "n/a (other). Fired on scratch: links from docs/ to ../packages/... and to ../package.json each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-48",
+   "summary": "verify-links 'out-of-changeset': links in changesets use absolute http(s) URLs only",
+   "evidence": "verify-links.js:242-248; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "markdown_links_resolve relative: forbid over .changeset/*.md: backstage-changeset-links-absolute",
+   "assertion_family": "none",
+   "reason": "Native site mode.",
+   "fire_verified": "n/a (other). Fired on scratch: a relative link in a changeset gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-49",
+   "summary": "verify-links 'not-relative': links inside docs/ never start with /docs/",
+   "evidence": "verify-links.js:251-256; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden: backstage-docs-links-not-root-absolute",
+   "assertion_family": "none",
+   "reason": "The script's own check is a regex test over the link text. The same regex is expressed directly.",
+   "fire_verified": "n/a (other). Fired on scratch: a /docs/ link in docs gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "R4 fails. verify-links.js runs stripCodeBlocks before matching, but file_content_forbidden reads raw text. Reproduced: a fenced code block containing ](/docs/x) fires the rule while the script passes it. The rule needs a code-block-aware markdown scope."
+    }
+   ]
+  },
+  {
+   "id": "backstage-50",
+   "summary": "verify-links 'doc-missing': microsite links into /docs/ use the externally reachable doc ID route (directory + frontmatter `id`, /index stripped)",
+   "evidence": "verify-links.js:257-262 and findExternalDocsLinks; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: route mapping from frontmatter `id` (markdown_links_resolve's root map tries only <route>, <route>.md, <route>/index.md)",
+   "assertion_family": "none",
+   "reason": "Needs a frontmatter-id route adapter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
+  },
+  {
+   "id": "backstage-51",
+   "summary": "verify-links 'github': docs/ and microsite/ do not link to github.com/backstage/backstage/(tree|blob)/master/docs/, except to release changelogs",
+   "evidence": "verify-links.js:196-223; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "for_each_match (select the GitHub docs URL; require the changelog form): backstage-docs-no-github-master-docs-links",
+   "assertion_family": "none",
+   "reason": "A line-level approximation of a per-link check. The 'changelog exists or matches the release file' half of the exception is not modelled.",
+   "fire_verified": "n/a (other). Fired on scratch: a GitHub master docs link in docs gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-53",
+   "summary": "verify-links 'multi-line': Markdown link text never spans lines",
+   "evidence": "verify-links.js:356-363; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden with the script's regex: backstage-md-no-multiline-link-text",
+   "assertion_family": "none",
+   "reason": "Regex check reproduced exactly.",
+   "fire_verified": "n/a (other). Fired on scratch: multi-line link text gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "Same defect as 49: the multi-line link regex is applied to raw text, but the script strips code blocks first. Reproduced: a multi-line [text\\n](x) inside a fenced block fires the rule but not the script."
+    }
+   ]
+  },
+  {
+   "id": "backstage-54",
+   "summary": "verify-links 'directory-link': relative links from docs/ never target a directory",
+   "evidence": "verify-links.js:308-320; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a target-kind option on markdown_links_resolve or file_graph (both accept directories)",
+   "assertion_family": "none",
+   "reason": "Needs a new operator that tells files from directories for link targets.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "other"
+     }
+    }
+   ],
+   "needs": "other"
+  },
+  {
+   "id": "backstage-55",
+   "summary": "verify-links 'invisible-chars': no zero-width or invisible Unicode character inside a link URL",
+   "evidence": "verify-links.js:29-31, 179-182; ci.yml:166-172",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_content_forbidden: backstage-md-no-invisible-chars-in-links",
+   "assertion_family": "none",
+   "reason": "Character-class check on the link destination.",
+   "fire_verified": "n/a (other). Fired on scratch: a U+200B in a URL gave +1.",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "B",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "NOT reproduced; inferred by analogy. It is the same raw-text file_content_forbidden pattern over a check the script runs after stripCodeBlocks, so an invisible character in a link inside a code block would be a false positive. Verify before applying."
+    }
+   ]
+  },
+  {
+   "id": "backstage-56",
+   "summary": "Vale docs quality (Vale style: spelling with the Backstage vocabulary, repetition) on changed Markdown",
+   "evidence": "verify_docs-quality.yml:25-55; scripts/check-docs-quality.js; .vale.ini; lint-staged *.md",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "vale",
+   "assertion_family": "none",
+   "reason": "R2: prose/NLP linter (dictionary spelling). Repetition would also need a backreference.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-57",
+   "summary": "No typos (crate-ci/typos with typos.toml)",
+   "evidence": "ci.yml:190-199",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "typos",
+   "assertion_family": "none",
+   "reason": "R2 spelling tool.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-58",
+   "summary": "Every patch: reference in a workspace manifest names an existing patch file (~/ from the project root, ./ from the manifest)",
+   "evidence": "ci.yml:98-99 `backstage-cli pm verify-patches`; packages/cli-module-package-manager-yarn/src/lib/verifyYarnPatches.ts:198-224, 1253-1273 (missing-patch-file)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "two file_graph no_dangling rules (relative_to_repo_root for ~/, relative_to_file for ./): backstage-yarn-patches-exist-root-relative, backstage-yarn-patches-exist-file-relative",
+   "assertion_family": "none",
+   "reason": "Reference resolution over files alint reads.",
+   "fire_verified": "n/a (other). Fired on scratch: a renamed ~/ path and a renamed ./ path each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-59",
+   "summary": "No file under .yarn/patches is left unreferenced by a manifest",
+   "evidence": "verifyYarnPatches.ts:1276-1286 (orphaned-patch-file); ci.yml:98-99",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_graph no_orphans with the manifests as roots: backstage-yarn-patches-no-orphans",
+   "assertion_family": "none",
+   "reason": "Orphan detection over the reference graph.",
+   "fire_verified": "n/a (other). Fired on scratch: an orphan .patch file gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-60",
+   "summary": "Patch declarations agree with yarn.lock, each resolution is used, and patch declarations are compatible across manifests",
+   "evidence": "verifyYarnPatches.ts lockfile-mismatch / unused-resolution / incompatible-patch-declarations / malformed-*; ci.yml:98-99",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "backstage-cli pm verify-patches",
+   "assertion_family": "none",
+   "reason": "R7 D: package-manager resolution semantics (descriptor-to-locator matching in the lockfile).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-61",
+   "summary": "Patched @backstage packages agree with the Backstage release manifest",
+   "evidence": "verifyYarnPatches.ts:1000-1160 (backstage-* kinds, loadReleaseManifest); ci.yml:98-99",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "backstage-cli pm verify-patches",
+   "assertion_family": "none",
+   "reason": "Needs external state: release manifests fetched over the network.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-62",
+   "summary": "Custom Spectral rule allow-reserved-in-query-params: every query parameter has a truthy allowReserved",
+   "evidence": "packages/repo-tools/src/commands/repo/schema/openapi/lint.ts:52-61; ci.yml:132-133",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent with a descendant filter over paths and components: backstage-openapi-query-allow-reserved",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a linter rule that asserts a property of the file is classified by its logic. The message says '(true or false)', but the function is truthy, so false fails, and the alint rule mirrors truthy.",
+   "fire_verified": "n/a (other). Fired on scratch: allowReserved false gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-63",
+   "summary": "The OpenAPI specs pass Spectral's oas ruleset and @apisyouwonthate/style-guide (with 7 rules turned off)",
+   "evidence": "lint.ts:47-75; ci.yml:132-133",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "spectral",
+   "assertion_family": "none",
+   "reason": "The rest of a third-party linter run (R2), collapsed into one unit.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-64",
+   "summary": "Each src/schema/openapi.yaml deep-equals the spec embedded in its generated router.ts",
+   "evidence": "ci.yml:135-136 `repo schema openapi validate`",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "backstage-repo-tools repo schema openapi validate",
+   "assertion_family": "none",
+   "reason": "Requires evaluating a TypeScript object literal (code analysis or codegen).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-65",
+   "summary": "Every linted JS/TS file in packages/ and plugins/ carries the Apache 'Copyright <year> The Backstage Authors' header",
+   "evidence": ".eslintrc.js:43-53 notice/notice with scripts/templates/copyright-header.txt; ci.yml:310-311 repo lint; lint-staged eslint --fix",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "file_header (20 lines, (?m) pattern), excludes mirror .eslintignore, the eslint-factory ignores and one inline eslint-disable: backstage-copyright-header",
+   "assertion_family": "none",
+   "reason": "Batch-2 ruling: a linter rule that asserts a header is classified by its logic.",
+   "fire_verified": "n/a (other). Fired on scratch: a new .ts file without the header gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-66",
+   "summary": "Each *-noop.yml workflow triggers on exactly the complement of its real workflow's path filter, so required checks always report",
+   "evidence": "NOTE comments: ci.yml:3, verify_e2e-linux.yml:3, verify_e2e-windows.yml, verify_accessibility.yml, verify_chromatic.yml, verify_microsite.yml, verify_microsite_accessibility.yml ('If you change these you must update ...-noop.yml as well')",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "7 cross_file set_equals rules (yaml for the 5 paths<->paths-ignore pairs; regex for ci.yml's negated globs): backstage-noop-*",
+   "assertion_family": "none",
+   "reason": "R1 collapses the pairs into one behavior. Five pairs are exact yaml set_equals. ci.yml encodes the complement as '!' globs, which only a layout-specific regex can split, so the unit is C. The verify_microsite_accessibility pair has drifted at the pin: under R5 that instance is not enforced, and it is a value-add rule at info.",
+   "fire_verified": "n/a (other). Fired on scratch: each of the 7 rules gave +1 on its own drift.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-67",
+   "summary": "Each BEP lives in beps/NNNN-short-descriptive-title with a README.md",
+   "evidence": "beps/README.md:8; beps/NNNN-template/README.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "A",
+   "alint": "dir_absent with include/exclude globs + for_each_dir file_exists: backstage-bep-directory-name, backstage-bep-directory-naming",
+   "assertion_family": "none",
+   "reason": "Directory naming and contents. Uniqueness of the number is not asserted. It holds at the pin.",
+   "fire_verified": "n/a (other). Fired on scratch: a misnamed BEP dir and a BEP without a README each gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-68",
+   "summary": "Every ADR is registered in microsite/sidebars.ts by its frontmatter id",
+   "evidence": "docs/architecture-decisions/index.md:21-31; microsite/sidebars.ts:871-885",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "cross_file superset (sidebars.ts regex vs ADR frontmatter id regex): backstage-adrs-in-sidebar",
+   "assertion_family": "none",
+   "reason": "Both sides are read by regex (TypeScript sidebar and Markdown frontmatter). The mkdocs.yml half of the same instruction is violated at the pin (adr015 is missing), so that half is value-add only (R5).",
+   "fire_verified": "n/a (other). Fired on scratch: an unregistered adr016 gave +1.",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-69",
+   "summary": "Workspace package names are unique",
+   "evidence": "Yarn rejects duplicate workspace names on every `yarn install` (all CI jobs); package.json workspaces packages/*, plugins/*",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the workspace manifests ($.name -> manifest path)",
+   "assertion_family": "unique-key",
+   "reason": "Twin of trpc-B05 / jest-B02 / tq-35. unique_by keys only on path templates.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-70",
+   "summary": "package.json keys follow sort-package-json order, with name, version, description, backstage and publishConfig first",
+   "evidence": "package.json lint-staged 'package.json' -> node ./scripts/sort-package-json.mjs; scripts/sort-package-json.mjs:21-39",
+   "mechanism": "hook",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: an order operator over JSON object keys (canonical order list)",
+   "assertion_family": "none",
+   "reason": "Needs an order operator (R7 example: normalized key order is B-adapter).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "order"
+     }
+    }
+   ],
+   "needs": "order"
+  },
+  {
+   "id": "backstage-71",
+   "summary": "Every commit carries a DCO Signed-off-by line",
+   "evidence": "CONTRIBUTING.md:339-350 (DCO, external GitHub DCO check)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "git_commit_signed_off; not used, because the clone is depth 1",
+   "assertion_family": "none",
+   "reason": "Batch-1 ruling: a commit-message check that a git kind expresses is C.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-72",
+   "summary": "yarn.lock and microsite/yarn.lock have no dedupable duplicate resolutions (yarn dedupe --check)",
+   "evidence": "ci.yml:101-102 scripts/verify-lockfile-duplicates.js; verify_microsite.yml; lint-staged yarn.lock -> --fix",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn dedupe --check",
+   "assertion_family": "none",
+   "reason": "R7 D: package-manager resolution semantics.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-73",
+   "summary": "yarn.lock is in sync with the manifests (immutable install in CI)",
+   "evidence": "backstage/actions/yarn-install in every CI job; verify_windows.yml:46 `yarn install --immutable`",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "yarn install --immutable",
+   "assertion_family": "none",
+   "reason": "R7 D: lockfile freshness.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-74",
+   "summary": "CI's pinned setup-node versions (24.22.1, 26.13.0) satisfy the per-line minimums create-app enforces",
+   "evidence": "verify_e2e-linux.yml:42,82,97 (e2e under the pinned Node); packages/e2e-test/src/commands/runCommand.ts:54 createApp; packages/create-app/src/createApp.ts:52-110 prerequisite check exits 1 below the minimum",
+   "mechanism": "test",
+   "family": "toolchain-pin",
+   "bucket": "B-adapter",
+   "alint": "missing: a semver comparison operator (workflow literal >= range floor of the same major)",
+   "assertion_family": "none",
+   "reason": "The check runs over process.versions in the e2e test. Its file-level logic needs a semver-satisfies operator, which alint lacks.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "version-compare"
+     }
+    }
+   ],
+   "needs": "version-compare"
+  },
+  {
+   "id": "backstage-75",
+   "summary": "ESLint passes: code rules, React and testing-library rules, restricted syntax and imports, and the @backstage import plugin rules",
+   "evidence": "ci.yml:310-311 repo lint --since; verify_windows.yml:49; .eslintrc.js; packages/cli/config/eslint-factory.js; lint-staged",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "eslint",
+   "assertion_family": "none",
+   "reason": "R2 plus the batch-2 ruling: import restrictions and the rest of a linter run are code analysis. The notice header is split out as backstage-65.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-76",
+   "summary": "@backstage/no-undeclared-imports: every package a source file imports is declared in the right dependency field",
+   "evidence": "packages/eslint-plugin/index.js:24; eslint-factory extends plugin:@backstage/recommended",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "eslint (@backstage/eslint-plugin)",
+   "assertion_family": "none",
+   "reason": "Import extraction from source is code analysis (R7 D).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-77",
+   "summary": "type-deps: packages that public type declarations import are declared as dependencies",
+   "evidence": "ci.yml:159-160 `yarn lint:type-deps`; packages/repo-tools/src/commands/type-deps/type-deps.ts",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "D",
+   "alint": "backstage-repo-tools type-deps",
+   "assertion_family": "none",
+   "reason": "Reads built .d.ts output, so it needs a build plus code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-78",
+   "summary": "Prettier formatting",
+   "evidence": "ci.yml:307-308 prettier:check; lint-staged",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "prettier --check",
+   "assertion_family": "none",
+   "reason": "R2 formatter.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-79",
+   "summary": "Type check (tsc:full)",
+   "evidence": "ci.yml:119-120; verify_windows.yml:52",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "tsc",
+   "assertion_family": "none",
+   "reason": "R2 type checker.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-80",
+   "summary": "API reports (api-extractor, SQL reports, release-tag validation) are current",
+   "evidence": "ci.yml:123-124 build:api-reports:only --ci --docs",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "backstage-repo-tools api-reports",
+   "assertion_family": "none",
+   "reason": "Code analysis and generation.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-81",
+   "summary": "The generated API reference index is consistent",
+   "evidence": "ci.yml:126-127 scripts/verify-api-reference.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node scripts/verify-api-reference.js",
+   "assertion_family": "none",
+   "reason": "Validates generated output of the api-reports step.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-82",
+   "summary": "App config validates against the packages' config schemas",
+   "evidence": "ci.yml:116-117 config:check --lax",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "backstage-cli config:check",
+   "assertion_family": "none",
+   "reason": "Schemas are collected from package code and config.d.ts (code analysis).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-83",
+   "summary": "All packages build (repo build --all, docs-ui build)",
+   "evidence": "ci.yml:147-157",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "backstage-cli repo build",
+   "assertion_family": "none",
+   "reason": "Build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-84",
+   "summary": "Unit tests pass (repo test, scripts/*.test.js, the Windows verify job)",
+   "evidence": "ci.yml:144-145, 313-315; verify_windows.yml:55",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "jest / node --test",
+   "assertion_family": "none",
+   "reason": "R2 test runner.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-85",
+   "summary": "End-to-end tests pass (CLI e2e on Linux and Windows, techdocs-cli e2e)",
+   "evidence": "verify_e2e-linux.yml:97; verify_e2e-windows.yml; verify_e2e-techdocs.yml:65-67",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "e2e-test / playwright",
+   "assertion_family": "none",
+   "reason": "Runs the project's code.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-86",
+   "summary": "Accessibility audits pass (lighthouse for the app and the microsite)",
+   "evidence": "verify_accessibility.yml; verify_microsite_accessibility.yml; lighthouserc.js",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "lighthouse-ci",
+   "assertion_family": "none",
+   "reason": "Runs the built app.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-87",
+   "summary": "Visual regression (Chromatic storybook)",
+   "evidence": "verify_chromatic.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "chromatic",
+   "assertion_family": "none",
+   "reason": "External service plus a rendered build.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-88",
+   "summary": "The microsite and docs build: docusaurus build, mkdocs build --strict, microsite prettier and typecheck",
+   "evidence": "verify_microsite.yml (mkdocs build --strict --config-file mkdocs-ci.yml, yarn build)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "docusaurus / mkdocs",
+   "assertion_family": "none",
+   "reason": "Build. Docusaurus broken links are 'log' only.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-89",
+   "summary": "Release-branch guard: no patch bump released from master",
+   "evidence": "ci.yml:295-296 scripts/verify-release.js:19-68",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "node scripts/verify-release.js",
+   "assertion_family": "none",
+   "reason": "Needs git history and branch state (depth-1 clone, and git-history kinds are excluded).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-90",
+   "summary": "The working directory stays clean after build and codegen steps (generated files committed and current)",
+   "evidence": "ci.yml:174-175, 331-332 'ensure clean working directory'",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "git status after the build",
+   "assertion_family": "none",
+   "reason": "Freshness of generated output requires running the generators.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-91",
+   "summary": "CodeQL static analysis",
+   "evidence": "verify_codeql.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "codeql",
+   "assertion_family": "none",
+   "reason": "Code analysis.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-92",
+   "summary": "FOSSA license compliance scan",
+   "evidence": "verify_fossa.yml:25-32 (pull_request and push to master)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "fossa",
+   "assertion_family": "none",
+   "reason": "External service plus dependency-graph resolution.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-93",
+   "summary": "The gh-aw agentic workflow lock is current with its source doc-updater.md",
+   "evidence": ".github/workflows/doc-updater.lock.yml (runtime stale-lock check); .gitattributes marks *.lock.yml as generated",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "D",
+   "alint": "gh-aw runtime check",
+   "assertion_family": "none",
+   "reason": "The check runs inside the compiled workflow at run time (generator semantics), not on PRs.",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-94",
+   "summary": "Code and prose style conventions (STYLE.md, docs/contribute/doc-style-guide.md, REVIEWING.md API and bump judgement)",
+   "evidence": "STYLE.md; docs/contribute/doc-style-guide.md; REVIEWING.md",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "D",
+   "alint": "review",
+   "assertion_family": "none",
+   "reason": "Code analysis and human judgement (R2).",
+   "fire_verified": "n/a",
+   "origin": "A",
+   "changes": []
+  },
+  {
+   "id": "backstage-b01",
+   "summary": "Every src/schema/openapi.yaml has a generated router: src/schema/openapi/generated/router.ts, or the legacy src/schema/openapi.generated.ts",
+   "evidence": "packages/repo-tools/src/commands/openapi/schema/validate.ts (throws 'No `src/schema/openapi/generated/router.ts` file found.' unless TS_SCHEMA_PATH or OLD_SCHEMA_PATH exists; paths in packages/repo-tools/src/commands/openapi/constants.ts); run by the verify job in .github/workflows/ci.yml (the schema:openapi verify step, around lines 135-136)",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "for_each_file over **/src/schema/openapi.yaml with a file_exists any-of [\"{dir}/openapi/generated/router.ts\", \"{dir}/openapi.generated.ts\"]. Proposed id backstage-openapi-generated-router-exists, replacing value-add backstage-valueadd-openapi-generated-router",
+   "assertion_family": "none",
+   "reason": "This is a separate assertion in validate.ts from the deep-equality check (unit 64, D). It is an existence check alint expresses directly. Stage A put it in value_add, but the script throws on it in CI, so it is enforced and belongs in the ratio. Probe: passes on the clone; fires on a scratch spec with no generated file; passes for both the current and the legacy layout.",
+   "fire_verified": "n/a (family other); fired anyway on a scratch copy (spec without a router fires, legacy and current layouts pass), passes on the clone",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "backstage-b02",
+   "summary": "The create-app templates pin resolutions['@yarnpkg/core'] to 4.9.1",
+   "evidence": "packages/create-app/src/lib/tasks.test.ts:314-337 asserts that both templates/default-app/package.json.hbs and templates/legacy-app/package.json.hbs resolutions include '@yarnpkg/core': '4.9.1'; runs in the CI unit tests (unit 84)",
+   "mechanism": "test",
+   "family": "dep-version",
+   "bucket": "A",
+   "alint": "json_path_equals over packages/create-app/templates/*/package.json.hbs (parsed as JSON; both files are valid JSON), $.resolutions['@yarnpkg/core'] == \"4.9.1\". Proposed id backstage-create-app-template-yarnpkg-core-pin",
+   "assertion_family": "none",
+   "reason": "Per R7, a test that only reads committed manifests is classified by what it asserts: here, an exact pinned value in two files. That is a single json_path_equals, so A.",
+   "fire_verified": "On a scratch copy of both templates: bumping the value to 4.9.2 fired (+1), and deleting the resolutions key fired (+1). Passes on the clone (0 findings).",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "backstage-b03",
+   "summary": "Every {{versionQuery '<pkg>'}} used in a cli-module-new template names a package registered in version.ts packageVersions",
+   "evidence": "packages/cli-module-new/src/lib/version.test.ts:25-50 (globs templates/**/*.hbs and asserts each versionQuery package is a key of packageVersions in src/lib/version.ts); at the pin 30 distinct packages are used and 42 keys exist, with 0 missing",
+   "mechanism": "test",
+   "family": "dep-version",
+   "bucket": "C",
+   "alint": "cross_file superset: source = regex-extracted keys of packageVersions in packages/cli-module-new/src/lib/version.ts; target = regex captures of versionQuery '(@backstage/[^']+)' over templates/**/*.hbs. Proposed id backstage-cli-new-versionquery-registered",
+   "assertion_family": "none",
+   "reason": "The relation (template references are a subset of the registry) is expressible, but the registry is a TypeScript object literal read by regex. Per the batch ruling, a regex that holds for one layout only is C. The probe passes on the clone and fires when a template adds an unregistered package.",
+   "fire_verified": "Fired on a scratch copy (a template with versionQuery '@backstage/does-not-exist' gave +1); passes on the clone",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "backstage-b04",
+   "summary": "Every nav entry in mkdocs-ci.yml names an existing file under docs/",
+   "evidence": ".github/workflows/verify_microsite.yml:322 runs `mkdocs build --strict --config-file mkdocs-ci.yml`. mkdocs-ci.yml INHERITs mkdocs.yml and overrides nav (11 overview entries). validation.nav.not_found is not overridden (only links.not_found: info), so it stays at warn and --strict turns a missing nav file into a failure",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "registry_paths_resolve with source mkdocs-ci.yml, extracting the nav leaf string values, base: docs, expect file. Proposed id backstage-mkdocs-ci-nav-resolves",
+   "assertion_family": "none",
+   "reason": "This is a docs-build integrity check split out of the mkdocs build (unit 88, D), following the jest-18 precedent for Docusaurus build checks. The nav paths are plain YAML strings resolved against docs/, which alint expresses directly.",
+   "fire_verified": "n/a (family other); fired anyway: deleting docs/overview/roadmap.md in a scratch copy gave +1, and it passes on the clone",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "backstage-b05",
+   "summary": "Every doc id referenced in microsite/sidebars.ts resolves to a Docusaurus doc",
+   "evidence": "The Docusaurus build in verify_microsite.yml (unit 88) fails on an unknown sidebar doc id. microsite/sidebars.ts holds 381 literal ids: 283 resolve by path; 97 need the frontmatter-id or number-prefix-stripping mapping; the env-gated GOLDEN_PATH block contains an id that does not resolve",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing primitive: a Docusaurus route model (doc id = directory + frontmatter id, or the file name with its numeric prefix stripped), read from a TypeScript sidebars module",
+   "assertion_family": "none",
+   "reason": "This is a build integrity check split out of the build, following jest-18/21/28 against jest-42. The ids come from a TS module, not data, and resolving them needs the doc-id mapping, the same need as unit 50 (route-model). The GOLDEN_PATH broken id sits behind an env gate that CI does not set, so the unit holds in the CI build.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "route-model"
+     }
+    }
+   ],
+   "needs": "route-model"
+  },
+  {
+   "id": "backstage-b06",
+   "summary": "Each src/schema/openapi.yaml is a valid OpenAPI document (swagger-parser validate: schema plus $ref resolution)",
+   "evidence": "packages/repo-tools/src/commands/openapi/schema/validate.ts: loadAndValidateOpenApiYaml calls Parser.validate before the deep-equal check; run by the verify job in ci.yml alongside unit 64",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "json_schema / yaml schema validation against the OpenAPI 3 meta-schema, which the repo does not ship. Proposed id backstage-openapi-spec-valid",
+   "assertion_family": "none",
+   "reason": "Following rushstack-09b, schema validation that needs a schema the repo does not ship stays C. This partly overlaps the oas ruleset in unit 63 (Spectral), but it is a separate tool call that fails independently. If the reconciler prefers, fold it into 63 as D; it should not be dropped silently.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": []
+  },
+  {
+   "id": "backstage-b07",
+   "summary": "The fields shared by the issue forms 01-04 equal the definitions in .github/ISSUE_TEMPLATE/.common.yaml",
+   "evidence": ".github/ISSUE_TEMPLATE/.common.yaml header ('WARNING: After updating this file, run `yarn sync-issue-templates`') and its sync.js generator; at the pin all 19 common field blocks in templates 01-04 equal .common.yaml",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing primitive: structured-subtree equality keyed by field id across YAML files. cross_file compares scalar extracts only",
+   "assertion_family": "equality",
+   "reason": "This is a generated-copy convention that holds at the pin, so it is not excluded by R5. Comparing whole mapping and list subtrees keyed by id is outside cross_file's scalar extraction, so it needs an adapter (entry-values or derived-value). It is weaker than the CI units because no workflow re-runs sync.js; the reconciler may drop it if conventions without a gate are out of scope for this stratum.",
+   "fire_verified": "n/a",
+   "origin": "B",
+   "changes": [
+    {
+     "by": "integrator",
+     "fields": {
+      "needs": "entry-values",
+      "assertion_family": "equality"
+     }
+    }
+   ],
+   "needs": "entry-values"
+  }
+ ],
+ "removed": [
+  {
+   "id": "backstage-52",
+   "summary": "A Markdown link to github.com/backstage/backstage/(tree|blob)/master/<path> names a path that exists in the repository",
+   "why": "R1 duplicate of backstage-45. In scripts/verify-links.js a github.com/backstage/backstage/(tree|blob)/master/<path> URL is rewritten to the repo path and goes through the same 'missing' existence check as relative links. It is one more input form for that assertion, not a separate rule. Keep the alint rule as part of 45's expression; if kept separately, it would double-count the 'missing' behavior."
+  }
+ ],
+ "rejected_stage_b": {},
+ "value_add": [
+  "backstage-valueadd-noop-microsite-accessibility (info, fires): verify_microsite_accessibility-noop.yml has drifted from its workflow's paths. It is the one noop pair whose NOTE convention is violated at the pin, so per R5 it sits outside the ratio",
+  "backstage-valueadd-adrs-in-mkdocs (info, fires on adr015): the mkdocs.yml half of the ADR registration instruction, violated at the pin",
+  "backstage-valueadd-package-manager-matches-yarnpath (info, passes): packageManager yarn@X equals the version in the .yarnrc.yml yarnPath file name; Corepack defers to yarnPath, so a mismatch would be silent today",
+  "backstage-valueadd-openapi-generated-router (info, passes): every src/schema/openapi.yaml has src/schema/openapi/generated/router.ts (file_graph derive_target no_dangling)",
+  "backstage-valueadd-patch-release-file-names (info, passes): .patches/*.txt are named pr-<number>.txt; .patches/README.md documents it, and sync_patch-release.yml silently skips other names",
+  "backstage-valueadd-root-private (info, passes): the root package.json stays private"
+ ],
+ "absent_categories": [
+  "locale: no locale catalogs under a gate. Translation messages are TypeScript objects (createTranslationRef in 26 .ts files under packages/ and plugins/). README-fr_FR/ja_JP/ko_kr/zh_Hans.md are docs translations, and check-docs-quality ignores them. plugins/home WelcomeTitle/locales/*.locales.json are greeting data with no parity check",
+  "toolchain pin files: no .nvmrc, .node-version, .tool-versions or Volta. Node is pinned by engines.node, the createApp.ts constants and literal setup-node versions in the workflows",
+  "one version or range per dependency: no syncpack, yarn constraints or yarn.config.cjs. REVIEWING.md:90 only 'prefers' existing ranges, and at the pin 55 of 529 external dependencies carry more than one range across the workspace manifests, so it is not enforced (R5)",
+  "catalog: protocol: not used",
+  "single-lockfile invariant: microsite/ and docs-ui/ each keep their own yarn.lock by design",
+  "commit-message format (commitlint / conventional commits): absent; only the DCO sign-off",
+  "per-package license-field or engines policy across workspace manifests: not enforced"
+ ],
+ "unusual": [
+  "Package roles drive the dependency policy: each of the 239 manifests carries backstage.role, and verify-local-dependencies.js resolves every runtime dependency to that dependency's own manifest to read its role (a cross-manifest join). Without a key extractor, alint can only hand-list the target names (128/58/186/23), which makes role rules 1-4 C. Rules 5-6 name fixed targets and are A",
+  "`yarn fix --check` (repo fix --publish) is a canonicalize-and-check command. Its fixers decompose into separate file-property assertions: 6 are A, one needs entry-values, 2 need group/reference. The publishConfig fixer only runs when `exports` exists: 110 manifests without exports keep publishConfig main/types and stay green",
+  "Seven workflows have *-noop.yml twins that keep required checks reporting under path filters, held in sync only by NOTE comments. One twin (verify_microsite_accessibility) has drifted at the pin",
+  "Node support is stated in three places: root engines.node, createApp.ts MINIMUM_NODE_VERSIONS (comment: 'Keep in sync'), and CI literals ('26.13.0' is exactly the 26-line minimum). renovate.json5 freezes @types/node and @types/react 'to match the React/Node versions we support'",
+  "verify-links.js checks GitHub master URLs that point into the repo against the local tree. It also applies route rules: /docs/ ids from frontmatter, microsite/static fallback, no directory links in docs/, and no relative links in changesets",
+  "The repo has its own `backstage-cli pm verify-patches` that checks Yarn patch files, including orphan detection, and patched @backstage versions against release manifests",
+  "The custom Spectral rule's message says 'must specify allowReserved (true or false)', but it uses the truthy function, so allowReserved: false fails",
+  "The copyright header is enforced by ESLint notice/notice (onNonMatchingHeader: replace) only where ESLint runs. 14 JS/TS files outside packages/ and plugins/ (.github, .lighthouseci, .patches, .storybook, contrib) lack it",
+  "The .agents/skills index.json publishes a subset of skills (2 skill dirs are unpublished), and docs/ai/well-known-skills.md must list exactly the published ones",
+  "Changesets for @backstage/ui have a documented required format (.changeset/README.md, REVIEWING.md:146). At the pin, 2 of the 3 @backstage/ui changesets lack the required '**Affected components:**' trailer, so it is not enforced (R5)"
+ ],
+ "check_result": "validate-config: \"Config valid: 72 rule(s) loaded\" (66 rules for A/C units at level error, 6 value-add rules at level info). `alint -c CONFIG check . --compact` on the clone exits 0 with \"2 info\". Every rule for an A or C unit passes. Both findings are value-add and correct. (1) backstage-valueadd-noop-microsite-accessibility: verify_microsite_accessibility-noop.yml paths-ignore lists microsite/scripts|src|data|blog|static/**, but the real workflow triggers on all of microsite/**. That pair has drifted, so its NOTE convention is violated at the pin and stays outside the ratio. (2) backstage-valueadd-adrs-in-mkdocs: adr015 is registered in sidebars.ts but missing from the mkdocs.yml nav, which is the violated half of the ADR registration instruction.\n\nViolations during drafting, and how I resolved them:\n(a) backstage-publishconfig-no-legacy-entry-fields fired on 110 manifests. fixPackageExports returns early when a package has no `exports`, and those 110 manifests keep publishConfig main/types without an exports field. The rule is now gated on `$.exports` like the fixer and passes.\n(b) backstage-skills-index-description fired twice. backstage-release-notes/SKILL.md has a second `description:` line in its body, and that skill is not in index.json. The regex is now anchored to the frontmatter, with allow_missing_target as in the script.\n(c) backstage-skills-index-files fired 6 times. The orphan space matched directories, and the two unpublished skills were included. The space is now `{path}/**/*.*`, and the two unpublished skill dirs are excluded by hand (C).\n(d) markdown_links_resolve gave 2 findings that verify-links.js's regex never reports: an undefined reference label in contrib/docs/tutorials/aws-alb-aad-oidc-auth.md and a parenthesised `((https://...))` destination in plugins/catalog-graph/README-alpha.md. Both files are excluded (C).\n(e) A copyright-header probe over the whole repo hit templates/** (in .eslintignore) and packages/cli/asset-types/asset-types.js (`eslint-disable-next-line notice/notice`). Both are excluded to mirror the repo. 14 files outside packages/plugins (.github, .lighthouseci, .patches, .storybook, contrib) lack the header, so the scope is packages/plugins, which is what CI lints.\n\nNon-vacuity: a scratch copy held only the files the rules read. I ran 79 mutation cases against it, and every one of the 66 enforced-unit rules fired on its own break. The clone was left unmodified: git status is empty and HEAD is bc73976a.",
+ "stage_b_config_issues": [
+  "backstage-17 rule (CI node matrix set_equals): targets cover only ci.yml, ci-noop, e2e-linux(-noop) and e2e-windows(-noop). The same supported-majors matrix [24.x, 26.x] is also in verify_windows.yml:20, verify_e2e-techdocs.yml:29 and deploy_packages.yml:16. Reproduced: dropping 26.x from verify_windows, dropping 26.x from techdocs, and adding 22.x to techdocs each gave 0 findings.",
+  "backstage-14 rule (yarnpath-resolves) covers only the root .yarnrc.yml. packages/create-app/templates/{default-app,legacy-app}/.yarnrc.yml.hbs carry `yarnPath: .yarn/releases/yarn-4.13.0.cjs` with the release committed beside them, and the create-app e2e (unit 85) depends on it. Reproduced: renaming the template yarnPath gave 0 findings. Add a second registry_paths_resolve scoped to the templates with base: the template dir.",
+  "backstage-48 rule (markdown_links_resolve relative: forbid over .changeset/*.md) does not flag root-absolute links. verify-links.js treats any non-scheme link in a changeset (including /package.json) as out-of-changeset. Reproduced: a changeset link to /package.json gave 0 findings. A file_content_forbidden for '\\]\\((?!https?:|#)' (or a forbid-absolute option) is needed. The A claim stands only after this fix.",
+  "backstage-65 rule (copyright file_header): the pattern asserts only the first 3 lines of the Apache header, while the eslint header rule checks the full template. A full-template pattern (about 15 lines, lines: 30) also passes on the clone, so the rule can express the unit fully. As written it under-asserts.",
+  "backstage-valueadd-openapi-generated-router is presented as value-add, but validate.ts throws on a missing router in CI, so it is enforced (missed unit backstage-b01). Its derive_target also requires only the new layout and does not model the legacy src/schema/openapi.generated.ts alternative that validate.ts accepts.",
+  "backstage-62 rule (allow-reserved yaml_path_absent): Spectral's custom rule uses given `$.paths..parameters[?(@.in == \"query\")]`, but the alint filter also descends into components. It would flag an unreferenced components parameter that Spectral ignores. Minor; holds at the pin.",
+  "backstage-15 rule: semver-major normalize of the first-listed engines.node alternative is layout-dependent (reproduced: a +9 false positive on reorder, a miss on the >=/< form). See reclassify.",
+  "backstage-49, backstage-53 and backstage-55 rules are raw-text file_content_forbidden and blind to code blocks, unlike verify-links.js, which strips code blocks first (49 and 53 reproduced; 55 inferred).",
+  "backstage-46 rule uses GitHub slugs, but verify-links.js headingToSlug drops [*_] and punctuation differently (reproduced in both directions).",
+  "Re-ran validate-config (72 rules OK) and check on the clone: exit 0 with 2 info findings, matching Stage A. Fire tests for the locale/dep-version/toolchain-pin A units 01-06, 12, 13, 14 and 15 reproduced on a scratch copy as claimed, including the plugins/home and backend-defaults exemptions (0). The standalone cli-with-react case correctly gives 0 for 01. Unit 15 additionally showed the reorder false positive above."
+ ],
+ "stage_b_summary": "Stage B for backstage/backstage at bc73976a6de26df49b2bc2eefe689ee5b3ed0af1 (js-monorepo). Stage A's config validates (72 rules) and checks clean (exit 0, 2 info) on the clone. On my own scratch copy, every dep-version and toolchain-pin A unit fired as claimed (01-06, 12, 13, 14, 15), with the exemptions holding.\n\nThe main corrections:\n(1) Unit 15 is layout-dependent and goes to C. It reads the first-listed engines major: a reorder gives a +9 false positive, and an equivalent >=/< spelling gives a miss.\n(2) Units 46, 49 and 53 fail R4 against verify-links.js and go to C. 46 has a different slug algorithm, reproduced in both directions. 49 and 53 are raw-text and code-block-blind, with false positives reproduced. Unit 55 is likely the same but was not reproduced.\n(3) Unit 52 is the same 'missing' check as 45 (R1) and should be removed.\n(4) Units 08-11 are C and should carry assertion_family none.\n\nSeven missed units:\n- b01 (A): openapi generated-router existence. validate.ts throws on it in CI, but Stage A filed it as value-add.\n- b02 (A, dep-version): the create-app templates' @yarnpkg/core resolution pin, asserted in tasks.test.ts:314-337. Fire-verified with a bump and a drop.\n- b03 (C, dep-version): cli-module-new versionQuery packages registered in version.ts (a regex over a TS module).\n- b04 (A): mkdocs-ci.yml nav files exist, which mkdocs --strict enforces. Fire-verified.\n- b05 (B-adapter route-model): Docusaurus sidebars.ts doc ids.\n- b06 (C per rushstack-09b, or fold into 63): swagger-parser validation.\n- b07 (B-adapter, convention without a gate): issue-template common-field sync.\n\nConfig scope gaps reproduced:\n- Rule 17 misses three workflows that carry the Node matrix.\n- Rule 14 misses the create-app template .yarnrc.yml.hbs yarnPath.\n- Rule 48 misses root-absolute links in changesets.\n- Rule 65 asserts only 3 of the header's lines, although a full-template pattern passes on the clone.\n\nLocale absence confirmed: only test fixtures and the home plugin's locale files exist, and nothing enforces them.\n\nCandidates checked and rejected:\n- REVIEWING.md config.d.ts registration: violated by 3 plugins (aws-alb, vmware-cloud, catalog-backend-module-gitea), so R5 excludes it.\n- version.ts 'accompanying devDependencies' comment: violated at the pin.\n- workspaces/ui engines and yarnPath: not in any CI.\n- readEntryPoints export-string and mount-slash guards: build-time guards inside the build (D 83), and they hold at the pin.\n- Stage A's @backstage/ui changeset trailer claim (2 of 3 violate): confirmed.\n\nThe clone was left unmodified (git status empty, HEAD unchanged), and the scratch directory <scratch>/backstage-backstage-b was removed.",
+ "notes": "Counts: 94 units in total.\n- By bucket: 37 A, 26 C, 3 B-config, 9 B-adapter, 0 B-kernel, 0 B-delegate, 19 D.\n- dep-version: 15 units. A 8 (backstage-01..06, 12, 13), C 5 (07..11), D 4 (72, 73, 76, 77). B-config 0.\n- toolchain-pin: 5 units. A 2 (14, 15), C 2 (16, 17), B-adapter 1 (74).\n- locale: none.\n\nTreatment of partly drifted conventions:\n- R1 collapses the noop pairs (backstage-66) and the ADR registry (backstage-68). I counted the instances that hold.\n- The drifted instance in each case (the verify_microsite_accessibility pair, and the mkdocs.yml half of the ADR instruction) is treated as violated at the pin (R5). Each is kept as an info value-add rule that fires.\n- If the integrator reads the batch-1 ruling strictly, as a whole convention being unenforced when any instance drifts, 66 and 68 drop out of the denominator.\n\nNot counted as units:\n- api-breaking-changes.yml and automate_changeset_feedback.yml only post PR comments.\n- Snyk sync and scorecard are reporting only.\n- The verify-links 'api-missing' check is skipped when type-docs/ does not exist. I did not confirm that CI generates it, so it is left out.\n- These conventions are violated or soft at the pin:\n  - the @backstage/ui changeset format;\n  - REVIEWING.md 'prefer existing ranges';\n  - BEP YAML metadata ('fill out as much as you can'; 0001 has no owners);\n  - the ADR mkdocs registration.\n\nBucket notes:\n- I applied the batch-2 regex ruling throughout. Markdown frontmatter (changesets, SKILL.md, ADR ids) has no adapter, so regex reads of it are C. This includes backstage-34, the twin of TanStack tq-31 (A there).\n- Role rules 1-4 follow the berry precedent: hand-listed names make them C. Their clean form is B-config reference over a key extractor.\n\nR4 evidence, recorded per unit:\n- A scratch tree copied only the files the rules read (manifests, catalog-info, workflows, createApp.ts, templates, .yarnrc.yml and .yarn/, skills, the plugin directory, sidebars/mkdocs, ADRs, BEPs, the OpenAPI specs).\n- 79 mutation cases covered all 66 enforced-unit rules, and each fired on its own break.\n- The clone passes.\n\nHousekeeping:\n- The scratch directory has been removed.\n- The clone is unmodified (git status empty, HEAD bc73976a6de26df49b2bc2eefe689ee5b3ed0af1).\n- Nothing from the repository was executed. Only alint ran against the clone, and my own read-only Python (run with -I) read its files.\n\nLine numbers I could not pin exactly are cited by function name.",
+ "stage_c": {
+  "changes": [
+   {
+    "rule_id": "backstage-create-app-template-yarnpath-resolves",
+    "unit": "backstage-14",
+    "action": "added",
+    "detail": "Fixes Stage B's reproduced gap: rule 14 checked only the root .yarnrc.yml. New rule: for_each_dir over packages/create-app/templates/* where the template has .yarnrc.yml.hbs, then registry_paths_resolve of yaml $.yarnPath with base {path} and expect file. Passes on the clone. Fires on scratch: renaming default-app's yarnPath to yarn-4.13.1.cjs gave +1; deleting legacy-app/.yarn/releases/yarn-4.13.0.cjs gave +1."
+   },
+   {
+    "rule_id": "backstage-ci-node-matrix-matches-supported",
+    "unit": "backstage-17",
+    "action": "modified",
+    "detail": "Added three targets: verify_windows.yml ($.jobs.*), verify_e2e-techdocs.yml ($.jobs.*) and deploy_packages.yml ($.jobs.build only). deploy_packages' release job [24.x] and deploy_docker-image [24.x] are single-Node deploys, so they stay out. Passes on the clone. Each of these gave +1 on scratch: drop 26.x from verify_windows; drop 26.x from techdocs; add 22.x to techdocs; add 22.x to the deploy_packages build matrix. Control: changing the release job's [24.x] gave 0."
+   },
+   {
+    "rule_id": "backstage-create-app-template-yarnpkg-core-pin",
+    "unit": "backstage-b02",
+    "action": "added",
+    "detail": "New A rule (dep-version): json_path_equals on templates/default-app and templates/legacy-app package.json.hbs, $.resolutions['@yarnpkg/core'] == \"4.9.1\", the two templates tasks.test.ts:314-337 checks. The third template, next-app, has only examples/. alint parses the .hbs as JSON. Passes on the clone. On scratch, a bump to 4.9.2 in default-app gave +1, and deleting the key in legacy-app gave +1. Both are policy findings, not parse failures."
+   },
+   {
+    "rule_id": "backstage-cli-new-versionquery-registered",
+    "unit": "backstage-b03",
+    "action": "added",
+    "detail": "New C rule (dep-version): cross_file superset. Source: the packageVersions keys in packages/cli-module-new/src/lib/version.ts, read by the regex (?m)^  '(@backstage/[^']+)':. Target: the test's own versionQuery regex over packages/cli-module-new/templates/**/*.hbs, with allow_missing_target. Passes on the clone. On scratch, a template using '@backstage/does-not-exist' gave +1, and removing the '@backstage/backend-test-utils' key gave +9 (one per template). Control: a call with a version hint, which the test ignores, gave 0."
+   },
+   {
+    "rule_id": "backstage-openapi-generated-router-exists",
+    "unit": "backstage-b01",
+    "action": "added",
+    "detail": "Promoted backstage-valueadd-openapi-generated-router to level error. The old rule was a file_graph derive_target that required the new layout only, so it is replaced. New rule: for_each_file over {packages,plugins}/*/src/schema/openapi.yaml with file_exists any-of [{dir}/openapi/generated/router.ts, {dir}/openapi.generated.ts], as validate.ts does. Passes on the clone (6 specs). On scratch, deleting events-backend's router.ts gave +1, and a new spec with no router gave +1. Control: the legacy openapi.generated.ts layout alone gave 0."
+   },
+   {
+    "rule_id": "backstage-openapi-spec-valid",
+    "unit": "backstage-b06",
+    "action": "added",
+    "detail": "PARTIAL C rule. Swagger-parser Parser.validate needs the OpenAPI meta-schema, which the clone does not ship and a standalone corpus config cannot carry. The added yaml_path_absent asserts only the top-level requirements: openapi matches 3[.][01][.][0-9]+, info.title and info.version are strings, and paths, components or webhooks is present. Nested-schema validity and $ref resolution are not covered. Passes on the clone. On scratch, openapi: 2.0.0 gave +1 and dropping info.title gave +1. Control: 3.0.3 gave 0."
+   },
+   {
+    "rule_id": "backstage-mkdocs-ci-nav-resolves",
+    "unit": "backstage-b04",
+    "action": "added",
+    "detail": "New A rule: registry_paths_resolve, source mkdocs-ci.yml, yaml $.nav..[?match(@, '[^:]+')], base docs (mkdocs.yml sets no docs_dir, so the default applies), expect file. It resolves the 11 overview entries. Passes on the clone. On scratch, deleting docs/overview/roadmap.md gave +1, and renaming the vision.md nav entry to visions.md gave +1. Control: an external https nav entry gave 0."
+   },
+   {
+    "rule_id": "backstage-changeset-links-absolute",
+    "unit": "backstage-48",
+    "action": "modified",
+    "detail": "Fixes Stage B's reproduced gap: root-absolute links in changesets were skipped. Added root: {url_prefix: '/', dir: '.changeset/__root-absolute-links-are-forbidden__'}. That directory does not exist, so every root-absolute route is reported. relative: forbid is kept, and the rule stays CommonMark-aware. Passes on the clone. Each of these gave +1 on scratch: /package.json; /docs/overview/vision.md, whose target exists; bare /; and ../docs/overview/vision.md. Controls gave 0: an https link, and /package.json inside a ``` fenced block. Remaining edge differences from the script are noted in the comment: the script skips any URL containing [a-z]+: and flags //host."
+   },
+   {
+    "rule_id": "backstage-copyright-header",
+    "unit": "backstage-65",
+    "action": "modified",
+    "detail": "The pattern is now the whole 15-line scripts/templates/copyright-header.txt, with YEAR as \\d{4}, unanchored, and lines raised from 20 to 30. Before, only the first 3 lines were asserted. Passes on the clone. Each of these gave +1 on scratch: a new .ts with no header; header line 11 altered (outside the old pattern); header line 14 altered. Controls gave 0: a shebang plus an eslint directive above the header, and a different year."
+   },
+   {
+    "rule_id": "backstage-types-node-major-matches-engines",
+    "unit": "backstage-15",
+    "action": "comment",
+    "detail": "Relabelled C per Stage B: the rule reads the first engines.node alternative, so it depends on the order. Rule kept at error with a comment. No in-config fix exists, because the minimum major of a range needs version-compare. Still passes on the clone."
+   },
+   {
+    "rule_id": "backstage-md-fragments-resolve",
+    "unit": "backstage-46",
+    "action": "comment",
+    "detail": "Relabelled C per Stage B: the GitHub slugger differs from verify-links.js headingToSlug ([*_] and punctuation), reproduced by Stage B in both directions. markdown_fragments_resolve has no slug-style option. Rule kept at error. Passes on the clone."
+   },
+   {
+    "rule_id": "backstage-docs-links-not-root-absolute",
+    "unit": "backstage-49",
+    "action": "comment",
+    "detail": "Relabelled C. The raw-text regex does not skip code blocks; the script strips ``` blocks first. Stage C re-reproduced it: ](/docs/overview/vision) inside a fenced block gave +1 on scratch. No code-block-aware scope exists for raw-text kinds. Rule kept at error. Passes on the clone."
+   },
+   {
+    "rule_id": "backstage-md-no-multiline-link-text",
+    "unit": "backstage-53",
+    "action": "comment",
+    "detail": "Relabelled C, for the same code-block reason as 49. Stage C re-reproduced it: a multi-line [two\\nlines](x.md) inside a fenced block gave +1. Rule kept at error. Passes on the clone."
+   },
+   {
+    "rule_id": "backstage-md-no-invisible-chars-in-links",
+    "unit": "backstage-55",
+    "action": "comment",
+    "detail": "Stage B only inferred this; Stage C reproduced it. [x](https://exa<U+200B>mple.com) inside a ``` fenced block fires the rule (+1 on scratch). By reading verify-links.js (not running it): verifyFile applies stripCodeBlocks before it extracts links, so the script never checks that link. Control: the same link outside a block fires in both. Relabelled C; rule kept at error. Passes on the clone."
+   },
+   {
+    "rule_id": "backstage-github-master-links-resolve",
+    "unit": "backstage-52",
+    "action": "demoted",
+    "detail": "Stage B removed unit 52 as an R1 duplicate of 45 (verify-links 'missing'). The rule is kept at level info with a comment: it is the GitHub master-URL input form of 45's check, so it is not counted separately. 0 findings on the clone."
+   },
+   {
+    "rule_id": "backstage-openapi-query-allow-reserved",
+    "unit": "backstage-62",
+    "action": "comment",
+    "detail": "Stage B's issue was not reproduced and is not a defect at the pin. Spectral checks inline path parameters plus the component parameters that paths reference ($ref-resolved); alint descends into all of components. A scan of '#/components/parameters/<name>' references shows every component parameter in the six specs is referenced, so a paths-only query would miss them. The broader query is kept, with a comment on the unreferenced-component false-positive edge. Unchanged; passes on the clone."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "backstage-b05",
+    "action": "not-done",
+    "detail": "B-adapter (route-model: Docusaurus sidebar doc ids from a TS module), so no rule. Listed in the config header."
+   },
+   {
+    "rule_id": "(none)",
+    "unit": "backstage-b07",
+    "action": "not-done",
+    "detail": "B-adapter (structured-subtree equality across issue forms), so no rule. Listed in the config header."
+   }
+  ],
+  "unit_notes": [
+   {
+    "id": "backstage-15",
+    "suggested_bucket": "C",
+    "note": "Stage B's reclassification applied. No in-config fix: the rule reads the first-listed engines.node alternative, which gives a false positive on reorder and a wrong result on the >=/< spelling (Stage B reproduced both). Rule kept at error."
+   },
+   {
+    "id": "backstage-46",
+    "suggested_bucket": "C",
+    "note": "Stage B's reclassification applied. markdown_fragments_resolve's GitHub slugs differ from verify-links.js headingToSlug, and there is no slug-style option. Rule kept at error; passes at the pin."
+   },
+   {
+    "id": "backstage-49",
+    "suggested_bucket": "C",
+    "note": "Raw-text file_content_forbidden does not skip code blocks; the script strips ``` blocks first. Re-reproduced in Stage C. No code-block-aware scope exists for raw-text kinds."
+   },
+   {
+    "id": "backstage-53",
+    "suggested_bucket": "C",
+    "note": "Same code-block blindness as 49. Re-reproduced in Stage C."
+   },
+   {
+    "id": "backstage-55",
+    "suggested_bucket": "C",
+    "note": "Stage B only inferred this; Stage C reproduced it. A zero-width character in a link inside a ``` fenced block fires the rule, and verify-links.js strips that block before checking (confirmed by reading the code, not by running it)."
+   },
+   {
+    "id": "backstage-52",
+    "suggested_bucket": "removed (R1 duplicate of backstage-45)",
+    "note": "Stage B's removal applied. Rule kept at level info as the GitHub master-URL input form of 45's 'missing' check, so it is not counted twice."
+   },
+   {
+    "id": "backstage-08",
+    "suggested_bucket": "C",
+    "note": "Bucket unchanged. Record-only fix: as a C unit, assertion_family should be 'none', not 'reference' (Stage B). No config change needed."
+   },
+   {
+    "id": "backstage-09",
+    "suggested_bucket": "C",
+    "note": "As 08: assertion_family should be 'none'."
+   },
+   {
+    "id": "backstage-10",
+    "suggested_bucket": "C",
+    "note": "As 08: assertion_family should be 'none'."
+   },
+   {
+    "id": "backstage-11",
+    "suggested_bucket": "C",
+    "note": "As 08: assertion_family should be 'none'."
+   },
+   {
+    "id": "backstage-b06",
+    "suggested_bucket": "C (or fold into backstage-63 as D)",
+    "note": "Stage B's form, json_schema validation against the OpenAPI meta-schema, needs a schema file the clone does not ship, so a standalone corpus config cannot express it. The added rule is partial: only the meta-schema's top-level requirements, with no nested schemas or $ref resolution. The integrator should decide between C (rushstack-09b precedent) and folding into 63 as D."
+   },
+   {
+    "id": "backstage-b01",
+    "suggested_bucket": "A",
+    "note": "New enforced unit for the ratio. It was Stage A's value-add backstage-valueadd-openapi-generated-router, now promoted to error and extended to accept the legacy openapi.generated.ts layout. The value-add list drops that entry."
+   }
+  ],
+  "validate_output": "✓ Config valid: 77 rule(s) loaded from docs/design/v0.12/corpus/backstage-backstage.alint.yml",
+  "check_output": "exit 0. \"2 info.\" Both findings are the expected value-add rules, unchanged from Stage A:\n.github/workflows/verify_microsite_accessibility-noop.yml: info: backstage-valueadd-noop-microsite-accessibility: verify_microsite_accessibility-noop.yml has drifted from verify_microsite_accessibility.yml's paths.\ndocs/architecture-decisions/adr015-jsx-loader-structure.md: info: backstage-valueadd-adrs-in-mkdocs: Register every ADR in mkdocs.yml (docs/architecture-decisions/index.md).\nThe clone is unmodified: `git status --porcelain` is empty and HEAD is bc73976a6de26df49b2bc2eefe689ee5b3ed0af1. The scratch directory <scratch>/backstage-backstage-c has been removed."
+ }
+}

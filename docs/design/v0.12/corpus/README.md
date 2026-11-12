@@ -82,3 +82,5 @@ repositories and JavaScript monorepos under the same protocol, pinned on
   `TanStack-query`, `jestjs-jest`, `microsoft-rushstack`.
 - **Batch 3:** `TryGhost-Ghost`, `RocketChat-Rocket.Chat`, `babel-babel`,
   `strapi-strapi`, `cloudflare-workers-sdk`.
+- **Batch 4:** `mattermost-mattermost`, `nextcloud-server`,
+  `thunderbird-thunderbird-android`, `microsoft-fluentui`, `backstage-backstage`.
