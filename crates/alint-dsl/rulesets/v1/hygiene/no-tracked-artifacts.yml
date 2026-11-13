@@ -6,10 +6,12 @@
 # reasonable defaults at unambiguous severities; use field-level
 # override to tweak.
 #
-# Each `dir_absent` rule walks the *tracked* tree (respecting
-# `.gitignore`), so a properly-gitignored directory trivially
-# passes — these checks catch the case where someone committed
-# an artifact AND forgot the `.gitignore` entry.
+# Each `dir_absent` rule reads the walked tree (the working tree
+# minus what `.gitignore` excludes), so a properly-gitignored
+# directory trivially passes — these checks catch the case where
+# someone committed an artifact AND forgot the `.gitignore` entry.
+# An artifact force-added past its `.gitignore` entry needs
+# `git_tracked_only: true` (or `git_no_denied_paths`) instead.
 
 version: 1
 

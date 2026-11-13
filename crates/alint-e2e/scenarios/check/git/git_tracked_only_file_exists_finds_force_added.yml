@@ -1,0 +1,28 @@
+test_version: 1
+name: file_exists + git_tracked_only finds a force-added gitignored file through a glob
+tags: [check, file_exists, git_tracked_only, git]
+
+given:
+  tree:
+    .gitignore: ".env\n"
+    README.md: "# demo\n"
+    .env: "TOKEN=x\n"
+  config: |
+    version: 1
+    rules:
+      - id: env-tracked
+        kind: file_exists
+        paths: "*.env*"
+        git_tracked_only: true
+        level: error
+  git:
+    init: true
+    add: [README.md, .gitignore]
+    add_force: [.env]
+    commit: true
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

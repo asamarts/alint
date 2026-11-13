@@ -1669,3 +1669,74 @@ fn read_bounded_bounds_the_actual_read_toctou() {
     assert_eq!(read_bounded(&p, 10, 10).unwrap().len(), 10);
     assert!(read_bounded(&p, 9, 10).is_none());
 }
+
+/// The tracked files the ignore files hid come back with their hidden
+/// directories (#503); the walk's other exclusions, a file missing on disk,
+/// and a walk without ignore files bring back nothing.
+#[test]
+fn tracked_entries_ignore_files_hid_returns_only_what_an_ignore_file_hid() {
+    let tmp = td();
+    let root = tmp.path();
+    touch(root, ".gitignore", b"target/\n.env\nvendor/\n");
+    touch(root, "README.md", b"# demo\n");
+    touch(root, ".env", b"X=1\n");
+    touch(root, "target/debug/build.log", b"log\n");
+    touch(root, "target/debug/other.log", b"log\n");
+    touch(root, "vendor/lib.rs", b"\n");
+    let tracked: HashSet<PathBuf> = [
+        "README.md",
+        ".env",
+        "target/debug/build.log",
+        "target/gone.txt",
+        "vendor/lib.rs",
+    ]
+    .into_iter()
+    .map(PathBuf::from)
+    .collect();
+    let opts = WalkOptions {
+        respect_gitignore: true,
+        extra_ignores: vec!["vendor".to_string()],
+    };
+    let index = walk(root, &opts).unwrap();
+    let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
+    assert_eq!(
+        paths(&hidden),
+        [".env", "target", "target/debug", "target/debug/build.log"]
+    );
+    let kinds: Vec<(bool, u64)> = hidden.entries.iter().map(|e| (e.is_dir, e.size)).collect();
+    assert_eq!(kinds, [(false, 4), (true, 0), (true, 0), (false, 4)]);
+
+    let no_ignore_files = walk(
+        root,
+        &WalkOptions {
+            respect_gitignore: false,
+            extra_ignores: Vec::new(),
+        },
+    )
+    .unwrap();
+    assert!(tracked_entries_ignore_files_hid(root, &no_ignore_files, &tracked).is_empty());
+    let built = FileIndex::from_entries(index.entries.clone());
+    assert!(tracked_entries_ignore_files_hid(root, &built, &tracked).is_empty());
+}
+
+/// A tracked symlink in an ignored directory that leads out of the root stays
+/// out, as the walk keeps it out of the index without ignore files.
+#[cfg(unix)]
+#[test]
+fn tracked_entries_ignore_files_hid_skips_a_symlink_out_of_the_root() {
+    let outside = td();
+    touch(outside.path(), "secret.txt", b"s\n");
+    let tmp = td();
+    let root = tmp.path();
+    touch(root, ".gitignore", b"out/\n");
+    touch(root, "out/kept.txt", b"k\n");
+    std::os::unix::fs::symlink(outside.path().join("secret.txt"), root.join("out/link.txt"))
+        .unwrap();
+    let tracked: HashSet<PathBuf> = ["out/kept.txt", "out/link.txt"]
+        .into_iter()
+        .map(PathBuf::from)
+        .collect();
+    let index = walk(root, &WalkOptions::default()).unwrap();
+    let hidden = FileIndex::from_entries(tracked_entries_ignore_files_hid(root, &index, &tracked));
+    assert_eq!(paths(&hidden), ["out", "out/kept.txt"]);
+}

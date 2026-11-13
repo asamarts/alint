@@ -1050,6 +1050,12 @@
     "fingerprint": "172746a42a857bca2d10a449491a3e77c52825eab97f3b17540831bb27fd6a35"
   },
   {
+    "scenario": "check/git/git_tracked_only_dir_absent_fires_on_force_added.yml",
+    "rule_id": "target-not-tracked",
+    "path": "target",
+    "fingerprint": "61868bcbaf65744e2953af455dd4c7cc221201b4278659a99a557843fe6c8d69"
+  },
+  {
     "scenario": "check/git/git_tracked_only_dir_absent_fires_when_tracked.yml",
     "rule_id": "no-tracked-target",
     "path": "target",
@@ -1060,6 +1066,18 @@
     "rule_id": "no-target",
     "path": "target",
     "fingerprint": "b6f3f0bb857661aa0a84d4873c01bbb0c85ffc76b00a97c88796d5e0ac2cf9b9"
+  },
+  {
+    "scenario": "check/git/git_tracked_only_file_absent_fires_on_force_added.yml",
+    "rule_id": "env-not-tracked",
+    "path": ".env",
+    "fingerprint": "33b055c52b3e0158395164017c9805afb4e181bad44647d94f02de8506b1705c"
+  },
+  {
+    "scenario": "check/git/git_tracked_only_keeps_config_ignore_exclusions.yml",
+    "rule_id": "env-not-tracked",
+    "path": ".env",
+    "fingerprint": "33b055c52b3e0158395164017c9805afb4e181bad44647d94f02de8506b1705c"
   },
   {
     "scenario": "check/git/git_tracked_only_outside_git_fails_closed.yml",
@@ -2719,6 +2737,30 @@
   },
   {
     "scenario": "java/java_fires_on_committed_target.yml",
+    "rule_id": "java-no-tracked-target",
+    "path": "target",
+    "fingerprint": "313125ac4fa2e43059e4b4a75ebaab479611ab57ae1acfb5d40e4c2fec8e2f30"
+  },
+  {
+    "scenario": "java/java_fires_on_force_added_ignored_outputs.yml",
+    "rule_id": "java-no-class-files",
+    "path": "build/classes/Bar.class",
+    "fingerprint": "42b9924c6c178faf1e7160103ebd538cc76fe10f27aabed85cb33c2330c74713"
+  },
+  {
+    "scenario": "java/java_fires_on_force_added_ignored_outputs.yml",
+    "rule_id": "java-no-class-files",
+    "path": "target/classes/Foo.class",
+    "fingerprint": "b3c60bce43f4dc628e5d2b54132e6ac36d96327c889679f1ceb7eea57d17592c"
+  },
+  {
+    "scenario": "java/java_fires_on_force_added_ignored_outputs.yml",
+    "rule_id": "java-no-tracked-build",
+    "path": "build",
+    "fingerprint": "83243e5e3c3d7df78d6b0a741d3d96ab0caac5ac3ad354816840be321d626231"
+  },
+  {
+    "scenario": "java/java_fires_on_force_added_ignored_outputs.yml",
     "rule_id": "java-no-tracked-target",
     "path": "target",
     "fingerprint": "313125ac4fa2e43059e4b4a75ebaab479611ab57ae1acfb5d40e4c2fec8e2f30"

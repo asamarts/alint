@@ -97,7 +97,8 @@ pub(super) enum Relation {
     SetEquals,
     /// Whole-file byte identity (optional `skip_header_lines`).
     Identical,
-    /// Each extracted source path must exist on disk (file or dir).
+    /// Each extracted source path must resolve to a file or dir in the walked
+    /// tree.
     Resolves,
     /// Each SOURCE member (a filesystem path from `source.file` / `source.files`,
     /// templated by `register_as`) must be an element of every target's list (the
@@ -231,13 +232,13 @@ pub(super) struct Options {
     /// `{ files: <glob>, extract }` whose matches are unioned into one set.
     pub(super) source: SourceSpec,
     /// The file(s) compared against the source, one relation check per target.
-    /// Absent for `resolves` (the target is the filesystem).
+    /// Absent for `resolves` (the target is the walked tree).
     #[serde(default)]
     pub(super) targets: Option<TargetsSpec>,
     /// The assertion checked between the source and each target: `equals`
     /// (default), `subset`, `superset`, `set_equals`, `identical` (whole file
-    /// byte-for-byte), or `resolves` (each path the source extracts exists on
-    /// disk).
+    /// byte-for-byte), or `resolves` (each path the source extracts resolves
+    /// in the walked tree).
     #[serde(default)]
     pub(super) relation: Relation,
     /// A normalize transform, or an ordered list of transforms applied

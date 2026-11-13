@@ -1,0 +1,42 @@
+test_version: 1
+name: git_tracked_only does not bring back a tracked file the config's ignore list excludes
+tags: [check, dir_absent, file_absent, git_tracked_only, git]
+
+# Only what an ignore file hid comes back (#503, ADR-0033 decision 3);
+# the configuration's own `ignore:` still applies.
+
+given:
+  tree:
+    .gitignore: "target/\n.env\n"
+    README.md: "# demo\n"
+    .env: "TOKEN=x\n"
+    target:
+      debug:
+        build.log: "log\n"
+  config: |
+    version: 1
+    ignore:
+      - "target"
+    rules:
+      - id: target-not-tracked
+        kind: dir_absent
+        paths: "**/target"
+        git_tracked_only: true
+        level: error
+      - id: env-not-tracked
+        kind: file_absent
+        paths: ".env"
+        git_tracked_only: true
+        level: error
+  git:
+    init: true
+    add: [README.md, .gitignore]
+    add_force: [.env, target/debug/build.log]
+    commit: true
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: env-not-tracked, level: error, path: .env}

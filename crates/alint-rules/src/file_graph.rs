@@ -159,7 +159,7 @@ enum RequireSpec {
 #[schemars(rename = "FileGraphNamedRequire")]
 enum NamedRequire {
     Acyclic,
-    /// Every path-shaped reference must resolve to a path on disk.
+    /// Every path-shaped reference must resolve to a path in the walked tree.
     NoDangling,
     /// No node is unreferenced (bare form - no entry-point roots).
     NoOrphans,
@@ -776,7 +776,7 @@ impl FileGraphRule {
         let target_text = crate::slash(target);
         let msg = self.message.clone().unwrap_or_else(|| {
             format!(
-                "{} references {target_text}, which does not resolve to any path on disk",
+                "{} references {target_text}, which does not resolve to any path (missing or ignored)",
                 crate::slash(src),
             )
         });

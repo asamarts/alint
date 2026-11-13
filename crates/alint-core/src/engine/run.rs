@@ -484,7 +484,7 @@ impl Engine {
         );
 
         let t_git_idx = Instant::now();
-        let git_tracked_indexes = self.build_git_tracked_indexes(index, git_tracked.as_ref());
+        let git_tracked_indexes = self.build_git_tracked_indexes(root, index, git_tracked.as_ref());
         phase!(
             t_git_idx,
             "build_git_tracked_indexes",

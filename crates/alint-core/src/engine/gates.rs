@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 
 use crate::error::{Error, Result};
 use crate::rule::{Rule, Violation};
-use crate::walker::FileIndex;
+use crate::walker::{FileEntry, FileIndex};
 use crate::when::WhenEnv;
 
 use super::{
@@ -155,11 +155,18 @@ impl Engine {
     ///   any nested per-file consultation by these rules still
     ///   works against the same index.
     ///
+    /// Both start from the walked entries plus the tracked files the walk
+    /// left out only because an ignore file excludes them, with their
+    /// directories (`tracked_entries_ignore_files_hid`): a force-added file
+    /// is tracked whatever `.gitignore` says (#503, ADR-0033 decision 3).
+    ///
     /// Build cost: O(N) per mode (one `HashSet` lookup or one
-    /// `dir_has_tracked_files` walk per entry). Amortised across
+    /// `dir_has_tracked_files` walk per entry), plus one lookup per tracked
+    /// path and a `stat` for each one the walk left out. Amortised across
     /// however many rules opt into each mode.
     pub(super) fn build_git_tracked_indexes(
         &self,
+        root: &Path,
         full: &FileIndex,
         tracked: Option<&std::collections::HashSet<std::path::PathBuf>>,
     ) -> Option<GitTrackedIndexes> {
@@ -195,39 +202,37 @@ impl Engine {
             });
         };
 
-        let file_only = if any_file_only {
-            let entries = full
+        let hidden = crate::walker::tracked_entries_ignore_files_hid(root, full, tracked);
+        // The walked entries and the hidden ones, merged in path order as the
+        // walk sorts its own.
+        let tracked_index = |keep: &dyn Fn(&FileEntry) -> bool| {
+            let mut entries: Vec<FileEntry> = full
                 .entries
                 .iter()
-                .filter(|e| !e.is_dir && tracked.contains(&*e.path))
+                .chain(&hidden)
+                .filter(|e| keep(e))
                 .cloned()
                 .collect();
+            if !hidden.is_empty() {
+                entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+            }
             let index = FileIndex::from_entries(entries);
             full.share_relation_caches(&index);
-            Some(index)
-        } else {
-            None
+            index
         };
 
-        let dir_aware = if any_dir_aware {
-            let entries = full
-                .entries
-                .iter()
-                .filter(|e| {
-                    if e.is_dir {
-                        crate::git::dir_has_tracked_files(&e.path, tracked)
-                    } else {
-                        tracked.contains(&*e.path)
-                    }
-                })
-                .cloned()
-                .collect();
-            let index = FileIndex::from_entries(entries);
-            full.share_relation_caches(&index);
-            Some(index)
-        } else {
-            None
-        };
+        let file_only = any_file_only
+            .then(|| tracked_index(&|e: &FileEntry| !e.is_dir && tracked.contains(&*e.path)));
+
+        let dir_aware = any_dir_aware.then(|| {
+            tracked_index(&|e: &FileEntry| {
+                if e.is_dir {
+                    crate::git::dir_has_tracked_files(&e.path, tracked)
+                } else {
+                    tracked.contains(&*e.path)
+                }
+            })
+        });
 
         Some(GitTrackedIndexes {
             file_only,

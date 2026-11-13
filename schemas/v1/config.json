@@ -140,7 +140,7 @@
         },
         {
           "const": "no_dangling",
-          "description": "Every path-shaped reference must resolve to a path on disk.",
+          "description": "Every path-shaped reference must resolve to a path in the walked tree.",
           "type": "string"
         },
         {
@@ -563,7 +563,7 @@
         },
         {
           "const": "resolves",
-          "description": "Each extracted source path must exist on disk (file or dir).",
+          "description": "Each extracted source path must resolve to a file or dir in the walked tree.",
           "type": "string"
         },
         {
@@ -2381,7 +2381,7 @@
       "type": "object"
     },
     "rule_cross_file": {
-      "description": "A `source` file must hold a `relation` to one or more `targets` (or the filesystem). Value relations extract values: `equals` (default - every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts exists on disk (`source.extract`, no `targets` - the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
+      "description": "A `source` file must hold a `relation` to one or more `targets` (or the walked tree). Value relations extract values: `equals` (default - every target value equals the single source value; the released `cross_file_value_equals`), `subset` / `superset` / `set_equals` (the source's extracted set vs each target's set). `identical` compares whole files byte-for-byte (no `extract`; optional `skip_header_lines`). `resolves` checks that each path the source extracts is in the walked tree (`source.extract`, no `targets` - the forward half of `registry_paths_resolve`). `targets` is a `{ files: <glob>, extract }` map or a `[{ file, extract }]` list. `normalize` relaxes value comparison. Non-literal values are skipped, not failed. `cross_file_value_equals` is a byte-compatible alias (relation defaults to equals). The per-relation shape (which of `source.extract` / `targets` is present) is validated at load.",
       "not": {
         "anyOf": [
           {
@@ -2439,7 +2439,7 @@
         },
         "relation": {
           "$ref": "#/$defs/Relation",
-          "description": "The assertion checked between the source and each target: `equals` (default), `subset`, `superset`, `set_equals`, `identical` (whole file byte-for-byte), or `resolves` (each path the source extracts exists on disk)."
+          "description": "The assertion checked between the source and each target: `equals` (default), `subset`, `superset`, `set_equals`, `identical` (whole file byte-for-byte), or `resolves` (each path the source extracts resolves in the walked tree)."
         },
         "skip_header_lines": {
           "default": null,
@@ -2464,7 +2464,7 @@
               "type": "null"
             }
           ],
-          "description": "The file(s) compared against the source, one relation check per target. Absent for `resolves` (the target is the filesystem)."
+          "description": "The file(s) compared against the source, one relation check per target. Absent for `resolves` (the target is the walked tree)."
         }
       },
       "required": [
@@ -6683,7 +6683,7 @@
         },
         "expect": {
           "$ref": "#/$defs/Expect",
-          "description": "Constrain the kind each entry must resolve to on disk: `any` (default), `file`, or `dir`."
+          "description": "Constrain the kind each entry must resolve to: `any` (default), `file`, or `dir`. Entries resolve against the walked tree, so a path an ignore file or `ignore:` excludes does not resolve."
         },
         "extract": {
           "$ref": "#/$defs/extract_spec",

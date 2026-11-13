@@ -632,9 +632,12 @@ locally doesn't show up in `git status`).
 
 The `ignore` crate that powers the walker honours `.gitignore` by
 default, so `file_exists` reports "no match" against a file that's on
-disk *and* in `git ls-files` output. Worse: `git_tracked_only: true`
-does NOT help — the engine pre-filters from the walker's emit set, so
-a file the walker never sees can't be intersected back in.
+disk *and* in `git ls-files` output. Before v0.23, `git_tracked_only:
+true` did not help either: the engine built the tracked view from the
+walker's emit set, so a file the walker never saw couldn't be
+intersected back in (#503). From v0.23 the tracked view adds back each
+tracked path that only an ignore file hid, so option D below works. The
+config's `ignore:` still excludes what it lists.
 
 **Wrong:**
 ```yaml
@@ -662,6 +665,19 @@ rules:
     paths: .bazelversion
     level: error
 ```
+
+**Right (option D: `git_tracked_only: true`, v0.23+):**
+```yaml
+- id: bazel-version-pinned
+  kind: file_exists
+  paths: .bazelversion
+  git_tracked_only: true     # ← sees tracked-and-ignored files from v0.23
+  level: error
+```
+
+Option D asks a stricter question, "is it committed?", which is usually
+what a pin check means. Outside a git repository the rule reports an
+analysis failure.
 
 **Right (option C — shell out for the existence check):**
 ```yaml
@@ -693,6 +709,8 @@ Regression-locked by
 `crates/alint-e2e/scenarios/check/git/file_exists_per_rule_respect_gitignore_finds_tracked_and_ignored.yml`
 (positive direction) and the matching `_misses_*` companion (negative
 direction — proves the workspace-default behaviour without the override).
+Option D is locked by
+`crates/alint-e2e/scenarios/check/git/git_tracked_only_file_exists_finds_force_added.yml`.
 
 ### 19. `file_exists` with `root_only: true` silently no-matches multi-component literal paths
 

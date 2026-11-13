@@ -103,6 +103,8 @@ In a healthy repo neither case is common, and `git ls-files <path>` is the autho
 | Gitignored but force-added | silent (walker prunes it) | **fires** |
 | Not a Git repo | **fires** | **analysis failure** |
 
+The tracked view starts from the walk and adds back each tracked path that only an ignore file hid. The config's `ignore:` and the walker's other exclusions, such as the `.git/` directory and symlinks that leave the root, still apply under `git_tracked_only`. alint 0.22 and earlier did not add those paths back, so there the force-added row is silent too. `git_no_denied_paths`, which reads git's index directly, catches a force-added path in every version.
+
 `git_tracked_only` applies to the existence kinds `file_exists`, `file_absent`, `dir_exists`, and `dir_absent`; any other kind rejects it at load rather than ignoring it. The engine derives the active dependency from capability metadata, runs one repository probe, and reports one `resource_read` analysis failure for each active owning rule if Git cannot run or the lint root is not a repository. A literal `git_tracked_only: false` does not create a dependency. The git-hygiene family also ships `git_commit_message`, `git_no_denied_paths`, and other Git-aware kinds; see the [rule reference](/docs/rules/) for the full set.
 
 ## In practice

@@ -816,7 +816,7 @@ impl Engine {
         let git_available = git_tracked.is_some();
         let git_blame = self.build_blame_cache_if_needed(root, git_tracked.as_ref());
         let filtered_index = self.build_filtered_index(index, Some(created));
-        let git_tracked_indexes = self.build_git_tracked_indexes(index, git_tracked.as_ref());
+        let git_tracked_indexes = self.build_git_tracked_indexes(root, index, git_tracked.as_ref());
         let full_ctx = Context {
             root,
             index,

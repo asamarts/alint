@@ -15,7 +15,7 @@
 //!   `source.extract` + `targets` (each with `extract`).
 //! - **`identical`**: whole-file byte identity — `targets` with NO
 //!   `extract`, no `source.extract` (optional `skip_header_lines`).
-//! - **`resolves`**: each extracted source path must exist on disk —
+//! - **`resolves`**: each extracted source path must be in the walked tree —
 //!   `source.extract`, NO `targets` (the forward half of
 //!   `registry_paths_resolve`, which keeps its richer ergonomics).
 //! - **`registered`**: each SOURCE member (a filesystem path from
