@@ -84,7 +84,8 @@ rules:
     level: error
     message: >-
       Maven's `target/` is a build directory and shouldn't be
-      committed. Add `target/` to your `.gitignore`.
+      committed. Untrack it with `git rm -r --cached` and list
+      `target/` in your `.gitignore`.
 
   - id: java-no-tracked-build
     when: facts.has_java
@@ -94,7 +95,8 @@ rules:
     level: error
     message: >-
       Gradle's `build/` is a build directory and shouldn't be
-      committed. Add `build/` to your `.gitignore`.
+      committed. Untrack it with `git rm -r --cached` and list
+      `build/` in your `.gitignore`.
 
   - id: java-no-class-files
     when: facts.has_java

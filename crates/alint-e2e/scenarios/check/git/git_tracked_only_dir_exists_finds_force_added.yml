@@ -1,0 +1,30 @@
+test_version: 1
+name: dir_exists + git_tracked_only finds a gitignored directory with a force-added file
+tags: [check, dir_exists, git_tracked_only, git]
+
+given:
+  tree:
+    .gitignore: "fixtures/\n"
+    README.md: "# demo\n"
+    fixtures:
+      golden:
+        expected.txt: "ok\n"
+  config: |
+    version: 1
+    rules:
+      - id: golden-fixtures-tracked
+        kind: dir_exists
+        paths: "fixtures/golden"
+        git_tracked_only: true
+        level: error
+  git:
+    init: true
+    add: [README.md, .gitignore]
+    add_force: [fixtures/golden/expected.txt]
+    commit: true
+
+when: [check]
+
+expect:
+  - exit: success
+    violations: []

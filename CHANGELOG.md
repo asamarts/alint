@@ -19,6 +19,27 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `baseline::fingerprints`, which existed only to match the v0.21 form. `baseline::apply` takes a
   fingerprinter that returns a `String` again, such as `baseline::fingerprint`.
 
+### Changed
+
+- **`git_tracked_only: true` sees tracked files that an ignore file excludes** (#503, ADR-0033
+  decision 3). Under the default `respect_gitignore: true` the walk leaves out what `.gitignore`,
+  `.ignore`, `.git/info/exclude` and the global excludes file list, and the tracked view was
+  built from the walk. A file forced in with `git add -f`, or committed before its `.gitignore`
+  entry, therefore never reached `file_exists`, `file_absent`, `dir_exists` or `dir_absent`. The
+  tracked view now adds back each tracked path that only an ignore file hid, with its parent
+  directories, when it exists inside the root. This is the documented behavior, and the one
+  change in v0.23 to how a v1 configuration behaves: a `file_absent` or `dir_absent` rule with
+  `git_tracked_only: true` can now fire on a force-added path, as the bundled `java@v1` rules do
+  on a committed `target/`, `build/` or `.class` file, and a `file_exists` or `dir_exists` rule
+  can now pass. The config's `ignore:` and the walker's other exclusions still apply.
+- `java@v1`'s `java-no-tracked-target` and `java-no-tracked-build` say to untrack the directory
+  with `git rm -r --cached` as well as list it in `.gitignore`, since the directory they report
+  can now already be listed there.
+- `registry_paths_resolve`, `file_graph`'s `no_dangling` and `markdown_links_resolve` no longer
+  say that a path is missing "on disk". They resolve paths against the walked tree, so a path
+  that an ignore file or `ignore:` excludes does not resolve either, and the messages now say
+  "missing or ignored". Their baseline keys are unchanged.
+
 ### Fixed
 
 - **A `key_parity` rule nested in the `require:` of `for_each_file`, `for_each_dir` or

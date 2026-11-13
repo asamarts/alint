@@ -22,6 +22,7 @@
 //!   level: error
 //! ```
 
+use std::borrow::Cow;
 use std::collections::{BTreeSet, HashSet};
 use std::path::{Path, PathBuf};
 
@@ -74,8 +75,9 @@ struct Options {
     /// single literal path; a glob that matches nothing is a violation.
     #[serde(default)]
     entries_are_globs: bool,
-    /// Constrain the kind each entry must resolve to on disk: `any` (default),
-    /// `file`, or `dir`.
+    /// Constrain the kind each entry must resolve to: `any` (default), `file`,
+    /// or `dir`. Entries resolve against the walked tree, so a path an ignore
+    /// file or `ignore:` excludes does not resolve.
     #[serde(default)]
     expect: Expect,
     /// When an entry resolves to a directory, that directory must contain this
@@ -307,7 +309,11 @@ impl Rule for RegistryPathsResolveRule {
                 else {
                     // An absolute / root-escaping declared path can never
                     // resolve to an in-tree path.
-                    violations.push(self.violation(&registry_rel, entry, "escapes the repo root"));
+                    violations.push(self.violation(
+                        &registry_rel,
+                        entry,
+                        &Reason::new("escapes the repo root"),
+                    ));
                     continue;
                 };
                 if self.entries_are_globs {
@@ -318,7 +324,10 @@ impl Rule for RegistryPathsResolveRule {
                         violations.push(self.violation(
                             &registry_rel,
                             entry,
-                            "matched no path on disk",
+                            &Reason::reworded(
+                                "matched no path (missing or ignored)",
+                                "matched no path on disk",
+                            ),
                         ));
                     } else {
                         covered.extend(matches);
@@ -491,37 +500,48 @@ impl RegistryPathsResolveRule {
             .collect()
     }
 
-    /// `None` => the resolved path is fine. `Some(reason)` => a
-    /// violation message fragment.
+    /// `None` => the resolved path is fine. `Some(reason)` => why the
+    /// entry is a violation.
     fn existence_problem(
         &self,
         ctx: &Context<'_>,
         path: &Path,
         dir_set: &HashSet<&Path>,
-    ) -> Option<String> {
+    ) -> Option<Reason> {
         let is_file = ctx.index.contains_file(path);
         let is_dir = dir_set.contains(path);
         match self.expect {
             Expect::File => {
                 if !is_file {
-                    return Some("does not resolve to a file on disk".into());
+                    return Some(Reason::reworded(
+                        "does not resolve to a file (missing or ignored)",
+                        "does not resolve to a file on disk",
+                    ));
                 }
             }
             Expect::Dir => {
                 if !is_dir {
-                    return Some("does not resolve to a directory on disk".into());
+                    return Some(Reason::reworded(
+                        "does not resolve to a directory (missing or ignored)",
+                        "does not resolve to a directory on disk",
+                    ));
                 }
             }
             Expect::Any => {
                 if !is_file && !is_dir {
-                    return Some("does not resolve to any path on disk".into());
+                    return Some(Reason::reworded(
+                        "does not resolve to any path (missing or ignored)",
+                        "does not resolve to any path on disk",
+                    ));
                 }
             }
         }
         if let Some(mc) = &self.must_contain {
             // Only meaningful when the entry is a directory.
             if is_dir && !ctx.index.contains_file(&path.join(mc)) {
-                return Some(format!("resolves to a directory missing `{mc}`"));
+                return Some(Reason::new(format!(
+                    "resolves to a directory missing `{mc}`"
+                )));
             }
         }
         None
@@ -583,22 +603,23 @@ impl RegistryPathsResolveRule {
         }
     }
 
-    fn violation(&self, registry: &Path, entry: &str, reason: &str) -> Violation {
+    fn violation(&self, registry: &Path, entry: &str, reason: &Reason) -> Violation {
         let msg = self
             .message
             .clone()
-            .unwrap_or_else(|| format!("{}: entry {entry:?} {reason}", registry.display()));
+            .unwrap_or_else(|| format!("{}: entry {entry:?} {}", registry.display(), reason.shown));
         let mut finding = Violation::new(msg)
             .with_path(registry.to_path_buf())
             .with_baseline_key(format!(
-                "entry\u{0}{}\u{0}{entry}\u{0}{reason}",
-                crate::slash(registry)
+                "entry\u{0}{}\u{0}{entry}\u{0}{}",
+                crate::slash(registry),
+                reason.key
             ));
         self.redact_extracted(
             &mut finding,
             registry,
             &self.extract,
-            reason,
+            &reason.key,
             std::iter::once(entry),
         );
         finding
@@ -620,6 +641,35 @@ impl RegistryPathsResolveRule {
             crate::slash(source)
         );
         finding.redact_evidence(&self.id, &locator, evidence);
+    }
+}
+
+/// Why a declared entry is a violation.
+struct Reason {
+    /// The wording in the message.
+    shown: Cow<'static, str>,
+    /// The wording the baseline key and the redaction locator use.
+    key: Cow<'static, str>,
+}
+
+impl Reason {
+    fn new(text: impl Into<Cow<'static, str>>) -> Self {
+        let text = text.into();
+        Self {
+            shown: text.clone(),
+            key: text,
+        }
+    }
+
+    /// A reason whose message wording changed after alint 0.22. `key` is the
+    /// old wording, so findings accepted into a baseline before keep their
+    /// keys. (The old "on disk" was wrong: the walk leaves out what an ignore
+    /// file or `ignore:` excludes.)
+    const fn reworded(shown: &'static str, key: &'static str) -> Self {
+        Self {
+            shown: Cow::Borrowed(shown),
+            key: Cow::Borrowed(key),
+        }
     }
 }
 
@@ -897,6 +947,51 @@ mod tests {
         assert!(findings[0].message.contains("matched no path"));
         assert_eq!(findings[0].related_locations, Vec::new());
         assert_eq!(findings[0].related_locations_omitted, 0);
+    }
+
+    #[test]
+    fn reworded_reasons_keep_their_0_22_baseline_keys() {
+        // The walk leaves out ignored paths, so the message no longer says
+        // "on disk"; the baseline key keeps that wording so that findings
+        // accepted under 0.22 still match.
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("MANIFEST"), "src/b.rs\n").unwrap();
+        let idx = index(&["MANIFEST"], &[]);
+        for (expect, kind) in [
+            (Expect::Any, "any path"),
+            (Expect::File, "a file"),
+            (Expect::Dir, "a directory"),
+        ] {
+            let mut options = opts("MANIFEST", Extract::Lines(LinesOpts::default()));
+            options.expect = expect;
+            let findings = eval(&rule(options), dir.path(), &idx);
+            assert_eq!(findings.len(), 1, "{findings:?}");
+            assert_eq!(
+                findings[0].message,
+                format!(
+                    "MANIFEST: entry \"src/b.rs\" does not resolve to {kind} (missing or ignored)"
+                )
+            );
+            assert_eq!(
+                findings[0].baseline_key.as_deref(),
+                Some(
+                    format!("entry\0MANIFEST\0src/b.rs\0does not resolve to {kind} on disk")
+                        .as_str()
+                )
+            );
+        }
+        let mut options = opts("MANIFEST", Extract::Lines(LinesOpts::default()));
+        options.entries_are_globs = true;
+        let findings = eval(&rule(options), dir.path(), &idx);
+        assert_eq!(findings.len(), 1, "{findings:?}");
+        assert_eq!(
+            findings[0].message,
+            "MANIFEST: entry \"src/b.rs\" matched no path (missing or ignored)"
+        );
+        assert_eq!(
+            findings[0].baseline_key.as_deref(),
+            Some("entry\0MANIFEST\0src/b.rs\0matched no path on disk")
+        );
     }
 
     #[test]

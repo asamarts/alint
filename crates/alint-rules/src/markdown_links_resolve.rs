@@ -233,7 +233,7 @@ impl MarkdownLinksResolveRule {
             None
         } else {
             Some(format!(
-                "Markdown link `{raw_target}` resolves to `{}` but no file or directory exists",
+                "Markdown link `{raw_target}` resolves to `{}`, which is missing or ignored",
                 crate::slash(&resolved)
             ))
         }

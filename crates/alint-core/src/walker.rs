@@ -250,6 +250,10 @@ pub struct FileIndex {
     /// indexes share the full index's caches.
     reads: OnceLock<std::sync::Arc<crate::relation::ReadCache>>,
     decodes: OnceLock<std::sync::Arc<crate::relation::DecodeCache>>,
+    /// The options [`walk`] built this index with; `None` for an index built
+    /// from entries. `git_tracked_only` reads them to find the tracked files
+    /// that ignore files hid ([`tracked_entries_ignore_files_hid`]).
+    walk_options: Option<WalkOptions>,
 }
 
 impl FileIndex {
@@ -282,6 +286,7 @@ impl FileIndex {
             facts: OnceLock::new(),
             reads: OnceLock::new(),
             decodes: OnceLock::new(),
+            walk_options: None,
         }
     }
 
@@ -766,10 +771,75 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
         .collect();
     escaping_symlinks.sort_unstable();
     escaping_symlinks.dedup();
-    Ok(FileIndex::from_entries_with_escaping(
-        entries,
-        escaping_symlinks,
-    ))
+    let mut index = FileIndex::from_entries_with_escaping(entries, escaping_symlinks);
+    index.walk_options = Some(opts.clone());
+    Ok(index)
+}
+
+/// The tracked files [`walk`] left out of `index` only because an ignore file
+/// excludes them (a force-added file, or one committed before its ignore
+/// line), as index entries, with the directories above them that the walk
+/// left out too, so `git_tracked_only` sees what git tracks (#503, ADR-0033
+/// decision 3). A file counts when it is a regular file or directory on disk
+/// under `root` and none of the walk's other exclusions applies: `.git/`, the
+/// configuration's `ignore:`, and a symlink the walk does not follow. Sorted
+/// by path; empty unless `index` was walked with ignore files.
+pub(crate) fn tracked_entries_ignore_files_hid<S: std::hash::BuildHasher>(
+    root: &Path,
+    index: &FileIndex,
+    tracked: &HashSet<PathBuf, S>,
+) -> Vec<FileEntry> {
+    let Some(opts) = index
+        .walk_options
+        .as_ref()
+        .filter(|opts| opts.respect_gitignore)
+    else {
+        return Vec::new();
+    };
+    // The walk with every ignore file off: what it would still leave out, the
+    // fix leaves out too.
+    let others = WalkOptions {
+        respect_gitignore: false,
+        extra_ignores: opts.extra_ignores.clone(),
+    };
+    let skips = WalkSkips::new(root, &others, &[]);
+    let mut entries = Vec::new();
+    let mut dirs: HashSet<PathBuf> = HashSet::new();
+    for path in tracked {
+        // Native separators, as the walk's own entries have.
+        let rel: PathBuf = path.components().collect();
+        if index.contains_path(&rel) {
+            continue;
+        }
+        let Ok(metadata) = std::fs::metadata(root.join(&rel)) else {
+            continue;
+        };
+        if !metadata.is_dir() && !metadata.is_file() || skips.skips(&rel, metadata.is_dir()) {
+            continue;
+        }
+        entries.push(FileEntry {
+            path: Arc::from(rel.as_path()),
+            is_dir: metadata.is_dir(),
+            size: if metadata.is_file() {
+                metadata.len()
+            } else {
+                0
+            },
+        });
+        for dir in rel.ancestors().skip(1) {
+            if dir.as_os_str().is_empty() || index.contains_path(dir) || !dirs.insert(dir.into()) {
+                break;
+            }
+            entries.push(FileEntry {
+                path: Arc::from(dir),
+                is_dir: true,
+                size: 0,
+            });
+        }
+    }
+    entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
+    entries.dedup_by(|a, b| a.path == b.path);
+    entries
 }
 
 /// Build the `ignore::WalkBuilder` we run today. Pure factor-out

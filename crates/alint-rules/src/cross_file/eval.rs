@@ -367,8 +367,8 @@ impl CrossFileRule {
         }
     }
 
-    /// `relation: resolves` - each path the source extracts must
-    /// exist on disk (file or dir), resolved relative to the source
+    /// `relation: resolves` - each path the source extracts must be a
+    /// file or dir in the walked tree, resolved relative to the source
     /// file's directory. The 1-level forward half of
     /// `registry_paths_resolve`.
     fn check_resolves(&self, ctx: &Context<'_>, out: &mut Vec<Violation>) {
