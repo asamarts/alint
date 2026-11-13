@@ -447,7 +447,7 @@
    "alint": "constraint over extracted SPDX ids -> LICENSES/ file names",
    "rules": [],
    "assertion_family": "reference",
-   "reason": "Each extracted identifier must name an existing file; a reference join between an extracted value set and a path set.",
+   "reason": "Each SPDX id used in a header, a .license sidecar or REUSE.toml must name LICENSES/<id>.txt: a reference join. Compound expressions ('A AND B', 'A OR B') must first be split into ids, which needs an SPDX expression extractor (needs: other).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -465,6 +465,13 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from B-config to B-adapter, but the reason did not name the missing extractor."
     }
    ],
    "needs": "other"
@@ -479,7 +486,7 @@
    "alint": "constraint: LICENSES/ stems included in the set of used SPDX ids",
    "rules": [],
    "assertion_family": "set",
-   "reason": "One-way inclusion between two named sets.",
+   "reason": "One-way inclusion of the LICENSES/ stems in the set of used SPDX ids, after the same SPDX expression extractor as nextcloud-18 (needs: other).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -497,6 +504,13 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from B-config to B-adapter, but the reason did not name the missing extractor."
     }
    ],
    "needs": "other"

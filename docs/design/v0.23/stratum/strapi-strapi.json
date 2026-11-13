@@ -517,13 +517,13 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "eslint (external config)",
+   "alint": "filename_regex over the admin .tsx and .ts sources, with the files that carry an inline `eslint-disable check-file/filename-naming-convention` excluded by hand: strapi-admin-tsx-filenames-pascal-case, strapi-admin-ts-filenames-camel-case; the no-index half has no rule",
    "rules": [
     "strapi-admin-tsx-filenames-pascal-case",
     "strapi-admin-ts-filenames-camel-case"
    ],
    "assertion_family": "none",
-   "reason": "The rule globs and options live in an unvendored external package and cannot be read offline, so the path-level assertion cannot be stated. Kept with the lint job (R2) and flagged as unverifiable in notes rather than guessed.",
+   "reason": "R7: the check-file filename rules assert path names, a structure invariant alint reads. The inferred convention fails exactly 40 files, and every one carries an inline eslint-disable for the rule, so the rules need a hand-kept exemption list: C (trpc-30, element-web-28). The no-index half and the .js/.jsx files' convention cannot be inferred offline.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -535,6 +535,14 @@
       "none"
      ],
      "why": "R7 was misapplied. The check-file filename-naming-convention rule in the admin .eslintrc.cjs files asserts a path name, not source code, so it is a structure invariant alint reads; classifying it D under R2 is wrong. The inferred rule is .tsx PascalCase and .ts camelCase, with middle extensions ignored, in the 14 admin dirs, and review-workflows turns it off. filename_regex fires on exactly 40 files on the clone. All 40 carry `eslint-disable check-file/filename-naming-convention` (50 files carry the disable in total), so the rule needs a hand-kept exemption list. That is C (trpc-30, element-web-28). The folder/no-index half cannot be inferred offline: 18 index files carry no disable. Split it out or leave it unverified."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "Stage B moved the unit from D to C but left Stage A's alint text and reason (R2)."
     }
    ]
   },
@@ -687,7 +695,7 @@
     "strapi-docs-html-images-have-alt"
    ],
    "assertion_family": "none",
-   "reason": "A dedicated kind; confirmed.",
+   "reason": "markdown_images_have_alt covers the CommonMark images. The docs also embed 13 raw <img> tags, 7 of them multi-line, which the kind does not read; a second rule reads them with a prefix-alternation regex, since Rust regex has no lookahead, and it counts tags inside code fences: C.",
    "fire_verified": "n/a (other); scratch: ![](/img/x.png) fired.",
    "origin": "A",
    "changes": [
@@ -699,6 +707,13 @@
       "none"
      ],
      "why": "markdown_images_have_alt covers only CommonMark images in docs/docs/**/*.md. The docs contain 13 HTML `<img>` tags (7 of them multi-line) plus 3 Markdown images; Stage A's count of 6 `<img>` is wrong. On a scratch copy, an `<img>` without alt and an .mdx image without alt both passed. A per-line for_each_match cannot handle multi-line tags, and Rust regex has no lookahead, so covering HTML images needs an awkward workaround. That makes it C, not A."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },

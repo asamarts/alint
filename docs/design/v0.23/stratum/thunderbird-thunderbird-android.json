@@ -786,7 +786,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "detekt",
+   "alint": "missing: a value derived from the path (derived-value); a file with one top-level class has that class's name as its stem",
    "rules": [],
    "assertion_family": "none",
    "reason": "Compares a file's stem with the name of its single top-level class, captured by regex. The expected value is derived from the path (thunderbird-android-43 precedent).",
@@ -801,6 +801,13 @@
       "none"
      ],
      "why": "thunderbird-android-43 (InvalidPackageDeclaration) joins a path with a captured name and is B-adapter derived-value; this compares the file stem with the single top-level declaration's name."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what alint lacks."
     }
    ],
    "needs": "derived-value"

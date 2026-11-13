@@ -559,7 +559,7 @@
     "ghost-cdn-defaults-version-is-major-minor"
    ],
    "assertion_family": "none",
-   "reason": "Version agreement between two manifests; semver-minor normalization is exact. Passes on the clone.",
+   "reason": "Version agreement between each CDN app's manifest and defaults.json at major.minor, with a second rule that keeps the defaults.json version in major.minor form. The scripts derive the app set from the publish manifest's cdn entries, while the config hand-lists six apps, so a seventh goes unchecked: C (ghost-42 precedent).",
    "fire_verified": "Fired in scratch for all six apps (minor or major bump on either side); a patch-only portal bump correctly did not fire. Passes on the clone.",
    "origin": "A",
    "changes": [
@@ -571,6 +571,13 @@
       "none"
      ],
      "why": "The A claim fails R4 in two ways. (1) check-app-version-bump.ts and publish-manifest.test.ts derive the CDN set from publish-manifest entries with `cdn`, but the config hand-lists six apps, so a seventh CDN entry goes unchecked (ghost-42 precedent: hand-listing is C). (2) The script requires defaults.json version === majorMinor(pkg.version), while the config normalizes both sides with semver-minor, so a defaults.json version of '2.72.0' passes alint and fails CI. Adding json_path_absent \"$[?@.version && !match(@.version, '[0-9]+[.][0-9]+')]\" on ghost/core/shared/config/defaults.json closes (2); probed, it passes on the clone and fires on '2.72.0'. (1) remains, hence C."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -723,7 +730,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "script (git diff vs base)",
+   "alint": "missing: the changed packages against the merge-base (base-revision); each publishable package changed since the base needs a covering changeset",
    "rules": [],
    "assertion_family": "none",
    "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
@@ -738,6 +745,13 @@
       "none"
      ],
      "why": "tools/scripts/ci/change-check.ts and lib/pnpm.ts:95-117,195-246 compare the changed packages with the merge-base, as fluentui-21 and yarnpkg-berry-16 do (B-adapter base-revision)."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what alint lacks."
     }
    ],
    "needs": "base-revision"
@@ -1066,7 +1080,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "script (git tags/diff)",
+   "alint": "missing: the migrations at the last published tag (base-revision); new migrations sit above the last published minor",
    "rules": [],
    "assertion_family": "none",
    "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
@@ -1081,6 +1095,13 @@
       "none"
      ],
      "why": "Check 2 in check-migration-integrity.ts compares migrations with the last published tag's tree, as mattermost-88 does."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what alint lacks."
     }
    ],
    "needs": "base-revision"
@@ -1168,7 +1189,7 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "missing: json_schema_passes with an inline schema (the schema exists only as zod in TS)",
+   "alint": "json_schema_passes with the zod schema translated to a JSON Schema in a file outside the repository (allow_out_of_root); no rule, since a corpus config cannot ship that file",
    "rules": [],
    "assertion_family": "none",
    "reason": "The zod strict schema has no refinements and translates to a JSON Schema, which json_schema_passes checks from a file outside the repository. A corpus config cannot ship that file, so C with no rule (backstage-38 precedent).",
@@ -1189,6 +1210,13 @@
       "none"
      ],
      "why": "The zod schema at legacy-service-inventory.test.ts:25-96 has no refinements, so it translates to JSON Schema. backstage-38, also a zod-only schema, is C."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still gave the need from before the audit moved the unit from B-adapter to C; it now says how alint expresses it."
     }
    ]
   },
@@ -1408,7 +1436,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "git merge-base",
+   "alint": "missing: the inventory at the merge-base (base-revision); the entries at HEAD are a subset of those at the base",
    "rules": [],
    "assertion_family": "none",
    "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
@@ -1423,6 +1451,13 @@
       "none"
      ],
      "why": "tools/scripts/ci/legacy-services-base.ts compares the inventory at HEAD with the merge-base, as immich-21 and rocketchat-45 do."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what alint lacks."
     }
    ],
    "needs": "base-revision"
@@ -1584,13 +1619,13 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "remark",
+   "alint": "markdown_links_resolve and markdown_fragments_resolve over **/*.md, excluding .changeset/**, fixture directories, .claude/** and the symlinked .agents/skills/shade-* directories: ghost-doc-links-resolve, ghost-doc-fragments-resolve",
    "rules": [
     "ghost-doc-links-resolve",
     "ghost-doc-fragments-resolve"
    ],
    "assertion_family": "none",
-   "reason": "R2 (batch-1 precedent).",
+   "reason": "R7: remark-validate-links checks that relative links and heading anchors in tracked Markdown resolve, a check over files alint reads. The two kinds express it once the walk mirrors the linted file set, but the library also validates links to the repository's own github.com blob and tree URLs, which alint does not resolve, so C.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -1602,6 +1637,14 @@
       "none"
      ],
      "why": "R7 misapplied. remark-validate-links asserts that relative links and heading anchors in tracked Markdown resolve. That is a check over files alint reads, not code analysis. The zulip-73 precedent is `remark --frail` (a linter), not link validation. markdown_links_resolve plus markdown_fragments_resolve over **/*.md pass on the clone and fire on a broken link, a broken fragment and a deleted target. They need excludes matching lint:doc-links (.changeset/**, **/fixture/**, **/fixtures/**) plus .claude/** and the symlinked .agents/skills/shade-* dirs, because the alint walk follows tracked directory symlinks that `git ls-files` does not expand; without those excludes there are 2 false positives in shade-imports/SKILL.md. It is C, not A, because remark-validate-links also validates links to the repo's own github.com/TryGhost/Ghost blob/tree URLs, which many READMEs use and alint does not resolve. That is the library's documented behavior; the library is not in the clone."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "Stage B moved the unit from D to C but left Stage A's alint text and reason (R2)."
     }
    ]
   },

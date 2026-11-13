@@ -622,7 +622,7 @@
     "rocketchat-docs-links-resolve"
    ],
    "assertion_family": "none",
-   "reason": "The docs link-resolution kind expresses it; alint is case-exact on Linux, as the script is.",
+   "reason": "markdown_links_resolve with a root map for root-absolute links expresses the Markdown links, case-exact on Linux as the script is. The script also checks HTML <a href> targets, which the kind does not read, and wants the exact path for an extensionless route, so C.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -634,6 +634,13 @@
       "none"
      ],
      "why": "The repo checker also validates HTML <a href> links and resolves root-absolute /-links against the repo root. Stage A's markdown_links_resolve, which has no root map, catches neither: an HTML href to a missing file and /docs/nope.md both pass. Adding root: {url_prefix: '/', dir: '.'} fixes the root-absolute half, and the clone still passes. The HTML-href half needs a kind extension. If the integrator adds the root map and treats HTML hrefs as marginal, keeping A is defensible."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -649,7 +656,7 @@
     "rocketchat-docs-anchors-resolve"
    ],
    "assertion_family": "none",
-   "reason": "Fragment resolution kind; passes on the clone.",
+   "reason": "markdown_fragments_resolve expresses heading anchors. The script also accepts a fragment that names an HTML <a id> or <a name> anchor, which the kind reports as missing (reproduced in scratch); the clone passes only because no such link exists, so C.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -661,6 +668,13 @@
       "none"
      ],
      "why": "scripts/check-docs-links.mjs accepts a fragment that matches either a heading slug or an HTML <a id=...>/<a name=...> anchor in the target. markdown_fragments_resolve gives a false positive on a link to an <a id> anchor that the repo's checker accepts. It passes at the pin only because no such link exists. Matching the gate needs a kind option (HTML-anchor targets), which is tuning, not a pass under R4."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },

@@ -816,6 +816,18 @@ B-config unit (rushstack-b14).
 - **Partial rules** on tq-B05 and wsdk-17 were called value-add; they are partial rules at level
   `info`. element-web-48's `alint` text still called its rule value-add at level `info`; the rule
   runs at level `error`.
+- **Texts a move left behind:** 34 units whose `alint`, `reason` or `fire_verified` text still
+  described the bucket that Stage B or the audit had moved them out of:
+  - 12 moved from A to C: 11 by Stage B, and backstage-55, which Stage B moved by analogy with
+    backstage-49 and the review reproduced on a scratch file;
+  - 14 moved out of D, whose `alint` text named the repository's tool (ghost-39, backstage-64,
+    fluentui-31, trpc-57 and others) or whose reason still argued for D (ghost-80, strapi-35,
+    zulip-55);
+  - 4 moved from B-adapter to C (ghost-61, fluentui-23, -b17, yarnpkg-berry-23), whose `alint`
+    text still gave the old need;
+  - nextcloud-18 and -19, moved from B-config to B-adapter, whose reasons did not name the missing
+    SPDX expression extractor;
+  - signal-desktop-38 and -46, whose `fire_verified` still said C.
 
 ### Configurations and prose
 

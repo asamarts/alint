@@ -1016,10 +1016,10 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "skills.ts",
+   "alint": "a delegated Docusaurus admonition-syntax check (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
-   "reason": "A custom content parser and transformer run as project code.",
+   "reason": "R7: fromDocusaurus's admonition checks (a known type, not reopened, closed) validate a Markdown dialect's own syntax over files alint reads, which section 2.2 names as B-delegate. CI runs them over every v11 docs page. The include-resolution half is trpc-B02 (A).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -1031,6 +1031,14 @@
       "none"
      ],
      "why": "R7: fromDocusaurus's admonition checks (a known type, not reopened, closed; docusaurus-syntax.ts:303-361) run over Markdown files alint reads. CI runs them over every v11 docs page through content.ts parseSource in the www tests (package-links.test.ts:41, search-ranking.test.ts:21, main.yml:131), not only over skill pages. Validating a Markdown dialect's own syntax is the B-delegate example in section 2.2. Stage A's D reason ('project code') was not applied to tooling/subtree (trpc-11) or to skills.ts (trpc-26..32). The include-resolution half is split out as trpc-B02 (A). The sample-fence half is dormant: the clone has no ```sample fences."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "Stage B moved the unit from D to B-delegate but left Stage A's alint text and a reason arguing for D."
     }
    ]
   },

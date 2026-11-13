@@ -362,7 +362,7 @@
     "rushstack-project-folder-depth-bounds"
    ],
    "assertion_family": "none",
-   "reason": "Regex over each projectFolder value; confirmed.",
+   "reason": "The first rule restates the depth (2) in a regex instead of reading projectFolderMinDepth and projectFolderMaxDepth from rush.json, the same tuning as rushstack-58 and -59, so C. The second rule checks the bounds' own sanity (min at least 1, max at least min) from rush.json directly.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -381,6 +381,13 @@
       "alint"
      ],
      "why": "The alint text left out rules the unit lists."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },

@@ -479,7 +479,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "sql-tools verify-order against another branch",
+   "alint": "missing: the migrations on another branch (base-revision); a release line's migrations do not diverge from main's",
    "rules": [],
    "assertion_family": "none",
    "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
@@ -494,6 +494,13 @@
       "none"
      ],
      "why": ".github/workflows/migration-order.yml runs the same verify-order --append-only-from as immich-21, against another branch's tree."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what alint lacks."
     }
    ],
    "needs": "base-revision"
