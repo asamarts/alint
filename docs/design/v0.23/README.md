@@ -1,7 +1,9 @@
 # v0.23: selectors, a first constraint slice, and the YAML groundwork
 
 Status: proposed (2026-11-12).
-Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope).
+Decisions: [ADR-0032](../../adr/0032-v023-owner-decisions.md) (the owner decisions and the scope);
+[ADR-0033](../../adr/0033-v023-slice-after-the-corpus-stratum.md) (the slice after the corpus
+stratum, and the #503 fix).
 
 v0.23 starts Phase 3 of [`general-linter.md`](../general-linter.md) (section 11.6), which v0.22.0
 unblocked by meeting all three gates of Phase 2 (section 11.1, "v0.22 gate results"). Phase 3 is
@@ -11,7 +13,7 @@ the `alint-core` API before v1.0.
 
 ## 1. Scope
 
-The Phase 3 slice (ADR-0032 decision 1):
+The Phase 3 slice (ADR-0032 decision 1, amended by ADR-0033 decisions 1 and 2):
 
 1. **A corpus stratum for the flagship policies.** An i18n stratum and a JavaScript-monorepo
    stratum join the pinned corpus. They are scored with section 12.3's buckets before the design
@@ -30,12 +32,15 @@ The Phase 3 slice (ADR-0032 decision 1):
    An ADR records the version boundary (DEC-9). The owner approves both before implementation
    starts.
 3. **Named selectors and relations,** top-level and rule-local, on the relation layer, in
-   `version: 2` only.
+   `version: 2` only. The `entry` adapter can emit value-bearing (key path, value) rows for JSON,
+   YAML and TOML, which the dependency version policy needs (ADR-0033 decision 2).
 4. **The `constraint` kind, report-only,** with the assertion families the three conformance
-   policies need: equality, unique/key and cardinality. It has no fixes (section 8.3).
+   policies need: equality, unique/key and set (ADR-0033 decision 1). `set` covers inclusion,
+   equality and disjointness, also per group. It has no fixes (section 8.3).
 5. **Three conformance policies** as `version: 2` configurations: locale key parity (re-expressed
-   from `key_parity`), dependency version consistency, and toolchain-pin consistency. Each ships
-   firing and silent `alint test` cases and is measured against section 12.1.
+   from `key_parity` as per-locale set equality), dependency version consistency, and
+   toolchain-pin consistency. Each ships firing and silent `alint test` cases and is measured
+   against section 12.1.
 6. **`version: 2`, experimental.**
    - A draft `schemas/v2/config.json`, with a versioned `$id`.
    - `validate-config` for both versions; `list` and `explain` render named selectors and
@@ -55,10 +60,15 @@ Also in v0.23:
 11. **If ayaml 0.1.2 meets the criteria before the feature freeze,** the `yaml_depth` guard is
     re-derived (#483) and alint cuts over (#481). Otherwise both move to the next minor release
     (ADR-0032 decision 2).
+12. **`git_tracked_only: true` sees every tracked file on disk, ignored or not (#503,** ADR-0033
+    decision 3). Today the walker prunes a tracked file that an ignore file excludes before the
+    git-tracked index is built, so the documented case (a force-added file, or one committed before
+    its ignore line) is never seen. A v1 configuration that uses `git_tracked_only` can gain
+    findings; this is the one exception to section 3's "v1 is unchanged".
 
 Out of scope:
-- **v0.24 or later:** the remaining assertion families (reference, set, group, bounded count), the
-  specialized kinds and templates of DEC-8, and a stable `version: 2`.
+- **v0.24 or later:** the remaining assertion families (reference, cardinality, group, bounded
+  count), the specialized kinds and templates of DEC-8, and a stable `version: 2`.
 - **Plugin hosts:** these start in v0.24 (ADR-0032 decision 4).
 - **Phase 4:** stale exceptions.
 
@@ -109,7 +119,9 @@ it must respect:
   - the e2e suite;
   - the corpus replay against v0.22.1, with zero differences.
 
-  Item 7 does not change what alint writes, only which old baseline entries it matches.
+  Item 7 does not change what alint writes, only which old baseline entries it matches. Item 12 is
+  the one exception (ADR-0033 decision 3): a configuration that uses `git_tracked_only` can gain
+  findings, the CHANGELOG lists the change, and every difference in the replay must come from it.
 - **The version boundary of ADR-0022 holds.** A v2 source may extend v1 sources, never the
   reverse, at any recursive edge.
 - **Trust is no weaker than v1** (section 7.1 rules 9, 11 and 12):
@@ -170,20 +182,25 @@ next. Phases 1, 4 and 5 do not depend on the design and can run alongside phases
 | 3 | The design document and the version-boundary ADR. **Owner gate:** implementation starts after approval | no |
 | 4 | #484: the owned YAML types and the public-API gate; then sealing the five structs, with constructors (a short series) | API only |
 | 5 | #482: the differential fuzzing harness, its allowlist, and the pull-request and scheduled runs | no |
-| 6 | Named selectors and relations, the draft v2 schema, and `validate-config`, `list` and `explain` for v2 | v2 only |
-| 7 | The `constraint` kind: equality, unique/key and cardinality, report-only | v2 only |
+| 6 | Named selectors and relations, value-bearing entry rows, the draft v2 schema, and `validate-config`, `list` and `explain` for v2 | v2 only |
+| 7 | The `constraint` kind: equality, unique/key and set, report-only | v2 only |
 | 8 | The three conformance policies with `alint test` cases, and the section 12.1 measurements | v2 only |
 | 9 | If ayaml 0.1.2 qualifies: #483, then #481. Otherwise a status-log entry that moves them | yes (parser) |
-| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration), facts, and the release check | no |
+| 10 | Documentation, the CHANGELOG (re-run `alint baseline`; the library migration; the `git_tracked_only` change), facts, and the release check | no |
 
-The feature freeze is the point at which phases 1 to 8 are merged. Phase 9 is decided then.
+The #503 fix (item 12) is its own pull request, with `add -f` e2e scenarios for `file_absent`,
+`dir_absent`, `file_exists` and `dir_exists`, and does not depend on the design.
+
+The feature freeze is the point at which phases 1 to 8 and the #503 fix are merged. Phase 9 is
+decided then.
 
 ## 5. Release acceptance
 
-- **v1 is unchanged.** The e2e suite passes, and the corpus replay shows zero differences against
-  v0.22.1.
+- **v1 is unchanged** apart from item 12. The e2e suite passes, and the corpus replay against
+  v0.22.1 shows no differences other than those item 12 explains (ADR-0033 decision 3).
 - **The stratum is scored** and recorded in `general-linter.md` section 12, with the bucket shares
-  before and after the slice.
+  before and after the slice. Phase 8 re-scores it with the shipped slice and compares the result
+  with ADR-0033's projections.
 - **The three conformance policies** meet section 12.1:
   - each is a documented v2 configuration of bounded length, with firing and silent `alint test`
     cases;
@@ -238,3 +255,9 @@ The feature freeze is the point at which phases 1 to 8 are merged. Phase 9 is de
   `locale` is 22%, 26% and 29% today, after the slice and with entry values; the other families
   and the pooled figures are unchanged. Two new `xtask` gates check the records' change entries
   and the configurations' unit labels.
+- 2026-11-13: ADR-0033 (#506) records the owner's decisions on the stratum. The slice's
+  assertion families are equality, unique/key and set, and `cardinality` moves to v0.24. Phase 6
+  adds value-bearing entry rows for JSON, YAML and TOML. #503 is fixed in the behavior (item 12),
+  the one exception to "v1 is unchanged". The stratum's rulings stand. Projected under the
+  amended slice, with entry values: `locale` 35%, `dep-version` 61%, `toolchain-pin` 63%, pooled
+  58%.

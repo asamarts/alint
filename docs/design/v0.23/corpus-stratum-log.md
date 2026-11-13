@@ -104,6 +104,11 @@ first two steps are the "after slice" and "with values" columns.
 - **+ locale format adapters:** B-adapter units that need `placeholder`, `plural-categories` or
   `icu`.
 
+ADR-0033 (2026-11-13) swapped `cardinality` for `set` in the slice and added entry values to it.
+Under that slice, with forem-01 counted as per-locale set equality, the "+ slice" row reads 30%,
+48%, 63%, 60% and 55%, and the "+ entry values" row 35%, 61%, 63%, 61% and 58%. The rows above
+keep ADR-0032's slice, as the records do.
+
 ### Assertion families
 
 The assertion families the B-config units need, with the B-adapter units that need only entry

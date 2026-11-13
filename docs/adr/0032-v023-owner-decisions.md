@@ -15,6 +15,9 @@ of the remaining public `alint-core` structs, which [ADR-0030](0030-v022-owner-d
 decision 2 left as a pre-v1.0 roadmap item, into v0.23, and moves the plugin hosts' schedule in
 section 11.1 one release later. It does not change the parser criteria of
 [ADR-0031](0031-v0221-owner-decisions.md) or the `yaml-parser.md` record.
+[ADR-0033](0033-v023-slice-after-the-corpus-stratum.md) (2026-11-13) amends decision 1's
+assertion families and relations, and the consequence that v1 configurations keep their findings;
+the rest stands.
 
 ## Context
 

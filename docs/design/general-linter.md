@@ -1633,9 +1633,11 @@ so Phase 3 starts.
 ### 11.6 Phase 3: selectors and report-only constraints
 
 v0.23 carries the design and a first slice: the corpus stratum, the design document and the
-version-boundary ADR, named selectors and relations, and the `constraint` kind with equality,
-unique/key and cardinality assertions, with `version: 2` experimental. The rest follows in v0.24
-([`v0.23/README.md`](v0.23/README.md), [ADR-0032](../adr/0032-v023-owner-decisions.md)).
+version-boundary ADR, named selectors and relations with value-bearing entry rows, and the
+`constraint` kind with equality, unique/key and set assertions, with `version: 2` experimental.
+The rest follows in v0.24 ([`v0.23/README.md`](v0.23/README.md),
+[ADR-0032](../adr/0032-v023-owner-decisions.md),
+[ADR-0033](../adr/0033-v023-slice-after-the-corpus-stratum.md)).
 
 - Design and ADR the version boundary (decision DEC-9) and the cross-file selector amendment of
   constitution invariant 2 (question Q2).
@@ -1786,7 +1788,22 @@ The stratum was measured on 2026-11-12. The frame is
 "Units" counts every unit, D included; the percentages are of A + B + C. "After the v0.23 slice"
 counts a B-config unit as A when it needs `equality`, `unique-key` or `cardinality` (ADR-0032
 decision 1). "Plus entry values" also counts B-adapter units that need only (key path, value)
-rows in one of those families. Phase 8 confirms these projections.
+rows in one of those families.
+
+ADR-0033 (2026-11-13) amended the slice after this measurement: `set` replaces `cardinality`, and
+value-bearing entry rows join it (inputs 1 and 2 below). The records keep ADR-0032's definition.
+On the same units, with forem-01 counted under grouped set equality (section 7.4), the amended
+slice projects to:
+
+| Family | After the v0.23 slice | Slice plus entry values |
+|---|--:|--:|
+| `locale` | 30% | 35% |
+| `dep-version` | 48% | 61% |
+| `toolchain-pin` | 63% | 63% |
+| other | 60% | 61% |
+| Pooled | 55% | 58% |
+
+Phase 8 confirms these projections.
 
 **The demand is real.**
 - Locale checks are gated in all ten i18n repositories.
@@ -1834,15 +1851,13 @@ before implementation):
 1. **The dependency version policy needs entry values.** Its most common form joins each
    dependency name to its range. No relation adapter emits those rows today: `entry`, TOML and
    XML are key-only, and `extract` carries no pointer. Without such an adapter, the slice's
-   policy cannot express the form 6 of the 10 monorepos enforce.
-2. **`cardinality` is needed to re-express locale key parity, but adds little coverage.** Key
-   parity is already A through `key_parity`, and only 1 unit needs `cardinality`. `set` and
-   `reference`, which ADR-0032 defers to v0.24, account for 28 units: 16 B-config and 12 that
-   also need entry values.
-   - Keeping the slice as decided serves the conformance-policy goal.
-   - Bringing `set` forward serves coverage.
-   - Either choice is the owner's. A change to the slice's families needs a new ADR, since
-     ADR-0032 is accepted.
+   policy cannot express the form 6 of the 10 monorepos enforce. **Decided:** ADR-0033 decision 2
+   brings (key path, value) rows for JSON, YAML and TOML into v0.23.
+2. **`cardinality` adds little coverage.** Key parity is already A through `key_parity`, and only
+   1 unit needs `cardinality`. Per-locale set equality (section 7.4) re-expresses key parity
+   too. `set` and `reference`, which ADR-0032 deferred to v0.24, account for 28 units: 16
+   B-config and 12 that also need entry values. **Decided:** ADR-0033 decision 1 swaps
+   `cardinality` for `set`, which moves to v0.24 with `reference`, `group` and bounded count.
 3. **The toolchain-pin policy's remaining gap is version comparison, not an assertion family.**
    The pins that must agree are A today. All 13 B-adapter units in the family need version
    comparison, most of them to ask whether an exact pin satisfies a declared range.
@@ -1857,8 +1872,8 @@ before implementation):
 
 **Stop rule baseline.** Section 11.1's stop rule asks whether the share of demand expressible by
 configuration moves after Phase 3. Its baseline is the Today column above, per family. Phase 8
-re-scores the same units with the shipped slice and compares the result with the two projected
-columns.
+re-scores the same units with the shipped slice and compares the result with ADR-0033's
+projections above.
 
 **Limits of the measurement:**
 - Analysts were agents under the v0.12 protocol. Each repository had an adversarial
