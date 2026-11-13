@@ -21,7 +21,7 @@
  "by_family": {
   "locale": {
    "counts": {
-    "A": 6,
+    "A": 4,
     "B-config": 0,
     "B-adapter": 4,
     "B-kernel": 0,
@@ -29,12 +29,12 @@
     "C": 3,
     "D": 3
    },
-   "addressable": 14,
-   "coverage_today": 43,
-   "coverage_with_tuning": 64,
-   "gap": 36,
-   "coverage_after_slice": 43,
-   "coverage_after_slice_with_entry_values": 43
+   "addressable": 12,
+   "coverage_today": 33,
+   "coverage_with_tuning": 58,
+   "gap": 42,
+   "coverage_after_slice": 33,
+   "coverage_after_slice_with_entry_values": 33
   },
   "dep-version": {
    "counts": {
@@ -72,7 +72,7 @@
   },
   "other": {
    "counts": {
-    "A": 10,
+    "A": 12,
     "B-config": 0,
     "B-adapter": 4,
     "B-kernel": 0,
@@ -80,12 +80,12 @@
     "C": 10,
     "D": 20
    },
-   "addressable": 24,
-   "coverage_today": 42,
-   "coverage_with_tuning": 83,
-   "gap": 17,
-   "coverage_after_slice": 42,
-   "coverage_after_slice_with_entry_values": 46
+   "addressable": 26,
+   "coverage_today": 46,
+   "coverage_with_tuning": 85,
+   "gap": 15,
+   "coverage_after_slice": 46,
+   "coverage_after_slice_with_entry_values": 50
   }
  },
  "units": [
@@ -154,15 +154,57 @@
    "mechanism": "tool-config",
    "family": "locale",
    "bucket": "A",
-   "alint": "same 34 key_parity rules (android-strings dialect skips translatable=\"false\" keys in the reference, so a translated one is an extra key)",
+   "alint": "the same 34 rules as thunderbird-android-01 (32 key_parity, 2 cross_file superset); the android-strings dialect skips translatable=\"false\" keys in the reference, so a translated one is an extra key",
    "rules": [
-    "thunderbird-android-translations-no-extra-keys-app-k9mail"
+    "thunderbird-android-translations-no-extra-keys-app-common",
+    "thunderbird-android-translations-no-extra-keys-app-k9mail",
+    "thunderbird-android-translations-no-extra-keys-app-thunderbird",
+    "thunderbird-android-translations-no-extra-keys-core-ui-setting-impl-dialog",
+    "thunderbird-android-translations-no-extra-keys-feature-account-common",
+    "thunderbird-android-translations-no-extra-keys-feature-account-edit",
+    "thunderbird-android-translations-no-extra-keys-feature-account-oauth",
+    "thunderbird-android-translations-no-extra-keys-feature-account-server-certificate",
+    "thunderbird-android-translations-no-extra-keys-feature-account-server-settings",
+    "thunderbird-android-translations-no-extra-keys-feature-account-server-validation",
+    "thunderbird-android-translations-no-extra-keys-feature-account-settings-impl",
+    "thunderbird-android-translations-no-extra-keys-feature-account-setup",
+    "thunderbird-android-translations-no-extra-keys-feature-debug-settings",
+    "thunderbird-android-translations-no-extra-keys-feature-funding-googleplay",
+    "thunderbird-android-translations-no-extra-keys-feature-mail-message-composer-internal",
+    "thunderbird-android-translations-no-extra-keys-feature-mail-message-list-api",
+    "thunderbird-android-translations-no-extra-keys-feature-mail-message-list-internal",
+    "thunderbird-android-translations-no-extra-keys-feature-mail-message-reader-api",
+    "thunderbird-android-translations-no-extra-keys-feature-migration-qrcode",
+    "thunderbird-android-translations-no-extra-keys-feature-navigation-drawer-dropdown",
+    "thunderbird-android-translations-no-extra-keys-feature-onboarding-migration-thunderbird",
+    "thunderbird-android-translations-no-extra-keys-feature-onboarding-permissions",
+    "thunderbird-android-translations-no-extra-keys-feature-onboarding-welcome",
+    "thunderbird-android-translations-no-extra-keys-feature-settings-import",
+    "thunderbird-android-translations-no-extra-keys-feature-thundermail-api",
+    "thunderbird-android-translations-no-extra-keys-feature-thundermail-internal-common",
+    "thunderbird-android-translations-no-extra-keys-feature-widget-message-list-glance",
+    "thunderbird-android-translations-no-extra-keys-feature-widget-message-list",
+    "thunderbird-android-translations-no-extra-keys-feature-widget-shortcut",
+    "thunderbird-android-translations-no-extra-keys-feature-widget-unread",
+    "thunderbird-android-translations-no-extra-keys-legacy-ui-base",
+    "thunderbird-android-translations-no-extra-keys-legacy-ui-folder",
+    "thunderbird-android-translations-no-extra-keys-legacy-ui-legacy",
+    "thunderbird-android-translations-no-extra-keys-plugins-openpgp-api-lib-openpgp-api"
    ],
    "assertion_family": "none",
    "reason": "R7 logic classification; the android-strings adapter drops translatable=false entries from the reference, so direction extra fires on a translated one. Separate unit (separate lint issue id) sharing the rules of -01.",
    "fire_verified": "Adding <string name=\"app_name\">Thunderbird FR</string> (translatable=false in default) to app-thunderbird values-fr fired at values-fr/strings.xml:3:23; restored passed; clone passes.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "rules"
+     ],
+     "why": "It listed one of the 34 rules its text names."
+    }
+   ]
   },
   {
    "id": "thunderbird-android-03",
@@ -863,16 +905,25 @@
    "mechanism": "tool-config",
    "family": "other",
    "bucket": "A",
-   "alint": "json_schema_passes: thunderbird-android-featureflag-catalog-schema",
+   "alint": "json_schema_passes: thunderbird-android-featureflag-catalog-schema; also thunderbird-android-featureflag-catalog-strict-json, a line-regex approximation of the build's strict JSON parser",
    "rules": [
     "thunderbird-android-featureflag-catalog-schema",
     "thunderbird-android-featureflag-catalog-strict-json"
    ],
    "assertion_family": "none",
-   "reason": "R7: a build-time check over a file alint reads; json_schema_passes with schema_path expresses it.",
+   "reason": "R7: a build-time check over a file alint reads; json_schema_passes with schema_path expresses the schema assertion. The strict-JSON rule approximates the parser's strictness (line-start comments and trailing commas), which section 12.4's strict-JSON option would make exact.",
    "fire_verified": "n/a (also fired in scratch: first \"default\": true -> \"yes\"; restored passed)",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The texts did not mention the strict-JSON rule the unit lists."
+    }
+   ]
   },
   {
    "id": "thunderbird-android-51",
@@ -911,12 +962,12 @@
    "mechanism": "tool-config",
    "family": "other",
    "bucket": "C",
-   "alint": "missing: inclusion of map key paths ($.overrides.*.*  keys) in the extracted set of $.flags[*].key",
+   "alint": "cross_file subset: source the catalog's override keys by line regex `(?m)^        \"([a-z][a-z0-9_]+)\": (?:true|false)`, target json `$.flags[*].key`: thunderbird-android-featureflag-override-keys-declared",
    "rules": [
     "thunderbird-android-featureflag-override-keys-declared"
    ],
    "assertion_family": "none",
-   "reason": "Inclusion over key paths vs extracted values stays B-config (batch-2); RFC 9535 JSONPath cannot extract map keys, so cross_file cannot express it today.",
+   "reason": "Stage B: the override map keys are extractable only with a line regex on the catalog's fixed layout (the strapi-06 and wsdk-74 precedent: map keys by a line regex are C).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -928,6 +979,14 @@
       "reference"
      ],
      "why": "The override map keys are extractable today with a line regex on the catalog's fixed layout: cross_file subset with source regex (?m)^        \"([a-z][a-z0-9_]+)\": (?:true|false) and target json $.flags[*].key. That is the strapi-06/wsdk-74 precedent (map keys via a line regex = C), not B-config. Fired in scratch when one override key was renamed; clone passes."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The alint and reason texts were Stage A's B-config text; Stage B moved the unit to C."
     }
    ]
   },
@@ -1061,7 +1120,7 @@
    "summary": "Android lint ByteOrderMark: no U+FEFF in resource or source files",
    "evidence": "Android lint default issue (i18n category, severity fatal, recalled; not overridden in config/lint/lint.xml), run by build-android.yml:187 and lintVital during release assembles",
    "mechanism": "tool-config",
-   "family": "locale",
+   "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: thunderbird-android-res-no-byte-order-mark",
    "rules": [
@@ -1071,14 +1130,24 @@
    "reason": "Batch-2 ruling: a linter rule asserting an encoding property of the file is classified by logic; a content pattern for U+FEFF over res XML, .kt and .java expresses it (no BOM bytes anywhere in the clone).",
    "fire_verified": "Scratch copy of app-thunderbird/src/main/res/values/strings.xml: a leading UTF-8 BOM fired at 1:1; a BOM appended to line 3 fired at 3:1; restored passed; clone passes.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "A byte-order-mark check over every resource and source file (.kt, .java, res XML), not over locale files: the audit's locale ruling, as for thunderbird-android-07."
+    }
+   ]
   },
   {
    "id": "thunderbird-android-62",
    "summary": "Android lint EnforceUTF8: an XML resource that declares an encoding declares UTF-8",
    "evidence": "Android lint default issue (i18n, severity fatal, recalled); all 2838 XML prologs in the clone declare utf-8/UTF-8",
    "mechanism": "tool-config",
-   "family": "locale",
+   "family": "other",
    "bucket": "A",
    "alint": "for_each_match (select the encoding declaration, require utf-8 case-insensitively): thunderbird-android-res-xml-encoding-utf8",
    "rules": [
@@ -1106,6 +1175,15 @@
       "reason"
      ],
      "why": "Stage B moved the unit to A with a for_each_match rule; the alint, reason and fire_verified fields still described Stage A's complement regex."
+    },
+    {
+     "by": "review",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "An encoding check over every XML resource, not over locale files only: the audit's locale ruling, as for thunderbird-android-61."
     }
    ]
   },

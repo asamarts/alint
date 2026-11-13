@@ -1364,7 +1364,7 @@
    "mechanism": "script",
    "family": "locale",
    "bucket": "A",
-   "alint": "json_path_matches x6 on _locales/en/messages.json, path $['<key>'].messageformat, matches '[\\s\\S]' for the 3 description keys and '^[\\s\\S]*$' for the 3 message keys. Suggested ids: signal-desktop-policy-strings-*",
+   "alint": "json_path_matches x6 on _locales/en/messages.json, path $['<key>'].messageformat, matches '[\\s\\S]' for the 3 description keys and '^[\\s\\S]*$' for the 3 message keys. Rules signal-desktop-policy-strings-*.",
    "rules": [
     "signal-desktop-policy-strings-enable-backups-description",
     "signal-desktop-policy-strings-enable-backups-message",
@@ -1377,7 +1377,15 @@
    "reason": "An explicit assert in a generator that CI runs: build code names catalog keys, and the catalog must contain them. Contributors edit the en catalog, so deleting or renaming one of these strings breaks `pnpm run generate`. A native kind expresses each key. Stage A counted the weaker, implicit precondition in generate-compact-locales as unit 11 but missed this explicit one.",
    "fire_verified": "On a scratch copy of _locales with icu:PlaintextExport--OSPrompt--message--Linux deleted and the first description emptied, the 6 rules fired twice: 'produced no match' and 'does not match regex'. All 6 pass on the clone (exit 0).",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "signal-desktop-b02",

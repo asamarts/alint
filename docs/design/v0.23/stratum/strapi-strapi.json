@@ -369,13 +369,21 @@
    "mechanism": "test",
    "family": "locale",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint unique-key over a key-derived projection: each key minus its last segment, among keys ending .singular or .plural",
    "rules": [],
    "assertion_family": "unique-key",
    "reason": "Per key prefix (key minus its last segment, among keys ending .singular/.plural) at most one row: a unique-key over a key-derived projection. JSONPath cannot build a sibling key name, so no kind expresses it today. R1 collapses the five packages into one unit.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "strapi-22",
@@ -401,13 +409,21 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint unique-key over the code values of iso-locales.json",
    "rules": [],
    "assertion_family": "unique-key",
    "reason": "Uniqueness of a field across the elements of a JSON array is unique-key; no kind asserts value uniqueness today. Tagged other: a content-locale registry, not a translation catalog.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "strapi-30",
@@ -796,7 +812,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a Docusaurus route model for markdown_links_resolve (route-model)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Needs a Docusaurus route model (number-prefix stripping, folder-page folding, slug frontmatter, generated tag routes). markdown_links_resolve's root map only maps directories to routes.",
@@ -808,6 +824,13 @@
      "fields": {
       "needs": "route-model"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "route-model"
@@ -860,7 +883,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a frontmatter adapter for the typed review_notes and status values (format-reader)",
    "rules": [],
    "assertion_family": "none",
    "reason": "A typed frontmatter value check needs a frontmatter adapter.",
@@ -872,6 +895,13 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "format-reader"
@@ -962,7 +992,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a frontmatter adapter for the tags lists (format-reader), then a reference into the tags.yml keys",
    "rules": [],
    "assertion_family": "none",
    "reason": "Frontmatter tags list values vs tags.yml keys: needs a frontmatter adapter (and a YAML key extract).",
@@ -974,6 +1004,13 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "format-reader"
@@ -985,12 +1022,12 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "A",
-   "alint": "",
+   "alint": "yaml_path_absent on docs/docs/tags.yml with the root filter `$[?length($) > 35]`: strapi-docs-tags-at-most-35",
    "rules": [
     "strapi-docs-tags-at-most-35"
    ],
    "assertion_family": "none",
-   "reason": "A count bound on the top-level keys of one YAML file; no counting kind exists.",
+   "reason": "Stage B: an RFC 9535 root filter with length() bounds the top-level key count, so no bounded-count family is needed.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -1002,6 +1039,14 @@
       "bounded-count"
      ],
      "why": "It is expressible today: yaml_path_absent `$[?length($) > 35]` on docs/docs/tags.yml uses an RFC 9535 root filter with length(). It passes on the clone (17 tags), does not fire at 35 entries, and fires at 36 on a scratch copy. No new bounded-count family is needed."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The reason was Stage A's ('no counting kind exists'); Stage B moved the unit to A."
     }
    ]
   },
@@ -1012,13 +1057,21 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint set: the tags.yml keys are disjoint from the package-leaf-folder and status sets",
    "rules": [],
    "assertion_family": "set",
    "reason": "Disjointness between the tags.yml key set and the package-leaf-folder and status sets; tags.yml keys are not extractable as values today.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "strapi-63",
@@ -1027,7 +1080,7 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a TypeScript-array reader and the Docusaurus route model (route-model)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Needs a TypeScript-array reader and the Docusaurus route model.",
@@ -1039,6 +1092,13 @@
      "fields": {
       "needs": "route-model"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "route-model"
@@ -1110,7 +1170,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a conventional-commit parser that tells footer trailers from body lines; git_commit_message reads only the subject, body and whole message",
    "rules": [],
    "assertion_family": "none",
    "reason": "git_commit_message reads only subject, body and whole-message patterns. Telling footer trailers from body lines needs a conventional-commit message parser.",
@@ -1122,6 +1182,13 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "other"

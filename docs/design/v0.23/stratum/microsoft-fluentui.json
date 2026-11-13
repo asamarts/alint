@@ -113,7 +113,7 @@
    "mechanism": "tool-config",
    "family": "toolchain-pin",
    "bucket": "A",
-   "alint": "registry_paths_resolve (yaml $.yarnPath, expect file) microsoft-fluentui-yarnpath-resolves",
+   "alint": "registry_paths_resolve (yaml $.yarnPath, expect file): microsoft-fluentui-yarnpath-resolves; yaml_path_matches: microsoft-fluentui-yarnpath-present",
    "rules": [
     "microsoft-fluentui-yarnpath-resolves",
     "microsoft-fluentui-yarnpath-present"
@@ -122,7 +122,15 @@
    "reason": "A path reference from a structured YAML value to the filesystem.",
    "fire_verified": "Removed .yarn/releases/yarn-4.18.0.cjs in a scratch copy: the rule fired. It passes on the clone.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "fluentui-03",
@@ -190,7 +198,7 @@
    ],
    "assertion_family": "none",
    "reason": "R7: a path reference in manifests that must resolve to a committed file (babel-18 precedent). The regex takes the path from the descriptor value, which has one fixed form.",
-   "fire_verified": "n/a (C). It was fired anyway: deleting the .patch file in a scratch copy fired the rule. It passes on the clone.",
+   "fire_verified": "Audit: deleting the .patch file in a scratch copy fired the rule; it passes on the clone.",
    "origin": "A",
    "changes": [
     {
@@ -201,6 +209,13 @@
       "none"
      ],
      "why": "Pulling the patch path out of a patch: value is not a regex read of a JSON key, and it holds in any layout. babel-18, rocketchat-26 and jest-B03 are A with the same regex; the rule passes on the clone and fires when the patch file is deleted."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "fire_verified"
+     ],
+     "why": "The fire_verified text still called the unit C."
     }
    ]
   },
@@ -1157,7 +1172,7 @@
    "mechanism": "convention",
    "family": "toolchain-pin",
    "bucket": "A",
-   "alint": "file_content_forbidden over {.devops/**/*.yml,azure-pipelines*.yml}, pattern '(?m)^[^#\\n]*\\bcorepack\\s+enable\\b' (suggested id microsoft-fluentui-azure-no-corepack-enable)",
+   "alint": "file_content_forbidden over {.devops/**/*.yml,azure-pipelines*.yml}, pattern '(?m)^[^#\\n]*\\bcorepack\\s+enable\\b': microsoft-fluentui-azure-no-corepack-enable",
    "rules": [
     "microsoft-fluentui-azure-no-corepack-enable"
    ],
@@ -1165,7 +1180,15 @@
    "reason": "This is a load-bearing comment in CI config that states a file-text invariant. Stage A counted the same kind of comment for fluentui-04 (the same file) and fluentui-15, under R5. It is distinct from fluentui-02: yarnPath can resolve while a corepack step still breaks the 1ES install. It holds at the pin, because only the comment mentions corepack.",
    "fire_verified": "On a scratch copy of tools.yml and azure-pipelines.release.yml, I added a `- script: corepack enable` step to tools.yml and the rule fired at tools.yml:47:1. Prefixing `corepack enable &&` to the v8 build script fired at azure-pipelines.release.yml:71:1. The comment line does not match. The rule passes on the clone and on the restored copy.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "fluentui-b02",

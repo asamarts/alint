@@ -32,8 +32,8 @@
 # @minVersion annotation, the preset-env available-plugins / compat-data
 # sync, the static fixture-layout checks and LF line endings.
 # Not expressed (B/D, see the stratum record): no dependency in both
-# dependencies and devDependencies and unique workspace names (B-config
-# unique-key), the fixture monorepo-plugin prefix check (B-config
+# dependencies and devDependencies (B-adapter, entry values; unique-key) and
+# unique workspace names (B-config unique-key), the fixture monorepo-plugin prefix check (B-config
 # reference), catalog use for shared dependencies (B-adapter, needs
 # entry-values; unique-key), catalog: references that resolve (B-adapter,
 # needs entry-values; reference), workspace dependency cycles, the

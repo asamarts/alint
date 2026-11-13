@@ -3,20 +3,20 @@
  "sha": "e84183a6b20027fb9567d789acd0c59588641f27",
  "metrics": {
   "counts": {
-   "A": 5,
+   "A": 4,
    "B-config": 0,
    "B-adapter": 4,
    "B-kernel": 0,
    "B-delegate": 0,
-   "C": 6,
+   "C": 7,
    "D": 34
   },
   "addressable": 15,
-  "coverage_today": 33,
+  "coverage_today": 27,
   "coverage_with_tuning": 73,
   "gap": 27,
-  "coverage_after_slice": 33,
-  "coverage_after_slice_with_entry_values": 40
+  "coverage_after_slice": 27,
+  "coverage_after_slice_with_entry_values": 33
  },
  "by_family": {
   "locale": {
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 5,
+    "A": 4,
     "B-config": 0,
     "B-adapter": 0,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 4,
+    "C": 5,
     "D": 28
    },
    "addressable": 9,
-   "coverage_today": 56,
+   "coverage_today": 44,
    "coverage_with_tuning": 100,
    "gap": 0,
-   "coverage_after_slice": 56,
-   "coverage_after_slice_with_entry_values": 56
+   "coverage_after_slice": 44,
+   "coverage_after_slice_with_entry_values": 44
   }
  },
  "units": [
@@ -263,7 +263,7 @@
    "mechanism": "ci",
    "family": "locale",
    "bucket": "C",
-   "alint": "json_path_absent (parse probe): element-web-i18n-locale-json-parses",
+   "alint": "json_path_absent (parse probe): element-web-i18n-locale-json-parses; no_bom: element-web-i18n-locale-json-no-bom",
    "rules": [
     "element-web-i18n-locale-json-parses",
     "element-web-i18n-locale-json-no-bom"
@@ -272,7 +272,15 @@
    "reason": "No bare 'parses' kind; a never-matching query turns a malformed file into a resource_parse analysis failure. alint's JSON reader is JSONC-tolerant, so trailing commas and // comments that JSON.parse rejects pass: needs a strict-JSON tuning, hence C",
    "fire_verified": "Scratch copy of apps/desktop/.../fr.json truncated to 200 bytes: analysis failure (resource_parse), exit 1. A trailing comma and a // comment both passed (JSONC tolerance, recorded as the C gap). Passes on the clone (123 files)",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "element-web-09",
@@ -418,16 +426,26 @@
    "evidence": "oxlint.config.ts:184-187 ('element-call/copyright-header': error with the Element template); oxlint ignorePatterns; CI lint:js + lint-staged",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "A",
+   "bucket": "C",
    "alint": "file_header: element-web-js-copyright-header",
    "rules": [
     "element-web-js-copyright-header"
    ],
    "assertion_family": "none",
-   "reason": "The rule is a pure header-text assertion (precedent: docusaurus eslint-plugin-header -> file_header A); passes on 3,289 files once the oxlint ignores, minified vendored JS and one eslint-disabled generated file are excluded",
+   "reason": "A pure header-text assertion (precedent: docusaurus eslint-plugin-header -> file_header); passes on 3,289 files once the oxlint ignores, minified vendored JS and one eslint-disabled generated file are excluded. The last exclude stands in for an inline suppression, so C (audit ruling).",
    "fire_verified": "n/a (other family); also fired on a scratch NoHeader.ts while a headered control passed",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "One generated file is excluded by path for its eslint-disable; the audit's inline-suppression ruling makes a path exclude that stands in for an inline suppression C, as for thunderbird-android-b07, -40, strapi-35, ghost-60 and trpc-30."
+    }
+   ]
   },
   {
    "id": "element-web-19",
@@ -883,7 +901,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "file_absent (include apps/web/playwright/snapshots/**/*.png, apps/desktop/playwright/snapshots/**/*.png, modules/*/e2e/snapshots/**/*.png; exclude **/*-linux.png). Proposed id element-web-playwright-baselines-linux-only; it is not in Stage A's config",
+   "alint": "file_absent (include apps/web/playwright/snapshots/**/*.png, apps/desktop/playwright/snapshots/**/*.png, modules/*/e2e/snapshots/**/*.png; exclude **/*-linux.png): element-web-playwright-baselines-linux-only",
    "rules": [
     "element-web-playwright-baselines-linux-only"
    ],
@@ -891,7 +909,15 @@
    "reason": "R7: the reporter runs two independent assertions. Unit 32 covers the stale-file one, which needs test results (D). The platform-name one is a pure file-name invariant over files alint reads, and a native file_absent expresses it",
    "fire_verified": "Other family, so not required. It was still run: validate-config OK and it passes on the clone. On a scratch tree it fired once each on a-darwin.png under apps/web/playwright/snapshots and on c-win32.png under modules/banner/e2e/snapshots, and a -linux.png control passed",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "element-web-48",

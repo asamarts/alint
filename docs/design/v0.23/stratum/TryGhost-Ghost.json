@@ -766,7 +766,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "cross_file set_equals + subset: ghost-versioning-ignore-is-continuous-lane, ghost-versioning-ignore-has-ghost",
+   "alint": "cross_file set_equals, subset and superset: ghost-versioning-ignore-is-continuous-lane, ghost-versioning-ignore-has-ghost, ghost-versioning-ignore-names-workspace-packages",
    "rules": [
     "ghost-versioning-ignore-is-continuous-lane",
     "ghost-versioning-ignore-has-ghost",
@@ -776,7 +776,15 @@
    "reason": "Set equality between two files; the script hard-codes 'ghost' and so does the filter. Passes on the clone.",
    "fire_verified": "Fired in scratch when an entry was missing, when an extra package was added, and when ghost was missing.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "ghost-42",
@@ -819,12 +827,12 @@
    "mechanism": "script",
    "family": "other",
    "bucket": "C",
-   "alint": "constraint: object key set within an allowed set",
+   "alint": "json_path_absent with an RFC 9535 length() filter that enumerates the allowed key combinations: ghost-publish-manifest-entries-strict-keys",
    "rules": [
     "ghost-publish-manifest-entries-strict-keys"
    ],
    "assertion_family": "none",
-   "reason": "Needs key selection, which JSONPath lacks.",
+   "reason": "Stage B: length() on an object counts its members, so a filter over the required and optional keys expresses the strictObject. The 2^k enumeration is awkward, so C.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -836,6 +844,14 @@
       "set"
      ],
      "why": "It is expressible today. RFC 9535 length() on an object returns its member count. name, path and versioning are required (ghost-43), and distTag, cdn and installArgs are optional (publish-manifest.ts:48-54). An 8-case filter, $[?!((length(@) == 3 && !@.distTag && !@.cdn && !@.installArgs) || ... )], therefore expresses the strictObject. Probed on tools/scripts/release/publish-manifest.json: passes on the clone; fires on a `cdnKey` misspelling and on an extra `dist_tag`. The 2^k enumeration is awkward, so C rather than A."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The alint and reason texts were Stage A's B-config text; Stage B moved the unit to C."
     }
    ]
   },
@@ -1824,7 +1840,7 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "A",
-   "alint": "cross_file relation equals: source stripe-api.js regex \"(?m)^const STRIPE_API_VERSION = '([^']+)';\", target e2e/helpers/services/stripe/fixtures/manifest.json json $.api_version (suggested id ghost-stripe-fixture-api-version)",
+   "alint": "cross_file relation equals: source stripe-api.js regex \"(?m)^const STRIPE_API_VERSION = '([^']+)';\", target e2e/helpers/services/stripe/fixtures/manifest.json json $.api_version: ghost-stripe-fixture-api-version; json_path_equals on the test's pin: ghost-stripe-fixture-api-version-snapshot",
    "rules": [
     "ghost-stripe-fixture-api-version",
     "ghost-stripe-fixture-api-version-snapshot"
@@ -1833,7 +1849,15 @@
    "reason": "R7: a value agreement between two files alint reads. The test only reads the files and does not run Stripe.",
    "fire_verified": "n/a (family other). Probed anyway: passes on the clone and fires when manifest.json api_version is changed.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "ghost-b02",
@@ -1963,7 +1987,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "constraint unique-key over array elements keyed by (rule, from, to)",
+   "alint": "json_schema_passes with uniqueItems over the entries array, from a schema outside the repository (allow_out_of_root); no rule, since a corpus config cannot ship the schema",
    "rules": [],
    "assertion_family": "none",
    "reason": "json_schema_passes with uniqueItems over the entries array, from a schema file outside the repository (allow_out_of_root): every entry has exactly the keys rule, from and to, so whole-item uniqueness is triple uniqueness. A corpus config cannot ship the schema, so C with no rule.",
@@ -1978,6 +2002,13 @@
       "unique-key"
      ],
      "why": "Every one of the 349 entries carries exactly {rule, from, to}, so uniqueness of the triple is JSON Schema uniqueItems. A schema file outside the repository is the C route of rushstack-09b, yarnpkg-berry-23 and backstage-b06."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was the B-config text from before the audit moved the unit to C."
     }
    ]
   },

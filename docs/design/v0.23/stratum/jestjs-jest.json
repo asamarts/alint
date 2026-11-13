@@ -3,20 +3,20 @@
  "sha": "aa88f7cf0bfc7a3a2efbfcab97914886b22d4454",
  "metrics": {
   "counts": {
-   "A": 21,
+   "A": 22,
    "B-config": 3,
    "B-adapter": 3,
    "B-kernel": 0,
    "B-delegate": 0,
-   "C": 5,
+   "C": 4,
    "D": 23
   },
   "addressable": 32,
-  "coverage_today": 66,
+  "coverage_today": 69,
   "coverage_with_tuning": 81,
   "gap": 19,
-  "coverage_after_slice": 72,
-  "coverage_after_slice_with_entry_values": 75
+  "coverage_after_slice": 75,
+  "coverage_after_slice_with_entry_values": 78
  },
  "by_family": {
   "locale": {
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 15,
+    "A": 16,
     "B-config": 2,
     "B-adapter": 2,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 4,
+    "C": 3,
     "D": 18
    },
    "addressable": 23,
-   "coverage_today": 65,
+   "coverage_today": 70,
    "coverage_with_tuning": 83,
    "gap": 17,
-   "coverage_after_slice": 70,
-   "coverage_after_slice_with_entry_values": 70
+   "coverage_after_slice": 74,
+   "coverage_after_slice_with_entry_values": 74
   }
  },
  "units": [
@@ -277,10 +277,18 @@
     "jestjs-jest-copyright-header"
    ],
    "assertion_family": "none",
-   "reason": "A per-file content check over a file set alint can reproduce from the script's lists. Passes on the clone, matching my simulation of the script (0 failures).",
+   "reason": "A per-file content check over a file set alint can reproduce from the script's lists, which are the checker's own literals. Passes on the clone, matching my simulation of the script (0 failures).",
    "fire_verified": "n/a (family other); sanity-fired: a header removed from a .ts file fired; a blank file correctly did not fire",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "The reason now says why the copied ignore lists are not a hand-kept list."
+    }
+   ]
   },
   {
    "id": "jest-12",
@@ -402,7 +410,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "cross_file superset (docs front-matter ids vs sidebar JSON leaves), for_each_dir for versioned docs; rules jestjs-jest-sidebar-ids-exist, jestjs-jest-versioned-sidebar-ids-exist",
+   "alint": "cross_file superset (docs front-matter ids vs sidebar and navbar items), for_each_dir for versioned docs: jestjs-jest-sidebar-ids-exist, jestjs-jest-versioned-sidebar-ids-exist, jestjs-jest-navbar-doc-ids-exist, jestjs-jest-versioned-navbar-doc-ids-exist",
    "rules": [
     "jestjs-jest-sidebar-ids-exist",
     "jestjs-jest-versioned-sidebar-ids-exist",
@@ -413,7 +421,15 @@
    "reason": "R7: a build-time integrity check over files alint reads, extracted from the Docusaurus build. A set inclusion between two extractions. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: an unknown id in sidebars.json (doc and api sections) and in a versioned sidebar each fired",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "jest-19",
@@ -438,16 +454,26 @@
    "evidence": "package.json:130 (typecheck:tests brace list); nodejs.yml:81",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "C",
+   "bucket": "A",
    "alint": "for_each_dir over a hand-copied 19-package brace list /**/__tests__ -> file_exists + json_path_matches extends; rule jestjs-jest-typechecked-tests-have-tsconfig",
    "rules": [
     "jestjs-jest-typechecked-tests-have-tsconfig"
    ],
    "assertion_family": "none",
-   "reason": "R7: the structural precondition of the tsc run (each directory must be a project) is extracted; the type check itself is D. C because the package list has to be copied by hand from the script, and it drifts when the script changes.",
+   "reason": "R7: the structural precondition of the tsc run (each directory must be a project) is extracted; the type check itself is D. The 19-package list is the script's own literal, restated as the rule's brace list, as yarnpkg-berry-13 restates its exemption list.",
    "fire_verified": "n/a (family other); sanity-fired: a removed tsconfig and a wrong extends each fired",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "from": [
+      "C",
+      "other",
+      "none"
+     ],
+     "why": "The 19-package brace list is the checker's own literal (package.json typecheck:tests). Restating a checker's literal is ordinary configuration, as for yarnpkg-berry-13, rushstack-23, zulip-43 and nextcloud-12; a hand-kept list is one derived from repository state (strapi-07)."
+    }
+   ]
   },
   {
    "id": "jest-21",
@@ -599,7 +625,7 @@
    "mechanism": "script",
    "family": "dep-version",
    "bucket": "C",
-   "alint": "constraint: set of packages with the test-utils devDependency equals set of packages (path_capture of package dir) whose __tests__ tsconfig references test-utils",
+   "alint": "for_each_dir over packages/* with a nested cross_file set_equals (tsconfig references against the devDependency, read by a layout-dependent regex): jestjs-jest-test-utils-dev-dependency-iff-referenced, jestjs-jest-test-utils-dev-dependency-needs-tests-tsconfig",
    "rules": [
     "jestjs-jest-test-utils-dev-dependency-iff-referenced",
     "jestjs-jest-test-utils-dev-dependency-needs-tests-tsconfig"
@@ -624,6 +650,13 @@
       "bucket": "C",
       "reason": "Expressible with for_each_dir plus cross_file set_equals (Stage B, Stage C), but the devDependency side is a regex read of a JSON key restricted to the flat devDependencies object, which is layout-dependent (batch 2 ruling: a regex read of a JSON key is C)."
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was Stage A's B-config text; Stage B moved the unit to C."
     }
    ]
   },
@@ -899,7 +932,7 @@
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "cross_file relation superset; source.files '{package.json,packages/*/package.json,website/package.json,examples/*/package.json}' extract json $.name (unioned); targets.files is the same glob with extract regex '\"(?:(?:@[^\"/]+/)?[^\"/@]+/)*((?:@[^\"/]+/)?[^\"/@]+)\"\\s*:\\s*\"workspace:'; allow_missing_target: true. Suggested id jestjs-jest-workspace-refs-resolve. It is not in Stage A's config.",
+   "alint": "cross_file relation superset; source.files '{package.json,packages/*/package.json,website/package.json,examples/*/package.json}' extract json $.name (unioned); targets.files is the same glob with extract regex '\"(?:(?:@[^\"/]+/)?[^\"/@]+/)*((?:@[^\"/]+/)?[^\"/@]+)\"\\s*:\\s*\"workspace:'; allow_missing_target: true. Rule jestjs-jest-workspace-refs-resolve.",
    "rules": [
     "jestjs-jest-workspace-refs-resolve"
    ],
@@ -907,7 +940,15 @@
    "reason": "R7, following batch-1 trpc-B01 (A, dep-version). Yarn's name lookup runs over manifests alint reads. Stage A folded it into jest-39 (lockfile freshness, D), but the lookup can fail by itself when a package is renamed, and today's kinds express it. The regex takes the last name segment of a resolution path key, so the root's @testing-library/... resolutions are covered.",
    "fire_verified": "Probe config on a scratch copy of the clone: it passes on the copy and on the read-only clone. Each break fired: packages/jest-cli dependency jest-util renamed to jest-utilx; packages/jest-mock name changed to jest-mocks (fired for package.json and every dependent); the resolution key @testing-library/react-native/pretty-format changed to .../pretty-formatz; the scoped root devDependency @jest/globals changed to @jest/globalz.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "jest-B02",

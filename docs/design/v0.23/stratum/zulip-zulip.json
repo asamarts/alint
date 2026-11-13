@@ -96,13 +96,21 @@
    "mechanism": "script",
    "family": "locale",
    "bucket": "B-delegate",
-   "alint": "",
+   "alint": "a delegated gettext .po syntax check (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Checking a message format's own syntax is the section 2.2 B-delegate example; alint has no gettext .po reader",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "zulip-02",
@@ -151,7 +159,7 @@
    "mechanism": "script",
    "family": "locale",
    "bucket": "C",
-   "alint": "json_path_absent (never-matching probe): zulip-locale-translations-json-parses",
+   "alint": "json_path_absent (never-matching probe): zulip-locale-translations-json-parses; file_content_matches: zulip-locale-translations-json-object-root",
    "rules": [
     "zulip-locale-translations-json-parses",
     "zulip-locale-translations-json-object-root"
@@ -167,6 +175,13 @@
       "bucket": "C",
       "reason": "The object-root half is expressed (Stage C). alint's JSON parse tolerates trailing commas and comments, which orjson rejects, so the parse half is relaxed; the same gap keeps element-web-08 in C (integrator)."
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
     }
    ]
   },
@@ -722,13 +737,21 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "",
+   "alint": "a delegated OpenAPI validator (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Spec-format validation including $ref resolution; json_schema_passes would need an OpenAPI meta-schema inside the read-only lint root and still not cover the validator's semantics",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "zulip-34",
@@ -737,13 +760,21 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "",
+   "alint": "a delegated per-example schema validation with in-document $ref resolution (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Per-example schema validation with ref resolution inside one document; plugin territory",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "zulip-35",
@@ -1753,7 +1784,7 @@
    "mechanism": "script",
    "family": "locale",
    "bucket": "A",
-   "alint": "no_bom over locale/*/LC_MESSAGES/django.po (rule id zulip-locale-po-no-bom in my scratch config; not in Stage A's config)",
+   "alint": "no_bom over locale/*/LC_MESSAGES/django.po: zulip-locale-po-no-bom",
    "rules": [
     "zulip-locale-po-no-bom"
    ],
@@ -1761,7 +1792,15 @@
    "reason": "An encoding check on the locale files, with its own error message in Django and separate from zulip-01's gettext-syntax delegate (R1: a separate behavior). The no_bom kind expresses it exactly.",
    "fire_verified": "Prefixing a scratch copy of locale/de/LC_MESSAGES/django.po with EF BB BF made no_bom fire. The clean scratch copy and the clone both pass (rc=0).",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "zulip-b03",

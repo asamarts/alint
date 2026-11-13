@@ -96,7 +96,7 @@
    "mechanism": "ci",
    "family": "locale",
    "bucket": "A",
-   "alint": "for_each_dir + dir_exists / file_content_matches: nextcloud-l10n-app-has-l10n-dir, nextcloud-l10n-app-in-tx-config, nextcloud-l10n-shipped-with-server-in-tx-config, nextcloud-l10n-encryption-in-tx-config, nextcloud-l10n-settings-in-tx-config",
+   "alint": "for_each_dir + dir_exists / file_content_matches: nextcloud-l10n-app-has-l10n-dir, nextcloud-l10n-app-in-tx-config, nextcloud-l10n-shipped-with-server-in-tx-config, nextcloud-l10n-encryption-in-tx-config, nextcloud-l10n-settings-in-tx-config; file_exists: nextcloud-l10n-tx-config-exists; file_absent: nextcloud-apps-no-stray-files",
    "rules": [
     "nextcloud-l10n-app-has-l10n-dir",
     "nextcloud-l10n-app-in-tx-config",
@@ -110,7 +110,15 @@
    "reason": "R7: a check over files alint reads (directory structure and .tx/config); for_each_dir with {basename} templating expresses it, the renames as separate select groups. One script assertion (R1) collapsed over all apps.",
    "fire_verified": "Scratch tree (copied .tx/config, several apps' l10n, core/l10n): fired on an app with its l10n/ removed, on a removed tx resource for an ordinary app, on each renamed resource (appstore/dashboard -shipped-with-server, files_encryption, settings-1) removed, and on a new app with no tx entry; apps/testing without l10n stayed silent. Clean scratch baseline and the clone pass.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "nextcloud-02",
@@ -316,10 +324,18 @@
     "nextcloud-root-no-unexpected-dirs"
    ],
    "assertion_family": "none",
-   "reason": "A structure invariant; root-level '*' glob with allowlist excludes. respect_gitignore: false mirrors DirectoryIterator seeing tracked-but-ignored files.",
+   "reason": "A structure invariant; root-level '*' glob with allowlist excludes. The allowlist is the checker's own literal ($expectedFiles), restated as excludes, as rushstack-23 and zulip-43 restate theirs. respect_gitignore: false mirrors DirectoryIterator seeing tracked-but-ignored files.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "The reason now says why a restated allowlist is not a hand-kept list."
+    }
+   ]
   },
   {
    "id": "nextcloud-13",
@@ -345,7 +361,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "for_each_dir + file_content_matches: nextcloud-psalm-covers-every-app",
+   "alint": "for_each_dir + file_content_matches: nextcloud-psalm-covers-every-app; file_exists: nextcloud-psalm-config-exists",
    "rules": [
     "nextcloud-psalm-covers-every-app",
     "nextcloud-psalm-config-exists"
@@ -354,7 +370,15 @@
    "reason": "A reference from directory names into a config file; for_each_dir with {path} templating.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "nextcloud-15",
@@ -933,10 +957,18 @@
    "alint": "curl + grep",
    "rules": [],
    "assertion_family": "none",
-   "reason": "Reads another branch's state over the network at PR time (D).",
+   "reason": "A merge-window gate keyed on the target branch's release state (an RC in its version.php), not an assertion about the change or the files at the pin: D.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "The reason gave the network as the cause; the audit's base-revision ruling makes another revision's content B-adapter, so the reason now says what makes this D."
+    }
+   ]
   },
   {
    "id": "nextcloud-51",
@@ -990,7 +1022,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "for_each_dir select 'apps/*' require file_exists '{path}/composer/composer.json' (suggested id nextcloud-apps-have-composer-project)",
+   "alint": "for_each_dir select 'apps/*' require file_exists '{path}/composer/composer.json': nextcloud-apps-have-composer-project",
    "rules": [
     "nextcloud-apps-have-composer-project"
    ],
@@ -998,7 +1030,15 @@
    "reason": "A structural precondition that fails the CI step on its own, separate from the autoloader-freshness diff (unit 28, D). Earlier batches counted crash preconditions of a CI step as A units: signal-desktop-11 (every _locales entry holds messages.json), rocketchat-12 and rocketchat-82. Under R7 it is a property of files alint reads. All 34 apps have composer.json, composer.lock and autoload.php at the pin.",
    "fire_verified": "n/a (family other). Still tested on a scratch copy: removing apps/dav/composer/composer.json fired the rule on apps/dav. The unmodified scratch copy and the clone pass.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "nextcloud-b02",

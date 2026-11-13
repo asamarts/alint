@@ -3,20 +3,20 @@
  "sha": "a1d41fc46f3fa4951eef79ec0eabd2173db7dd55",
  "metrics": {
   "counts": {
-   "A": 32,
-   "B-config": 5,
+   "A": 30,
+   "B-config": 6,
    "B-adapter": 7,
    "B-kernel": 0,
    "B-delegate": 2,
-   "C": 16,
+   "C": 17,
    "D": 16
   },
   "addressable": 62,
-  "coverage_today": 52,
-  "coverage_with_tuning": 77,
-  "gap": 23,
-  "coverage_after_slice": 60,
-  "coverage_after_slice_with_entry_values": 61
+  "coverage_today": 48,
+  "coverage_with_tuning": 76,
+  "gap": 24,
+  "coverage_after_slice": 58,
+  "coverage_after_slice_with_entry_values": 60
  },
  "by_family": {
   "locale": {
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 30,
-    "B-config": 4,
+    "A": 28,
+    "B-config": 5,
     "B-adapter": 3,
     "B-kernel": 0,
     "B-delegate": 2,
-    "C": 12,
+    "C": 13,
     "D": 13
    },
    "addressable": 51,
-   "coverage_today": 59,
-   "coverage_with_tuning": 82,
-   "gap": 18,
-   "coverage_after_slice": 67,
-   "coverage_after_slice_with_entry_values": 67
+   "coverage_today": 55,
+   "coverage_with_tuning": 80,
+   "gap": 20,
+   "coverage_after_slice": 65,
+   "coverage_after_slice_with_entry_values": 65
   }
  },
  "units": [
@@ -317,10 +317,8 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "none: the schema-after-defaults check needs a shim schema outside the repository; the rule rushstack-command-line-no-global-plugin-commands expresses rushstack-c01 instead",
-   "rules": [
-    "rushstack-command-line-no-global-plugin-commands"
-   ],
+   "alint": "none: the schema-after-defaults check needs a shim schema outside the repository (the globalPlugin rule in this area expresses rushstack-c01)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The raw file fails the schema (build command lacks summary/enableParallelism, filled by defaults); expressing it needs a shim schema outside the repo (batch-1 precedent: shim schema is C).",
    "fire_verified": "n/a",
@@ -340,6 +338,14 @@
      "fields": {
       "alint": "none: the schema-after-defaults check needs a shim schema outside the repository; the rule rushstack-command-line-no-global-plugin-commands expresses rushstack-c01 instead"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "rules"
+     ],
+     "why": "Its rule expresses rushstack-c01, which lists it; a C unit is not credited with it."
     }
    ]
   },
@@ -350,7 +356,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "json_path_matches rushstack-project-folder-depth",
+   "alint": "json_path_matches: rushstack-project-folder-depth; json_path_absent: rushstack-project-folder-depth-bounds",
    "rules": [
     "rushstack-project-folder-depth",
     "rushstack-project-folder-depth-bounds"
@@ -368,6 +374,13 @@
       "none"
      ],
      "why": "The rule hardcodes depth 2 in a regex instead of reading projectFolderMinDepth/MaxDepth from rush.json. It also does not express the min>=1 and max>=min sanity checks (RushConfiguration.ts:800-811) that its comment claims. Restating a config value is the treatment Stage A gives rushstack-58 and -59 (C), so keep it consistent."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
     }
    ]
   },
@@ -813,7 +826,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a package graph from the workspace manifests and rush.json for an acyclic check (file_graph acyclic takes file edges only)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Cycle detection over a graph whose edges are package names from the workspace manifests and rush.json. file_graph acyclic exists for file edges; the package-name edges are what is missing.",
@@ -828,6 +841,13 @@
       "none"
      ],
      "why": "rush.json decoupledLocalDependencies (28 uses, e.g. rush.json:443,456) feed a package-name graph, as babel-39, wsdk-51 and trpc-13 (B-adapter package-graph)."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "package-graph"
@@ -987,15 +1007,15 @@
   },
   {
    "id": "rushstack-47",
-   "summary": "rush-project.json operationSettings integrity after rig resolution",
+   "summary": "rush-project.json's loader checks beyond the schema: a duplicate operationName in operationSettings, and overlapping output folders",
    "evidence": "rush retest phased commands",
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint unique-key over the operationName values of each rush-project.json (the schema half is rushstack-09)",
    "rules": [],
    "assertion_family": "unique-key",
-   "reason": "Requires rig resolution (tool semantics).",
+   "reason": "Stage B: none of the loader checks needs a build. A duplicate operationName is unique-key over values in one file, which no kind asserts; the output-folder overlap is folded in.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -1007,6 +1027,15 @@
       "none"
      ],
      "why": "D is too broad. The rush-project.json schema half is A per file (it belongs with 09; see b15). The remaining loader checks are duplicate operationName (RushProjectConfiguration.ts:1150-1214, unique-key) and outputFolderNames overlap / parameterNamesToIgnore (440-535, B-adapter for the overlap). None needs build execution."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason",
+      "summary"
+     ],
+     "why": "The summary and reason were Stage A's D text ('requires rig resolution')."
     }
    ]
   },
@@ -1175,17 +1204,27 @@
    "evidence": "libraries/rush-lib/src/api/Subspace.ts:152-156",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "A",
-   "alint": "registry_paths_resolve rushstack-subspace-config-folders-exist",
+   "bucket": "C",
+   "alint": "registry_paths_resolve x2: rushstack-subspace-config-folders-exist (the declared subspaces, by JSONPath) and rushstack-default-subspace-config-folder-exists (the implicit default subspace's folder, by a line-anchored regex)",
    "rules": [
     "rushstack-subspace-config-folders-exist",
     "rushstack-default-subspace-config-folder-exists"
    ],
    "assertion_family": "none",
-   "reason": "Registry-to-directory resolution; confirmed. The implicit default subspace's folder is not covered (no extraction yields the literal name).",
+   "reason": "Registry-to-directory resolution. The declared subspaces resolve by JSONPath; the implicit default subspace's folder needs a line-anchored regex on subspacesEnabled, which a one-line file defeats, so the unit is C (audit regex ruling).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "The default subspace's half reads `subspacesEnabled` with a line-anchored regex, which the config notes a one-line subspaces.json defeats; the audit's regex ruling makes that C."
+    }
+   ]
   },
   {
    "id": "rushstack-58",
@@ -1282,7 +1321,7 @@
    "mechanism": "tool-config",
    "family": "other",
    "bucket": "A",
-   "alint": "json_path_matches common/config/rush/command-line.json $.phases[*].name '^_phase:[a-z][a-z0-9]*(-[a-z0-9]+)*$' (proposed id b-cmdline-phase-name-syntax)",
+   "alint": "json_path_matches common/config/rush/command-line.json $.phases[*].name '^_phase:[a-z][a-z0-9]*(-[a-z0-9]+)*$': rushstack-cmdline-phase-name-syntax",
    "rules": [
     "rushstack-cmdline-phase-name-syntax"
    ],
@@ -1290,7 +1329,15 @@
    "reason": "A single-file value regex, so A. alint check passed on the clone. Renaming _phase:test (line 273) to an invalid name fired the rule on a scratch copy.",
    "fire_verified": "n/a (family other); fired anyway on scratch mutation of line 273",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "rushstack-b02",
@@ -1567,16 +1614,26 @@
    "evidence": "apps/heft/src/configuration/HeftPluginConfiguration.ts (loadAndValidate against apps/heft/src/schemas/heft-plugin.schema.json; duplicate plugin names at :216,:228); 22 */*/heft-plugin.json files; run by every heft build in rush retest (ci.yml:74)",
    "mechanism": "tool-config",
    "family": "other",
-   "bucket": "A",
-   "alint": "json_schema_passes */*/heft-plugin.json vs apps/heft/src/schemas/heft-plugin.schema.json",
+   "bucket": "B-config",
+   "alint": "json_schema_passes */*/heft-plugin.json vs apps/heft/src/schemas/heft-plugin.schema.json (the schema half, a partial rule): rushstack-heft-plugin-manifest-schema; the unique plugin names need constraint unique-key",
    "rules": [
     "rushstack-heft-plugin-manifest-schema"
    ],
-   "assertion_family": "none",
-   "reason": "Under R7 this is a loader validation of static files. The schema rule passed on all 22 files and fired when pluginName was renamed. The duplicate-name sub-check is part of the same loader, so one unit; a stricter count would add a unique-key B-config.",
+   "assertion_family": "unique-key",
+   "reason": "Under R7 this is a loader validation of static files. The schema rule passed on all 22 files and fired when pluginName was renamed. The duplicate-name check is part of the same loader step, so it is folded in (the tokio ruling), and it needs uniqueness over values within a file, which no kind asserts: B-config unique-key.",
    "fire_verified": "n/a (family other); fired on scratch mutation",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "Its summary folds in the duplicate-plugin-name check, which no kind expresses; it needs unique-key over values in a file. The schema rule stays as a partial rule."
+    }
+   ]
   },
   {
    "id": "rushstack-c01",

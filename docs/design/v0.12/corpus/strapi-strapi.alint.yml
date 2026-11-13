@@ -55,7 +55,7 @@
 # VALUE-ADD rules (level info, outside the ratio) close the file: Yarn and Node
 # pins that agree today by hand.
 # Not expressed (B/D, see the stratum record): syncpack's one exact version
-# per dependency (B-config unique-key), the en.json singular/plural pair test
+# per dependency (B-adapter, entry values; unique-key), the en.json singular/plural pair test
 # (B-config unique-key), iso-locales unique codes (B-config unique-key),
 # unique workspace names (B-config unique-key), the docs frontmatter value and
 # schema validators (status / review_notes / package / tags / Docusaurus
@@ -181,7 +181,7 @@ rules:
     level: error
     message: "A catalog: dependency must have an entry in .yarnrc.yml's catalog (yarn install fails otherwise)."
 
-  # A [dep-version] strapi-07. AGENTS.md "Workspace deps": internal packages/
+  # C [dep-version] strapi-07. AGENTS.md "Workspace deps": internal packages/
   #   deps reference each other with pinned semver versions, not workspace:*;
   #   workspace:* is only for examples/, tests-next/* and some root devDeps.
   #   Half 1 (no workspace:): every workspace manifest outside the allowlist,

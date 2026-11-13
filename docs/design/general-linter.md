@@ -1777,10 +1777,10 @@ The stratum was measured on 2026-11-12. The frame is
 
 | Family | Units | Today | With tuning | After the v0.23 slice | Slice plus entry values |
 |---|--:|--:|--:|--:|--:|
-| `locale` | 136 | 23% | 57% | 28% | 30% |
+| `locale` | 134 | 22% | 56% | 26% | 29% |
 | `dep-version` | 170 | 43% | 73% | 46% | 57% |
 | `toolchain-pin` | 81 | 63% | 80% | 63% | 63% |
-| other | 1,171 | 56% | 79% | 59% | 60% |
+| other | 1,173 | 56% | 79% | 59% | 60% |
 | Pooled | 1,558 | 51% | 76% | 54% | 56% |
 
 "Units" counts every unit, D included; the percentages are of A + B + C. "After the v0.23 slice"
@@ -1800,7 +1800,7 @@ rows in one of those families. Phase 8 confirms these projections.
 
 | Rank | Family | Units |
 |--:|---|--:|
-| 1 | `unique-key` | 41 (30 + 11) |
+| 1 | `unique-key` | 42 (31 + 11) |
 | 2 | `set` | 17 (11 + 6) |
 | 3 | `reference` | 11 (5 + 6) |
 | 4 | `equality` | 9 (0 + 9) |
@@ -1818,16 +1818,16 @@ rows in one of those families. Phase 8 confirms these projections.
 | 6 | a one-off need (`other`) | 13 | 10 |
 | 7 | placeholders compared per key | 11 | 7 |
 | 8 | a documentation site's routes | 9 | 6 |
-| 9 | a value derived from other files | 8 | 6 |
+| 9 | a value derived from other fields, files or paths | 8 | 6 |
 | 10 | CLDR plural categories per locale | 7 | 5 |
 
-Package graphs (5), link types (3), Unicode normalization (3) and ICU structure (2) follow.
+Package graphs (5), link types (3), normalization (3) and ICU structure (2) follow.
 
 The log's capability table adds each in turn:
 - entry values take `dep-version` from 46% to 57%;
 - version comparison takes `toolchain-pin` from 63% to 83%;
-- `set` and `reference` add 6.0 points to `locale` and 7.7 to `dep-version` (2.9 pooled);
-- adapters for placeholders, plural categories and ICU take `locale` from 36% to 53%.
+- `set` and `reference` add 6.1 points to `locale` and 7.7 to `dep-version` (2.9 pooled);
+- adapters for placeholders, plural categories and ICU take `locale` from 35% to 53%.
 
 **Inputs to the Phase 3 design** (`v0.23/selectors-and-constraints.md`, which the owner approves
 before implementation):
@@ -1862,8 +1862,8 @@ columns.
 
 **Limits of the measurement:**
 - Analysts were agents under the v0.12 protocol. Each repository had an adversarial
-  verification pass, the integrator re-validated every configuration, and the audit re-reviewed
-  every unit. The rulings that needed judgment are in the frame's section 2.2, and each unit's
+  verification pass, the integrator re-validated every configuration, the audit re-reviewed
+  every unit, and a review checked the records against the rulings (2026-11-13). The rulings that needed judgment are in the frame's section 2.2, and each unit's
   reason is in its record.
 - One repository (zulip) contributes 190 units, 87 of them rules in its own regex linter, so the
   family tables, not the pooled figure, are the measure.

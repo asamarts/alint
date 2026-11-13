@@ -825,7 +825,7 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "A",
-   "alint": "cross_file equals x2 with regex extraction: 'const MOUNT_MASK\\s*=\\s*(0x[0-9a-fA-F]+);' vs 'const ZIP_MASK\\s*=\\s*(0x[0-9a-fA-F]+);', and 'magicByte = 0x([0-9a-fA-F]{2}),' vs 'const ZIP_MAGIC\\s*=\\s*0x([0-9a-fA-F]{2})000000;'. Proposed ids yarnpkg-berry-fd-mask-synced and yarnpkg-berry-fd-magic-synced. They are not in Stage A's config; I verified them in scratch.",
+   "alint": "cross_file equals x2 with regex extraction: 'const MOUNT_MASK\\s*=\\s*(0x[0-9a-fA-F]+);' vs 'const ZIP_MASK\\s*=\\s*(0x[0-9a-fA-F]+);', and 'magicByte = 0x([0-9a-fA-F]{2}),' vs 'const ZIP_MAGIC\\s*=\\s*0x([0-9a-fA-F]{2})000000;'. Rules yarnpkg-berry-fd-mask-synced and yarnpkg-berry-fd-magic-synced.",
    "rules": [
     "yarnpkg-berry-fd-mask-synced",
     "yarnpkg-berry-fd-magic-synced"
@@ -834,7 +834,15 @@
    "reason": "This is a load-bearing sync comment under R5, the same treatment Stage A gave sortMap (unit 21). Stage A's search missed it. The two constants are one convention under R1. Both ends are literal values that alint extracts with a regex, so it is A.",
    "fire_verified": "n/a (family other). Fired anyway in a scratch git repo holding only the two files at their real paths: ZIP_MASK set to 0x7f000000 gave 1 finding (fd-mask-synced), and magicByte set to 0x2b gave 1 finding (fd-magic-synced). The clone and the unmodified scratch copy give 0. validate-config passes.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   }
  ],
  "removed": [

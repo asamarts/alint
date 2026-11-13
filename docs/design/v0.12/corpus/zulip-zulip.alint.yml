@@ -101,7 +101,7 @@ rules:
       Every locale with LC_MESSAGES/django.po needs a sibling translations.json
       (zerver/management/commands/compilemessages.py reads both).
 
-  # zulip-04 (A) compilemessages and zerver/lib/i18n.py orjson.loads() each
+  # zulip-04 (C) compilemessages and zerver/lib/i18n.py orjson.loads() each
   # locale/<x>/translations.json; it must parse, and compilemessages.py:147-160
   # calls .values() on the result, so the root must be a JSON object. Two
   # rules: the JSONPath below is a probe that never matches, so its only
@@ -389,7 +389,7 @@ rules:
     level: error
     message: "Keep EXEMPT_FILES in tools/test-js-with-node sorted."
 
-  # zulip-39 (A) tools/test-js-with-node enforce_proper_coverage():504-512
+  # zulip-39 (C) tools/test-js-with-node enforce_proper_coverage():504-512
   # asserts EXEMPT_FILES - all_js_files is empty, where all_js_files is the
   # non-recursive globs web/src/*.js, web/src/*.ts, web/src/billing/*.js,
   # web/tests/*.cjs and web/tests/lib/*.cjs. So an entry must both exist and

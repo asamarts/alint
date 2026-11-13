@@ -190,7 +190,7 @@
    "mechanism": "test",
    "family": "locale",
    "bucket": "C",
-   "alint": "cross_file relation set_equals; rule forem-locales-supported-match-files",
+   "alint": "cross_file relation set_equals: forem-locales-supported-match-files; for_each_file: forem-locales-files-registered-by-stem",
    "rules": [
     "forem-locales-files-registered-by-stem",
     "forem-locales-supported-match-files"
@@ -208,6 +208,13 @@
       "none"
      ],
      "why": "Both rules read the Ruby hash with line regexes. A one-line SUPPORTED_LOCALES = { \"en\" => ..., \"fr\" => ..., \"pt\" => ... }.freeze gives 4 false findings, although the spec passes; strapi-20 moved to C for the same two-entries-on-one-line reason."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
     }
    ]
   },
@@ -628,7 +635,7 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "cross_file relation subset; forem-documented-feature-icons-in-icons",
+   "alint": "cross_file relation subset: forem-documented-feature-icons-in-icons; file_content_matches: forem-documented-feature-icons-nonempty",
    "rules": [
     "forem-documented-feature-icons-in-icons",
     "forem-documented-feature-icons-nonempty"
@@ -637,7 +644,15 @@
    "reason": "Expressible but awkward. The target regex cannot be scoped to the %w[] block, so the bare `end` (line 53) and `super` (line 61) lines are also accepted (slightly lenient). Fire-tested: an undocumented icon and an icon removed from the list both fire.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "forem-27",
@@ -1010,7 +1025,7 @@
    "mechanism": "test",
    "family": "locale",
    "bucket": "A",
-   "alint": "file_content_matches on app/lib/constants/settings/user_experience.rb, pattern '(?s)SUPPORTED_LOCALES = \\{[^}]*\"pt\"[ \\t]*=>'; suggested rule id forem-locales-supported-includes-pt (not yet in the Stage A config)",
+   "alint": "file_content_matches on app/lib/constants/settings/user_experience.rb, pattern '(?s)SUPPORTED_LOCALES = \\{[^}]*\"pt\"[ \\t]*=>': forem-locales-supported-includes-pt",
    "rules": [
     "forem-locales-supported-includes-pt"
    ],
@@ -1018,7 +1033,15 @@
    "reason": "This `it` is separate from forem-05 and can fail on its own: if both the \"pt\" key and every *pt.yml file are deleted, forem-05's set_equals still passes but this spec fails. It is a required-member check on the supported-locale registry, which a regex expresses exactly (R4 confirmed).",
    "fire_verified": "On a scratch copy (config/locales/*.yml, user_experience.rb, package.json, .yarnrc.yml, .ruby-version, Containerfile, the yarn release) I removed the \"pt\" key and all *pt.yml files. The new rule fired, and Stage A's forem-locales-supported-match-files passed, which shows the two units are independent. The new rule passes on the unbroken scratch base and on the clone.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "forem-b02",
@@ -1027,7 +1050,7 @@
    "mechanism": "convention",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "cross_file equals: source Gemfile.lock regex '(?m)^    public_suffix \\(([0-9]+\\.[0-9]+\\.[0-9]+)\\)\\r?$' → target psl_data.rs regex '(?m)^//! Auto-generated ASCII rule table from `public_suffix` ([0-9]+\\.[0-9]+\\.[0-9]+) '; suggested rule id forem-deps-psl-data-tracks-public-suffix",
+   "alint": "cross_file equals: source Gemfile.lock regex '(?m)^    public_suffix \\(([0-9]+\\.[0-9]+\\.[0-9]+)\\)\\r?$' → target psl_data.rs regex '(?m)^//! Auto-generated ASCII rule table from `public_suffix` ([0-9]+\\.[0-9]+\\.[0-9]+) ': forem-deps-psl-data-tracks-public-suffix",
    "rules": [
     "forem-deps-psl-data-tracks-public-suffix"
    ],
@@ -1035,7 +1058,15 @@
    "reason": "A documented convention (R5) that HEAD upholds. It requires a dependency's locked version to agree with the version recorded in the committed mirror of that dependency's data, i.e. version agreement across two files for one dependency, so the family is dep-version (\"other\" as codegen freshness is the alternative reading). alint expresses it today.",
    "fire_verified": "On scratch copies of Gemfile.lock and the psl_data.rs header: bumping public_suffix to 7.0.6 in Gemfile.lock fired (\"7.0.5 != 7.0.6\"), and changing the header to 7.0.4 fired. The rule passes on the scratch base and on the clone.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "forem-b03",
@@ -1079,7 +1110,7 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "registry_paths_resolve source lib/sidekiq/boot_memory_trimmer.rb, extract regex '(?m)^      ([A-Za-z0-9_][A-Za-z0-9_./-]*)$', base lint_root, expect dir; suggested rule id forem-sidekiq-eager-load-exclusions-exist",
+   "alint": "registry_paths_resolve source lib/sidekiq/boot_memory_trimmer.rb, extract regex '(?m)^      ([A-Za-z0-9_][A-Za-z0-9_./-]*)$', base lint_root, expect dir: forem-sidekiq-eager-load-exclusions-exist",
    "rules": [
     "forem-sidekiq-eager-load-exclusions-exist"
    ],
@@ -1087,7 +1118,15 @@
    "reason": "A reference from a list literal to directories. registry_paths_resolve expresses it, but only because the regex is scoped by 6-space indentation. A future nested `      end` would false-fire, which is the same unscoped-scrape awkwardness Stage A rated C for forem-26 and forem-49. It wants block-scoped extraction (start/end markers on extract).",
    "fire_verified": "n/a (family other). I still tested it: the rule passes on the clone, fires when \"app/presenters\" (absent) is added to the list, and fires when app/policies is removed from a scratch copy.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "forem-b05",
@@ -1096,7 +1135,7 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "A",
-   "alint": "file_content_matches on app/queries/homepage/articles_query.rb, pattern '(?s)ATTRIBUTES = %i\\[[^\\]]*\\btype_of\\b[^\\]]*\\]'; suggested rule id forem-homepage-query-attributes-type-of",
+   "alint": "file_content_matches on app/queries/homepage/articles_query.rb, pattern '(?s)ATTRIBUTES = %i\\[[^\\]]*\\btype_of\\b[^\\]]*\\]': forem-homepage-query-attributes-type-of",
    "rules": [
     "forem-homepage-query-attributes-type-of"
    ],
@@ -1104,7 +1143,15 @@
    "reason": "Stage A put this assertion into forem-23's summary, but no rule in the config expresses it (R4). It is a separate `it`, in a separate context, about a different file, so it is its own unit. The bracket-scoped regex expresses it exactly.",
    "fire_verified": "n/a (family other). I still tested it: the rule passes on the clone and fires on a scratch copy with the `type_of` line removed.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "forem-b06",
@@ -1128,7 +1175,7 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "A",
-   "alint": "three file_exists rules, one per binary (a paths array is any-of); suggested ids forem-native-binary-{x86-64-linux,arm64-darwin,x86-64-darwin}",
+   "alint": "three file_exists rules, one per binary (a paths array is any-of): forem-native-binary-x86-64-linux, forem-native-binary-arm64-darwin, forem-native-binary-x86-64-darwin",
    "rules": [
     "forem-native-binary-x86-64-linux",
     "forem-native-binary-arm64-darwin",
@@ -1138,7 +1185,15 @@
    "reason": "A documented structural convention (R5) that HEAD upholds. For linux and arm64-darwin, existence is the guard clause of forem-35's D load test (calibration A5 ruling). The full three-platform set, including x86_64-darwin, is covered only by the convention, so it has its own failure semantics.",
    "fire_verified": "n/a (family other). I still tested it: the rules pass on the clone, and deleting x86_64-darwin/forem_native.bundle in scratch fires.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "forem-b08",

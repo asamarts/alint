@@ -3,20 +3,20 @@
  "sha": "3cea40b078519222db432b5edf827ddc3e629a2a",
  "metrics": {
   "counts": {
-   "A": 32,
+   "A": 31,
    "B-config": 1,
    "B-adapter": 9,
    "B-kernel": 1,
    "B-delegate": 0,
-   "C": 5,
+   "C": 6,
    "D": 35
   },
   "addressable": 48,
-  "coverage_today": 67,
+  "coverage_today": 65,
   "coverage_with_tuning": 77,
   "gap": 23,
-  "coverage_after_slice": 67,
-  "coverage_after_slice_with_entry_values": 67
+  "coverage_after_slice": 65,
+  "coverage_after_slice_with_entry_values": 65
  },
  "by_family": {
   "locale": {
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 27,
+    "A": 26,
     "B-config": 1,
     "B-adapter": 4,
     "B-kernel": 1,
     "B-delegate": 0,
-    "C": 3,
+    "C": 4,
     "D": 29
    },
    "addressable": 36,
-   "coverage_today": 75,
+   "coverage_today": 72,
    "coverage_with_tuning": 83,
    "gap": 17,
-   "coverage_after_slice": 75,
-   "coverage_after_slice_with_entry_values": 75
+   "coverage_after_slice": 72,
+   "coverage_after_slice_with_entry_values": 72
   }
  },
  "units": [
@@ -389,7 +389,7 @@
    "mechanism": "script",
    "family": "other",
    "bucket": "B-config",
-   "alint": "constraint over package dirs (build-script rows -> turbo build-output rows); partial guard only: wsdk-build-script-has-turbo-json-partial (info, value-add)",
+   "alint": "constraint over package dirs (build-script rows -> turbo build-output rows); partial guard only: wsdk-build-script-has-turbo-json-partial (a partial rule at level info)",
    "rules": [
     "wsdk-build-script-has-turbo-json-partial"
    ],
@@ -406,6 +406,13 @@
       "reference"
      ],
      "why": "The assertion is that the dirs with a build script are a subset of the dirs whose turbo.json has non-empty tasks.build.outputs. That is a one-way inclusion between two named sets, which batch 1 reserves for `set`. Neither file holds a value that names an entity in the other (both sides are keyed by the same dir path), so it is not `reference`. Moderate confidence. Neither family is in the slice, so the before/after figures do not change."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The rule is listed in `rules`, as a partial rule, not among the value-add rules."
     }
    ]
   },
@@ -1408,7 +1415,7 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "A",
-   "alint": "file_content_forbidden on packages/workers-utils/src/config/environment.ts, pattern '@default[^\\S\\n]+`' (suggested id wsdk-environment-default-not-escaped)",
+   "alint": "file_content_forbidden on packages/workers-utils/src/config/environment.ts, pattern '@default[^\\S\\n]+`': wsdk-environment-default-not-escaped",
    "rules": [
     "wsdk-environment-default-not-escaped"
    ],
@@ -1416,7 +1423,15 @@
    "reason": "By R7 and the forem-23 precedent, a test that greps committed source text is classified by its logic. This one is a single per-file forbidden pattern.",
    "fire_verified": "Family other, so not required. Checked anyway: inserting a backtick after an @default on the scratch copy fired; the rule passes on the clone (exit 0).",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "wsdk-b02",
@@ -1424,17 +1439,26 @@
    "evidence": "tools/deployments/__tests__/validate-changesets.test.ts:19-58 (expect(new Set(findPackages().keys())).toEqual(...) at :23); run on every PR by test-and-check.yml:206 (test:ci --filter @cloudflare/tools)",
    "mechanism": "test",
    "family": "other",
-   "bucket": "A",
-   "alint": "cross_file set_equals. Source: packages/*/package.json with json `$[?@ == $.name && ($.private != true || $.scripts.deploy)]` (Stage A's wsdk-changeset-packages-known selector). Target: the test file with regex `(?m)^\\t{4}\"([^\"]+)\",$`.",
+   "bucket": "C",
+   "alint": "cross_file set_equals: source packages/*/package.json with json `$[?@ == $.name && ($.private != true || $.scripts.deploy)]` (the selector of wsdk-19's rule), target the test file with regex `(?m)^\\t{4}\"([^\"]+)\",$`: wsdk-releasable-packages-match-test-list",
    "rules": [
-    "wsdk-changeset-packages-known",
     "wsdk-releasable-packages-match-test-list"
    ],
    "assertion_family": "none",
-   "reason": "Classified by its logic under R7, as in forem-b01/b05 (a spec that asserts committed state). It differs from wsdk-19, which checks that changeset names fall inside the releasable set; this test pins the set itself. Adding a public package or a deploy script fails CI until the list is updated. Same JSONPath-vs-JS-truthiness caveat as Stage A's rule.",
+   "reason": "Classified by its logic under R7, as in forem-b01/b05 (a spec that asserts committed state). It differs from wsdk-19, which checks that changeset names fall inside the releasable set; this test pins the set itself. C because the target regex reads the list in one layout (four tabs, one entry per line), which the batch 2 ruling makes C. Same JSONPath-vs-JS-truthiness caveat as Stage A's rule.",
    "fire_verified": "Family other, so not required. Checked anyway: adding a public packages/* manifest on the scratch copy fired, and so did deleting the solarflare-theme line from the list; the rule passes on the clone.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "The target regex `(?m)^\\t{4}\"([^\"]+)\",$` holds for one layout of the test file (batch 2 regex ruling). The unit also listed wsdk-19's rule, whose selector it only shares."
+    }
+   ]
   },
   {
    "id": "wsdk-b03",
