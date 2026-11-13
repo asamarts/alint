@@ -1863,8 +1863,8 @@ columns.
 **Limits of the measurement:**
 - Analysts were agents under the v0.12 protocol. Each repository had an adversarial
   verification pass, the integrator re-validated every configuration, the audit re-reviewed
-  every unit, and a review checked the records against the rulings (2026-11-13). The rulings that needed judgment are in the frame's section 2.2, and each unit's
-  reason is in its record.
+  every unit, and a review checked the records against the rulings (2026-11-13). The rulings
+  that needed judgment are in the frame's section 2.2, and each unit's reason is in its record.
 - One repository (zulip) contributes 190 units, 87 of them rules in its own regex linter, so the
   family tables, not the pooled figure, are the measure.
 - The per-repository median `coverage_today` is 45%, with a range from 25% to 84%.

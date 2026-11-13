@@ -233,7 +233,7 @@ The feature freeze is the point at which phases 1 to 8 are merged. Phase 9 is de
   `general-linter.md` section 12.4. Two need the owner's decision: an entry-values adapter for
   the dependency version policy, and `set` against `cardinality` in the slice (a new ADR, since
   ADR-0032 is accepted). The stratum found three alint defects: #502, #503 and #504.
-- 2026-11-13: phase 2 review. A check of the stratum records against the frame's rulings, the
+- 2026-11-13: phase 2 review (#505). A check of the stratum records against the frame's rulings, the
   configuration comments and the published figures moved eight units (log, "Review"):
   `locale` is 22%, 26% and 29% today, after the slice and with entry values; the other families
   and the pooled figures are unchanged. Two new `xtask` gates check the records' change entries
