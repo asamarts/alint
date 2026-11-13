@@ -1,0 +1,37 @@
+test_version: 1
+name: a nested key_parity checks strip_root against each iteration's format
+tags: [check, key_parity, for_each_file, cross_file, nested, json, properties]
+
+# `strip_root` loads because the reference's format is pending: a token gives
+# it its extension. Each iteration's build checks it, so the JSON iteration is
+# compared and the properties one is a nested_rule_build failure.
+
+given:
+  tree:
+    web:
+      en.json: '{"en": {"a": 1, "b": 2}}'
+      fr.json: '{"fr": {"a": 1}}'
+    api:
+      en.properties: "a=1\n"
+      fr.properties: "a=1\n"
+  config: |
+    version: 1
+    rules:
+      - id: locale-parity
+        kind: for_each_file
+        select: "*/en.*"
+        level: error
+        require:
+          - kind: key_parity
+            reference: "{path}"
+            peers: "{dir}/fr.{ext}"
+            strip_root: true
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: locale-parity, level: error, path: web/fr.json, message: {regex: "missing key `b`"}}
+    analysis_failures:
+      - {rule: locale-parity, kind: nested_rule_build, path: api/en.properties, message: {regex: "`strip_root` applies only to JSON, YAML, and TOML files, not properties"}}

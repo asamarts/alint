@@ -26,19 +26,24 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `.ignore`, `.git/info/exclude` and the global excludes file list, and the tracked view was
   built from the walk. A file forced in with `git add -f`, or committed before its `.gitignore`
   entry, therefore never reached `file_exists`, `file_absent`, `dir_exists` or `dir_absent`. The
-  tracked view now adds back each tracked path that only an ignore file hid, with its parent
-  directories, when it exists inside the root. This is the documented behavior, and the one
-  change in v0.23 to how a v1 configuration behaves: a `file_absent` or `dir_absent` rule with
-  `git_tracked_only: true` can now fire on a force-added path, as the bundled `java@v1` rules do
-  on a committed `target/`, `build/` or `.class` file, and a `file_exists` or `dir_exists` rule
-  can now pass. The config's `ignore:` and the walker's other exclusions still apply.
-- `java@v1`'s `java-no-tracked-target` and `java-no-tracked-build` say to untrack the directory
-  with `git rm -r --cached` as well as list it in `.gitignore`, since the directory they report
-  can now already be listed there.
+  tracked view now adds back each tracked path that only an ignore file hid, and each directory
+  above a tracked path, when it exists inside the root. This is the documented behavior. A
+  `file_absent` or `dir_absent` rule with `git_tracked_only: true` can now fire on a force-added
+  path, as the bundled `java@v1` rules do on a force-added `target/`, `build/` or `.class` file,
+  and a `file_exists` or `dir_exists` rule can now pass. The config's `ignore:` and the walker's
+  other exclusions still apply. A `.ignore` file, which git does not read, no longer hides a
+  tracked path from these rules either; list the path in `ignore:` to keep it out. `fix
+  --dry-run` and the language server agree with `check` on such paths.
+- `java@v1`'s `java-no-tracked-target` and `java-no-tracked-build` say to untrack a directory
+  that holds build output with `git rm -r --cached` as well as list it in `.gitignore`, since the
+  directory they report can now already be listed there, and `java-no-class-files` says to
+  untrack the files with `git rm --cached`.
 - `registry_paths_resolve`, `file_graph`'s `no_dangling` and `markdown_links_resolve` no longer
   say that a path is missing "on disk". They resolve paths against the walked tree, so a path
   that an ignore file or `ignore:` excludes does not resolve either, and the messages now say
-  "missing or ignored". Their baseline keys are unchanged.
+  "missing or ignored". A `registry_paths_resolve` entry of the other kind now says so ("resolves
+  to a file, not a directory"), and `php@v1`'s Composer rules say an entry must exist and not be
+  ignored. Their baseline keys are unchanged.
 
 ### Fixed
 
@@ -46,14 +51,26 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `every_matching_has` compares its files.** It used to stop on every iteration with
   "internal error ... key_parity requires the relation read cache", unless another rule in the
   configuration happened to enable the run's relation caches. `--only <parent>` and
-  `explain --trace <parent>` failed even then (#502).
-- **A nested `key_parity` whose `reference:` or literal `peers:` takes its file name from a path
+  `explain --trace <parent>` failed even then (#502). Each iteration's relation rules
+  (`key_parity`, `cross_file`) now read through caches of their own, which nothing outlives. With
+  a top-level relation rule configured as well, a nested one used the run's caches instead: every
+  iteration's files and decoded rows stayed in memory for the whole run and counted against its
+  row limit, so a long iteration could fail with "relation limit `rows_per_run` reached".
+- **A nested `key_parity` whose `reference:` or literal `peers:` takes its key format from a path
   token loads.** A configuration with `reference: "{path}"` or `peers: "{dir}/fr.{ext}"` in a
   `require:` block was rejected with "cannot infer the key format", because nested rules are
-  checked at load with a placeholder path that has no extension. The format is now inferred in
-  each iteration, and an iteration whose file has no key format is a `nested_rule_build` analysis
-  failure. The load-time placeholder also no longer renders `{dir}`, `{ext}` or `{parent_name}`
-  empty, so `reference: "i18n/{parent_name}.json"` loads too (#504).
+  checked at load with a placeholder path that has no extension. The format, and the
+  `strip_root` and `ignore_keys` checks that depend on it, are now made in each iteration, and an
+  iteration whose file has no key format is a `nested_rule_build` analysis failure whose message
+  lists the supported names. What holds for every iteration is still a load error: a literal
+  extension such as `reference: "{dir}/strings-{stem}.xml"`, a literal peer whose key model does
+  not allow `strip_root` or an `ignore_keys` pattern, and `peers: "{dir}/{basename}"` against
+  `reference: "{path}"` (#504).
+- **Nested rules of every kind are checked at load with a placeholder for each path token**
+  (`{stem}` as `_stem_`), where 0.22 rendered `{dir}`, `{ext}` and `{parent_name}` empty. A
+  template whose empty rendering was invalid now loads, such as `reference:
+  "i18n/{parent_name}.json"`, `command_idempotent`'s `workdir: "{dir}/.."` or `json_path_equals`'s
+  `path: "$.{dir}"`, and a load error quotes the template as written (`{dir}/[{stem}`) (#504).
 - `alint test` redacts a runner error's paths correctly when the test package and the temporary
   directory overlap. It replaced the temporary directory first, so a package under `TMPDIR`
   reported `<temporary-directory>` with the rest of its path instead of `<policy-test-package>`,

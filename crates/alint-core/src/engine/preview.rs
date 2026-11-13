@@ -9,6 +9,14 @@ use crate::walker::FileIndex;
 
 use super::{Engine, RuleEntry};
 
+/// The exclusions a fix preview checks a create against: the walk's, and what
+/// a `git_tracked_only` rule's view still leaves out.
+#[derive(Clone, Copy)]
+struct Skips<'s, 'a> {
+    walk: &'s crate::walker::WalkSkips<'a>,
+    tracked: &'s crate::walker::WalkSkips<'a>,
+}
+
 impl Engine {
     /// `--dry-run` has no re-walk to discover that a fix will not stick, so
     /// predict the known cases the real `fix` demotes after its re-check: a
@@ -20,7 +28,9 @@ impl Engine {
     /// the same pass writes, or below a symlinked directory the walk does not
     /// enter), and the rule does not look for on disk itself; a target outside
     /// the rule's `paths:` or landing outside the root; or a created file a
-    /// `git_tracked_only` rule would not see as tracked. Those become the same
+    /// `git_tracked_only` rule would not see as tracked. A `git_tracked_only`
+    /// rule also sees a tracked path that only an ignore file hides, so for it
+    /// ignore files do not count. Those become the same
     /// unresolved skip the real run reports. Other ways a fix can fail its
     /// re-check (a cascade through another rule, content a fixer writes that
     /// the rule still rejects, an edit to an existing ignore file) are only
@@ -60,28 +70,23 @@ impl Engine {
                 creates.push((result, item, entry, path, names, is_dir, content));
             }
         }
-        // The walk after the fix reads the ignore files those creates write,
-        // where they land. A create skips a file that is already there, so the
-        // first create of a path wins, whichever name (through an in-tree
-        // symlink) it uses.
-        let mut created_ignores: Vec<(&Path, &[u8])> = Vec::new();
-        for (_, _, _, _, names, _, content) in &creates {
-            let (Ok(names), Some(content)) = (names, content.as_deref()) else {
-                continue;
-            };
-            let landed = names.last().expect("a create lands somewhere");
-            if matches!(
-                landed.file_name().and_then(std::ffi::OsStr::to_str),
-                Some(".gitignore" | ".ignore")
-            ) && !created_ignores.iter().any(|(path, _)| path == landed)
-            {
-                created_ignores.push((landed.as_path(), content));
-            }
-        }
+        let created_ignores = Self::created_ignore_files(
+            creates
+                .iter()
+                .map(|(_, _, _, _, names, _, content)| (names, content.as_deref())),
+        );
         // `git ls-files`, once, when a `git_tracked_only` rule creates a file,
         // and the walk's ignore files, once for every create.
         let tracked = std::cell::OnceCell::new();
         let skips = crate::walker::WalkSkips::new(root, walk_opts, &created_ignores);
+        // What a `git_tracked_only` rule's view leaves out: ignore files do not
+        // hide a tracked path from it (`walker::tracked_entries_ignore_files_hid`).
+        let tracked_walk = crate::walker::without_ignore_files(walk_opts);
+        let tracked_skips = crate::walker::WalkSkips::new(root, &tracked_walk, &[]);
+        let skips = Skips {
+            walk: &skips,
+            tracked: &tracked_skips,
+        };
         for (result, item, entry, path, names, is_dir, _) in &creates {
             // A sensitive item's reason leaves the target out: its rule's
             // configuration or evidence can hold it, as the redacted summary
@@ -114,7 +119,7 @@ impl Engine {
                             &written,
                             &shown(&written),
                             *is_dir,
-                            &skips,
+                            skips,
                             &tracked,
                         ),
                         None => Some(format!(
@@ -135,7 +140,7 @@ impl Engine {
                             name,
                             &shown(name),
                             *is_dir,
-                            &skips,
+                            skips,
                             &tracked,
                         )
                     });
@@ -150,6 +155,31 @@ impl Engine {
                 ));
             }
         }
+    }
+
+    /// The ignore files a fix's creates write, where they land: the walk after
+    /// the fix reads them. A create skips a file that is already there, so the
+    /// first create of a path wins, whichever name (through an in-tree symlink)
+    /// it uses. Each create comes with the names it lands under, and its
+    /// content when it is a file.
+    fn created_ignore_files<'c>(
+        creates: impl Iterator<Item = (&'c Result<Vec<PathBuf>, PathBuf>, Option<&'c [u8]>)>,
+    ) -> Vec<(&'c Path, &'c [u8])> {
+        let mut ignore_files: Vec<(&Path, &[u8])> = Vec::new();
+        for (names, content) in creates {
+            let (Ok(names), Some(content)) = (names, content) else {
+                continue;
+            };
+            let landed = names.last().expect("a create lands somewhere");
+            if matches!(
+                landed.file_name().and_then(std::ffi::OsStr::to_str),
+                Some(".gitignore" | ".ignore")
+            ) && !ignore_files.iter().any(|(path, _)| path == landed)
+            {
+                ignore_files.push((landed.as_path(), content));
+            }
+        }
+        ignore_files
     }
 
     /// The root-relative names the walk could list a create of `path` under:
@@ -209,7 +239,7 @@ impl Engine {
         target: &Path,
         shown: &str,
         is_dir: bool,
-        skips: &crate::walker::WalkSkips<'_>,
+        skips: Skips<'_, '_>,
         tracked: &std::cell::OnceCell<Option<HashSet<PathBuf>>>,
     ) -> Option<String> {
         if !is_dir
@@ -224,6 +254,11 @@ impl Engine {
                  tracked files"
             ));
         }
+        let skips = if entry.rule.git_tracked_mode() == crate::GitTrackedMode::Off {
+            skips.walk
+        } else {
+            skips.tracked
+        };
         if !is_dir && entry.rule.sees_path_past_walk(target) {
             // The rule's own stat refuses a path that resolves out of the root.
             let within = skips.canonical_root().is_some_and(|canonical| {

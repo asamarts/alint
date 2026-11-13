@@ -355,6 +355,50 @@ impl DecodeCache {
     }
 }
 
+std::thread_local! {
+    /// How many [`IterationScope`]s are open on this thread.
+    static ITERATION_SCOPES: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// One iteration of a nested `require:` block, on this thread. While a scope is
+/// open, [`FileIndex::read_cache`](crate::walker::FileIndex::read_cache) and
+/// [`FileIndex::decode_cache`](crate::walker::FileIndex::decode_cache) return
+/// `None`, so a nested relation rule reads through caches of its own and drops
+/// them when it returns. The run's caches would otherwise keep every
+/// iteration's files and decoded rows for the whole run, and charge them all to
+/// one run-wide row budget (#502's audit).
+///
+/// A thread-local rather than a `Context` field, so the fix adds no field to a
+/// public struct before v0.23 seals it. Nested rules evaluate on the thread
+/// that iterates, inside the scope.
+#[doc(hidden)]
+#[derive(Debug)]
+#[must_use = "the scope closes when the guard drops"]
+pub struct IterationScope {
+    /// Keeps the guard on the thread whose counter it raised.
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl IterationScope {
+    pub fn enter() -> Self {
+        ITERATION_SCOPES.with(|open| open.set(open.get() + 1));
+        Self {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for IterationScope {
+    fn drop(&mut self) {
+        ITERATION_SCOPES.with(|open| open.set(open.get() - 1));
+    }
+}
+
+/// Whether an [`IterationScope`] is open on this thread.
+pub(crate) fn in_iteration_scope() -> bool {
+    ITERATION_SCOPES.with(|open| open.get() > 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -735,5 +779,29 @@ mod tests {
             cache.decode(&adapter, &resource, b"a\nb\n", &limits),
             Err(AdapterError::Limit(_))
         ));
+    }
+
+    #[test]
+    fn an_iteration_scope_hides_the_run_caches_until_it_closes() {
+        let index = crate::walker::FileIndex::from_entries(Vec::new());
+        index.enable_relation_caches();
+        assert!(index.read_cache().is_some() && index.decode_cache().is_some());
+        {
+            let _outer = IterationScope::enter();
+            assert!(index.read_cache().is_none() && index.decode_cache().is_none());
+            {
+                let _inner = IterationScope::enter();
+                assert!(index.read_cache().is_none());
+            }
+            assert!(
+                index.read_cache().is_none(),
+                "the outer scope is still open"
+            );
+            // Another thread has no scope open.
+            std::thread::scope(|threads| {
+                threads.spawn(|| assert!(index.read_cache().is_some()));
+            });
+        }
+        assert!(index.read_cache().is_some() && index.decode_cache().is_some());
     }
 }

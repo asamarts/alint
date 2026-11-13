@@ -1,0 +1,47 @@
+test_version: 1
+name: git_untrack removes a force-added gitignored file from the git index
+# The walk leaves out what `.gitignore` lists, but git_tracked_only's tracked view
+# adds back a tracked file that only an ignore file hides (#503). The fix untracks
+# it with `git rm --cached`, keeps it on disk, and the check then passes: the file
+# is ignored and no longer tracked.
+tags: [fix, file_absent, git_untrack, git_tracked_only, applicability, git]
+
+capabilities:
+  spawn: true
+
+given:
+  tree:
+    .gitignore: "build/\n"
+    README.md: "# demo\n"
+    build:
+      out.o: "OBJ\n"
+  git:
+    add: [README.md, .gitignore]
+    add_force: [build/out.o]
+    commit: true
+  config: |
+    version: 1
+    rules:
+      - id: no-tracked-build
+        kind: file_absent
+        paths: "build/**"
+        git_tracked_only: true
+        level: error
+        fix:
+          git_untrack: {}
+
+when: [check, fix_unsafe, check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: no-tracked-build, level: error, path: build/out.o}
+  - exit: success
+    applied: [no-tracked-build]
+  - exit: success
+    violations: []
+
+expect_tree_mode: contains
+expect_tree:
+  build:
+    out.o: "OBJ\n"

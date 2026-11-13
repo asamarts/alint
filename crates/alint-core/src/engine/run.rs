@@ -23,7 +23,7 @@ use crate::when::WhenEnv;
 use super::{
     Engine, EntryGateOutcome, LivePerFileEntries, RuleEntry, RunGateInputs, TraceSession,
     evaluate_entry_gates, evaluate_per_file_entries, mark_fixability, phase, pick_ctx, run_entry,
-    trace_assertion, visit_rule_tree_with_registry, with_worker_pool,
+    trace_assertion, with_worker_pool,
 };
 
 impl Engine {
@@ -39,7 +39,6 @@ impl Engine {
             analysis_time: None,
             process_environment: None,
             analysis_time_required: OnceLock::new(),
-            relations_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
             fix_baseline: None,
@@ -57,7 +56,6 @@ impl Engine {
             analysis_time: None,
             process_environment: None,
             analysis_time_required: OnceLock::new(),
-            relations_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: None,
             fix_baseline: None,
@@ -323,7 +321,6 @@ impl Engine {
             analysis_time: self.analysis_time,
             process_environment: self.process_environment.clone(),
             analysis_time_required: OnceLock::new(),
-            relations_required: OnceLock::new(),
             analysis_time_cache: Mutex::new(None),
             changed_paths: self.changed_paths.clone(),
             fix_baseline: None,
@@ -361,36 +358,19 @@ impl Engine {
     }
 
     /// Enable the run-scoped relation read and decode caches when a configured
-    /// rule tree consumes the relation layer. Nested `require:` rules count
-    /// too: a `key_parity` under `for_each_file` reads through the same caches.
-    /// A disabled rule costs nothing; a rule that is merely skipped by `when:`
-    /// still enables the caches, which only adds a per-file lookup for the
-    /// files that rule's per-file peers read. The answer is computed once per
-    /// engine, since `run_for_file` calls this on every keystroke.
+    /// top-level rule consumes the relation layer. A disabled rule costs
+    /// nothing; a rule that is merely skipped by `when:` still enables the
+    /// caches, which only adds a per-file lookup for the files that rule's
+    /// per-file peers read. Nested `require:` rules do not count and never see
+    /// these caches: each iteration's relation rules read through caches of
+    /// their own (`relation::IterationScope`), so memory and the run's row
+    /// budget do not grow with the iterations.
     pub(super) fn enable_relation_caches(&self, index: &FileIndex) {
-        let required = *self.relations_required.get_or_init(|| {
-            self.entries
-                .iter()
-                .filter(|entry| entry.rule.level() != crate::Level::Off)
-                .any(|entry| {
-                    let mut uses = entry.rule.uses_relations();
-                    if !uses {
-                        // A nested rule that cannot be prepared reports that
-                        // where the parent evaluates it.
-                        let _ = visit_rule_tree_with_registry(
-                            &self.registry,
-                            entry.rule.as_ref(),
-                            entry.spec.as_deref(),
-                            &mut |rule, _spec| {
-                                uses |= rule.uses_relations();
-                                Ok(())
-                            },
-                        );
-                    }
-                    uses
-                })
-        });
-        if required {
+        if self
+            .entries
+            .iter()
+            .any(|entry| entry.rule.uses_relations() && entry.rule.level() != crate::Level::Off)
+        {
             index.enable_relation_caches();
         }
     }

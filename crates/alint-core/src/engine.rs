@@ -727,6 +727,28 @@ fn unavailable_git_failure() -> Violation {
         .as_analysis_failure(AnalysisFailureKind::ResourceRead)
 }
 
+/// Build one nested rule from the placeholder tokens, as a preparation build
+/// ([`crate::template::Preparation`]). An error shows each token as the
+/// template wrote it.
+fn prepare_nested_rule(
+    registry: &RuleRegistry,
+    parent_id: &str,
+    idx: usize,
+    compiled: &crate::config::CompiledNestedSpec,
+    nested_spec: &crate::RuleSpec,
+) -> Result<Box<dyn Rule>> {
+    let _preparing = crate::template::Preparation::enter();
+    registry.build(nested_spec).map_err(|error| {
+        Error::rule_config(
+            parent_id,
+            crate::template::unrender_placeholders(&format!(
+                "nested rule #{idx} (`{}`) could not be prepared: {error}",
+                compiled.spec.kind
+            )),
+        )
+    })
+}
+
 pub(crate) fn visit_rule_tree_with_registry(
     registry: &RuleRegistry,
     rule: &dyn Rule,
@@ -741,15 +763,7 @@ pub(crate) fn visit_rule_tree_with_registry(
     let tokens = crate::template::PathTokens::placeholder();
     for (idx, compiled) in rule.nested_rule_specs().iter().enumerate() {
         let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
-        let nested_rule = registry.build(&nested_spec).map_err(|error| {
-            Error::rule_config(
-                rule.id(),
-                format!(
-                    "nested rule #{idx} (`{}`) could not be prepared: {error}",
-                    compiled.spec.kind
-                ),
-            )
-        })?;
+        let nested_rule = prepare_nested_rule(registry, rule.id(), idx, compiled, &nested_spec)?;
         visit_rule_tree_with_registry(registry, nested_rule.as_ref(), Some(&nested_spec), visit)?;
     }
     Ok(())
@@ -901,15 +915,7 @@ fn visit_active_rule_tree_with_registry(
             continue;
         }
         let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
-        let nested_rule = registry.build(&nested_spec).map_err(|error| {
-            Error::rule_config(
-                rule.id(),
-                format!(
-                    "nested rule #{idx} (`{}`) could not be prepared: {error}",
-                    compiled.spec.kind
-                ),
-            )
-        })?;
+        let nested_rule = prepare_nested_rule(registry, rule.id(), idx, compiled, &nested_spec)?;
         visit_active_rule_tree_with_registry(
             registry,
             nested_rule.as_ref(),
@@ -939,9 +945,6 @@ pub struct Engine {
     analysis_time: Option<crate::AnalysisTimeResolution>,
     process_environment: Option<BTreeMap<String, String>>,
     analysis_time_required: OnceLock<bool>,
-    /// Whether an active rule tree reads through the relation layer
-    /// ([`Self::enable_relation_caches`]).
-    relations_required: OnceLock<bool>,
     analysis_time_cache: Mutex<Option<AnalysisTimeCache>>,
     /// In `--changed` mode, the set of paths (relative to root)
     /// that the user wants linted. `None` means "full check"; the

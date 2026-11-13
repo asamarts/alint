@@ -138,15 +138,18 @@ impl PathTokens {
 
     /// Tokens for building a nested `require:` rule before any entry is
     /// iterated: the parent's load-time check and the engine's preparation
-    /// traversal. Each token renders as its own name in white curly brackets
-    /// (`{stem}` as `⦃stem⦄`), so no token renders empty, no two tokens
-    /// render alike, and a builder can tell a value a token rendered
-    /// ([`has_placeholder`]) from text the configuration wrote. A check that
-    /// depends on the value a token will take, such as a format inferred from
-    /// an extension, belongs to each iteration's own build.
+    /// traversal. Each token renders as its name between underscores (`{stem}`
+    /// as `_stem_`). No token renders empty or like another, each value is as
+    /// wide as the token it stands for, and the value is ASCII word characters,
+    /// so a regex, glob or `JSONPath` that is valid for an ordinary name is valid
+    /// for it too. Inside a [`Preparation`], [`has_placeholder`] tells these
+    /// values from text the configuration wrote, and [`unrender_placeholders`]
+    /// turns them back into tokens for an error message. A check that depends
+    /// on the value a token will take, such as a format inferred from an
+    /// extension, belongs to each iteration's own build.
     #[must_use]
     pub fn placeholder() -> Self {
-        let token = |name: &str| format!("{PLACEHOLDER_OPEN}{name}{PLACEHOLDER_CLOSE}");
+        let token = |name: &str| format!("_{name}_");
         Self {
             path: token("path"),
             dir: token("dir"),
@@ -158,21 +161,119 @@ impl PathTokens {
     }
 }
 
-/// The brackets [`PathTokens::placeholder`] puts around a token's name.
-const PLACEHOLDER_OPEN: char = '\u{2983}';
-const PLACEHOLDER_CLOSE: char = '\u{2984}';
-/// The path tokens' names, as a template spells them between braces.
-const TOKEN_NAMES: [&str; 6] = ["path", "dir", "basename", "stem", "ext", "parent_name"];
+/// The path tokens' names, as a template spells them between braces. Longest
+/// first, so a scan tries `parent_name` before any shorter name.
+const TOKEN_NAMES: [&str; 6] = ["parent_name", "basename", "path", "stem", "dir", "ext"];
 
-/// Whether `rendered` holds a value that [`PathTokens::placeholder`] rendered:
-/// part of it comes from a path token whose value is known only per
-/// iteration.
+std::thread_local! {
+    static PREPARATIONS: std::cell::Cell<u32> = const { std::cell::Cell::new(0) };
+}
+
+/// A nested rule's preparation build on this thread, open until the guard
+/// drops. While one is open, [`has_placeholder`] recognises the values
+/// [`PathTokens::placeholder`] renders. Outside one, every rendered value
+/// comes from a real path (an iteration's build) or from the configuration
+/// (a top-level rule), so nothing is taken for a placeholder, even a file
+/// named `_stem_`.
+///
+/// A thread-local rather than a field on the spec: the build runs on the
+/// thread that opens the scope, and `RuleSpec` gains no field before v0.23
+/// seals it.
+#[doc(hidden)]
+#[derive(Debug)]
+#[must_use = "the preparation ends when the guard drops"]
+pub struct Preparation {
+    /// Keeps the guard on the thread whose counter it raised.
+    _not_send: std::marker::PhantomData<*const ()>,
+}
+
+impl Preparation {
+    pub fn enter() -> Self {
+        PREPARATIONS.with(|open| open.set(open.get() + 1));
+        Self {
+            _not_send: std::marker::PhantomData,
+        }
+    }
+}
+
+impl Drop for Preparation {
+    fn drop(&mut self) {
+        PREPARATIONS.with(|open| open.set(open.get() - 1));
+    }
+}
+
+fn preparing() -> bool {
+    PREPARATIONS.with(|open| open.get() > 0)
+}
+
+/// The name of the token whose placeholder value starts `text`.
+fn placeholder_name(text: &str) -> Option<&'static str> {
+    let rest = text.strip_prefix('_')?;
+    TOKEN_NAMES.into_iter().find(|name| {
+        rest.strip_prefix(name)
+            .is_some_and(|after| after.starts_with('_'))
+    })
+}
+
+/// The byte offset of the first value [`PathTokens::placeholder`] rendered in
+/// `rendered`, inside a [`Preparation`]. Always `None` outside one.
+#[must_use]
+pub fn first_placeholder(rendered: &str) -> Option<usize> {
+    if !preparing() {
+        return None;
+    }
+    rendered
+        .match_indices('_')
+        .map(|(at, _)| at)
+        .find(|&at| placeholder_name(&rendered[at..]).is_some())
+}
+
+/// Whether `rendered` holds a value that [`PathTokens::placeholder`] rendered,
+/// inside a [`Preparation`]: part of it comes from a path token whose value is
+/// known only per iteration. Always `false` outside one.
 #[must_use]
 pub fn has_placeholder(rendered: &str) -> bool {
-    rendered.split(PLACEHOLDER_OPEN).skip(1).any(|rest| {
-        rest.split_once(PLACEHOLDER_CLOSE)
-            .is_some_and(|(name, _)| TOKEN_NAMES.contains(&name))
-    })
+    first_placeholder(rendered).is_some()
+}
+
+/// Whether two rendered paths name the same path in every iteration: they are
+/// equal, or, inside a [`Preparation`], equal once a `{path}` placeholder is
+/// spelled `{dir}/{basename}`.
+#[must_use]
+pub fn same_iteration_path(a: &str, b: &str) -> bool {
+    if a == b {
+        return true;
+    }
+    if !preparing() {
+        return false;
+    }
+    let spelled_out = |text: &str| text.replace("_path_", "_dir_/_basename_");
+    spelled_out(a) == spelled_out(b)
+}
+
+/// `text` with every value [`PathTokens::placeholder`] renders turned back
+/// into the token it stands for (`_stem_` into `{stem}`), for an error
+/// message from a preparation build. The two are equally wide, so a column a
+/// message points at still lines up.
+#[must_use]
+pub fn unrender_placeholders(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find('_') {
+        out.push_str(&rest[..at]);
+        rest = &rest[at..];
+        if let Some(name) = placeholder_name(rest) {
+            out.push('{');
+            out.push_str(name);
+            out.push('}');
+            rest = &rest[name.len() + 2..];
+        } else {
+            out.push('_');
+            rest = &rest[1..];
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// Substitute `{token}` placeholders in a path-shaped template. Unknown
@@ -645,47 +746,101 @@ where
 mod tests {
     use super::*;
 
-    /// The preparation build's tokens: none renders empty or like another, and
-    /// each is recognisable after rendering, alone or inside a path (#504).
+    /// The preparation build's tokens: none renders empty or like another, each
+    /// is as wide as its token, and each is recognisable after rendering, alone
+    /// or inside a path, only inside a preparation (#504).
     #[test]
     fn placeholder_tokens_are_distinct_non_empty_and_recognisable() {
         let tokens = PathTokens::placeholder();
-        let rendered: Vec<String> = TOKEN_NAMES
+        // Exhaustive, so a new token field fails to compile here until
+        // `TOKEN_NAMES` (which the recognition reads) lists it.
+        let PathTokens {
+            path,
+            dir,
+            basename,
+            stem,
+            ext,
+            parent_name,
+        } = tokens.clone();
+        let mut fields = [path, dir, basename, stem, ext, parent_name];
+        let mut rendered: Vec<String> = TOKEN_NAMES
             .iter()
             .map(|name| render_path(&format!("{{{name}}}"), &tokens))
             .collect();
-        for (name, value) in TOKEN_NAMES.iter().zip(&rendered) {
-            assert!(!value.is_empty(), "{name}");
-            assert!(!value.contains('{'), "{name}: {value}");
-            assert!(has_placeholder(value), "{name}: {value}");
-            assert!(
-                has_placeholder(&render_path(&format!("a/{{{name}}}.json"), &tokens)),
+        fields.sort();
+        rendered.sort();
+        assert_eq!(fields.to_vec(), rendered, "every field is a known token");
+
+        let _preparing = Preparation::enter();
+        for name in TOKEN_NAMES {
+            let template = format!("{{{name}}}");
+            let value = render_path(&template, &tokens);
+            assert_eq!(value, format!("_{name}_"));
+            assert_eq!(value.len(), template.len(), "{name}");
+            assert_ne!(TokenSet::of(&template), TokenSet::NONE, "{name}");
+            assert!(has_placeholder(&value), "{name}");
+            assert_eq!(unrender_placeholders(&value), template);
+            assert_eq!(
+                first_placeholder(&render_path(&format!("a/{template}.json"), &tokens)),
+                Some(2),
                 "{name}"
             );
             assert!(
-                has_placeholder(&render_path_glob(&format!("{{{name}}}/*.json"), &tokens)),
+                has_placeholder(&render_path_glob(&format!("{template}/*.json"), &tokens)),
                 "{name}"
             );
         }
         let mut unique = rendered.clone();
-        unique.sort();
         unique.dedup();
         assert_eq!(unique.len(), TOKEN_NAMES.len(), "{rendered:?}");
         // A lone `{dir}` keeps its value rather than collapsing as an empty one does.
-        assert_eq!(
-            render_path("{dir}/en.json", &tokens),
-            "\u{2983}dir\u{2984}/en.json"
-        );
+        assert_eq!(render_path("{dir}/en.json", &tokens), "_dir_/en.json");
         for plain in [
-            "",
-            "en.json",
-            "{path}",
-            "\u{2983}",
-            "\u{2983}other\u{2984}",
-            "a\u{2984}",
+            "", "en.json", "{path}", "_", "_other_", "a_dir", "_dir", "dir_",
         ] {
             assert!(!has_placeholder(plain), "{plain:?}");
         }
+    }
+
+    /// Outside a preparation, text that looks like a placeholder is a real
+    /// name: a file called `_stem_.json`, or a top-level rule that wrote it.
+    #[test]
+    fn placeholders_are_recognised_only_while_preparing() {
+        assert!(!has_placeholder("_stem_.json"));
+        assert!(!same_iteration_path("_path_", "_dir_/_basename_"));
+        {
+            let _outer = Preparation::enter();
+            {
+                let _inner = Preparation::enter();
+                assert!(has_placeholder("_stem_.json"));
+            }
+            assert!(
+                has_placeholder("_stem_.json"),
+                "the outer one is still open"
+            );
+            assert!(same_iteration_path("_path_", "_dir_/_basename_"));
+            assert!(same_iteration_path("_path_.bak", "_dir_/_basename_.bak"));
+            assert!(!same_iteration_path("_path_", "_dir_/_stem_"));
+            std::thread::spawn(|| assert!(!has_placeholder("_stem_")))
+                .join()
+                .unwrap();
+        }
+        assert!(!has_placeholder("_stem_.json"), "closed on drop");
+    }
+
+    /// Error messages show the template the configuration wrote.
+    #[test]
+    fn unrendering_restores_the_tokens() {
+        assert_eq!(
+            unrender_placeholders("invalid glob \"_dir_/[_stem_\""),
+            "invalid glob \"{dir}/[{stem}\""
+        );
+        assert_eq!(
+            unrender_placeholders("_parent_name__basename_x_path_y_"),
+            "{parent_name}{basename}x{path}y_"
+        );
+        assert_eq!(unrender_placeholders("a_b _ __"), "a_b _ __");
+        assert_eq!(unrender_placeholders(""), "");
     }
 
     #[test]

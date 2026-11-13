@@ -16,7 +16,8 @@ struct Options {
     #[serde(default)]
     root_only: bool,
     /// Restrict matches to directories that contain at least one git-tracked
-    /// file. Repository unavailability is an analysis failure when enabled.
+    /// file, including one that only an ignore file hides from the walk.
+    /// Repository unavailability is an analysis failure when enabled.
     /// Default `false`.
     #[serde(default)]
     git_tracked_only: bool,

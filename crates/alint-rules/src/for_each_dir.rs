@@ -249,11 +249,12 @@ pub(crate) fn compile_nested_require(
 /// nothing. Shared by `for_each_dir`, `for_each_file`, and
 /// `every_matching_has` via their `Rule::validate_nested` impls.
 ///
-/// The placeholder path tokens ([`PathTokens::placeholder`]) are used: only
-/// errors that hold for every iteration surface here (kind, option,
-/// required field, a value the configuration wrote). A check on a value a
-/// token renders, such as `key_parity`'s format inferred from a templated
-/// `reference:`, waits for the iteration's own build.
+/// The placeholder path tokens ([`PathTokens::placeholder`]) are used, inside
+/// a [`Preparation`](alint_core::template::Preparation): only errors that hold
+/// for every iteration surface here (kind, option, required field, a value the
+/// configuration wrote). A check on a value a token renders, such as
+/// `key_parity`'s format inferred from a templated `reference:`, waits for the
+/// iteration's own build. An error shows each token as the template wrote it.
 pub(crate) fn validate_nested_require(
     parent_id: &str,
     level: Level,
@@ -285,18 +286,22 @@ pub(crate) fn validate_nested_require(
             }
         }
         let synthesized = compiled.instantiate(parent_id, idx, level, &tokens);
-        let nested_rule = registry.build(&synthesized).map_err(|e| {
+        let nested_error = |e: Error| {
             Error::rule_config(
                 parent_id,
-                format!("nested rule #{idx} (`{}`): {e}", compiled.spec.kind),
+                alint_core::template::unrender_placeholders(&format!(
+                    "nested rule #{idx} (`{}`): {e}",
+                    compiled.spec.kind
+                )),
             )
-        })?;
-        nested_rule.validate_nested(registry).map_err(|e| {
-            Error::rule_config(
-                parent_id,
-                format!("nested rule #{idx} (`{}`): {e}", compiled.spec.kind),
-            )
-        })?;
+        };
+        let nested_rule = {
+            let _preparing = alint_core::template::Preparation::enter();
+            registry.build(&synthesized).map_err(nested_error)?
+        };
+        nested_rule
+            .validate_nested(registry)
+            .map_err(nested_error)?;
     }
     Ok(())
 }
@@ -571,6 +576,9 @@ fn evaluate_for_each_inner<const TRACE: bool>(
 
         let tokens = PathTokens::from_path_with(&entry.path, needed_tokens);
         let entry_start = violations.len();
+        // The iteration's relation rules read through caches of their own, so
+        // nothing they read outlives the iteration.
+        let _iteration = alint_core::relation::IterationScope::enter();
         for (i, nested) in require.iter().enumerate() {
             // v0.9.12: nested `when:` is pre-compiled at rule-
             // build time (`CompiledNestedSpec`) — gate on the
@@ -1266,6 +1274,46 @@ mod tests {
             assert!(
                 err.contains("not supported on a nested rule"),
                 "{extra}: {err}"
+            );
+        }
+    }
+
+    /// The placeholder tokens are ASCII word characters, so a pattern that is
+    /// valid for every ASCII name is valid at load, and a load error shows the
+    /// tokens the template wrote, not their placeholders (#504's audit).
+    #[test]
+    fn validate_nested_accepts_what_every_name_renders_and_reports_the_template() {
+        let reg = registry();
+        for yaml in [
+            "kind: filename_regex\npaths: \"{path}/*\"\npattern: \"(?-u)^[{parent_name}_a-z]+$\"\n",
+            "kind: file_content_matches\npaths: \"{path}/*\"\npattern: \"(?-u)[{stem}]\"\n",
+            "kind: file_content_matches\npaths: \"{path}/*\"\npattern: \"[{stem}-z]\"\n",
+            "kind: json_path_equals\npaths: \"{path}/package.json\"\npath: \"$.{basename}\"\nequals: x\n",
+        ] {
+            let nested: NestedRuleSpec = yaml_serde::from_str(yaml).unwrap();
+            rule("src/*", vec![nested])
+                .validate_nested(&reg)
+                .unwrap_or_else(|error| panic!("{yaml}: {error}"));
+        }
+        for (yaml, shown) in [
+            (
+                "kind: file_exists\npaths: \"{dir}/[{stem}\"\n",
+                "{dir}/[{stem}",
+            ),
+            (
+                "kind: filename_regex\npaths: \"{path}/*\"\npattern: \"({stem}\"\n",
+                "({stem}",
+            ),
+        ] {
+            let nested: NestedRuleSpec = yaml_serde::from_str(yaml).unwrap();
+            let error = rule("src/*", vec![nested])
+                .validate_nested(&reg)
+                .expect_err(yaml)
+                .to_string();
+            assert!(error.contains(shown), "{yaml}: {error}");
+            assert!(
+                !error.contains("_stem_") && !error.contains("_dir_"),
+                "{error}"
             );
         }
     }

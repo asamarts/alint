@@ -763,10 +763,11 @@ static NESTED_RELATION_META: crate::KindMeta = crate::KindMeta {
     trace: crate::TraceMeta::EXTRACTION,
 };
 
-/// A relation consumer nested in a parent's `require:` reads through the run's
-/// caches too (#502): the parent never reports `uses_relations` itself.
+/// A relation consumer nested in a parent's `require:` does not turn the run's
+/// caches on: each iteration's relation rules read through caches of their own
+/// (`relation::IterationScope`), which nothing outlives (#502's audit).
 #[test]
-fn a_nested_relation_consumer_enables_the_relation_caches() {
+fn a_nested_relation_consumer_leaves_the_run_caches_off() {
     let tmp = tempfile::Builder::new()
         .prefix("alint-nested-relation-cache-")
         .tempdir()
@@ -778,26 +779,56 @@ fn a_nested_relation_consumer_enables_the_relation_caches() {
     });
     let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
     Engine::new(
-        vec![nested_parent("kind: nested_scope_fixture\n")],
-        registry.clone(),
-    )
-    .run(tmp.path(), &index)
-    .unwrap();
-    assert!(
-        index.read_cache().is_none(),
-        "a nested rule that reads no relations keeps the direct read path"
-    );
-    Engine::new(
         vec![nested_parent("kind: nested_relation_fixture\n")],
         registry,
     )
     .run(tmp.path(), &index)
     .unwrap();
-    assert!(index.read_cache().is_some(), "a nested consumer enables it");
     assert!(
-        index.decode_cache().is_some(),
-        "a nested consumer enables the decode cache"
+        index.read_cache().is_none(),
+        "a nested consumer leaves the read cache off"
     );
+    assert!(
+        index.decode_cache().is_none(),
+        "a nested consumer leaves the decode cache off"
+    );
+}
+
+/// The engine's preparation builds run inside a `template::Preparation`, so a
+/// builder recognises the placeholder values, and an error shows each token as
+/// the template wrote it (#504's audit).
+#[test]
+fn a_nested_preparation_error_shows_the_template() {
+    let mut registry = nested_registry();
+    registry.register("nested_failing_fixture", &NESTED_RELATION_META, |spec| {
+        let target = spec
+            .extra
+            .get("target")
+            .and_then(|value| value.as_str())
+            .unwrap_or_default();
+        Err(crate::Error::rule_config(
+            &spec.id,
+            format!(
+                "invalid glob {target:?} (placeholder: {})",
+                crate::template::has_placeholder(target)
+            ),
+        ))
+    });
+    let entry = RuleEntry::new(nested_parent(
+        "kind: nested_failing_fixture\ntarget: \"{dir}/[{stem}\"\n",
+    ));
+    let error = entry
+        .wants_analysis_time(&registry)
+        .expect_err("the nested rule does not build")
+        .to_string();
+    assert!(
+        error.contains(
+            "could not be prepared: rule \"owner.require[0]\": invalid glob \"{dir}/[{stem}\""
+        ),
+        "{error}"
+    );
+    assert!(error.contains("(placeholder: true)"), "{error}");
+    assert!(!crate::template::has_placeholder("_stem_"), "closed again");
 }
 
 #[test]

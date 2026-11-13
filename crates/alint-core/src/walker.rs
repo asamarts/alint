@@ -306,6 +306,8 @@ impl FileIndex {
     }
 
     /// The run-scoped relation read cache, if a relation consumer enabled it.
+    /// `None` inside a nested rule's iteration
+    /// ([`IterationScope`](crate::relation::IterationScope)).
     ///
     /// The ordinary per-file path checks this once per file and reads directly
     /// when it is `None`; it allocates no cache entry or retained bytes, so a
@@ -314,13 +316,21 @@ impl FileIndex {
     #[doc(hidden)]
     #[must_use]
     pub fn read_cache(&self) -> Option<&crate::relation::ReadCache> {
+        if crate::relation::in_iteration_scope() {
+            return None;
+        }
         self.reads.get().map(std::sync::Arc::as_ref)
     }
 
     /// The run-scoped relation decode cache, if a relation consumer enabled it.
+    /// `None` inside a nested rule's iteration, as for
+    /// [`read_cache`](Self::read_cache).
     #[doc(hidden)]
     #[must_use]
     pub fn decode_cache(&self) -> Option<&crate::relation::DecodeCache> {
+        if crate::relation::in_iteration_scope() {
+            return None;
+        }
         self.decodes.get().map(std::sync::Arc::as_ref)
     }
 
@@ -776,14 +786,17 @@ pub fn walk(root: &Path, opts: &WalkOptions) -> Result<FileIndex> {
     Ok(index)
 }
 
-/// The tracked files [`walk`] left out of `index` only because an ignore file
+/// The tracked paths [`walk`] left out of `index` only because an ignore file
 /// excludes them (a force-added file, or one committed before its ignore
-/// line), as index entries, with the directories above them that the walk
-/// left out too, so `git_tracked_only` sees what git tracks (#503, ADR-0033
-/// decision 3). A file counts when it is a regular file or directory on disk
-/// under `root` and none of the walk's other exclusions applies: `.git/`, the
-/// configuration's `ignore:`, and a symlink the walk does not follow. Sorted
-/// by path; empty unless `index` was walked with ignore files.
+/// line), as index entries, so `git_tracked_only` sees what git tracks (#503,
+/// ADR-0033 decision 3). That covers each such file, and each directory above
+/// a tracked path, whether or not the path itself is still on disk, as the walk
+/// lists a directory whose tracked files were deleted. An entry counts when it
+/// is a regular file or directory on disk under `root`, spelled as the
+/// directory listing spells it (a case-insensitive filesystem resolves `Docs/x`
+/// for `docs/x`), and none of the walk's other exclusions applies: `.git/`, the
+/// configuration's `ignore:`, and a symlink the walk does not follow. Sorted by
+/// path; empty unless `index` was walked with ignore files.
 pub(crate) fn tracked_entries_ignore_files_hid<S: std::hash::BuildHasher>(
     root: &Path,
     index: &FileIndex,
@@ -796,19 +809,56 @@ pub(crate) fn tracked_entries_ignore_files_hid<S: std::hash::BuildHasher>(
     else {
         return Vec::new();
     };
-    // The walk with every ignore file off: what it would still leave out, the
-    // fix leaves out too.
-    let others = WalkOptions {
-        respect_gitignore: false,
-        extra_ignores: opts.extra_ignores.clone(),
-    };
+    // What the walk would still leave out with every ignore file off, the
+    // tracked view leaves out too.
+    let others = without_ignore_files(opts);
     let skips = WalkSkips::new(root, &others, &[]);
+    let mut listings = Listings::default();
+    // Each directory left out of the walk that was checked: whether it is
+    // added back.
+    let mut dirs: HashMap<PathBuf, bool> = HashMap::new();
     let mut entries = Vec::new();
-    let mut dirs: HashSet<PathBuf> = HashSet::new();
     for path in tracked {
+        // Git lists relative paths; anything else (a Windows drive prefix such
+        // as `C:x`) would join outside the root.
+        if !path
+            .components()
+            .all(|part| matches!(part, std::path::Component::Normal(_)))
+        {
+            continue;
+        }
         // Native separators, as the walk's own entries have.
         let rel: PathBuf = path.components().collect();
         if index.contains_path(&rel) {
+            continue;
+        }
+        // The directories above it, outermost first: one that is left out
+        // leaves out everything below it.
+        let mut parents: Vec<&Path> = rel
+            .ancestors()
+            .skip(1)
+            .filter(|dir| !dir.as_os_str().is_empty())
+            .collect();
+        parents.reverse();
+        let reachable = parents.into_iter().all(|dir| {
+            if index.contains_path(dir) {
+                return true;
+            }
+            *dirs.entry(dir.to_path_buf()).or_insert_with(|| {
+                let shown = listings.spelled_as_listed(root, dir)
+                    && std::fs::metadata(root.join(dir)).is_ok_and(|m| m.is_dir())
+                    && !skips.skips(dir, true);
+                if shown {
+                    entries.push(FileEntry {
+                        path: Arc::from(dir),
+                        is_dir: true,
+                        size: 0,
+                    });
+                }
+                shown
+            })
+        });
+        if !reachable || !listings.spelled_as_listed(root, &rel) {
             continue;
         }
         let Ok(metadata) = std::fs::metadata(root.join(&rel)) else {
@@ -826,20 +876,46 @@ pub(crate) fn tracked_entries_ignore_files_hid<S: std::hash::BuildHasher>(
                 0
             },
         });
-        for dir in rel.ancestors().skip(1) {
-            if dir.as_os_str().is_empty() || index.contains_path(dir) || !dirs.insert(dir.into()) {
-                break;
-            }
-            entries.push(FileEntry {
-                path: Arc::from(dir),
-                is_dir: true,
-                size: 0,
-            });
-        }
     }
     entries.sort_unstable_by(|a, b| a.path.cmp(&b.path));
     entries.dedup_by(|a, b| a.path == b.path);
     entries
+}
+
+/// `opts` with every ignore file off: the exclusions a `git_tracked_only`
+/// rule's view keeps, since git tracks a path whatever an ignore file says
+/// (#503). The config's `ignore:` stays.
+pub(crate) fn without_ignore_files(opts: &WalkOptions) -> WalkOptions {
+    WalkOptions {
+        respect_gitignore: false,
+        extra_ignores: opts.extra_ignores.clone(),
+    }
+}
+
+/// The names each directory below a root lists, read once per directory.
+#[derive(Default)]
+struct Listings(HashMap<PathBuf, HashSet<std::ffi::OsString>>);
+
+impl Listings {
+    /// Whether the directory holding `rel` (root-relative) lists its name
+    /// exactly as `rel` spells it.
+    fn spelled_as_listed(&mut self, root: &Path, rel: &Path) -> bool {
+        let (Some(parent), Some(name)) = (rel.parent(), rel.file_name()) else {
+            return false;
+        };
+        self.0
+            .entry(parent.to_path_buf())
+            .or_insert_with(|| {
+                std::fs::read_dir(root.join(parent))
+                    .map(|listing| {
+                        listing
+                            .filter_map(|entry| entry.ok().map(|entry| entry.file_name()))
+                            .collect()
+                    })
+                    .unwrap_or_default()
+            })
+            .contains(name)
+    }
 }
 
 /// Build the `ignore::WalkBuilder` we run today. Pure factor-out
@@ -1024,45 +1100,17 @@ impl DirIgnores {
     }
 }
 
-/// Whether the walk stops at a symlink on the way to `parts` (root-relative)
-/// or at `parts` itself: one that leads back to a directory on its own path, a
-/// loop `ignore` reports and does not descend, or one that is broken or leads
-/// out of the root, which the walk prunes (`build_walk_builder`). Only paths
-/// that exist count; one that does not exist yet cannot be a symlink.
-fn symlink_stops_the_walk(
-    root: &Path,
-    canonical_root: Option<&Path>,
-    parts: &[std::path::Component<'_>],
-) -> bool {
-    // The directories the walk has entered on the way, canonical.
-    let mut entered: Vec<PathBuf> = canonical_root
-        .iter()
-        .map(|root| root.to_path_buf())
-        .collect();
-    for k in 1..=parts.len() {
-        let dir = root.join(parts[..k].iter().collect::<PathBuf>());
-        let Ok(metadata) = dir.symlink_metadata() else {
-            return false;
-        };
-        let canonical = dir.canonicalize().ok();
-        if metadata.file_type().is_symlink() {
-            let Some(target) = &canonical else {
-                return true;
-            };
-            if canonical_root
-                .as_ref()
-                .is_none_or(|root| !target.starts_with(root))
-                || entered.contains(target)
-            {
-                return true;
-            }
-        }
-        let Some(canonical) = canonical else {
-            return false;
-        };
-        entered.push(canonical);
-    }
-    false
+/// How the walk reaches a directory below the root (`WalkSkips::reach`).
+#[derive(Clone)]
+enum Reach {
+    /// It enters the directory, at this canonical path.
+    Entered(PathBuf),
+    /// It stops at a symlink on the way: one that is broken, leads out of the
+    /// root or loops back to a directory on its own path.
+    Stops,
+    /// The path does not exist (or does not resolve), so nothing below it can
+    /// be a symlink the walk stops at.
+    Missing,
 }
 
 /// A one-off [`WalkSkips::skips`].
@@ -1091,6 +1139,9 @@ pub(crate) struct WalkSkips<'a> {
     /// The ignore files of each directory below the root checked so far,
     /// with `created` applied.
     dirs: std::cell::RefCell<HashMap<PathBuf, std::rc::Rc<DirIgnores>>>,
+    /// How the walk reaches each directory below the root checked so far, so
+    /// each is resolved once however many paths lie below it.
+    reached: std::cell::RefCell<HashMap<PathBuf, Reach>>,
 }
 
 /// What every check of a [`WalkSkips`] shares.
@@ -1117,6 +1168,7 @@ impl<'a> WalkSkips<'a> {
             created,
             shared: std::cell::OnceCell::new(),
             dirs: std::cell::RefCell::default(),
+            reached: std::cell::RefCell::default(),
         }
     }
 
@@ -1169,6 +1221,70 @@ impl<'a> WalkSkips<'a> {
     /// The root, canonical, when it resolves.
     pub(crate) fn canonical_root(&self) -> Option<&Path> {
         self.shared().canonical_root.as_deref()
+    }
+
+    /// Whether the walk stops at a symlink on the way to `parts` (root-relative)
+    /// or at `parts` itself: one that leads back to a directory on its own path,
+    /// a loop `ignore` reports and does not descend, or one that is broken or
+    /// leads out of the root, which the walk prunes (`build_walk_builder`). Only
+    /// paths that exist count; one that does not exist yet cannot be a symlink.
+    fn symlink_stops_the_walk(&self, parts: &[std::path::Component<'_>]) -> bool {
+        // The directories the walk has entered on the way, canonical.
+        let mut entered: Vec<PathBuf> = self
+            .canonical_root()
+            .iter()
+            .map(|root| root.to_path_buf())
+            .collect();
+        let Some((last, dirs)) = parts.split_last() else {
+            return false;
+        };
+        let mut prefix = PathBuf::new();
+        for part in dirs {
+            prefix.push(part);
+            let cached = self.reached.borrow().get(&prefix).cloned();
+            let reach = cached.unwrap_or_else(|| {
+                let reach = self.reach(&prefix, &entered, true);
+                self.reached
+                    .borrow_mut()
+                    .insert(prefix.clone(), reach.clone());
+                reach
+            });
+            match reach {
+                Reach::Entered(canonical) => entered.push(canonical),
+                Reach::Stops => return true,
+                Reach::Missing => return false,
+            }
+        }
+        prefix.push(last);
+        matches!(self.reach(&prefix, &entered, false), Reach::Stops)
+    }
+
+    /// How the walk reaches `prefix`, below the directories it `entered` on the
+    /// way. Only a directory the walk goes on into (`descends`) needs its
+    /// canonical path; for the path itself, only a symlink is resolved.
+    fn reach(&self, prefix: &Path, entered: &[PathBuf], descends: bool) -> Reach {
+        let path = self.root.join(prefix);
+        let Ok(metadata) = path.symlink_metadata() else {
+            return Reach::Missing;
+        };
+        let symlink = metadata.file_type().is_symlink();
+        if !symlink && !descends {
+            return Reach::Missing;
+        }
+        let canonical = path.canonicalize().ok();
+        if symlink {
+            let Some(target) = &canonical else {
+                return Reach::Stops;
+            };
+            if self
+                .canonical_root()
+                .is_none_or(|root| !target.starts_with(root))
+                || entered.contains(target)
+            {
+                return Reach::Stops;
+            }
+        }
+        canonical.map_or(Reach::Missing, Reach::Entered)
     }
 
     /// Whether [`walk`] would leave the repo-relative path `rel` out of the index
@@ -1273,10 +1389,10 @@ impl<'a> WalkSkips<'a> {
             matches!(found, Some(Match::Ignore(_)))
         };
         // The path itself, and every ancestor directory (an excluded directory is
-        // never descended into, so nothing below it is indexed).
-        symlink_stops_the_walk(root, canonical_root.as_deref(), &parts)
-            || (0..parts.len())
-                .any(|i| ignored(i, if i + 1 == parts.len() { is_dir } else { true }))
+        // never descended into, so nothing below it is indexed). The patterns
+        // first: they need no file system call.
+        (0..parts.len()).any(|i| ignored(i, if i + 1 == parts.len() { is_dir } else { true }))
+            || self.symlink_stops_the_walk(&parts)
     }
 }
 

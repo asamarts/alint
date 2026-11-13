@@ -388,7 +388,10 @@ impl Rule for KeyParityRule {
     #[allow(clippy::too_many_lines)]
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
         if self.format_pending {
-            return Err(Error::rule_config(&self.id, NO_REFERENCE_FORMAT));
+            return Err(Error::rule_config(
+                &self.id,
+                no_reference_format(&self.reference),
+            ));
         }
         // The run's caches, or fresh ones when the engine did not enable them
         // (a rule evaluated directly, as the unit tests do).
@@ -1408,16 +1411,16 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
         ));
     }
     // A nested rule is first built from placeholder path tokens. When a token
-    // gives the reference its file name, the format is known only once an
+    // decides the reference's format, the format is known only once an
     // iteration renders the name, and that iteration's build infers it.
     let format_pending = opts.format.is_none()
         && infer_format(Path::new(reference.as_str())).is_none()
-        && name_from_token(reference.as_str());
+        && format_from_token(reference.as_str());
     let reference_format = match opts.format {
         Some(format) => format,
         None if format_pending => KeyFormat::Json,
         None => infer_format(Path::new(reference.as_str()))
-            .ok_or_else(|| Error::rule_config(&spec.id, NO_REFERENCE_FORMAT))?,
+            .ok_or_else(|| Error::rule_config(&spec.id, no_reference_format(&reference)))?,
     };
     if let Some(format) = opts.format
         && let Some(inferred) = infer_format(Path::new(reference.as_str()))
@@ -1432,12 +1435,23 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
             ),
         ));
     }
-    if opts.strip_root && !format_pending && reference_format.model() != KeyModel::Tree {
+    // With the format pending, a literal peer whose name no token decides
+    // stands in for it: every iteration whose reference has a different key
+    // model fails the peer's model check.
+    let model_format = if format_pending {
+        literal_peer_format(&opts.peers)
+    } else {
+        Some(reference_format)
+    };
+    if opts.strip_root
+        && let Some(format) = model_format
+        && format.model() != KeyModel::Tree
+    {
         return Err(Error::rule_config(
             &spec.id,
             format!(
                 "`strip_root` applies only to JSON, YAML, and TOML files, not {}",
-                reference_format.name()
+                format.name()
             ),
         ));
     }
@@ -1447,8 +1461,8 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
             "`ignore_keys` patterns must be at most 1024 bytes",
         ));
     }
+    let ignore = ignore_patterns(spec, &opts.ignore_keys, model_format)?;
     let known_format = (!format_pending).then_some(reference_format);
-    let ignore = ignore_patterns(spec, &opts.ignore_keys, known_format)?;
     let literal_peer = literal_peer(spec, &opts, &reference, known_format)?;
     let peers_scope = Scope::from_patterns(std::slice::from_ref(&opts.peers))?;
     // The reference is a literal path: escape it, so a name such as
@@ -1484,9 +1498,10 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
     })
 }
 
-/// The `ignore_keys` patterns, parsed for the reference's key model. With the
-/// format pending (`None`), a pattern must parse under some key model; the
-/// iteration's build parses it under the one its format has.
+/// The `ignore_keys` patterns, parsed for the reference's key model. With no
+/// model known yet (`None`: the format is pending and no literal peer stands
+/// in), a pattern must parse under some key model; the iteration's build
+/// parses it under the one its format has.
 fn ignore_patterns(
     spec: &RuleSpec,
     patterns: &[String],
@@ -1521,8 +1536,10 @@ fn ignore_patterns(
 
 /// A `peers` value with no glob metacharacters, as a confined path other than
 /// the reference. Its extension implies a key model (without an explicit
-/// `format`, it picks the format), so a key-model mismatch is a config error
-/// here rather than an analysis failure when it is read.
+/// `format`, it picks the format), so a key-model mismatch with a known
+/// reference format is a config error here rather than an analysis failure
+/// when it is read. With the reference format pending, each iteration's build
+/// makes that check.
 fn literal_peer(
     spec: &RuleSpec,
     opts: &Options,
@@ -1538,14 +1555,14 @@ fn literal_peer(
             "a literal `peers` path must be a confined repository path",
         )
     })?;
-    if &path == reference {
+    if alint_core::template::same_iteration_path(path.as_str(), reference.as_str()) {
         return Err(Error::rule_config(
             &spec.id,
             "`peers` must select at least one file other than the reference",
         ));
     }
     let inferred = infer_format(Path::new(path.as_str()));
-    if opts.format.is_none() && inferred.is_none() && !name_from_token(path.as_str()) {
+    if opts.format.is_none() && inferred.is_none() && !format_from_token(path.as_str()) {
         return Err(Error::rule_config(
             &spec.id,
             "cannot infer the key format of the literal `peers` path; set `format` explicitly",
@@ -1567,18 +1584,46 @@ fn literal_peer(
     Ok(Some(path))
 }
 
-const NO_REFERENCE_FORMAT: &str =
-    "cannot infer the key format from `reference`; set `format` explicitly";
+/// The file names [`infer_format`] knows, for an error message.
+const FORMAT_NAMES: &str = "`.env`, `.env.*`, `*.json`, `*.yaml`, `*.yml`, `*.toml`, \
+                            `*.properties`, `*.ini` or `*.resx`";
 
-/// Whether a path token gave `path` its file name. That is known only in a
-/// nested rule's preparation build, which renders the tokens as placeholders
-/// ([`alint_core::template::PathTokens::placeholder`]); each iteration's build
-/// sees the real name.
-fn name_from_token(path: &str) -> bool {
-    Path::new(path)
-        .file_name()
-        .and_then(|name| name.to_str())
-        .is_some_and(alint_core::template::has_placeholder)
+fn no_reference_format(reference: &RelPath) -> String {
+    format!(
+        "cannot infer the key format of `reference` {:?}: the name is not {FORMAT_NAMES}; \
+         set `format`, or, in a nested rule, select only files with such a name",
+        reference.as_str()
+    )
+}
+
+/// Whether a path token decides the format [`infer_format`] gives `path`'s
+/// file name: the extension comes from a token, the name has no literal
+/// extension, or a token can make the name start with `.env.`. That is known
+/// only in a nested rule's preparation build, which renders the tokens as
+/// placeholders ([`alint_core::template::PathTokens::placeholder`]); each
+/// iteration's build sees the real name. A name such as `strings-{stem}.xml`
+/// has the same unsupported extension in every iteration.
+fn format_from_token(path: &str) -> bool {
+    use alint_core::template::{first_placeholder, has_placeholder};
+    let path = Path::new(path);
+    let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+        return false;
+    };
+    let Some(first) = first_placeholder(name) else {
+        return false;
+    };
+    match path.extension().and_then(|ext| ext.to_str()) {
+        None => true,
+        Some(ext) if has_placeholder(ext) => true,
+        Some(_) => ".env.".starts_with(&name[..first]),
+    }
+}
+
+/// The format a literal `peers` path's name implies. As for the reference, a
+/// literal extension decides it at load (`{dir}/{stem}.json` is JSON); a name
+/// whose format a token decides implies none until an iteration renders it.
+fn literal_peer_format(peers: &str) -> Option<KeyFormat> {
+    infer_format(Path::new(&alint_core::template::literal_glob_path(peers)?))
 }
 
 #[cfg(test)]

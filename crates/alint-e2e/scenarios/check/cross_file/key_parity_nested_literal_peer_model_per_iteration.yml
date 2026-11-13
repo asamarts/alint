@@ -1,0 +1,36 @@
+test_version: 1
+name: a nested key_parity checks a literal peer's key model in each iteration
+tags: [check, key_parity, for_each_file, cross_file, nested, json, dotenv]
+
+# The literal peer `{dir}/.env` is dotenv. The dotenv iteration is compared;
+# the JSON iteration's reference has a different key model, which its build
+# reports as a nested_rule_build failure.
+
+given:
+  tree:
+    web:
+      .env: "A=1\n"
+      config.json: '{"a": 1}'
+    api:
+      .env: "A=1\n"
+      .env.example: "A=1\nB=2\n"
+  config: |
+    version: 1
+    rules:
+      - id: env-parity
+        kind: for_each_file
+        select: ["web/config.json", "api/.env.example"]
+        level: error
+        require:
+          - kind: key_parity
+            reference: "{path}"
+            peers: "{dir}/.env"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: env-parity, level: error, path: api/.env, message: {regex: "missing key `B`"}}
+    analysis_failures:
+      - {rule: env-parity, kind: nested_rule_build, path: web/config.json, message: {regex: "different key model"}}
