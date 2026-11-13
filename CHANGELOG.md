@@ -26,6 +26,13 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   "internal error ... key_parity requires the relation read cache", unless another rule in the
   configuration happened to enable the run's relation caches. `--only <parent>` and
   `explain --trace <parent>` failed even then (#502).
+- **A nested `key_parity` whose `reference:` or literal `peers:` takes its file name from a path
+  token loads.** A configuration with `reference: "{path}"` or `peers: "{dir}/fr.{ext}"` in a
+  `require:` block was rejected with "cannot infer the key format", because nested rules are
+  checked at load with a placeholder path that has no extension. The format is now inferred in
+  each iteration, and an iteration whose file has no key format is a `nested_rule_build` analysis
+  failure. The load-time placeholder also no longer renders `{dir}`, `{ext}` or `{parent_name}`
+  empty, so `reference: "i18n/{parent_name}.json"` loads too (#504).
 - `alint test` redacts a runner error's paths correctly when the test package and the temporary
   directory overlap. It replaced the temporary directory first, so a package under `TMPDIR`
   reported `<temporary-directory>` with the rest of its path instead of `<policy-test-package>`,

@@ -1650,6 +1650,7 @@ KeyParityRule {
     message: None,
     reference: "locales/en.json",
     reference_format: Json,
+    format_pending: false,
     format_override: None,
     peers: "locales/*.json",
     peers_scope: Scope { ... },

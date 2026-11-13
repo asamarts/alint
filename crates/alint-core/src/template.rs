@@ -135,6 +135,44 @@ impl PathTokens {
             }),
         }
     }
+
+    /// Tokens for building a nested `require:` rule before any entry is
+    /// iterated: the parent's load-time check and the engine's preparation
+    /// traversal. Each token renders as its own name in white curly brackets
+    /// (`{stem}` as `⦃stem⦄`), so no token renders empty, no two tokens
+    /// render alike, and a builder can tell a value a token rendered
+    /// ([`has_placeholder`]) from text the configuration wrote. A check that
+    /// depends on the value a token will take, such as a format inferred from
+    /// an extension, belongs to each iteration's own build.
+    #[must_use]
+    pub fn placeholder() -> Self {
+        let token = |name: &str| format!("{PLACEHOLDER_OPEN}{name}{PLACEHOLDER_CLOSE}");
+        Self {
+            path: token("path"),
+            dir: token("dir"),
+            basename: token("basename"),
+            stem: token("stem"),
+            ext: token("ext"),
+            parent_name: token("parent_name"),
+        }
+    }
+}
+
+/// The brackets [`PathTokens::placeholder`] puts around a token's name.
+const PLACEHOLDER_OPEN: char = '\u{2983}';
+const PLACEHOLDER_CLOSE: char = '\u{2984}';
+/// The path tokens' names, as a template spells them between braces.
+const TOKEN_NAMES: [&str; 6] = ["path", "dir", "basename", "stem", "ext", "parent_name"];
+
+/// Whether `rendered` holds a value that [`PathTokens::placeholder`] rendered:
+/// part of it comes from a path token whose value is known only per
+/// iteration.
+#[must_use]
+pub fn has_placeholder(rendered: &str) -> bool {
+    rendered.split(PLACEHOLDER_OPEN).skip(1).any(|rest| {
+        rest.split_once(PLACEHOLDER_CLOSE)
+            .is_some_and(|(name, _)| TOKEN_NAMES.contains(&name))
+    })
 }
 
 /// Substitute `{token}` placeholders in a path-shaped template. Unknown
@@ -615,6 +653,49 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The preparation build's tokens: none renders empty or like another, and
+    /// each is recognisable after rendering, alone or inside a path (#504).
+    #[test]
+    fn placeholder_tokens_are_distinct_non_empty_and_recognisable() {
+        let tokens = PathTokens::placeholder();
+        let rendered: Vec<String> = TOKEN_NAMES
+            .iter()
+            .map(|name| render_path(&format!("{{{name}}}"), &tokens))
+            .collect();
+        for (name, value) in TOKEN_NAMES.iter().zip(&rendered) {
+            assert!(!value.is_empty(), "{name}");
+            assert!(!value.contains('{'), "{name}: {value}");
+            assert!(has_placeholder(value), "{name}: {value}");
+            assert!(
+                has_placeholder(&render_path(&format!("a/{{{name}}}.json"), &tokens)),
+                "{name}"
+            );
+            assert!(
+                has_placeholder(&render_path_glob(&format!("{{{name}}}/*.json"), &tokens)),
+                "{name}"
+            );
+        }
+        let mut unique = rendered.clone();
+        unique.sort();
+        unique.dedup();
+        assert_eq!(unique.len(), TOKEN_NAMES.len(), "{rendered:?}");
+        // A lone `{dir}` keeps its value rather than collapsing as an empty one does.
+        assert_eq!(
+            render_path("{dir}/en.json", &tokens),
+            "\u{2983}dir\u{2984}/en.json"
+        );
+        for plain in [
+            "",
+            "en.json",
+            "{path}",
+            "\u{2983}",
+            "\u{2983}other\u{2984}",
+            "a\u{2984}",
+        ] {
+            assert!(!has_placeholder(plain), "{plain:?}");
+        }
+    }
 
     #[test]
     fn kinds_outside_the_table_have_no_nested_glob_options() {

@@ -1,0 +1,31 @@
+test_version: 1
+name: an iteration whose templated reference has no key format is an analysis failure
+tags: [check, key_parity, for_each_file, cross_file, nested]
+
+given:
+  tree:
+    web:
+      en.json: '{"a": 1}'
+      fr.json: '{"a": 1}'
+    notes:
+      en.txt: "a"
+      fr.txt: "a"
+  config: |
+    version: 1
+    rules:
+      - id: locale-parity
+        kind: for_each_file
+        select: "*/en.*"
+        level: error
+        require:
+          - kind: key_parity
+            reference: "{path}"
+            peers: "{dir}/fr.{ext}"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations: []
+    analysis_failures:
+      - {rule: locale-parity, kind: nested_rule_build, path: notes/en.txt}

@@ -654,6 +654,18 @@
     "fingerprint": "fa8c0e9a3ffca8a371b3e9bcab889ee6ec7679ecce90575c64fa09ac392b4dab"
   },
   {
+    "scenario": "check/cross_file/key_parity_nested_templated_reference_fires.yml",
+    "rule_id": "locale-parity",
+    "path": "api/fr.yml",
+    "fingerprint": "6df3195a2d55c4b0ed9b691cef20e3db0a669869728b55941a7249da48f9f6ca"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_nested_templated_reference_fires.yml",
+    "rule_id": "locale-parity",
+    "path": "web/fr.json",
+    "fingerprint": "18e63f8208f3a80f8d8d861bad5c9fc1eb99a4f82dae0ad9e3ba5d1a8e4797e0"
+  },
+  {
     "scenario": "check/cross_file/key_parity_nested_twice_fires.yml",
     "rule_id": "package-locale-parity",
     "path": "packages/ui/locales/fr.json",

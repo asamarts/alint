@@ -1206,7 +1206,7 @@ mod tests {
              root_only: false\nscope_filter:\n  has_ancestor: Cargo.toml\n",
         )
         .unwrap();
-        let placeholder = crate::template::PathTokens::from_path(std::path::Path::new("_"));
+        let placeholder = crate::template::PathTokens::placeholder();
         for path in ["pkgs/a", "pkgs/[weird]{x}/*?", "a/b/c/d.e.f", "", "!neg"] {
             let tokens = crate::template::PathTokens::from_path(std::path::Path::new(path));
             let a = nested.instantiate("parent", 0, crate::Level::Error, &placeholder);

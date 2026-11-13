@@ -249,16 +249,18 @@ pub(crate) fn compile_nested_require(
 /// nothing. Shared by `for_each_dir`, `for_each_file`, and
 /// `every_matching_has` via their `Rule::validate_nested` impls.
 ///
-/// A placeholder path token set is used: only structural errors
-/// (kind / option / required-field) surface here - the per-iteration
-/// path *values* are irrelevant to whether a nested spec builds.
+/// The placeholder path tokens ([`PathTokens::placeholder`]) are used: only
+/// errors that hold for every iteration surface here (kind, option,
+/// required field, a value the configuration wrote). A check on a value a
+/// token renders, such as `key_parity`'s format inferred from a templated
+/// `reference:`, waits for the iteration's own build.
 pub(crate) fn validate_nested_require(
     parent_id: &str,
     level: Level,
     require: &[CompiledNestedSpec],
     registry: &alint_core::RuleRegistry,
 ) -> Result<()> {
-    let tokens = alint_core::template::PathTokens::from_path(std::path::Path::new("_"));
+    let tokens = PathTokens::placeholder();
     for (idx, compiled) in require.iter().enumerate() {
         // These parent-only fields are stripped before the leaf rule is built
         // (`NestedRuleSpec::instantiate`), so they never take effect. Reject

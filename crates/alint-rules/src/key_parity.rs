@@ -234,6 +234,11 @@ pub struct KeyParityRule {
     message: Option<String>,
     reference: RelPath,
     reference_format: KeyFormat,
+    /// The reference's file name came from a path token and has no format
+    /// yet: only a nested rule's preparation build, from placeholder tokens,
+    /// sets this, and each iteration builds the rule again from its own path
+    /// (#504). `reference_format` is then a stand-in.
+    format_pending: bool,
     format_override: Option<KeyFormat>,
     peers: String,
     peers_scope: Scope,
@@ -382,6 +387,9 @@ impl Rule for KeyParityRule {
 
     #[allow(clippy::too_many_lines)]
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
+        if self.format_pending {
+            return Err(Error::rule_config(&self.id, NO_REFERENCE_FORMAT));
+        }
         // The run's caches, or fresh ones when the engine did not enable them
         // (a rule evaluated directly, as the unit tests do).
         let mut local = None;
@@ -1399,14 +1407,17 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
             "`peers` must select at least one file other than the reference",
         ));
     }
+    // A nested rule is first built from placeholder path tokens. When a token
+    // gives the reference its file name, the format is known only once an
+    // iteration renders the name, and that iteration's build infers it.
+    let format_pending = opts.format.is_none()
+        && infer_format(Path::new(reference.as_str())).is_none()
+        && name_from_token(reference.as_str());
     let reference_format = match opts.format {
         Some(format) => format,
-        None => infer_format(Path::new(reference.as_str())).ok_or_else(|| {
-            Error::rule_config(
-                &spec.id,
-                "cannot infer the key format from `reference`; set `format` explicitly",
-            )
-        })?,
+        None if format_pending => KeyFormat::Json,
+        None => infer_format(Path::new(reference.as_str()))
+            .ok_or_else(|| Error::rule_config(&spec.id, NO_REFERENCE_FORMAT))?,
     };
     if let Some(format) = opts.format
         && let Some(inferred) = infer_format(Path::new(reference.as_str()))
@@ -1421,7 +1432,7 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
             ),
         ));
     }
-    if opts.strip_root && reference_format.model() != KeyModel::Tree {
+    if opts.strip_root && !format_pending && reference_format.model() != KeyModel::Tree {
         return Err(Error::rule_config(
             &spec.id,
             format!(
@@ -1436,19 +1447,9 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
             "`ignore_keys` patterns must be at most 1024 bytes",
         ));
     }
-    let ignore = opts
-        .ignore_keys
-        .iter()
-        .map(|pattern| {
-            KeyPattern::parse(pattern, reference_format.model()).map_err(|error| {
-                Error::rule_config(
-                    &spec.id,
-                    format!("`ignore_keys` pattern {pattern:?}: {error}"),
-                )
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-    let literal_peer = literal_peer(spec, &opts, &reference, reference_format)?;
+    let known_format = (!format_pending).then_some(reference_format);
+    let ignore = ignore_patterns(spec, &opts.ignore_keys, known_format)?;
+    let literal_peer = literal_peer(spec, &opts, &reference, known_format)?;
     let peers_scope = Scope::from_patterns(std::slice::from_ref(&opts.peers))?;
     // The reference is a literal path: escape it, so a name such as
     // `locales/[id].json` matches its own `--changed` edit. Git cannot report
@@ -1469,6 +1470,7 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
         message: spec.message.clone(),
         reference,
         reference_format,
+        format_pending,
         format_override: opts.format,
         peers: opts.peers,
         peers_scope,
@@ -1482,6 +1484,41 @@ fn build_rule(spec: &RuleSpec) -> Result<KeyParityRule> {
     })
 }
 
+/// The `ignore_keys` patterns, parsed for the reference's key model. With the
+/// format pending (`None`), a pattern must parse under some key model; the
+/// iteration's build parses it under the one its format has.
+fn ignore_patterns(
+    spec: &RuleSpec,
+    patterns: &[String],
+    reference_format: Option<KeyFormat>,
+) -> Result<Vec<KeyPattern>> {
+    let models: &[KeyModel] = match reference_format {
+        Some(format) => &[format.model()],
+        None => &[KeyModel::Tree, KeyModel::Flat],
+    };
+    patterns
+        .iter()
+        .map(|pattern| {
+            let mut first_error = None;
+            for &model in models {
+                match KeyPattern::parse(pattern, model) {
+                    Ok(parsed) => return Ok(parsed),
+                    Err(error) => {
+                        first_error.get_or_insert(error);
+                    }
+                }
+            }
+            Err(Error::rule_config(
+                &spec.id,
+                format!(
+                    "`ignore_keys` pattern {pattern:?}: {}",
+                    first_error.unwrap_or_default()
+                ),
+            ))
+        })
+        .collect()
+}
+
 /// A `peers` value with no glob metacharacters, as a confined path other than
 /// the reference. Its extension implies a key model (without an explicit
 /// `format`, it picks the format), so a key-model mismatch is a config error
@@ -1490,7 +1527,7 @@ fn literal_peer(
     spec: &RuleSpec,
     opts: &Options,
     reference: &RelPath,
-    reference_format: KeyFormat,
+    reference_format: Option<KeyFormat>,
 ) -> Result<Option<RelPath>> {
     let Some(path) = alint_core::template::literal_glob_path(&opts.peers) else {
         return Ok(None);
@@ -1508,13 +1545,14 @@ fn literal_peer(
         ));
     }
     let inferred = infer_format(Path::new(path.as_str()));
-    if opts.format.is_none() && inferred.is_none() {
+    if opts.format.is_none() && inferred.is_none() && !name_from_token(path.as_str()) {
         return Err(Error::rule_config(
             &spec.id,
             "cannot infer the key format of the literal `peers` path; set `format` explicitly",
         ));
     }
     if let Some(format) = inferred
+        && let Some(reference_format) = reference_format
         && format.model() != reference_format.model()
     {
         return Err(Error::rule_config(
@@ -1527,6 +1565,20 @@ fn literal_peer(
         ));
     }
     Ok(Some(path))
+}
+
+const NO_REFERENCE_FORMAT: &str =
+    "cannot infer the key format from `reference`; set `format` explicitly";
+
+/// Whether a path token gave `path` its file name. That is known only in a
+/// nested rule's preparation build, which renders the tokens as placeholders
+/// ([`alint_core::template::PathTokens::placeholder`]); each iteration's build
+/// sees the real name.
+fn name_from_token(path: &str) -> bool {
+    Path::new(path)
+        .file_name()
+        .and_then(|name| name.to_str())
+        .is_some_and(alint_core::template::has_placeholder)
 }
 
 #[cfg(test)]

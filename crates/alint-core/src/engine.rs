@@ -738,7 +738,7 @@ pub(crate) fn visit_rule_tree_with_registry(
         return Ok(());
     }
 
-    let tokens = crate::template::PathTokens::from_path(Path::new("_"));
+    let tokens = crate::template::PathTokens::placeholder();
     for (idx, compiled) in rule.nested_rule_specs().iter().enumerate() {
         let nested_spec = compiled.instantiate(rule.id(), idx, rule.level(), &tokens);
         let nested_rule = registry.build(&nested_spec).map_err(|error| {
@@ -888,7 +888,7 @@ fn visit_active_rule_tree_with_registry(
 
     let parent_gate = configured_iteration_gate(spec)?;
     let select = configured_select_scope(spec)?;
-    let tokens = crate::template::PathTokens::from_path(Path::new("_"));
+    let tokens = crate::template::PathTokens::placeholder();
     for (idx, compiled) in rule.nested_rule_specs().iter().enumerate() {
         if !nested_rule_can_activate(
             spec,
