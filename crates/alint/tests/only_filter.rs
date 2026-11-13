@@ -124,3 +124,49 @@ fn fix_only_unknown_id_is_a_hard_error() {
         String::from_utf8_lossy(&out.stderr)
     );
 }
+
+/// A `key_parity` in a parent's `require:` compares its files under
+/// `--only <parent>` and `explain --trace <parent>` as in a full check (#502).
+/// A top-level relation rule used to enable the run's caches and hide the
+/// failure from `check`; both of these build a one-rule engine.
+#[test]
+fn a_nested_key_parity_runs_under_only_and_trace() {
+    let d = tempfile::tempdir().unwrap();
+    std::fs::write(
+        d.path().join(".alint.yml"),
+        "version: 1\n\
+         rules:\n\
+         \x20 - id: locale-parity\n\
+         \x20   kind: for_each_file\n\
+         \x20   select: \"en.json\"\n\
+         \x20   level: error\n\
+         \x20   require:\n\
+         \x20     - kind: key_parity\n\
+         \x20       reference: \"en.json\"\n\
+         \x20       peers: \"fr.json\"\n\
+         \x20 - id: top-level-parity\n\
+         \x20   kind: key_parity\n\
+         \x20   reference: en.json\n\
+         \x20   peers: \"*.json\"\n\
+         \x20   level: warning\n",
+    )
+    .unwrap();
+    std::fs::write(d.path().join("en.json"), "{\"a\": 1, \"b\": 2}\n").unwrap();
+    std::fs::write(d.path().join("fr.json"), "{\"a\": 1}\n").unwrap();
+
+    for args in [&["check"][..], &["check", "--only", "locale-parity"]] {
+        let out = run(d.path(), args);
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        assert_eq!(code(&out), 1, "{args:?}:\n{stdout}");
+        assert!(stdout.contains("missing key `b`"), "{args:?}:\n{stdout}");
+        assert!(!stdout.contains("internal error"), "{args:?}:\n{stdout}");
+    }
+
+    let out = run(
+        d.path(),
+        &["explain", "locale-parity", "--trace", "--format", "json"],
+    );
+    assert_eq!(code(&out), 0, "{}", String::from_utf8_lossy(&out.stderr));
+    let trace: serde_json::Value = serde_json::from_slice(&out.stdout).expect("trace JSON");
+    assert_eq!(trace["result"]["status"], "violated", "{trace:#}");
+}

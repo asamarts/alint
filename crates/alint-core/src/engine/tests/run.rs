@@ -743,6 +743,63 @@ fn a_relation_free_run_does_not_enable_the_read_cache() {
     );
 }
 
+/// Metadata for [`RelationConsumer`] as a registered kind.
+static NESTED_RELATION_META: crate::KindMeta = crate::KindMeta {
+    dispatch: crate::DispatchClass::FullIndex { path_scope: false },
+    paths: crate::PathsSupport::Forbidden,
+    scope_filter: crate::ScopeFilterSupport::Full,
+    git_tracked_only: crate::GitTrackedSupport::None,
+    respect_gitignore: false,
+    root_only: false,
+    selectors: std::borrow::Cow::Borrowed(&[]),
+    since: crate::SinceSupport::None,
+    capabilities: std::borrow::Cow::Borrowed(&[]),
+    content: crate::ContentAccess::WholeFile,
+    formats: std::borrow::Cow::Borrowed(&[]),
+    dependencies: std::borrow::Cow::Borrowed(&[]),
+    fix_ops: std::borrow::Cow::Borrowed(&[]),
+    expect_matches: false,
+    nested_rules: false,
+    trace: crate::TraceMeta::EXTRACTION,
+};
+
+/// A relation consumer nested in a parent's `require:` reads through the run's
+/// caches too (#502): the parent never reports `uses_relations` itself.
+#[test]
+fn a_nested_relation_consumer_enables_the_relation_caches() {
+    let tmp = tempfile::Builder::new()
+        .prefix("alint-nested-relation-cache-")
+        .tempdir()
+        .unwrap();
+    std::fs::write(tmp.path().join("a.txt"), b"hello").unwrap();
+    let mut registry = nested_registry();
+    registry.register("nested_relation_fixture", &NESTED_RELATION_META, |_spec| {
+        Ok(Box::new(RelationConsumer))
+    });
+    let index = crate::walk(tmp.path(), &crate::WalkOptions::default()).unwrap();
+    Engine::new(
+        vec![nested_parent("kind: nested_scope_fixture\n")],
+        registry.clone(),
+    )
+    .run(tmp.path(), &index)
+    .unwrap();
+    assert!(
+        index.read_cache().is_none(),
+        "a nested rule that reads no relations keeps the direct read path"
+    );
+    Engine::new(
+        vec![nested_parent("kind: nested_relation_fixture\n")],
+        registry,
+    )
+    .run(tmp.path(), &index)
+    .unwrap();
+    assert!(index.read_cache().is_some(), "a nested consumer enables it");
+    assert!(
+        index.decode_cache().is_some(),
+        "a nested consumer enables the decode cache"
+    );
+}
+
 #[test]
 fn run_for_file_and_fix_enable_the_relation_cache() {
     let tmp = tempfile::Builder::new()
