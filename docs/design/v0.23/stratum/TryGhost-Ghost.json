@@ -4,54 +4,54 @@
  "metrics": {
   "counts": {
    "A": 36,
-   "B-config": 7,
-   "B-adapter": 14,
+   "B-config": 2,
+   "B-adapter": 18,
    "B-kernel": 0,
    "B-delegate": 0,
-   "C": 19,
-   "D": 22
+   "C": 27,
+   "D": 18
   },
-  "addressable": 76,
-  "coverage_today": 47,
-  "coverage_with_tuning": 72,
-  "gap": 28,
-  "coverage_after_slice": 50,
-  "coverage_after_slice_with_entry_values": 51
+  "addressable": 83,
+  "coverage_today": 43,
+  "coverage_with_tuning": 76,
+  "gap": 24,
+  "coverage_after_slice": 45,
+  "coverage_after_slice_with_entry_values": 45
  },
  "by_family": {
   "locale": {
    "counts": {
-    "A": 5,
+    "A": 4,
     "B-config": 0,
     "B-adapter": 5,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 2,
+    "C": 3,
     "D": 1
    },
    "addressable": 12,
-   "coverage_today": 42,
+   "coverage_today": 33,
    "coverage_with_tuning": 58,
    "gap": 42,
-   "coverage_after_slice": 42,
-   "coverage_after_slice_with_entry_values": 42
+   "coverage_after_slice": 33,
+   "coverage_after_slice_with_entry_values": 33
   },
   "dep-version": {
    "counts": {
     "A": 1,
     "B-config": 0,
-    "B-adapter": 1,
+    "B-adapter": 0,
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 4,
     "D": 2
    },
-   "addressable": 6,
-   "coverage_today": 17,
-   "coverage_with_tuning": 83,
-   "gap": 17,
-   "coverage_after_slice": 17,
-   "coverage_after_slice_with_entry_values": 33
+   "addressable": 5,
+   "coverage_today": 20,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 20,
+   "coverage_after_slice_with_entry_values": 20
   },
   "toolchain-pin": {
    "counts": {
@@ -60,32 +60,32 @@
     "B-adapter": 0,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 1,
+    "C": 2,
     "D": 1
    },
-   "addressable": 8,
-   "coverage_today": 88,
+   "addressable": 9,
+   "coverage_today": 78,
    "coverage_with_tuning": 100,
    "gap": 0,
-   "coverage_after_slice": 88,
-   "coverage_after_slice_with_entry_values": 88
+   "coverage_after_slice": 78,
+   "coverage_after_slice_with_entry_values": 78
   },
   "other": {
    "counts": {
-    "A": 23,
-    "B-config": 7,
-    "B-adapter": 8,
+    "A": 24,
+    "B-config": 2,
+    "B-adapter": 13,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 12,
-    "D": 18
+    "C": 18,
+    "D": 14
    },
-   "addressable": 50,
-   "coverage_today": 46,
-   "coverage_with_tuning": 70,
-   "gap": 30,
-   "coverage_after_slice": 50,
-   "coverage_after_slice_with_entry_values": 50
+   "addressable": 57,
+   "coverage_today": 42,
+   "coverage_with_tuning": 74,
+   "gap": 26,
+   "coverage_after_slice": 44,
+   "coverage_after_slice_with_entry_values": 44
   }
  },
  "units": [
@@ -97,6 +97,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "i18next-parser",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: the extraction step needs code analysis (it parses t() calls in JS/TS/HBS sources), so it stays D.",
    "fire_verified": "n/a",
@@ -111,6 +112,14 @@
    "family": "locale",
    "bucket": "A",
    "alint": "key_parity x5 (plurals: cldr, direction: both): ghost-i18n-key-parity-{ghost,portal,signup-form,comments,search}",
+   "rules": [
+    "ghost-i18n-key-parity-ghost",
+    "ghost-i18n-key-parity-portal",
+    "ghost-i18n-key-parity-signup-form",
+    "ghost-i18n-key-parity-comments",
+    "ghost-i18n-key-parity-search",
+    "ghost-i18n-locale-has-every-namespace"
+   ],
    "assertion_family": "none",
    "reason": "R7: key parity is an assertion over files alint reads. key_parity with plurals: cldr expresses it, and check passes at the pin, where 61 files differ from en only by per-locale plural suffixes.",
    "fire_verified": "Scratch copy of packages/i18n/locales. Each namespace rule fired on its own mutation: fr/portal drop key, de/ghost extra key, nl/search drop key, fr/comments drop key, es/signup-form rename key, it/ghost drop whole plural group. Passes on the clone.",
@@ -125,6 +134,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "missing: per-locale CLDR plural-category data (key_parity plurals: cldr deliberately does not check exact categories)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Control test in scratch: dropping only it/ghost.json's `_one` form passes alint, but the parser would re-add it and fail CI. A locale-to-categories adapter is needed.",
    "fire_verified": "n/a",
@@ -147,6 +157,10 @@
    "family": "locale",
    "bucket": "A",
    "alint": "registry_paths_resolve (expect dir, orphans space locales/*/**): ghost-i18n-locale-dirs-match-locale-data",
+   "rules": [
+    "ghost-i18n-locale-dirs-match-locale-data",
+    "ghost-i18n-locales-no-stray-files"
+   ],
    "assertion_family": "none",
    "reason": "A registry-to-directory bijection; passes on the clone (63 codes, 63 dirs).",
    "fire_verified": "Fired both ways in the scratch copy: an added locales/xx dir not in locale-data, and an added locale-data code zz with no dir. Passes on the clone.",
@@ -161,6 +175,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "json_path_matches if_present: ghost-i18n-stripe-note-label-length",
+   "rules": [
+    "ghost-i18n-stripe-note-label-length"
+   ],
    "assertion_family": "none",
    "reason": "A value-length assertion on one key. JS length counts UTF-16 units and the regex counts code points; these are identical for the text at the pin (max 35).",
    "fire_verified": "Set sv/portal.json's value to 256 chars in the scratch copy and the rule fired; passes on the clone.",
@@ -175,8 +192,11 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "cross_file set_equals with source.files union and line-regex key extraction: ghost-i18n-context-keys-match-en",
+   "rules": [
+    "ghost-i18n-context-keys-match-en"
+   ],
    "assertion_family": "none",
-   "reason": "alint has no JSON key extractor. Keys are read with a regex over the one-entry-per-line JSON.stringify layout, which is layout-dependent. One key containing '( )' is skipped as non-literal on both sides (an alint note).",
+   "reason": "generate-context.js makes one byte comparison: the en key union, sorted and serialized with JSON.stringify(..., 4), against the committed file. Key-set equality and canonical form are one unit (R1). Its binding part is key order, which needs an order operator: B-adapter, as element-web-02. The cross_file rule stays at level info as a partial (key sets only).",
    "fire_verified": "Fired in scratch when a context key was dropped and when an en key was added; passes on the clone.",
    "origin": "A",
    "changes": [
@@ -194,6 +214,13 @@
      "fields": {
       "needs": "order"
      }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ],
    "needs": "order"
@@ -206,6 +233,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "json_path_absent $[?match(@,'[ \\t\\r\\n]*')]: ghost-i18n-context-descriptions-non-empty",
+   "rules": [
+    "ghost-i18n-context-descriptions-non-empty"
+   ],
    "assertion_family": "none",
    "reason": "A value predicate over one JSON file; passes on the clone (570 non-empty).",
    "fire_verified": "Blanked one description in the scratch copy and the rule fired; passes on the clone.",
@@ -220,6 +250,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent parse probe: ghost-i18n-locale-json-parses",
+   "rules": [
+    "ghost-i18n-locale-json-parses"
+   ],
    "assertion_family": "none",
    "reason": "Precedent: a parse probe is C. alint's JSON reader is JSONC-tolerant: a trailing comma passed in a scratch control test, although JSON.parse rejects it.",
    "fire_verified": "Truncated ja/ghost.json in scratch and the rule fired; a trailing-comma control was missed as expected.",
@@ -234,6 +267,10 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent filter over values (ghost-i18n-values-brace-syntax) + for_each_match line regex over en keys (ghost-i18n-en-keys-brace-syntax)",
+   "rules": [
+    "ghost-i18n-values-brace-syntax",
+    "ghost-i18n-en-keys-brace-syntax"
+   ],
    "assertion_family": "none",
    "reason": "The values half is exact via a JSONPath filter. The keys half needs a layout-dependent line regex because JSONPath cannot select keys (precedent element-web-04).",
    "fire_verified": "Both rules fired in scratch: a nested brace in a fr value, and an unclosed brace in an en key.",
@@ -248,6 +285,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "missing: (key, value) row adapter with a placeholder extractor and per-entry waivers",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: an assertion over a locale entry's value against its key is B-adapter, because the entry adapter is key-only.",
    "fire_verified": "n/a",
@@ -270,6 +308,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "missing: (key, value) placeholder adapter",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Same ruling as ghost-12.",
    "fire_verified": "n/a",
@@ -292,6 +331,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "missing: join of waiver (file,key) entries against placeholder-rule results",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Depends on the B-adapter results of ghost-12 and ghost-13.",
    "fire_verified": "n/a",
@@ -312,13 +352,27 @@
    "evidence": "packages/i18n/test/i18n.lint.js:105-128 (assert calls)",
    "mechanism": "ci",
    "family": "locale",
-   "bucket": "A",
+   "bucket": "C",
    "alint": "json_path_absent x2: ghost-i18n-ignores-entry-shape, ghost-i18n-ignores-rule-lists-are-arrays",
+   "rules": [
+    "ghost-i18n-ignores-entry-shape",
+    "ghost-i18n-ignores-rule-lists-are-arrays"
+   ],
    "assertion_family": "none",
-   "reason": "Structured-query predicates over one JSON file; both pass on the clone.",
+   "reason": "Structured-query predicates over one JSON file. They miss an override list that is {} or \"\", because JSONPath cannot tell an empty object from an empty array.",
    "fire_verified": "Fired in scratch for an empty comment, a non-string key, and a rule list replaced by a string. Passes on the clone.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "ghost-i18n-ignores-rule-lists-are-arrays passes when an overrides.<rule> entry is {} or \"\", which Array.isArray (i18n.lint.js:110) rejects. JSONPath cannot tell an empty object from an empty array, so the rule misses a case the check catches (R4)."
+    }
+   ]
   },
   {
    "id": "ghost-16",
@@ -328,6 +382,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint / node --test",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linter and test runner over tool code.",
    "fire_verified": "n/a",
@@ -342,6 +397,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file equals: ghost-node-ci-matches-devengines",
+   "rules": [
+    "ghost-node-ci-matches-devengines"
+   ],
    "assertion_family": "none",
    "reason": "Precedent: CI-vs-pin agreement via cross_file is A; passes on the clone (22.23.5).",
    "fire_verified": "Fired in scratch on both sides (ci.yml NODE_VERSION 22.23.6; devEngines 22.24.0); passes on the clone.",
@@ -356,6 +414,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file x2: ghost-node-engines-root-matches-ghost, ghost-node-docker-args-match-devengines",
+   "rules": [
+    "ghost-node-engines-root-matches-ghost",
+    "ghost-node-docker-args-match-devengines"
+   ],
    "assertion_family": "none",
    "reason": "R5: a Renovate rule that explicitly states a sync invariant counts (mastodon precedent); it holds at the pin.",
    "fire_verified": "Fired in scratch on ghost engines drift, the Dockerfile.production ARG and the docker/ghost-dev ARG; passes on the clone.",
@@ -370,6 +432,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file normalize semver-major: ghost-types-node-major-matches-node",
+   "rules": [
+    "ghost-types-node-major-matches-node"
+   ],
    "assertion_family": "none",
    "reason": "A stated invariant between two pins, expressed exactly with semver-major; passes on the clone (22 vs 22.20.5).",
    "fire_verified": "Set @types/node to 24.1.0 in scratch and the rule fired; passes on the clone.",
@@ -384,6 +449,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file equals: ghost-node-version-files-match-devengines (also bundled toolchain-pins@v1 .nvmrc vs .node-version)",
+   "rules": [
+    "ghost-node-version-files-match-devengines"
+   ],
    "assertion_family": "none",
    "reason": "R5: a documented convention that holds at the pin.",
    "fire_verified": "Fired in scratch for .nvmrc drift (the bundle's toolchain-node-declarations-coherent fired too) and for .node-version drift; passes on the clone.",
@@ -398,6 +466,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file yaml extract: ghost-i18n-review-node-lockstep",
+   "rules": [
+    "ghost-i18n-review-node-lockstep"
+   ],
    "assertion_family": "none",
    "reason": "A stated lockstep in workflow comments that holds at the pin ('24').",
    "fire_verified": "Changed i18n-review-checks to node '22' in scratch and the rule fired; passes on the clone.",
@@ -412,6 +483,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches: ghost-package-manager-pinned",
+   "rules": [
+    "ghost-package-manager-pinned"
+   ],
    "assertion_family": "none",
    "reason": "Precedent trpc-02.",
    "fire_verified": "Fired in scratch for a range (pnpm@^12) and for a removed field; passes on the clone.",
@@ -426,6 +500,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file: ghost-tinybird-cli-lockstep",
+   "rules": [
+    "ghost-tinybird-cli-lockstep"
+   ],
    "assertion_family": "none",
    "reason": "A stated lockstep that holds at the pin (4.6.13).",
    "fire_verified": "Set the workflow to 4.6.12 in scratch and the rule fired; passes on the clone.",
@@ -440,6 +517,9 @@
    "family": "toolchain-pin",
    "bucket": "C",
    "alint": "file_content_matches hand-encoded range regex: ghost-tb-cli-python-range",
+   "rules": [
+    "ghost-tb-cli-python-range"
+   ],
    "assertion_family": "none",
    "reason": "The version range is hand-encoded as a regex; it wants a semver-range operator.",
    "fire_verified": "n/a (C); fired in scratch on python:3.14 and passes on the clone.",
@@ -454,6 +534,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It checks the invoking package manager at runtime, not repository state.",
    "fire_verified": "n/a",
@@ -468,6 +549,15 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file normalize semver-minor x6: ghost-cdn-app-version-{portal,sodo-search,comments-ui,signup-form,announcement-bar,admin-toolbar}",
+   "rules": [
+    "ghost-cdn-app-version-portal",
+    "ghost-cdn-app-version-sodo-search",
+    "ghost-cdn-app-version-comments-ui",
+    "ghost-cdn-app-version-signup-form",
+    "ghost-cdn-app-version-announcement-bar",
+    "ghost-cdn-app-version-admin-toolbar",
+    "ghost-cdn-defaults-version-is-major-minor"
+   ],
    "assertion_family": "none",
    "reason": "Version agreement between two manifests; semver-minor normalization is exact. Passes on the clone.",
    "fire_verified": "Fired in scratch for all six apps (minor or major bump on either side); a patch-only portal bump correctly did not fire. Passes on the clone.",
@@ -492,6 +582,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent with absolute filter: ghost-pkg-compliant-required-devdeps",
+   "rules": [
+    "ghost-pkg-compliant-required-devdeps"
+   ],
    "assertion_family": "none",
    "reason": "Fixed per-package dependency specs selectable by name; passes on the clone.",
    "fire_verified": "Fired in scratch when nql-string's vitest was pinned to 4.0.0 and when checkout's @internal/cfg-vitest was removed; passes on the clone.",
@@ -504,10 +597,11 @@
    "evidence": "tools/scripts/ci/check-internal-packages.ts:396-407",
    "mechanism": "ci",
    "family": "dep-version",
-   "bucket": "B-adapter",
-   "alint": "constraint: dependency keys of compliant manifests that name a workspace package must have value workspace:*",
-   "assertion_family": "equality",
-   "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). For a dependency key that names a workspace package, the value must equal workspace:*.",
+   "bucket": "C",
+   "alint": "no rule: a regex over the compliant manifests' dependency lines with the workspace package names hand-listed, as in yarnpkg-berry-02",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A line regex with hand-listed workspace names expresses it, as for yarnpkg-berry-02, trpc-12, rushstack-03, strapi-07 and backstage-07. Hand-listed and layout-dependent, so C.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -519,23 +613,44 @@
       "assertion_family": "equality",
       "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). For a dependency key that names a workspace package, the value must equal workspace:*."
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "dep-version",
+      "equality"
+     ],
+     "why": "yarnpkg-berry-02, trpc-12, rushstack-03, strapi-07 and backstage-07 check the same shape (a dependency on a workspace package uses a fixed workspace: spec) and are C, with the workspace names hand-listed in a regex. The compliant packages are selectable by $.ghostPackage.goldenPath."
     }
-   ],
-   "needs": "entry-values"
+   ]
   },
   {
    "id": "ghost-34",
    "summary": "The Tinybird CLI is held below 4.6.14",
    "evidence": ".github/renovate.json5:229-239 allowedVersions <4.6.14 with a stated reason",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "toolchain-pin",
    "bucket": "C",
    "alint": "file_content_matches hand-encoded ceiling regex: ghost-tinybird-cli-held",
+   "rules": [
+    "ghost-tinybird-cli-held"
+   ],
    "assertion_family": "none",
    "reason": "A version ceiling hand-encoded as a regex.",
    "fire_verified": "n/a (C); fired in scratch on 4.6.14.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "C",
+      "dep-version",
+      "none"
+     ],
+     "why": "ghost-26 tags the same Tinybird CLI pin toolchain-pin; a ceiling on it belongs to the same family, as ghost-27's Node ceiling does."
+    }
+   ]
   },
   {
    "id": "ghost-35",
@@ -545,6 +660,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "file_content_forbidden regex: ghost-mysql-8-line",
+   "rules": [
+    "ghost-mysql-8-line"
+   ],
    "assertion_family": "none",
    "reason": "A version ceiling hand-encoded as a regex over image references.",
    "fire_verified": "n/a (C); fired in scratch on mysql:9.1.0.",
@@ -559,6 +677,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "yaml_path_matches regex: ghost-flexsearch-0-7",
+   "rules": [
+    "ghost-flexsearch-0-7"
+   ],
    "assertion_family": "none",
    "reason": "A version ceiling hand-encoded as a regex.",
    "fire_verified": "n/a (C); fired in scratch on 0.8.2.",
@@ -573,6 +694,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: these rely on package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -587,6 +709,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "knip",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: needs import analysis of the code.",
    "fire_verified": "n/a",
@@ -599,13 +722,25 @@
    "evidence": "tools/scripts/ci/change-check.ts (ci.yml:444); .github/CONTRIBUTING.md Changesets",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-adapter",
    "alint": "script (git diff vs base)",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Needs PR diff/history; the clones are depth 1.",
+   "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "tools/scripts/ci/change-check.ts and lib/pnpm.ts:95-117,195-246 compare the changed packages with the merge-base, as fluentui-21 and yarnpkg-berry-16 do (B-adapter base-revision)."
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "ghost-40",
@@ -615,6 +750,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent absolute filter: ghost-private-packages-version-placeholder",
+   "rules": [
+    "ghost-private-packages-version-placeholder"
+   ],
    "assertion_family": "none",
    "reason": "A per-manifest conditional predicate; passes on the clone.",
    "fire_verified": "Set packages/i18n version to 1.0.0 in scratch and the rule fired; passes on the clone.",
@@ -629,6 +767,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file set_equals + subset: ghost-versioning-ignore-is-continuous-lane, ghost-versioning-ignore-has-ghost",
+   "rules": [
+    "ghost-versioning-ignore-is-continuous-lane",
+    "ghost-versioning-ignore-has-ghost",
+    "ghost-versioning-ignore-names-workspace-packages"
+   ],
    "assertion_family": "none",
    "reason": "Set equality between two files; the script hard-codes 'ghost' and so does the filter. Passes on the clone.",
    "fire_verified": "Fired in scratch when an entry was missing, when an extra package was added, and when ghost was missing.",
@@ -643,6 +786,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "json_path_absent with hand-listed external names: ghost-published-packages-semver",
+   "rules": [
+    "ghost-published-packages-semver"
+   ],
    "assertion_family": "none",
    "reason": "The externally versioned names are repeated by hand because alint cannot join publish-manifest names into a per-file filter.",
    "fire_verified": "n/a (C); fired in scratch when cache-base was set to 0.2.",
@@ -657,6 +803,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: ghost-publish-manifest-entries-valid",
+   "rules": [
+    "ghost-publish-manifest-entries-valid"
+   ],
    "assertion_family": "none",
    "reason": "Per-element predicates; passes on the clone.",
    "fire_verified": "Fired in scratch for a prerelease without distTag and for cdn on a prerelease.",
@@ -671,6 +820,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "constraint: object key set within an allowed set",
+   "rules": [
+    "ghost-publish-manifest-entries-strict-keys"
+   ],
    "assertion_family": "none",
    "reason": "Needs key selection, which JSONPath lacks.",
    "fire_verified": "n/a",
@@ -695,6 +847,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over array elements' name",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Uniqueness inside one file's array.",
    "fire_verified": "n/a",
@@ -709,6 +862,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve must_contain package.json: ghost-publish-manifest-paths-resolve",
+   "rules": [
+    "ghost-publish-manifest-paths-resolve"
+   ],
    "assertion_family": "none",
    "reason": "A registry path resolution; passes on the clone.",
    "fire_verified": "Fired in the partial scratch tree where apps/shade/package.json was absent.",
@@ -723,6 +879,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: ghost-pkg-golden-path-status",
+   "rules": [
+    "ghost-pkg-golden-path-status"
+   ],
    "assertion_family": "none",
    "reason": "A conditional per-manifest predicate.",
    "fire_verified": "Fired in scratch for a private package without goldenPath and for a published package with one.",
@@ -737,6 +896,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: ghost-pkg-golden-path-reason",
+   "rules": [
+    "ghost-pkg-golden-path-reason"
+   ],
    "assertion_family": "none",
    "reason": "A conditional predicate.",
    "fire_verified": "Fired in scratch for a whitespace-only reason.",
@@ -751,6 +913,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent x2 + for_each_file {dir}: ghost-pkg-compliant-manifest-fields, ghost-pkg-compliant-name, ghost-pkg-compliant-repository-directory",
+   "rules": [
+    "ghost-pkg-compliant-manifest-fields",
+    "ghost-pkg-compliant-name",
+    "ghost-pkg-compliant-repository-directory"
+   ],
    "assertion_family": "none",
    "reason": "Fixed values under a compliant condition; repository.directory uses the {dir} token.",
    "fire_verified": "Fired in scratch for publishConfig, an extended files list, a non-kebab name and a wrong repository.directory.",
@@ -765,6 +932,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: key-order operator and derived-value (path transform) equality",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs condition key order and string derivation across fields.",
    "fire_verified": "n/a",
@@ -787,6 +955,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir when_iter contrapositive + json_path_absent: ghost-pkg-compliant-config-files",
+   "rules": [
+    "ghost-pkg-compliant-config-files"
+   ],
    "assertion_family": "none",
    "reason": "The contrapositive (missing a file implies not compliant) is exact.",
    "fire_verified": "Fired in scratch when vitest.config.ts was removed and in the partial tree without config files.",
@@ -801,6 +972,14 @@
    "family": "other",
    "bucket": "C",
    "alint": "json_path_absent x2 + file_content_matches x4 over hand-listed compliant dirs: ghost-pkg-compliant-{tsconfig,test-tsconfig,eslint-factory-import,eslint-factory-export,vitest-factory-import,vitest-factory-export}",
+   "rules": [
+    "ghost-pkg-compliant-tsconfig",
+    "ghost-pkg-compliant-test-tsconfig",
+    "ghost-pkg-compliant-eslint-factory-import",
+    "ghost-pkg-compliant-eslint-factory-export",
+    "ghost-pkg-compliant-vitest-factory-import",
+    "ghost-pkg-compliant-vitest-factory-export"
+   ],
    "assertion_family": "none",
    "reason": "alint cannot condition one file's check on another file's content, so the 13 compliant dirs are listed by hand.",
    "fire_verified": "n/a (C); fired in scratch for an outDir change and an eslint config without the factory.",
@@ -815,6 +994,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir when_iter contrapositive: ghost-pkg-compliant-typescript-only",
+   "rules": [
+    "ghost-pkg-compliant-typescript-only"
+   ],
    "assertion_family": "none",
    "reason": "Exact contrapositive.",
    "fire_verified": "Fired in scratch when a .js file was added to nql-string/src.",
@@ -829,6 +1011,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "golden-path rules include _template + token-aware json_path_absent: ghost-pkg-template-tokens",
+   "rules": [
+    "ghost-pkg-template-tokens"
+   ],
    "assertion_family": "none",
    "reason": "Needs token-tolerant variants of two fields.",
    "fire_verified": "n/a (C); fired in scratch on a changed directory token.",
@@ -843,6 +1028,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: numeric version comparison between a directory name and a JSON value",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs an ordered version comparison across file and path.",
    "fire_verified": "n/a",
@@ -863,13 +1049,25 @@
    "evidence": "tools/scripts/ci/check-migration-integrity.ts:110-240",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-adapter",
    "alint": "script (git tags/diff)",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Needs git history and tags.",
+   "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Check 2 in check-migration-integrity.ts compares migrations with the last published tag's tree, as mattermost-88 does."
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "ghost-57",
@@ -879,6 +1077,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden over a hand-encoded >6.72 folder glob: ghost-no-permission-migrations",
+   "rules": [
+    "ghost-no-permission-migrations"
+   ],
    "assertion_family": "none",
    "reason": "The semver folder comparison is encoded as glob alternatives.",
    "fire_verified": "n/a (C); fired in scratch for a 6.78 migration calling addPermissionWithRoles.",
@@ -893,6 +1094,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: hash of canonicalized (parsed + JSON.stringify) content",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The hash is over re-serialized parsed data, not file bytes.",
    "fire_verified": "n/a",
@@ -915,6 +1117,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex stem: ghost-migration-filenames",
+   "rules": [
+    "ghost-migration-filenames"
+   ],
    "assertion_family": "none",
    "reason": "A documented convention that holds for all 392 files at the pin. The oxlint half is likely inert (later ghost/core override, export exemption).",
    "fire_verified": "Fired in scratch for addPerm.js.",
@@ -929,6 +1134,11 @@
    "family": "other",
    "bucket": "C",
    "alint": "filename_regex x3: ghost-core-filenames, ghost-core-helper-filenames, ghost-test-filenames",
+   "rules": [
+    "ghost-core-filenames",
+    "ghost-core-helper-filenames",
+    "ghost-test-filenames"
+   ],
    "assertion_family": "none",
    "reason": "Three files opt out with inline oxlint-disable and are excluded by name (precedent element-web-28).",
    "fire_verified": "n/a (C); each rule fired in scratch.",
@@ -941,11 +1151,12 @@
    "evidence": "ghost/test/unit/server/services/legacy-service-inventory.test.ts:25-96 (ci.yml:562 job_service_inventory)",
    "mechanism": "test",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "C",
    "alint": "missing: json_schema_passes with an inline schema (the schema exists only as zod in TS)",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Corpus configs cannot add a schema file to the read-only clone.",
-   "fire_verified": "n/a",
+   "reason": "The zod strict schema has no refinements and translates to a JSON Schema, which json_schema_passes checks from a file outside the repository. A corpus config cannot ship that file, so C with no rule (backstage-38 precedent).",
+   "fire_verified": "Audit: the translated schema passed on a scratch copy; two mutations gave 2 violations.",
    "origin": "A",
    "changes": [
     {
@@ -953,9 +1164,17 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "The zod schema at legacy-service-inventory.test.ts:25-96 has no refinements, so it translates to JSON Schema. backstage-38, also a zod-only schema, is C."
     }
-   ],
-   "needs": "other"
+   ]
   },
   {
    "id": "ghost-62",
@@ -963,13 +1182,24 @@
    "evidence": "legacy-service-inventory.test.ts:185-220",
    "mechanism": "test",
    "family": "other",
-   "bucket": "B-config",
+   "bucket": "C",
    "alint": "constraint: inventory map keys vs directory entries",
-   "assertion_family": "reference",
-   "reason": "Needs YAML map keys, which JSONPath cannot select.",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "registry_paths_resolve over the inventory's kind: directory and kind: file entries, plus a for_each_dir that requires index.ts or registration in the inventory. The keys are read by line regex, so C.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-config",
+      "other",
+      "reference"
+     ],
+     "why": "Three existing kinds express it over the inventory file (registry_paths_resolve by kind line, for_each_dir with cross_file registered), with layout-dependent key reads."
+    }
+   ]
   },
   {
    "id": "ghost-63",
@@ -979,6 +1209,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint over map keys and allowed field set",
+   "rules": [],
    "assertion_family": "set",
    "reason": "Needs key selection.",
    "fire_verified": "n/a",
@@ -993,6 +1224,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "TypeScript AST",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis.",
    "fire_verified": "n/a",
@@ -1007,6 +1239,12 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve x3 + yaml_path_absent: ghost-inventory-evidence-paths-resolve, ghost-inventory-extras-callers-resolve, ghost-inventory-contract-tests-resolve, ghost-inventory-contract-tests-prefix",
+   "rules": [
+    "ghost-inventory-evidence-paths-resolve",
+    "ghost-inventory-extras-callers-resolve",
+    "ghost-inventory-contract-tests-resolve",
+    "ghost-inventory-contract-tests-prefix"
+   ],
    "assertion_family": "none",
    "reason": "A registry resolution; passes on the clone.",
    "fire_verified": "Fired in scratch for a missing evidence source.",
@@ -1021,6 +1259,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve: ghost-inventory-entry-points-resolve",
+   "rules": [
+    "ghost-inventory-entry-points-resolve"
+   ],
    "assertion_family": "none",
    "reason": "A registry resolution.",
    "fire_verified": "Fired in scratch for a missing entry point.",
@@ -1033,13 +1274,25 @@
    "evidence": "legacy-service-inventory.test.ts:292-300",
    "mechanism": "test",
    "family": "other",
-   "bucket": "B-config",
+   "bucket": "B-adapter",
    "alint": "constraint: value prefix vs map key; uniqueness within a list",
+   "rules": [],
    "assertion_family": "reference",
-   "reason": "Needs map keys.",
+   "reason": "Each entry point must start with its own map key: a join between a key and its values, which needs (key path, value) rows (batch 2 ruling). The assertion is reference.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-config",
+      "other",
+      "reference"
+     ],
+     "why": "The test requires entryPoint.startsWith(`${name}/`) (legacy-service-inventory.test.ts:294-297): a map key that must agree with its values, the batch 2 example. No RE2 form exists, since it needs a backreference."
+    }
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "ghost-68",
@@ -1047,13 +1300,25 @@
    "evidence": "legacy-service-inventory.test.ts:307-312",
    "mechanism": "test",
    "family": "other",
-   "bucket": "B-config",
+   "bucket": "B-adapter",
    "alint": "constraint: contracts keys plus unverified list equal the facet enum",
+   "rules": [],
    "assertion_family": "set",
-   "reason": "Needs key selection and set equality inside a document.",
+   "reason": "Per-service facet sets compared with the facet enum. The values must stay tied to their service key, so this needs (key path, value) rows (batch 2 ruling). The assertion is set.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-config",
+      "other",
+      "set"
+     ],
+     "why": "Each service's unverified items must stay tied to that service (test.ts:307-311); extracted values carry no pointer, so key paths alone don't express it."
+    }
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "ghost-69",
@@ -1063,6 +1328,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent with length(): ghost-inventory-status-and-assessment",
+   "rules": [
+    "ghost-inventory-status-and-assessment"
+   ],
    "assertion_family": "none",
    "reason": "Per-entry predicates.",
    "fire_verified": "Fired in scratch for an audited entry with an unverified facet.",
@@ -1075,13 +1343,24 @@
    "evidence": "tools/scripts/test/service-dependencies.test.ts:275-286",
    "mechanism": "test",
    "family": "other",
-   "bucket": "B-config",
+   "bucket": "C",
    "alint": "constraint: keys of entries with dependencyChecks: deferred are within an allowed set",
-   "assertion_family": "set",
-   "reason": "Needs map keys.",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "A cross_file subset with a source regex that finds each entry with dependencyChecks: deferred by indentation, against the allowed list in service-dependencies.test.ts. Layout-dependent, so C (ghost-b08 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-config",
+      "other",
+      "set"
+     ],
+     "why": "ghost-b08 reads the same file with an indentation regex and is C."
+    }
+   ]
   },
   {
    "id": "ghost-71",
@@ -1089,13 +1368,25 @@
    "evidence": "tools/scripts/ci/check-legacy-services.ts; ci.yml:566 job_legacy_services",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-adapter",
    "alint": "git merge-base",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Needs history.",
+   "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "tools/scripts/ci/legacy-services-base.ts compares the inventory at HEAD with the merge-base, as immich-21 and rocketchat-45 do."
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "ghost-72",
@@ -1105,6 +1396,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "dependency-cruiser",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: import-graph analysis.",
    "fire_verified": "n/a",
@@ -1119,6 +1411,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_max_lines: ghost-agents-md-max-lines",
+   "rules": [
+    "ghost-agents-md-max-lines"
+   ],
    "assertion_family": "none",
    "reason": "Passes on the clone (max 101).",
    "fire_verified": "Fired in scratch for a 150+ line AGENTS.md.",
@@ -1133,6 +1428,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + file_exists: ghost-agent-skills-have-skill-md",
+   "rules": [
+    "ghost-agent-skills-have-skill-md"
+   ],
    "assertion_family": "none",
    "reason": "Passes on the clone (24 skills).",
    "fire_verified": "Fired in scratch for a skill dir without SKILL.md.",
@@ -1147,6 +1445,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: symlink target adapter",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Precedent trpc-16.",
    "fire_verified": "n/a",
@@ -1169,6 +1468,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 linter (filename rules split out as ghost-59/60).",
    "fire_verified": "n/a",
@@ -1177,17 +1477,26 @@
   },
   {
    "id": "ghost-77",
-   "summary": "eslint per project (nx lint, affected)",
+   "summary": "eslint per project (nx lint, affected); the i18n entry point's max-lines is ghost-a03",
    "evidence": "ci.yml:498",
    "mechanism": "ci",
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "ghost-a03 was split out of it."
+    }
+   ]
   },
   {
    "id": "ghost-78",
@@ -1197,6 +1506,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxfmt",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 formatter.",
    "fire_verified": "n/a",
@@ -1205,17 +1515,28 @@
   },
   {
    "id": "ghost-79",
-   "summary": "markdownlint over tracked Markdown",
+   "summary": "markdownlint over tracked Markdown: MD011, MD018-021 and MD037-039 (MD052 is ghost-a01, MD056 ghost-a02, MD051 is counted with ghost-80)",
    "evidence": "package.json:52; .markdownlint-cli2.jsonc; ci.yml:543",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
-   "alint": "markdownlint",
+   "bucket": "C",
+   "alint": "no rule: line regexes for reversed links, heading spacing and emphasis, code-span and link-text spacing",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "R2 (batch-1 precedent).",
+   "reason": "R7: Markdown structure rules over files alint reads. Line regexes express them, but raw-text kinds also read code blocks, which markdownlint skips, so C. No rule in the corpus config.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "markdownlint's enabled rules are Markdown structure rules over files alint reads, not code analysis; ghost-80 (remark-validate-links) already moved from D to C for the same reason. MD052 and MD056 are split out; MD051 (link fragments) is the check ghost-80's ghost-doc-fragments-resolve counts."
+    }
+   ]
   },
   {
    "id": "ghost-80",
@@ -1225,6 +1546,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "remark",
+   "rules": [
+    "ghost-doc-links-resolve",
+    "ghost-doc-fragments-resolve"
+   ],
    "assertion_family": "none",
    "reason": "R2 (batch-1 precedent).",
    "fire_verified": "n/a",
@@ -1249,6 +1574,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "secretlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Delegated secret-detection tool.",
    "fire_verified": "n/a",
@@ -1263,6 +1589,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden x2: ghost-no-tinybird-tokens, ghost-no-authorization-header-credentials",
+   "rules": [
+    "ghost-no-tinybird-tokens",
+    "ghost-no-authorization-header-credentials"
+   ],
    "assertion_family": "none",
    "reason": "Two patterns need lookahead and allowlists alint's regex cannot express, and the hook scans staged files only.",
    "fire_verified": "n/a (C); both fired in scratch.",
@@ -1277,6 +1607,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git commit-message kind (no rule; git-history kinds excluded for depth-1 clones)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: a commit-message check a git kind expresses is C.",
    "fire_verified": "n/a",
@@ -1291,6 +1622,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "test runners/builds",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Running code (R2/R7).",
    "fire_verified": "n/a",
@@ -1305,6 +1637,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "git",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs code execution.",
    "fire_verified": "n/a",
@@ -1319,6 +1652,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "git tag / npm registry",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs git/network state.",
    "fire_verified": "n/a",
@@ -1327,17 +1661,26 @@
   },
   {
    "id": "ghost-87",
-   "summary": "Packed ghost tarball has packageManager and the expected manifest",
+   "summary": "The packed ghost tarball has the expected manifest (the root packageManager pin it copies is ghost-25)",
    "evidence": "ghost/scripts/pack.mjs:338-339; ci.yml:1335-1336,2901-2902",
    "mechanism": "ci",
    "family": "other",
    "bucket": "D",
    "alint": "build output",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs a build.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "pack.mjs:105-106 checks the root packageManager, which ghost-25 already counts, and :189 copies it into the packed manifest."
+    }
+   ]
   },
   {
    "id": "ghost-88",
@@ -1347,6 +1690,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node --test",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Evaluates tool logic.",
    "fire_verified": "n/a",
@@ -1361,6 +1705,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tb",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs an external tool.",
    "fire_verified": "n/a",
@@ -1375,11 +1720,79 @@
    "family": "other",
    "bucket": "A",
    "alint": "pinned_references github_actions: ghost-gha-actions-pinned",
+   "rules": [
+    "ghost-gha-actions-pinned"
+   ],
    "assertion_family": "none",
    "reason": "R5: documented and held at the pin.",
    "fire_verified": "Fired in scratch for a tag ref.",
    "origin": "A",
    "changes": []
+  },
+  {
+   "id": "ghost-a01",
+   "summary": "markdownlint MD052: reference links and images use a defined label",
+   "evidence": "package.json lint:markdown (ci.yml lint:docs) runs markdownlint-cli2; .markdownlint-cli2.jsonc enables MD052",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "markdown_links_resolve over the files markdownlint reads: ghost-markdownlint-md052-reference-labels-defined",
+   "rules": [
+    "ghost-markdownlint-md052-reference-labels-defined"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a Markdown structure rule over files alint reads. markdown_links_resolve reports a reference link whose label has no definition.",
+   "fire_verified": "Audit: passes on a copy of every tracked file; [Contributor Covenant][home-page] in .github/CODE_OF_CONDUCT.md fired.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit."
+    }
+   ]
+  },
+  {
+   "id": "ghost-a02",
+   "summary": "markdownlint MD056: every table row has the header's column count",
+   "evidence": ".markdownlint-cli2.jsonc enables MD056",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: a Markdown table reader (rows and cells), so that a row's cell count can be compared with its header's",
+   "rules": [],
+   "assertion_family": "none",
+   "needs": "format-reader",
+   "reason": "Comparing each row's cell count with its table's header needs the table structure, which no kind reads; a format reader for Markdown tables.",
+   "fire_verified": "n/a",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit."
+    }
+   ]
+  },
+  {
+   "id": "ghost-a03",
+   "summary": "packages/i18n/src/index.ts stays within 50 lines (ESLint max-lines, skipping blank and comment lines)",
+   "evidence": "packages/i18n/eslint.config.mjs:11-16; 25 lines at the pin",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_max_lines: ghost-i18n-index-max-lines",
+   "rules": [
+    "ghost-i18n-index-max-lines"
+   ],
+   "assertion_family": "none",
+   "reason": "file_max_lines counts every line, while ESLint skips blank and comment lines, so a long file of comments fires here but passes ESLint: C.",
+   "fire_verified": "Audit: passes on the clone; 51 lines fired, 50 passed.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit."
+    }
+   ]
   },
   {
    "id": "ghost-b01",
@@ -1389,6 +1802,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file relation equals: source stripe-api.js regex \"(?m)^const STRIPE_API_VERSION = '([^']+)';\", target e2e/helpers/services/stripe/fixtures/manifest.json json $.api_version (suggested id ghost-stripe-fixture-api-version)",
+   "rules": [
+    "ghost-stripe-fixture-api-version",
+    "ghost-stripe-fixture-api-version-snapshot"
+   ],
    "assertion_family": "none",
    "reason": "R7: a value agreement between two files alint reads. The test only reads the files and does not run Stripe.",
    "fire_verified": "n/a (family other). Probed anyway: passes on the clone and fires when manifest.json api_version is changed.",
@@ -1403,6 +1820,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file set_equals x2 (url, styles): the source is a multiline regex over defaults.json text for app objects whose url/styles start with https://cdn.jsdelivr.net/ghost/; the targets are (\\w+)__url / (\\w+)__styles captures in the three files",
+   "rules": [
+    "ghost-frontend-overrides-cover-cdn-urls",
+    "ghost-frontend-overrides-cover-cdn-styles"
+   ],
    "assertion_family": "none",
    "reason": "Expressible today, but the defaults.json side needs a layout-dependent regex. alint has no JSON key extractor and cannot compose <app>__<field> from a key and a value test.",
    "fire_verified": "n/a (C). Probe passed on the clone and fired when one override was removed from Dockerfile.e2e.",
@@ -1417,6 +1838,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file subset (the override asset dirs in Dockerfile.e2e are a subset of its COPY destination dirs) plus for_each_match select '^COPY apps/(?P<src>[\\w-]+)/umd /home/ghost/core/built/admin/assets/(?P<dst>[\\w-]+)' require equal [src,dst]",
+   "rules": [
+    "ghost-e2e-dockerfile-copies-override-assets",
+    "ghost-e2e-dockerfile-copy-dirs-match"
+   ],
    "assertion_family": "none",
    "reason": "Set inclusion and capture equality over one file alint reads. Confirmed on the clone (R4).",
    "fire_verified": "n/a (family other). Probed: passes on the clone; fires on a removed COPY line and on a COPY whose source and destination dirs differ.",
@@ -1431,6 +1856,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file registered with register_as '{parent_name}', source files apps/{announcement-bar,sodo-search,signup-form,comments-ui,admin-toolbar,portal}/package.json, targets a Dockerfile.e2e COPY regex and a ci.yml '^\\s+apps/([\\w-]+)/umd' regex",
+   "rules": [
+    "ghost-public-apps-in-e2e-image"
+   ],
    "assertion_family": "none",
    "reason": "The test derives the app set from package.json nx.tags. alint cannot select manifests by content, so the six apps are hand-listed (ghost-42 precedent: hand-listing is C).",
    "fire_verified": "n/a (C). Probe passed on the clone and fired when one app's COPY line was removed.",
@@ -1445,6 +1873,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden '\\bmodels\\b' over ghost/core/server/data/migrations/versions/**/*.{js,ts}",
+   "rules": [
+    "ghost-migrations-no-models"
+   ],
    "assertion_family": "none",
    "reason": "A documented convention (R5) that holds at the pin. A content ban over files alint reads.",
    "fire_verified": "n/a (family other). Probed: passes on the clone; fires when require('../../../../models') is added to one migration.",
@@ -1459,6 +1890,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code semantics of migration bodies (forem-42 precedent). R1 collapses the checklist into one unit. 'Does not reference models' (ghost-b05) and 'Filename is in the correct format' (ghost-59) are split out because alint expresses them.",
    "fire_verified": "n/a",
@@ -1473,6 +1905,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent x2 on .dependency-cruiser-known-violations.json: \"$[?!(@.rule == 'service-dependencies' || @.rule == 'service-own-root' || @.rule == 'service-unresolved') || !match(@.from, 'ghost/core/server/services/.*') || !match(@.to, '.+')]\" and \"$[?length(@) != 3]\" (strict keys)",
+   "rules": [
+    "ghost-known-violations-entry-shape",
+    "ghost-known-violations-strict-keys"
+   ],
    "assertion_family": "none",
    "reason": "R7: a schema over a JSON file alint reads; it is not dependency-cruiser's import analysis (ghost-72). RFC 9535 length() on an object counts its members, so the strictObject is expressible because all three keys are required.",
    "fire_verified": "n/a (family other). Probed: passes on the clone (349 entries); fired separately on rule 'bogus', a from outside services/, an empty to, and an extra 'note' key.",
@@ -1487,6 +1923,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file subset: source regex '\"from\": \"ghost/core/server/services/([^/\"]+)' over the known-violations file, target regex '(?m)^  ([a-z0-9][a-z0-9._-]*):[ \\t]*$' over legacy-service-inventory.yaml; plus file_content_forbidden for the hand-listed deferred services (automations|members|members-metafields|stripe)",
+   "rules": [
+    "ghost-known-violations-legacy-services",
+    "ghost-known-violations-not-deferred"
+   ],
    "assertion_family": "none",
    "reason": "Expressible today but awkward. The inventory keys come from an indentation-dependent regex, because no YAML key extractor exists, and the deferred set is hand-copied from dependencyChecks: deferred.",
    "fire_verified": "n/a (C). Probed: passes on the clone; the subset rule fired for a from in services/brandnewsvc and the forbidden rule fired for a from in services/stripe.",
@@ -1499,13 +1939,24 @@
    "evidence": "tools/scripts/lib/dependency-boundaries.ts:69-72 (throws 'duplicate entry'); ci.yml:507",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-config",
+   "bucket": "C",
    "alint": "constraint unique-key over array elements keyed by (rule, from, to)",
-   "assertion_family": "unique-key",
-   "reason": "Uniqueness of a composite key across array elements inside one JSON file. The JSONPath kinds cannot compare siblings (trpc-24 precedent).",
-   "fire_verified": "n/a",
+   "rules": [],
+   "assertion_family": "none",
+   "reason": "json_schema_passes with uniqueItems over the entries array, from a schema file outside the repository (allow_out_of_root): every entry has exactly the keys rule, from and to, so whole-item uniqueness is triple uniqueness. A corpus config cannot ship the schema, so C with no rule.",
+   "fire_verified": "Audit: passes on a scratch copy with the schema outside the tree; a reordered duplicate entry fired 'has non-unique elements'.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-config",
+      "other",
+      "unique-key"
+     ],
+     "why": "Every one of the 349 entries carries exactly {rule, from, to}, so uniqueness of the triple is JSON Schema uniqueItems. A schema file outside the repository is the C route of rushstack-09b, yarnpkg-berry-23 and backstage-b06."
+    }
+   ]
   },
   {
    "id": "ghost-b10",
@@ -1515,6 +1966,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: condition key-order operator. The require pattern and source existence alone would be json_path_* plus a registry rule.",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: an assertion over manifests, not tool logic, so ghost-88's D lump does not cover it. 'First key is source' needs object key order (element-web-02 and ghost-50 precedents).",
    "fire_verified": "n/a",
@@ -1537,6 +1989,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file relation registered: source files **/CONTEXT.md, register_as '{path}', target CONTEXT-MAP.md regex '(?m)^Path: `([^`]+)`'",
+   "rules": [
+    "ghost-context-map-lists-contexts"
+   ],
    "assertion_family": "none",
    "reason": "A documented convention (R5) that holds at the pin. Registry membership is a kind alint has today.",
    "fire_verified": "n/a (family other). Probed: passes on the clone; fires (CONTEXT-MAP.md is missing member packages/checkout/CONTEXT.md) when a new CONTEXT.md is added.",
@@ -1551,6 +2006,12 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent ghost/bin/* excluding README.md, *.d.ts and the three entrypoints; one file_exists per shipped entrypoint",
+   "rules": [
+    "ghost-bin-entrypoints-closed",
+    "ghost-bin-entrypoint-generate-data",
+    "ghost-bin-entrypoint-validate-adapters",
+    "ghost-bin-entrypoint-warm-compile-cache"
+   ],
    "assertion_family": "none",
    "reason": "R7: a directory-listing assertion inside a unit test, which ghost-84's D lump misses. A file_exists with several paths passes when any one exists, so one rule per file is needed.",
    "fire_verified": "n/a (family other). Probed: passes on the clone; fires on a new ghost/bin/new-tool.ts and on a removed generate-data.ts.",
@@ -1565,6 +2026,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches '\\{\\{> styles\\}\\}' over ghost/core/server/services/staff/email-templates/*.hbs",
+   "rules": [
+    "ghost-staff-email-templates-include-styles"
+   ],
    "assertion_family": "none",
    "reason": "R7: a content assertion over template files alint reads. The rest of that test exercises loader code (D, within ghost-84).",
    "fire_verified": "n/a (family other). Probed: passes on the clone; fires on donation.hbs when the partial reference is renamed.",
@@ -1579,8 +2043,9 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a JSON5 reader and duration-unit normalization (minutes vs '3 days')",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Needs a JSON5 reader and duration-unit normalization (minutes against '3 days'). Release-age settings are not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14 and wsdk-75.",
+   "reason": "The JSON5 value sits on one line a regex reads (rocketchat-24 precedent); comparing 4320 minutes with '3 days' needs unit normalization (wsdk-75). Release-age settings are family other, as jest-14 and wsdk-75.",
    "fire_verified": "n/a",
    "origin": "B",
    "changes": [
@@ -1591,9 +2056,18 @@
       "reason": "Needs a JSON5 reader and duration-unit normalization (minutes against '3 days'). Release-age settings are not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14 and wsdk-75.",
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "renovate.json5:71 is a one-line scalar a regex can read, as rocketchat-24 does. What is missing is converting minutes and days, which is normalization (wsdk-75 precedent)."
     }
    ],
-   "needs": "format-reader"
+   "needs": "normalization"
   },
   {
    "id": "ghost-b15",
@@ -1603,6 +2077,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: JSON5 reader (renovate.json5 has unquoted keys and single-quoted strings). With it, cross_file set_equals against yaml $.minimumReleaseAgeExclude[?!match(@, '@.*')] would do.",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs a JSON5 reader for renovate.json5. Release-age settings are not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14 and wsdk-75.",
    "fire_verified": "n/a",
@@ -1642,7 +2117,14 @@
   "ghost-va-workflow-node-versions (info): every workflow's env NODE_VERSION equals devEngines.runtime.version; only ci.yml is checked",
   "ghost-va-other-docker-node-pins (info): e2e/Dockerfile.runner, docker/fake-upgrades, docker/fake-mailgun NODE_VERSION ARGs and the devcontainer node image equal devEngines; renovate.json5 names only Dockerfile.production and docker/ghost-dev",
   "ghost-va-locale-no-bom (info): locale catalogs have no UTF-8 BOM (JSON.parse rejects one; alint's reader accepts it)",
-  "extends alint://bundled/toolchain-pins@v1 (warning, bundle-internal): .nvmrc authority vs .node-version and literal setup-node pins (typescript-inventory.yml '22.23.5'); passes at the pin"
+  "extends alint://bundled/toolchain-pins@v1 (warning, bundle-internal): .nvmrc authority vs .node-version and literal setup-node pins (typescript-inventory.yml '22.23.5'); passes at the pin",
+  "ghost-playwright-catalog-pin-concrete (info): kept as value-add after ghost-33 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "ghost-playwright-catalog-pin-concrete",
+  "ghost-va-workflow-node-versions",
+  "ghost-va-other-docker-node-pins",
+  "ghost-va-locale-no-bom"
  ],
  "absent_categories": [
   "license / SPDX header checks",

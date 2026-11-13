@@ -7,16 +7,16 @@
    "B-config": 2,
    "B-adapter": 6,
    "B-kernel": 0,
-   "B-delegate": 1,
-   "C": 6,
+   "B-delegate": 0,
+   "C": 9,
    "D": 23
   },
-  "addressable": 29,
-  "coverage_today": 48,
-  "coverage_with_tuning": 69,
-  "gap": 31,
-  "coverage_after_slice": 55,
-  "coverage_after_slice_with_entry_values": 59
+  "addressable": 31,
+  "coverage_today": 45,
+  "coverage_with_tuning": 74,
+  "gap": 26,
+  "coverage_after_slice": 52,
+  "coverage_after_slice_with_entry_values": 58
  },
  "by_family": {
   "locale": {
@@ -38,19 +38,19 @@
   },
   "dep-version": {
    "counts": {
-    "A": 3,
+    "A": 2,
     "B-config": 0,
     "B-adapter": 2,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 2,
-    "D": 4
+    "C": 3,
+    "D": 3
    },
    "addressable": 7,
-   "coverage_today": 43,
+   "coverage_today": 29,
    "coverage_with_tuning": 71,
    "gap": 29,
-   "coverage_after_slice": 43,
+   "coverage_after_slice": 29,
    "coverage_after_slice_with_entry_values": 57
   },
   "toolchain-pin": {
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 9,
+    "A": 10,
     "B-config": 2,
     "B-adapter": 3,
     "B-kernel": 0,
-    "B-delegate": 1,
-    "C": 4,
-    "D": 19
+    "B-delegate": 0,
+    "C": 6,
+    "D": 20
    },
-   "addressable": 19,
-   "coverage_today": 47,
-   "coverage_with_tuning": 68,
-   "gap": 32,
-   "coverage_after_slice": 58,
-   "coverage_after_slice_with_entry_values": 58
+   "addressable": 21,
+   "coverage_today": 48,
+   "coverage_with_tuning": 76,
+   "gap": 24,
+   "coverage_after_slice": 57,
+   "coverage_after_slice_with_entry_values": 57
   }
  },
  "units": [
@@ -97,6 +97,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "file_exists + file_content_matches: tanstack-query-nvmrc-present, tanstack-query-nvmrc-version-spec",
+   "rules": [
+    "tanstack-query-nvmrc-present",
+    "tanstack-query-nvmrc-version-spec"
+   ],
    "assertion_family": "none",
    "reason": "A documented toolchain-pin convention over a file alint reads, expressed exactly and confirmed on the clone and on broken copies (R4, R5). Whether the external setup action uses node-version-file could not be verified offline; the unit stands on CONTRIBUTING alone.",
    "fire_verified": "In a scratch tree of the files the rules read: deleting .nvmrc gave 1 error from tanstack-query-nvmrc-present; writing '^24.22' gave 1 error from tanstack-query-nvmrc-version-spec. The restored copy and the clone pass.",
@@ -111,6 +115,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches: tanstack-query-package-manager-pnpm-pinned",
+   "rules": [
+    "tanstack-query-package-manager-pnpm-pinned"
+   ],
    "assertion_family": "none",
    "reason": "R7: sherif's presence check and corepack's exact-version requirement are one behavior over package.json. A JSONPath regex expresses it, and a missing field is a zero-match violation (R4).",
    "fire_verified": "Scratch copy of package.json: removing packageManager fired 1 error; setting it to 'pnpm@^12' fired 1 error. The restored copy and the clone pass.",
@@ -125,6 +132,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "missing: a semver range-satisfaction operator (cross_file compares values, and normalize only gives semver-major/minor bands)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Range satisfaction is not equality: pnpm@12.19.0 satisfies >=12.18.0 but fails an equality rule. The stratum doc names a semver-range operator as B-adapter, and the batch-1 twin trpc-03 has the same classification. The stricter equality the repo happens to keep is recorded as value-add.",
    "fire_verified": "n/a",
@@ -147,6 +155,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint unique-key over (manifest, field, dependency, range) rows of root + packages/* manifests, excluding peerDependencies, `typescript` and non-semver specs: dependency -> range",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
    "fire_verified": "n/a",
@@ -172,8 +181,9 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint unique-key over dependency rows with a name -> similar-family transform (sherif's fixed table): family -> version",
-   "assertion_family": "none",
-   "reason": "R7. One version per similar family is a functional dependency keyed by a derived family name. It needs a name-to-family transform plus unique-key, and no current kind expresses it.",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "One version per similar family is a functional dependency keyed by a family name derived from the dependency name. It needs (name, version) rows (batch 2 ruling) and a transform to the family; the assertion is unique-key.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -191,9 +201,18 @@
      "fields": {
       "needs": "derived-value"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "dep-version",
+      "none"
+     ],
+     "why": "Its reason asks for a name-to-family transform plus unique-key; the batch 2 ruling records such a join as entry-values with the family it will need."
     }
    ],
-   "needs": "derived-value"
+   "needs": "entry-values"
   },
   {
    "id": "tq-12",
@@ -201,13 +220,26 @@
    "evidence": "package.json:20, pr.yml:36-37 (sherif error-level rule)",
    "mechanism": "ci",
    "family": "dep-version",
-   "bucket": "A",
+   "bucket": "C",
    "alint": "file_content_forbidden: tanstack-query-no-empty-dependency-maps",
+   "rules": [
+    "tanstack-query-no-empty-dependency-maps"
+   ],
    "assertion_family": "none",
-   "reason": "The regex `\"<field>\"\\s*:\\s*\\{\\s*\\}` names the four keys literally and does not depend on layout (formatted or minified), so it expresses the check exactly (R4).",
+   "reason": "The regex names the four keys literally and works in any layout, but it also matches a nested empty map that sherif ignores, so it is approximate.",
    "fire_verified": "Scratch copy of the root and packages/* manifests: adding \"peerDependencies\": {} to packages/query-core/package.json gave 1 error, and \"dependencies\": {} in the root gave 1 error. The restored copy and the clone pass.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "A",
+      "dep-version",
+      "none"
+     ],
+     "why": "The regex also fires on a nested empty map such as publishConfig.dependencies {}, which sherif ignores: an over-assertion, though none occurs at the pin."
+    }
+   ]
   },
   {
    "id": "tq-13",
@@ -217,6 +249,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "file_content_forbidden with a two-order alternation regex (private:true ... dependencies{...@types/} | dependencies{...@types/} ... private:true): tanstack-query-private-no-types-in-dependencies",
+   "rules": [
+    "tanstack-query-private-no-types-in-dependencies"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but awkward. No selector or JSONPath filter can condition on the same document's `private` field, and Rust regex has no lookaround, so both key orders are spelled out in one regex.",
    "fire_verified": "Done although the unit is C. Adding @types/lodash to query-test-utils' dependencies (private) fired with \"private\" before \"dependencies\" and again with \"dependencies\" first. The same edit in public query-core did not fire. The clone passes.",
@@ -231,6 +266,10 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "cross_file relation superset: source.files = the root plus the workspace member globs ($.name, with examples/vue/[!2]* mirroring the exclusion); targets = the same manifests (regex: keys whose value starts with workspace:): tanstack-query-workspace-refs-resolve",
+   "rules": [
+    "tanstack-query-workspace-refs-resolve",
+    "tanstack-query-workspace-alias-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "R7: a name lookup over files alint reads, as in the batch-1 twin trpc-B01. The set relation expresses it exactly for workspace:*/^ specs.",
    "fire_verified": "Scratch copy of all 199 workspace manifests: \"@tanstack/not-a-package\": \"workspace:*\" in integrations/react/vite fired 1 error. A workspace: dependency on @tanstack/query-example-vue-2.6-basic, which the workspace excludes, fired 1 error. A dependency on a real example name passed. The clone passes.",
@@ -244,9 +283,13 @@
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "C",
-   "alint": "constraint reference: (dependency name whose value is catalog:) -> keys of pnpm-workspace.yaml $.catalog",
+   "alint": "cross_file superset with a value-shape regex over pnpm-workspace.yaml's catalog keys: tanstack-query-catalog-refs-resolve (manifests), tanstack-query-catalog-override-refs-resolve (overrides)",
+   "rules": [
+    "tanstack-query-catalog-refs-resolve",
+    "tanstack-query-catalog-override-refs-resolve"
+   ],
    "assertion_family": "none",
-   "reason": "R7 lookup, as in the batch-1 twin trpc-10. The target side is YAML map keys, which JSONPath cannot select. A text regex cannot isolate the catalog block's keys from the overrides and allowBuilds keys at the same indent, so it is not expressible today.",
+   "reason": "R7 lookup, as trpc-10. JSONPath cannot select the catalog's keys; a regex captures them by value shape (catalog values are the only unquoted version specs at indent 2). That holds for the pin's layout only, so C (Stage B).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -258,6 +301,14 @@
       "reference"
      ],
      "why": "Stage A says no regex can isolate the catalog keys. That is refuted at this pin by a value-shape capture trick. A cross_file superset with source pnpm-workspace.yaml and regex \"(?m)^  '?([@a-z0-9][^':\\\\s]*)'?: [~^]?[0-9][^\\\\s]*$\" captures only catalog keys, because catalog values are unquoted version specs while overrides are quoted and allowBuilds/lockfile values are booleans. Targets are the manifests (regex '\"([^\"]+)\"\\s*:\\s*\"catalog:\"'); a second rule takes the pnpm-workspace.yaml overrides (regex \"(?m)^  '?([^'\\\\s:]+)'?: '?catalog:'?\\\\s*$\"). Both rules pass on the clone. On scratch they fired on a deleted solid-js entry (3 errors), on 'nx': 'catalog:' (an allowBuilds key, 1 error) and on chokidar: 'catalog:' in overrides (1 error). They give a false positive when a catalog value is quoted, so the rule is layout-dependent and awkward: C, as for zulip-39's capture trick. This differs from trpc-10, whose file layout may not allow the trick."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ]
   },
@@ -269,6 +320,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution semantics (lockfile freshness).",
    "fire_verified": "n/a",
@@ -280,14 +332,25 @@
    "summary": "No dependency version younger than 1440 minutes, and no trust-evidence downgrade, may be resolved (minimumReleaseAge, trustPolicy no-downgrade with three exemptions)",
    "evidence": "pnpm-workspace.yaml:5-16",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "other",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs registry publish times and provenance at resolution (network / external state).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
   },
   {
    "id": "tq-18",
@@ -297,6 +360,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the resolved dependency graph (R7: package-manager resolution).",
    "fire_verified": "n/a",
@@ -311,6 +375,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "knip",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs import extraction from source (code analysis).",
    "fire_verified": "n/a",
@@ -325,6 +390,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_equals: tanstack-query-root-private",
+   "rules": [
+    "tanstack-query-root-private"
+   ],
    "assertion_family": "none",
    "reason": "A scalar JSON assertion, confirmed on the clone (R4).",
    "fire_verified": "n/a",
@@ -339,6 +407,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file superset (workspace names ⊇ the frontmatter keys of each changeset) + for_each_match (bump word): tanstack-query-changesets-name-workspace-packages, tanstack-query-changesets-valid-bump",
+   "rules": [
+    "tanstack-query-changesets-name-workspace-packages",
+    "tanstack-query-changesets-frontmatter-valid"
+   ],
    "assertion_family": "none",
    "reason": "A reference plus an enum check over files alint reads. Scoped names are always quoted YAML keys, so the regex extraction is exact here.",
    "fire_verified": "n/a (family other). Fired anyway on scratch: '@tanstack/query-cor' gave 1 error and bump 'bugfix' gave 1 error; the clone passes.",
@@ -353,6 +425,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file superset: tanstack-query-changeset-groups-name-workspace-packages",
+   "rules": [
+    "tanstack-query-changeset-groups-name-workspace-packages"
+   ],
    "assertion_family": "none",
    "reason": "A reference into the workspace's package names, expressible as a set relation. The repo lists literal names, not globs.",
    "fire_verified": "n/a (family other). Fired anyway: a misspelled '@tanstack/vue-qery' in the fixed group gave 1 error.",
@@ -367,6 +442,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over (group index, package) rows of $.fixed: package -> group",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "A functional dependency within one JSON array of arrays; no current kind asserts element uniqueness across nested arrays.",
    "fire_verified": "n/a",
@@ -379,13 +455,24 @@
    "evidence": ".changeset/config.json ($schema https://unpkg.com/@changesets/config@4.0.1/schema.json); validated whenever changesets runs (release.yml:51-53, `pnpm changeset`)",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-delegate",
+   "bucket": "C",
    "alint": "json_schema_passes would need the remote schema committed; the rest is the tool's own parse logic",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Validating a tool's own config against its published schema belongs in a plugin or command, as in the batch-1 twin element-web-20.",
+   "reason": "The checks are shapes a JSON Schema states (field types and enums). json_schema_passes with a schema file outside the repository expresses them; a corpus config cannot ship one, so C with no rule.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-delegate",
+      "other",
+      "none"
+     ],
+     "why": "Its summary lists only shape checks, and validation against a schema the repository doesn't ship is C in rushstack-09b, backstage-b06 (before this audit) and yarnpkg-berry-23."
+    }
+   ]
   },
   {
    "id": "tq-35",
@@ -395,6 +482,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over workspace manifests: $.name -> manifest path (unique_by only keys on path templates)",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Batch-1 twin trpc-B05. The key is a JSON value, not a path, so unique_by cannot express it.",
    "fire_verified": "n/a",
@@ -409,6 +497,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a route-resolution adapter for link checking (append .md to extensionless relative links, rewrite a path prefix). markdown_links_resolve gives 41 findings at the pin, all of them links the script accepts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "markdown_links_resolve's root map only applies to root-absolute routes, and its relative resolution neither appends .md nor remaps example paths, so the check cannot be expressed today (R4).",
    "fire_verified": "n/a",
@@ -431,6 +520,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent: tanstack-query-test-files-not-spec",
+   "rules": [
+    "tanstack-query-test-files-not-spec"
+   ],
    "assertion_family": "none",
    "reason": "R7: the one file-name-level rule among the oxlint code lints. With the default patterns, a *.spec.ts(x) in a linted dir is exactly what fires.",
    "fire_verified": "n/a (family other). Fired anyway: packages/query-core/src/__tests__/foo.spec.ts gave 1 error and foo.test-d.ts gave none.",
@@ -445,6 +537,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent: tanstack-query-gha-checkout-persist-credentials",
+   "rules": [
+    "tanstack-query-gha-checkout-persist-credentials"
+   ],
    "assertion_family": "none",
    "reason": "R7 per zizmor audit, following batch-1 element-web-27.",
    "fire_verified": "n/a (family other). Fired anyway: removing persist-credentials from the pr.yml checkout gave 1 error.",
@@ -459,6 +554,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent with a match() filter: tanstack-query-gha-third-party-actions-hash-pinned",
+   "rules": [
+    "tanstack-query-gha-third-party-actions-hash-pinned"
+   ],
    "assertion_family": "none",
    "reason": "R7. This is zizmor's default policy as recalled offline: a hash pin for `*` and a ref pin for actions/github/dependabot. Unlike element-web-28 there are no inline exemptions, so the policy is expressed exactly; the stricter all-SHA state is value-add.",
    "fire_verified": "n/a (family other). Fired anyway: zizmor-action@v0.5.3 and TanStack/config/...setup@main each gave 1 error; actions/checkout@v6 gave none.",
@@ -467,17 +565,26 @@
   },
   {
    "id": "tq-40",
-   "summary": "zizmor's other workflow security audits pass (template-injection, excessive-permissions, dangerous-triggers, cache-poisoning, secrets-inherit, and the online audits such as impostor-commit and ref-version-mismatch)",
+   "summary": "zizmor's other workflow security audits pass (template-injection, excessive-permissions, cache-poisoning, and the online audits such as impostor-commit and ref-version-mismatch; dangerous-triggers is tq-a01, secrets-inherit tq-a02)",
    "evidence": "zizmor.yml:12-24",
    "mechanism": "ci",
    "family": "other",
    "bucket": "D",
    "alint": "zizmor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Collapsed as in batch-1 element-web-29: expression and dataflow analysis of workflows, plus online audits (network).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "tq-a01 and tq-a02 were split out of it."
+    }
+   ]
   },
   {
    "id": "tq-41",
@@ -487,6 +594,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "line_endings target lf: tanstack-query-lf-line-endings",
+   "rules": [
+    "tanstack-query-lf-line-endings"
+   ],
    "assertion_family": "none",
    "reason": "Git normalizes LF on check-in, and alint asserts it directly. Same treatment as batch-1 yarnpkg-berry-25.",
    "fire_verified": "n/a (family other). Fired anyway: a CRLF .ts file gave 1 error.",
@@ -501,6 +611,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a path-to-route transform (strip docs/ and .md) for cross_file registered / registry_paths_resolve; register_as templates cannot strip a prefix",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R5 counts a documented convention. The only kinds that compare a file set with a registry need the registry entries to be repo paths, and these entries are site routes.",
    "fire_verified": "n/a",
@@ -523,6 +634,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a key-order operator for JSON objects",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: publint reads package.json, and these assertions are about key order. The stratum doc lists an order operator as B-adapter.",
    "fire_verified": "n/a",
@@ -545,6 +657,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "publint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the build output and the pack file list.",
    "fire_verified": "n/a",
@@ -559,6 +672,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "@arethetypeswrong/cli",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type resolution over packed build output.",
    "fire_verified": "n/a",
@@ -573,6 +687,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxfmt",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a formatter.",
    "fire_verified": "n/a",
@@ -587,6 +702,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linting source (AST).",
    "fire_verified": "n/a",
@@ -601,6 +717,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linting source.",
    "fire_verified": "n/a",
@@ -615,6 +732,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "knip",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: usage extraction from source.",
    "fire_verified": "n/a",
@@ -629,6 +747,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a test runner.",
    "fire_verified": "n/a",
@@ -643,6 +762,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a type checker.",
    "fire_verified": "n/a",
@@ -657,6 +777,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc / vue-tsc / svelte-check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a type checker.",
    "fire_verified": "n/a",
@@ -671,6 +792,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsdown and others",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Running the build.",
    "fire_verified": "n/a",
@@ -685,6 +807,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "framework builds",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Running builds.",
    "fire_verified": "n/a",
@@ -699,6 +822,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "size-limit",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the build output.",
    "fire_verified": "n/a",
@@ -713,6 +837,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "changeset_requires_path (add_glob .changeset/*.md, when_changed packages/*/src/**); not used, because the clone is depth 1",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A change-set rule that a git kind expresses. By analogy to the batch-1 commit-message ruling it is C, since R4 cannot confirm it on a depth-1 clone.",
    "fire_verified": "n/a",
@@ -727,6 +852,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "pair_changed_together with if_changed docs/framework/*/reference/** and a then_changed glob that never changes; not used (git kind, depth 1)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Expressible only through an awkward unsatisfiable obligation in a git kind, which cannot be confirmed on a depth-1 clone.",
    "fire_verified": "n/a",
@@ -741,6 +867,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_subject_matches would express it; not used (depth-1 clone)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: a commit-message check that a git kind expresses is C.",
    "fire_verified": "n/a",
@@ -755,6 +882,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "external action",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Logic lives outside the repository (external state); it could not be read offline.",
    "fire_verified": "n/a",
@@ -769,6 +897,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "About PR text and process (external state), enforced by human review.",
    "fire_verified": "n/a",
@@ -783,6 +912,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs test execution against two revisions plus reviewer judgment.",
    "fire_verified": "n/a",
@@ -797,6 +927,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Semantic review of code changes (code analysis and judgment).",
    "fire_verified": "n/a",
@@ -811,6 +942,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent, paths packages/*/package.json excluding query-codemods and query-test-utils (neither runs publint), path \"$.dependencies[?match(@, '(file|link):.*')]\" (proposed id tanstack-query-publint-no-local-dependencies)",
+   "rules": [
+    "tanstack-query-publint-no-local-dependencies"
+   ],
    "assertion_family": "none",
    "reason": "R7: publint reads package.json, and this assertion bans dependency specifiers, which is the stratum's 'banned ranges and dependency fields' dep-version shape. Stage A split sherif into one unit per rule, but grouped publint into only tq-43 (B-adapter) and tq-44 (D), so this manifest-only error rule went uncounted. One JSONPath filter expresses it exactly (R4).",
    "fire_verified": "On my scratch copy: 'foo': 'file:../foo' in packages/react-query dependencies gave 1 error, and so did 'link:../foo' in angular-query-experimental dependencies. 'link:../foo' in react-query devDependencies gave none. Passes on the clone.",
@@ -825,6 +959,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent over the same manifests, path \"$.exports..[?match(@, '[^.].*') || match(@, '[.][^/].*')]\" (proposed id tanstack-query-publint-exports-values-relative)",
+   "rules": [
+    "tanstack-query-publint-exports-values-relative"
+   ],
    "assertion_family": "none",
    "reason": "R7: a manifest-only publint error-level assertion that a JSONPath filter expresses. Same per-rule grain Stage A used for sherif. It does not cover a bare-string `exports` (none at the pin).",
    "fire_verified": "n/a (family other). Fired anyway on scratch: query-core exports default 'build/modern/index.js' gave 1 error, './package.json' -> '../package.json' gave 1 error, and an angular devtools target without ./ gave 1 error. Passes on the clone.",
@@ -839,6 +976,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "no_bom over packages/{preact-query,preact-query-devtools,preact-query-persist-client}/src/**/*.{js,jsx,ts,tsx,mjs,cjs,mts,cts}",
+   "rules": [
+    "tanstack-query-preact-src-no-bom"
+   ],
    "assertion_family": "none",
    "reason": "R7, with the precedents tq-37, element-web-18 and trpc-30: an oxlint rule that checks file bytes, not code, is classified by its logic. no_bom expresses it.",
    "fire_verified": "n/a (family other). Fired anyway: a UTF-8 BOM prepended to packages/preact-query/src/IsRestoringProvider.ts gave 1 error. The same edit in react-query/src, which is outside preactConfig, gave none. Passes on the clone.",
@@ -853,6 +993,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_match over packages/svelte-query{,-persist-client}/{src,tests}/**/*.svelte and packages/svelte-query-devtools/src/**/*.svelte: select '<script\\b', require matches '<script\\b[^>]*\\blang=[\"'']ts[\"'']'",
+   "rules": [
+    "tanstack-query-svelte-script-lang-ts"
+   ],
    "assertion_family": "none",
    "reason": "A text-level attribute check on <script> open tags (R7, as element-web-18), exact only while each open tag stays on one line, so layout-dependent (C).",
    "fire_verified": "n/a (family other). Fired anyway: '<script>' in a tests .svelte file gave 1 error, and '<script module lang=\"js\">' in src/QueryClientProvider.svelte gave 1 error. Passes on the clone.",
@@ -875,6 +1018,9 @@
    "family": "other",
    "bucket": "D",
    "alint": "json_path_matches over packages/*/package.json, path $.repository.url, matches '^(git\\+)?https://github\\.com/TanStack/query(\\.git)?$'",
+   "rules": [
+    "tanstack-query-repository-url-matches-repo"
+   ],
    "assertion_family": "none",
    "reason": "The npm registry enforces it at publish time against the workflow's OIDC identity: external state (R7). publint --strict checks only the URL's shape. The rule stays as value-add.",
    "fire_verified": "n/a (family other). Fired anyway: query-core repository.url '.../TanStack/querry.git' gave 1 error. Passes on the clone.",
@@ -897,11 +1043,58 @@
    "family": "other",
    "bucket": "D",
    "alint": "typedoc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A doc-build gate that runs only after merge. It needs the TypeScript program (code analysis and execution), so R2 applies.",
    "fire_verified": "n/a",
    "origin": "B",
    "changes": []
+  },
+  {
+   "id": "tq-a01",
+   "summary": "zizmor dangerous-triggers: no workflow is triggered by pull_request_target or workflow_run",
+   "evidence": ".github/workflows/zizmor.yml:20-24 (zizmor with advanced-security: false, so any finding fails the job); no such trigger at the pin",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "C",
+   "alint": "yaml_path_absent x3 (mapping, list and scalar forms of on:): tanstack-query-gha-no-dangerous-triggers, -list-form, -scalar-form",
+   "rules": [
+    "tanstack-query-gha-no-dangerous-triggers",
+    "tanstack-query-gha-no-dangerous-triggers-list-form",
+    "tanstack-query-gha-no-dangerous-triggers-scalar-form"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a structural workflow check. The mapping and list forms are exact; the scalar form matches any top-level value equal to the trigger name, so C.",
+   "fire_verified": "Audit: all three pass on the clone; pull_request_target in pr.yml, on: [push, workflow_run] and on: workflow_run each fired their rule.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit. immich-32 and wsdk-60 count dangerous-trigger checks separately."
+    }
+   ]
+  },
+  {
+   "id": "tq-a02",
+   "summary": "zizmor secrets-inherit: no reusable-workflow call passes secrets: inherit",
+   "evidence": ".github/workflows/zizmor.yml:20-24; no secrets: inherit at the pin",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent: tanstack-query-gha-no-secrets-inherit",
+   "rules": [
+    "tanstack-query-gha-no-secrets-inherit"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a structural workflow check that a JSONPath filter expresses exactly.",
+   "fire_verified": "Audit: passes on the clone; a job with uses: ./.github/workflows/zizmor.yml and secrets: inherit in release.yml fired.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit."
+    }
+   ]
   }
  ],
  "removed": [
@@ -925,6 +1118,19 @@
   "tanstack-query-va-workspace-globs-match-packages (other): sherif's warning-level non-existant-packages / packages-without-package-json checks, via registry_paths_resolve over pnpm-workspace.yaml packages (the !-negation is excluded)",
   "tanstack-query-va-gha-all-actions-sha-pinned (other): every action, actions/* included, is SHA-pinned. This is renovate's helpers:pinGitHubActionDigests state and is stricter than zizmor's default",
   "tanstack-query-va-eslint-rules-documented (other): every eslint-plugin-query rule has a docs/eslint/<rule>.md page"
+ ],
+ "value_add_rules": [
+  "tanstack-query-va-package-manager-equals-engines-floor",
+  "tanstack-query-va-types-node-major-matches-nvmrc",
+  "tanstack-query-va-types-node-override-matches-devdep",
+  "tanstack-query-va-fixed-group-1-lockstep",
+  "tanstack-query-va-fixed-group-2-lockstep",
+  "tanstack-query-va-examples-track-react-query-version",
+  "tanstack-query-va-examples-private",
+  "tanstack-query-va-root-no-prod-dependencies",
+  "tanstack-query-va-workspace-globs-match-packages",
+  "tanstack-query-va-gha-all-actions-sha-pinned",
+  "tanstack-query-va-eslint-rules-documented"
  ],
  "absent_categories": [
   "locale: no locale catalogs, translation files or i18n tooling (docs and UI strings are English-only), so the locale family is empty",

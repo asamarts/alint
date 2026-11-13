@@ -5,16 +5,16 @@
   "counts": {
    "A": 12,
    "B-config": 0,
-   "B-adapter": 4,
+   "B-adapter": 2,
    "B-kernel": 0,
    "B-delegate": 1,
-   "C": 11,
+   "C": 13,
    "D": 46
   },
   "addressable": 28,
   "coverage_today": 43,
-  "coverage_with_tuning": 82,
-  "gap": 18,
+  "coverage_with_tuning": 89,
+  "gap": 11,
   "coverage_after_slice": 43,
   "coverage_after_slice_with_entry_values": 43
  },
@@ -23,16 +23,16 @@
    "counts": {
     "A": 2,
     "B-config": 0,
-    "B-adapter": 3,
+    "B-adapter": 1,
     "B-kernel": 0,
     "B-delegate": 1,
-    "C": 7,
-    "D": 3
+    "C": 9,
+    "D": 2
    },
    "addressable": 13,
    "coverage_today": 15,
-   "coverage_with_tuning": 69,
-   "gap": 31,
+   "coverage_with_tuning": 85,
+   "gap": 15,
    "coverage_after_slice": 15,
    "coverage_after_slice_with_entry_values": 15
   },
@@ -44,7 +44,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 1,
-    "D": 9
+    "D": 10
    },
    "addressable": 3,
    "coverage_today": 33,
@@ -97,6 +97,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "for_each_match (select '^  \"', require '^  \"(?:icu:[^\"]*|smartling)\":') - signal-desktop-intl-icu-prefix",
+   "rules": [
+    "signal-desktop-intl-icu-prefix"
+   ],
    "assertion_family": "none",
    "reason": "No kind asserts a pattern over JSON key names. The per-line regex depends on the prettier-enforced two-space top-level layout (element-web precedent for key-name regexes = C). json_schema_passes would need an in-repo schema, and corpus configs create none.",
    "fire_verified": "n/a (C); still fired on a scratch en catalog with an un-prefixed key (line 12476) and passes on the clone",
@@ -111,6 +114,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent '$[?search(@.messageformat, \"\\\\$[^${}]+\\\\$\")]' - signal-desktop-intl-no-legacy-variables",
+   "rules": [
+    "signal-desktop-intl-no-legacy-variables"
+   ],
    "assertion_family": "none",
    "reason": "Expressible today with a JSONPath search() filter over each entry's messageformat. The linter checks only ICU literal nodes, so the whole-string regex approximates the AST and ignores apostrophe quoting.",
    "fire_verified": "n/a (C); fired on a scratch en entry with $name$, passes on the clone",
@@ -125,6 +131,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent search(@.messageformat, ',\\s*plural\\s*,\\s*offset\\s*:') - signal-desktop-intl-no-offset",
+   "rules": [
+    "signal-desktop-intl-no-offset"
+   ],
    "assertion_family": "none",
    "reason": "A regex approximation of the ICU AST check (it ignores quoting; an explicit offset:0 diverges)",
    "fire_verified": "n/a (C); fired on scratch, passes on clone",
@@ -139,6 +148,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent search(... selectordinal ...) - signal-desktop-intl-no-ordinal",
+   "rules": [
+    "signal-desktop-intl-no-ordinal"
+   ],
    "assertion_family": "none",
    "reason": "Regex approximation of the ICU AST argument type",
    "fire_verified": "n/a (C); fired on scratch, passes on clone",
@@ -153,6 +165,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent search(... plural ... plural ...) - signal-desktop-intl-one-plural",
+   "rules": [
+    "signal-desktop-intl-one-plural"
+   ],
    "assertion_family": "none",
    "reason": "Counting plural arguments is approximated by a two-occurrence regex over the raw string, which is not ICU-aware.",
    "fire_verified": "n/a (C); fired on scratch, passes on clone",
@@ -167,6 +182,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "missing: ICU message-format extractor (tag/literal nodes) plus emoji classification",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the ICU AST (whether a literal is inside a tag element). Per the batch-1 ruling, value assertions over entries need (key, value) rows plus an ICU extractor.",
    "fire_verified": "n/a",
@@ -187,11 +203,14 @@
    "evidence": "build/intl-linter/rules/noNestedChoice.std.ts; ci.yml:90",
    "mechanism": "script",
    "family": "locale",
-   "bucket": "B-adapter",
-   "alint": "missing: ICU message-format extractor (choice nesting depth)",
+   "bucket": "C",
+   "alint": "json_path_absent with a search() regex: signal-desktop-intl-no-nested-choice",
+   "rules": [
+    "signal-desktop-intl-no-nested-choice"
+   ],
    "assertion_family": "none",
-   "reason": "Brace-balanced nesting of choice arguments needs an ICU parser; a regex cannot do it robustly",
-   "fire_verified": "n/a",
+   "reason": "A regex over each messageformat finds a choice argument opened inside an option of another, following braces two levels deep. It ignores ICU apostrophe quoting, like signal-desktop-08's rule, so C.",
+   "fire_verified": "Audit: passes on the clone; fires on '{count, plural, one {# member} other {{g, select, male {he} other {they}} # members}}'; passes when the select is a sibling argument.",
    "origin": "A",
    "changes": [
     {
@@ -199,21 +218,32 @@
      "fields": {
       "needs": "icu"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "The one-level-brace regex idiom that put signal-desktop-08 in C also expresses noNestedChoice: the new rule signal-desktop-intl-no-nested-choice passes on the clone and fires on a select nested in a plural option."
     }
-   ],
-   "needs": "icu"
+   ]
   },
   {
    "id": "signal-desktop-08",
-   "summary": "A plural/select must have at least two options (intl-linter noOneChoice)",
+   "summary": "A plural or selectordinal argument has at least two options (intl-linter noOneChoice; select is not checked)",
    "evidence": "build/intl-linter/rules/noOneChoice.std.ts; ci.yml:90",
    "mechanism": "script",
    "family": "locale",
    "bucket": "C",
-   "alint": "missing: ICU extractor emitting per-argument option counts",
+   "alint": "json_path_absent with a search() regex over each messageformat: signal-desktop-intl-no-one-choice",
+   "rules": [
+    "signal-desktop-intl-no-one-choice"
+   ],
    "assertion_family": "none",
-   "reason": "Option counting per choice argument needs ICU AST rows",
-   "fire_verified": "n/a",
+   "reason": "A regex over each messageformat finds a plural or selectordinal argument with exactly one option, following braces one level deep. It ignores ICU apostrophe quoting, so it is C (Stage B).",
+   "fire_verified": "Audit: passes on the clone; fires when GroupListItem__message-default keeps only its other option; passes with =1 and other.",
    "origin": "A",
    "changes": [
     {
@@ -224,20 +254,33 @@
       "none"
      ],
      "why": "Stage A counted onePlural (05) as C because json_path_absent with a search() regex approximates it. noOneChoice yields to the same idiom. I checked it on the clone: path $[?search(@.messageformat, \"\\\\{\\\\s*[^{}\\\\s,]+\\\\s*,\\\\s*plural\\\\s*,\\\\s*(?:offset\\\\s*:\\\\s*[0-9]+\\\\s*)?=?[A-Za-z0-9_]+\\\\s*\\\\{(?:[^{}]|\\\\{[^{}]*\\\\})*\\\\}\\\\s*\\\\}\")] passes on the clone and fired on a scratch entry '{count, plural, other {# new {thing} items}}'. Like 02-05 it ignores ICU quoting, and it allows one level of nested braces, which noNestedChoice keeps sufficient. The summary also needs a correction: the rule checks only {plural} and {selectordinal} (enterPlural), not select."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified",
+      "reason",
+      "summary"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ]
   },
   {
    "id": "signal-desktop-09",
-   "summary": "Plural branches use # rather than repeating the plural argument (intl-linter pluralPound)",
+   "summary": "Plural options use # rather than an explicit number in their literal text (intl-linter pluralPound: 'Use # instead of an explicit number')",
    "evidence": "build/intl-linter/rules/pluralPound.std.ts; ci.yml:90",
    "mechanism": "script",
    "family": "locale",
-   "bucket": "B-adapter",
-   "alint": "missing: ICU extractor (plural branch contents vs argument name)",
+   "bucket": "C",
+   "alint": "json_path_absent with a search() regex: signal-desktop-intl-plural-pound",
+   "rules": [
+    "signal-desktop-intl-plural-pound"
+   ],
    "assertion_family": "none",
-   "reason": "Correlates the plural argument name with references inside its own branches, which needs the ICU AST",
-   "fire_verified": "n/a",
+   "reason": "A regex walks the options of one plural argument and finds a stand-alone number in an option's literal text. It ignores ICU quoting, as signal-desktop-08's rule does, so C.",
+   "fire_verified": "Audit: passes on the clone; fires on 'one {1 # member}' and on 'other {Show 2 of # members}'; passes on an '=1' selector.",
    "origin": "A",
    "changes": [
     {
@@ -245,9 +288,17 @@
      "fields": {
       "needs": "icu"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "The summary described the wrong rule. pluralPound.std.ts reports an explicit number standing alone in literal text directly inside a plural option. A regex of signal-desktop-08's quality expresses it."
     }
-   ],
-   "needs": "icu"
+   ]
   },
   {
    "id": "signal-desktop-10",
@@ -257,6 +308,7 @@
    "family": "locale",
    "bucket": "B-delegate",
    "alint": "delegate: ICU MessageFormat syntax validator (plugin/command)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Validating a message format's own syntax is the corpus-stratum section 2.2 B-delegate example",
    "fire_verified": "n/a",
@@ -271,6 +323,10 @@
    "family": "locale",
    "bucket": "A",
    "alint": "dir_contains select _locales/* require [messages.json] - signal-desktop-locale-dir-has-messages",
+   "rules": [
+    "signal-desktop-locale-dir-has-messages",
+    "signal-desktop-locale-no-stray-files"
+   ],
    "assertion_family": "none",
    "reason": "dir_contains expresses it directly; alint check confirms it in both directions (R4)",
    "fire_verified": "Scratch copy of _locales with an added _locales/xx-YY/ directory lacking messages.json: alint check fired signal-desktop-locale-dir-has-messages on xx-YY. On the clone the rule passes (exit 0).",
@@ -285,6 +341,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent \"$['__alint_parse_probe__']\" parse probe - signal-desktop-locale-json-parses",
+   "rules": [
+    "signal-desktop-locale-json-parses"
+   ],
    "assertion_family": "none",
    "reason": "Same parse-probe idiom as element-web (C): alint's JSON reader is more tolerant than JSON.parse, so the probe only approximates strict validity",
    "fire_verified": "n/a (C); a truncated scratch de catalog produced a resource_parse failure, and the clone passes",
@@ -299,6 +358,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: extracting the keys a program uses is code analysis (type checking)",
    "fire_verified": "n/a",
@@ -310,14 +370,25 @@
    "summary": "Never hard-code user-facing strings; pull them from messages.json",
    "evidence": "CONTRIBUTING.md:267 (jsx-no-literals is off in .oxlintrc.json)",
    "mechanism": "convention",
-   "family": "locale",
+   "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: finding UI string literals in source needs code analysis",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "It checks translatable strings in source or layout files, not locale files. Section 2.3's locale family covers locale files; zulip's equivalent source checks (zulip-06, zulip-cc-59, -61, -67 to -69) are `other`."
+    }
+   ]
   },
   {
    "id": "signal-desktop-15",
@@ -327,6 +398,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A PR-scope/review policy over a diff and its author, not a repository-state invariant. No alint kind constrains which paths a change touches.",
    "fire_verified": "n/a",
@@ -341,6 +413,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_matches $['dependencies','devDependencies','peerDependencies','optionalDependencies'].* with a semver|workspace:*|npm:..@semver|https:..#.. regex, if_present - signal-desktop-root-deps-pinned",
+   "rules": [
+    "signal-desktop-root-deps-pinned"
+   ],
    "assertion_family": "none",
    "reason": "One structured-query rule expresses the per-value allowed-spec predicate; the semver.valid grammar is spelled as a regex. R4 confirmed in both directions.",
    "fire_verified": "Scratch copy of package.json with \"zod\": \"4.6.6\" changed to \"^4.6.6\": the rule fired (re-run on the final config with if_present). An earlier iteration also fired on an npm:...@~6.0.2 alias. On the clone the rule passes (exit 0).",
@@ -355,6 +430,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file equals: source package.json $.devDependencies.tailwindcss; targets package.json regex and pnpm-lock.yaml text regex - signal-desktop-tailwind-versions-match",
+   "rules": [
+    "signal-desktop-tailwind-versions-match"
+   ],
    "assertion_family": "none",
    "reason": "pnpm-lock.yaml has two YAML documents, which alint's YAML extract rejects, so the lockfile side is a layout-dependent text regex. That makes it expressible but awkward: it wants multi-document YAML support (C).",
    "fire_verified": "n/a (C); still fired on scratch for @tailwindcss/vite drift in package.json, '@tailwindcss/oxide@4.2.9' and tailwindcss@4.2.9 in the lockfile, and the clone passes",
@@ -369,6 +447,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "missing: pnpm-lock adapter emitting (name, version, deprecated) rows from multi-document YAML and name@version(peers) keys, plus an alternatives-list match",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Set inclusion of deprecated (name, version) rows in an allowlist map. It needs a lockfile adapter (multi-document YAML, key splitting), which neither the relation layer nor any kind has.",
    "fire_verified": "n/a",
@@ -391,6 +470,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: lockfile freshness is package-manager resolution semantics",
    "fire_verified": "n/a",
@@ -405,6 +485,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: resolution semantics",
    "fire_verified": "n/a",
@@ -416,14 +497,25 @@
    "summary": "Dependencies must be published at least 3 days before they are resolved (minimumReleaseAge 4320, strict)",
    "evidence": "pnpm-workspace.yaml:15-18",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "other",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs registry publish times (network)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
   },
   {
    "id": "signal-desktop-22",
@@ -433,6 +525,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: registry provenance metadata (network)",
    "fire_verified": "n/a",
@@ -447,6 +540,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: applied during resolution by the package manager",
    "fire_verified": "n/a",
@@ -461,6 +555,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: semantic resolution of peer ranges",
    "fire_verified": "n/a",
@@ -475,6 +570,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "audit-deps",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: advisory database (network)",
    "fire_verified": "n/a",
@@ -489,6 +585,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: network/external state",
    "fire_verified": "n/a",
@@ -502,9 +599,10 @@
    "mechanism": "tool-config",
    "family": "dep-version",
    "bucket": "D",
-   "alint": "missing: JS import-source adapter (bare specifier -> package name) joined to the nearest-ancestor manifest's dependency keys",
+   "alint": "missing: import extraction (code analysis under R7)",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "A reference (import -> declared dependency) that alint cannot join: import_gate extracts specifiers per file but cannot look them up in the nearest package.json. R7 lists import extraction as code analysis, so Stage B may move this to D. Kept as B-adapter because alint already ships a JS import extractor.",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41, signal-desktop-38/39/46).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -516,6 +614,14 @@
       "none"
      ],
      "why": "no-extraneous-dependencies extracts bare import specifiers from source and checks them against the nearest package.json. That is the element-web-12 precedent (knip unlisted dependencies: 'R7: needs import extraction from source (code analysis)', D). Stage A itself flagged that R7 names import extraction as code analysis."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ]
   },
@@ -527,6 +633,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file equals: source .nvmrc regex; targets package.json $.engines.node, $.devEngines.runtime.version, $.volta.node - signal-desktop-node-pin-coherent",
+   "rules": [
+    "signal-desktop-node-pin-coherent"
+   ],
    "assertion_family": "none",
    "reason": "All four root pins hold the same value at the pin; CONTRIBUTING and reproducible-builds treat .nvmrc as authoritative while CI provisions Node from devEngines. No tool compares them, so this is a convention honoured at the pin (R3/R5). cross_file expresses it, and R4 is confirmed in both directions. The danger/ subproject (24.17.0) and packages/mock-server (.nvmrc 24.11.1) are separate projects and are outside the convention.",
    "fire_verified": "On scratch copies, each of these fired signal-desktop-node-pin-coherent: engines.node drift, devEngines.runtime.version drift, .nvmrc drift, volta.node changed to 24.21.0, and volta.node removed (\"target query matched nothing\"). A scratch copy identical to the clone files passed, and the clone passes (exit 0).",
@@ -541,6 +650,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Package-manager self-management and env-lockfile freshness (R7). A value-add rule states the equality.",
    "fire_verified": "n/a",
@@ -555,6 +665,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_header lines 2 + file_header lines 3 (sh) - signal-desktop-license-comments, signal-desktop-license-comments-sh",
+   "rules": [
+    "signal-desktop-license-comments",
+    "signal-desktop-license-comments-sh"
+   ],
    "assertion_family": "none",
    "reason": "Header regexes over git-tracked files with the script's extension and ignore lists. A read-only emulation agreed on 3,372 in-scope files with 0 failures.",
    "fire_verified": "n/a (other family; fired on scratch .github/workflows/x.yml, .smartling.yml and build.sh)",
@@ -569,6 +683,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden '\\A[^\\n]*[0-9]{4}-[0-9]{4}' (+ sh variant) - signal-desktop-license-no-end-year, signal-desktop-license-no-end-year-sh",
+   "rules": [
+    "signal-desktop-license-no-end-year",
+    "signal-desktop-license-no-end-year-sh"
+   ],
    "assertion_family": "none",
    "reason": "A distinct assertion of the same script (its own failure message), anchored to the header line",
    "fire_verified": "n/a (other family; fired on scratch ts/util/endyear.std.ts)",
@@ -583,6 +701,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_header lines 3 - signal-desktop-oxlint-license-comments",
+   "rules": [
+    "signal-desktop-oxlint-license-comments"
+   ],
    "assertion_family": "none",
    "reason": "File-header assertion inside a custom lint rule, counted A per the element-web oxlint copyright-header precedent. Emulation: 3,146 files, 0 bad.",
    "fire_verified": "n/a (other family; fired on a scratch file with a block-comment header)",
@@ -597,6 +718,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex - signal-desktop-file-suffix-naming",
+   "rules": [
+    "signal-desktop-file-suffix-naming"
+   ],
    "assertion_family": "none",
    "reason": "Filename convention with the repository's own off-list as excludes. Emulation: 2,977 files, 0 bad.",
    "fire_verified": "n/a (other family; fired on scratch ts/util/nosuffix.ts)",
@@ -611,6 +735,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2/R7: global-reference and import-specifier AST analysis",
    "fire_verified": "n/a",
@@ -625,6 +750,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "no_bom - signal-desktop-js-no-bom",
+   "rules": [
+    "signal-desktop-js-no-bom"
+   ],
    "assertion_family": "none",
    "reason": "A byte-level file property expressed directly; carved out of the oxlint run like the header rule",
    "fire_verified": "n/a (other family; fired on scratch ts/util2/bom.std.ts; the excluded sticker-creator/src/skip.ts did not fire)",
@@ -639,6 +767,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden - signal-desktop-lint-deps-first-party",
+   "rules": [
+    "signal-desktop-lint-deps-first-party"
+   ],
    "assertion_family": "none",
    "reason": "Regex ban over files. Because there are no first-party exceptions, any hit fails. Emulation: 2,116 first-party files, 0 hits.",
    "fire_verified": "n/a (other family; fired on a scratch innerHTML use)",
@@ -653,6 +784,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "lint-deps",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Scans installed third-party code (node_modules), which needs the install (R7 external state)",
    "fire_verified": "n/a",
@@ -667,8 +799,11 @@
    "family": "other",
    "bucket": "D",
    "alint": "file_graph forbidden_edges, relative_to_file, with a regex alternative that consumes suppressed lines - signal-desktop-restricted-import-zones",
+   "rules": [
+    "signal-desktop-restricted-import-zones"
+   ],
    "assertion_family": "none",
-   "reason": "file_graph expresses the forbidden edges. Inline-suppression semantics have to be emulated in the extract regex, and only relative specifiers resolve. That is awkward but works (C). Edge source: content regex.",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41 precedent). The rule stays in the config at level info, as a demoted approximation.",
    "fire_verified": "n/a (C; fired on scratch scripts/s.mjs -> ts and ts/util -> ts/components)",
    "origin": "A",
    "changes": [
@@ -680,6 +815,13 @@
       "none"
      ],
      "why": "signal-desktop/no-restricted-paths is an AST import-zone firewall. R7 puts import extraction in D, as the trpc-41 precedent did. The workaround needed to emulate inline oxlint-disable suppressions in the extract regex also shows this is linter semantics, not a file invariant."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit to D but left the reason arguing for A or C."
     }
    ]
   },
@@ -691,8 +833,11 @@
    "family": "other",
    "bucket": "D",
    "alint": "import_gate js forbid (complement regex) - signal-desktop-github-scripts-node-builtins-only",
+   "rules": [
+    "signal-desktop-github-scripts-node-builtins-only"
+   ],
    "assertion_family": "none",
-   "reason": "An import firewall over module specifiers, which import_gate expresses directly",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41 precedent). The rule stays in the config at level info, as a demoted approximation.",
    "fire_verified": "n/a (other family; fired on zod, ../utils.mjs and ./sub/v.mjs; allowed ./ok.mjs and node:fs)",
    "origin": "A",
    "changes": [
@@ -704,6 +849,13 @@
       "none"
      ],
      "why": "An oxlint eslint/no-restricted-imports pattern over import specifiers. R7 keeps 'extracting the ... imports a program uses' in D. The batch-1 precedent trpc-41 (an oxlint no-restricted-imports firewall) is D, 'v0.12 treated the vite eslint firewall the same way', and so are yarnpkg-berry-34 and zulip-62. That import_gate can express it does not change the R7 classification."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit to D but left the reason arguing for A or C."
     }
    ]
   },
@@ -715,6 +867,12 @@
    "family": "other",
    "bucket": "C",
    "alint": "json_path_equals x2 (if_present) + file_content_matches + file_content_forbidden - signal-desktop-pkg-*",
+   "rules": [
+    "signal-desktop-pkg-publish-config-exact",
+    "signal-desktop-pkg-private-true-only",
+    "signal-desktop-pkg-private-or-publish-config",
+    "signal-desktop-pkg-not-both-private-and-publish"
+   ],
    "assertion_family": "none",
    "reason": "A schema union with no inline-schema kind. It is split into four rules, two of them text regexes for exactly-one-of key presence (C).",
    "fire_verified": "n/a (C; fired one-of on scratch packages/foo, both-present on root, and wrong provenance on packages/bar; the .oxlint fixture was excluded)",
@@ -729,6 +887,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_match select '^\\s+resolution:' require '\\bintegrity:' - signal-desktop-lockfile-integrity",
+   "rules": [
+    "signal-desktop-lockfile-integrity"
+   ],
    "assertion_family": "none",
    "reason": "The lockfile has two YAML documents, so a structured YAML query cannot be used. A per-line text check depends on pnpm's inline-map layout (C).",
    "fire_verified": "n/a (C; fired on a scratch tarball-only resolution)",
@@ -743,6 +904,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve yaml $.patchedDependencies.* expect file - signal-desktop-patched-dependencies-exist",
+   "rules": [
+    "signal-desktop-patched-dependencies-exist"
+   ],
    "assertion_family": "none",
    "reason": "Manifest-declared path existence is a native kind",
    "fire_verified": "n/a (other family; fired on a scratch entry pointing at a missing patch)",
@@ -754,28 +918,50 @@
    "summary": "Every declared patch is applied (allowUnusedPatches: false)",
    "evidence": "pnpm-workspace.yaml:100",
    "mechanism": "tool-config",
-   "family": "other",
+   "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs resolution (whether the patched name@version is in the graph)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Patch declarations are dependency fields (mattermost-47)."
+    }
+   ]
   },
   {
    "id": "signal-desktop-44",
    "summary": "Only allow-listed dependencies may run install scripts (strictDepBuilds + allowBuilds)",
    "evidence": "pnpm-workspace.yaml:122-123",
    "mechanism": "tool-config",
-   "family": "other",
+   "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: install-time package-manager behaviour",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "immich-16 has the identical allowBuilds and strictDepBuilds settings and is dep-version; so are tq-18, ghost-37, wsdk-42 and trpc-56."
+    }
+   ]
   },
   {
    "id": "signal-desktop-45",
@@ -785,6 +971,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linter over source ASTs. Units 32, 33, 35, 38, 39 and 46 are carved out as file/import-shaped.",
    "fire_verified": "n/a",
@@ -799,8 +986,11 @@
    "family": "other",
    "bucket": "D",
    "alint": "file_content_forbidden regex over import/export-from chai statements, with the one suppressed file excluded - signal-desktop-no-chai-expect-should",
+   "rules": [
+    "signal-desktop-no-chai-expect-should"
+   ],
    "assertion_family": "none",
-   "reason": "A named-import ban that import_gate (module specifiers only) cannot express. The regex approximates specifier parsing, and the inline suppression is emulated by a path exclude (C).",
+   "reason": "R7 keeps extracting the imports a program uses in D (trpc-41 precedent). The rule stays in the config at level info, as a demoted approximation.",
    "fire_verified": "n/a (C); on scratch it fired on `import { assert, expect }`, multi-line `import chai, { should }` and `export { Should } from`, and did not fire on `import { type expect as E2 }`, `import type { expect }` or `import { expectType }`. The clone passes.",
    "origin": "A",
    "changes": [
@@ -812,6 +1002,13 @@
       "none"
      ],
      "why": "eslint/no-restricted-imports importNames with allowTypeImports is a ban on named import specifiers, which is AST import extraction (R7, trpc-41). The regex only approximates specifier parsing and type-import semantics."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit to D but left the reason arguing for A or C."
     }
    ]
   },
@@ -823,6 +1020,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node --test",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: test runner",
    "fire_verified": "n/a",
@@ -837,6 +1035,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: type checker",
    "fire_verified": "n/a",
@@ -851,6 +1050,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: formatter",
    "fire_verified": "n/a",
@@ -865,6 +1065,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "stylelint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linter",
    "fire_verified": "n/a",
@@ -879,6 +1080,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "knip",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs the module graph from source imports",
    "fire_verified": "n/a",
@@ -893,6 +1095,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "knip",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: module-graph analysis",
    "fire_verified": "n/a",
@@ -907,6 +1110,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2/R7: runs the project's build",
    "fire_verified": "n/a",
@@ -921,6 +1125,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs compiled CSS and SCSS #{$icon} interpolation resolution (build output)",
    "fire_verified": "n/a",
@@ -935,6 +1140,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "purgecss",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs build output plus source class-name extraction",
    "fire_verified": "n/a",
@@ -949,6 +1155,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness by running project code (R2)",
    "fire_verified": "n/a",
@@ -963,6 +1170,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Reads node_modules license files (install state)",
    "fire_verified": "n/a",
@@ -977,6 +1185,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "electron-mocha",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -991,6 +1200,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "test-electron",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1005,6 +1215,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "electron-builder",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: build execution",
    "fire_verified": "n/a",
@@ -1019,6 +1230,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "storybook",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1033,6 +1245,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1047,6 +1260,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1061,6 +1275,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Inspects build artifacts",
    "fire_verified": "n/a",
@@ -1075,6 +1290,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vite",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1089,6 +1305,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1103,6 +1320,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1117,6 +1335,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -1131,6 +1350,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution plus a downloaded artifact (network)",
    "fire_verified": "n/a",
@@ -1145,6 +1365,14 @@
    "family": "locale",
    "bucket": "A",
    "alint": "json_path_matches x6 on _locales/en/messages.json, path $['<key>'].messageformat, matches '[\\s\\S]' for the 3 description keys and '^[\\s\\S]*$' for the 3 message keys. Suggested ids: signal-desktop-policy-strings-*",
+   "rules": [
+    "signal-desktop-policy-strings-enable-backups-description",
+    "signal-desktop-policy-strings-enable-backups-message",
+    "signal-desktop-policy-strings-plaintext-export-description",
+    "signal-desktop-policy-strings-plaintext-export-message",
+    "signal-desktop-policy-strings-view-aep-description",
+    "signal-desktop-policy-strings-view-aep-message"
+   ],
    "assertion_family": "none",
    "reason": "An explicit assert in a generator that CI runs: build code names catalog keys, and the catalog must contain them. Contributors edit the en catalog, so deleting or renaming one of these strings breaks `pnpm run generate`. A native kind expresses each key. Stage A counted the weaker, implicit precondition in generate-compact-locales as unit 11 but missed this explicit one.",
    "fire_verified": "On a scratch copy of _locales with icu:PlaintextExport--OSPrompt--message--Linux deleted and the first description emptied, the 6 rules fired twice: 'produced no match' and 'does not match regex'. All 6 pass on the clone (exit 0).",
@@ -1159,6 +1387,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches package.json $.version, matches '^\\s*v?(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)\\.(?:0|[1-9][0-9]*)(?:-(?:beta|alpha|staging|axolotl|adhoc)\\.(?:0|[1-9][0-9]*)(?:\\.[0-9A-Za-z-]+)*(?:\\+[0-9A-Za-z-]+(?:\\.[0-9A-Za-z-]+)*)?)?\\s*$'",
+   "rules": [
+    "signal-desktop-app-version-format"
+   ],
    "assertion_family": "none",
    "reason": "A CI script asserts the format of a value in a file alint reads, so R7 classifies it by its logic. The 'prepare beta build' step runs in CI, and parseVersion throws on any other shape before the channel check. It is the app's own version, not a dependency version, so the family is other.",
    "fire_verified": "n/a (other family). Checked anyway: fired on 8.38.0-nightly.1, 8.38.0-beta and 8.38.0+build5; passes on the clone (8.38.0-alpha.1).",
@@ -1173,6 +1404,14 @@
    "family": "other",
    "bucket": "C",
    "alint": "json_path_equals x6 on package.json ($.name signal-desktop, $.productName Signal, $.build.appId org.whispersystems.signal-desktop, $.build.linux.desktop.entry.StartupWMClass signal, $.desktopName signal.desktop, $.build.linux.executableName signal-desktop)",
+   "rules": [
+    "signal-desktop-beta-prep-name",
+    "signal-desktop-beta-prep-product-name",
+    "signal-desktop-beta-prep-app-id",
+    "signal-desktop-beta-prep-startup-wm-class",
+    "signal-desktop-beta-prep-desktop-name",
+    "signal-desktop-beta-prep-executable-name"
+   ],
    "assertion_family": "none",
    "reason": "The gate is real but conditional: it runs only on beta-version builds, so it is dormant at the alpha pin and is enforced on the X.Y.x release branches CI runs on. alint has no way to condition on the version channel (custom facts are excluded), so it asserts the values unconditionally. That is stronger than the gate but holds at the pin, which makes it expressible but awkward (C). The integrator may reject this unit as a dormant guard.",
    "fire_verified": "n/a (C). Checked anyway: the 6 rules pass on the clone and fired on a scratch package.json with productName 'Signal Beta'.",
@@ -1187,6 +1426,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest reporter",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A distinct assertion from 'visual tests pass' (unit 63), per R1. It needs the test run's set of used screenshots, as the element-web-32 precedent (stale screenshot baselines) found: D.",
    "fire_verified": "n/a",
@@ -1201,6 +1441,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Unit 64 covers the minimum-OS checks (macOS minos and glibc). The Windows step asserts something else, an import allowlist over PE import tables, so R1 makes it a separate behavior. It inspects build artifacts: D.",
    "fire_verified": "n/a",
@@ -1214,6 +1455,11 @@
   "signal-desktop-va-locale-key-parity (key_parity, en reference vs _locales/*/messages.json, ignore smartling.** and *.description, direction both): parity holds at the pin, but Smartling generates the catalogs and nothing gates them. Fired on scratch.",
   "signal-desktop-va-available-locales-registered (cross_file registered): every _locales/<locale> is listed in build/available-locales.json, which only the manual `get-strings` regenerates. Fired on scratch.",
   "signal-desktop-va-pnpm-pin-lockfile (cross_file equals): package.json devEngines.packageManager.version equals the pnpm specifier in pnpm-lock.yaml document 1 packageManagerDependencies, which reproducible-builds.yml:106 reads. The repository relies on pnpm itself for this (unit 29, D). Fired on scratch."
+ ],
+ "value_add_rules": [
+  "signal-desktop-va-locale-key-parity",
+  "signal-desktop-va-available-locales-registered",
+  "signal-desktop-va-pnpm-pin-lockfile"
  ],
  "absent_categories": [
   "No git hooks: no husky, lefthook, .pre-commit-config.yaml, lint-staged or simple-git-hooks, and no committed hooks/ directory",

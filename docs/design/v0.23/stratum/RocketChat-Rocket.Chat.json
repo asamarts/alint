@@ -27,7 +27,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 1,
-    "D": 2
+    "D": 1
    },
    "addressable": 13,
    "coverage_today": 38,
@@ -44,7 +44,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 0,
-    "D": 4
+    "D": 3
    },
    "addressable": 3,
    "coverage_today": 100,
@@ -78,7 +78,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 5,
-    "D": 30
+    "D": 32
    },
    "addressable": 28,
    "coverage_today": 43,
@@ -97,6 +97,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "needs an ICU-collation key-order operator (ordered_block lexical-ci disagrees: a probe failed at en line 67, \"@username\" after \"__usersCount__…\")",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Key order under ICU collation plus an integer-first partition; alint has no collation or JSON key-order operator (batch-1 precedent element-web-02, trpc-15). R4: an ordered_block probe parses but asserts a different order.",
    "fire_verified": "n/a",
@@ -119,6 +120,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "needs a key-order-relative-to-reference operator",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Order relative to a reference file's key order; no order operator over JSON keys (element-web-02 / trpc-15 precedent).",
    "fire_verified": "n/a",
@@ -141,6 +143,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "key_parity (direction: extra, plurals: cldr) — rocketchat-i18n-no-extra-keys",
+   "rules": [
+    "rocketchat-i18n-no-extra-keys"
+   ],
    "assertion_family": "none",
    "reason": "key_parity extra with CLDR plural grouping asserts the same set inclusion. key_parity compares leaf paths, so a non-plural nested object that en lacks would also fire, but locales are flat apart from plural objects at the pin.",
    "fire_verified": "Scratch copy of en, de, pt-BR: passes. Adding \"zz_r4_extra_key\" to de fires once (de.i18n.json:7198). A de plural object with few/many where en has one/other does not fire, matching the task. Passes on the clone.",
@@ -155,6 +160,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "needs CLDR plural categories per locale",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Per-locale CLDR category sets; key_parity plurals: cldr deliberately does not check categories per locale (forem-03 precedent).",
    "fire_verified": "n/a",
@@ -177,6 +183,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "needs CLDR plural categories per locale",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Same missing adapter as rocketchat-04 (forem-03).",
    "fire_verified": "n/a",
@@ -199,6 +206,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "json_path_absent with RFC 9535 search() — rocketchat-i18n-no-double-underscore-placeholders",
+   "rules": [
+    "rocketchat-i18n-no-double-underscore-placeholders"
+   ],
    "assertion_family": "none",
    "reason": "A value-level regex over every string leaf; search(@, '__[^\\n\\r]*__') matches the task's lazy regex, which does not cross line breaks. Keys containing __ (148 at the pin) are not selected.",
    "fire_verified": "Scratch copy of en and de: passes, with en's 148 keys containing __ not firing. Adding the value \"Hello __username__\" to de fires once. Passes on the clone.",
@@ -213,6 +223,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "file_content_forbidden with a JS-\\s class anchored at \\z — rocketchat-i18n-no-trailing-whitespace-at-eof",
+   "rules": [
+    "rocketchat-i18n-no-trailing-whitespace-at-eof"
+   ],
    "assertion_family": "none",
    "reason": "A byte-level end-of-file predicate; the character class matches the JavaScript \\s set exactly.",
    "fire_verified": "Scratch copy of de and fr: passes. Appending LF to de and U+00A0 to fr fires twice. Passes on the clone.",
@@ -227,6 +240,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "needs an i18next placeholder extractor and (key path, value) rows",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Per-key value comparison; the entry adapter is key-only (batch-1 ruling, forem-04 / zulip-02).",
    "fire_verified": "n/a",
@@ -249,6 +263,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "needs a placeholder extractor and (key path, value) rows",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Same as rocketchat-08, in the other direction.",
    "fire_verified": "n/a",
@@ -271,6 +286,7 @@
    "family": "locale",
    "bucket": "B-config",
    "alint": "constraint unique-key over duplicate-aware entry rows (the JSON reader keeps the last duplicate, so no kind sees it today)",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Duplicate keys are unique-key over the duplicate-aware entry adapter's rows (zulip-28 precedent).",
    "fire_verified": "n/a",
@@ -285,6 +301,11 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent parse probe + file_content_matches '\\A[ \\t\\r\\n]*\\{' — rocketchat-i18n-locale-parses, rocketchat-i18n-locale-object-root",
+   "rules": [
+    "rocketchat-i18n-locale-parses",
+    "rocketchat-i18n-locale-object-root",
+    "rocketchat-i18n-locale-no-bom"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but alint's JSON reader accepts comments and trailing commas that JSON.parse rejects, and the object root needs a byte-level companion rule (zulip-04 / element-web-08 precedent).",
    "fire_verified": "n/a (C unit). Fired anyway on scratch: an array root in de fires object-root, and a truncated fr is a resource_parse analysis failure. The known gap was confirmed: a trailing comma passes.",
@@ -299,6 +320,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "dir_only_contains — rocketchat-i18n-locales-dir-only-locale-files",
+   "rules": [
+    "rocketchat-i18n-locales-dir-only-locale-files"
+   ],
    "assertion_family": "none",
    "reason": "A directory-shape invariant that alint expresses directly. A subdirectory would also crash the script, but dir_only_contains checks files only; there are none at the pin.",
    "fire_verified": "Scratch copy of en and de: passes. Adding locales/de.json fires once. Passes on the clone.",
@@ -313,6 +337,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A process and review judgment that needs PR authorship context; no file-state invariant.",
    "fire_verified": "n/a",
@@ -324,14 +349,25 @@
    "summary": "Client code uses i18n through the documented hooks and keys (no hard-coded user-visible strings, etc.)",
    "evidence": "docs/frontend/i18n.md",
    "mechanism": "convention",
-   "family": "locale",
+   "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs analysis of source strings and calls (R7 code analysis).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "It checks translatable strings in source or layout files, not locale files. Section 2.3's locale family covers locale files; zulip's equivalent source checks (zulip-06, zulip-cc-59, -61, -67 to -69) are `other`."
+    }
+   ]
   },
   {
    "id": "rocketchat-15",
@@ -341,6 +377,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches $.volta.node '^[0-9]+\\.[0-9]+\\.[0-9]+$' — rocketchat-volta-node-exact",
+   "rules": [
+    "rocketchat-volta-node-exact"
+   ],
    "assertion_family": "none",
    "reason": "Presence plus well-formedness of a toolchain pin, as for batch-1's .nvmrc and packageManager units.",
    "fire_verified": "Scratch copy of package.json: passes. volta.node set to ^24.15.0 fires, and removing volta.node fires. Passes on the clone.",
@@ -355,6 +394,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "needs a semver-range satisfaction operator",
+   "rules": [],
    "assertion_family": "none",
    "reason": "An exact pin must satisfy a declared range (element-web-13 / trpc-03 precedent). The two instances are one behavior (R1).",
    "fire_verified": "n/a",
@@ -377,6 +417,9 @@
    "family": "toolchain-pin",
    "bucket": "C",
    "alint": "cross_file equals (engines.yarn vs the yarnPath version) — rocketchat-yarnpath-release-matches-engines-yarn",
+   "rules": [
+    "rocketchat-yarnpath-release-matches-engines-yarn"
+   ],
    "assertion_family": "none",
    "reason": "Equality expresses the check only while engines.yarn stays an exact version. A range would need the missing semver operator, so this is a narrowed expression (C, like batch-1's \"holds for one layout\").",
    "fire_verified": "n/a (C unit). Fired anyway: a scratch copy of package.json and .yarnrc.yml passes, and setting engines.yarn to 4.19.0 fires.",
@@ -391,6 +434,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "registry_paths_resolve (regex extract, base: lint_root, expect: file) — rocketchat-yarnrc-paths-resolve",
+   "rules": [
+    "rocketchat-yarnrc-paths-resolve"
+   ],
    "assertion_family": "none",
    "reason": "A manifest's path entries must exist; registry_paths_resolve is that check.",
    "fire_verified": "Scratch copy of .yarnrc.yml and both files: passes. Deleting the plugin fires, and pointing yarnPath at yarn-4.18.2.cjs fires. Passes on the clone.",
@@ -405,6 +451,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Checks the installed toolchain on the host, which is environment state (R7).",
    "fire_verified": "n/a",
@@ -419,6 +466,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Lockfile freshness needs package-manager resolution (R7).",
    "fire_verified": "n/a",
@@ -433,6 +481,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs package-manager resolution semantics (R7).",
    "fire_verified": "n/a",
@@ -447,6 +496,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs network and registry state (R7).",
    "fire_verified": "n/a",
@@ -458,14 +508,25 @@
    "summary": "Packages younger than 3 days cannot be installed (npmMinimalAgeGate: 3d; @rocket.chat/* preapproved)",
    "evidence": ".yarnrc.yml npmMinimalAgeGate / npmPreapprovedPackages",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs registry publish times (R7; batch-1 minimum release age).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
   },
   {
    "id": "rocketchat-24",
@@ -475,6 +536,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals (regex extracts) — rocketchat-dependabot-cooldown-matches-age-gate",
+   "rules": [
+    "rocketchat-dependabot-cooldown-matches-age-gate"
+   ],
    "assertion_family": "none",
    "reason": "Agreement between two release-age settings (Dependabot cooldown and Yarn's npmMinimalAgeGate). Release age is not a dependency version, range, protocol or field (section 2.3), so the family is other, as jest-14, ghost-b14 and wsdk-75. A: cross_file equals over the day counts both files state, fire-verified.",
    "fire_verified": "Scratch copy of .yarnrc.yml and dependabot.yml: passes. Setting npmMinimalAgeGate to 7d fires once. Passes on the clone.",
@@ -496,12 +560,23 @@
    "mechanism": "tool-config",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "cross_file superset (source.files union of $.name over the 4 workspace globs plus the root; regex targets) — rocketchat-workspace-protocol-refs-resolve",
+   "alint": "cross_file superset (source.files union of $.name over the 4 workspace globs plus the root; regex targets '\"([^\"]+)\"\\s*:\\s*\"workspace:') rocketchat-workspace-protocol-refs-resolve",
+   "rules": [
+    "rocketchat-workspace-protocol-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "The workspace-name set must cover every workspace: reference (trpc-B01 precedent).",
    "fire_verified": "Scratch copy of the 103 manifests (102 workspaces plus the root): passes. Renaming one workspace: dependency in apps/meteor fires once. Renaming @rocket.chat/rest-typings fires 16 times. Passes on the clone.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "alint"
+     ],
+     "why": "Its regex required the value on the key's line ([ \\t]*); the audit widened it to \\s*, so a value on the next line is read too. It fires on that case and still passes on the clone."
+    }
+   ]
   },
   {
    "id": "rocketchat-26",
@@ -511,6 +586,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "registry_paths_resolve over the manifest glob (regex '#~/(\\.yarn/patches/[^\"#]+\\.patch)\"', base: lint_root, expect: file) — rocketchat-yarn-patch-files-exist",
+   "rules": [
+    "rocketchat-yarn-patch-files-exist"
+   ],
    "assertion_family": "none",
    "reason": "Path entries in manifests must exist on disk.",
    "fire_verified": "Scratch copy of the manifests and patches: passes. Deleting typia's patch (referenced only by apps/meteor) fires once. Deleting the @react-aria/i18n patch (two root resolutions) fires twice. Passes on the clone.",
@@ -525,6 +603,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Whether a change is user-visible is a judgment.",
    "fire_verified": "n/a",
@@ -539,6 +618,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "markdown_links_resolve — rocketchat-docs-links-resolve",
+   "rules": [
+    "rocketchat-docs-links-resolve"
+   ],
    "assertion_family": "none",
    "reason": "The docs link-resolution kind expresses it; alint is case-exact on Linux, as the script is.",
    "fire_verified": "n/a",
@@ -563,6 +645,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "markdown_fragments_resolve — rocketchat-docs-anchors-resolve",
+   "rules": [
+    "rocketchat-docs-anchors-resolve"
+   ],
    "assertion_family": "none",
    "reason": "Fragment resolution kind; passes on the clone.",
    "fire_verified": "n/a",
@@ -587,6 +672,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the project's tests (R2).",
    "fire_verified": "n/a",
@@ -601,6 +687,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals (first-match source, all-match target) — rocketchat-codeql-steps-one-version",
+   "rules": [
+    "rocketchat-codeql-steps-one-version"
+   ],
    "assertion_family": "none",
    "reason": "One value repeated in a file; equals against the first occurrence expresses it.",
    "fire_verified": "n/a (other). Fired anyway: a scratch copy passes, and changing analyze's SHA fires.",
@@ -615,6 +704,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file superset (workspace names vs frontmatter regex) — rocketchat-changeset-packages-are-workspaces",
+   "rules": [
+    "rocketchat-changeset-packages-are-workspaces"
+   ],
    "assertion_family": "none",
    "reason": "A reference check from changeset entries to the workspace-name set.",
    "fire_verified": "n/a (other). Fired anyway: a scratch copy passes, and renaming one frontmatter package fires.",
@@ -629,6 +721,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file superset (workspace names vs $.fixed[*][*]) — rocketchat-changeset-fixed-group-are-workspaces",
+   "rules": [
+    "rocketchat-changeset-fixed-group-are-workspaces"
+   ],
    "assertion_family": "none",
    "reason": "A reference check from config to the workspace set.",
    "fire_verified": "n/a (other). Fired anyway on a renamed fixed member.",
@@ -643,6 +738,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_subject_matches (comment only in config; git-history kinds are excluded for depth-1 clones)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A commit-message check that a git kind expresses is C (batch-1 ruling).",
    "fire_verified": "n/a",
@@ -657,6 +753,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service state.",
    "fire_verified": "n/a",
@@ -671,6 +768,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex — rocketchat-xmpp-adr-filename",
+   "rules": [
+    "rocketchat-xmpp-adr-filename"
+   ],
    "assertion_family": "none",
    "reason": "A naming convention that holds at the pin.",
    "fire_verified": "n/a (other). Fired anyway on a renamed ADR.",
@@ -685,6 +785,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches ×3 — rocketchat-xmpp-spec-status, rocketchat-xmpp-adr-status, rocketchat-xmpp-intent-status",
+   "rules": [
+    "rocketchat-xmpp-spec-status",
+    "rocketchat-xmpp-adr-status",
+    "rocketchat-xmpp-intent-status"
+   ],
    "assertion_family": "none",
    "reason": "Closed vocabularies at fixed positions; regex expresses them, and all hold at the pin.",
    "fire_verified": "n/a (other). Fired anyway on a spec status 'done' and an ADR status 'proposed'.",
@@ -699,6 +804,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a frontmatter-list plus markdown-table adapter to compare (standard, spec, status) rows",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The values are YAML lists in frontmatter on one side and markdown table rows on the other; no adapter reads either as rows.",
    "fire_verified": "n/a",
@@ -721,6 +827,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs heading-slug anchor extraction from non-markdown references (markdown_fragments_resolve reads markdown links only)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The path half is expressible, but the anchor and the reverse (every D heading cited) need slugged headings joined with code comments.",
    "fire_verified": "n/a",
@@ -743,6 +850,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a symlink-target predicate",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Link-target convention (trpc-16 precedent).",
    "fire_verified": "n/a",
@@ -765,6 +873,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Process ordering and history across commits; judgment and PR-level context.",
    "fire_verified": "n/a",
@@ -779,6 +888,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a base-revision comparison (file unchanged since the base ref)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "No kind compares file content with a base revision; treated the same as rocketchat-45.",
    "fire_verified": "n/a",
@@ -801,6 +911,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Import analysis (R7). Recorded as a file-graph edge (imports).",
    "fire_verified": "n/a",
@@ -814,9 +925,10 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "needs a path-capture adapter (icon stems as values) to compare with the mapping keys",
+   "alint": "needs the icon key derived from the file name (buildIcons.mjs strips the .dir suffix) before cross_file registered can compare it with the glyphsMapping.json keys",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "The set of icon file stems must be covered by JSON keys; cross_file cannot take values from file names except via registered with a list target.",
+   "reason": "cross_file registered with {stem} against the glyphsMapping.json keys covers every icon except *.dir.svg, whose key is the stem with the .dir suffix stripped (buildIcons.mjs:7). That derived key is what is missing.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -825,9 +937,18 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "cross_file registered with {stem} and a regex over the glyphsMapping.json keys fails only for the *.dir.svg icons; the blocker is the suffix strip in packages/icons/scripts/buildIcons.mjs:7."
     }
    ],
-   "needs": "other"
+   "needs": "derived-value"
   },
   {
    "id": "rocketchat-45",
@@ -837,6 +958,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a base-revision comparison",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Append-only versus the base revision.",
    "fire_verified": "n/a",
@@ -859,6 +981,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a diff-scoped co-change predicate (added path ⇒ added file with given content)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Conditional on what the PR adds; no kind relates added paths to added files.",
    "fire_verified": "n/a",
@@ -881,6 +1004,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs rename tracking over the diff",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Detecting a move needs git rename detection against a base.",
    "fire_verified": "n/a",
@@ -903,6 +1027,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches '\\Aid,title,…,is_muted\\r?\\n' — rocketchat-qase-csv-header",
+   "rules": [
+    "rocketchat-qase-csv-header"
+   ],
    "assertion_family": "none",
    "reason": "A fixed prefix; the README's CRLF claim is violated at the pin (the file is LF), so line endings are left open.",
    "fire_verified": "n/a (other). Fired anyway on swapped columns.",
@@ -917,6 +1044,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a CSV adapter (quoted multi-line fields)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "alint cannot read CSV records.",
    "fire_verified": "n/a",
@@ -939,6 +1067,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a CSV adapter",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Per-row field comparison over CSV.",
    "fire_verified": "n/a",
@@ -961,6 +1090,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a CSV adapter",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Column-value vocabularies over CSV records.",
    "fire_verified": "n/a",
@@ -983,6 +1113,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A source linter (R2). The layering is a file-graph edge over imports.",
    "fire_verified": "n/a",
@@ -997,6 +1128,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc via turbo",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checking (R2).",
    "fire_verified": "n/a",
@@ -1011,6 +1143,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "stylelint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A style linter (R2).",
    "fire_verified": "n/a",
@@ -1025,6 +1158,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "scripts/scan-style-props.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "AST scan via vite parseAst (code analysis).",
    "fire_verified": "n/a",
@@ -1039,6 +1173,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "scripts/scan-raw-layout.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "AST scan (code analysis).",
    "fire_verified": "n/a",
@@ -1053,6 +1188,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "scripts/spacing-scale/check.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "An oxlint custom rule over source plus a baseline ratchet (code analysis).",
    "fire_verified": "n/a",
@@ -1067,6 +1203,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "actionlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A workflow semantic linter with shellcheck (R2).",
    "fire_verified": "n/a",
@@ -1081,6 +1218,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "CodeQL",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis (R2).",
    "fire_verified": "n/a",
@@ -1095,6 +1233,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the build (R2).",
    "fire_verified": "n/a",
@@ -1109,6 +1248,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the build (R2).",
    "fire_verified": "n/a",
@@ -1123,6 +1263,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the build (R2).",
    "fire_verified": "n/a",
@@ -1137,6 +1278,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs tests (R2).",
    "fire_verified": "n/a",
@@ -1151,6 +1293,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs tests (R2).",
    "fire_verified": "n/a",
@@ -1165,6 +1308,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs tests (R2).",
    "fire_verified": "n/a",
@@ -1179,6 +1323,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs tests (R2).",
    "fire_verified": "n/a",
@@ -1193,6 +1338,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs tests (R2).",
    "fire_verified": "n/a",
@@ -1207,6 +1353,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs tests (R2).",
    "fire_verified": "n/a",
@@ -1221,6 +1368,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service over test runs.",
    "fire_verified": "n/a",
@@ -1235,6 +1383,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Review judgment over source.",
    "fire_verified": "n/a",
@@ -1249,6 +1398,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis.",
    "fire_verified": "n/a",
@@ -1263,6 +1413,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis and review.",
    "fire_verified": "n/a",
@@ -1277,6 +1428,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Placement depends on what the code does (judgment).",
    "fire_verified": "n/a",
@@ -1291,6 +1443,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code review over test source.",
    "fire_verified": "n/a",
@@ -1305,6 +1458,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "PR process judgment.",
    "fire_verified": "n/a",
@@ -1319,6 +1473,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent rocketchat-published-repository-url over {apps,packages,ee/apps,ee/packages}/*/package.json, path $[?$.private != true && $.repository.url != 'git+https://github.com/RocketChat/Rocket.Chat.git']",
+   "rules": [
+    "rocketchat-published-repository-url"
+   ],
    "assertion_family": "none",
    "reason": "Documented in docs/npm-publishing.md as a requirement of publishing; the repository states the rule, so it counts as a convention-enforced unit (v0.12 conventions docs) even though npm performs the check. Unlike tq-B05, which had no in-repo statement.",
    "fire_verified": "n/a (family other); still fire-tested on scratch: a casing change of the url and removal of repository both fire; passes on the clone",
@@ -1341,6 +1498,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_file rocketchat-published-repository-directory (select {apps,packages,ee/apps,ee/packages}/*/package.json) requiring json_path_absent on {path} with $[?$.private != true && $.repository.directory != '{dir}']",
+   "rules": [
+    "rocketchat-published-repository-directory"
+   ],
    "assertion_family": "none",
    "reason": "Documented in docs/npm-publishing.md as a requirement of publishing; the repository states the rule, so it counts as a convention-enforced unit (v0.12 conventions docs) even though npm performs the check. Unlike tq-B05, which had no in-repo statement.",
    "fire_verified": "n/a (family other); fire-tested: a mismatched directory in a scratch manifest fires; clone passes",
@@ -1363,6 +1523,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_exists rocketchat-release-workflow-path, paths .github/workflows/release.yml",
+   "rules": [
+    "rocketchat-release-workflow-path"
+   ],
    "assertion_family": "none",
    "reason": "Documented in docs/npm-publishing.md as a requirement of publishing; the repository states the rule, so it counts as a convention-enforced unit (v0.12 conventions docs) even though npm performs the check. Unlike tq-B05, which had no in-repo statement.",
    "fire_verified": "n/a (family other); fire-tested: renaming release.yml in scratch fires; clone passes",
@@ -1385,6 +1548,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_equals rocketchat-release-job-id-token-write, path $.jobs.release.permissions['id-token'], equals write",
+   "rules": [
+    "rocketchat-release-job-id-token-write"
+   ],
    "assertion_family": "none",
    "reason": "Documented in docs/npm-publishing.md as a requirement of publishing; the repository states the rule, so it counts as a convention-enforced unit (v0.12 conventions docs) even though npm performs the check. Unlike tq-B05, which had no in-repo statement.",
    "fire_verified": "n/a (family other); fire-tested: id-token: read fires; clone passes",
@@ -1407,6 +1573,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "needs a semver-range operator (range ^11.15.0 must satisfy >= 11.5.1) over a regex extract of the workflow",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A toolchain floor checked against a range string; the stratum names a semver-range operator as B-adapter. A regex approximation would be C at best and was not written.",
    "fire_verified": "n/a",
@@ -1429,6 +1596,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent rocketchat-react-i18next-consumers-on-ts7 over {apps,packages,ee/apps,ee/packages}/*/package.json minus packages/livechat/package.json, path $[?@.typescript && !match(@.typescript, '[~^]?7[.].*') && ($.dependencies['react-i18next'] || $.devDependencies['react-i18next'] || $.peerDependencies['react-i18next'])]",
+   "rules": [
+    "rocketchat-react-i18next-consumers-on-ts7"
+   ],
    "assertion_family": "none",
    "reason": "An allowed-range policy for one dependency, conditional on another dependency's presence, within each manifest: expressible today with RFC 9535 filters using absolute $ queries. Convention with a documented failure mode (NO_I18NEXT_INSTANCE), holds at the pin. It could also be modelled as B-config group (one TS side per react-i18next tree), but the per-file form passes R4 now.",
    "fire_verified": "Scratch copy of the manifests: setting packages/ui-client typescript to ~5.9.3 fires once; ~7.1.0 passes; packages/emitter (no react-i18next) with a 5.x typescript does not fire; the clone passes (alint check exits 0).",
@@ -1443,6 +1613,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "file_exists rocketchat-i18n-en-base-exists, paths packages/i18n/src/locales/en.i18n.json",
+   "rules": [
+    "rocketchat-i18n-en-base-exists"
+   ],
    "assertion_family": "none",
    "reason": "An explicit validation with its own message, separate from key parity (rocketchat-03), which only reports an analysis failure when en is missing rather than a finding. It is a file-existence check over files alint reads (R7), not a build-output check.",
    "fire_verified": "Scratch copy holding only de.i18n.json: the rule fires ('expected a file matching [packages/i18n/src/locales/en.i18n.json]', exit 1); adding en.i18n.json passes; the clone passes.",
@@ -1457,6 +1630,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "two registry_paths_resolve rules: rocketchat-xmpp-spec-paths-package (base ee/packages/xmpp-server, regex for src|tests paths) and rocketchat-xmpp-spec-paths-repo (base lint_root, regex for apps|packages|ee paths), expect: any",
+   "rules": [
+    "rocketchat-xmpp-spec-paths-package",
+    "rocketchat-xmpp-spec-paths-repo"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but awkward: the mixed base needs two rules split by path prefix, and the regex extract is not frontmatter-scoped (a YAML frontmatter extract plus a per-entry base would make it A).",
    "fire_verified": "n/a (family other); fire-tested: moving src/muc/MucRoom.ts and deleting a referenced hook both fire; clone passes",
@@ -1471,6 +1648,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "markdown_required_headings rocketchat-xmpp-spec-sections on ee/packages/xmpp-server/docs/specs/*.md with '*' wildcards between the required H2s",
+   "rules": [
+    "rocketchat-xmpp-spec-sections"
+   ],
    "assertion_family": "none",
    "reason": "A template structure convention that holds at the pin and that a kind expresses directly.",
    "fire_verified": "n/a (family other); fire-tested: renaming '## Known defects' in a scratch spec fires; clone passes",
@@ -1485,6 +1665,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "pair_changed_together (if_changed ee/packages/xmpp-server/docs/compliance.md, then_changed ee/packages/xmpp-server/docs/{specs,intents}/**) - a git-diff kind",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: a check a git kind expresses is C because the depth-1 clones cannot confirm it (R4). Stage A folded this into rocketchat-38 with the mirroring check. By R1 these are two behaviors, so rocketchat-38 should be narrowed to 'compliance.md mirrors spec frontmatter' (still B-adapter).",
    "fire_verified": "n/a",
@@ -1499,6 +1680,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7/R2: it inspects build output (dist), which exists only after the build runs. It is a distinct assertion with its own failure message inside the packages build, so it is a separate unit from rocketchat-60.",
    "fire_verified": "n/a",
@@ -1515,6 +1697,13 @@
   "rocketchat-valueadd-workspace-volta-extends (info): every workspace manifest sets volta.extends to the root package.json. Fires 3 info findings at the pin: packages/media-signaling, packages/mp3-encoder and ee/packages/media-calls lack it; 99 of 102 have it.",
   "rocketchat-valueadd-locale-indent (info): locale files keep the 2-space indent that .editorconfig declares and fix mode writes (JSON.stringify(…, null, 2)). Holds.",
   "rocketchat-valueadd-locale-no-bom (info): locale files carry no UTF-8 BOM. Holds."
+ ],
+ "value_add_rules": [
+  "rocketchat-valueadd-release-version-in-sync",
+  "rocketchat-valueadd-durability-node-matches-volta",
+  "rocketchat-valueadd-yarn-pins-agree",
+  "rocketchat-valueadd-workspace-volta-extends",
+  "rocketchat-valueadd-locale-indent"
  ],
  "absent_categories": [
   "No .nvmrc, .node-version or .tool-versions. Node is pinned only in package.json volta and engines (and the Dockerfile FROM tags), so the toolchain-pins bundle has nothing to read.",

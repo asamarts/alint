@@ -97,11 +97,11 @@ Out of scope:
   - `FixContext`, `Config` and `CompiledNestedSpec` were sealed in v0.22.
 - **Corpus.** 110 configurations under `docs/design/v0.12/corpus/`, at pinned commits, replayed by
   `xtask corpus-replay` and `corpus-replay.yml`. None is an i18n-heavy repository or a
-  JavaScript workspace chosen for its version policy.
+  JavaScript workspace chosen for its version policy; phase 2 added 20 that are (section 7).
 
 ## 3. Design constraints
 
-The selector and constraint design is the phase 2 document's job (section 4). This plan fixes what
+The selector and constraint design is the phase 3 document's job (section 4). This plan fixes what
 it must respect:
 
 - **v1 is unchanged.** A v1 configuration keeps its findings, messages, fingerprints and exit
@@ -227,8 +227,9 @@ The feature freeze is the point at which phases 1 to 8 are merged. Phase 9 is de
   `baseline::Fingerprints` and `baseline::fingerprints` are gone, and `baseline::apply` takes a
   `String` fingerprinter again, as in v0.21.
 - 2026-11-12: phase 2 (#501). The corpus stratum: 20 repositories (10 i18n, 10 JavaScript
-  monorepos), 1,546 units, configurations in the pinned corpus. Today, after the slice, and with
-  entry values: `locale` 26%, 31%, 32%; `dep-version` 44%, 48%, 58%; `toolchain-pin` 65%, 65%,
-  65%. The ranking and the inputs to phase 3 are in `general-linter.md` section 12.4. Two of
-  them are for the owner: entry values for the dependency version policy, and `set` against
-  `cardinality` in the slice.
+  monorepos), 1,558 units after an audit of every unit, configurations in the pinned corpus.
+  Today, after the slice, and with entry values: `locale` 23%, 28%, 30%; `dep-version` 43%, 46%,
+  57%; `toolchain-pin` 63%, 63%, 63%. The ranking and the inputs to phase 3 are in
+  `general-linter.md` section 12.4. Two need the owner's decision: an entry-values adapter for
+  the dependency version policy, and `set` against `cardinality` in the slice (a new ADR, since
+  ADR-0032 is accepted). The stratum found three alint defects: #502, #503 and #504.

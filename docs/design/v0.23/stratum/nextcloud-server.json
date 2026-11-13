@@ -5,23 +5,23 @@
   "counts": {
    "A": 11,
    "B-config": 0,
-   "B-adapter": 5,
+   "B-adapter": 4,
    "B-kernel": 0,
    "B-delegate": 0,
-   "C": 7,
+   "C": 8,
    "D": 30
   },
   "addressable": 23,
   "coverage_today": 48,
-  "coverage_with_tuning": 78,
-  "gap": 22,
+  "coverage_with_tuning": 83,
+  "gap": 17,
   "coverage_after_slice": 48,
   "coverage_after_slice_with_entry_values": 52
  },
  "by_family": {
   "locale": {
    "counts": {
-    "A": 3,
+    "A": 2,
     "B-config": 0,
     "B-adapter": 0,
     "B-kernel": 0,
@@ -29,12 +29,12 @@
     "C": 1,
     "D": 1
    },
-   "addressable": 4,
-   "coverage_today": 75,
+   "addressable": 3,
+   "coverage_today": 67,
    "coverage_with_tuning": 100,
    "gap": 0,
-   "coverage_after_slice": 75,
-   "coverage_after_slice_with_entry_values": 75
+   "coverage_after_slice": 67,
+   "coverage_after_slice_with_entry_values": 67
   },
   "dep-version": {
    "counts": {
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 7,
+    "A": 8,
     "B-config": 0,
-    "B-adapter": 4,
+    "B-adapter": 3,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 6,
+    "C": 7,
     "D": 26
    },
-   "addressable": 17,
-   "coverage_today": 41,
-   "coverage_with_tuning": 76,
-   "gap": 24,
-   "coverage_after_slice": 41,
-   "coverage_after_slice_with_entry_values": 41
+   "addressable": 18,
+   "coverage_today": 44,
+   "coverage_with_tuning": 83,
+   "gap": 17,
+   "coverage_after_slice": 44,
+   "coverage_after_slice_with_entry_values": 44
   }
  },
  "units": [
@@ -97,6 +97,15 @@
    "family": "locale",
    "bucket": "A",
    "alint": "for_each_dir + dir_exists / file_content_matches: nextcloud-l10n-app-has-l10n-dir, nextcloud-l10n-app-in-tx-config, nextcloud-l10n-shipped-with-server-in-tx-config, nextcloud-l10n-encryption-in-tx-config, nextcloud-l10n-settings-in-tx-config",
+   "rules": [
+    "nextcloud-l10n-app-has-l10n-dir",
+    "nextcloud-l10n-app-in-tx-config",
+    "nextcloud-l10n-shipped-with-server-in-tx-config",
+    "nextcloud-l10n-encryption-in-tx-config",
+    "nextcloud-l10n-settings-in-tx-config",
+    "nextcloud-l10n-tx-config-exists",
+    "nextcloud-apps-no-stray-files"
+   ],
    "assertion_family": "none",
    "reason": "R7: a check over files alint reads (directory structure and .tx/config); for_each_dir with {basename} templating expresses it, the renames as separate select groups. One script assertion (R1) collapsed over all apps.",
    "fire_verified": "Scratch tree (copied .tx/config, several apps' l10n, core/l10n): fired on an app with its l10n/ removed, on a removed tx resource for an ordinary app, on each renamed resource (appstore/dashboard -shipped-with-server, files_encryption, settings-1) removed, and on a new app with no tx entry; apps/testing without l10n stayed silent. Clean scratch baseline and the clone pass.",
@@ -111,6 +120,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "file_content_forbidden: nextcloud-l10n-no-rtl-chars-in-ltr-catalogs",
+   "rules": [
+    "nextcloud-l10n-no-rtl-chars-in-ltr-catalogs"
+   ],
    "assertion_family": "none",
    "reason": "R7: a content property of locale files alint reads; a forbidden-character regex with RTL-language exclusions matches the script's logic.",
    "fire_verified": "Scratch: fired on U+200F inserted in core/l10n/de.json and on U+0623 in a fr.json value; silent for the same characters in ar.json (exempt RTL language). Clone passes (the only hit is the out-of-scope lib/l10n/vi.json, reported by the separate value-add rule).",
@@ -125,6 +137,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "file_content_forbidden: nextcloud-l10n-no-pipe-in-translations",
+   "rules": [
+    "nextcloud-l10n-no-pipe-in-translations"
+   ],
    "assertion_family": "none",
    "reason": "Batch-2 ruling: a regex that holds for one layout only is C. The script strips the pluralForm key structurally; the alint regex relies on the catalogs' line layout (pluralForm on the line starting with '}') to skip the '||' in plural expressions.",
    "fire_verified": "n/a (C); still shown on scratch: fired on '|' in a translation value, silent on the pluralForm '||'; clone passes.",
@@ -136,14 +151,27 @@
    "summary": "Translatable strings in t()/n() calls use the ellipsis character, never three dots",
    "evidence": "build/triple-dot-checker.php:9-33 (recursive over apps/ and core/, skipping .map; regex at :23); run by .github/workflows/autocheckers.yml",
    "mechanism": "ci",
-   "family": "locale",
+   "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: nextcloud-l10n-ellipsis-not-triple-dot",
+   "rules": [
+    "nextcloud-l10n-ellipsis-not-triple-dot"
+   ],
    "assertion_family": "none",
    "reason": "R7: a line regex over source files alint reads, not code analysis (the script itself is a per-line regex); same scope and exclusion.",
    "fire_verified": "Scratch: fired on t('files', 'Loading...') in a .js file and on $l->n('...', '... items...') in a .php file; silent for the same text in a .map file. Clone passes.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "A",
+      "locale",
+      "none"
+     ],
+     "why": "It checks translatable strings in source or layout files, not locale files. Section 2.3's locale family covers locale files; zulip's equivalent source checks (zulip-06, zulip-cc-59, -61, -67 to -69) are `other`."
+    }
+   ]
   },
   {
    "id": "nextcloud-05",
@@ -153,6 +181,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A process rule enforced by review and the external Transifex sync bot; consistent with batch records element-web-07, immich-09, signal-desktop-15 (translation-platform-only conventions are D).",
    "fire_verified": "n/a",
@@ -167,6 +196,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: nextcloud-deps-lock-entries-resolved",
+   "rules": [
+    "nextcloud-deps-lock-entries-resolved"
+   ],
    "assertion_family": "none",
    "reason": "R7: the action rewrites the lockfile only where an entry lacks resolved/integrity; the diff gate thus asserts a static property of a file alint reads. A JSONPath filter expresses it.",
    "fire_verified": "Scratch copy of package-lock.json: fired with resolved removed from one entry and with integrity removed from another; silent when a link entry lacks both. Clone passes (1218 entries, only the root \"\" lacks them).",
@@ -186,16 +218,28 @@
   {
    "id": "nextcloud-07",
    "summary": "The committed composer autoloader in lib/composer/composer has no reference to the composer-bin plugin (Bamarni\\Composer\\Bin)",
-   "evidence": "build/autoloaderchecker.sh:86-93 (composer dump-autoload then grep for Bamarni\\Composer\\Bin in lib/composer/composer)",
+   "evidence": "build/autoloaderchecker.sh:35-42 (composer dump-autoload, then grep for Bamarni\\Composer\\Bin in lib/composer/composer)",
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "A",
    "alint": "file_content_forbidden: nextcloud-deps-no-composer-bin-plugin-in-autoloader",
+   "rules": [
+    "nextcloud-deps-no-composer-bin-plugin-in-autoloader"
+   ],
    "assertion_family": "none",
    "reason": "R7: dump-autoload regenerates from the committed installed.json/composer.json; the grep's assertion is static content of committed files alint reads. The regeneration itself is unit 28 (D).",
-   "fire_verified": "Scratch copy of lib/composer/composer: fired on an injected 'Bamarni\\\\Composer\\\\Bin\\\\' line in autoload_psr4.php; silent on the unmodified copy. Clone passes.",
+   "fire_verified": "Scratch copy of lib/composer/composer: an injected Bamarni\\\\Composer\\\\Bin reference in installed.json fires; autoload_*.php is excluded, since dump-autoload regenerates it before the grep. The clone passes.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "evidence",
+      "fire_verified"
+     ],
+     "why": "The evidence cited lines past the end of the script, and fire_verified described a file the rule now excludes."
+    }
+   ]
   },
   {
    "id": "nextcloud-08",
@@ -205,6 +249,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "npm ci",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: lockfile freshness needs package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -219,6 +264,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "git ls-remote",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network/external state (R7 D list).",
    "fire_verified": "n/a",
@@ -233,6 +279,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "autoloaderchecker.sh",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Asserts the version of a binary fetched from the network at run time, not a committed pin alint could read.",
    "fire_verified": "n/a",
@@ -247,6 +294,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: nextcloud-htaccess-no-runtime-section (with top-level respect_gitignore: false, since .htaccess is tracked but gitignored)",
+   "rules": [
+    "nextcloud-htaccess-no-runtime-section"
+   ],
    "assertion_family": "none",
    "reason": "A content check on a single file.",
    "fire_verified": "n/a",
@@ -261,6 +311,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent + dir_absent with exclude allowlists: nextcloud-root-no-unexpected-files, nextcloud-root-no-unexpected-dirs",
+   "rules": [
+    "nextcloud-root-no-unexpected-files",
+    "nextcloud-root-no-unexpected-dirs"
+   ],
    "assertion_family": "none",
    "reason": "A structure invariant; root-level '*' glob with allowlist excludes. respect_gitignore: false mirrors DirectoryIterator seeing tracked-but-ignored files.",
    "fire_verified": "n/a",
@@ -275,6 +329,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "registry_paths_resolve: nextcloud-root-expected-files-present",
+   "rules": [
+    "nextcloud-root-expected-files-present"
+   ],
    "assertion_family": "none",
    "reason": "file_exists/dir_exists path lists are any-of, so an all-of check over ~85 names needs one rule per name; the config reads the script's own array with a regex that holds for its one-quoted-name-per-line layout (batch-2: a regex for one layout only is C), skipping '.', '..', '.git' which the walker never shows.",
    "fire_verified": "n/a",
@@ -289,6 +346,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + file_content_matches: nextcloud-psalm-covers-every-app",
+   "rules": [
+    "nextcloud-psalm-covers-every-app",
+    "nextcloud-psalm-config-exists"
+   ],
    "assertion_family": "none",
    "reason": "A reference from directory names into a config file; for_each_dir with {path} templating.",
    "fire_verified": "n/a",
@@ -303,6 +364,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: nextcloud-no-replacement-character",
+   "rules": [
+    "nextcloud-no-replacement-character"
+   ],
    "assertion_family": "none",
    "reason": "A file-content property convention that holds at the pin outside generated dist/ bundles, 3rdparty and AGENTS.md itself (R5 satisfied).",
    "fire_verified": "n/a",
@@ -317,6 +381,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a REUSE coverage adapter: per-file disjunction of header, sidecar and REUSE.toml glob annotations (TOML glob precedence)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The REUSE.toml annotation-glob resolution and sidecar precedence are not expressible by the reuse bundle or kinds today; value-add rules cover two slices (app l10n listed in REUSE.toml, dist sidecars).",
    "fire_verified": "n/a",
@@ -339,6 +404,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "spdx_identifier_valid: nextcloud-reuse-spdx-identifiers-valid",
+   "rules": [
+    "nextcloud-reuse-spdx-identifiers-valid"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but alint lacks REUSE sidecar precedence and REUSE-IgnoreStart/End handling, so the scope hand-excludes dist bundles and WebpackSPDXPlugin.cjs (a bundle relaxation -> C).",
    "fire_verified": "n/a",
@@ -353,6 +421,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "constraint over extracted SPDX ids -> LICENSES/ file names",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "Each extracted identifier must name an existing file; a reference join between an extracted value set and a path set.",
    "fire_verified": "n/a",
@@ -384,6 +453,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "constraint: LICENSES/ stems included in the set of used SPDX ids",
+   "rules": [],
    "assertion_family": "set",
    "reason": "One-way inclusion between two named sets.",
    "fire_verified": "n/a",
@@ -415,6 +485,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex: nextcloud-reuse-license-files-have-extension",
+   "rules": [
+    "nextcloud-reuse-license-files-have-extension"
+   ],
    "assertion_family": "none",
    "reason": "A file-name property.",
    "fire_verified": "n/a",
@@ -429,6 +502,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_subject_matches: nextcloud-commits-conventional (commented out in config)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: a commit-message check a git kind expresses is C (depth-1 clone; R4 cannot confirm).",
    "fire_verified": "n/a",
@@ -443,6 +517,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_no_fixup: nextcloud-commits-no-fixup (commented out in config)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: git-kind commit check is C.",
    "fire_verified": "n/a",
@@ -455,10 +530,11 @@
    "evidence": ".github/workflows/ai-policy.yml:88-94 (trailer detection), :156-181 (fail step); AGENTS.md",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "C",
    "alint": "needs a forbidden-pattern (negative match) operator over commit trailers/bodies",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "alint's commit kinds require a pattern but cannot forbid one in trailers.",
+   "reason": "git_commit_message with an RE2 complement pattern that rejects the trailer (thunderbird-android-63 precedent). Awkward, since the kind asserts a match, so C. The clone is depth 1, so the corpus config has no rule.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -467,9 +543,17 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "thunderbird-android-63 bans a trailer the same way and is C: the commit kinds assert a match, so the ban is an RE2 complement pattern. The two reasons contradicted each other."
     }
-   ],
-   "needs": "other"
+   ]
   },
   {
    "id": "nextcloud-26",
@@ -479,6 +563,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_signed_off: nextcloud-commits-signed-off (commented out in config)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Git-kind commit check (batch-1 ruling C); enforced through the organization's DCO check, not a workflow in the repo.",
    "fire_verified": "n/a",
@@ -493,6 +578,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_no_denied_paths with since: nextcloud-dist-unchanged-in-pr (commented out in config)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Expressible by a git-history kind that the depth-1 clone cannot confirm (C, consistent with the commit-check ruling).",
    "fire_verified": "n/a",
@@ -507,6 +593,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "composer dump-autoload + git diff",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness by running the package manager (R7 D).",
    "fire_verified": "n/a",
@@ -521,6 +608,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "openapi-extractor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis + codegen freshness (D).",
    "fire_verified": "n/a",
@@ -535,6 +623,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "php -l",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: language tool.",
    "fire_verified": "n/a",
@@ -549,6 +638,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "php-cs-fixer",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: formatter.",
    "fire_verified": "n/a",
@@ -563,6 +653,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linter.",
    "fire_verified": "n/a",
@@ -577,6 +668,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "stylelint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linter.",
    "fire_verified": "n/a",
@@ -591,6 +683,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: test runner.",
    "fire_verified": "n/a",
@@ -605,6 +698,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "npm run build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the build (D).",
    "fire_verified": "n/a",
@@ -619,6 +713,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "psalm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: type checker.",
    "fire_verified": "n/a",
@@ -633,6 +728,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "psalm --taint-analysis",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: code analysis.",
    "fire_verified": "n/a",
@@ -647,6 +743,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "psalm:ocp",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: code analysis.",
    "fire_verified": "n/a",
@@ -661,6 +758,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "psalm:ncu",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: code analysis.",
    "fire_verified": "n/a",
@@ -675,6 +773,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "psalm:strict",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: code analysis.",
    "fire_verified": "n/a",
@@ -689,6 +788,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "rector --dry-run",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: code analysis.",
    "fire_verified": "n/a",
@@ -703,6 +803,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "phpunit",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: tests.",
    "fire_verified": "n/a",
@@ -717,6 +818,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "behat",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: tests.",
    "fire_verified": "n/a",
@@ -731,6 +833,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "caldavtester",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: tests.",
    "fire_verified": "n/a",
@@ -745,6 +848,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "litmus",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: tests.",
    "fire_verified": "n/a",
@@ -759,6 +863,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "playwright",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: tests.",
    "fire_verified": "n/a",
@@ -773,6 +878,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "performance action",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the application (D).",
    "fire_verified": "n/a",
@@ -787,6 +893,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "codeql",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: code analysis.",
    "fire_verified": "n/a",
@@ -801,6 +908,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "curl",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network/external state (D).",
    "fire_verified": "n/a",
@@ -815,6 +923,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "curl + grep",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Reads another branch's state over the network at PR time (D).",
    "fire_verified": "n/a",
@@ -829,6 +938,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Whether a commit was agent-assisted is not observable from the repository; unverifiable by any static check.",
    "fire_verified": "n/a",
@@ -843,6 +953,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Review judgment about code (D).",
    "fire_verified": "n/a",
@@ -857,6 +968,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code-semantics review conventions (D), collapsed per R1.",
    "fire_verified": "n/a",
@@ -871,6 +983,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir select 'apps/*' require file_exists '{path}/composer/composer.json' (suggested id nextcloud-apps-have-composer-project)",
+   "rules": [
+    "nextcloud-apps-have-composer-project"
+   ],
    "assertion_family": "none",
    "reason": "A structural precondition that fails the CI step on its own, separate from the autoloader-freshness diff (unit 28, D). Earlier batches counted crash preconditions of a CI step as A units: signal-desktop-11 (every _locales entry holds messages.json), rocketchat-12 and rocketchat-82. Under R7 it is a property of files alint reads. All 34 apps have composer.json, composer.lock and autoload.php at the pin.",
    "fire_verified": "n/a (family other). Still tested on a scratch copy: removing apps/dav/composer/composer.json fired the rule on apps/dav. The unmodified scratch copy and the clone pass.",
@@ -885,6 +1000,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "needs: entry-values. It joins (override key, value) rows to (dependency name, spec) rows. The eventual assertion family is reference (a `$` reference resolves to a direct dependency) plus equality (a non-`$` override of a direct dependency equals its spec).",
+   "rules": [],
    "assertion_family": "equality",
    "reason": "R7: npm makes this static check over package.json when it loads the root manifest. It is not resolution semantics, so it is classified like the workspace:/catalog:/patch: reference units of earlier batches (jest-B01, jest-B03, tq-15, trpc-10). Batch-2 ruling: an assertion that joins a name to its value is B-adapter. A JSONPath filter cannot compare an override value with the dependency entry another key selects. Confidence: plausible. The exact EOVERRIDE conditions are recalled from npm documentation, not read from source. build/frontend-legacy's overrides are nested objects keyed by direct dependencies (@vitejs/plugin-vue2, @vueuse/integrations) and do not set those packages' own versions.",
    "fire_verified": "n/a",
@@ -924,7 +1040,24 @@
   "nextcloud-valueadd-lib-l10n-no-rtl-chars (locale): extends unit 02 to lib/l10n, which the checker skips; FIRES at pin on lib/l10n/vi.json:34 (two U+200E LEFT-TO-RIGHT MARKs around 'Mẫu')",
   "nextcloud-valueadd-lib-l10n-no-pipe (locale): extends unit 03 to lib/l10n; passes",
   "nextcloud-valueadd-reuse-covers-app-l10n (locale; slice of B-adapter unit 16): every apps/*/l10n is listed in a REUSE.toml annotation; passes",
-  "nextcloud-valueadd-dist-bundles-have-license-sidecar (other; slice of unit 16): every dist/*.js and dist/*.mjs (except preview-service-worker.js, covered by REUSE.toml) has a .license sidecar; passes"
+  "nextcloud-valueadd-dist-bundles-have-license-sidecar (other; slice of unit 16): every dist/*.js and dist/*.mjs (except preview-service-worker.js, covered by REUSE.toml) has a .license sidecar; passes",
+  "nextcloud-yaml-parses (info): kept as value-add after nextcloud-21 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "nextcloud-yaml-parses",
+  "nextcloud-valueadd-php-floor-coherent",
+  "nextcloud-valueadd-vendor-bin-php-platform",
+  "nextcloud-valueadd-node-engines-coherent",
+  "nextcloud-valueadd-npm-engines-coherent",
+  "nextcloud-valueadd-apps-target-server-major",
+  "nextcloud-valueadd-apps-max-server-major",
+  "nextcloud-valueadd-l10n-json-has-js",
+  "nextcloud-valueadd-l10n-js-has-json",
+  "nextcloud-valueadd-l10n-plural-form",
+  "nextcloud-valueadd-lib-l10n-no-rtl-chars",
+  "nextcloud-valueadd-lib-l10n-no-pipe",
+  "nextcloud-valueadd-reuse-covers-app-l10n",
+  "nextcloud-valueadd-dist-bundles-have-license-sidecar"
  ],
  "absent_categories": [
   "No locale key-parity, placeholder or plural-agreement gate: Transifex delivers partial catalogs and nothing checks keys across languages",

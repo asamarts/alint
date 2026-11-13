@@ -328,7 +328,7 @@ rules:
     level: error
     message: "common/config/validation/rush-package-lock.json must pin @microsoft/rush at rush.json's rushVersion (npm ci in install-run-rush)."
 
-  # A [toolchain-pin] rushstack-07: SetupChecks (rush install) rejects a
+  # C [toolchain-pin] rushstack-07: SetupChecks (rush install) rejects a
   #   pnpmVersion below Rush's MINIMUM_SUPPORTED_PNPM_VERSION (5.0.0):
   #   semver.lt(pnpmVersion, '5.0.0'), run only when pnpm is the package
   #   manager (SetupChecks.ts ~46-52). The regex encodes semver order against
@@ -340,10 +340,24 @@ rules:
     kind: json_path_matches
     paths: ["rush.json"]
     path: "$.pnpmVersion"
-    matches: '^(?:(?:[6-9]|[1-9][0-9]+)\.[0-9]+\.[0-9]+|5\.[1-9][0-9]*\.[0-9]+|5\.0\.[1-9][0-9]*|5\.0\.0(?:\+[0-9A-Za-z.-]+)?$)'
+    matches: '^(?:(?:(?:[6-9]|[1-9][0-9]+)\.[0-9]+\.[0-9]+|5\.[1-9][0-9]*\.[0-9]+|5\.0\.[1-9][0-9]*)(?:-[0-9A-Za-z.-]+)?|5\.0\.0)(?:\+[0-9A-Za-z.-]+)?$'
     if_present: true
     level: error
     message: "rush.json pnpmVersion must be at least 5.0.0, the minimum Rush supports."
+
+  # C [toolchain-pin] rushstack-b11: RushConfiguration (~637-643) rejects a
+  #   nodeSupportedVersionRange that semver.validRange cannot parse. The
+  #   node-semver range grammar is regular, so the regex below spells it out,
+  #   as microsoft-fluentui-peer-ranges-valid-semver does (fluentui-07, C);
+  #   the regex ignores node-semver's loose mode.
+  - id: rushstack-node-supported-range-valid
+    kind: json_path_matches
+    paths: ["rush.json"]
+    path: "$.nodeSupportedVersionRange"
+    matches: '^\s*(?:v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?\s+-\s+v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?|(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?(?:\s+(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?)*)?(?:\s*\|\|\s*(?:v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?\s+-\s+v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?|(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?(?:\s+(?:(?:[<>]=?|=|~>?|\^)\s*)?v?(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:\.(?:[xX*]|0|[1-9][0-9]*)(?:-[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?(?:\+[-0-9A-Za-z]+(?:\.[-0-9A-Za-z]+)*)?)?)?)*)?)*\s*$'
+    if_present: true
+    level: error
+    message: "rush.json nodeSupportedVersionRange must be a valid node-semver range (RushConfiguration semver.validRange)."
 
   # A [toolchain-pin] rushstack-52: RushConfiguration (RushConfiguration.ts
   #   ~752-764) requires exactly one of npmVersion, pnpmVersion and yarnVersion.
@@ -863,6 +877,59 @@ rules:
   # other: conventions
   # ══════════════════════════════════════════════════════════════════════════
 
+  # rushstack-a01 (C, split out of rushstack-39's ESLint run by the audit) - headers/header-format in
+  #     rigs/decoupled-local-node-rig/profiles/default/includes/eslint/flat/profile/_common.js:149-159
+  #     ('warn'; warnings fail the build: common/config/rush/command-line.json:261-284,
+  #     allowWarningsOnSuccess false). local-eslint-config copies that profile, so every
+  #     project linting through local-node-rig / decoupled-local-node-rig gets it. Line
+  #     style, trailingNewlines 2: the two-line Microsoft header, then a blank line (or
+  #     end of file); an optional shebang line + blank line may precede it.
+  #     C, not A: scoped by an exclude list of projects that do not lint with the rule.
+  - id: rushstack-ts-copyright-header
+    kind: file_header
+    lines: 5
+    pattern: '^(?:#![^\n]*\n\n)?// Copyright \(c\) Microsoft Corporation\. All rights reserved\. Licensed under the MIT license\.\n// See LICENSE in the project root for license information\.\n(?:\n|$)'
+    paths:
+      include: ["**/*.ts", "**/*.tsx"]
+      exclude:
+        - "**/*.d.ts"
+        - "**/lib/**"
+        - "**/lib-*/**"
+        - "**/dist/**"
+        - "**/temp/**"
+        - "**/coverage/**"
+        # Projects whose ESLint config does not inherit the decoupled-local-node-rig
+        # profile (their own config, a published rig without the rule, or lint off).
+        - "build-tests-samples/packlets-tutorial/**"
+        - "build-tests-subspace/typescript-v4-test/**"
+        - "build-tests/api-extractor-*/**"
+        - "build-tests/eslint-*/**"
+        - "build-tests/hashed-folder-copy-plugin-webpack5-test/**"
+        - "build-tests/heft-minimal-rig-usage-test/**"
+        - "build-tests/heft-parameter-plugin-test/**"
+        - "build-tests/heft-typescript-v2-test/**"
+        - "build-tests/heft-typescript-v3-test/**"
+        - "build-tests/heft-typescript-v4-test/**"
+        - "build-tests/heft-web-rig-library-test/**"
+        - "build-tests/rush-mcp-example-plugin/**"
+        - "build-tests/set-webpack-public-path-plugin-test/**"
+        - "build-tests/webpack-local-version-test/**"
+        - "libraries/npm-check-fork/**"
+        - "libraries/rush-lib/src/cli/test/rush-mock-*/**"
+        - "vscode-extensions/**"
+        - "webpack/hashed-folder-copy-plugin/src/test/scenarios/**"
+        # Whole-file /* eslint-disable */.
+        - "build-tests/heft-rspack-everything-test/src/indexA.ts"
+        - "build-tests/heft-typescript-composite-test/src/indexA.ts"
+        - "build-tests/heft-webpack4-everything-test/src/indexA.ts"
+        - "build-tests/heft-webpack5-everything-test/src/indexA.ts"
+        # A third // line follows the header with no blank line. Whether
+        # eslint-plugin-headers flags that was not verified offline (the plugin is
+        # not installed in the clone), so the file is left out.
+        - "build-tests/rushd-wire-e2e-test/src/test/WireAdapter.ts"
+    level: error
+    message: "TypeScript sources start with the two-line Microsoft MIT header followed by a blank line (ESLint headers/header-format)."
+
   # A [other] rushstack-31: .gitattributes — "NPM 'bin' scripts MUST have LF,
   #   or else the executable fails to run on Mac" (/*/*/bin/+([!.]) -text, so
   #   git does not normalize them).
@@ -1251,13 +1318,9 @@ rules:
   # B-config [other] rushstack-b02 (no rule): phase names and command names
   #   are each unique within command-line.json (CommandLineConfiguration.ts
   #   ~254, ~345): unique-key within one array.
-  # B-kernel [other] rushstack-b07 (no rule): no cycle through phases' self
+  # B-adapter [other] rushstack-b07 (no rule): no cycle through phases' self
   #   dependencies (CommandLineConfiguration.ts ~336, ~602-633): graph-cycle
   #   detection over a JSON-internal edge list.
-  # B-adapter [toolchain-pin] rushstack-b11 (no rule): nodeSupportedVersionRange
-  #   must be a valid node-semver range (RushConfiguration.ts ~637-643,
-  #   semver.validRange): needs a semver-range parser; a regex only
-  #   approximates the grammar.
   # [other] rushstack-b12 (no rule): the keys of preferredVersions and
   #   allowedAlternativeVersions in common-versions.json must be valid package
   #   names (CommonVersionsConfiguration.ts ~283, ~295). Stage B proposed a

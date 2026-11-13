@@ -188,6 +188,18 @@ rules:
     level: error
     message: "tusd aarch64 sha256 must match between common.pp and tools/setup/install-tusd."
 
+  # zulip-18 (A) scripts/lib/node_cache.py runs `corepack pnpm install`, so
+  # package.json's packageManager must be a pnpm pin Corepack accepts: an
+  # exact version with an optional integrity hash. Fetching that version is
+  # environment state; the spec itself is file content.
+  - id: zulip-package-manager-pnpm-pinned
+    kind: json_path_matches
+    paths: "package.json"
+    path: "$.packageManager"
+    matches: '^pnpm@[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+sha(?:1|224|256|384|512)\.[0-9a-f]+)?$'
+    level: error
+    message: "package.json packageManager must pin pnpm@<x.y.z>[+sha512.<hash>]; node_cache.py runs corepack pnpm."
+
   # ══════════════════════════════════════════════════════════════════════
   # OTHER family: bespoke gates outside custom_check.py
   # ══════════════════════════════════════════════════════════════════════
@@ -1800,6 +1812,30 @@ rules:
       exclude: ["web/third/**", "**/*custom_check.py*"]
     pattern: 'class='
     level: error
+
+  # zulip-a01 and zulip-a02 (A), split out of zulip-82 by the audit, as tq-38/39,
+  #     element-web-27/28 and immich-30/31 were - .github/workflows/zizmor.yml runs
+  #     zizmorcore/zizmor-action with its defaults (SARIF upload) and no zizmor
+  #     config file. The only inline ignores are ignore[cache-poisoning]; nothing
+  #     ignores artipacked or unpinned-uses, and neither has a finding at the pin
+  #     (all 7 actions/checkout steps set persist-credentials; every uses: is
+  #     SHA-pinned). Rules copied from TanStack-query.alint.yml tq-38/tq-39.
+  # zulip-a01 artipacked: every actions/checkout step sets persist-credentials explicitly.
+  - id: zulip-gha-checkout-persist-credentials
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$..steps[?match(@.uses, 'actions/checkout@.*') && !@.with['persist-credentials']]"
+    level: error
+    message: "actions/checkout must set persist-credentials explicitly (zizmor artipacked)."
+  # zulip-a02 unpinned-uses (default policy): third-party actions and reusable workflows are
+  # pinned to a full 40-hex SHA; actions/*, github/* and dependabot/* may be
+  # ref-pinned; local ./ actions are exempt.
+  - id: zulip-gha-third-party-actions-hash-pinned
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$..[?@.uses && !match(@.uses, '[.]/.*') && !match(@.uses, '(actions|github|dependabot)/[^@]+@.+') && !match(@.uses, '[^@]+@[0-9a-f]{40}')]"
+    level: error
+    message: "Third-party actions and reusable workflows must be pinned to a full commit SHA (zizmor unpinned-uses)."
 
   # ══════════════════════════════════════════════════════════════════════
   # VALUE-ADD (outside the coverage ratio, R3/R5): assertions zulip does not

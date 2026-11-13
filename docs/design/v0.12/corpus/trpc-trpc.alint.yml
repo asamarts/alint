@@ -151,12 +151,13 @@ rules:
     level: error
     message: "A workspace: dependency must name a workspace project (pnpm install fails with ERR_PNPM_WORKSPACE_PKG_NOT_FOUND)."
 
-  # trpc-11 (A) — tooling/subtree `standaloneVersion` throws
+  # trpc-11 (C) — tooling/subtree `standaloneVersion` throws
   # "<name>@workspace:… only resolves in the monorepo" for any workspace:
   # dependency of a subtree-synced example (subtree.yml matrix) except
   # @shared/ui (inlined) and @trpc/* (rewritten to `canary`). Every
   # package.json under those 10 examples is processed. One dependency per
-  # line holds because oxfmt formats package.json.
+  # line holds because oxfmt formats package.json; the rule depends on that
+  # layout, so the audit moved the unit to C.
   - id: trpc-subtree-examples-workspace-protocol
     kind: for_each_match
     paths:

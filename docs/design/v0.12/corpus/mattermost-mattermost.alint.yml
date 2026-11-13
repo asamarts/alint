@@ -1220,7 +1220,7 @@ rules:
     message: "Value-add: webapp/.npmrc keeps engine-strict=true."
 
   # VA4 — former unit mattermost-15, REMOVED by Stage B as an R1 duplicate of
-  #   mattermost-16 (D): check_icu.mjs:159-173 is one comparison,
+  #   mattermost-16 (B-adapter, needs order): check_icu.mjs:159-173 is one comparison,
   #   text !== JSON.stringify(sorted, null, 2) + '\n', so key order and
   #   duplicate keys are part of the canonical-form (formatting) unit, not a
   #   separately enforced behavior. Kept only as a value-add approximation of

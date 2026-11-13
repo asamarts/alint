@@ -889,7 +889,7 @@ rules:
   # neither the generated router nor the deprecated
   # src/schema/openapi.generated.ts (packages/repo-tools/src/commands/repo/
   # schema/openapi/validate.ts, paths in lib/openapi/constants.ts). The
-  # deep-equality half of the command is backstage-64 (D).
+  # deep-equality half of the command is backstage-64 (B-adapter, format-reader).
   - id: backstage-openapi-generated-router-exists
     kind: for_each_file
     select: "{packages,plugins}/*/src/schema/openapi.yaml"
@@ -899,7 +899,7 @@ rules:
     level: error
     message: "An OpenAPI spec needs its generated src/schema/openapi/generated/router.ts (repo schema openapi validate)."
 
-  # backstage-b06 (C, Stage B missed unit; PARTIAL) — validate.ts's
+  # backstage-b06 (B-delegate since the audit, as zulip-33; PARTIAL) — validate.ts's
   # loadAndValidateOpenApiYaml runs swagger-parser Parser.validate, which
   # checks the OpenAPI meta-schema and resolves $refs, before the
   # deep-equal step. The repository ships no OpenAPI meta-schema, and a

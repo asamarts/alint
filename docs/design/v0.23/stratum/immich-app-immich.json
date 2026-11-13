@@ -3,20 +3,20 @@
  "sha": "7f13ab5e139e68308c67a709fc90d8bebd20ba7d",
  "metrics": {
   "counts": {
-   "A": 9,
+   "A": 10,
    "B-config": 1,
-   "B-adapter": 8,
+   "B-adapter": 10,
    "B-kernel": 0,
    "B-delegate": 0,
    "C": 5,
-   "D": 30
+   "D": 29
   },
-  "addressable": 23,
-  "coverage_today": 39,
-  "coverage_with_tuning": 61,
-  "gap": 39,
-  "coverage_after_slice": 39,
-  "coverage_after_slice_with_entry_values": 39
+  "addressable": 26,
+  "coverage_today": 38,
+  "coverage_with_tuning": 58,
+  "gap": 42,
+  "coverage_after_slice": 38,
+  "coverage_after_slice_with_entry_values": 38
  },
  "by_family": {
   "locale": {
@@ -27,7 +27,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 2,
-    "D": 5
+    "D": 4
    },
    "addressable": 5,
    "coverage_today": 20,
@@ -44,7 +44,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 0,
-    "D": 6
+    "D": 5
    },
    "addressable": 0,
    "coverage_today": null,
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 7,
+    "A": 8,
     "B-config": 1,
-    "B-adapter": 3,
+    "B-adapter": 5,
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 3,
-    "D": 19
+    "D": 20
    },
-   "addressable": 14,
-   "coverage_today": 50,
-   "coverage_with_tuning": 71,
-   "gap": 29,
-   "coverage_after_slice": 50,
-   "coverage_after_slice_with_entry_values": 50
+   "addressable": 17,
+   "coverage_today": 47,
+   "coverage_with_tuning": 65,
+   "gap": 35,
+   "coverage_after_slice": 47,
+   "coverage_after_slice_with_entry_values": 47
   }
  },
  "units": [
@@ -97,8 +97,13 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "ordered_block x3: immich-i18n-keys-sorted-top-level (select '^  \"'), immich-i18n-keys-sorted-first-nested (end-only '},', select '^    \"'), immich-i18n-keys-sorted-later-nested (start-only '},', select '^    \"'), order lexical",
+   "rules": [
+    "immich-i18n-keys-sorted-top-level",
+    "immich-i18n-keys-sorted-first-nested",
+    "immich-i18n-keys-sorted-later-nested"
+   ],
    "assertion_family": "none",
-   "reason": "R7: the plugin's assertion (sorted keys) is classified by its logic, not as a formatter run. ordered_block expresses it, but only by keying on indentation and on the literal '},' line that closes a nested object (gu.json/km.json close the last nested object with '  }', which forced the end-only plus start-only pair). This is a layout-dependent workaround for a missing JSON-aware order operator, so it is C, not A. Fired on scratch: top-level at en.json:3, first nested object at en.json:45 and gu.json:42, later nested object at en.json:1007; passes on the clone.",
+   "reason": "R7: the plugin's assertion (recursively sorted keys) is classified by its logic. ordered_block keys on indentation and on the literal '},' line, so it covers depths 1 and 2 only; an unsorted third level passes (Stage B). Recursive key order needs an order operator: B-adapter, as element-web-02. The three rules stay at level info as an approximation.",
    "fire_verified": "C unit (not required); fired on scratch copies with swapped keys at en.json:3 (top level), en.json:45 (admin), gu.json:42 (admin as last object), en.json:1007 (errors); all 89 files pass on the clone",
    "origin": "A",
    "changes": [
@@ -116,6 +121,13 @@
      "fields": {
       "needs": "order"
      }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ],
    "needs": "order"
@@ -128,6 +140,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 as kept by R7: whitespace and layout formatting is a formatter's job; only the key-order assertion the plugin adds is split out (immich-01).",
    "fire_verified": "n/a",
@@ -142,6 +155,10 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent immich-i18n-json-parses ($['__alint_parse_probe__'] probe; unparseable file = analysis failure) + file_content_forbidden immich-i18n-json-strict (trailing comma / // / /* patterns)",
+   "rules": [
+    "immich-i18n-json-parses",
+    "immich-i18n-json-strict"
+   ],
    "assertion_family": "none",
    "reason": "alint's JSON reader is JSONC-tolerant, so a parse probe alone accepts trailing commas and comments; strictness needs a second regex rule and parse failure surfaces as an analysis failure rather than a rule violation. Expressible but awkward, hence C.",
    "fire_verified": "C unit (not required); json-strict fired on a trailing comma at fr.json:2411; json-parses produced an analysis failure on a truncated it.json; both pass on the clone",
@@ -156,6 +173,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "filename_regex immich-i18n-filename-has-web-loader (pattern '[A-Za-z0-9_]+\\.json', paths i18n/*.json excluding i18n/package.json)",
+   "rules": [
+    "immich-i18n-filename-has-web-loader"
+   ],
    "assertion_family": "none",
    "reason": "A filename-shape assertion a kind expresses directly; confirmed against the clone (R4).",
    "fire_verified": "Fired on scratch copies named i18n/sr-Latn.json and i18n/de.backup.json; passes on the clone (89 catalogs)",
@@ -177,6 +197,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "(key path, value) row adapter for locale entries + ICU placeholder extractor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: the entry adapter is key-only; this asserts over the entry's value (placeholder presence) and needs an ICU placeholder extractor, both missing.",
    "fire_verified": "n/a",
@@ -199,6 +220,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "svelte-check / tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: extracting the keys a program uses is code analysis (type check).",
    "fire_verified": "n/a",
@@ -213,6 +235,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "generate_keys.dart + dart analyze",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: used-key existence needs source extraction / type checking of generated code; it runs the project's code generator.",
    "fire_verified": "n/a",
@@ -234,14 +257,25 @@
    "summary": "Mobile code must not call the untyped tr()/plural() helpers (use the generated keys)",
    "evidence": "mobile/analysis_options.yaml DCM banned-usage entries; static_analysis.yml dcm analyze",
    "mechanism": "tool-config",
-   "family": "locale",
+   "family": "other",
    "bucket": "D",
    "alint": "dcm analyze",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a source linter rule over Dart call sites.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "locale",
+      "none"
+     ],
+     "why": "It checks translatable strings in source or layout files, not locale files. Section 2.3's locale family covers locale files; zulip's equivalent source checks (zulip-06, zulip-cc-59, -61, -67 to -69) are `other`."
+    }
+   ]
   },
   {
    "id": "immich-09",
@@ -251,6 +285,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "GitHub PR/review state",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Depends on external PR author and review state, not repository files.",
    "fire_verified": "n/a",
@@ -265,6 +300,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file equals immich-rust-toolchain-pins-coherent (source toml $.toolchain.channel; targets toml $.tools.rust.version in native/mise.toml and mobile/mise.toml)",
+   "rules": [
+    "immich-rust-toolchain-pins-coherent"
+   ],
    "assertion_family": "none",
    "reason": "Load-bearing keep-in-sync comments at all three sites plus AGENTS.md, held at the pin (R5 satisfied); cross_file equals expresses it and passes on the clone.",
    "fire_verified": "Fired on scratch with mobile/mise.toml rust=1.98.0, with native/mise.toml rust=1.100.0, and with the source channel 1.99.2 (both targets flagged); passes on the clone",
@@ -279,6 +317,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "semver-range satisfaction operator",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Checking a version against a range needs a semver-range operator alint does not have. Whether pnpm 12 hard-fails on a mismatch was not verified (web/.npmrc engine-strict is probably ignored under pnpm 12).",
    "fire_verified": "n/a",
@@ -301,6 +340,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm install --frozen-lockfile",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: lockfile freshness is package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -315,6 +355,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "uv sync --locked",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -329,6 +370,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "cargo --locked",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -343,6 +385,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "flutter pub get --enforce-lockfile",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -357,6 +400,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm allowBuilds",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Applies to the resolved dependency graph at install time (package-manager semantics). Whether pnpm 12 fails the install or only skips the script was not verified.",
    "fire_verified": "n/a",
@@ -368,14 +412,25 @@
    "summary": "Newly published dependency versions are not installed before a minimum release age, except listed packages",
    "evidence": "pnpm-workspace.yaml minimumReleaseAge settings and minimumReleaseAgeExclude",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "other",
    "bucket": "D",
    "alint": "pnpm minimumReleaseAge",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Depends on registry publish timestamps (external state). Its effect under a frozen-lockfile install was not verified.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
   },
   {
    "id": "immich-20",
@@ -385,6 +440,9 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "partial: cross_file registered immich-migrations-registered-in-order (source.files migrations/*.ts, register_as {stem}, target ORDER lines) covers files->ORDER only",
+   "rules": [
+    "immich-migrations-registered-in-order"
+   ],
    "assertion_family": "set",
    "reason": "Two-way set equality between a directory listing and a manifest's lines. Today's registered relation checks only files->ORDER; a ghost ORDER line does not fire (confirmed on scratch). The full check needs set equality.",
    "fire_verified": "n/a (B-config); the partial rule fired on scratch for a new 1799999999999-NewThing.ts missing from ORDER and stayed silent for a ghost ORDER line",
@@ -399,6 +457,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "base-revision file diff adapter (compare a file to its content at a git base ref)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the file's content at another revision. A depth-1 clone cannot show it, and no kind compares against a base ref's content.",
    "fire_verified": "n/a",
@@ -419,13 +478,25 @@
    "evidence": ".github/workflows/migration-order.yml release-vs-main step",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-adapter",
    "alint": "sql-tools verify-order against another branch",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "External state: another branch's tree.",
+   "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": ".github/workflows/migration-order.yml runs the same verify-order --append-only-from as immich-21, against another branch's tree."
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "immich-23",
@@ -435,6 +506,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "rename/delete-aware diff adapter",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the set of pages removed or renamed in a change; git kinds see only changed paths, not renames or deletions mapped to old URLs.",
    "fire_verified": "n/a",
@@ -457,6 +529,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals immich-ml-ocr-preload-resolution-matches-server (regex extracts)",
+   "rules": [
+    "immich-ml-ocr-preload-resolution-matches-server"
+   ],
    "assertion_family": "none",
    "reason": "A load-bearing 'must match' comment held at the pin (R5); a regex-extract equality expresses it and passes on the clone.",
    "fire_verified": "n/a",
@@ -471,6 +546,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals immich-mobile-playback-style-enum-in-sync (regex extract, normalize trim)",
+   "rules": [
+    "immich-mobile-playback-style-enum-in-sync"
+   ],
    "assertion_family": "none",
    "reason": "A keep-in-sync comment held at the pin; equality over the extracted enum members passes on the clone.",
    "fire_verified": "n/a",
@@ -485,6 +563,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals immich-native-ffigen-asset-id-matches-hook",
+   "rules": [
+    "immich-native-ffigen-asset-id-matches-hook"
+   ],
    "assertion_family": "none",
    "reason": "A must-match pairing that would break FFI loading at runtime, held at the pin; regex-extract equality passes on the clone.",
    "fire_verified": "n/a",
@@ -499,6 +580,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve immich-mobile-bg-worker-library-exists (base mobile/lib) + cross_file subset immich-mobile-bg-worker-entrypoint-android and immich-mobile-bg-worker-entrypoint-ios",
+   "rules": [
+    "immich-mobile-bg-worker-library-exists",
+    "immich-mobile-bg-worker-entrypoint-android",
+    "immich-mobile-bg-worker-entrypoint-ios"
+   ],
    "assertion_family": "none",
    "reason": "Keep-in-sync comments in three languages, held at the pin; the three rules express the library path and entry-point name and pass on the clone.",
    "fire_verified": "n/a",
@@ -513,6 +599,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "toml_path_matches immich-native-release-profile-unwinds ($.profile.release.panic ^unwind$, if_present)",
+   "rules": [
+    "immich-native-release-profile-unwinds"
+   ],
    "assertion_family": "none",
    "reason": "A documented rule held at the pin; toml_path_matches expresses it and passes on the clone.",
    "fire_verified": "n/a",
@@ -527,6 +616,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_absent immich-mobile-no-new-legacy-files (level off; needs baseline grandfathering)",
+   "rules": [
+    "immich-mobile-no-new-legacy-files"
+   ],
    "assertion_family": "none",
    "reason": "Expressible only with baseline grandfathering of the existing legacy files. The shipped rule is level off so the replay stays clean, and R4 cannot confirm it without a baseline. Hence C.",
    "fire_verified": "n/a",
@@ -541,6 +633,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent immich-gha-checkout-persist-credentials",
+   "rules": [
+    "immich-gha-checkout-persist-credentials"
+   ],
    "assertion_family": "none",
    "reason": "R7: a zizmor audit over files alint reads. The audit is evidenced by every checkout complying (draft-release/prepare-release set it to true deliberately). The rule passes on the clone.",
    "fire_verified": "n/a",
@@ -555,6 +650,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "pinned_references immich-gha-actions-pinned (excluding the two org-* workflow files)",
+   "rules": [
+    "immich-gha-actions-pinned"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but the org's own reusable workflows at @main are exempted by zizmor config that lives outside the repo, so the rule needs a hand-written exclusion. Hence C.",
    "fire_verified": "n/a",
@@ -569,6 +667,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_match immich-gha-dangerous-triggers-justified",
+   "rules": [
+    "immich-gha-dangerous-triggers-justified"
+   ],
    "assertion_family": "none",
    "reason": "Expressible only as a text pairing of the trigger with an ignore comment. No YAML-plus-comment-aware relation exists, so it is C.",
    "fire_verified": "n/a",
@@ -583,6 +684,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "zizmor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: data-flow analysis of workflow expressions, with external configuration. Whether the SARIF upload actually gates merges is uncertain.",
    "fire_verified": "n/a",
@@ -607,6 +709,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "cargo metadata / cargo-about",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs Cargo dependency-graph resolution filtered by target and dependency kind.",
    "fire_verified": "n/a",
@@ -621,6 +724,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "openapi-generator / oazapfts + git diff",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: runs the project's generators.",
    "fire_verified": "n/a",
@@ -635,6 +739,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oasdiff + dart script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the base revision's spec and runs project code.",
    "fire_verified": "n/a",
@@ -649,6 +754,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "server migrations generate / sql snapshot tasks",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: runs the project against a database.",
    "fire_verified": "n/a",
@@ -657,17 +763,26 @@
   },
   {
    "id": "immich-38",
-   "summary": "Prettier, ESLint (no relative imports, Route.continue, etc.), tsc and svelte-check --fail-on-warnings across server, web, cli, e2e, docs, scripts and .github",
+   "summary": "Prettier, ESLint (no relative imports, Route.continue, etc.), tsc and svelte-check --fail-on-warnings across server, web, cli, e2e, docs, scripts and .github (the CLI's file-name case is immich-a01)",
    "evidence": ".github/workflows/test.yml ci-unit jobs; per-package eslint configs; docs-build.yml",
    "mechanism": "ci",
    "family": "other",
    "bucket": "D",
    "alint": "prettier / eslint / tsc / svelte-check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: formatters, linters and type checkers over source.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "immich-a01 was split out of it."
+    }
+   ]
   },
   {
    "id": "immich-39",
@@ -677,6 +792,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest / playwright",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: test execution.",
    "fire_verified": "n/a",
@@ -691,6 +807,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "ruff / mypy / pytest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2. Note: the :format task runs 'ruff format', which rewrites rather than checks.",
    "fire_verified": "n/a",
@@ -705,6 +822,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "cargo fmt / clippy / test",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2.",
    "fire_verified": "n/a",
@@ -719,6 +837,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "flutter / dart / dcm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2.",
    "fire_verified": "n/a",
@@ -727,17 +846,26 @@
   },
   {
    "id": "immich-43",
-   "summary": "Docs site builds with onBrokenLinks: throw",
+   "summary": "Docs site builds (the broken-link check is immich-a02)",
    "evidence": "docs/docusaurus.config.js (onBrokenLinks 'throw'); .github/workflows/docs-build.yml",
    "mechanism": "ci",
    "family": "other",
    "bucket": "D",
    "alint": "docusaurus build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a build, with route resolution done by Docusaurus.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "immich-a02 was split out of it."
+    }
+   ]
   },
   {
    "id": "immich-44",
@@ -747,6 +875,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "shellcheck",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2.",
    "fire_verified": "n/a",
@@ -761,6 +890,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "codeql / docker / flutter build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: code analysis and builds.",
    "fire_verified": "n/a",
@@ -775,6 +905,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "org reusable workflow over PR title",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Checks the PR title (external PR state), not a commit message that a git kind could read.",
    "fire_verified": "n/a",
@@ -789,6 +920,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "GitHub labels",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External PR state.",
    "fire_verified": "n/a",
@@ -803,6 +935,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "GitHub PR body / labels",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External PR state and maintainer judgment.",
    "fire_verified": "n/a",
@@ -817,6 +950,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "for_each_match immich-i18n-en-keys-dart-identifiers: paths [i18n/en.json], select '^\\s*\"(?:[^\"\\\\]|\\\\.)*\"\\s*:', require.matches ['^\\s*\"[A-Za-z0-9_]+\"\\s*:']",
+   "rules": [
+    "immich-i18n-en-keys-dart-identifiers"
+   ],
    "assertion_family": "none",
    "reason": "R7: a check over a file alint reads (en.json), classified by its logic: a key charset. Stage A folded it into immich-07 (D), but the used-key half of 07 is code extraction and this half is not. No kind asserts JSON key names structurally, so the rule depends on prettier's one-key-per-line layout. Batch 1 rated 'a key charset that holds for one layout only' as C, so this is C too.",
    "fire_verified": "C unit (not required). On a scratch copy, renaming en.json's admin_user to admin-user fired at en.json:45, and so did admin.user. Passes on the clone.",
@@ -831,6 +967,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent immich-gha-job-permissions-explicit: paths [.github/workflows/*.{yml,yaml}], path \"$.jobs[?(!@.permissions && !$.permissions) || @.permissions == 'write-all' || $.permissions == 'write-all']\"",
+   "rules": [
+    "immich-gha-job-permissions-explicit"
+   ],
    "assertion_family": "none",
    "reason": "R7: a zizmor audit over workflow YAML, which alint reads, and it is structural, not data-flow. Stage A lumped it into immich-33 as D. alint's JSONPath supports absolute $ inside filters, so one rule expresses it (the bundled gha-workflow-contents-read rule uses the same feature). This is A on the same gate assumption as immich-30: whether zizmor's SARIF upload blocks merges is unverified.",
    "fire_verified": "n/a (family other). Fire-tested anyway: it fired after removing a job-level permissions block from docs-deploy.yml (no top-level block) and after setting native-tests to `permissions: write-all`. Jobs that rely on a top-level `permissions: {}`, such as ml-unit-tests, stay clean. Passes on the clone.",
@@ -845,6 +984,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a key-order operator over nested JSON objects (the same gap as immich-01; ordered_block's indentation trick cannot segment objects inside arrays)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: the plugin's sort assertion is classified by its logic, as Stage A did for immich-01. This is a separate CI job with a separate config and file set, so it can fail on its own. The integrator may fold it into immich-01 under R1. package.json files use prettier's json-stringify parser and are not sorted.",
    "fire_verified": "n/a",
@@ -867,6 +1007,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "semver/version-range satisfaction operator (pinned version vs a declared SDK constraint)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The same shape batch 1 rated B-adapter (element-web-13, trpc-03): an exact pin that must satisfy a declared constraint. My recollection is that pub ignores upper bounds on the Flutter SDK constraint, so the effective check is >=, not equality. That was not verified from pub's source. Equality holds at the pin, so a cross_file equals rule would be stricter than the gate, which makes it value-add rather than an expression of the gate.",
    "fire_verified": "n/a",
@@ -889,6 +1030,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "version-range satisfaction operator (.python-version vs requires-python)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A pin checked against a declared range by the tool, so it needs a range operator alint lacks (batch-1 ruling). Stage A recorded the .python-version 3.13 vs mise 3.12 drift as 'unusual' but did not record the relation uv enforces. As I recall, uv gives .python-version precedence over mise's python 3.12 on PATH; not verified from uv's source.",
    "fire_verified": "n/a",
@@ -911,6 +1053,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "server medium test (vitest + Zod)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The schema exists only as project code: Zod, plus enums from server/src/enum.ts, plus JsonSchemaSchema. Asserting it requires running the project's code or hand-copying the schema into a JSON Schema that would drift (R7 D: running the project's code). R1 folds the unique-template-name refinement into this one check.",
    "fire_verified": "n/a",
@@ -925,11 +1068,55 @@
    "family": "other",
    "bucket": "D",
    "alint": "workflow_dispatch input and branch guards",
+   "rules": [],
    "assertion_family": "none",
    "reason": "These validate external state (the dispatch inputs and the current branch), not repository files.",
    "fire_verified": "n/a",
    "origin": "B",
    "changes": []
+  },
+  {
+   "id": "immich-a01",
+   "summary": "packages/cli source file names are kebab-case (unicorn/filename-case from the recommended config)",
+   "evidence": "packages/cli/eslint.config.mjs loads eslintPluginUnicorn.configs.recommended without turning off filename-case; packages/cli/mise.toml ci-unit runs eslint with --max-warnings 0",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "filename_regex: immich-cli-filename-kebab-case",
+   "rules": [
+    "immich-cli-filename-kebab-case"
+   ],
+   "assertion_family": "none",
+   "reason": "R7 and the batch 2 ruling: a file-name rule run by a linter is classified by its logic. filename_regex expresses kebab-case before the first dot.",
+   "fire_verified": "Audit: passes on the clone; a new assetUtils.ts fired; a new server-info.spec.ts passed.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit. trpc-30 split file-name case out of a lint run the same way."
+    }
+   ]
+  },
+  {
+   "id": "immich-a02",
+   "summary": "Links in the docs resolve to a site route (Docusaurus onBrokenLinks: 'throw')",
+   "evidence": "docs/docusaurus.config.js:12 (onBrokenLinks: 'throw'); .github/workflows/docs-build.yml",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "B-adapter",
+   "alint": "missing: the Docusaurus route model (number prefixes, index pages, slug and id) to resolve a link to a route",
+   "rules": [],
+   "assertion_family": "none",
+   "needs": "route-model",
+   "reason": "Resolving a docs link to a Docusaurus route needs the site's route model, as for strapi-55.",
+   "fire_verified": "n/a",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of immich-43 (audit): the build's broken-link check is the route-model check that strapi-55 counts as its own B-adapter unit; jest-18 and backstage-b05 split such checks out too."
+    }
+   ]
   }
  ],
  "removed": [],
@@ -942,6 +1129,15 @@
   "immich-internal-deps-workspace-protocol (info): @immich/* internal dependencies use workspace:; passes",
   "immich-release-versions-lockstep (info): root, web, cli, sdk, e2e and server package.json versions equal 3.4.0-rc.0; passes. Release automation keeps them in step, but no check does.",
   "immich-mobile-ui-component-has-preview (pair, info, top level only): convention violated in settings/ subcomponents, so it is scoped to top-level components and kept out of the ratio (R5)"
+ ],
+ "value_add_rules": [
+  "immich-i18n-no-stale-keys",
+  "immich-node-pin-mise-matches-nvmrc",
+  "immich-pnpm-pin-coherent",
+  "immich-cli-docker-node-major",
+  "immich-internal-deps-workspace-protocol",
+  "immich-release-versions-lockstep",
+  "immich-mobile-ui-component-has-preview"
  ],
  "absent_categories": [
   "JS dependency-consistency tools: syncpack, sherif, manypkg, yarn constraints, knip",

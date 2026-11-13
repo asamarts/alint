@@ -7,16 +7,16 @@
    "B-config": 0,
    "B-adapter": 4,
    "B-kernel": 0,
-   "B-delegate": 1,
-   "C": 4,
+   "B-delegate": 0,
+   "C": 6,
    "D": 34
   },
-  "addressable": 14,
-  "coverage_today": 36,
-  "coverage_with_tuning": 64,
-  "gap": 36,
-  "coverage_after_slice": 36,
-  "coverage_after_slice_with_entry_values": 36
+  "addressable": 15,
+  "coverage_today": 33,
+  "coverage_with_tuning": 73,
+  "gap": 27,
+  "coverage_after_slice": 33,
+  "coverage_after_slice_with_entry_values": 40
  },
  "by_family": {
   "locale": {
@@ -34,7 +34,7 @@
    "coverage_with_tuning": 40,
    "gap": 60,
    "coverage_after_slice": 0,
-   "coverage_after_slice_with_entry_values": 0
+   "coverage_after_slice_with_entry_values": 20
   },
   "dep-version": {
    "counts": {
@@ -44,7 +44,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 0,
-    "D": 3
+    "D": 2
    },
    "addressable": 0,
    "coverage_today": null,
@@ -76,16 +76,16 @@
     "B-config": 0,
     "B-adapter": 0,
     "B-kernel": 0,
-    "B-delegate": 1,
-    "C": 2,
-    "D": 27
+    "B-delegate": 0,
+    "C": 4,
+    "D": 28
    },
-   "addressable": 8,
-   "coverage_today": 62,
-   "coverage_with_tuning": 88,
-   "gap": 12,
-   "coverage_after_slice": 62,
-   "coverage_after_slice_with_entry_values": 62
+   "addressable": 9,
+   "coverage_today": 56,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 56,
+   "coverage_after_slice_with_entry_values": 56
   }
  },
  "units": [
@@ -97,6 +97,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "matrix-gen-i18n (source string extraction) + tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs extracting the strings a program uses (code analysis), so D",
    "fire_verified": "n/a",
@@ -111,6 +112,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "missing: a key-order operator over nested JSON objects (ordered_block is line-based and cannot sort nested object keys level by level)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 example: normalized key order is B-adapter (no order operator)",
    "fire_verified": "n/a",
@@ -133,6 +135,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "oxfmt",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2/R7: formatter equivalence is a formatting check, D",
    "fire_verified": "n/a",
@@ -147,6 +150,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "file_content_forbidden: element-web-i18n-en-key-charset",
+   "rules": [
+    "element-web-i18n-en-key-charset"
+   ],
    "assertion_family": "none",
    "reason": "Expressible today only as a line regex over the oxfmt-normalized one-key-per-line layout; alint has no JSON key-name predicate, so it is awkward (C)",
    "fire_verified": "Scratch copies of both en_EN.json files: renaming a key to 'jump first_invite' (space), 'message|composer' (pipe) and adding 'bad-key' in shared-components each fired one error; a control value containing '\": ' text did not fire; the rule passes on the clone",
@@ -161,8 +167,9 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "constraint over entry-json rows (key path, value) asserting value != key path",
-   "assertion_family": "none",
-   "reason": "Needs per-row comparison of key path and value; for_each_match only asserts capture equality, and the RE2 regex has no backreferences. The entry-json row adapter exists (key_parity), so B-config, not B-adapter",
+   "rules": [],
+   "assertion_family": "equality",
+   "reason": "Needs (key path, value) rows, which no adapter emits (the entry adapter is key-only). Once they exist, the assertion is a scalar comparison of the two fields of one row (equality, negated).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -180,20 +187,30 @@
      "fields": {
       "needs": "entry-values"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
+     ],
+     "why": "The batch 2 ruling keeps the family an entry-values unit will need. value != key path is a negated scalar equality on one row, as mattermost-32 (value equals its key) is `equality`."
     }
    ],
    "needs": "entry-values"
   },
   {
    "id": "element-web-06",
-   "summary": "en_EN.json values must not contain the brand word 'Element' (case-insensitive whole word) except under each package's allowed-hardcoded-keys (14 key paths for apps/web, none for apps/desktop, 1 for shared-components)",
+   "summary": "en_EN.json values must not contain the brand word 'Element' (case-insensitive whole word) except under each package's allowed-hardcoded-keys (14 key paths for apps/web, 1 for shared-components; apps/desktop's lint does not run this check)",
    "evidence": ".github/workflows/static_analysis.yaml:111-148 (hardcoded-words: \"Element\", per-matrix allowed-hardcoded-keys). Clone data matches exactly: the 13 'Element'-bearing apps/web values plus 'welcome|title_element' ('Be in your element') are the allowlist; 'initializeElementCall' in shared-components is not a whole word",
    "mechanism": "ci",
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "constraint over entry-json rows: {key path : value matches (?i)\\belement\\b} subset of the allowlist (value-add rules give an exact desktop instance and a leaf-key approximation for apps/web)",
+   "rules": [],
    "assertion_family": "set",
-   "reason": "The allowlist is keyed by full key path; a line regex sees only leaf keys ('invalid_json' occurs twice in apps/web, 'title' 7 times in shared-components), so no current kind expresses it exactly; entry-json rows exist",
+   "reason": "Selecting rows by value (matches (?i)\\belement\\b) and asserting that their key paths are a subset of the allowlist needs (key path, value) rows, which no adapter emits (batch 2 ruling). A line regex sees only leaf keys ('invalid_json' occurs twice in apps/web, 'title' 7 times in shared-components). Once the adapter exists, the assertion is set.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -212,6 +229,14 @@
       "needs": "entry-values",
       "assertion_family": "set"
      }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason",
+      "summary"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ],
    "needs": "entry-values"
@@ -224,6 +249,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "PR diff + actor identity (reusable workflow, contents not in clone)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs change provenance (PR author/bot identity, base diff): external state",
    "fire_verified": "n/a",
@@ -238,6 +264,10 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent (parse probe): element-web-i18n-locale-json-parses",
+   "rules": [
+    "element-web-i18n-locale-json-parses",
+    "element-web-i18n-locale-json-no-bom"
+   ],
    "assertion_family": "none",
    "reason": "No bare 'parses' kind; a never-matching query turns a malformed file into a resource_parse analysis failure. alint's JSON reader is JSONC-tolerant, so trailing commas and // comments that JSON.parse rejects pass: needs a strict-JSON tuning, hence C",
    "fire_verified": "Scratch copy of apps/desktop/.../fr.json truncated to 200 bytes: analysis failure (resource_parse), exit 1. A trailing comma and a // comment both passed (JSONC tolerance, recorded as the C gap). Passes on the clone (123 files)",
@@ -252,6 +282,7 @@
    "family": "locale",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Human semantic judgement (is a string 'common', does a name match its meaning)",
    "fire_verified": "n/a",
@@ -266,6 +297,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution semantics (lockfile freshness)",
    "fire_verified": "n/a",
@@ -277,14 +309,25 @@
    "summary": "No dependency version younger than pnpm's minimum release age may be resolved (minimumReleaseAgeStrict, with matrix-js-sdk and @matrix-org/@vector-im/@element-hq scopes excluded)",
    "evidence": "pnpm-workspace.yaml:4 (minimumReleaseAgeStrict: true), :215 (minimumReleaseAgeExclude)",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "other",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs registry publish times at resolution: network/external state",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
   },
   {
    "id": "element-web-12",
@@ -294,6 +337,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "knip",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs import extraction from source (code analysis)",
    "fire_verified": "n/a",
@@ -308,6 +352,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "missing: semver-range satisfaction operator (exact pin vs range)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "cross_file compares values (equals/subset) and normalize offers semver-major/minor bands, not range satisfaction; stratum doc lists a semver-range operator as B-adapter",
    "fire_verified": "n/a",
@@ -330,6 +375,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 type checker",
    "fire_verified": "n/a",
@@ -344,6 +390,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxfmt",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 formatter",
    "fire_verified": "n/a",
@@ -358,6 +405,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 linter over source (code analysis)",
    "fire_verified": "n/a",
@@ -372,6 +420,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_header: element-web-js-copyright-header",
+   "rules": [
+    "element-web-js-copyright-header"
+   ],
    "assertion_family": "none",
    "reason": "The rule is a pure header-text assertion (precedent: docusaurus eslint-plugin-header -> file_header A); passes on 3,289 files once the oxlint ignores, minified vendored JS and one eslint-disabled generated file are excluded",
    "fire_verified": "n/a (other family); also fired on a scratch NoHeader.ts while a headered control passed",
@@ -386,6 +437,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "stylelint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 linter",
    "fire_verified": "n/a",
@@ -398,13 +450,24 @@
    "evidence": "package.json scripts.lint:workflows (find .github/workflows ... -exec action-validator); static_analysis.yaml:40",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-delegate",
+   "bucket": "C",
    "alint": "json_schema_passes would need the SchemaStore workflow schema committed; alint bundles none",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Validating a third-party format's own schema belongs to a delegated tool/plugin (the schema lives outside the repo); corpus configs reference only in-repo schemas",
+   "reason": "json_schema_passes against a copy of the SchemaStore workflow schema outside the repository (allow_out_of_root). A corpus config cannot ship it, so C with no rule; action-validator's glob checks are not covered.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "B-delegate",
+      "other",
+      "none"
+     ],
+     "why": "Validation against the SchemaStore workflow schema is json_schema_passes with a schema outside the repository, the C route of yarnpkg-berry-23. action-validator's glob checks are a small extra."
+    }
+   ]
   },
   {
    "id": "element-web-21",
@@ -414,6 +477,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve (entries_are_globs, base lint_root): element-web-gha-path-filters-match",
+   "rules": [
+    "element-web-gha-path-filters-match"
+   ],
    "assertion_family": "none",
    "reason": "R7: a check over files alint reads, natively expressed and passing on the clone",
    "fire_verified": "n/a (other family); a scratch tree missing apps/web/docker and docker-bake.hcl fired 2 errors on cd.yaml's '**/docker' and '**/docker-*'",
@@ -428,6 +494,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "knip",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: import/usage extraction from source",
    "fire_verified": "n/a",
@@ -442,6 +509,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "bespoke node script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis (TS AST parse and usage search)",
    "fire_verified": "n/a",
@@ -456,6 +524,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "registry_paths_resolve with orphans + ordered_block: element-web-rethemendex-index-complete, element-web-rethemendex-index-sorted",
+   "rules": [
+    "element-web-rethemendex-index-complete",
+    "element-web-rethemendex-index-sorted"
+   ],
    "assertion_family": "none",
    "reason": "Set equality and order are native, but orphans.space is a single glob with no exclude, so the index files are kept out by a hand-built brace/class glob that would miss a future top-level _c*/_i* partial: awkward, C",
    "fire_verified": "n/a (other family); scratch: removing an import, adding a bogus import, adding an unimported partial, and swapping two lines each fired; the clone passes",
@@ -470,6 +542,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "api-extractor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs running the build and type analysis of the public API",
    "fire_verified": "n/a",
@@ -484,6 +557,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitepress",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution; link semantics depend on project code (customPathResolver)",
    "fire_verified": "n/a",
@@ -498,6 +572,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent: element-web-gha-checkout-persist-credentials",
+   "rules": [
+    "element-web-gha-checkout-persist-credentials"
+   ],
    "assertion_family": "none",
    "reason": "zizmor artipacked is a structural YAML check (R7), expressed natively; zizmor results go to code scanning, see notes",
    "fire_verified": "n/a (other family); removing persist-credentials from a scratch static_analysis.yaml checkout fired 1 error",
@@ -512,6 +589,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "pinned_references: element-web-gha-actions-pinned",
+   "rules": [
+    "element-web-gha-actions-pinned"
+   ],
    "assertion_family": "none",
    "reason": "pinned_references fires on exactly the 9 exempted refs; alint has no inline or per-ref exemption, so the 8 files carrying one are excluded wholesale: awkward, C",
    "fire_verified": "n/a (other family); tag-pinning zizmor-action in a scratch static_analysis.yaml and actions/cache in setup-playwright/action.yml each fired",
@@ -526,6 +606,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "zizmor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 security linter: expression/dataflow analysis of workflows (dangerous-triggers and secrets-inherit are structural and could be split out, see notes)",
    "fire_verified": "n/a",
@@ -540,6 +621,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Test execution",
    "fire_verified": "n/a",
@@ -554,6 +636,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "diff-cover",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs test execution and coverage data",
    "fire_verified": "n/a",
@@ -568,6 +651,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "diff of test-run results",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the test run's result set",
    "fire_verified": "n/a",
@@ -582,6 +666,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "playwright",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Test execution",
    "fire_verified": "n/a",
@@ -596,6 +681,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "webpack",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution",
    "fire_verified": "n/a",
@@ -610,6 +696,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "readelf/file on build artifacts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build-artifact inspection",
    "fire_verified": "n/a",
@@ -624,6 +711,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "glibc-check.sh",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build-artifact inspection",
    "fire_verified": "n/a",
@@ -638,6 +726,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "dpkg-deb/tar listing",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build-artifact inspection",
    "fire_verified": "n/a",
@@ -652,6 +741,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "gpg / signtool",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Cryptographic verification of built artifacts",
    "fire_verified": "n/a",
@@ -666,6 +756,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "storybook",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution",
    "fire_verified": "n/a",
@@ -680,6 +771,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "docker",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build and runtime execution",
    "fire_verified": "n/a",
@@ -694,6 +786,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "PR event metadata (external state)",
    "fire_verified": "n/a",
@@ -708,6 +801,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "PR labels and metadata (external state)",
    "fire_verified": "n/a",
@@ -722,6 +816,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service state",
    "fire_verified": "n/a",
@@ -736,6 +831,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External repository/issue state",
    "fire_verified": "n/a",
@@ -750,6 +846,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Review governance (who approves), external state",
    "fire_verified": "n/a",
@@ -758,17 +855,26 @@
   },
   {
    "id": "element-web-46",
-   "summary": "Contribution and code-review conventions: human-written PR title/description with linked issue and before/after screenshots, no force-push, squash merge, tests with every feature/bug fix, TypeScript for new files, avoid default exports, code_style.md, MVVM placement, review screenshot diffs",
+   "summary": "Contribution and code-review conventions: human-written PR title/description with linked issue and before/after screenshots, no force-push, squash merge, tests with every feature/bug fix, avoid default exports, code_style.md, MVVM placement (TypeScript for new files is element-web-a01)",
    "evidence": "CONTRIBUTING.md (How to contribute, Tests, Code style, Merge Strategy); code_style.md; AGENTS.md (MVVM, Reviewing updated screenshots); docs/MVVM.md",
    "mechanism": "convention",
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Process and code-level review judgement (the MVVM file layout is not followed by 46 existing View dirs, so it is not a file-level invariant)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "element-web-a01 was split out of it."
+    }
+   ]
   },
   {
    "id": "element-web-47",
@@ -778,6 +884,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent (include apps/web/playwright/snapshots/**/*.png, apps/desktop/playwright/snapshots/**/*.png, modules/*/e2e/snapshots/**/*.png; exclude **/*-linux.png). Proposed id element-web-playwright-baselines-linux-only; it is not in Stage A's config",
+   "rules": [
+    "element-web-playwright-baselines-linux-only"
+   ],
    "assertion_family": "none",
    "reason": "R7: the reporter runs two independent assertions. Unit 32 covers the stale-file one, which needs test results (D). The platform-name one is a pure file-name invariant over files alint reads, and a native file_absent expresses it",
    "fire_verified": "Other family, so not required. It was still run: validate-config OK and it passes on the clone. On a scratch tree it fired once each on a-darwin.png under apps/web/playwright/snapshots and on c-win32.png under modules/banner/e2e/snapshots, and a -linux.png control passed",
@@ -792,6 +901,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file relation equals: element-web-app-versions-lockstep. It is already in the config, but labelled value-add at level info",
+   "rules": [
+    "element-web-app-versions-lockstep"
+   ],
    "assertion_family": "none",
    "reason": "R5: a documented invariant, stated twice in contributor docs and maintained by the release automation. It is stronger evidence than unit 14 (a Renovate group with no stated invariant), so it belongs in the denominator, not in value-add",
    "fire_verified": "Other family, so not required. It was still run: passes on the clone; setting apps/desktop/package.json to 1.12.33 on a scratch copy fired 1 error",
@@ -806,11 +918,34 @@
    "family": "other",
    "bucket": "D",
    "alint": "SonarCloud (external service)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis and coverage computed by an external service (R2, external state)",
    "fire_verified": "n/a",
    "origin": "B",
    "changes": []
+  },
+  {
+   "id": "element-web-a01",
+   "summary": "New source files under apps/web/src are TypeScript (CONTRIBUTING.md)",
+   "evidence": "CONTRIBUTING.md:165-166 \"All new files should be written in TypeScript\"; two JavaScript files exist at the pin (utils/exportUtils/exportJS.js, vector/modernizr.cjs)",
+   "mechanism": "convention",
+   "family": "other",
+   "bucket": "C",
+   "alint": "file_absent over apps/web/src/**/*.{js,jsx,mjs,cjs} with the two existing files excluded: element-web-new-source-files-typescript",
+   "rules": [
+    "element-web-new-source-files-typescript"
+   ],
+   "assertion_family": "none",
+   "reason": "A documented file-level convention that holds at the pin. The two grandfathered files are a hand-kept list, so C.",
+   "fire_verified": "Audit: passes on the clone; a new apps/web/src/components/views/NewThing.jsx fired.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit."
+    }
+   ]
   }
  ],
  "removed": [
@@ -831,7 +966,17 @@
   "element-web-internal-deps-workspace-protocol (json_path_matches if_present, dep-version): internal packages consumed with workspace:*, passes",
   "element-web-node-major-coherent (cross_file, toolchain-pin): Node major agrees across .node-version, apps/desktop/.node-version and the apps/web builder image, passes",
   "element-web-playwright-image-matches-catalog (cross_file, toolchain-pin): apps/desktop/playwright/Dockerfile image v1.65.0 equals catalog @playwright/test, passes",
-  "element-web-app-versions-lockstep (cross_file): apps/web and apps/desktop versions equal (release.yml version-dirs), passes"
+  "element-web-pnpm-pin-docker-coherent (info): kept as value-add after element-web-14 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "element-web-i18n-no-inverted-plurals",
+  "element-web-i18n-brand-word-desktop",
+  "element-web-i18n-brand-word-web-approx",
+  "element-web-i18n-locale-sets-aligned",
+  "element-web-internal-deps-workspace-protocol",
+  "element-web-pnpm-pin-docker-coherent",
+  "element-web-node-major-coherent",
+  "element-web-playwright-image-matches-catalog"
  ],
  "absent_categories": [
   "No .nvmrc, .tool-versions or Volta: Node is pinned only in .node-version files, so the bundled toolchain-pins@v1 (authority .nvmrc) stays silent",

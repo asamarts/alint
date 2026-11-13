@@ -23,7 +23,11 @@ The study runs under the v0.12 protocol ([`case_study_100_repos.md`](../v0.12/ca
 - **The where-to-look superset** and the open "what is unusual here?" scan.
 - **Stage A:** a deep read that catalogues, classifies and drafts a configuration.
 - **Stage B:** a second agent that adversarially verifies the catalogue's completeness.
+- **Stage C:** a fix-up pass that applies Stage B's verified configuration issues and missed
+  units to the configuration, then re-validates it.
 - **Integration:** `alint validate-config` and `alint check` against the pinned clone.
+- **Audit:** after the four batches, a review of every classification against the rulings below
+  and the clones (log, "Audit").
 
 Calibration rulings R1 to R6 ([`case_study_calibration.md`](../v0.12/case_study_calibration.md))
 apply unchanged, except where R7 below narrows R2. The configurations join the pinned corpus in
@@ -52,10 +56,11 @@ stratum would then show no demand for the flagship policies, by construction. R7
 - **R2 still applies** to code-analysis tools: formatters, linters, type checkers, test runners.
 
 Examples:
-- **i18n-tasks:** missing keys is A (`key_parity`, YAML); unused keys is D (source extraction);
-  normalized key order is B-adapter (no order operator).
+- **i18n-tasks:** missing keys is A when each locale is one file (`key_parity`, YAML). forem
+  merges each locale from many files, so there it is B-config `cardinality` (forem-01). Unused
+  keys is D (source extraction); normalized key order is B-adapter (no order operator).
 - **`syncpack list-mismatches`:** "one version per dependency across every `package.json`" is
-  B-config (unique/key).
+  B-adapter with `needs: entry-values` and family `unique-key` (the batch 2 ruling below).
 - **`yarn constraints`:** each rule in `yarn.config.cjs` is its own unit.
 
 The stratum's coverage figures are therefore not directly comparable to v0.12's 61%. The log
@@ -94,9 +99,11 @@ Rulings from batch 1, applied to every later batch:
 - **A commit-message check that a git kind expresses is C.** The clones are depth 1, so R4 cannot
   confirm it.
 - **Two alint defects to work around, not to count against a unit:**
-  - `key_parity` nested under `for_each_file` stops with an internal error;
+  - `key_parity` nested under `for_each_file` stops with an internal error
+    ([#502](https://github.com/asamarts/alint/issues/502); a templated `reference:` there also
+    fails to load, [#504](https://github.com/asamarts/alint/issues/504));
   - `git_tracked_only: true` on `file_absent` and `dir_absent` does not see a force-added file
-    that `.gitignore` excludes.
+    that `.gitignore` excludes ([#503](https://github.com/asamarts/alint/issues/503)).
 
 Rulings from batch 2, applied by the integrator to every batch:
 - **An assertion that joins a name to its value is B-adapter.**
@@ -120,6 +127,31 @@ Rulings from batch 3:
 - **A documented requirement counts as a convention** even when a fallback hides its failure.
   Rocket.Chat's `docs/npm-publishing.md` states its publishing requirements, so they count; the
   registry check in tq-B05 is stated nowhere in that repository, so it is D.
+
+Rulings from the audit, applied to every batch (the log lists each unit they moved):
+- **The batch 2 regex ruling, made precise.** A regex read of a JSON key is C when it depends on
+  the layout (line breaks, key order, one entry per line) or on a hand-kept list. A regex over
+  JSON's `"key": value` token pair that holds in any layout can be A, when R4 confirms it.
+  Markdown frontmatter and YAML values read by regex are C: a regex reads a value on one line,
+  not a list or a nested block. An inclusion that `cross_file` expresses over values read that
+  way is C too; uniqueness over them, which no kind expresses, is B-config `unique-key`.
+- **Release age is `other` wherever it stands alone**, not only in agreement units.
+- **`locale` covers locale files.** A check over translatable strings in source or layout files
+  is `other`.
+- **`toolchain-pin` is versions agreeing.** A compile under a toolchain version is `other`.
+  Install-time package-manager settings (allowed build scripts, patches, cache integrity) are
+  `dep-version`, as the batches already tagged them.
+- **A schema the repository does not ship** is C: `json_schema_passes` takes a schema file outside
+  the repository. A validator with semantics beyond a schema (OpenAPI, template syntax) is
+  B-delegate.
+- **A comparison with another revision's content** (the merge-base, a tag, another branch) over
+  files alint reads is B-adapter `base-revision`, not D. A rule over which paths a change touches
+  is different: a git kind expresses it, so it is C, as a commit-message check is.
+- **Inline suppressions** that a path exclude approximates make a unit C, as a hand-kept list.
+- **A B or D unit may list a partial rule**, one that checks the half alint can express. A rule
+  demoted from an A or C unit stays in the configuration at level `info`.
+- **A B-adapter unit with `needs: entry-values` names the family it will need.** Other B-adapter
+  units may name one; the figures use only the first.
 
 **Every B-adapter unit records what it needs** (`needs`), so the synthesis can rank capabilities
 as well as assertion families. Each unit gets the one capability it lacks most directly:
@@ -186,15 +218,15 @@ through the GitHub API. Every one:
 - is absent from the 110-repository corpus;
 - has the stratum's policy under a gate found in its CI, scripts or tests.
 
-The table shows 10-character prefixes. The full SHAs go into `pins.tsv` as each configuration
-lands. The "gate found" column is from the selection; each record has the gates its analysts
-confirmed. workers-sdk lists `@manypkg/cli` as a dependency but runs no manypkg check.
+The table shows 10-character prefixes; the full SHAs are in `pins.tsv`. The "gate found"
+column is from the selection; each record has the gates its analysts confirmed. workers-sdk
+lists `@manypkg/cli` as a dependency but runs no manypkg check.
 
 ### 3.1 i18n
 
 | Repository | Pin | Locale format | Gate found |
 |---|---|---|---|
-| element-hq/element-web | `e84183a6b2` | flat JSON | `i18n_check` reusable workflow |
+| element-hq/element-web | `e84183a6b2` | nested JSON | `i18n_check` reusable workflow |
 | signalapp/Signal-Desktop | `848443afc3` | `_locales/*/messages.json`, ICU | `pnpm run lint-intl` |
 | TryGhost/Ghost | `ab272fcb60` | i18next JSON | CI `job_i18n` |
 | mattermost/mattermost | `69102aba22` | react-intl JSON, go-i18n JSON | `i18n-ci-template.yml` |
@@ -220,14 +252,17 @@ confirmed. workers-sdk lists `@manypkg/cli` as a dependency but runs no manypkg 
 | cloudflare/workers-sdk | `3cea40b078` | pnpm, Turborepo | `check:package-deps`, catalogs |
 | backstage/backstage | `bc73976a6d` | Yarn | `verify-local-dependencies.js` |
 
-Four i18n repositories are also workspaces (Ghost, Rocket.Chat, element-web, immich). Their
-`dep-version` and `toolchain-pin` units count like any other.
+Six i18n repositories are also workspaces: Ghost, Rocket.Chat, element-web, immich,
+Signal-Desktop (`packages/*`) and mattermost (`webapp/`). zulip's workspace holds one package.
+Their `dep-version` and `toolchain-pin` units count like any other.
 
 ## 4. Execution
 
 The study runs in four batches of five repositories, each a workflow:
 - Stage A runs once per repository, in parallel.
 - Stage B starts as soon as that repository's Stage A finishes.
+- Stage C follows Stage B: a separate workflow in batch 1, inside the batch workflow from batch 2
+  on.
 - Integration and a commit follow each batch.
 
 The batches mix the two strata, so each one gives an early signal on both:
@@ -238,9 +273,10 @@ The batches mix the two strata, so each one gives an early signal on both:
 
 ## 5. Outputs
 
-- **Per repository:** a record in the log (pin, units with buckets and families, counts,
-  `coverage_today`, `coverage_with_tuning`, `gap`, the B split, notes), and its configuration in
-  the corpus.
+- **Per repository:** a JSON record in [`stratum/`](stratum/) (pin, units with buckets, families
+  and the rules that check them, counts, `coverage_today`, `coverage_with_tuning`, `gap`, the B
+  split, notes), a totals row in the log, and its configuration in the corpus. `cargo test -p
+  xtask` checks every record against its pin and configuration and recomputes its metrics.
 - **Aggregate:** the bucket shares overall and per family and stratum, before and after the slice,
-  recorded in `general-linter.md` section 12. Also the assertion families the B-config units
-  need, ranked, as input to the phase 3 design.
+  recorded in `general-linter.md` section 12.4. Also the assertion families that the B-config
+  units and the entry-values B-adapter units need, ranked, as input to the phase 3 design.

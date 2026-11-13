@@ -249,9 +249,11 @@ rules:
     level: error
     message: "English key has an unbalanced or nested '{' / '}' (ghost/i18n/no-invalid-translations)."
 
-  # ghost-15, A - i18n.lint.js:107-126 asserts the waiver file's shape:
+  # ghost-15, C - i18n.lint.js:107-126 asserts the waiver file's shape:
   #     overrides.<rule> is an array of {file, key, comment} with string fields
-  #     and a non-empty comment.
+  #     and a non-empty comment. C since the audit: an overrides.<rule> that is
+  #     {} or "" passes the two rules, because JSONPath cannot tell an empty
+  #     object from an empty array, while Array.isArray rejects it.
   - id: ghost-i18n-ignores-entry-shape
     kind: json_path_absent
     paths: packages/i18n/test/i18n-ignores.json
@@ -1046,6 +1048,18 @@ rules:
     level: error
     message: "AGENTS.md files must stay within 150 lines."
 
+  # ghost-a03 (C, split out of ghost-77's eslint run by the audit) - packages/i18n/eslint.config.mjs:11-16
+  #     extraBlocks: max-lines error, max 50, skipBlankLines and skipComments, on
+  #     src/index.ts ("Keep the entry point small"). C, not A: file_max_lines counts
+  #     every line, so a file with more than 50 lines that are mostly blank or
+  #     comments fires here but passes ESLint. 25 lines at the pin.
+  - id: ghost-i18n-index-max-lines
+    kind: file_max_lines
+    paths: "packages/i18n/src/index.ts"
+    max_lines: 50
+    level: error
+    message: "packages/i18n/src/index.ts stays within 50 lines (ESLint max-lines; it is public surface)."
+
   # ghost-74, A - tools/scripts/ci/check-agent-skill-links.ts:35-47: every
   #     .agents/skills/<name> holds a SKILL.md file.
   - id: ghost-agent-skills-have-skill-md
@@ -1144,6 +1158,34 @@ rules:
         - ".agents/skills/shade-use-primitives/**"
     level: error
     message: "Markdown link fragment names no heading in its target (lint:doc-links, remark-validate-links)."
+
+  # ghost-a01 (A, split out of ghost-79's markdownlint run by the audit) - lint:markdown (package.json:52,
+  #     ci.yml lint:docs) runs markdownlint-cli2 over `git ls-files '*.md'` minus
+  #     .changeset/**, **/fixture/** and **/fixtures/**, and .markdownlint-cli2.jsonc
+  #     ignores packages/limit-service/**. It enables only MD011, MD018-021,
+  #     MD037-039, MD051, MD052 and MD056. This rule is MD052 (reference links
+  #     use a defined label). MD051 (link fragments) is counted with ghost-80's
+  #     ghost-doc-fragments-resolve, and MD056 (table column count) is ghost-a02.
+  #     .claude/** and the shade-* skill symlinks are excluded as in
+  #     ghost-doc-links-resolve (alint walks tracked directory symlinks).
+  - id: ghost-markdownlint-md052-reference-labels-defined
+    kind: markdown_links_resolve
+    paths:
+      include: ["**/*.md"]
+      exclude:
+        - ".changeset/**"
+        - "**/fixture/**"
+        - "**/fixtures/**"
+        - "packages/limit-service/**"
+        - ".claude/**"
+        - ".agents/skills/shade-imports/**"
+        - ".agents/skills/shade-no-dark-variants/**"
+        - ".agents/skills/shade-page-header/**"
+        - ".agents/skills/shade-page-templates/**"
+        - ".agents/skills/shade-tokens-not-hex/**"
+        - ".agents/skills/shade-use-primitives/**"
+    level: error
+    message: "Markdown reference link uses an undefined label (markdownlint MD052)."
 
   # ghost-b01, A - e2e/tests/stripe-fixtures/drift.test.ts:24-33 (fixtures
   #     project, ci.yml job_stripe_fixtures, needed by job_required_tests): the

@@ -373,6 +373,18 @@ rules:
     level: error
     message: "pull_request_target / workflow_run triggers need an inline `# zizmor: ignore[dangerous-triggers]` justification."
 
+  # immich-a01 (A, split out of immich-38's CLI ESLint run by the audit) - packages/cli/eslint.config.mjs
+  #     loads eslintPluginUnicorn.configs.recommended and does not turn off
+  #     unicorn/filename-case (default: kebabCase); packages/cli/mise.toml:12-14,40-49
+  #     ci-unit runs `eslint "src/**/*.ts" --max-warnings 0`. The part before the
+  #     first dot is kebab-case; later dot segments (.spec, .d) are allowed.
+  - id: immich-cli-filename-kebab-case
+    kind: filename_regex
+    paths: "packages/cli/src/**/*.ts"
+    pattern: '^[a-z0-9]+(?:-[a-z0-9]+)*(?:\.[A-Za-z0-9-]+)*\.ts$'
+    level: error
+    message: "packages/cli source file names are kebab-case (unicorn/filename-case, recommended)."
+
   # ════════════════════════════════════════════════════════════════
   # VALUE-ADD (NOT in the enforced denominator, rulings R3/R5). These assert
   # invariants immich keeps (mostly via automation) but no gate checks.

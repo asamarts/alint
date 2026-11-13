@@ -44,7 +44,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 1,
-    "D": 3
+    "D": 4
    },
    "addressable": 4,
    "coverage_today": 50,
@@ -78,7 +78,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 5,
-    "D": 17
+    "D": 16
    },
    "addressable": 16,
    "coverage_today": 56,
@@ -97,6 +97,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint over a dependency-entries relation (workspace, field, dependency key, range), filtered by workspace path, field and is-workspace; functional_dependency dependency -> range",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
    "fire_verified": "n/a",
@@ -122,6 +123,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_equals (union selector over the dependency fields x 46 hand-listed workspace names, equals 'workspace:^', if_present) - yarnpkg-berry-workspace-deps-use-workspace-protocol",
+   "rules": [
+    "yarnpkg-berry-workspace-deps-use-workspace-protocol"
+   ],
    "assertion_family": "none",
    "reason": "Expressible and confirmed against the clone. The constraint derives the workspace set from the project, but JSONPath cannot read object keys, so the 46 workspace names are listed by hand and the list drifts when a workspace is added. That tuning cost makes it C. A list-free form would be a B-config reference over a key extractor.",
    "fire_verified": "n/a (C). Also fired on a scratch copy: yarnpkg-cli dependency @yarnpkg/core '^4.9.2' gave 1 finding, and plugin-nm peer @yarnpkg/cli '^4.0.0' gave 1. Passes on the clone.",
@@ -136,6 +140,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent - yarnpkg-berry-banned-dependencies",
+   "rules": [
+    "yarnpkg-berry-banned-dependencies"
+   ],
    "assertion_family": "none",
    "reason": "R7: a banned-dependency check over manifests alint reads. One json_path_absent with a union selector expresses it exactly. R1: the two forbidDependency calls are instances of one banned list.",
    "fire_verified": "Scratch tree copied package.json and packages/*/package.json, with relative paths kept. Each mutation gave exactly 1 finding: lodash added to packages/yarnpkg-core dependencies; inquirer added to root devDependencies; inquirer added to plugin-dlx peerDependencies. The clone gives 0 findings.",
@@ -150,6 +157,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent with an RFC 9535 filter that uses absolute queries ($.devDependencies.typescript && !$.dependencies.tslib ...) - yarnpkg-berry-typescript-requires-tslib",
+   "rules": [
+    "yarnpkg-berry-typescript-requires-tslib"
+   ],
    "assertion_family": "none",
    "reason": "This is an implication within one manifest. Absolute queries inside the filter test the whole document, and peer-only typescript is skipped as the constraint does. Confirmed against the clone in both directions.",
    "fire_verified": "On the scratch copy of the manifests: removing tslib from packages/yarnpkg-doctor (which has typescript in dependencies) gave 1 finding. typescript in plugin-git devDependencies without tslib gave 1 finding. Negative controls gave 0: typescript only in peerDependencies, and tslib moved to peerDependencies. The clone gives 0 findings.",
@@ -164,6 +174,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It reads dependency.resolution.peerDependencies, which is the resolved package's metadata. That is package-manager resolution semantics, so it stays D under R7.",
    "fire_verified": "n/a",
@@ -178,6 +189,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn install --immutable",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Lockfile and install-state freshness need resolution. The R7 D list names this case.",
    "fire_verified": "n/a",
@@ -192,6 +204,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn dedupe --check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 names it as D: package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -206,6 +219,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file equals: source is a regex over yarn.config.cjs, targets are {package.json,packages/*/package.json} $.engines.node - yarnpkg-berry-workspace-engines-node",
+   "rules": [
+    "yarnpkg-berry-workspace-engines-node"
+   ],
    "assertion_family": "none",
    "reason": "Engines agreement across all manifests, read from the constraint's own literal. It is a distinct assertion from the license and repository fields set in the same call.",
    "fire_verified": "Scratch copy of yarn.config.cjs and all workspace manifests. Member plugin-nm engines '>=20.0.0' gave 1 finding. Root '>=18.0.0' gave 1. engines removed from plugin-git gave 1 (no value). Bumping only the constraint literal to '>=20.0.0' gave 46 (every workspace). The clone gives 0.",
@@ -220,6 +236,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals (regex extracts the 4-digit ES year from the three files) - yarnpkg-berry-es-target-sites-agree",
+   "rules": [
+    "yarnpkg-berry-es-target-sites-agree"
+   ],
    "assertion_family": "none",
    "reason": "R5 counts a load-bearing review comment. Agreement across the named sites is pure cross-file value equality. The node.green choice of which level is a separate unit (yarnpkg-berry-10).",
    "fire_verified": "Scratch copy of the three files. tsconfig target ES2022 gave 2 findings (both targets). eslint-config globals.es2022 gave 1. Builder scaffold ES2020 gave 1. The clone gives 0.",
@@ -244,6 +263,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It needs an external compatibility table (node.green) and a human judgment: the sites pin ES2021 although Node 18 supports more. That is external state, and the repository holds no machine mapping.",
    "fire_verified": "n/a",
@@ -258,6 +278,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file equals with normalize: semver-major; source is root package.json $.engines.node, targets are regexes over integration-workflow.yml - yarnpkg-berry-ci-min-node-matches-engines",
+   "rules": [
+    "yarnpkg-berry-ci-min-node-matches-engines"
+   ],
    "assertion_family": "none",
    "reason": "Load-bearing workflow comments (R5) tie the CI minimum Node to the supported floor. semver-major reconciles '>=18.12.0' with '18'.",
    "fire_verified": "Scratch copy of package.json and integration-workflow.yml. One matrix row 18->20 gave 1 finding. The LTS filter '>= 20' gave 1. Root engines '>=20.10.0' gave 7 (6 matrix rows and the filter). The clone gives 0.",
@@ -272,6 +295,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file subset: the source unions packages/*/package.json names that lack update-local (JSONPath filter with search()), the target is bundles.standard[*] - yarnpkg-berry-unbundled-plugins-have-update-local",
+   "rules": [
+    "yarnpkg-berry-unbundled-plugins-have-update-local"
+   ],
    "assertion_family": "none",
    "reason": "Expressed exactly as a set relation: plugins lacking the script must be a subset of the bundled list.",
    "fire_verified": "n/a (family other). Fired anyway: removing @yarnpkg/plugin-jsr from bundles.standard gave 1 finding. With update-local added to plugin-jsr it gave 0. The clone gives 0.",
@@ -286,6 +312,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent with a whole-document filter - yarnpkg-berry-prepack-postpack-scripts",
+   "rules": [
+    "yarnpkg-berry-prepack-postpack-scripts"
+   ],
    "assertion_family": "none",
    "reason": "The exemption list is the constraint's own literal, not a derived set. The filter mirrors private, name and exemption logic exactly.",
    "fire_verified": "n/a (family other). Fired anyway: a wrong postpack in plugin-git gave 1 finding, and a missing prepack in yarnpkg-shell gave 1. Exempt @yarnpkg/pnp and private vscode-zipfs gave 0. The clone gives 0.",
@@ -300,6 +329,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals: source regex over yarn.config.cjs, targets $.license of every manifest - yarnpkg-berry-workspace-license",
+   "rules": [
+    "yarnpkg-berry-workspace-license"
+   ],
    "assertion_family": "none",
    "reason": "A plain field equality across manifests.",
    "fire_verified": "n/a (family other). Fired anyway: license MIT on yarnpkg-nm gave 1 finding. The clone gives 0.",
@@ -314,6 +346,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir packages/* (when_iter has_file package.json) with templated json_path_equals ({path}) - yarnpkg-berry-workspace-repository-field; plus json_path_absent filter for the root (directory '.') - yarnpkg-berry-root-repository-field",
+   "rules": [
+    "yarnpkg-berry-workspace-repository-field",
+    "yarnpkg-berry-root-repository-field"
+   ],
    "assertion_family": "none",
    "reason": "Path-derived equality is expressible through for_each_dir templating inside equals.",
    "fire_verified": "n/a (family other). Fired anyway: a wrong directory, a wrong url and type svn each gave 1 finding. The root directory '' and a missing root repository each gave 1. An extra repository key gave 0. The clone gives 0.",
@@ -328,6 +364,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a change relation adapter (merge-base diff -> changed workspace rows, minus ignore globs) joined to version-file decisions",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It needs the PR change set mapped to workspaces. pair_changed_together and changeset_requires_path are path-level and cannot read which workspace the version file names. general-linter.md 5.3 says a first-class change relation is needed. The guard 'at most one version file per branch' is the same step's guard clause and is folded in, as in the tokio ruling.",
    "fire_verified": "n/a",
@@ -350,6 +387,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint joining manifest dependency entries with a version file's releases and declined rows: each (workspace -> bumped workspace) edge must reference a decision row in the same file",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "Evaluated per version file, it is a static join over files alint parses (JSON manifests, YAML version files). Each version file is one PR's decision set, so git is not needed. alint has no join or implication over keys today.",
    "fire_verified": "n/a",
@@ -364,6 +402,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "yaml_path_matches $.releases.* - yarnpkg-berry-version-file-strategies-valid; cross_file superset (versioned workspace names vs a line regex over version-file keys and list items) - yarnpkg-berry-version-file-idents-exist",
+   "rules": [
+    "yarnpkg-berry-version-file-strategies-valid",
+    "yarnpkg-berry-version-file-idents-exist"
+   ],
    "assertion_family": "none",
    "reason": "It is enforced in two places: the PR check for that PR's file, and `version apply --all` over every file at release. Mapping keys are read with a line regex because JSONPath cannot select keys. Yarn always writes this layout (stringifySyml).",
    "fire_verified": "n/a (family other). Fired anyway: strategy 'patchy' gave 1 finding and '4.10.0-rc.1' gave 0. An unknown declined ident gave 1, an unknown release key gave 1, and an unversioned @yarnpkg/docusaurus release gave 1. The clone gives 0.",
@@ -388,6 +430,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "yaml_path_absent with a filter over a hand-listed copy of bundles.standard - yarnpkg-berry-default-plugin-release-bumps-cli",
+   "rules": [
+    "yarnpkg-berry-default-plugin-release-bumps-cli"
+   ],
    "assertion_family": "none",
    "reason": "Expressible and confirmed, but the 25-plugin list is copied by hand from packages/yarnpkg-cli/package.json, because alint has no implication across files. That makes it C.",
    "fire_verified": "n/a (C). Fired anyway: removing cli from b3c4e21f.yml gave 1 finding, and cli set to decline gave 1. A core-only release (5c7a2e91.yml) gave 0. The clone gives 0.",
@@ -402,6 +447,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve (base .github/workflows + orphans space) - yarnpkg-berry-readme-e2e-list-matches-workflows; ordered_block - yarnpkg-berry-readme-e2e-list-sorted; for_each_match (equal captures) - yarnpkg-berry-readme-e2e-list-line-shape",
+   "rules": [
+    "yarnpkg-berry-readme-e2e-list-matches-workflows",
+    "yarnpkg-berry-readme-e2e-list-sorted",
+    "yarnpkg-berry-readme-e2e-list-line-shape"
+   ],
    "assertion_family": "none",
    "reason": "The generator is a directory listing turned into a sorted list. alint expresses its whole output contract natively (set equality, order, line shape) without running it.",
    "fire_verified": "n/a (family other). Fired anyway: dropping a line gave 1 finding (an orphan), adding e2e-bun-workflow.yml gave 1, and deleting a listed workflow gave 1. Swapping two lines gave 1 (unsorted), and a mismatched link target gave 1. The clone gives 0.",
@@ -416,6 +466,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals with a regex extraction of the function body - yarnpkg-berry-sortmap-copy-in-sync",
+   "rules": [
+    "yarnpkg-berry-sortmap-copy-in-sync"
+   ],
    "assertion_family": "none",
    "reason": "A load-bearing comment (R5) asks for textual sync, and the copy is identical today.",
    "fire_verified": "n/a (family other). Fired anyway: an edited body in the pnp copy gave 1 finding. The clone gives 0.",
@@ -430,6 +483,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The original has drifted textually (realRequire, dynamicRequireNode), so the sync the comment asks for is semantic code equivalence, which is code analysis. The two copies are byte-identical, and the config holds them that way as value-add only.",
    "fire_verified": "n/a",
@@ -444,6 +498,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "missing: a meta-schema mode for json_schema_passes that validates a document as a JSON Schema of its declared draft using bundled metaschemas",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: a data-file assertion. json_schema_passes needs the 2019-09 meta-schema and its vocabulary files inside the repository. Probed in scratch: a $ref to the draft URI fails offline with 'Retrieving external resources is not supported', and the repository has no unzipped meta-schema.",
    "fire_verified": "n/a",
@@ -468,6 +523,11 @@
    "family": "other",
    "bucket": "C",
    "alint": "no_trailing_whitespace + final_newline + indent_style (spaces, no width) - yarnpkg-berry-editorconfig-*",
+   "rules": [
+    "yarnpkg-berry-editorconfig-trim-trailing-whitespace",
+    "yarnpkg-berry-editorconfig-final-newline",
+    "yarnpkg-berry-editorconfig-indent-spaces"
+   ],
    "assertion_family": "none",
    "reason": "The natural kind, editorconfig_conforms, reports 94 findings on the clone. 93 are JSDoc ' * ' continuation lines that are not a multiple of indent_size, which no editor or eslint rule rewrites. The other is a significant trailing space inside a test template literal. The tuned three-rule form, plus one excluded file, passes. A block-comment alignment relaxation is the tuning.",
    "fire_verified": "n/a (C). Fired anyway: trailing whitespace in miscUtils.ts gave 1 finding and in README.md gave 0. A missing final newline gave 1, and tab indentation gave 1.",
@@ -482,6 +542,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "line_endings lf - yarnpkg-berry-text-files-lf",
+   "rules": [
+    "yarnpkg-berry-text-files-lf"
+   ],
    "assertion_family": "none",
    "reason": "Git enforces LF on check-in, and alint asserts it directly.",
    "fire_verified": "n/a (family other). Fired anyway: a CRLF tsconfig.json gave 1 finding. The clone gives 0.",
@@ -496,6 +559,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_no_denied_paths with the workspace directories brace-enumerated - yarnpkg-berry-no-committed-build-artifacts",
+   "rules": [
+    "yarnpkg-berry-no-committed-build-artifacts"
+   ],
    "assertion_family": "none",
    "reason": "file_absent and dir_absent walk with .gitignore, so they never see a force-added artifact (probed). git_no_denied_paths globs let '*' cross '/', and packages/*/lib/** gave 14 false positives (docusaurus/src/lib, fixtures, libzip/artifacts/lib). Listing the 47 directories by hand is the tuning.",
    "fire_verified": "n/a (C). Fired anyway: force-added packages/yarnpkg-core/lib/index.js, a libui .d.ts, and package.tgz at root and nested each gave 1 finding. A force-added packages/docusaurus/src/lib file gave 0.",
@@ -507,14 +573,25 @@
    "summary": "Files changed under .yarn/cache match their remote sources (--check-cache).",
    "evidence": "integration-workflow.yml:40-49",
    "mechanism": "ci",
-   "family": "other",
+   "family": "dep-version",
    "bucket": "D",
    "alint": "yarn install --check-cache",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It needs network or external state.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Cache integrity is dep-version in babel-21 and yarnpkg-berry-06."
+    }
+   ]
   },
   {
    "id": "yarnpkg-berry-28",
@@ -524,6 +601,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It runs the project's generators and builds.",
    "fire_verified": "n/a",
@@ -538,6 +616,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It needs a build (emscripten).",
    "fire_verified": "n/a",
@@ -552,6 +631,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It needs a build.",
    "fire_verified": "n/a",
@@ -566,6 +646,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It needs a build.",
    "fire_verified": "n/a",
@@ -580,6 +661,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The generator runs project code to enumerate command paths.",
    "fire_verified": "n/a",
@@ -594,6 +676,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It runs the parser generator.",
    "fire_verified": "n/a",
@@ -608,6 +691,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 still applies to linters (code analysis).",
    "fire_verified": "n/a",
@@ -622,6 +706,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checking is D under R2.",
    "fire_verified": "n/a",
@@ -636,6 +721,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Test execution. R1 collapses the matrix into one unit.",
    "fire_verified": "n/a",
@@ -650,6 +736,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Execution and network. R1 collapses the 25 workflows into one unit.",
    "fire_verified": "n/a",
@@ -664,6 +751,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Test execution with network resolution.",
    "fire_verified": "n/a",
@@ -678,6 +766,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution.",
    "fire_verified": "n/a",
@@ -692,6 +781,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution on an external CI.",
    "fire_verified": "n/a",
@@ -706,6 +796,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It checks git working-tree state at release time, not committed content.",
    "fire_verified": "n/a",
@@ -720,6 +811,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution (prepack).",
    "fire_verified": "n/a",
@@ -734,6 +826,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals x2 with regex extraction: 'const MOUNT_MASK\\s*=\\s*(0x[0-9a-fA-F]+);' vs 'const ZIP_MASK\\s*=\\s*(0x[0-9a-fA-F]+);', and 'magicByte = 0x([0-9a-fA-F]{2}),' vs 'const ZIP_MAGIC\\s*=\\s*0x([0-9a-fA-F]{2})000000;'. Proposed ids yarnpkg-berry-fd-mask-synced and yarnpkg-berry-fd-magic-synced. They are not in Stage A's config; I verified them in scratch.",
+   "rules": [
+    "yarnpkg-berry-fd-mask-synced",
+    "yarnpkg-berry-fd-magic-synced"
+   ],
    "assertion_family": "none",
    "reason": "This is a load-bearing sync comment under R5, the same treatment Stage A gave sortMap (unit 21). Stage A's search missed it. The two constants are one convention under R1. Both ends are literal values that alint extracts with a regex, so it is A.",
    "fire_verified": "n/a (family other). Fired anyway in a scratch git repo holding only the two files at their real paths: ZIP_MASK set to 0x7f000000 gave 1 finding (fd-mask-synced), and magicByte set to 0x2b gave 1 finding (fd-magic-synced). The clone and the unmodified scratch copy give 0. validate-config passes.",
@@ -752,6 +848,9 @@
  "value_add": [
   "yarnpkg-berry-valueadd-dynamic-require-copies-identical (cross_file identical): keeps packages/yarnpkg-pnpify/sources/dynamicRequire.ts and packages/yarnpkg-sdks/sources/dynamicRequire.ts byte-identical. It backs the D sync convention of unit 22; the repo does not gate it. It fires on an edited copy and passes on the clone.",
   "Bundles were probed (oss-baseline, node, monorepo, monorepo/yarn-workspace, hygiene/lockfiles, tooling/editorconfig, toolchain-pins, ci/github-actions) and deliberately not extended, since the repo enforces none of their findings. They reported 56 gha-pin-actions-to-sha, 30 gha-workflow-contents-read, 10 monorepo-packages-have-readme, 9 yarn-workspace-member-has-readme, 2 monorepo-packages-have-package-json (packages/berry-cli, packages/esbuild-plugin-pnp), and 1 each of oss-security-policy-non-empty, oss-no-trailing-whitespace, oss-dependency-update-tool and node-engine-or-nvmrc."
+ ],
+ "value_add_rules": [
+  "yarnpkg-berry-valueadd-dynamic-require-copies-identical"
  ],
  "absent_categories": [
   "locale: no locale or translation files and no i18n tooling (the locale family is empty for this repo)",

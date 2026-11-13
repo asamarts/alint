@@ -171,7 +171,7 @@ rules:
   # element-web-21, A — action-validator (`pnpm lint:workflows`,
   #     static_analysis.yaml "Workflow Lint") checks that every `paths` /
   #     `paths-ignore` glob in a workflow trigger matches at least one file (its
-  #     schema check is the separate B-delegate unit element-web-20).
+  #     schema check is the separate C unit element-web-20).
   - id: element-web-gha-path-filters-match
     kind: registry_paths_resolve
     source: ".github/workflows/*.{yml,yaml}"
@@ -258,6 +258,21 @@ rules:
     relation: equals
     level: error
     message: "apps/web and apps/desktop package versions must match (docs/release.md: Element Web and Element Desktop always have matching version numbers)."
+
+  # element-web-a01 (C, split out of element-web-46 by the audit) -
+  #     CONTRIBUTING.md:165-166 "All new files should be written in TypeScript".
+  #     The two JavaScript files under apps/web/src at the pin,
+  #     utils/exportUtils/exportJS.js and vector/modernizr.cjs, are grandfathered:
+  #     a hand-kept list, so C.
+  - id: element-web-new-source-files-typescript
+    kind: file_absent
+    paths:
+      include: ["apps/web/src/**/*.{js,jsx,mjs,cjs}"]
+      exclude:
+        - "apps/web/src/utils/exportUtils/exportJS.js"
+        - "apps/web/src/vector/modernizr.cjs"
+    level: error
+    message: "New files under apps/web/src are written in TypeScript (CONTRIBUTING.md)."
 
   # ════════════════════════════════════════════════════════════════
   # VALUE-ADD (NOT in the enforced denominator, rulings R3/R5). These assert

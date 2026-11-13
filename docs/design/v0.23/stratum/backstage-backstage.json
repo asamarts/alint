@@ -5,18 +5,18 @@
   "counts": {
    "A": 30,
    "B-config": 3,
-   "B-adapter": 10,
+   "B-adapter": 12,
    "B-kernel": 0,
-   "B-delegate": 0,
+   "B-delegate": 2,
    "C": 29,
-   "D": 28
+   "D": 25
   },
-  "addressable": 72,
-  "coverage_today": 42,
-  "coverage_with_tuning": 82,
-  "gap": 18,
-  "coverage_after_slice": 43,
-  "coverage_after_slice_with_entry_values": 46
+  "addressable": 76,
+  "coverage_today": 39,
+  "coverage_with_tuning": 78,
+  "gap": 22,
+  "coverage_after_slice": 41,
+  "coverage_after_slice_with_entry_values": 43
  },
  "by_family": {
   "locale": {
@@ -40,18 +40,18 @@
    "counts": {
     "A": 9,
     "B-config": 0,
-    "B-adapter": 0,
+    "B-adapter": 1,
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 6,
-    "D": 4
+    "D": 6
    },
-   "addressable": 15,
-   "coverage_today": 60,
-   "coverage_with_tuning": 100,
-   "gap": 0,
-   "coverage_after_slice": 60,
-   "coverage_after_slice_with_entry_values": 60
+   "addressable": 16,
+   "coverage_today": 56,
+   "coverage_with_tuning": 94,
+   "gap": 6,
+   "coverage_after_slice": 56,
+   "coverage_after_slice_with_entry_values": 56
   },
   "toolchain-pin": {
    "counts": {
@@ -74,18 +74,18 @@
    "counts": {
     "A": 20,
     "B-config": 3,
-    "B-adapter": 9,
+    "B-adapter": 10,
     "B-kernel": 0,
-    "B-delegate": 0,
+    "B-delegate": 2,
     "C": 20,
-    "D": 24
+    "D": 19
    },
-   "addressable": 52,
-   "coverage_today": 38,
-   "coverage_with_tuning": 77,
-   "gap": 23,
-   "coverage_after_slice": 40,
-   "coverage_after_slice_with_entry_values": 44
+   "addressable": 55,
+   "coverage_today": 36,
+   "coverage_with_tuning": 73,
+   "gap": 27,
+   "coverage_after_slice": 38,
+   "coverage_after_slice_with_entry_values": 42
   }
  },
  "units": [
@@ -97,6 +97,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent whole-document filter with a union existence test: backstage-react-peer-group-declared",
+   "rules": [
+    "backstage-react-peer-group-declared"
+   ],
    "assertion_family": "none",
    "reason": "R7: a per-manifest assertion over fixed key paths, expressed and confirmed on the clone.",
    "fire_verified": "Scratch copy of the manifests. Removing peerDependencies['react-dom'] from plugins/catalog/package.json gave +1 finding. 0 findings on the clone and on the unmodified scratch base.",
@@ -111,6 +114,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent: backstage-react-peer-optional-marking",
+   "rules": [
+    "backstage-react-peer-optional-marking"
+   ],
    "assertion_family": "none",
    "reason": "Fixed-path value tests in one manifest.",
    "fire_verified": "Two cases on plugins/catalog/package.json each gave +1: dropping the @types/react optional flag, and marking react optional. The clone passes.",
@@ -125,6 +131,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent: backstage-react-peer-also-dev",
+   "rules": [
+    "backstage-react-peer-also-dev"
+   ],
    "assertion_family": "none",
    "reason": "Key-presence implication within one manifest.",
    "fire_verified": "Removing devDependencies.react from plugins/catalog gave +1 (backstage-react-dev-ranges also fired, as expected). The clone passes.",
@@ -139,6 +148,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent: backstage-react-peer-not-runtime",
+   "rules": [
+    "backstage-react-peer-not-runtime"
+   ],
    "assertion_family": "none",
    "reason": "Disjoint dependency fields for three fixed names, so it is expressible per manifest with no key extraction.",
    "fire_verified": "Adding dependencies.react to plugins/catalog gave +1. The clone passes.",
@@ -153,6 +165,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent: backstage-react-dev-ranges",
+   "rules": [
+    "backstage-react-dev-ranges"
+   ],
    "assertion_family": "none",
    "reason": "Value at a fixed key path, so no name-to-value join is needed.",
    "fire_verified": "Setting devDependencies.react to ^18.2.0 in plugins/catalog gave +1. The clone passes.",
@@ -167,6 +182,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent: backstage-react-peer-ranges",
+   "rules": [
+    "backstage-react-peer-ranges"
+   ],
    "assertion_family": "none",
    "reason": "Fixed-path value tests, with the script's own three-package list as a parameter.",
    "fire_verified": "Two cases each gave +1: peer react ^18.0.0 on plugins/catalog, and '^17.0.0 || ^18.0.0' on packages/ui. The clone passes.",
@@ -181,6 +199,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "file_content_forbidden regex over the raw JSON with the workspace names as an alternation: backstage-local-deps-workspace-caret",
+   "rules": [
+    "backstage-local-deps-workspace-caret"
+   ],
    "assertion_family": "none",
    "reason": "Batch-2 ruling: a regex read of a JSON key is C. JSONPath cannot test object keys, so the local package names (@backstage/*, @internal/* and 8 unscoped names) are kept in a regex. A clean form needs entry-values (name to range rows), then reference into the workspace names.",
    "fire_verified": "n/a (C). Fired anyway: workspace:* and ^1.0.0 on a local dependency of plugins/catalog each gave +1.",
@@ -195,6 +216,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_absent with a 128-name union generated from the manifests at the pin: backstage-role-frontend-no-backend-deps",
+   "rules": [
+    "backstage-role-frontend-no-backend-deps"
+   ],
    "assertion_family": "none",
    "reason": "The target's role lives in the target manifest (a join). JSONPath cannot read keys, so the target names are hand-listed and drift when a package is added (berry precedent: C). The list-free form is B-config reference: dependency names (keys) resolved to manifests filtered by role.",
    "fire_verified": "n/a (C). Fired anyway: plugins/catalog depending on plugin-catalog-backend gave +1.",
@@ -219,6 +243,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_absent with a 58-name union: backstage-role-backend-no-frontend-deps",
+   "rules": [
+    "backstage-role-backend-no-frontend-deps"
+   ],
    "assertion_family": "none",
    "reason": "Same as backstage-08: a role join, so the names are hand-listed.",
    "fire_verified": "n/a (C). Fired anyway: catalog-backend depending on plugin-catalog-react gave +1.",
@@ -243,6 +270,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_absent with a 186-name union: backstage-role-common-no-platform-deps",
+   "rules": [
+    "backstage-role-common-no-platform-deps"
+   ],
    "assertion_family": "none",
    "reason": "Same as backstage-08.",
    "fire_verified": "n/a (C). Fired anyway: catalog-common depending on plugin-catalog-node gave +1.",
@@ -267,6 +297,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_absent with a 23-name union: backstage-role-no-plugin-to-plugin-deps",
+   "rules": [
+    "backstage-role-no-plugin-to-plugin-deps"
+   ],
    "assertion_family": "none",
    "reason": "Same as backstage-08.",
    "fire_verified": "n/a (C). Fired anyway: plugins/catalog depending on plugin-techdocs gave +1.",
@@ -291,6 +324,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent: backstage-role-frontend-no-app-api-deps",
+   "rules": [
+    "backstage-role-frontend-no-app-api-deps"
+   ],
    "assertion_family": "none",
    "reason": "Target names are fixed in the rule, so there is no join. Source role and the exemptions come from the manifest and the script.",
    "fire_verified": "Adding @backstage/core-app-api to plugins/catalog dependencies gave +1. The clone passes.",
@@ -305,6 +341,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent: backstage-role-backend-no-backend-app-api-deps",
+   "rules": [
+    "backstage-role-backend-no-backend-app-api-deps"
+   ],
    "assertion_family": "none",
    "reason": "Fixed target name, so a per-manifest test works.",
    "fire_verified": "Adding @backstage/backend-app-api to plugins/catalog-backend dependencies gave +1. The clone passes.",
@@ -319,6 +358,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "registry_paths_resolve (yaml $.yarnPath, base lint_root, expect file): backstage-yarnpath-resolves",
+   "rules": [
+    "backstage-yarnpath-resolves",
+    "backstage-create-app-template-yarnpath-resolves"
+   ],
    "assertion_family": "none",
    "reason": "Path resolution of a pinned package-manager binary.",
    "fire_verified": "Two cases each gave +1: yarnPath renamed to yarn-4.18.2.cjs (the value-add packageManager rule also fired), and the release file deleted. The clone and the scratch base pass.",
@@ -333,6 +376,9 @@
    "family": "toolchain-pin",
    "bucket": "C",
    "alint": "cross_file equals, normalize semver-major, allow_missing_target: backstage-types-node-major-matches-engines",
+   "rules": [
+    "backstage-types-node-major-matches-engines"
+   ],
    "assertion_family": "none",
    "reason": "R5 load-bearing comment. The semver-major of '^24.15.0 || ^26.13.0' is 24, which matches ^24.0.0.",
    "fire_verified": "Three cases each fired: root @types/node ^26 (+1), packages/cli ^22 (+1), engines changed to '^26.13.0 || ^28.0.0' (+9, all 9 users). The clone passes.",
@@ -357,6 +403,11 @@
    "family": "toolchain-pin",
    "bucket": "C",
    "alint": "cross_file equals (root json vs template regex) + two cross_file subset rules with per-line regexes: backstage-node-engines-templates-match-root, backstage-node-minimum-first-line, backstage-node-minimum-second-line",
+   "rules": [
+    "backstage-node-engines-templates-match-root",
+    "backstage-node-minimum-first-line",
+    "backstage-node-minimum-second-line"
+   ],
    "assertion_family": "none",
    "reason": "engines.node holds two ranges in one string. Splitting them needs regexes that hold for this two-line layout only (batch-2 ruling: C).",
    "fire_verified": "n/a (C). Fired anyway: template engines drift, root first minimum raised, and createApp second minimum changed each gave +1.",
@@ -371,6 +422,9 @@
    "family": "toolchain-pin",
    "bucket": "C",
    "alint": "cross_file set_equals, normalize semver-major (createApp.ts minimums vs yaml matrix values): backstage-ci-node-matrix-matches-supported",
+   "rules": [
+    "backstage-ci-node-matrix-matches-supported"
+   ],
    "assertion_family": "none",
    "reason": "The supported-majors set is read from createApp.ts by regex, because the engines string cannot be split structurally. backstage-16 ties it to engines.node. Layout-specific regex, so C.",
    "fire_verified": "n/a (C). Fired anyway: dropping 26.x from ci.yml's three matrices and adding 22.x to e2e-linux each gave +1.",
@@ -385,6 +439,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: backstage-role-is-known",
+   "rules": [
+    "backstage-role-is-known"
+   ],
    "assertion_family": "none",
    "reason": "Enum check at a fixed path.",
    "fire_verified": "n/a (family other). Fired on scratch: role 'frontend-plugin-x' gave +1.",
@@ -399,6 +456,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: backstage-exports-expose-package-json",
+   "rules": [
+    "backstage-exports-expose-package-json"
+   ],
    "assertion_family": "none",
    "reason": "Fixed-key presence.",
    "fire_verified": "n/a (other). Fired on scratch: removing exports['./package.json'] gave +1.",
@@ -413,6 +473,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs: entry-values (each exports key joined to its value, compared with the typesVersions key/value), then equality",
+   "rules": [],
    "assertion_family": "equality",
    "reason": "Batch-2 ruling: an assertion that joins a map key to its value is B-adapter (needs entry-values). The structured adapters are key-only.",
    "fire_verified": "n/a",
@@ -436,6 +497,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: backstage-publishconfig-no-legacy-entry-fields",
+   "rules": [
+    "backstage-publishconfig-no-legacy-entry-fields"
+   ],
    "assertion_family": "none",
    "reason": "Per-manifest key test. The exports gate mirrors the fixer's early return: 110 manifests without exports keep these fields legitimately.",
    "fire_verified": "n/a (other). Fired on scratch: adding publishConfig.main to plugins/catalog (which has exports) gave +1.",
@@ -450,6 +514,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: backstage-side-effects-declared",
+   "rules": [
+    "backstage-side-effects-declared"
+   ],
    "assertion_family": "none",
    "reason": "Role-conditional key presence.",
    "fire_verified": "n/a (other). Fired on scratch: removing sideEffects gave +1.",
@@ -464,6 +531,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + json_path_absent with the {path} token: backstage-repository-directory",
+   "rules": [
+    "backstage-repository-directory"
+   ],
    "assertion_family": "none",
    "reason": "Path token compared with a fixed-path value.",
    "fire_verified": "n/a (other). Fired on scratch: a wrong directory and a string repository each gave +1.",
@@ -478,6 +548,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent with search() on $.name: backstage-plugin-id-declared",
+   "rules": [
+    "backstage-plugin-id-declared"
+   ],
    "assertion_family": "none",
    "reason": "Presence and type tests conditioned on role and a name regex in the same manifest.",
    "fire_verified": "n/a (other). Fired on scratch: a dropped pluginId and a numeric pluginId each gave +1.",
@@ -492,6 +565,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint group over workspace manifests: group by $.backstage.pluginId (filtered by role), compare members' $.name with each member's $.backstage.pluginPackages",
+   "rules": [],
    "assertion_family": "group",
    "reason": "Group-by over extracted values across 239 manifests, which no current kind expresses. The comparison also requires the list to be sorted.",
    "fire_verified": "n/a",
@@ -506,6 +580,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint reference: module manifest (pluginId, pluginPackage) resolved against plugin manifests (pluginId, role, name)",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "A cross-manifest join on pluginId and role, over values only.",
    "fire_verified": "n/a",
@@ -520,6 +595,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: backstage-peer-modules-valid",
+   "rules": [
+    "backstage-peer-modules-valid"
+   ],
    "assertion_family": "none",
    "reason": "Role-conditional presence plus element type tests.",
    "fire_verified": "n/a (other). Fired on scratch: peerModules on a node-library and an empty entry each gave +1.",
@@ -534,6 +612,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_dir + file_exists with one hand exclusion (packages/eslint-plugin): backstage-catalog-info-exists",
+   "rules": [
+    "backstage-catalog-info-exists"
+   ],
    "assertion_family": "none",
    "reason": "Whether a package carries the field is content, not a path. when_iter cannot read JSON, so the one package without it is excluded by hand.",
    "fire_verified": "n/a (other). Fired on scratch: deleting plugins/catalog/catalog-info.yaml gave +1.",
@@ -548,6 +629,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + cross_file equals: backstage-catalog-info-title",
+   "rules": [
+    "backstage-catalog-info-title"
+   ],
    "assertion_family": "none",
    "reason": "Sibling-file value equality.",
    "fire_verified": "n/a (other). Fired on scratch: title drift gave +1.",
@@ -562,6 +646,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a slug/transform normalize (only trim, lower, semver-major and semver-minor exist)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs a value transform operator.",
    "fire_verified": "n/a",
@@ -584,6 +669,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_dir + cross_file equals, with the target read by a layout-specific regex: backstage-catalog-info-type",
+   "rules": [
+    "backstage-catalog-info-type"
+   ],
    "assertion_family": "none",
    "reason": "No normalize can add or strip the prefix, so the YAML value is read by a regex that assumes the generated layout (batch-2 ruling).",
    "fire_verified": "n/a (other). Fired on scratch: type drift gave +1.",
@@ -598,6 +686,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a CODEOWNERS adapter (last-match glob semantics yielding the owners of a path)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs a new adapter.",
    "fire_verified": "n/a",
@@ -620,6 +709,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden over .changeset/*.md frontmatter: backstage-changesets-no-private-packages",
+   "rules": [
+    "backstage-changesets-no-private-packages"
+   ],
    "assertion_family": "none",
    "reason": "alint has no frontmatter adapter. A regex read of YAML keys inside Markdown is C (batch-2 ruling).",
    "fire_verified": "n/a (other). Fired on scratch: a changeset releasing example-app gave +1.",
@@ -634,6 +726,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file superset (workspace names vs each changeset's frontmatter keys, by regex) + for_each_match: backstage-changesets-name-workspace-packages, backstage-changesets-valid-bump",
+   "rules": [
+    "backstage-changesets-name-workspace-packages",
+    "backstage-changesets-valid-bump"
+   ],
    "assertion_family": "none",
    "reason": "Frontmatter is read by regex. This is the TanStack tq-31 twin, classified C under the batch-2 regex ruling.",
    "fire_verified": "n/a (other). Fired on scratch: an unknown package and bump 'bugfix' each gave +1.",
@@ -648,6 +744,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: frontmatter adapter, then a reference join from changeset entry to the manifest's $.version",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Joins frontmatter keys to another file's version. A regex would need the ~0.x package names hand-listed, and that list changes every release.",
    "fire_verified": "n/a",
@@ -670,6 +767,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "changeset_requires_path (if_changed {packages,plugins}/*/src/**, then .changeset/*.md); not used, because the clone is depth 1",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A change-set rule that a git kind expresses. By the batch-1 commit-message ruling it is C, since R4 cannot run on a depth-1 clone (TanStack tq-57 twin).",
    "fire_verified": "n/a",
@@ -684,6 +782,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex: backstage-plugin-directory-yaml-extension",
+   "rules": [
+    "backstage-plugin-directory-yaml-extension"
+   ],
    "assertion_family": "none",
    "reason": "File-name property.",
    "fire_verified": "n/a (other). Fired on scratch: a .yml copy gave +1.",
@@ -698,6 +799,11 @@
    "family": "other",
    "bucket": "C",
    "alint": "three yaml_path_absent filter rules: backstage-plugin-directory-required-strings, -urls, -status-and-dates",
+   "rules": [
+    "backstage-plugin-directory-required-strings",
+    "backstage-plugin-directory-urls",
+    "backstage-plugin-directory-status-and-dates"
+   ],
    "assertion_family": "none",
    "reason": "The schema exists only as zod code. It is hand-copied into structured-query rules, because json_schema_passes needs a schema file and a corpus config cannot ship one. Coerced-date validity is approximated by presence.",
    "fire_verified": "n/a (other). Fired on scratch: a missing title, a non-URL authorUrl and status 'deprecated' each gave +1.",
@@ -712,6 +818,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + file_exists: backstage-skills-have-skill-md",
+   "rules": [
+    "backstage-skills-have-skill-md"
+   ],
    "assertion_family": "none",
    "reason": "Directory structure.",
    "fire_verified": "n/a (other). Fired on scratch: a skill dir without SKILL.md gave +1.",
@@ -726,6 +835,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_dir + file_content_matches with the {basename} token: backstage-skills-frontmatter-name",
+   "rules": [
+    "backstage-skills-frontmatter-name"
+   ],
    "assertion_family": "none",
    "reason": "No frontmatter adapter. A regex read of YAML keys is C.",
    "fire_verified": "n/a (other). Fired on scratch: a name mismatch gave +1.",
@@ -740,6 +852,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve (json $.skills[*].name, expect dir): backstage-skills-index-names-resolve",
+   "rules": [
+    "backstage-skills-index-names-resolve"
+   ],
    "assertion_family": "none",
    "reason": "Registry-entry resolution.",
    "fire_verified": "n/a (other). Fired on scratch: adding a missing skill to index.json gave +1.",
@@ -754,6 +869,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_dir + cross_file equals: frontmatter regex vs a templated JSONPath; backstage-skills-index-description",
+   "rules": [
+    "backstage-skills-index-description"
+   ],
    "assertion_family": "none",
    "reason": "Frontmatter is read by a regex anchored to the first block. Single-line descriptions only, and no whitespace normalization.",
    "fire_verified": "n/a (other). Fired on scratch: index description drift gave +1.",
@@ -768,6 +886,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_dir + registry_paths_resolve with a templated JSONPath, base {path}, orphans space {path}/**/*.*: backstage-skills-index-files",
+   "rules": [
+    "backstage-skills-index-files"
+   ],
    "assertion_family": "none",
    "reason": "Both directions are expressible. The script checks only skills that index.json publishes, and which ones those are is content, so the 2 unpublished skill dirs are excluded by hand.",
    "fire_verified": "n/a (other). Fired on scratch: an unlisted reference file and a listed file deleted each gave +1.",
@@ -782,6 +903,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file set_equals (the script's own regex vs json $.skills[*].name): backstage-skills-documented",
+   "rules": [
+    "backstage-skills-documented"
+   ],
    "assertion_family": "none",
    "reason": "Set equality. The Markdown side uses the script's own regex, not a stand-in for structured data.",
    "fire_verified": "n/a (other). Fired on scratch: un-listing one skill gave +1.",
@@ -796,6 +920,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "markdown_links_resolve with root map '/' -> '.', 2 files excluded: backstage-md-links-resolve",
+   "rules": [
+    "backstage-md-links-resolve",
+    "backstage-github-master-links-resolve"
+   ],
    "assertion_family": "none",
    "reason": "alint's CommonMark scanner is stricter than the script's regex. It also flags an undefined reference label and a parenthesised destination that the script skips, so two files are excluded by hand. The microsite/static fallback is not modelled.",
    "fire_verified": "n/a (other). Fired on scratch: a broken relative link gave +1.",
@@ -810,6 +938,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "markdown_fragments_resolve: backstage-md-fragments-resolve",
+   "rules": [
+    "backstage-md-fragments-resolve"
+   ],
    "assertion_family": "none",
    "reason": "Native kind with GitHub-style slugs and -N suffixes. It passes on all .md files at the pin.",
    "fire_verified": "n/a (other). Fired on scratch: a bad sibling fragment and a bad same-file fragment each gave +1.",
@@ -834,6 +965,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_graph forbidden_edges from docs/** to a hand-listed set of the other top-level dirs plus root files: backstage-docs-relative-links-stay-in-docs",
+   "rules": [
+    "backstage-docs-relative-links-stay-in-docs"
+   ],
    "assertion_family": "none",
    "reason": "forbidden_edges `to` takes one glob without negation, so 'not under docs/' is the other top-level directories, hand-listed. That list drifts when a new top-level directory appears.",
    "fire_verified": "n/a (other). Fired on scratch: links from docs/ to ../packages/... and to ../package.json each gave +1.",
@@ -848,6 +982,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "markdown_links_resolve relative: forbid over .changeset/*.md: backstage-changeset-links-absolute",
+   "rules": [
+    "backstage-changeset-links-absolute"
+   ],
    "assertion_family": "none",
    "reason": "Native site mode.",
    "fire_verified": "n/a (other). Fired on scratch: a relative link in a changeset gave +1.",
@@ -862,6 +999,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden: backstage-docs-links-not-root-absolute",
+   "rules": [
+    "backstage-docs-links-not-root-absolute"
+   ],
    "assertion_family": "none",
    "reason": "The script's own check is a regex test over the link text. The same regex is expressed directly.",
    "fire_verified": "n/a (other). Fired on scratch: a /docs/ link in docs gave +1.",
@@ -886,6 +1026,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: route mapping from frontmatter `id` (markdown_links_resolve's root map tries only <route>, <route>.md, <route>/index.md)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs a frontmatter-id route adapter.",
    "fire_verified": "n/a",
@@ -908,6 +1049,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_match (select the GitHub docs URL; require the changelog form): backstage-docs-no-github-master-docs-links",
+   "rules": [
+    "backstage-docs-no-github-master-docs-links"
+   ],
    "assertion_family": "none",
    "reason": "A line-level approximation of a per-link check. The 'changelog exists or matches the release file' half of the exception is not modelled.",
    "fire_verified": "n/a (other). Fired on scratch: a GitHub master docs link in docs gave +1.",
@@ -922,6 +1066,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden with the script's regex: backstage-md-no-multiline-link-text",
+   "rules": [
+    "backstage-md-no-multiline-link-text"
+   ],
    "assertion_family": "none",
    "reason": "Regex check reproduced exactly.",
    "fire_verified": "n/a (other). Fired on scratch: multi-line link text gave +1.",
@@ -944,10 +1091,11 @@
    "evidence": "verify-links.js:308-320; ci.yml:166-172",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "C",
    "alint": "missing: a target-kind option on markdown_links_resolve or file_graph (both accept directories)",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Needs a new operator that tells files from directories for link targets.",
+   "reason": "registry_paths_resolve over docs/**/*.md with a link regex and expect: file rejects a link that names a directory. A regex approximates Markdown link parsing, so C (strapi-53 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -956,9 +1104,17 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "registry_paths_resolve with expect: file over the docs' relative links expresses it, as strapi-53 (C) does."
     }
-   ],
-   "needs": "other"
+   ]
   },
   {
    "id": "backstage-55",
@@ -968,6 +1124,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden: backstage-md-no-invisible-chars-in-links",
+   "rules": [
+    "backstage-md-no-invisible-chars-in-links"
+   ],
    "assertion_family": "none",
    "reason": "Character-class check on the link destination.",
    "fire_verified": "n/a (other). Fired on scratch: a U+200B in a URL gave +1.",
@@ -992,6 +1151,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vale",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: prose/NLP linter (dictionary spelling). Repetition would also need a backreference.",
    "fire_verified": "n/a",
@@ -1006,6 +1166,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "typos",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 spelling tool.",
    "fire_verified": "n/a",
@@ -1020,6 +1181,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "two file_graph no_dangling rules (relative_to_repo_root for ~/, relative_to_file for ./): backstage-yarn-patches-exist-root-relative, backstage-yarn-patches-exist-file-relative",
+   "rules": [
+    "backstage-yarn-patches-exist-root-relative",
+    "backstage-yarn-patches-exist-file-relative"
+   ],
    "assertion_family": "none",
    "reason": "Reference resolution over files alint reads.",
    "fire_verified": "n/a (other). Fired on scratch: a renamed ~/ path and a renamed ./ path each gave +1.",
@@ -1034,6 +1199,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_graph no_orphans with the manifests as roots: backstage-yarn-patches-no-orphans",
+   "rules": [
+    "backstage-yarn-patches-no-orphans"
+   ],
    "assertion_family": "none",
    "reason": "Orphan detection over the reference graph.",
    "fire_verified": "n/a (other). Fired on scratch: an orphan .patch file gave +1.",
@@ -1042,31 +1210,60 @@
   },
   {
    "id": "backstage-60",
-   "summary": "Patch declarations agree with yarn.lock, each resolution is used, and patch declarations are compatible across manifests",
+   "summary": "Patch declarations agree with yarn.lock and each resolution is used (one source per patch file across manifests is backstage-a01)",
    "evidence": "verifyYarnPatches.ts lockfile-mismatch / unused-resolution / incompatible-patch-declarations / malformed-*; ci.yml:98-99",
    "mechanism": "ci",
-   "family": "other",
+   "family": "dep-version",
    "bucket": "D",
    "alint": "backstage-cli pm verify-patches",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 D: package-manager resolution semantics (descriptor-to-locator matching in the lockfile).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Patch declarations and resolutions are dependency fields (mattermost-47, element-web-10)."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "backstage-a01 was split out of it."
+    }
+   ]
   },
   {
    "id": "backstage-61",
    "summary": "Patched @backstage packages agree with the Backstage release manifest",
    "evidence": "verifyYarnPatches.ts:1000-1160 (backstage-* kinds, loadReleaseManifest); ci.yml:98-99",
    "mechanism": "ci",
-   "family": "other",
+   "family": "dep-version",
    "bucket": "D",
    "alint": "backstage-cli pm verify-patches",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs external state: release manifests fetched over the network.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "The patched @backstage versions must agree with the release manifest: a dependency version check."
+    }
+   ]
   },
   {
    "id": "backstage-62",
@@ -1076,6 +1273,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent with a descendant filter over paths and components: backstage-openapi-query-allow-reserved",
+   "rules": [
+    "backstage-openapi-query-allow-reserved"
+   ],
    "assertion_family": "none",
    "reason": "Batch-2 ruling: a linter rule that asserts a property of the file is classified by its logic. The message says '(true or false)', but the function is truthy, so false fails, and the alint rule mirrors truthy.",
    "fire_verified": "n/a (other). Fired on scratch: allowReserved false gave +1.",
@@ -1088,13 +1288,24 @@
    "evidence": "lint.ts:47-75; ci.yml:132-133",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-delegate",
    "alint": "spectral",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "The rest of a third-party linter run (R2), collapsed into one unit.",
+   "reason": "Spectral's oas ruleset validates OpenAPI semantics (a delegated validator, as zulip-33). The @apisyouwonthate/style-guide rules are data assertions over the YAML that this audit did not split one by one, so they stay collapsed here.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Spectral's oas ruleset is OpenAPI validation, B-delegate as for zulip-33 and backstage-b06; backstage-62 already split out the custom rule."
+    }
+   ]
   },
   {
    "id": "backstage-64",
@@ -1102,13 +1313,25 @@
    "evidence": "ci.yml:135-136 `repo schema openapi validate`",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-adapter",
    "alint": "backstage-repo-tools repo schema openapi validate",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Requires evaluating a TypeScript object literal (code analysis or codegen).",
+   "reason": "Deep equality between openapi.yaml and the spec embedded as an object literal in the generated router.ts. Reading data in a TypeScript module is the format-reader capability.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "validate.ts checks isEqual(schema.spec, yaml); the spec is an object literal in the generated router.ts, and the format-reader capability covers data in a TypeScript module."
+    }
+   ],
+   "needs": "format-reader"
   },
   {
    "id": "backstage-65",
@@ -1118,6 +1341,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_header (20 lines, (?m) pattern), excludes mirror .eslintignore, the eslint-factory ignores and one inline eslint-disable: backstage-copyright-header",
+   "rules": [
+    "backstage-copyright-header"
+   ],
    "assertion_family": "none",
    "reason": "Batch-2 ruling: a linter rule that asserts a header is classified by its logic.",
    "fire_verified": "n/a (other). Fired on scratch: a new .ts file without the header gave +1.",
@@ -1132,6 +1358,15 @@
    "family": "other",
    "bucket": "C",
    "alint": "7 cross_file set_equals rules (yaml for the 5 paths<->paths-ignore pairs; regex for ci.yml's negated globs): backstage-noop-*",
+   "rules": [
+    "backstage-noop-e2e-linux",
+    "backstage-noop-e2e-windows",
+    "backstage-noop-accessibility",
+    "backstage-noop-chromatic",
+    "backstage-noop-microsite",
+    "backstage-noop-ci-negations",
+    "backstage-noop-ci-reincludes"
+   ],
    "assertion_family": "none",
    "reason": "R1 collapses the pairs into one behavior. Five pairs are exact yaml set_equals. ci.yml encodes the complement as '!' globs, which only a layout-specific regex can split, so the unit is C. The verify_microsite_accessibility pair has drifted at the pin: under R5 that instance is not enforced, and it is a value-add rule at info.",
    "fire_verified": "n/a (other). Fired on scratch: each of the 7 rules gave +1 on its own drift.",
@@ -1146,6 +1381,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "dir_absent with include/exclude globs + for_each_dir file_exists: backstage-bep-directory-name, backstage-bep-directory-naming",
+   "rules": [
+    "backstage-bep-directory-naming",
+    "backstage-bep-directory-name"
+   ],
    "assertion_family": "none",
    "reason": "Directory naming and contents. Uniqueness of the number is not asserted. It holds at the pin.",
    "fire_verified": "n/a (other). Fired on scratch: a misnamed BEP dir and a BEP without a README each gave +1.",
@@ -1160,6 +1399,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file superset (sidebars.ts regex vs ADR frontmatter id regex): backstage-adrs-in-sidebar",
+   "rules": [
+    "backstage-adrs-in-sidebar"
+   ],
    "assertion_family": "none",
    "reason": "Both sides are read by regex (TypeScript sidebar and Markdown frontmatter). The mkdocs.yml half of the same instruction is violated at the pin (adr015 is missing), so that half is value-add only (R5).",
    "fire_verified": "n/a (other). Fired on scratch: an unregistered adr016 gave +1.",
@@ -1174,6 +1416,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over the workspace manifests ($.name -> manifest path)",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Twin of trpc-B05 / jest-B02 / tq-35. unique_by keys only on path templates.",
    "fire_verified": "n/a",
@@ -1188,6 +1431,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: an order operator over JSON object keys (canonical order list)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs an order operator (R7 example: normalized key order is B-adapter).",
    "fire_verified": "n/a",
@@ -1210,6 +1454,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_signed_off; not used, because the clone is depth 1",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: a commit-message check that a git kind expresses is C.",
    "fire_verified": "n/a",
@@ -1224,6 +1469,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn dedupe --check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 D: package-manager resolution semantics.",
    "fire_verified": "n/a",
@@ -1238,6 +1484,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn install --immutable",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 D: lockfile freshness.",
    "fire_verified": "n/a",
@@ -1252,6 +1499,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "missing: a semver comparison operator (workflow literal >= range floor of the same major)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The check runs over process.versions in the e2e test. Its file-level logic needs a semver-satisfies operator, which alint lacks.",
    "fire_verified": "n/a",
@@ -1274,6 +1522,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 plus the batch-2 ruling: import restrictions and the rest of a linter run are code analysis. The notice header is split out as backstage-65.",
    "fire_verified": "n/a",
@@ -1288,6 +1537,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "eslint (@backstage/eslint-plugin)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Import extraction from source is code analysis (R7 D).",
    "fire_verified": "n/a",
@@ -1302,6 +1552,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "backstage-repo-tools type-deps",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Reads built .d.ts output, so it needs a build plus code analysis.",
    "fire_verified": "n/a",
@@ -1316,6 +1567,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "prettier --check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 formatter.",
    "fire_verified": "n/a",
@@ -1330,6 +1582,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 type checker.",
    "fire_verified": "n/a",
@@ -1344,6 +1597,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "backstage-repo-tools api-reports",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis and generation.",
    "fire_verified": "n/a",
@@ -1358,6 +1612,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node scripts/verify-api-reference.js",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Validates generated output of the api-reports step.",
    "fire_verified": "n/a",
@@ -1372,6 +1627,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "backstage-cli config:check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Schemas are collected from package code and config.d.ts (code analysis).",
    "fire_verified": "n/a",
@@ -1386,6 +1642,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "backstage-cli repo build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build.",
    "fire_verified": "n/a",
@@ -1400,6 +1657,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest / node --test",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 test runner.",
    "fire_verified": "n/a",
@@ -1414,6 +1672,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "e2e-test / playwright",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the project's code.",
    "fire_verified": "n/a",
@@ -1428,6 +1687,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "lighthouse-ci",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the built app.",
    "fire_verified": "n/a",
@@ -1442,6 +1702,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "chromatic",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service plus a rendered build.",
    "fire_verified": "n/a",
@@ -1456,6 +1717,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "docusaurus / mkdocs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build. Docusaurus broken links are 'log' only.",
    "fire_verified": "n/a",
@@ -1468,13 +1730,25 @@
    "evidence": "ci.yml:295-296 scripts/verify-release.js:19-68",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-adapter",
    "alint": "node scripts/verify-release.js",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Needs git history and branch state (depth-1 clone, and git-history kinds are excluded).",
+   "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "scripts/verify-release.js:50-68 compares package.json with git show origin/${baseRef}:package.json (plus a semver comparison)."
+    }
+   ],
+   "needs": "base-revision"
   },
   {
    "id": "backstage-90",
@@ -1484,6 +1758,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "git status after the build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Freshness of generated output requires running the generators.",
    "fire_verified": "n/a",
@@ -1498,6 +1773,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "codeql",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis.",
    "fire_verified": "n/a",
@@ -1512,6 +1788,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "fossa",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service plus dependency-graph resolution.",
    "fire_verified": "n/a",
@@ -1526,6 +1803,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "gh-aw runtime check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The check runs inside the compiled workflow at run time (generator semantics), not on PRs.",
    "fire_verified": "n/a",
@@ -1540,11 +1818,33 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis and human judgement (R2).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": []
+  },
+  {
+   "id": "backstage-a01",
+   "summary": "A patch file is used for one source descriptor across all manifests (verify-patches incompatible-patch-declarations)",
+   "evidence": "packages/cli-module-package-manager-yarn/src/lib/verifyYarnPatches.ts:1331-1360 (backstage-cli pm verify-patches)",
+   "mechanism": "ci",
+   "family": "dep-version",
+   "bucket": "B-adapter",
+   "alint": "needs (patch file, source) rows: two captures from one patch: descriptor value, paired; then unique-key: the patch file determines the source",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "needs": "other",
+   "reason": "Both the patch file and its source come from one patch: descriptor value, so the rows need two captures from one value kept together, which extract does not emit (its values are single and carry no pointer). The assertion is unique-key.",
+   "fire_verified": "n/a",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of backstage-60 (audit): its incompatible-patch-declarations check reads only the manifests' patch: descriptors (packages/cli-module-package-manager-yarn/src/lib/verifyYarnPatches.ts:1331-1360)."
+    }
+   ]
   },
   {
    "id": "backstage-b01",
@@ -1554,6 +1854,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_file over **/src/schema/openapi.yaml with a file_exists any-of [\"{dir}/openapi/generated/router.ts\", \"{dir}/openapi.generated.ts\"]. Proposed id backstage-openapi-generated-router-exists, replacing value-add backstage-valueadd-openapi-generated-router",
+   "rules": [
+    "backstage-openapi-generated-router-exists"
+   ],
    "assertion_family": "none",
    "reason": "This is a separate assertion in validate.ts from the deep-equality check (unit 64, D). It is an existence check alint expresses directly. Stage A put it in value_add, but the script throws on it in CI, so it is enforced and belongs in the ratio. Probe: passes on the clone; fires on a scratch spec with no generated file; passes for both the current and the legacy layout.",
    "fire_verified": "n/a (family other); fired anyway on a scratch copy (spec without a router fires, legacy and current layouts pass), passes on the clone",
@@ -1568,6 +1871,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_equals over packages/create-app/templates/*/package.json.hbs (parsed as JSON; both files are valid JSON), $.resolutions['@yarnpkg/core'] == \"4.9.1\". Proposed id backstage-create-app-template-yarnpkg-core-pin",
+   "rules": [
+    "backstage-create-app-template-yarnpkg-core-pin"
+   ],
    "assertion_family": "none",
    "reason": "Per R7, a test that only reads committed manifests is classified by what it asserts: here, an exact pinned value in two files. That is a single json_path_equals, so A.",
    "fire_verified": "On a scratch copy of both templates: bumping the value to 4.9.2 fired (+1), and deleting the resolutions key fired (+1). Passes on the clone (0 findings).",
@@ -1582,6 +1888,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file superset: source = regex-extracted keys of packageVersions in packages/cli-module-new/src/lib/version.ts; target = regex captures of versionQuery '(@backstage/[^']+)' over templates/**/*.hbs. Proposed id backstage-cli-new-versionquery-registered",
+   "rules": [
+    "backstage-cli-new-versionquery-registered"
+   ],
    "assertion_family": "none",
    "reason": "The relation (template references are a subset of the registry) is expressible, but the registry is a TypeScript object literal read by regex. Per the batch ruling, a regex that holds for one layout only is C. The probe passes on the clone and fires when a template adds an unregistered package.",
    "fire_verified": "Fired on a scratch copy (a template with versionQuery '@backstage/does-not-exist' gave +1); passes on the clone",
@@ -1596,6 +1905,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve with source mkdocs-ci.yml, extracting the nav leaf string values, base: docs, expect file. Proposed id backstage-mkdocs-ci-nav-resolves",
+   "rules": [
+    "backstage-mkdocs-ci-nav-resolves"
+   ],
    "assertion_family": "none",
    "reason": "This is a docs-build integrity check split out of the mkdocs build (unit 88, D), following the jest-18 precedent for Docusaurus build checks. The nav paths are plain YAML strings resolved against docs/, which alint expresses directly.",
    "fire_verified": "n/a (family other); fired anyway: deleting docs/overview/roadmap.md in a scratch copy gave +1, and it passes on the clone",
@@ -1610,6 +1922,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing primitive: a Docusaurus route model (doc id = directory + frontmatter id, or the file name with its numeric prefix stripped), read from a TypeScript sidebars module",
+   "rules": [],
    "assertion_family": "none",
    "reason": "This is a build integrity check split out of the build, following jest-18/21/28 against jest-42. The ids come from a TS module, not data, and resolving them needs the doc-id mapping, the same need as unit 50 (route-model). The GOLDEN_PATH broken id sits behind an env gate that CI does not set, so the unit holds in the CI build.",
    "fire_verified": "n/a",
@@ -1630,13 +1943,26 @@
    "evidence": "packages/repo-tools/src/commands/openapi/schema/validate.ts: loadAndValidateOpenApiYaml calls Parser.validate before the deep-equal check; run by the verify job in ci.yml alongside unit 64",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "C",
+   "bucket": "B-delegate",
    "alint": "json_schema / yaml schema validation against the OpenAPI 3 meta-schema, which the repo does not ship. Proposed id backstage-openapi-spec-valid",
+   "rules": [
+    "backstage-openapi-spec-valid"
+   ],
    "assertion_family": "none",
-   "reason": "Following rushstack-09b, schema validation that needs a schema the repo does not ship stays C. This partly overlaps the oas ruleset in unit 63 (Spectral), but it is a separate tool call that fails independently. If the reconciler prefers, fold it into 63 as D; it should not be dropped silently.",
+   "reason": "OpenAPI validity (swagger-parser: meta-schema, $ref resolution and OpenAPI semantics) belongs to a delegated validator, as for zulip-33. backstage-openapi-spec-valid checks only the meta-schema's top-level requirements, as a partial.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "C",
+      "other",
+      "none"
+     ],
+     "why": "zulip-33 checks the same thing (SwaggerParser.validate) and is B-delegate. OpenAPI validation adds $ref resolution and OpenAPI semantics to a meta-schema, which a validator delegates; the existing rule checks only the top-level fields and stays as a partial."
+    }
+   ]
   },
   {
    "id": "backstage-b07",
@@ -1646,6 +1972,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing primitive: structured-subtree equality keyed by field id across YAML files. cross_file compares scalar extracts only",
+   "rules": [],
    "assertion_family": "equality",
    "reason": "This is a generated-copy convention that holds at the pin, so it is not excluded by R5. Comparing whole mapping and list subtrees keyed by id is outside cross_file's scalar extraction, so it needs an adapter (entry-values or derived-value). It is weaker than the CI units because no workflow re-runs sync.js; the reconciler may drop it if conventions without a gate are out of scope for this stratum.",
    "fire_verified": "n/a",
@@ -1677,6 +2004,13 @@
   "backstage-valueadd-openapi-generated-router (info, passes): every src/schema/openapi.yaml has src/schema/openapi/generated/router.ts (file_graph derive_target no_dangling)",
   "backstage-valueadd-patch-release-file-names (info, passes): .patches/*.txt are named pr-<number>.txt; .patches/README.md documents it, and sync_patch-release.yml silently skips other names",
   "backstage-valueadd-root-private (info, passes): the root package.json stays private"
+ ],
+ "value_add_rules": [
+  "backstage-valueadd-noop-microsite-accessibility",
+  "backstage-valueadd-adrs-in-mkdocs",
+  "backstage-valueadd-package-manager-matches-yarnpath",
+  "backstage-valueadd-patch-release-file-names",
+  "backstage-valueadd-root-private"
  ],
  "absent_categories": [
   "locale: no locale catalogs under a gate. Translation messages are TypeScript objects (createTranslationRef in 26 .ts files under packages/ and plugins/). README-fr_FR/ja_JP/ko_kr/zh_Hans.md are docs translations, and check-docs-quality ignores them. plugins/home WelcomeTitle/locales/*.locales.json are greeting data with no parity check",

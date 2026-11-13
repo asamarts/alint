@@ -3,20 +3,20 @@
  "sha": "39bd5f2f40a647af06b1cc0267cddd34f88ed2e9",
  "metrics": {
   "counts": {
-   "A": 108,
-   "B-config": 1,
+   "A": 111,
+   "B-config": 2,
    "B-adapter": 3,
    "B-kernel": 0,
-   "B-delegate": 3,
-   "C": 11,
-   "D": 62
+   "B-delegate": 4,
+   "C": 12,
+   "D": 58
   },
-  "addressable": 126,
-  "coverage_today": 86,
-  "coverage_with_tuning": 94,
-  "gap": 6,
-  "coverage_after_slice": 87,
-  "coverage_after_slice_with_entry_values": 87
+  "addressable": 132,
+  "coverage_today": 84,
+  "coverage_with_tuning": 93,
+  "gap": 7,
+  "coverage_after_slice": 86,
+  "coverage_after_slice_with_entry_values": 86
  },
  "by_family": {
   "locale": {
@@ -44,7 +44,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 1,
-    "D": 4
+    "D": 3
    },
    "addressable": 2,
    "coverage_today": 50,
@@ -55,37 +55,37 @@
   },
   "toolchain-pin": {
    "counts": {
-    "A": 0,
+    "A": 1,
     "B-config": 0,
     "B-adapter": 0,
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 0,
-    "D": 3
+    "D": 2
    },
-   "addressable": 0,
-   "coverage_today": null,
-   "coverage_with_tuning": null,
-   "gap": null,
-   "coverage_after_slice": null,
-   "coverage_after_slice_with_entry_values": null
+   "addressable": 1,
+   "coverage_today": 100,
+   "coverage_with_tuning": 100,
+   "gap": 0,
+   "coverage_after_slice": 100,
+   "coverage_after_slice_with_entry_values": 100
   },
   "other": {
    "counts": {
-    "A": 105,
-    "B-config": 1,
+    "A": 107,
+    "B-config": 2,
     "B-adapter": 1,
     "B-kernel": 0,
-    "B-delegate": 2,
-    "C": 8,
-    "D": 55
+    "B-delegate": 3,
+    "C": 9,
+    "D": 53
    },
-   "addressable": 117,
-   "coverage_today": 90,
-   "coverage_with_tuning": 97,
-   "gap": 3,
-   "coverage_after_slice": 91,
-   "coverage_after_slice_with_entry_values": 91
+   "addressable": 122,
+   "coverage_today": 88,
+   "coverage_with_tuning": 95,
+   "gap": 5,
+   "coverage_after_slice": 89,
+   "coverage_after_slice_with_entry_values": 89
   }
  },
  "units": [
@@ -97,6 +97,7 @@
    "family": "locale",
    "bucket": "B-delegate",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Checking a message format's own syntax is the section 2.2 B-delegate example; alint has no gettext .po reader",
    "fire_verified": "n/a",
@@ -111,6 +112,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "gettext .po adapter plus a printf/python-format placeholder extractor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Placeholder agreement needs a .po adapter and a placeholder extractor (section 2.2 B-adapter example)",
    "fire_verified": "n/a",
@@ -133,6 +135,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "pair: zulip-locale-po-has-translations-json",
+   "rules": [
+    "zulip-locale-po-has-translations-json"
+   ],
    "assertion_family": "none",
    "reason": "pair with a {dir}/../translations.json partner expresses it; check passes on the clone (R4)",
    "fire_verified": "Scratch copy of locale/de and locale/fr (django.po + translations.json) passes; deleting locale/fr/translations.json fires on locale/fr/LC_MESSAGES/django.po; passes on the clone",
@@ -147,6 +152,10 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent (never-matching probe): zulip-locale-translations-json-parses",
+   "rules": [
+    "zulip-locale-translations-json-parses",
+    "zulip-locale-translations-json-object-root"
+   ],
    "assertion_family": "none",
    "reason": "The object-root half is expressed (Stage C). alint's JSON parse tolerates trailing commas and comments, which orjson rejects, so the parse half is relaxed; the same gap keeps element-web-08 in C (integrator).",
    "fire_verified": "Truncating a scratch copy of locale/de/translations.json to 200 bytes gives a resource_parse analysis failure with exit 1 (also confirmed with a one-rule config); clean copy and clone pass",
@@ -169,6 +178,7 @@
    "family": "locale",
    "bucket": "B-adapter",
    "alint": "Unicode normalization-form predicate over file content",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Maintainer-run gate (counted under R5); alint has no normalization operator",
    "fire_verified": "n/a",
@@ -191,6 +201,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tools/check-frontend-i18n after makemessages",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs makemessages string extraction from source (code analysis, R7)",
    "fire_verified": "n/a",
@@ -215,6 +226,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "file_content_matches: zulip-locale-po-language-team",
+   "rules": [
+    "zulip-locale-po-language-team"
+   ],
    "assertion_family": "none",
    "reason": "The real condition applies only to locale codes missing from Django's LANG_INFO (external package data); asserting the header for every locale over-approximates and holds at the pin",
    "fire_verified": "Optional for C: deleting the Language-Team line in a scratch copy of locale/de/LC_MESSAGES/django.po fires; clone passes",
@@ -229,6 +243,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tools/check-capitalization",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Operates on strings extracted from code and templates by makemessages (R7 extraction)",
    "fire_verified": "n/a",
@@ -253,6 +268,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tools/check-capitalization BANNED_WORDS",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Same extracted-string input as zulip-08 (R7 extraction)",
    "fire_verified": "n/a",
@@ -277,6 +293,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "tool: pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Package-manager resolution (R7)",
    "fire_verified": "n/a",
@@ -291,6 +308,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "tool: pnpm dedupe",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Resolution semantics (R7 names dedupe --check as D)",
    "fire_verified": "n/a",
@@ -305,6 +323,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "tool: uv",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Lockfile freshness is resolution (R7)",
    "fire_verified": "n/a",
@@ -319,6 +338,11 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "cross_file x3: zulip-tusd-version-sync, zulip-tusd-sha256-amd64-sync, zulip-tusd-sha256-arm64-sync",
+   "rules": [
+    "zulip-tusd-version-sync",
+    "zulip-tusd-sha256-amd64-sync",
+    "zulip-tusd-sha256-arm64-sync"
+   ],
    "assertion_family": "none",
    "reason": "Load-bearing keep-in-sync comment (R5); cross_file equals expresses it and passes on the clone",
    "fire_verified": "Scratch copies of both files pass; version=2.9.2 in install-tusd fires the version rule, an altered amd64 sha in install-tusd fires the amd64 rule, an altered aarch64 sha in common.pp fires the arm64 rule; clone passes",
@@ -330,14 +354,25 @@
    "summary": "Dependencies must be at least one day old (pnpm minimumReleaseAge 1440, uv exclude-newer '24 hours')",
    "evidence": "pnpm-workspace.yaml:4; pyproject.toml:350",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "other",
    "bucket": "D",
    "alint": "tool: pnpm / uv resolution",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Enforced by the resolvers against registry publish times (external state); keeping the declarations is value-add (R3)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
   },
   {
    "id": "zulip-15",
@@ -346,9 +381,10 @@
    "mechanism": "convention",
    "family": "dep-version",
    "bucket": "C",
-   "alint": "",
+   "alint": "pair_changed_together (if_changed pyproject.toml, uv.lock, package.json, pnpm-lock.yaml or tools/setup/**, then_changed version.py); not used, because the clone is depth 1",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "A judgment over a diff (git history); not a repository-state invariant on a depth-1 clone",
+   "reason": "A change-set rule that a git kind expresses, with 'needs a re-provision' narrowed to a path list. C by the batch-1 ruling: R4 cannot confirm it on a depth-1 clone.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -360,6 +396,14 @@
       "none"
      ],
      "why": "pair_changed_together can approximate it: if pyproject.toml, uv.lock, package.json, pnpm-lock.yaml or tools/setup/** changed, version.py must change. The approximation needs the judgment 'requires re-provision' narrowed to a path list, hence C, not D. It is documented as a rule in docs/subsystems/dependencies.md:55 ('PROVISION_VERSION must be manually updated...')."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The alint field was empty and the reason did not name the git kind behind C (rushstack-27, tq-57 and backstage-36 are the same shape)."
     }
    ]
   },
@@ -371,6 +415,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "tool: scripts/lib/install-node",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Checks the installed binary (environment state); there is no second in-repo Node pin to compare (no .nvmrc, engines or Volta)",
    "fire_verified": "n/a",
@@ -385,6 +430,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "tool: scripts/lib/install-uv",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Environment/binary check; the unenforced .readthedocs.yaml duplicate is covered by a value-add rule",
    "fire_verified": "n/a",
@@ -397,13 +443,26 @@
    "evidence": "package.json:3; scripts/lib/node_cache.py:32-33",
    "mechanism": "tool-config",
    "family": "toolchain-pin",
-   "bucket": "D",
-   "alint": "tool: corepack",
+   "bucket": "A",
+   "alint": "json_path_matches: zulip-package-manager-pnpm-pinned",
+   "rules": [
+    "zulip-package-manager-pnpm-pinned"
+   ],
    "assertion_family": "none",
-   "reason": "Corepack enforces the pin at run time (environment)",
-   "fire_verified": "n/a",
+   "reason": "The pin's form is file content Corepack reads: pnpm@<x.y.z> with an optional integrity hash. Fetching that pnpm is environment state and stays outside the unit.",
+   "fire_verified": "Audit: passes on the clone; fires on pnpm@latest and on a yarn pin.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "Seven repositories count a valid exact packageManager pin as A (strapi-11, babel-23, tq-02, trpc-02, wsdk-54, ghost-25, fluentui-01). node_cache.py runs corepack pnpm install, which needs that spec; only fetching the version is environment state."
+    }
+   ]
   },
   {
    "id": "zulip-19",
@@ -413,6 +472,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Environment state",
    "fire_verified": "n/a",
@@ -427,6 +487,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "executable_has_shebang: zulip-executables-have-shebang",
+   "rules": [
+    "zulip-executables-have-shebang"
+   ],
    "assertion_family": "none",
    "reason": "Direct kind; passes on the clone",
    "fire_verified": "n/a",
@@ -441,6 +504,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "ordered_block lexical-ci: zulip-mailmap-sorted",
+   "rules": [
+    "zulip-mailmap-sorted"
+   ],
    "assertion_family": "none",
    "reason": "ordered_block lexical-ci folds to lowercase, while tools/lint's sort -cf folds to uppercase; they agree at the pin but differ for [ \\ ] ^ _ ` against letters. A fold option would make it exact (integrator, from Stage B and C).",
    "fire_verified": "n/a",
@@ -463,6 +529,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_header: zulip-thirdparty-dep5-format",
+   "rules": [
+    "zulip-thirdparty-dep5-format"
+   ],
    "assertion_family": "none",
    "reason": "First-line pattern; passes on the clone",
    "fire_verified": "n/a",
@@ -477,6 +546,11 @@
    "family": "other",
    "bucket": "C",
    "alint": "registry_paths_resolve x3: zulip-thirdparty-files-token1/2/3",
+   "rules": [
+    "zulip-thirdparty-files-token1",
+    "zulip-thirdparty-files-token2",
+    "zulip-thirdparty-files-token3"
+   ],
    "assertion_family": "none",
    "reason": "Expressible but awkward: one rule per token position of a space-separated Files field; DEP-5 '*' crosses '/' and alint's does not; the script's injected fake path for generated static/generated/ has to be a hand-unrolled no-lookahead prefix exclusion",
    "fire_verified": "n/a",
@@ -491,6 +565,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file subset: zulip-thirdparty-licenses-defined",
+   "rules": [
+    "zulip-thirdparty-licenses-defined"
+   ],
    "assertion_family": "none",
    "reason": "Set membership between two extractions of the same file; passes on the clone",
    "fire_verified": "n/a",
@@ -505,6 +582,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: python-debian Copyright.dump",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatter-style canonicalization (R2)",
    "fire_verified": "n/a",
@@ -519,6 +597,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-api-docs-no-zf-placeholder",
+   "rules": [
+    "zulip-api-docs-no-zf-placeholder"
+   ],
    "assertion_family": "none",
    "reason": "Substring ban over a fixed file set; passes on the clone",
    "fire_verified": "n/a",
@@ -533,6 +614,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-unmerged-changelog-no-feature-level-heading",
+   "rules": [
+    "zulip-unmerged-changelog-no-feature-level-heading"
+   ],
    "assertion_family": "none",
    "reason": "Documented convention (R5); vacuous at the pin (no fragments) but the rule passes",
    "fire_verified": "n/a",
@@ -547,6 +631,9 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "yaml_path_absent probe: zulip-yaml-parses",
+   "rules": [
+    "zulip-yaml-parses"
+   ],
    "assertion_family": "unique-key",
    "reason": "The YAML Composer in tools/check-openapi.ts reports duplicate mapping keys; alint's YAML parse keeps the last one. The duplicate-aware entry adapter emits a row per key, so no duplicate (file, key path) is a unique-key constraint. The syntax half is covered by zulip-yaml-parses (integrator, from Stage B and C).",
    "fire_verified": "n/a",
@@ -570,6 +657,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent: zulip-openapi-ref-no-siblings",
+   "rules": [
+    "zulip-openapi-ref-no-siblings"
+   ],
    "assertion_family": "none",
    "reason": "RFC 9535 filter with length(); passes on the clone",
    "fire_verified": "n/a",
@@ -584,6 +674,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent: zulip-openapi-nullable-not-beside-combinator",
+   "rules": [
+    "zulip-openapi-nullable-not-beside-combinator"
+   ],
    "assertion_family": "none",
    "reason": "JSONPath filter; passes on the clone",
    "fire_verified": "n/a",
@@ -598,6 +691,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent: zulip-openapi-allof-one-inline",
+   "rules": [
+    "zulip-openapi-allof-one-inline"
+   ],
    "assertion_family": "none",
    "reason": "RFC 9535 count() filter; passes on the clone",
    "fire_verified": "n/a",
@@ -612,6 +708,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatter (R2)",
    "fire_verified": "n/a",
@@ -626,6 +723,7 @@
    "family": "other",
    "bucket": "B-delegate",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Spec-format validation including $ref resolution; json_schema_passes would need an OpenAPI meta-schema inside the read-only lint root and still not cover the validator's semantics",
    "fire_verified": "n/a",
@@ -640,6 +738,7 @@
    "family": "other",
    "bucket": "B-delegate",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Per-example schema validation with ref resolution inside one document; plugin territory",
    "fire_verified": "n/a",
@@ -654,6 +753,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "ordered_block: zulip-events-fixtures-sorted",
+   "rules": [
+    "zulip-events-fixtures-sorted"
+   ],
    "assertion_family": "none",
    "reason": "Marker-delimited sorted block; passes on the clone",
    "fire_verified": "n/a",
@@ -668,6 +770,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs project Python (event_schema checkers)",
    "fire_verified": "n/a",
@@ -682,6 +785,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "ordered_block: zulip-node-exempt-files-sorted",
+   "rules": [
+    "zulip-node-exempt-files-sorted"
+   ],
    "assertion_family": "none",
    "reason": "Sorted block; passes on the clone",
    "fire_verified": "n/a",
@@ -696,6 +802,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "registry_paths_resolve: zulip-node-exempt-files-exist",
+   "rules": [
+    "zulip-node-exempt-files-exist"
+   ],
    "assertion_family": "none",
    "reason": "registry_paths_resolve cannot narrow the scope to tools/test-js-with-node's non-recursive globs; the extract regex captures an out-of-glob entry with its closing quote so it never resolves. Exact on the tested cases but a capture trick (integrator, from Stage C).",
    "fire_verified": "n/a",
@@ -718,6 +827,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tools/test-js-with-node",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code (R2)",
    "fire_verified": "n/a",
@@ -732,6 +842,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Coverage requires running tests",
    "fire_verified": "n/a",
@@ -746,6 +857,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tools/test-backend",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code (R2)",
    "fire_verified": "n/a",
@@ -760,6 +872,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent: zulip-migrations-no-auto-names",
+   "rules": [
+    "zulip-migrations-no-auto-names"
+   ],
    "assertion_family": "none",
    "reason": "File-name ban with the same allowlist; passes on the clone",
    "fire_verified": "n/a",
@@ -774,6 +889,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: manage.py makemigrations",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs Django model introspection",
    "fire_verified": "n/a",
@@ -788,6 +904,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Executes the regex rules against sample lines (a test of tool config, runs Python)",
    "fire_verified": "n/a",
@@ -802,6 +919,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "registry_paths_resolve: zulip-custom-check-paths-exist",
+   "rules": [
+    "zulip-custom-check-paths-exist"
+   ],
    "assertion_family": "none",
    "reason": "Paths sit in Python set/tuple literals, so a regex harvests every quoted repo-rooted string (a superset); awkward but works",
    "fire_verified": "n/a",
@@ -816,6 +936,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-custom-check-include-only-trailing-slash",
+   "rules": [
+    "zulip-custom-check-include-only-trailing-slash"
+   ],
    "assertion_family": "none",
    "reason": "Regex over the set literal (entries may span lines); passes on the clone and fired in scratch on both a multi-line and an inline set",
    "fire_verified": "n/a",
@@ -830,6 +953,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file: zulip-cloud-standard-price-sync",
+   "rules": [
+    "zulip-cloud-standard-price-sync"
+   ],
    "assertion_family": "none",
    "reason": "Load-bearing keep-in-sync comment (R5); passes on the clone",
    "fire_verified": "n/a",
@@ -844,6 +970,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file: zulip-dropdown-height-sync",
+   "rules": [
+    "zulip-dropdown-height-sync"
+   ],
    "assertion_family": "none",
    "reason": "Load-bearing keep-in-sync comment (R5); passes on the clone",
    "fire_verified": "n/a",
@@ -858,6 +987,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Semantic equivalence of code or prose, not a value (code analysis); counted as one behavior (R1)",
    "fire_verified": "n/a",
@@ -872,6 +1002,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: unittest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code (R2)",
    "fire_verified": "n/a",
@@ -886,6 +1017,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Coverage requires running tests",
    "fire_verified": "n/a",
@@ -898,13 +1030,24 @@
    "evidence": "tools/lint:103-108; tools/check-templates:56-100",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
-   "alint": "tool: tools/check-templates",
-   "assertion_family": "none",
-   "reason": "Template tokenizer/linter (R2)",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the id attributes extracted by regex from the templates, minus IGNORE_IDS",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "The tool extracts ids with a regex, which alint can do; uniqueness of extracted values across files has no kind today, so B-config unique-key (batch 2 ruling, fluentui-b08 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "tools/check-templates:56-100 and tools/lib/html_branches.py:28-47,76-98 pull ids out with a regex and require uniqueness across templates, with an IGNORE_IDS exception list. Uniqueness over extracted values is B-config (batch 2 ruling; fluentui-b08)."
+    }
+   ]
   },
   {
    "id": "zulip-53",
@@ -912,13 +1055,24 @@
    "evidence": "tools/check-templates:47,109",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "D",
+   "bucket": "B-delegate",
    "alint": "tool: tools/check-templates",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Template parser (R2)",
+   "reason": "Balanced-tag validity of HTML and Handlebars templates needs a template parser; that is a delegated validator for a format alint does not read (zulip-33 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Template syntax validity is a parser for a format alint does not read, as OpenAPI validity is for zulip-33."
+    }
+   ]
   },
   {
    "id": "zulip-54",
@@ -928,6 +1082,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: validate_indent_html",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatter (R2)",
    "fire_verified": "n/a",
@@ -942,6 +1097,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "(git_commit_subject_matches would express it; not used, depth-1 clone)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Commit history is external state on a depth-1 clone and section 2.4 bars git-history kinds; gitlint is skipped in CI (zulip-ci.yml:152,188) and hooks are local",
    "fire_verified": "n/a",
@@ -966,6 +1122,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "(git_commit_message would express it; not used)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "As zulip-55",
    "fire_verified": "n/a",
@@ -990,6 +1147,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "(git_commit_message would express it; not used)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "As zulip-55",
    "fire_verified": "n/a",
@@ -1012,13 +1170,24 @@
    "evidence": "tools/lib/gitlint_rules.py:74-80",
    "mechanism": "hook",
    "family": "other",
-   "bucket": "D",
-   "alint": "",
+   "bucket": "C",
+   "alint": "git_commit_subject_matches with two complement regexes generated from TENSE_DATA (no rule: depth-1 clone)",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Word-list/NLP judgment over git history",
-   "fire_verified": "n/a",
+   "reason": "A word list checked against the first word of the commit title, after an area prefix. Two complement regexes generated from the list express it; a commit kind on a depth-1 clone cannot be confirmed (batch 1 ruling), so C with no rule.",
+   "fire_verified": "Audit: the two regexes agreed with gitlint's logic on 176,050 generated titles; end to end on a scratch repository, 'compose: Added ...' and 'Fixes ...' fired and 'compose: Add ...' passed.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "zulip-55, -56, -57 and -59 are C, and the imperative-mood check is a fixed list of 177 words against the title's first word (tools/lib/gitlint_rules.py:8-104), not NLP."
+    }
+   ]
   },
   {
    "id": "zulip-59",
@@ -1028,6 +1197,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "(git_commit_message would express most of it; not used)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "As zulip-55",
    "fire_verified": "n/a",
@@ -1052,6 +1222,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: stylelint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
@@ -1066,6 +1237,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
@@ -1080,6 +1252,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: puppet",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Parser/linter (R2)",
    "fire_verified": "n/a",
@@ -1094,6 +1267,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: puppet-lint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
@@ -1108,6 +1282,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: shellcheck",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
@@ -1122,6 +1297,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: shfmt",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatter (R2)",
    "fire_verified": "n/a",
@@ -1136,6 +1312,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: mypy",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checker (R2)",
    "fire_verified": "n/a",
@@ -1150,6 +1327,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: ruff",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
@@ -1164,6 +1342,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checker (R2)",
    "fire_verified": "n/a",
@@ -1178,6 +1357,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatter (R2)",
    "fire_verified": "n/a",
@@ -1192,6 +1372,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: ruff format",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatter (R2)",
    "fire_verified": "n/a",
@@ -1206,6 +1387,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: semgrep",
+   "rules": [],
    "assertion_family": "none",
    "reason": "AST code analysis (R2)",
    "fire_verified": "n/a",
@@ -1220,6 +1402,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: remark",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
@@ -1234,6 +1417,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: codespell",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
@@ -1248,6 +1432,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: astro",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checker/build (R2)",
    "fire_verified": "n/a",
@@ -1262,6 +1447,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: puppeteer",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code",
    "fire_verified": "n/a",
@@ -1276,6 +1462,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tools/test-api",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code",
    "fire_verified": "n/a",
@@ -1290,6 +1477,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: sphinx + vnu",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build and HTML validator (R2)",
    "fire_verified": "n/a",
@@ -1304,6 +1492,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: build-help-center / test-help-documentation",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build (R2)",
    "fire_verified": "n/a",
@@ -1318,6 +1507,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: sphinx",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build (R2); external service",
    "fire_verified": "n/a",
@@ -1332,6 +1522,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: codeql",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis (R2)",
    "fire_verified": "n/a",
@@ -1340,17 +1531,26 @@
   },
   {
    "id": "zulip-82",
-   "summary": "zizmor GitHub Actions security audit",
+   "summary": "zizmor's other GitHub Actions security audits (artipacked is zulip-a01, unpinned-uses zulip-a02)",
    "evidence": ".github/workflows/zizmor.yml:23",
    "mechanism": "ci",
    "family": "other",
    "bucket": "D",
    "alint": "tool: zizmor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linter (R2)",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "summary"
+     ],
+     "why": "zulip-a01 and zulip-a02 were split out of it."
+    }
+   ]
   },
   {
    "id": "zulip-83",
@@ -1360,6 +1560,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service over coverage data",
    "fire_verified": "n/a",
@@ -1374,6 +1575,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: tools/ci/production-build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build",
    "fire_verified": "n/a",
@@ -1388,6 +1590,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: es-check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Checks build output",
    "fire_verified": "n/a",
@@ -1402,6 +1605,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the installer",
    "fire_verified": "n/a",
@@ -1416,6 +1620,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the upgrade",
    "fire_verified": "n/a",
@@ -1430,6 +1635,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tool: svgo",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatter (R2)",
    "fire_verified": "n/a",
@@ -1444,6 +1650,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the Python integrations registry (running code)",
    "fire_verified": "n/a",
@@ -1458,6 +1665,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code against a database",
    "fire_verified": "n/a",
@@ -1472,6 +1680,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Depends on running the suite",
    "fire_verified": "n/a",
@@ -1486,11 +1695,56 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": []
+  },
+  {
+   "id": "zulip-a01",
+   "summary": "zizmor artipacked: every actions/checkout step sets persist-credentials explicitly",
+   "evidence": ".github/workflows/zizmor.yml (zizmor-action defaults, no config file; the only inline ignores are ignore[cache-poisoning]); all 7 checkout steps set persist-credentials",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent: zulip-gha-checkout-persist-credentials",
+   "rules": [
+    "zulip-gha-checkout-persist-credentials"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: a structural workflow check, as tq-38.",
+   "fire_verified": "Audit: passes on the clone; removing persist-credentials from codeql-analysis.yml fired.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit. element-web-27/28, tq-38/39 and immich-30/31 count the same two audits."
+    }
+   ]
+  },
+  {
+   "id": "zulip-a02",
+   "summary": "zizmor unpinned-uses (default policy): third-party actions and reusable workflows are pinned to a full commit SHA",
+   "evidence": ".github/workflows/zizmor.yml; every uses: is SHA-pinned at the pin",
+   "mechanism": "ci",
+   "family": "other",
+   "bucket": "A",
+   "alint": "yaml_path_absent with match() filters: zulip-gha-third-party-actions-hash-pinned",
+   "rules": [
+    "zulip-gha-third-party-actions-hash-pinned"
+   ],
+   "assertion_family": "none",
+   "reason": "R7: zizmor's default unpinned-uses policy (a hash pin for third-party actions, a ref pin allowed for actions/*, github/* and dependabot/*), as tq-39.",
+   "fire_verified": "Audit: passes on the clone; codecov/codecov-action@v7 in zulip-ci.yml fired.",
+   "origin": "audit",
+   "changes": [
+    {
+     "by": "audit",
+     "why": "Split out of a D tool run under R7 (audit): the check is structural, over files alint reads, and other repositories already count the same check as its own unit. element-web-27/28, tq-38/39 and immich-30/31 count the same two audits."
+    }
+   ]
   },
   {
    "id": "zulip-b01",
@@ -1500,6 +1754,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "no_bom over locale/*/LC_MESSAGES/django.po (rule id zulip-locale-po-no-bom in my scratch config; not in Stage A's config)",
+   "rules": [
+    "zulip-locale-po-no-bom"
+   ],
    "assertion_family": "none",
    "reason": "An encoding check on the locale files, with its own error message in Django and separate from zulip-01's gettext-syntax delegate (R1: a separate behavior). The no_bom kind expresses it exactly.",
    "fire_verified": "Prefixing a scratch copy of locale/de/LC_MESSAGES/django.po with EF BB BF made no_bom fire. The clean scratch copy and the clone both pass (rc=0).",
@@ -1514,6 +1771,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file (equals) with a regex extract from validator.py and two targets (rule id zulip-max-idx-sync)",
+   "rules": [
+    "zulip-max-idx-sync"
+   ],
    "assertion_family": "none",
    "reason": "A literal keep-in-sync value (R5: conventions count). Stage A folded it into zulip-49 as a 'code or prose' sync, but it is the same shape as zulip-47 and zulip-48, which Stage A put in A.",
    "fire_verified": "n/a (family other). Checked anyway: the rule passes on the clone, and MAX_IDX 999 in a scratch poll_data.ts fired.",
@@ -1528,6 +1788,12 @@
    "family": "other",
    "bucket": "A",
    "alint": "4 cross_file rules with regex extracts: zulip-avatar-resize-sync, zulip-realm-icon-resize-sync, zulip-logo-resize-width-sync, zulip-logo-resize-height-sync (the realm_icon maxWidth can be added as a second target)",
+   "rules": [
+    "zulip-avatar-resize-sync",
+    "zulip-realm-icon-resize-sync",
+    "zulip-logo-resize-width-sync",
+    "zulip-logo-resize-height-sync"
+   ],
    "assertion_family": "none",
    "reason": "A two-way keep-in-sync comment over literal integers (R5). Stage A put it in zulip-49 (D), but the values are plain numbers, not code behavior.",
    "fire_verified": "n/a (family other). Checked anyway: all four rules pass on the clone, and each fired on a scratch copy (avatar 400 and maxWidth 640, icon 64, logo width 800, logo height 120).",
@@ -1542,6 +1808,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve with source tools/release-tarball-exclude.txt, base lint_root and extract lines (rule id zulip-release-tarball-exclude-paths-exist)",
+   "rules": [
+    "zulip-release-tarball-exclude-paths-exist"
+   ],
    "assertion_family": "none",
    "reason": "A manifest-to-path existence check, the same shape as zulip-39 and zulip-46. Caveat: the script would also fail if an entry sat under an entry removed earlier, which alint does not model. That case does not occur at the pin.",
    "fire_verified": "n/a (family other). Checked anyway: the rule passes on the clone, and removing zproject/test_settings.py from a scratch tree fired it.",
@@ -1556,6 +1825,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file relation subset: version.py regex (?m)^API_FEATURE_LEVEL = (\\d+)$ into api_docs/changelog.md regex (?m)^\\*\\*Feature level (\\d+)\\*\\*$ (rule id zulip-feature-level-documented)",
+   "rules": [
+    "zulip-feature-level-documented"
+   ],
    "assertion_family": "none",
    "reason": "A maintainer release gate that holds continuously on main. Stage A expresses nearly the same assertion as value-add (zulip-va-feature-level-sync), but it is enforced, so it belongs in the ratio. The enforced form is membership (subset), not equality with the newest heading. The other assertion on that line (the release commit changed API_FEATURE_LEVEL) is git history and goes to zulip-b07.",
    "fire_verified": "n/a (family other). Checked anyway: the rule passes on the clone, and API_FEATURE_LEVEL 517 in a scratch version.py fired it.",
@@ -1570,6 +1842,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Each assertion compares the tree with a command-line argument, the wall clock or the release commit itself (git history). None of these is repository state at an arbitrary pin.",
    "fire_verified": "n/a",
@@ -1584,6 +1857,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs coverage data from running the test suites (R2/R7: running code). Distinct from zulip-41 and zulip-51, which assert the forward direction.",
    "fire_verified": "n/a",
@@ -1598,6 +1872,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs instrumentation from running the backend tests (R2).",
    "fire_verified": "n/a",
@@ -1612,6 +1887,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network download and running the installed binary (R7: network or external state). The in-repo half, the cross-file tusd pin, is Stage A's zulip-13. This unit covers the download verification for the lint tools, which are not toolchains.",
    "fire_verified": "n/a",
@@ -1626,6 +1902,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-zerver-no-shebang",
+   "rules": [
+    "zulip-cc-zerver-no-shebang"
+   ],
    "assertion_family": "none",
    "reason": "zulint regex rule; \\A is file start",
    "fire_verified": "n/a",
@@ -1640,6 +1919,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches: zulip-cc-shebang-env, zulip-cc-shebang-env-bash",
+   "rules": [
+    "zulip-cc-shebang-env",
+    "zulip-cc-shebang-env-bash"
+   ],
    "assertion_family": "none",
    "reason": "Negative lookahead recast as a start-of-file alternation",
    "fire_verified": "n/a",
@@ -1654,6 +1937,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-shebang-python3, -bash",
+   "rules": [
+    "zulip-cc-shebang-python3",
+    "zulip-cc-shebang-python3-bash"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1668,6 +1955,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-bash-shebang-flags",
+   "rules": [
+    "zulip-cc-bash-shebang-flags"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1682,6 +1972,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "no_trailing_whitespace: zulip-cc-trailing-whitespace, -py; file_content_forbidden: zulip-cc-trailing-whitespace-md",
+   "rules": [
+    "zulip-cc-trailing-whitespace",
+    "zulip-cc-trailing-whitespace-py",
+    "zulip-cc-trailing-whitespace-md"
+   ],
    "assertion_family": "none",
    "reason": "Kind plus an unrolled-lookbehind regex for Markdown",
    "fire_verified": "n/a",
@@ -1696,6 +1991,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "final_newline: zulip-cc-final-newline, -py",
+   "rules": [
+    "zulip-cc-final-newline",
+    "zulip-cc-final-newline-py"
+   ],
    "assertion_family": "none",
    "reason": "Direct kind",
    "fire_verified": "n/a",
@@ -1710,6 +2009,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-rtd-https, -py",
+   "rules": [
+    "zulip-cc-rtd-https",
+    "zulip-cc-rtd-https-py"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1724,6 +2027,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-tabs, -py",
+   "rules": [
+    "zulip-cc-no-tabs",
+    "zulip-cc-no-tabs-py"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1738,6 +2045,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-web-app-two-words, -py",
+   "rules": [
+    "zulip-cc-web-app-two-words",
+    "zulip-cc-web-app-two-words-py"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1752,6 +2063,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-comma-whitespace",
+   "rules": [
+    "zulip-cc-comma-whitespace"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1766,6 +2080,12 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-no-subject-js, -py, -py-exempt, -templates",
+   "rules": [
+    "zulip-cc-no-subject-js",
+    "zulip-cc-no-subject-py",
+    "zulip-cc-no-subject-py-exempt",
+    "zulip-cc-no-subject-templates"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches; exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -1780,6 +2100,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-msgid-js, -py",
+   "rules": [
+    "zulip-cc-no-msgid-js",
+    "zulip-cc-no-msgid-py"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1794,6 +2118,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-i18n-concat",
+   "rules": [
+    "zulip-cc-no-i18n-concat"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1808,6 +2135,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-jquery-html-xss",
+   "rules": [
+    "zulip-cc-jquery-html-xss"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -1822,6 +2152,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-relative-json-url",
+   "rules": [
+    "zulip-cc-no-relative-json-url"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1836,6 +2169,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-text-needs-t",
+   "rules": [
+    "zulip-cc-text-needs-t"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1850,6 +2186,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-report-success-literal",
+   "rules": [
+    "zulip-cc-report-success-literal"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1864,6 +2203,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-report-error-literal",
+   "rules": [
+    "zulip-cc-report-error-literal"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1878,6 +2220,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-report-client-error-literal",
+   "rules": [
+    "zulip-cc-report-client-error-literal"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1892,6 +2237,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-document-ready",
+   "rules": [
+    "zulip-cc-no-document-ready"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1906,6 +2254,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-use-channel-module",
+   "rules": [
+    "zulip-cc-use-channel-module"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1920,6 +2271,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-no-style-attr-js, -templates",
+   "rules": [
+    "zulip-cc-no-style-attr-js",
+    "zulip-cc-no-style-attr-templates"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -1934,6 +2289,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-assert-ok",
+   "rules": [
+    "zulip-cc-assert-ok"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1948,6 +2306,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-tippy-allowhtml-js, -templates",
+   "rules": [
+    "zulip-cc-no-tippy-allowhtml-js",
+    "zulip-cc-no-tippy-allowhtml-templates"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1962,6 +2324,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-direct-rewire",
+   "rules": [
+    "zulip-cc-no-direct-rewire"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -1976,6 +2341,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-login-required",
+   "rules": [
+    "zulip-cc-no-login-required"
+   ],
    "assertion_family": "none",
    "reason": "Vacuous lookahead dropped",
    "fire_verified": "n/a",
@@ -1990,6 +2358,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden + for_each_match: zulip-cc-user-profile-save-update-fields, -exempt",
+   "rules": [
+    "zulip-cc-user-profile-save-update-fields",
+    "zulip-cc-user-profile-save-update-fields-exempt"
+   ],
    "assertion_family": "none",
    "reason": "exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -2004,6 +2376,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-self-any",
+   "rules": [
+    "zulip-cc-no-self-any"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2018,6 +2393,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden + for_each_match: zulip-cc-assert-length-equal, -exempt",
+   "rules": [
+    "zulip-cc-assert-length-equal",
+    "zulip-cc-assert-length-equal-exempt"
+   ],
    "assertion_family": "none",
    "reason": "exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -2032,6 +2411,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-assert-length-true",
+   "rules": [
+    "zulip-cc-assert-length-true"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2046,6 +2428,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-type-ignore-explained",
+   "rules": [
+    "zulip-cc-type-ignore-explained"
+   ],
    "assertion_family": "none",
    "reason": "Negative lookahead -> select + require",
    "fire_verified": "n/a",
@@ -2060,6 +2445,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden + for_each_match: zulip-cc-scripts-no-sudo-py, -py-exempt, -bash",
+   "rules": [
+    "zulip-cc-scripts-no-sudo-py",
+    "zulip-cc-scripts-no-sudo-py-exempt",
+    "zulip-cc-scripts-no-sudo-bash"
+   ],
    "assertion_family": "none",
    "reason": "Extensionless python scripts listed explicitly; exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -2074,6 +2464,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-tests-no-translation",
+   "rules": [
+    "zulip-cc-tests-no-translation"
+   ],
    "assertion_family": "none",
    "reason": "include_only substring -> glob",
    "fire_verified": "n/a",
@@ -2088,6 +2481,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-userid",
+   "rules": [
+    "zulip-cc-no-userid"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2102,6 +2498,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-jsonable-error-literal",
+   "rules": [
+    "zulip-cc-jsonable-error-literal"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2116,6 +2515,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-self-client",
+   "rules": [
+    "zulip-cc-no-self-client"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2130,6 +2532,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-use-access-message",
+   "rules": [
+    "zulip-cc-use-access-message"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2144,6 +2549,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-use-access-stream-views, -actions",
+   "rules": [
+    "zulip-cc-use-access-stream-views",
+    "zulip-cc-use-access-stream-actions"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2158,6 +2567,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-from-os-path",
+   "rules": [
+    "zulip-cc-no-from-os-path"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2172,6 +2584,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-import-os-path",
+   "rules": [
+    "zulip-cc-no-import-os-path"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2186,6 +2601,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-id-not-pk",
+   "rules": [
+    "zulip-cc-id-not-pk"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -2200,6 +2618,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-comment-function-type",
+   "rules": [
+    "zulip-cc-no-comment-function-type"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2214,6 +2635,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-no-comment-variable-type",
+   "rules": [
+    "zulip-cc-no-comment-variable-type"
+   ],
    "assertion_family": "none",
    "reason": "Negative lookahead -> select + require",
    "fire_verified": "n/a",
@@ -2228,6 +2652,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-model-null-optional",
+   "rules": [
+    "zulip-cc-model-null-optional"
+   ],
    "assertion_family": "none",
    "reason": "Negative lookahead -> select + require",
    "fire_verified": "n/a",
@@ -2242,6 +2669,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-model-optional-null",
+   "rules": [
+    "zulip-cc-model-optional-null"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -2256,6 +2686,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-management-no-exit",
+   "rules": [
+    "zulip-cc-management-no-exit"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2270,6 +2703,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-direct-role-attr",
+   "rules": [
+    "zulip-cc-no-direct-role-attr"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2284,6 +2720,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-mock-assert-prefix",
+   "rules": [
+    "zulip-cc-mock-assert-prefix"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2298,6 +2737,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden + for_each_match: zulip-cc-atomic-explicit-savepoint, -exempt",
+   "rules": [
+    "zulip-cc-atomic-explicit-savepoint",
+    "zulip-cc-atomic-explicit-savepoint-exempt"
+   ],
    "assertion_family": "none",
    "reason": "exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -2312,6 +2755,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-prose-javascript",
+   "rules": [
+    "zulip-cc-prose-javascript"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2326,6 +2772,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-prose-github",
+   "rules": [
+    "zulip-cc-prose-github"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2340,6 +2789,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-prose-organization",
+   "rules": [
+    "zulip-cc-prose-organization"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2354,6 +2806,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-prose-warn-admonition",
+   "rules": [
+    "zulip-cc-prose-warn-admonition"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2368,6 +2823,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-prose-terms-of-service",
+   "rules": [
+    "zulip-cc-prose-terms-of-service"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2382,6 +2840,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-prose-botserver",
+   "rules": [
+    "zulip-cc-prose-botserver"
+   ],
    "assertion_family": "none",
    "reason": "Lookahead unrolled",
    "fire_verified": "n/a",
@@ -2396,6 +2857,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match + file_content_forbidden: zulip-cc-placeholder-translatable-dq, -dq-exempt, -sq",
+   "rules": [
+    "zulip-cc-placeholder-translatable-dq",
+    "zulip-cc-placeholder-translatable-dq-exempt",
+    "zulip-cc-placeholder-translatable-sq"
+   ],
    "assertion_family": "none",
    "reason": "Lookahead -> select + require; exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -2410,6 +2876,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-attr-quoting",
+   "rules": [
+    "zulip-cc-attr-quoting"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -2424,6 +2893,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-translation-tag-quoting",
+   "rules": [
+    "zulip-cc-translation-tag-quoting"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2438,6 +2910,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-aria-label-translatable",
+   "rules": [
+    "zulip-cc-aria-label-translatable"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2452,6 +2927,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-cdn-scripts",
+   "rules": [
+    "zulip-cc-no-cdn-scripts"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2466,6 +2944,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-title-translatable-sq, -dq",
+   "rules": [
+    "zulip-cc-title-translatable-sq",
+    "zulip-cc-title-translatable-dq"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2480,6 +2962,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden + for_each_match: zulip-cc-alt-translatable, -exempt",
+   "rules": [
+    "zulip-cc-alt-translatable",
+    "zulip-cc-alt-translatable-exempt"
+   ],
    "assertion_family": "none",
    "reason": "exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -2494,6 +2980,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-help-link-absolute",
+   "rules": [
+    "zulip-cc-help-link-absolute"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2508,6 +2997,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-no-inline-handlers",
+   "rules": [
+    "zulip-cc-no-inline-handlers"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2522,6 +3014,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-hbs-no-script",
+   "rules": [
+    "zulip-cc-hbs-no-script"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2536,6 +3031,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-hbs-t-no-space-before",
+   "rules": [
+    "zulip-cc-hbs-t-no-space-before"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2550,6 +3048,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-period-inside-translation-hbs, -jinja",
+   "rules": [
+    "zulip-cc-period-inside-translation-hbs",
+    "zulip-cc-period-inside-translation-jinja"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex (the Jinja form's parentheses are a regex group)",
    "fire_verified": "n/a",
@@ -2564,6 +3066,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-hbs-t-no-leading-space",
+   "rules": [
+    "zulip-cc-hbs-t-no-leading-space"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2578,6 +3083,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-hbs-t-no-trailing-space",
+   "rules": [
+    "zulip-cc-hbs-t-no-trailing-space"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2592,6 +3100,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-hbs-t-attr-quoting",
+   "rules": [
+    "zulip-cc-hbs-t-attr-quoting"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2606,6 +3117,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-hbs-no-href-hash",
+   "rules": [
+    "zulip-cc-hbs-no-href-hash"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2620,6 +3134,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-jinja-no-dev-entrypoint",
+   "rules": [
+    "zulip-cc-jinja-no-dev-entrypoint"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2634,6 +3151,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-json-space-after-colon",
+   "rules": [
+    "zulip-cc-json-space-after-colon"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2648,6 +3168,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-md-heading-space",
+   "rules": [
+    "zulip-cc-md-heading-space"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2662,6 +3185,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "capture-inequality operator (for_each_match require.equal has no negated form) or backreference support",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The rule bans link text equal to its URL via a named backreference; RE2 has none and alint's equal can only require equality",
    "fire_verified": "n/a",
@@ -2684,6 +3208,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden + for_each_match: zulip-cc-docs-relative-links, -exempt",
+   "rules": [
+    "zulip-cc-docs-relative-links",
+    "zulip-cc-docs-relative-links-exempt"
+   ],
    "assertion_family": "none",
    "reason": "exclude_line -> exempt companion",
    "fire_verified": "n/a",
@@ -2698,6 +3226,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-docs-su-quoting",
+   "rules": [
+    "zulip-cc-docs-su-quoting"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2712,6 +3243,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-github-docs-absolute-links",
+   "rules": [
+    "zulip-cc-github-docs-absolute-links"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -2726,6 +3260,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-docs-no-line-links",
+   "rules": [
+    "zulip-cc-docs-no-line-links"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2740,6 +3277,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-md-eg-comma",
+   "rules": [
+    "zulip-cc-md-eg-comma"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2754,6 +3294,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-help-sentence-space",
+   "rules": [
+    "zulip-cc-help-sentence-space"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -2768,6 +3311,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: zulip-cc-help-no-realm",
+   "rules": [
+    "zulip-cc-help-no-realm"
+   ],
    "assertion_family": "none",
    "reason": "exclude_pattern -> require.matches",
    "fire_verified": "n/a",
@@ -2782,6 +3328,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-puppet-layering-zulip, -kandra",
+   "rules": [
+    "zulip-cc-puppet-layering-zulip",
+    "zulip-cc-puppet-layering-kandra"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2796,6 +3346,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-openapi-lowercase-literals",
+   "rules": [
+    "zulip-cc-openapi-lowercase-literals"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2810,6 +3363,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-icons-no-fill-attr, -fill-style",
+   "rules": [
+    "zulip-cc-icons-no-fill-attr",
+    "zulip-cc-icons-no-fill-style"
+   ],
    "assertion_family": "none",
    "reason": "Quote backreference unrolled into two alternatives",
    "fire_verified": "n/a",
@@ -2824,6 +3381,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-icons-no-fill-rule",
+   "rules": [
+    "zulip-cc-icons-no-fill-rule"
+   ],
    "assertion_family": "none",
    "reason": "Quote backreference unrolled",
    "fire_verified": "n/a",
@@ -2838,6 +3398,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-icons-no-stroke",
+   "rules": [
+    "zulip-cc-icons-no-stroke"
+   ],
    "assertion_family": "none",
    "reason": "Quote backreference unrolled",
    "fire_verified": "n/a",
@@ -2852,6 +3415,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: zulip-cc-icons-no-class",
+   "rules": [
+    "zulip-cc-icons-no-class"
+   ],
    "assertion_family": "none",
    "reason": "Direct regex",
    "fire_verified": "n/a",
@@ -2881,6 +3447,12 @@
   "zulip-va-pnpm-minimum-release-age (dep-version): pnpm-workspace.yaml keeps minimumReleaseAge: 1440",
   "zulip-va-uv-exclude-newer (dep-version): pyproject.toml keeps [tool.uv] exclude-newer = \"24 hours\"",
   "extends alint://bundled/toolchain-pins@v1 (inert at the pin: no .nvmrc/.node-version/.tool-versions/.python-version root authority)"
+ ],
+ "value_add_rules": [
+  "zulip-va-uv-version-sync",
+  "zulip-va-python-floor-sync",
+  "zulip-va-pnpm-minimum-release-age",
+  "zulip-va-uv-exclude-newer"
  ],
  "absent_categories": [
   "No .nvmrc, .node-version, .tool-versions, .python-version, package.json engines or Volta pin: Node, uv and Python are pinned only inside provision scripts, so there is no in-repo cross-file toolchain-pin gate",

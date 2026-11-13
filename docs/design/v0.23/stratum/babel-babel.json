@@ -4,8 +4,8 @@
  "metrics": {
   "counts": {
    "A": 27,
-   "B-config": 3,
-   "B-adapter": 4,
+   "B-config": 2,
+   "B-adapter": 5,
    "B-kernel": 0,
    "B-delegate": 3,
    "C": 6,
@@ -15,7 +15,7 @@
   "coverage_today": 63,
   "coverage_with_tuning": 77,
   "gap": 23,
-  "coverage_after_slice": 67,
+  "coverage_after_slice": 65,
   "coverage_after_slice_with_entry_values": 70
  },
  "by_family": {
@@ -39,8 +39,8 @@
   "dep-version": {
    "counts": {
     "A": 7,
-    "B-config": 1,
-    "B-adapter": 2,
+    "B-config": 0,
+    "B-adapter": 3,
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 1,
@@ -50,7 +50,7 @@
    "coverage_today": 64,
    "coverage_with_tuning": 73,
    "gap": 27,
-   "coverage_after_slice": 73,
+   "coverage_after_slice": 64,
    "coverage_after_slice_with_entry_values": 82
   },
   "toolchain-pin": {
@@ -97,6 +97,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent babel-workspace-ranges-caret",
+   "rules": [
+    "babel-workspace-ranges-caret"
+   ],
    "assertion_family": "none",
    "reason": "R7: a yarn.config.cjs rule is classified by its assertion. A union selector over the two dependency fields with a search() filter states it exactly (782 workspace:^ ranges at the pin).",
    "fire_verified": "Scratch copy of the files the config reads, relative paths kept. Setting @babel/traverse to workspace:* in devDependencies fired 1. Setting a dependency to workspace:~ fired 1, and to workspace:^8.0.0 fired 1. The clean copy and the clone give 0.",
@@ -111,6 +114,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-workspace-license",
+   "rules": [
+    "babel-workspace-license"
+   ],
    "assertion_family": "none",
    "reason": "R7, one field of enforcePackageInfo. Split per field as in the berry precedent (enforceFieldsOnAllWorkspaces).",
    "fire_verified": "n/a (family other). Fired anyway: license ISC on a public package fired 1, and license on private benchmark fired 1. The clone gives 0.",
@@ -125,6 +131,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + json_path_absent with {path} templated into the filter: babel-workspace-repository-field; json_path_absent babel-private-workspaces-no-repository",
+   "rules": [
+    "babel-workspace-repository-field",
+    "babel-private-workspaces-no-repository"
+   ],
    "assertion_family": "none",
    "reason": "The path-derived directory value is expressed by iterating the workspace directories and templating {path} into the filter. length()==3 enforces 'exactly'.",
    "fire_verified": "n/a (family other). Fired anyway: a wrong directory, an extra key, a git+https url, and a repository on private benchmark each fired 1. The clone gives 0.",
@@ -139,6 +149,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-workspace-publish-config",
+   "rules": [
+    "babel-workspace-publish-config"
+   ],
    "assertion_family": "none",
    "reason": "R7, a per-field split of enforcePackageInfo.",
    "fire_verified": "n/a (family other). Fired anyway: access restricted fired 1, and an extra tag key fired 1. The clone gives 0.",
@@ -153,6 +166,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-workspace-author",
+   "rules": [
+    "babel-workspace-author"
+   ],
    "assertion_family": "none",
    "reason": "R7, a per-field split of enforcePackageInfo.",
    "fire_verified": "n/a (family other). Fired anyway: a changed author fired 1. The clone gives 0.",
@@ -167,6 +183,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_absent babel-workspace-engines-node",
+   "rules": [
+    "babel-workspace-engines-node"
+   ],
    "assertion_family": "none",
    "reason": "R7: an engines agreement across all manifests, using the constraint's own literal (berry-08 precedent). One filter covers both the set branch and the unset branch.",
    "fire_verified": "Scratch copy: engines.node '>=22.18.0' on a public package fired 1. Removing engines fired 1. Adding engines.node to private benchmark fired 1, and adding it to @babel/runtime fired 1. The clean copy and the clone give 0.",
@@ -181,6 +200,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches (if_present) babel-main-types-relative",
+   "rules": [
+    "babel-main-types-relative"
+   ],
    "assertion_family": "none",
    "reason": "A direct value regex over the two fields.",
    "fire_verified": "n/a (family other). Fired anyway: main 'lib/index.js' on @babel/cli fired 1. The clone gives 0.",
@@ -195,6 +217,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-public-type-field",
+   "rules": [
+    "babel-public-type-field"
+   ],
    "assertion_family": "none",
    "reason": "A whole-document filter states it exactly (151 module, 4 commonjs).",
    "fire_verified": "n/a (family other). Fired anyway: removing type from a public package fired 1. The clone gives 0.",
@@ -209,6 +234,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent x3: babel-exports-class-special, babel-exports-class-extended, babel-exports-class-standard",
+   "rules": [
+    "babel-exports-class-special",
+    "babel-exports-class-extended",
+    "babel-exports-class-standard"
+   ],
    "assertion_family": "none",
    "reason": "The name lists are the constraint's own literals, not derived sets (berry-13 precedent), so this is A. One unit, three rules for the three classes (144 standard, 8 special, 3 extended at the pin).",
    "fire_verified": "n/a (family other). Fired anyway: an extra './lib/*' export, a wrong default, @babel/runtime missing './package.json', and a wrong types in @babel/code-frame each fired 1. The clone gives 0.",
@@ -223,6 +253,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-types-field-unset",
+   "rules": [
+    "babel-types-field-unset"
+   ],
    "assertion_family": "none",
    "reason": "This is a distinct assertion in the same function, the docstring's second sentence. Counted separately, like berry's per-field splits (fork noted).",
    "fire_verified": "n/a (family other). Fired anyway: adding types to a standard package fired 1. The clone gives 0.",
@@ -237,6 +270,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint unique-key: dep ident -> workspace over filtered (workspace, dep, range) rows",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "R7: a cross-manifest grouping. Per dependency, at most one workspace may carry a literal range, which is a functional dependency dep -> workspace. JSONPath cannot select keys and no kind groups dependency entries across manifests (berry-01 and trpc-05 precedent).",
    "fire_verified": "n/a",
@@ -266,10 +300,11 @@
    "evidence": "yarn.config.cjs:159-173 (enforceNoDualTypeDependencies); ci.yml:50-52",
    "mechanism": "ci",
    "family": "dep-version",
-   "bucket": "B-config",
-   "alint": "constraint set: keys($.dependencies) disjoint from keys($.devDependencies) per manifest, minus condition: rows",
+   "bucket": "B-adapter",
+   "alint": "needs (manifest, field, dependency, range) rows; then unique-key: (manifest, dependency) determines the field, except when the dependencies range uses condition:",
+   "rules": [],
    "assertion_family": "unique-key",
-   "reason": "Key-set disjointness inside one document needs key selection that RFC 9535 JSONPath lacks (trpc-08 precedent).",
+   "reason": "Disjoint dependency fields (unique-key), with an exemption that depends on the range value. That needs (name, value) rows (batch 2 ruling).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -281,8 +316,25 @@
       "set"
      ],
      "why": "enforceNoDualTypeDependencies (no package in both dependencies and devDependencies) is a disjoint-dependency-fields assertion. Batch-2 ruling: disjoint dependency fields are unique-key, because (manifest, name) determines the field. Precedent jest-24. Stage A tagged it set. Caveat: the rule exempts a dependencies range containing \"condition:\", which reads the value and could argue B-adapter, but there are 0 condition: specifiers at the pin, so the key-only form is the enforced behavior."
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-config",
+      "dep-version",
+      "unique-key"
+     ],
+     "why": "The exemption reads the value: a dependencies range that uses condition: may repeat in devDependencies (yarn.config.cjs:159-173), and .yarnrc.yml declares the BABEL_9_BREAKING condition."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint field still named Stage A's set form; the integrator and the audit settled on unique-key with entry values."
     }
-   ]
+   ],
+   "needs": "entry-values"
   },
   {
    "id": "babel-13",
@@ -292,6 +344,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent babel-helpers-no-template-types-deps",
+   "rules": [
+    "babel-helpers-no-template-types-deps"
+   ],
    "assertion_family": "none",
    "reason": "An implication within one manifest, with fixed dependency names. Absolute queries inside a root filter state it exactly (berry-04 precedent).",
    "fire_verified": "Scratch copy: adding @babel/types, and separately @babel/template, to the dependencies of @babel/helper-builder-react-jsx (which peers on core) each fired 1. The clean copy and the clone give 0.",
@@ -306,6 +361,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent babel-core-peer-implies-dev-dep",
+   "rules": [
+    "babel-core-peer-implies-dev-dep"
+   ],
    "assertion_family": "none",
    "reason": "An implication within one manifest. Its branch is separate from babel-15 (fork noted).",
    "fire_verified": "Scratch copy: on plugin-transform-arrow-functions, devDependencies @babel/core '^8.0.0' fired 1, and removing it fired 1. The clean copy and the clone give 0.",
@@ -320,6 +378,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent babel-core-not-in-dependencies",
+   "rules": [
+    "babel-core-not-in-dependencies"
+   ],
    "assertion_family": "none",
    "reason": "The four-name exemption is the constraint's literal. The env-only 7/8-compat branch is not run in CI and is not a unit.",
    "fire_verified": "Scratch copy: adding @babel/core to the dependencies of @babel/types fired 1. The four exempt packages carry it on the clone and pass. The clean copy and the clone give 0.",
@@ -334,6 +395,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_equals (union selector, if_present) babel-peer-ranges",
+   "rules": [
+    "babel-peer-ranges"
+   ],
    "assertion_family": "none",
    "reason": "A literal range over two fixed peer keys (128 core peers and 1 eslint-parser peer at the pin).",
    "fire_verified": "Scratch copy: peer @babel/core '^7.0.0-0 || ^8.0.0' fired 1, and peer @babel/eslint-parser '^7.11.0' on eslint-plugin fired 1. The clean copy and the clone give 0.",
@@ -348,6 +412,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint reference: (dep name, catalog name) from manifests -> keys of .yarnrc.yml catalog / catalogs.<name>",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "A manifest-to-catalog join. Both sides are map keys (the manifest dependency key and the YAML catalog key), which JSONPath cannot select, and a line regex cannot scope keys to one named catalog. R7: a lookup, not resolution (trpc-10 precedent).",
    "fire_verified": "n/a",
@@ -379,6 +444,10 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "registry_paths_resolve (regex '#~/(.yarn/patches/...patch)') babel-patch-references-resolve",
+   "rules": [
+    "babel-patch-references-resolve",
+    "babel-patch-references-resolve-manifest-relative"
+   ],
    "assertion_family": "none",
    "reason": "R7: a path reference over files alint reads. The ~/ prefix is the project root.",
    "fire_verified": "Scratch copy: renaming the interpret patch reference to a missing file fired 1, and deleting rollup-plugin-dts's patch file fired 1. The clean copy and the clone give 0.",
@@ -393,6 +462,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "cross_file superset (source.files unions $.name of the 166 manifests; targets.files regex of keys whose value starts with workspace:) babel-workspace-refs-resolve",
+   "rules": [
+    "babel-workspace-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "R7: a name lookup over files alint reads (trpc-B01 precedent). It is exact here because every workspace range is workspace:^ (babel-01), so no semver check is needed.",
    "fire_verified": "Scratch copy: renaming a workspace dependency key to @babel/traverser fired 1. Renaming @babel/helper-plugin-utils's own name fired 110 (one per dependent). The clean copy and the clone give 0.",
@@ -407,6 +479,10 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file subset babel-eslint-version-catalogs-exist + yaml_path_absent babel-eslint-version-catalog-keys-present",
+   "rules": [
+    "babel-eslint-version-catalogs-exist",
+    "babel-eslint-version-catalog-keys-present"
+   ],
    "assertion_family": "none",
    "reason": "Expressible but awkward. The matrix regex reads the flow list's first element only. The key check names version 9 by hand, because a catalog name cannot be selected by pattern and the catalog name would need to be templated from the matrix value.",
    "fire_verified": "C, not required. Fired anyway on the scratch copy: matrix [10] fired 1 (no catalog), and dropping @eslint/js from babel-eslint--9 fired 1. The clone gives 0.",
@@ -421,6 +497,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn install",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 D: lockfile freshness and package-manager resolution semantics (hardened mode also checks registry metadata over the network).",
    "fire_verified": "n/a",
@@ -435,6 +512,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn dedupe --check",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 names yarn dedupe --check as D (resolution semantics).",
    "fire_verified": "n/a",
@@ -449,6 +527,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches babel-package-manager-pinned-with-hash",
+   "rules": [
+    "babel-package-manager-pinned-with-hash"
+   ],
    "assertion_family": "none",
    "reason": "The script's packageManagerSpecRegex, with its own user-facing error and remedy ('Use corepack use yarn@<version>'). It is counted separately from the network hash comparison (babel-25). A guard-clause reading would fold it in (fork noted).",
    "fire_verified": "Scratch copy: 'yarn@4.17.0' with no hash fired 1. Removing the field fired 1, and '+sha224.' fired 1. The clean copy and the clone give 0.",
@@ -463,6 +544,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "yaml_path_matches babel-yarn-path-set + registry_paths_resolve babel-yarn-path-resolves",
+   "rules": [
+    "babel-yarn-path-set",
+    "babel-yarn-path-resolves"
+   ],
    "assertion_family": "none",
    "reason": "Toolchain-pin file-state assertions over files alint reads (forem-11 precedent). Presence and resolution are one unit.",
    "fire_verified": "Scratch copy: removing the yarnPath line fired babel-yarn-path-set 1. Pointing it at yarn-4.18.0.cjs fired babel-yarn-path-resolves 1, and deleting the release file fired 1. The clean copy and the clone give 0.",
@@ -477,6 +562,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "corepack (network)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 D: the expected hash comes from the registry through corepack, which is network and external state. The offline proxy (the committed binary hashes to the committed packageManager hash) is recorded as value-add.",
    "fire_verified": "n/a",
@@ -491,6 +577,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file equals (anchor .github/workflows/backport-7x.lock.yml, targets.files *.lock.yml, header regex) babel-gh-aw-single-compiler-version",
+   "rules": [
+    "babel-gh-aw-single-compiler-version"
+   ],
    "assertion_family": "none",
    "reason": "'All equal across a glob' needs an anchor file. Renaming the only agentic workflow breaks the rule loudly, which is awkward, so C. Tagged toolchain-pin as a tool-version agreement across files; 'other' is the alternative reading.",
    "fire_verified": "C, not required. Fired anyway: a second lock file with gh-aw (v0.0.1) fired 1. Changing the single lock file's version passes, as the anchor design implies. The clone gives 0.",
@@ -515,6 +604,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "gh aw compile + assert-dir-git-clean",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness by running a generator (spawning kinds are excluded); R7 D.",
    "fire_verified": "n/a",
@@ -529,6 +619,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "line_endings lf babel-text-files-lf",
+   "rules": [
+    "babel-text-files-lf"
+   ],
    "assertion_family": "none",
    "reason": "Git enforces LF on check-in, and alint asserts it directly over the whole tree, vendored .yarn included (berry-25 precedent).",
    "fire_verified": "n/a (family other). Fired anyway: a CRLF file fired 1. The clone gives 0.",
@@ -543,6 +636,14 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_dir (whole-file regex with {basename}, cross_file name/description equality) babel-readme-generated-shape; for_each_match babel-readme-install-flags, babel-readme-pkg-label-matches-dir, babel-readme-area-label-matches-dir; file_content_matches / file_content_forbidden babel-readme-issue-link-labelled / -unlabelled",
+   "rules": [
+    "babel-readme-generated-shape",
+    "babel-readme-install-flags",
+    "babel-readme-issue-link-labelled",
+    "babel-readme-issue-link-unlabelled",
+    "babel-readme-pkg-label-matches-dir",
+    "babel-readme-area-label-matches-dir"
+   ],
    "assertion_family": "none",
    "reason": "The generator's whole output contract is expressible natively, but the 14-package issue-label map is copied into the config by hand, so a new label would go unchecked silently (berry hand-list precedent): C.",
    "fire_verified": "C, not required. Fired anyway: a wrong title, description drift, a wrong docs dir, a swapped --save flag, a helper with --dev, a wrong pkg label, a wrong area label, a link on an unlabelled package, a missing link on a labelled package, and trailing extra text each fired. The clone gives 0.",
@@ -557,6 +658,17 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_file/for_each_dir + json_path_absent + file_content_matches/forbidden: babel-npmignore-absent-when-private-or-files, -present-otherwise, -content, -scripts-when-dir, -no-scripts-without-dir, -extra-compat-data, -extra-node, -extra-decorators, -no-other-extras",
+   "rules": [
+    "babel-npmignore-absent-when-private-or-files",
+    "babel-npmignore-present-otherwise",
+    "babel-npmignore-content",
+    "babel-npmignore-scripts-when-dir",
+    "babel-npmignore-no-scripts-without-dir",
+    "babel-npmignore-extra-compat-data",
+    "babel-npmignore-extra-node",
+    "babel-npmignore-extra-decorators",
+    "babel-npmignore-no-other-extras"
+   ],
    "assertion_family": "none",
    "reason": "Fully expressible, but the extraIgnore map (3 packages) is hand-copied: C.",
    "fire_verified": "C, not required. Fired anyway: changed content, a .npmignore on a files package, a missing .npmignore, a scripts dir not listed, scripts listed without the dir, an extra entry elsewhere, and a removed extra each fired 1. The clone gives 0.",
@@ -571,6 +683,7 @@
    "family": "other",
    "bucket": "B-delegate",
    "alint": "(none) loader-specific option inheritance and JSON deep-equality",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Repository-state logic of the fixture loader's option inheritance: suite or fixture fallback, a category level for the parser, deep equality after deleting a key. It belongs in a plugin, not core (B-delegate; the integrator moved it from B-adapter, which its own reason argued against).",
    "fire_verified": "n/a",
@@ -602,6 +715,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node scripts/generators/tsconfig.ts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness by running a generator with a topological sort and special-cased edges (berry-32 precedent). The cycle throw is a guard for the sort and is folded in.",
    "fire_verified": "n/a",
@@ -616,6 +730,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: ordered-sequence equality between a JSON array and a regex-extracted sequence (set equality and block shape are native, kept as value-add)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The order is the JSON array's arbitrary order, not a sort, so ordered_block does not apply. R7's example puts order in B-adapter (no order operator).",
    "fire_verified": "n/a",
@@ -638,6 +753,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "make build-standalone-ci + assert-dir-git-clean",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness by running the build (R7 D). R1 collapses the two platforms.",
    "fire_verified": "n/a",
@@ -652,6 +768,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "pack-script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "It runs the bundler. alint's pair_hash supports only sha256/sha512, so even the embedded-hash half is out of reach.",
    "fire_verified": "n/a",
@@ -666,6 +783,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "make check-compat-data",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network (git clone of compat-table) plus running generators.",
    "fire_verified": "n/a",
@@ -680,6 +798,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: workspace package-name -> manifest resolver feeding file_graph acyclic",
+   "rules": [],
    "assertion_family": "none",
    "reason": "file_graph's acyclic needs path-shaped edges, and it drops bare package names (trpc-13 precedent).",
    "fire_verified": "n/a",
@@ -702,6 +821,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "unique_by x3 (key {dir}) babel-fixture-one-input, -one-exec, -one-output",
+   "rules": [
+    "babel-fixture-one-input",
+    "babel-fixture-one-exec",
+    "babel-fixture-one-output"
+   ],
    "assertion_family": "none",
    "reason": "A per-directory uniqueness over file roles. The brace globs mirror the loader's role-by-name rule.",
    "fire_verified": "n/a (family other). Fired anyway: adding input.mjs beside input.js fired 1, and output.js plus output.mjs fired 1. The clone gives 0.",
@@ -716,6 +840,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex babel-fixture-input-exec-extension, babel-fixture-output-extension",
+   "rules": [
+    "babel-fixture-input-exec-extension",
+    "babel-fixture-output-extension"
+   ],
    "assertion_family": "none",
    "reason": "A file-name assertion. Multi-dot names such as input.js.map are excluded, as the loader's last-extension role split excludes them.",
    "fire_verified": "n/a (family other). Fired anyway: input.coffee fired 1. The clone gives 0.",
@@ -730,6 +858,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_file + file_absent ({dir}/input.* minus input.{ext}) babel-fixture-exec-input-same-extension",
+   "rules": [
+    "babel-fixture-exec-input-same-extension"
+   ],
    "assertion_family": "none",
    "reason": "A templated sibling-existence check.",
    "fire_verified": "n/a (family other). Fired anyway: exec.mjs beside input.js fired 1. The clone gives 0.",
@@ -744,6 +875,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "json_path_matches (if_present) babel-fixture-min-node-version-semver",
+   "rules": [
+    "babel-fixture-min-node-version-semver"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but the four process-runner fixture trees (babel-cli, babel-node, babel-register, babel-build-external-helpers via buildProcessTests) use a numeric major, a different contract, and are excluded by a hand list.",
    "fire_verified": "C, not required. Fired anyway: minNodeVersion '22' in a transform fixture fired 1. babel-cli's numeric 10 values in the scratch copy pass. The clone gives 0.",
@@ -758,6 +892,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-fixture-os-option-type",
+   "rules": [
+    "babel-fixture-os-option-type"
+   ],
    "assertion_family": "none",
    "reason": "A type check on one JSON value.",
    "fire_verified": "n/a (family other). Fired anyway: os 5 fired 1, and os ['linux', 3] fired 1. The clone gives 0.",
@@ -772,6 +909,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-fixture-no-source-map-option",
+   "rules": [
+    "babel-fixture-no-source-map-option"
+   ],
    "assertion_family": "none",
    "reason": "A banned key.",
    "fire_verified": "n/a (family other). Fired anyway: sourceMap true fired 1. The clone gives 0.",
@@ -786,6 +926,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent babel-fixture-preset-arity",
+   "rules": [
+    "babel-fixture-preset-arity"
+   ],
    "assertion_family": "none",
    "reason": "An array-length bound via the length() filter.",
    "fire_verified": "n/a (family other). Fired anyway: a 4-element preset fired 1. The clone gives 0.",
@@ -800,6 +943,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "dir_only_contains babel-fixture-suites-are-directories, babel-parser-fixture-categories-are-directories",
+   "rules": [
+    "babel-fixture-suites-are-directories",
+    "babel-parser-fixture-categories-are-directories"
+   ],
    "assertion_family": "none",
    "reason": "A structure invariant with the loader's own ignore list.",
    "fire_verified": "n/a (family other). Fired anyway: a stray file in a fixtures root fired 1, and one in a parser category fired 1. The clone gives 0.",
@@ -814,6 +961,7 @@
    "family": "other",
    "bucket": "B-delegate",
    "alint": "(none) needs the loader's option inheritance (root -> suite -> task)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "throws is usually inherited from a suite options.json, so the check needs the loader's merge semantics. Two runners, one convention (R1).",
    "fire_verified": "n/a",
@@ -828,6 +976,7 @@
    "family": "other",
    "bucket": "B-delegate",
    "alint": "(none) needs effective (inherited) options",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Like babel-48, it needs the loader's option merge.",
    "fire_verified": "n/a",
@@ -842,6 +991,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint reference: (stripped plugin/preset name from options.json) -> packages/babel-{plugin,preset}-<name> must not exist when prefixed",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "An existence-conditioned join from option values to package directories. A blanket 'no @babel/ prefix' regex passes at the pin but is stricter than the repo's rule, which allows prefixed names outside the monorepo.",
    "fire_verified": "n/a",
@@ -856,6 +1006,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: type checker.",
    "fire_verified": "n/a",
@@ -870,6 +1021,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linter. Import restrictions stay D (trpc-41 precedent). linebreak-style is folded into babel-29.",
    "fire_verified": "n/a",
@@ -884,6 +1036,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tstyche",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: type tests.",
    "fire_verified": "n/a",
@@ -898,6 +1051,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: formatter.",
    "fire_verified": "n/a",
@@ -912,6 +1066,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "gulp bundle-dts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build step.",
    "fire_verified": "n/a",
@@ -926,6 +1081,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: test runner. R1 collapses the matrix.",
    "fire_verified": "n/a",
@@ -940,6 +1096,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node test/esm/index.ts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs project code.",
    "fire_verified": "n/a",
@@ -954,6 +1111,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "list-node-flags.js",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Compares against the running Node's flags (environment).",
    "fire_verified": "n/a",
@@ -968,6 +1126,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "make test-test262/test-flow/test-typescript",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network download plus running tests.",
    "fire_verified": "n/a",
@@ -982,6 +1141,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "test262 runner",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Running tests and comparing with external artifacts.",
    "fire_verified": "n/a",
@@ -996,6 +1156,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "runtime-integration scripts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs bundlers and Node.",
    "fire_verified": "n/a",
@@ -1010,6 +1171,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "yarn up + jest eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Resolution plus test execution. Its static precondition is babel-20.",
    "fire_verified": "n/a",
@@ -1024,6 +1186,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "make prepublish-no-lint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build.",
    "fire_verified": "n/a",
@@ -1038,6 +1201,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "publint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a linter over build output that is not committed.",
    "fire_verified": "n/a",
@@ -1052,6 +1216,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "ensure-packages-exist.ts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network registry state.",
    "fire_verified": "n/a",
@@ -1066,6 +1231,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "e2e scripts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs builds and tests.",
    "fire_verified": "n/a",
@@ -1080,6 +1246,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "(none)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The condition (whether a commit is LLM-generated) is provenance, not repository state. A git_commit_message proxy would be both a git-history kind (excluded at depth 1) and a guess.",
    "fire_verified": "n/a",
@@ -1094,6 +1261,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Same unit as jest-B02 and trpc-B05 (workspace names unique, B-config unique-key, other). It asserts uniqueness over one extracted value (manifest name) across a group, with no name-to-value join, so it stays B-config under the batch-2 ruling. Stage A catalogued the duplicate check for neither Yarn nor the release-tool.",
    "fire_verified": "n/a",
@@ -1108,6 +1276,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches; paths packages/babel-helpers/src/helpers/*.{js,ts}; pattern (?m)^\\s*/\\*\\s*@minVersion\\s+\\S+\\s*\\*/\\s*$. This rule is NOT in Stage A's config and should be added as e.g. babel-helpers-min-version-annotation.",
+   "rules": [
+    "babel-helpers-min-version-annotation"
+   ],
    "assertion_family": "none",
    "reason": "A file-content property that the build script checks before it generates anything. It is not code analysis: the script only applies a regex to the file text. file_content_matches expresses it exactly. R4: my probe rule passed on the clone and on a clean scratch copy, and fired 1 when the annotation was stripped from typeof.ts.",
    "fire_verified": "n/a (family other). Still verified: the probe passed on the clone and a clean copy, and fired 1 on a copy with the @minVersion line removed from src/helpers/typeof.ts.",
@@ -1122,6 +1293,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file superset: the source set is files packages/babel-compat-data/data/{plugins,plugin-bugfixes}.json with regex (?m)^  \"([^\"]+)\": \\{; four targets over packages/babel-preset-env/src/available-plugins.ts with complement regexes (bugfix/..., transform-[^dm\"]..., transform-d minus dynamic-import, transform-m minus modules-) to emulate the prefix exclusions.",
+   "rules": [
+    "babel-preset-env-available-plugins-in-compat-data"
+   ],
    "assertion_family": "none",
    "reason": "A set inclusion between two named key sets, expressible today but only by reading JSON keys and TS object keys with layout-specific regexes plus hand-written complement patterns for the exclusions. The batch-2 ruling makes a regex read of a JSON key, or a regex that holds for one layout only, C. Alternative reading: D, if the TS map is treated as source extraction. The map is a flat object literal of string keys, so I classify by logic (R7). The probe passed on the clone and fired 2 on a copy with two keys added.",
    "fire_verified": "n/a (family other). The probe passed on the clone and fired 2 on a mutated copy.",
@@ -1158,7 +1332,19 @@
   "babel-valueadd-yarn-path-version-matches-package-manager (cross_file equals): the yarnPath release file name carries the packageManager version (4.17.0). Passes.",
   "babel-valueadd-archived-libs-module-set (cross_file set_equals): lib/archived-libs.d.ts declares exactly the archived-syntax-pkgs.json names. This is the set half of B-adapter unit babel-35. Passes.",
   "babel-valueadd-archived-libs-shape (file_content_matches): lib/archived-libs.d.ts is the generator's header plus only its fixed declare-module blocks. This is the shape half of babel-35. Passes.",
-  "babel-valueadd-agentic-workflow-has-lock (pair): every .github/workflows/*.md agentic source has its .lock.yml. Passes."
+  "babel-valueadd-agentic-workflow-has-lock (pair): every .github/workflows/*.md agentic source has its .lock.yml. Passes.",
+  "babel-yarn-plugins-resolve (info): kept as value-add after babel-28 was removed; see `removed`",
+  "babel-public-workspaces-name-version (info): kept as value-add after babel-30 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "babel-valueadd-yarn-binary-hash-in-package-manager",
+  "babel-valueadd-yarn-plugin-checksums",
+  "babel-valueadd-yarn-path-version-matches-package-manager",
+  "babel-valueadd-archived-libs-module-set",
+  "babel-valueadd-archived-libs-shape",
+  "babel-yarn-plugins-resolve",
+  "babel-public-workspaces-name-version",
+  "babel-valueadd-agentic-workflow-has-lock"
  ],
  "absent_categories": [
   "locale: no translation catalogs or i18n gates (the repository has no locale files)",

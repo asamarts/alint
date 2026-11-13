@@ -61,7 +61,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 0,
-    "D": 1
+    "D": 0
    },
    "addressable": 2,
    "coverage_today": 100,
@@ -78,7 +78,7 @@
     "B-kernel": 0,
     "B-delegate": 0,
     "C": 4,
-    "D": 17
+    "D": 18
    },
    "addressable": 23,
    "coverage_today": 65,
@@ -97,6 +97,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir over packages/*, examples/*, website with json_path_absent filters; rules jestjs-jest-workspace-license-public, jestjs-jest-workspace-license-private",
+   "rules": [
+    "jestjs-jest-workspace-license-public",
+    "jestjs-jest-workspace-license-private"
+   ],
    "assertion_family": "none",
    "reason": "R7: one yarn.config.cjs rule is one unit, classified by what it asserts. A per-manifest field-value check that JSONPath filters express. Passes on the clone (R4).",
    "fire_verified": "n/a (family other); sanity-fired anyway: a public manifest with license changed and a private manifest given a license each fired on a scratch copy",
@@ -111,6 +115,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + json_path_absent using a {path} template inside the RFC 9535 filter; rules jestjs-jest-workspace-repository-public, jestjs-jest-workspace-repository-private",
+   "rules": [
+    "jestjs-jest-workspace-repository-public",
+    "jestjs-jest-workspace-repository-public-root",
+    "jestjs-jest-workspace-repository-private"
+   ],
    "assertion_family": "none",
    "reason": "R7. A per-manifest field check that depends on the manifest's own directory, which for_each_dir's {path} token supplies. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: wrong repository.directory on a public package and a repository field on a private package each fired",
@@ -125,6 +134,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + json_path_absent; rules jestjs-jest-workspace-publish-config-public, jestjs-jest-workspace-publish-config-private",
+   "rules": [
+    "jestjs-jest-workspace-publish-config-public",
+    "jestjs-jest-workspace-publish-config-private"
+   ],
    "assertion_family": "none",
    "reason": "R7. A per-manifest field check. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: public publishConfig removed and private publishConfig added each fired",
@@ -139,6 +152,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file (regex extract of the range from yarn.config.cjs -> json extract $.engines[?(@ == $.engines.node && $.private != true)] over every workspace manifest, allow_missing_target) jestjs-jest-workspace-engines-node-public, plus for_each_dir presence rule jestjs-jest-workspace-engines-node-present",
+   "rules": [
+    "jestjs-jest-workspace-engines-node-public",
+    "jestjs-jest-workspace-engines-node-present"
+   ],
    "assertion_family": "none",
    "reason": "R7. An equality between a value in a config file and a field in each public manifest, with private manifests exempt. cross_file with a filtered JSONPath target expresses it. Passes on the clone.",
    "fire_verified": "Scratch copies of the clone: (a) a public package's engines.node edited -> fired; (b) a private workspace's engines.node edited -> correctly did not fire; (c) the range literal in yarn.config.cjs edited -> fired on every public workspace; (d) engines removed from a public package -> the presence rule fired. Every rule passed on the unmodified copy and on the clone.",
@@ -153,6 +170,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + json_path_matches $['main','types'] ^\\./ if_present; rule jestjs-jest-workspace-main-types-dot-slash",
+   "rules": [
+    "jestjs-jest-workspace-main-types-dot-slash"
+   ],
    "assertion_family": "none",
    "reason": "R7. A per-manifest value pattern. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: main without ./ fired",
@@ -167,6 +187,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "cross_file root package.json $.engines.node -> packages/*/package.json $.engines.node (equals); rule jestjs-jest-package-engines-match-root",
+   "rules": [
+    "jestjs-jest-package-engines-match-root"
+   ],
    "assertion_family": "none",
    "reason": "A different assertion from jest-04: its source of truth is the root manifest, not yarn.config.cjs, and it covers private packages and packages/* only (R1 keeps them apart). cross_file equality expresses it. Passes on the clone (all 55 packages match).",
    "fire_verified": "Scratch copies: (a) packages/test-utils (private) engines.node changed -> fired; (b) root package.json engines.node changed -> fired on every package; (c) engines removed from a package -> fired. Passed on the unmodified copy and on the clone.",
@@ -181,6 +204,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent with a conditional RFC 9535 filter over packages/*/package.json; rule jestjs-jest-package-main-types-canonical",
+   "rules": [
+    "jestjs-jest-package-main-types-canonical"
+   ],
    "assertion_family": "none",
    "reason": "R1 folds the buildTs main/types agreement into the stricter buildUtils canonical-value check. Literal values under a conditional filter. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: a TS package's main changed to ./build/main.js fired",
@@ -195,6 +221,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve over packages/*/package.json for object bins ($.bin.*) and string bins; rules jestjs-jest-package-bin-exists-object, jestjs-jest-package-bin-exists-string",
+   "rules": [
+    "jestjs-jest-package-bin-exists-object",
+    "jestjs-jest-package-bin-exists-string"
+   ],
    "assertion_family": "none",
    "reason": "A reference from manifest values to paths relative to the manifest's directory, which is what registry_paths_resolve does. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: object and string bin paths renamed each fired",
@@ -209,6 +239,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir packages/* when the package has tsconfig.json -> json_path_matches $.types; rule jestjs-jest-ts-package-declares-types",
+   "rules": [
+    "jestjs-jest-ts-package-declares-types"
+   ],
    "assertion_family": "none",
    "reason": "A per-directory conditional field check. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: types removed from a TS package fired",
@@ -223,6 +256,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent $.dependencies['@jest/test-utils'] over packages/*/package.json; rule jestjs-jest-test-utils-dev-dependency-only",
+   "rules": [
+    "jestjs-jest-test-utils-dev-dependency-only"
+   ],
    "assertion_family": "none",
    "reason": "A banned dependency field ('allowed and banned dependency fields' is in the dep-version family). Per-manifest absence check. Passes on the clone.",
    "fire_verified": "Scratch copy: @jest/test-utils added to a package's dependencies -> fired; the unmodified copy and the clone pass.",
@@ -237,6 +273,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches with a whole-file \\A alternation (empty file | header), excludes copied from the script's lists plus binary extensions; rule jestjs-jest-copyright-header",
+   "rules": [
+    "jestjs-jest-copyright-header"
+   ],
    "assertion_family": "none",
    "reason": "A per-file content check over a file set alint can reproduce from the script's lists. Passes on the clone, matching my simulation of the script (0 failures).",
    "fire_verified": "n/a (family other); sanity-fired: a header removed from a .ts file fired; a blank file correctly did not fire",
@@ -251,6 +290,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match on CHANGELOG.md with named groups, equal [a,b] and two forbid patterns; rule jestjs-jest-changelog-pr-links",
+   "rules": [
+    "jestjs-jest-changelog-pr-links"
+   ],
    "assertion_family": "none",
    "reason": "R1: one script with one link-format check (number equality, org, type) gives one unit. Regex captures plus an equality between groups express it. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: a mismatched number, a wrong org (two variants), a type of issues, and a second link on one line each fired",
@@ -265,6 +307,10 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_matches and json_path_equals on package.json; rules jestjs-jest-root-types-node-18, jestjs-jest-root-types-node-resolution-18",
+   "rules": [
+    "jestjs-jest-root-types-node-18",
+    "jestjs-jest-root-types-node-resolution-18"
+   ],
    "assertion_family": "none",
    "reason": "An allowed range for one dependency, held by the resolutions field and documented as a project rule. Literal value checks. Passes on the clone.",
    "fire_verified": "Scratch copies: devDependencies @types/node set to ^20 -> fired; resolutions set to 20.x -> fired; the unmodified copy and the clone pass.",
@@ -279,6 +325,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file yaml $.npmMinimalAgeGate -> regex in scripts/verifyOldTs.mjs; rule jestjs-jest-verify-old-ts-age-gate-matches-yarnrc",
+   "rules": [
+    "jestjs-jest-verify-old-ts-age-gate-matches-yarnrc"
+   ],
    "assertion_family": "none",
    "reason": "A resolution-policy value kept in sync by hand, with the invariant stated in the script. A YAML value equals a regex capture. Holds at the pin.",
    "fire_verified": "Scratch copies: .yarnrc.yml npmMinimalAgeGate changed to 7d -> fired; the literal in verifyOldTs.mjs changed -> fired; the unmodified copy and the clone pass.",
@@ -303,6 +352,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_starts_with; rule jestjs-jest-jasmine-utils-license-header",
+   "rules": [
+    "jestjs-jest-jasmine-utils-license-header"
+   ],
    "assertion_family": "none",
    "reason": "A documented, load-bearing convention that holds at the pin. A fixed prefix check.",
    "fire_verified": "n/a (family other); sanity-fired: the header line edited fired",
@@ -317,6 +369,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_graph derive_target + no_dangling; rule jestjs-jest-runtime-internals-tests-mirror-sources",
+   "rules": [
+    "jestjs-jest-runtime-internals-tests-mirror-sources"
+   ],
    "assertion_family": "none",
    "reason": "A documented convention that holds at the pin. A derived path must exist.",
    "fire_verified": "n/a (family other); sanity-fired: an orphan test file fired",
@@ -331,6 +386,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file regex extract -> regex extract (equals); rule jestjs-jest-external-matcher-trap-in-sync",
+   "rules": [
+    "jestjs-jest-external-matcher-trap-in-sync"
+   ],
    "assertion_family": "none",
    "reason": "A documented cross-file sync invariant (snapshot stack tests exercise it indirectly). Two regex captures must be equal. Holds at the pin.",
    "fire_verified": "n/a (family other); sanity-fired: the marker renamed in expect fired with a mismatch message",
@@ -345,6 +403,12 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file superset (docs front-matter ids vs sidebar JSON leaves), for_each_dir for versioned docs; rules jestjs-jest-sidebar-ids-exist, jestjs-jest-versioned-sidebar-ids-exist",
+   "rules": [
+    "jestjs-jest-sidebar-ids-exist",
+    "jestjs-jest-versioned-sidebar-ids-exist",
+    "jestjs-jest-navbar-doc-ids-exist",
+    "jestjs-jest-versioned-navbar-doc-ids-exist"
+   ],
    "assertion_family": "none",
    "reason": "R7: a build-time integrity check over files alint reads, extracted from the Docusaurus build. A set inclusion between two extractions. Passes on the clone.",
    "fire_verified": "n/a (family other); sanity-fired: an unknown id in sidebars.json (doc and api sections) and in a versioned sidebar each fired",
@@ -359,6 +423,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "line_endings lf; rule jestjs-jest-text-files-lf",
+   "rules": [
+    "jestjs-jest-text-files-lf"
+   ],
    "assertion_family": "none",
    "reason": "Git normalizes on commit. The tree is LF at the pin.",
    "fire_verified": "n/a (family other); sanity-fired: a CRLF file fired",
@@ -373,6 +440,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "for_each_dir over a hand-copied 19-package brace list /**/__tests__ -> file_exists + json_path_matches extends; rule jestjs-jest-typechecked-tests-have-tsconfig",
+   "rules": [
+    "jestjs-jest-typechecked-tests-have-tsconfig"
+   ],
    "assertion_family": "none",
    "reason": "R7: the structural precondition of the tsc run (each directory must be a project) is extracted; the type check itself is D. C because the package list has to be copied by hand from the script, and it drifts when the script changes.",
    "fire_verified": "n/a (family other); sanity-fired: a removed tsconfig and a wrong extends each fired",
@@ -387,6 +457,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file regex extracts of the first and last authors in the front matter vs authors.yml keys; rules jestjs-jest-blog-authors-defined-first, jestjs-jest-blog-authors-defined-last",
+   "rules": [
+    "jestjs-jest-blog-authors-defined-first",
+    "jestjs-jest-blog-authors-defined-last"
+   ],
    "assertion_family": "none",
    "reason": "R7 build integrity check. C because front-matter author lists are extracted by regex, which covers only the first and last entry, so a middle author in a list of three or more is not checked.",
    "fire_verified": "n/a (family other); sanity-fired: an unknown single author, the first list entry and the last list entry each fired",
@@ -401,6 +475,11 @@
    "family": "other",
    "bucket": "C",
    "alint": "indent_style, no_trailing_whitespace, final_newline with per-file excludes; rules jestjs-jest-editorconfig-indent-spaces, jestjs-jest-editorconfig-trim-trailing-whitespace, jestjs-jest-editorconfig-final-newline",
+   "rules": [
+    "jestjs-jest-editorconfig-indent-spaces",
+    "jestjs-jest-editorconfig-trim-trailing-whitespace",
+    "jestjs-jest-editorconfig-final-newline"
+   ],
    "assertion_family": "none",
    "reason": "editorconfig_conforms reports 2297 violations on JSDoc ` * ` continuation lines, which are not indentation errors. The split kinds with excludes (vendored .yarn, three fixture files) are a tuning, so C.",
    "fire_verified": "n/a (family other); sanity-fired: a tab indent, trailing whitespace and a missing final newline each fired",
@@ -415,6 +494,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint over the workspace-manifest dependency entries grouped by dependency name, one range per name, with an exemption",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
    "fire_verified": "n/a",
@@ -440,6 +520,7 @@
    "family": "dep-version",
    "bucket": "B-config",
    "alint": "constraint: per (manifest, dependency name) at most one dependency field",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "R7. RFC 9535 has no access to object keys, so no JSONPath filter can intersect the two key sets. Expressed as a functional dependency, (manifest, name) to field.",
    "fire_verified": "n/a",
@@ -454,6 +535,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a value-transform operator (main to the exports '.' object, .js to .d.ts) and a closed-key-set equality on objects",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The expected value is computed from other fields with string transforms and a branch for the type-only package list. No adapter or operator derives it.",
    "fire_verified": "n/a",
@@ -476,6 +558,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a package-name to workspace-path mapping adapter and an ordered-sequence equality operator",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The order matters (deepStrictEqual on arrays), and names have to be mapped to relative paths. No order operator or name-to-path adapter exists (section 2.2 lists the order operator as B-adapter).",
    "fire_verified": "n/a",
@@ -496,9 +579,18 @@
       "summary": "A TS package's tsconfig.json references equal the sorted paths of its internal TS workspace dependencies (scripts/buildTs.mjs:73-79).",
       "needs": "order"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "Mapping package names to workspace paths (scripts/buildTs.mjs:20-31) comes before the ordered comparison, so package-graph is the capability it lacks most directly."
     }
    ],
-   "needs": "order"
+   "needs": "package-graph"
   },
   {
    "id": "jest-27",
@@ -508,6 +600,10 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "constraint: set of packages with the test-utils devDependency equals set of packages (path_capture of package dir) whose __tests__ tsconfig references test-utils",
+   "rules": [
+    "jestjs-jest-test-utils-dev-dependency-iff-referenced",
+    "jestjs-jest-test-utils-dev-dependency-needs-tests-tsconfig"
+   ],
    "assertion_family": "none",
    "reason": "Expressible with for_each_dir plus cross_file set_equals (Stage B, Stage C), but the devDependency side is a regex read of a JSON key restricted to the flat devDependencies object, which is layout-dependent (batch 2 ruling: a regex read of a JSON key is C).",
    "fire_verified": "n/a",
@@ -539,6 +635,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint: each JSON array value, with a version- prefix, references an existing directory",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "R7 build integrity check. registry_paths_resolve resolves values as paths but cannot add the version- prefix. A reference relation with a templated target expresses it.",
    "fire_verified": "n/a",
@@ -553,6 +650,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2/R7: code analysis of source.",
    "fire_verified": "n/a",
@@ -567,6 +665,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: formatter.",
    "fire_verified": "n/a",
@@ -581,6 +680,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: type checker (the directory-layout precondition is extracted as jest-20).",
    "fire_verified": "n/a",
@@ -595,6 +695,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node scripts/build.mjs, scripts/buildTs.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: running the build (the manifest assertions those scripts make are extracted as jest-06 to jest-10 and jest-25 to jest-27).",
    "fire_verified": "n/a",
@@ -609,6 +710,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "node scripts/buildTs.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: inspects build output (build/**/*.d.ts), which does not exist in the tree, so the build must run.",
    "fire_verified": "n/a",
@@ -623,6 +725,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "api-extractor",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: build and type analysis.",
    "fire_verified": "n/a",
@@ -637,6 +740,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "node scripts/verifyPnP.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager install and running the code.",
    "fire_verified": "n/a",
@@ -648,14 +752,25 @@
    "summary": "verify-old-ts: published types compile with the oldest supported TypeScript",
    "evidence": "package.json:131; scripts/verifyOldTs.mjs; nodejs.yml ts-compatibility job",
    "mechanism": "ci",
-   "family": "toolchain-pin",
+   "family": "other",
    "bucket": "D",
    "alint": "node scripts/verifyOldTs.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: installs and type checks a temporary project (the age-gate sync inside the script is extracted as jest-14).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "A compile under the oldest supported TypeScript is a type check, not versions agreeing across files (section 2.3); tq-51 and trpc-52, the same check, are other."
+    }
+   ]
   },
   {
    "id": "jest-37",
@@ -665,6 +780,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint (type info), jest, tstyche",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: linters, type checkers and test runners.",
    "fire_verified": "n/a",
@@ -679,6 +795,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: test runner.",
    "fire_verified": "n/a",
@@ -693,6 +810,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: lockfile freshness needs package-manager resolution.",
    "fire_verified": "n/a",
@@ -707,6 +825,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution semantics (named as D in the ruling).",
    "fire_verified": "n/a",
@@ -721,6 +840,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node scripts/checkChangelog.mjs, scripts/requireChangelog.mjs",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs external state (PR number, labels, changed files from the GitHub API).",
    "fire_verified": "n/a",
@@ -735,6 +855,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "docusaurus build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: running the build (its file-level integrity checks are extracted as jest-18, jest-21 and jest-28).",
    "fire_verified": "n/a",
@@ -749,6 +870,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "external CLA bot",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network and external state.",
    "fire_verified": "n/a",
@@ -763,6 +885,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "human review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs semantic judgment of whether content is relevant or accurate, with no mechanical invariant in the files.",
    "fire_verified": "n/a",
@@ -777,6 +900,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "cross_file relation superset; source.files '{package.json,packages/*/package.json,website/package.json,examples/*/package.json}' extract json $.name (unioned); targets.files is the same glob with extract regex '\"(?:(?:@[^\"/]+/)?[^\"/@]+/)*((?:@[^\"/]+/)?[^\"/@]+)\"\\s*:\\s*\"workspace:'; allow_missing_target: true. Suggested id jestjs-jest-workspace-refs-resolve. It is not in Stage A's config.",
+   "rules": [
+    "jestjs-jest-workspace-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "R7, following batch-1 trpc-B01 (A, dep-version). Yarn's name lookup runs over manifests alint reads. Stage A folded it into jest-39 (lockfile freshness, D), but the lookup can fail by itself when a package is renamed, and today's kinds express it. The regex takes the last name segment of a resolution path key, so the root's @testing-library/... resolutions are covered.",
    "fire_verified": "Probe config on a scratch copy of the clone: it passes on the copy and on the read-only clone. Each break fired: packages/jest-cli dependency jest-util renamed to jest-utilx; packages/jest-mock name changed to jest-mocks (fired for package.json and every dependent); the resolution key @testing-library/react-native/pretty-format changed to .../pretty-formatz; the scoped root devDependency @jest/globals changed to @jest/globalz.",
@@ -791,6 +917,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over the workspace manifests ($.name -> manifest path). unique_by keys on path templates only, and cross_file has no uniqueness relation.",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "R7, following batch-1 trpc-B05 (B-config unique-key, other): one manifest per name across a group. Unlike trpc-B05, the error text is confirmed offline in the committed Yarn bundle.",
    "fire_verified": "n/a",
@@ -804,12 +931,25 @@
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "registry_paths_resolve; source '{package.json,packages/*/package.json,website/package.json,examples/*/package.json}', extract regex '\"patch:[^\"#]*#(?:~/|\\./)?([^\"]+)\"', expect: file. Suggested id jestjs-jest-yarn-patches-resolve.",
+   "alint": "registry_paths_resolve x2: jestjs-jest-yarn-patches-resolve-root-relative (~/ from the project root), jestjs-jest-yarn-patches-resolve-manifest-relative (other paths from the manifest)",
+   "rules": [
+    "jestjs-jest-yarn-patches-resolve-root-relative",
+    "jestjs-jest-yarn-patches-resolve-manifest-relative"
+   ],
    "assertion_family": "none",
-   "reason": "R7: a protocol reference in manifests that must resolve to a file alint reads. It belongs with trpc-B01 (workspace:) and trpc-10 (catalog:) under 'workspace-protocol and catalog use'. Caveat: the rule resolves ~/ relative to the manifest, which is exact only for the root manifest, the only one with patches at the pin. The integrator may reject it as an install precondition rather than a rule; it is listed because batch 1 accepted the same shape.",
+   "reason": "R7: a protocol reference in manifests that must resolve to a file alint reads, as trpc-B01 (workspace:) and trpc-10 (catalog:). Yarn resolves ~/ from the project root and other paths from the manifest, so two rules with different bases express it.",
    "fire_verified": "Probe on a scratch copy: it passes on the copy and on the clone. It fired when .yarn/patches/ts-node-npm-10.9.1-6c268be7f4.patch was deleted (./ form) and when the @types/mdx patch was renamed (~/ form).",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "Stage C split the rule by base, so the caveat about ~/ is outdated."
+    }
+   ]
   },
   {
    "id": "jest-B04",
@@ -819,6 +959,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "two cross_file set_equals rules. (1) The Windows codes: specialChars regex \"isWindows \\? '(\\\\u[0-9A-Fa-f]{4})' : '\\\\u[0-9A-Fa-f]{4}'\" vs normalizeIcons regex \"new RegExp\\('(\\\\u[0-9A-Fa-f]{4})', 'gu'\\)\". (2) The POSIX codes: specialChars \"isWindows \\? '\\\\u[0-9A-Fa-f]{4}' : '(\\\\u[0-9A-Fa-f]{4})'\" vs normalizeIcons \"'gu'\\), '(\\\\u[0-9A-Fa-f]{4})'\\)\".",
+   "rules": [
+    "jestjs-jest-normalize-icons-windows-codes-in-sync",
+    "jestjs-jest-normalize-icons-posix-codes-in-sync"
+   ],
    "assertion_family": "none",
    "reason": "A load-bearing comment (R5), of the same kind as jest-17, which Stage A counted as A. It holds at the pin. C, not A: a capture group must be one contiguous substring, so the (windows, posix) pairing cannot be compared. Two set rules catch any code changed on one side only, but miss a swapped pairing.",
    "fire_verified": "n/a (family other). Sanity-fired on a scratch copy: changing the Windows success code in specialChars.ts fired rule 1, and changing the POSIX failed code fired rule 2. Both pass on the clone.",
@@ -833,6 +977,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest --detectLeaks",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R1 calibration: leak detection is a behavior separate from 'tests pass', as tokio's valgrind and miri are. Stage A folded it into jest-38. R2: D.",
    "fire_verified": "n/a",
@@ -847,6 +992,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tstyche",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R1: type-level assertions are a separate behavior from type-aware ESLint (lint-ts-files) and from the TS-config integration tests that jest-37 lumps them with. R2: D.",
    "fire_verified": "n/a",
@@ -861,6 +1007,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "human review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Split out of jest-44 under R1: it can pass or fail independently of the other conventions jest-44 lumps. Whether a change is relevant needs judgment.",
    "fire_verified": "n/a",
@@ -875,6 +1022,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "human review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Split out of jest-44 under R1. The sites are TS source tables (code analysis). The mechanical subset does not hold at the pin: 32 of the 106 ValidConfig initialOptions keys have no `### ` heading in docs/Configuration.md, and 53 have no Descriptions.ts entry (measured), so R5 also rules out an A form.",
    "fire_verified": "n/a",
@@ -889,6 +1037,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "human review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Split out of jest-44 under R1. Deciding whether a type test is about a matcher signature or about an internal expect concern needs semantic judgment.",
    "fire_verified": "n/a",
@@ -903,6 +1052,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn install output, reviewed by hand",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A documented review rule about dependency declarations. Checking it needs the package manager's peer-dependency resolution (R7 D).",
    "fire_verified": "n/a",
@@ -917,6 +1067,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "human review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis and judgment over source (R2/R7). Recorded so the D count is honest. Strictly, R1 would split this cluster into about five D units. That does not change any coverage figure.",
    "fire_verified": "n/a",
@@ -937,6 +1088,18 @@
   "jestjs-jest-va-site-locales-mapped-in-crowdin: every non-en site locale is mapped in crowdin.yaml (locale)",
   "jestjs-jest-va-crowdin-download-languages: crowdin.yaml mapped languages set_equals the --language flags of the crowdin:download script (locale)",
   "jestjs-jest-va-actions-pinned: GitHub Actions are pinned to full commit SHAs (pinned_references); every action is SHA-pinned but nothing checks it"
+ ],
+ "value_add_rules": [
+  "jestjs-jest-va-package-manager-matches-yarn-path",
+  "jestjs-jest-va-node-floor-coherent",
+  "jestjs-jest-va-agent-doc-engines-in-sync",
+  "jestjs-jest-va-package-versions-match-lerna",
+  "jestjs-jest-va-workspace-protocol-star",
+  "jestjs-jest-va-renovate-age-matches-yarnrc",
+  "jestjs-jest-va-crowdin-locales-enabled-on-site",
+  "jestjs-jest-va-site-locales-mapped-in-crowdin",
+  "jestjs-jest-va-crowdin-download-languages",
+  "jestjs-jest-va-actions-pinned"
  ],
  "absent_categories": [
   "committed locale files and locale gates: translations are gitignored (/website/i18n/*) and fetched from Crowdin only in the Netlify production build",

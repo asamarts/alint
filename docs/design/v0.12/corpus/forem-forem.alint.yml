@@ -77,7 +77,7 @@ rules:
   # LOCALE FAMILY
   # ════════════════════════════════════════════════════════════════
 
-  # forem-05 (A, locale) spec/lib/constants/settings/user_experience_spec.rb
+  # forem-05 (C, locale) spec/lib/constants/settings/user_experience_spec.rb
   # "offers every locale that ships a translation file":
   # Constants::Settings::UserExperience::SUPPORTED_LOCALES.keys must equal the
   # DOT-FREE file stems of config/locales/*.yml (the spec rejects any stem
@@ -91,6 +91,9 @@ rules:
   #      source is one glob, so it enumerates locale-shaped stems (ll, lll,
   #      ll-CC, ll_CC) rather than "any dot-free stem". Column-0 (not
   #      first-line) so a leading comment does not hide the root key.
+  # Both rules read the Ruby hash one entry per line. A one-line
+  # `SUPPORTED_LOCALES = { "en" => ..., "fr" => ... }.freeze` gives false
+  # findings although the spec passes, so the audit moved the unit to C.
   - id: forem-locales-files-registered-by-stem
     kind: for_each_file
     select: ["config/locales/*.yml", "!config/locales/*.*.yml"]

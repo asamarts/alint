@@ -190,7 +190,7 @@ rules:
       extract: { json: "$.name" }
     targets:
       files: "{package.json,apps/*/package.json,packages/*/package.json,ee/apps/*/package.json,ee/packages/*/package.json}"
-      extract: { regex: '"([^"]+)":[ \t]*"workspace:' }
+      extract: { regex: '"([^"]+)"\s*:\s*"workspace:' }
     relation: superset
     allow_missing_target: true
     level: error

@@ -71,8 +71,9 @@ synthesis + ranked backlog.
 ### v0.23 corpus stratum
 
 The [v0.23 corpus stratum](../../v0.23/corpus-stratum.md) adds configs for i18n
-repositories and JavaScript monorepos under the same protocol, pinned on
-2026-11-12. Each repository's record is in
+repositories and JavaScript monorepos, pinned on 2026-11-12. It follows the v0.12
+protocol plus ruling R7 (a tool run over files alint reads is classified by what it
+asserts), so its figures are not comparable with v0.12's. Each repository's record is in
 [`../../v0.23/stratum/`](../../v0.23/stratum/), and the results are in
 [`corpus-stratum-log.md`](../../v0.23/corpus-stratum-log.md).
 

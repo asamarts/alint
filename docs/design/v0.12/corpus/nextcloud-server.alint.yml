@@ -76,9 +76,9 @@
 #     GPL-3.0-or-later') in headers, .license sidecars and REUSE.toml values,
 #     so they need an SPDX-expression extractor that splits them into ids; the
 #     other side is a directory listing of LICENSES/.
-#   - nextcloud-25 ai-policy.yml "no coding-agent Signed-off-by trailer": the
-#     commit-message kinds can require a pattern but not forbid one
-#     (B-adapter).
+#   - nextcloud-25 ai-policy.yml "no coding-agent Signed-off-by trailer": a
+#     git_commit_message complement pattern bans it (C, as
+#     thunderbird-android-63); the clone is depth 1, so no rule here.
 #   - nextcloud-b02 root package.json `overrides` must not conflict with a
 #     direct dependency (a `$<name>` reference names a direct dependency; a
 #     non-`$` override of a direct dependency equals its spec), else `npm ci`
@@ -236,7 +236,7 @@ rules:
     level: error
     message: 'Contains a | in the translations (build/translation-checker.php).'
 
-  # nextcloud-04 (A, locale) build/triple-dot-checker.php:9-33
+  # nextcloud-04 (A, other) build/triple-dot-checker.php:9-33
   # In every file under apps/ and core/ except *.map, a t()/n() call whose
   # second string argument contains '...' is an error: translatable strings
   # use the ellipsis character. The script greps each line with

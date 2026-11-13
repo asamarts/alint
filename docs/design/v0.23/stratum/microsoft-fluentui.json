@@ -3,20 +3,20 @@
  "sha": "b4f5c3cca4e95ab5d271657cbf440cc8bf7427f6",
  "metrics": {
   "counts": {
-   "A": 19,
+   "A": 20,
    "B-config": 4,
-   "B-adapter": 10,
+   "B-adapter": 8,
    "B-kernel": 0,
    "B-delegate": 0,
-   "C": 9,
+   "C": 10,
    "D": 35
   },
   "addressable": 42,
-  "coverage_today": 45,
-  "coverage_with_tuning": 67,
-  "gap": 33,
-  "coverage_after_slice": 52,
-  "coverage_after_slice_with_entry_values": 57
+  "coverage_today": 48,
+  "coverage_with_tuning": 71,
+  "gap": 29,
+  "coverage_after_slice": 55,
+  "coverage_after_slice_with_entry_values": 60
  },
  "by_family": {
   "locale": {
@@ -38,20 +38,20 @@
   },
   "dep-version": {
    "counts": {
-    "A": 1,
+    "A": 2,
     "B-config": 1,
     "B-adapter": 3,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 3,
-    "D": 4
+    "C": 2,
+    "D": 3
    },
    "addressable": 8,
-   "coverage_today": 12,
+   "coverage_today": 25,
    "coverage_with_tuning": 50,
    "gap": 50,
-   "coverage_after_slice": 12,
-   "coverage_after_slice_with_entry_values": 25
+   "coverage_after_slice": 25,
+   "coverage_after_slice_with_entry_values": 38
   },
   "toolchain-pin": {
    "counts": {
@@ -74,16 +74,16 @@
    "counts": {
     "A": 14,
     "B-config": 3,
-    "B-adapter": 7,
+    "B-adapter": 5,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 5,
-    "D": 30
+    "C": 7,
+    "D": 31
    },
    "addressable": 29,
    "coverage_today": 48,
-   "coverage_with_tuning": 66,
-   "gap": 34,
+   "coverage_with_tuning": 72,
+   "gap": 28,
    "coverage_after_slice": 59,
    "coverage_after_slice_with_entry_values": 62
   }
@@ -97,6 +97,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches microsoft-fluentui-package-manager-yarn4-exact",
+   "rules": [
+    "microsoft-fluentui-package-manager-yarn4-exact"
+   ],
    "assertion_family": "none",
    "reason": "A structured read of one JSON key against an exact-version pattern. It holds at the pin (R5).",
    "fire_verified": "Scratch package.json with packageManager yarn@^4.18.0, then yarn@3.6.4: the rule fired each time. It passes on the clone.",
@@ -111,6 +114,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "registry_paths_resolve (yaml $.yarnPath, expect file) microsoft-fluentui-yarnpath-resolves",
+   "rules": [
+    "microsoft-fluentui-yarnpath-resolves",
+    "microsoft-fluentui-yarnpath-present"
+   ],
    "assertion_family": "none",
    "reason": "A path reference from a structured YAML value to the filesystem.",
    "fire_verified": "Removed .yarn/releases/yarn-4.18.0.cjs in a scratch copy: the rule fired. It passes on the clone.",
@@ -125,6 +132,9 @@
    "family": "toolchain-pin",
    "bucket": "C",
    "alint": "cross_file equals (regex on package.json, regex on .yarnrc.yml) microsoft-fluentui-yarnpath-matches-package-manager",
+   "rules": [
+    "microsoft-fluentui-yarnpath-matches-package-manager"
+   ],
    "assertion_family": "none",
    "reason": "Batch-2 ruling: a regex read of a JSON key is C. No normalize turns yarn@4.18.0 and .yarn/releases/yarn-4.18.0.cjs into the same full version; semver-minor would drop the patch digit.",
    "fire_verified": "n/a (C). It was fired anyway: in a scratch copy, the release renamed to 4.17.1 in yarnPath fired the rule. It passes on the clone.",
@@ -139,6 +149,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "yaml_path_matches microsoft-fluentui-azure-usenode-major-x + yaml_path_equals microsoft-fluentui-azure-usenode-check-latest",
+   "rules": [
+    "microsoft-fluentui-azure-usenode-major-x",
+    "microsoft-fluentui-azure-usenode-check-latest"
+   ],
    "assertion_family": "none",
    "reason": "Two structured YAML reads of one step that the template comment declares load-bearing. R1 makes them one unit.",
    "fire_verified": "In scratch tools.yml, version 22.14.0 fired the major-x rule and checkLatest false fired the check-latest rule. Both pass on the clone.",
@@ -153,6 +167,10 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_matches microsoft-fluentui-syncpack-is-root-devdependency + microsoft-fluentui-beachball-is-root-devdependency",
+   "rules": [
+    "microsoft-fluentui-syncpack-is-root-devdependency",
+    "microsoft-fluentui-beachball-is-root-devdependency"
+   ],
    "assertion_family": "none",
    "reason": "R7: the github-script guard asserts that a string-valued key exists. One guard pattern applied to two tools, collapsed under R1.",
    "fire_verified": "Removed syncpack, then beachball, from root devDependencies in a scratch copy: each rule fired. Both pass on the clone.",
@@ -165,13 +183,26 @@
    "evidence": "package.json:307 (storywright patch:...#~/.yarn/patches/storywright-npm-0.0.27-storybook7.14-bfcc4eb382.patch); yarn install --immutable in every CI job",
    "mechanism": "ci",
    "family": "dep-version",
-   "bucket": "C",
+   "bucket": "A",
    "alint": "registry_paths_resolve (regex over workspace manifests, base lint_root) microsoft-fluentui-yarn-patches-resolve",
+   "rules": [
+    "microsoft-fluentui-yarn-patches-resolve"
+   ],
    "assertion_family": "none",
-   "reason": "R7 classifies the assertion yarn install makes over files alint reads. Batch-2 ruling: the path is pulled from the specifier with a regex over manifest text, and a JSONPath extract returns the whole descriptor, so this is C.",
+   "reason": "R7: a path reference in manifests that must resolve to a committed file (babel-18 precedent). The regex takes the path from the descriptor value, which has one fixed form.",
    "fire_verified": "n/a (C). It was fired anyway: deleting the .patch file in a scratch copy fired the rule. It passes on the clone.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "C",
+      "dep-version",
+      "none"
+     ],
+     "why": "Pulling the patch path out of a patch: value is not a regex read of a JSON key, and it holds in any layout. babel-18, rocketchat-26 and jest-B03 are A with the same regex; the rule passes on the clone and fires when the patch file is deleted."
+    }
+   ]
   },
   {
    "id": "fluentui-07",
@@ -181,6 +212,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_matches ($.peerDependencies.*, a regex of node-semver's range grammar) microsoft-fluentui-peer-ranges-valid-semver",
+   "rules": [
+    "microsoft-fluentui-peer-ranges-valid-semver"
+   ],
    "assertion_family": "none",
    "reason": "alint has no semver-range operator, so the grammar is spelled as a regex. The generator scopes by project.json tags (publishable, vNext), which package.json cannot see, so the rule covers every workspace manifest. All 32 distinct peer ranges at the pin match.",
    "fire_verified": "n/a (C). It was fired anyway: the scratch ranges 'latest' and '||| 21' fired. The control '1.2.3 - 2.x || >=3.0.0-rc.1 <4' did not fire. It passes on the clone.",
@@ -195,6 +229,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_matches ($.resolutions['tar-fs'], range spelled as a regex) microsoft-fluentui-tar-fs-security-resolution",
+   "rules": [
+    "microsoft-fluentui-tar-fs-security-resolution"
+   ],
    "assertion_family": "none",
    "reason": "A documented security-maintained resolution that holds at the pin (R5). With no semver operator, ^2.1.3 is spelled as a regex.",
    "fire_verified": "n/a (C). It was fired anyway: 2.1.2 fired and removing the key fired. The control ^2.1.3 did not fire. It passes on the clone.",
@@ -209,6 +246,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches microsoft-fluentui-change-file-type-valid + microsoft-fluentui-change-file-dependent-type-valid",
+   "rules": [
+    "microsoft-fluentui-change-file-type-valid",
+    "microsoft-fluentui-change-file-dependent-type-valid"
+   ],
    "assertion_family": "none",
    "reason": "R7: an enum check over JSON files alint reads.",
    "fire_verified": "n/a (family other). It was fired anyway: type 'feature' and dependentChangeType 'bogus' each fired in scratch. Both pass on the clone.",
@@ -223,6 +264,16 @@
    "family": "other",
    "bucket": "C",
    "alint": "cross_file superset x8 (one rule per change type) microsoft-fluentui-change-type-{major,premajor,minor,preminor,patch,prepatch,prerelease,none}-allowed",
+   "rules": [
+    "microsoft-fluentui-change-type-major-allowed",
+    "microsoft-fluentui-change-type-premajor-allowed",
+    "microsoft-fluentui-change-type-minor-allowed",
+    "microsoft-fluentui-change-type-preminor-allowed",
+    "microsoft-fluentui-change-type-patch-allowed",
+    "microsoft-fluentui-change-type-prepatch-allowed",
+    "microsoft-fluentui-change-type-prerelease-allowed",
+    "microsoft-fluentui-change-type-none-allowed"
+   ],
    "assertion_family": "none",
    "reason": "Expressible today, but only as one rule per change type, with JSONPath filters that join packageName to the manifests whose list allows that type, and with the repo default restated in the major rule.",
    "fire_verified": "n/a (family other). It was fired anyway in scratch: prerelease on react-aria (disallowed) fired, major on @fluentui/azure-themes (default list) fired, and minor on @fluentui/react-theme-sass (own list includes minor) fired. Controls: minor on react-aria and major on react-aria did not fire, since react-aria's own list lacks major. It passes on the clone.",
@@ -237,6 +288,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden microsoft-fluentui-no-tslint-comments",
+   "rules": [
+    "microsoft-fluentui-no-tslint-comments"
+   ],
    "assertion_family": "none",
    "reason": "Batch-2 ruling: a linter rule that asserts a text property of the file, not its code, is classified by its logic. packages/eslint-plugin is excluded because its tests quote the directive.",
    "fire_verified": "n/a (family other). It was fired anyway: a tslint:disable comment added in packages/react/src in scratch fired. It passes on the clone.",
@@ -251,6 +305,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent (match() filter on name and version) microsoft-fluentui-preview-packages-zero-major",
+   "rules": [
+    "microsoft-fluentui-preview-packages-zero-major"
+   ],
    "assertion_family": "none",
    "reason": "A documented convention that holds at the pin (R5). The filter expresses it.",
    "fire_verified": "n/a (family other). It was fired anyway: a preview package set to 1.0.0 in scratch fired. It passes on the clone.",
@@ -265,6 +322,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_hash microsoft-fluentui-react-components-unstable-api-frozen",
+   "rules": [
+    "microsoft-fluentui-react-components-unstable-exports-frozen"
+   ],
    "assertion_family": "none",
    "reason": "A documented freeze. The API report is the committed surface, and its digest pins it.",
    "fire_verified": "n/a (family other). It was fired anyway: editing the api.md in scratch fired. It passes on the clone.",
@@ -289,6 +349,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches microsoft-fluentui-yarnrc-comments-kept",
+   "rules": [
+    "microsoft-fluentui-yarnrc-comments-kept"
+   ],
    "assertion_family": "none",
    "reason": "A load-bearing comment that states a file-text invariant. It holds at the pin.",
    "fire_verified": "n/a (family other). It was fired anyway: removing a comment in scratch fired. It passes on the clone.",
@@ -303,6 +366,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "line_endings (lf) microsoft-fluentui-api-reports-lf",
+   "rules": [
+    "microsoft-fluentui-api-reports-lf"
+   ],
    "assertion_family": "none",
    "reason": ".gitattributes sets `*.api.md text=auto` without eol=lf, so Git keeps only the committed blob LF. alint reads the working tree, which is CRLF on a Windows checkout with core.autocrlf=true, so the rule holds for one checkout layout only (C, batch 2 ruling). It passes on the clone and fires on CRLF.",
    "fire_verified": "n/a (family other). It was fired anyway: CRLF in a scratch api.md fired. It passes on the clone.",
@@ -325,6 +391,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "needs: entry-values. Later: constraint unique-key over (manifest, field, dependency, version) rows of the source manifests, with the version groups as partitions",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Batch-2 ruling: one version per dependency joins a dependency name to its value, which needs (key path, value) rows. The non-default groups have at most one instance per dependency because peerDependencies are excluded, so they act as carve-outs. The semverGroups entry is an ignored group and is inert for list-mismatches. A simulation found 0 mismatches at the pin.",
    "fire_verified": "n/a",
@@ -347,6 +414,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "needs: entry-values. Later: constraint reference from (manifest, field, dep name, range) rows to the target workspace's version",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "Joins a dependency name (a key) to its range (a value) and to the target workspace's version. Batch-2 ruling: B-adapter (entry-values).",
    "fire_verified": "n/a",
@@ -369,6 +437,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs: entry-values (a map union of compilerOptions.paths entries across two files, compared with a third)",
+   "rules": [],
    "assertion_family": "equality",
    "reason": "Needs (key, value) rows of the paths maps to compare a derived union. Key-only adapters cannot carry the values.",
    "fire_verified": "n/a",
@@ -391,7 +460,10 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "needs: entry-values plus a directory-listing join",
+   "alint": "needs: the expected exports map derived from metadata.exportMap globs over the package's files (derived-value); comparing it as rows would then need entry-values",
+   "rules": [
+    "microsoft-fluentui-export-maps-entry-fields"
+   ],
    "assertion_family": "equality",
    "reason": "The derived map pairs export keys with path values computed from globs over the package directory. No adapter emits those rows.",
    "fire_verified": "n/a",
@@ -402,6 +474,13 @@
      "fields": {
       "needs": "derived-value"
      }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint field named entry-values, but the unit is tagged derived-value: the export paths are computed from metadata.exportMap globs over the package directory."
     }
    ],
    "needs": "derived-value"
@@ -414,6 +493,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a change relation (merge-base diff mapped to workspaces, minus ignorePatterns) joined to the packageName inside change/*.json",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Follows berry-16: path-level git kinds (changeset_requires_path, pair_changed_together) cannot read which package a flat change/*.json names. Unlike rushstack-27, there is no per-package change folder.",
    "fire_verified": "n/a",
@@ -436,6 +516,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a change relation (the change files this PR adds) plus unique-key over their packageName",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The scope is per PR. The change files at the pin accumulate across PRs, so the assertion needs the PR's added-file set (a change relation).",
    "fire_verified": "n/a",
@@ -456,10 +537,11 @@
    "evidence": "packages/eslint-plugin/src/configs/core.js:112 (max-len off), :128-141 (@fluentui/max-len); still on in the legacy configs used by 43 projects; test-utilities turns it off",
    "mechanism": "tool-config",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "C",
    "alint": "missing: suppression-comment awareness (eslint-disable / eslint-disable-next-line) for line-width kinds; no rule",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Batch-2 ruling classifies a file-property lint rule by its logic. A for_each_match probe found 74 long lines in 42 files. 73 of them are exempted by eslint-disable comments that alint cannot honor, so a rule would be all false positives.",
+   "reason": "The check is a regex over source text. Its inline eslint-disable suppressions are approximated by excluding the files that carry them, a hand-kept list, so C (thunderbird-android-b07 precedent). No rule in the corpus config.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -468,9 +550,17 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "74 long lines in 42 files, 73 of them suppressed inline; thunderbird-android-b07 (69 lines, 27 excludes) and the C units thunderbird-android-40, strapi-35, ghost-60 and trpc-30 approximate inline suppressions with path excludes."
     }
-   ],
-   "needs": "other"
+   ]
   },
   {
    "id": "fluentui-24",
@@ -480,6 +570,7 @@
    "family": "dep-version",
    "bucket": "B-config",
    "alint": "constraint set: per manifest, keys of peerDependenciesMeta are a subset of keys of peerDependencies",
+   "rules": [],
    "assertion_family": "set",
    "reason": "Inclusion over key paths alone stays B-config (batch-2 ruling). No current kind compares the key sets of two objects in one file. It holds at the pin.",
    "fire_verified": "n/a",
@@ -494,6 +585,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over workspace manifests ($.name -> manifest path)",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Same as jest-B02, babel-B01 and strapi-b04: unique_by keys on path templates only. Verified unique at the pin (267 manifests).",
    "fire_verified": "n/a",
@@ -508,6 +600,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over **/project.json $.name",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Same as tq-35. A separate tool and a separate name source (project.json, not package.json), so it is a separate unit. Verified unique at the pin.",
    "fire_verified": "n/a",
@@ -522,6 +615,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution semantics (lockfile freshness).",
    "fire_verified": "n/a",
@@ -536,6 +630,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 names dedupe --check as D.",
    "fire_verified": "n/a",
@@ -550,6 +645,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "satisfied",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the installed node_modules tree (resolution state).",
    "fire_verified": "n/a",
@@ -561,14 +657,25 @@
    "summary": "Installed packages are at least 7 days old unless preapproved (quarantine policy)",
    "evidence": ".yarnrc.yml:10-11,13-19",
    "mechanism": "tool-config",
-   "family": "dep-version",
+   "family": "other",
    "bucket": "D",
    "alint": "yarn",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs registry publish dates (external state).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "dep-version",
+      "none"
+     ],
+     "why": "Release age is not a dependency version, range, protocol or field (the batch 3 ruling's reason), so a pure release-age gate is `other`, as the release-age agreement units are."
+    }
+   ]
   },
   {
    "id": "fluentui-31",
@@ -578,6 +685,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "nx generator",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "Stage B: getDependencyManifest reads workspace dependencies from the committed manifests, which cover most peer chains at fluentui, and node_modules only for external ones, which it skips when absent. The static half intersects semver ranges (needs: version-compare), so the unit is B-adapter rather than D.",
    "fire_verified": "n/a",
@@ -607,14 +715,25 @@
    "summary": "The ts-minbar apps compile against the TypeScript 5.4 floor",
    "evidence": "apps/ts-minbar-test-react/package.json and apps/ts-minbar-test-react-components/package.json (test-integration); src/index.ts const tsVersion = '5.4'; pr.yml:78",
    "mechanism": "test",
-   "family": "toolchain-pin",
+   "family": "other",
    "bucket": "D",
    "alint": "nx test-integration",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a compile against an installed toolchain. The textual agreement of the floor across the apps and READMEs is value-add only (microsoft-fluentui-va-ts-minbar-floor-agrees).",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "toolchain-pin",
+      "none"
+     ],
+     "why": "A compile against the TypeScript floor is a type check, not versions agreeing across files (section 2.3); tq-51 and trpc-52 are other."
+    }
+   ]
   },
   {
    "id": "fluentui-33",
@@ -624,6 +743,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The graph is computed by Nx from source imports (code analysis).",
    "fire_verified": "n/a",
@@ -638,6 +758,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Parses TypeScript sources with the TS compiler API (code analysis).",
    "fire_verified": "n/a",
@@ -652,6 +773,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: type checker.",
    "fire_verified": "n/a",
@@ -666,6 +788,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: formatter.",
    "fire_verified": "n/a",
@@ -680,6 +803,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 and the batch-2 ruling: code rules and import restrictions are code analysis.",
    "fire_verified": "n/a",
@@ -694,6 +818,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: test runner.",
    "fire_verified": "n/a",
@@ -708,6 +833,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution.",
    "fire_verified": "n/a",
@@ -722,6 +848,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "git diff-index",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness that needs the build (api-extractor) to run.",
    "fire_verified": "n/a",
@@ -736,6 +863,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx test-ssr",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: runs project code.",
    "fire_verified": "n/a",
@@ -750,6 +878,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx test-integration",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: runs project code.",
    "fire_verified": "n/a",
@@ -764,6 +893,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx verify-packaging",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs build output (npm pack).",
    "fire_verified": "n/a",
@@ -778,6 +908,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx verify-bundle-isolation",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs build output (bundling).",
    "fire_verified": "n/a",
@@ -792,6 +923,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "attw",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type resolution over build output.",
    "fire_verified": "n/a",
@@ -806,6 +938,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx react-compiler-analyzer--lint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis.",
    "fire_verified": "n/a",
@@ -820,6 +953,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "rit",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: runs project code.",
    "fire_verified": "n/a",
@@ -834,6 +968,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx e2e",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: runs project code.",
    "fire_verified": "n/a",
@@ -848,6 +983,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "monosize",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs build output and a base report (external state).",
    "fire_verified": "n/a",
@@ -862,6 +998,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vr tool",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Rendering plus external baselines.",
    "fire_verified": "n/a",
@@ -876,6 +1013,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx generators",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the repository's tooling.",
    "fire_verified": "n/a",
@@ -890,6 +1028,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "just-scripts task",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Import restrictions are code analysis (batch-2 ruling).",
    "fire_verified": "n/a",
@@ -904,6 +1043,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "1ES",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External pipeline service.",
    "fire_verified": "n/a",
@@ -918,6 +1058,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "beachball publish",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-2 ruling: a check only an external service makes (the registry at publish time) is D.",
    "fire_verified": "n/a",
@@ -932,6 +1073,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "github-script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Validates workflow-dispatch inputs (external state), not repository files.",
    "fire_verified": "n/a",
@@ -943,14 +1085,25 @@
    "summary": "preinstall guard: installs must go through yarn",
    "evidence": "package.json:24 (scripts/package-manager/src/preinstall.js)",
    "mechanism": "script",
-   "family": "other",
+   "family": "toolchain-pin",
    "bucket": "D",
    "alint": "node script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Inspects the invoking package manager at run time.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "D",
+      "other",
+      "none"
+     ],
+     "why": "Which package manager may install is a toolchain pin, as for ghost-28's preinstall guard."
+    }
+   ]
   },
   {
    "id": "fluentui-57",
@@ -960,6 +1113,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "PR state on GitHub (external), as in immich-47.",
    "fire_verified": "n/a",
@@ -974,6 +1128,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Human judgment, as in rocketchat-27. The 'never major' part is fluentui-10.",
    "fire_verified": "n/a",
@@ -988,6 +1143,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code semantics, reviewed by humans.",
    "fire_verified": "n/a",
@@ -1002,6 +1158,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "file_content_forbidden over {.devops/**/*.yml,azure-pipelines*.yml}, pattern '(?m)^[^#\\n]*\\bcorepack\\s+enable\\b' (suggested id microsoft-fluentui-azure-no-corepack-enable)",
+   "rules": [
+    "microsoft-fluentui-azure-no-corepack-enable"
+   ],
    "assertion_family": "none",
    "reason": "This is a load-bearing comment in CI config that states a file-text invariant. Stage A counted the same kind of comment for fluentui-04 (the same file) and fluentui-15, under R5. It is distinct from fluentui-02: yarnPath can resolve while a corepack step still breaks the 1ES install. It holds at the pin, because only the comment mentions corepack.",
    "fire_verified": "On a scratch copy of tools.yml and azure-pipelines.release.yml, I added a `- script: corepack enable` step to tools.yml and the rule fired at tools.yml:47:1. Prefixing `corepack enable &&` to the v8 build script fired at azure-pipelines.release.yml:71:1. The comment line does not match. The rule passes on the clone and on the restored copy.",
@@ -1016,6 +1175,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches on change/*.json, $.comment, '^(feat|fix|chore|docs|refactor)(\\([^)]*\\))?!?: \\S'",
+   "rules": [
+    "microsoft-fluentui-change-file-comment-prefix"
+   ],
    "assertion_family": "none",
    "reason": "A documented convention that holds at the pin (R5). Stage A read dev-workflow.md (it cites :18 for branch naming) but missed :95.",
    "fire_verified": "n/a (family other). I fired it anyway: rewriting one change file's comment to 'Fixed ...' in scratch fired the rule. It passes on the clone.",
@@ -1030,6 +1192,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches on AGENTS.md, '(?s)<!-- nx configuration start-->.*<!-- nx configuration end-->'",
+   "rules": [
+    "microsoft-fluentui-agents-md-nx-markers"
+   ],
    "assertion_family": "none",
    "reason": "A load-bearing comment that states a file-text invariant, the same kind as fluentui-15 (.yarnrc.yml comments kept). It holds at the pin.",
    "fire_verified": "n/a (family other). I fired it anyway: removing the end marker in scratch fired the rule. It passes on the clone.",
@@ -1044,6 +1209,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_matches on .github/workflows/copilot-setup-steps.yml, $.jobs['copilot-setup-steps']['runs-on'], '.+'",
+   "rules": [
+    "microsoft-fluentui-copilot-setup-steps-job-name"
+   ],
    "assertion_family": "none",
    "reason": "A load-bearing comment (R5), the same standard Stage A used for fluentui-04 and fluentui-15. If the job is renamed, Copilot silently ignores it.",
    "fire_verified": "n/a (family other). I fired it anyway: renaming the job in scratch fired the rule. It passes on the clone.",
@@ -1058,6 +1226,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_matches on .github/dependabot.yml, $.updates[?(@['package-ecosystem'] == 'npm')].allow[?(@['dependency-type'] == 'production')]['dependency-type'], '^production$'",
+   "rules": [
+    "microsoft-fluentui-dependabot-npm-allows-production"
+   ],
    "assertion_family": "none",
    "reason": "Stage A excluded dependabot.yml as 'bot configuration, not a gate'. This entry, though, carries a 'must stay' load-bearing comment of the same kind Stage A counted in tools.yml (fluentui-04) and .yarnrc.yml (fluentui-15). It holds at the pin. Family other, at moderate confidence: dependency-update policy is arguably dep-version.",
    "fire_verified": "n/a (family other). I fired it anyway: deleting the production allow entry in scratch fired the rule. It passes on the clone.",
@@ -1072,6 +1243,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex on packages/react-icons-mdl2/src/components/*, '.+Icon\\.tsx'",
+   "rules": [
+    "microsoft-fluentui-icons-mdl2-component-files-icon-suffix"
+   ],
    "assertion_family": "none",
    "reason": "Under R7 and its precedents (the babel fixture tests and wsdk-b02), a test assertion over a file name is classified by its logic, not lumped into fluentui-38. The same file's other three assertions (exported, valid element type, displayName) evaluate the module, so they stay D in fluentui-38. All 1736 files pass.",
    "fire_verified": "n/a (family other). I fired it anyway: adding Accept.tsx to a scratch components dir fired the rule. It passes on the clone.",
@@ -1086,6 +1260,15 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_matches/file_content_forbidden pairs (one Meta title, the Overview opening, Prop Mapping present except in 3 files and at most one), plus a markdown_required_headings template per guide for the one-H1 part",
+   "rules": [
+    "microsoft-fluentui-migration-guide-has-meta-title",
+    "microsoft-fluentui-migration-guide-one-meta-title",
+    "microsoft-fluentui-migration-guide-one-h1",
+    "microsoft-fluentui-migration-guide-overview-opening",
+    "microsoft-fluentui-migration-guide-has-prop-mapping",
+    "microsoft-fluentui-migration-guide-prop-mapping-count",
+    "microsoft-fluentui-migration-guide-no-prop-mapping-listed"
+   ],
    "assertion_family": "none",
    "reason": "The Meta, Overview and Prop Mapping parts pass on the clone as regex rules. The one-top-level-heading count needs fence awareness, which the test gets by stripping fences first. A fence-blind '(?ms)^#[ \\t]+\\S.*^#[ \\t]+\\S' forbid rule false-fires at the pin on Icon.mdx, which has two '# ' lines inside code fences. markdown_required_headings is fence-aware, but its entries are exact text, so it would need one template per guide (about 53). That is awkward, so the unit is C.",
    "fire_verified": "n/a (family other). The regex parts pass on the clone. The fence-blind H1 rule fires falsely on Icon.mdx:5, which is why this unit is C.",
@@ -1100,6 +1283,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over the <Meta title> values extracted from FromV8/Components/**/*.mdx",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Uniqueness over extracted values is B-config under the batch-2 ruling, and unique_by keys only on path templates. Exact title uniqueness is the faithful key, up to slug collisions between titles that differ only in case or punctuation.",
    "fire_verified": "n/a",
@@ -1114,6 +1298,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a slug normalize (lower-case, runs of non-alphanumerics to '-', trim dashes) to join each <Meta title> to the /docs/<id> links. cross_file normalize offers only trim, lower, semver-major and semver-minor.",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "A reference in both directions between two extracted value sets. The join needs a value transform that no adapter or normalize has, so it is B-adapter, keeping its future family (batch-2 ruling).",
    "fire_verified": "n/a",
@@ -1124,9 +1309,18 @@
      "fields": {
       "needs": "route-model"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "reference"
+     ],
+     "why": "Its own text says the blocker is a slug normalize, which is the capability backstage-30 tags derived-value."
     }
    ],
-   "needs": "route-model"
+   "needs": "derived-value"
   },
   {
    "id": "fluentui-b10",
@@ -1136,6 +1330,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches on apps/public-docsite-v9/src/Concepts/Migration/FromV8/ThemeColors/ColorMapping.mdx, '(?m)^# Color Mapping\\r?\\n\\r?\\n---\\r?\\n\\r?\\n\\S'",
+   "rules": [
+    "microsoft-fluentui-migration-color-mapping-divider"
+   ],
    "assertion_family": "none",
    "reason": "A fixed text shape at the top of one file (R7: classified by its logic). It passes on the clone.",
    "fire_verified": "n/a (family other). It passes on the clone.",
@@ -1150,6 +1347,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches on apps/public-docsite-v9/.storybook/preview.js, \"'from v8',\\s*\\[[^\\]]*'Components'[^\\]]*'Component Mapping'\"",
+   "rules": [
+    "microsoft-fluentui-docsite-storysort-components-first"
+   ],
    "assertion_family": "none",
    "reason": "The test asserts this with the same regex over file text, so alint expresses it directly.",
    "fire_verified": "n/a (family other). I fired it anyway: swapping the two entries in scratch fired the rule. It passes on the clone.",
@@ -1164,6 +1364,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden '<Canvas|<Source|import\\s+\\*\\s+as\\s+Examples\\b|\\./examples/' plus file_content_matches '```tsx\\s*\\r?\\n', both over the 28 listed .mdx paths",
+   "rules": [
+    "microsoft-fluentui-migration-added-guides-no-example-imports",
+    "microsoft-fluentui-migration-added-guides-inline-tsx"
+   ],
    "assertion_family": "none",
    "reason": "These are text properties of a fixed file list. Both rules pass on the clone.",
    "fire_verified": "n/a (family other). I fired it anyway: appending <Canvas of={X} /> to Dialog.mdx in scratch fired the rule. It passes on the clone.",
@@ -1178,6 +1382,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden over FromV8/Components/**/*.mdx, '(?m)^```[a-z0-9-]*[ \\t]*\\r?\\n(?:[ \\t]*\\r?\\n)*```[ \\t]*$'",
+   "rules": [
+    "microsoft-fluentui-migration-guide-no-empty-fence"
+   ],
    "assertion_family": "none",
    "reason": "A text property. The regex mirrors extractCodeBlocks and agrees with it at the pin.",
    "fire_verified": "n/a (family other). I fired it anyway: appending an empty tsx fence to Dialog.mdx in scratch fired at :201. It passes on the clone.",
@@ -1192,6 +1399,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest (TypeScript transpiler)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "This parses code with the TypeScript compiler, which is code analysis (R2, R7).",
    "fire_verified": "n/a",
@@ -1206,6 +1414,16 @@
    "family": "other",
    "bucket": "C",
    "alint": "json_path rules per named project: project.json $.tags includes v8, web-components, react-headless or tools, and package.json $.version is below 9.x and not 0.0.0. Plus json_path_absent over packages/react-components/**/project.json for a v8 tag without vNext.",
+   "rules": [
+    "microsoft-fluentui-beachball-v8-scope-members-tags",
+    "microsoft-fluentui-beachball-v8-scope-members-version",
+    "microsoft-fluentui-beachball-v8-scope-excludes-react-components",
+    "microsoft-fluentui-beachball-web-components-scope-members",
+    "microsoft-fluentui-beachball-headless-scope-member",
+    "microsoft-fluentui-beachball-tools-scope-members",
+    "microsoft-fluentui-beachball-headless-tools-scope-members-public",
+    "microsoft-fluentui-beachball-scope-non-members"
+   ],
    "assertion_family": "none",
    "reason": "Stage A folded this into fluentui-38 (D). Under R7 and wsdk-b02, membership assertions over committed manifests are classified by their logic. It is awkward, so C: the 'converged' predicate spans project.json and package.json of the same project and needs a major-version comparison. It holds at the pin, where react-migration-v8-v9 is the only react-components project tagged v8, and it is also vNext. Its trigger is weak, since it runs only when scripts-beachball is affected.",
    "fire_verified": "n/a",
@@ -1220,6 +1438,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file relation superset. The source is files **/project.json with json $.name (unioned). The targets are files **/project.json with json $.implicitDependencies[?(!match(@, '(tag:|!).*'))]. allow_missing_target: true.",
+   "rules": [
+    "microsoft-fluentui-nx-implicit-dependencies-resolve"
+   ],
    "assertion_family": "none",
    "reason": "This applies the same tool-enforced-structure standard Stage A used for fluentui-25 and fluentui-26. Unlike uniqueness, the superset-against-a-union form expresses it today. PLAUSIBLE only: I believe Nx raises a configuration error for implicitDependencies that match no project, but I could not confirm this in the Nx 22.7.9 source because node_modules is absent.",
    "fire_verified": "n/a (family other). I fired it anyway on a scratch copy of all 267 project.json files: renaming the referenced stories project fired the rule. It passes on the clone.",
@@ -1232,10 +1453,11 @@
    "evidence": "packages/eslint-plugin/src/configs/core.js, second config block ('@typescript-eslint/ban-ts-comment': 'error', no files restriction); pr.yml:78 (lint); .husky/pre-commit (nano-staged eslint)",
    "mechanism": "tool-config",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "C",
    "alint": "missing: suppression-comment awareness (eslint-disable / eslint-disable-next-line). No rule.",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "Under the batch-2 ruling, a directive-comment rule is a file-text property of the same kind as @fluentui/no-tslint-comments (fluentui-12). There are 52 @ts-ignore/@ts-nocheck matches under src/ at the pin, by a heuristic count. About 27 of them carry an eslint-disable for this rule. 21 are codemods test mocks, where packages/codemods/eslint.config.js turns the rule off, which a path exclusion can mirror. 2 are web-components benchmark wrappers and 2 are string literals in tools code. As with fluentui-23, the suppressions block a native rule.",
+   "reason": "The check is a regex over source text. Its inline eslint-disable suppressions are approximated by excluding the files that carry them, a hand-kept list, so C (thunderbird-android-b07 precedent). No rule in the corpus config.",
    "fire_verified": "n/a",
    "origin": "B",
    "changes": [
@@ -1244,9 +1466,17 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "The same suppression shape as fluentui-23, and whole-file excludes approximate it as for thunderbird-android-b07."
     }
-   ],
-   "needs": "other"
+   ]
   },
   {
    "id": "fluentui-b18",
@@ -1256,6 +1486,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "cypress verify",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Install state, a downloaded binary (R7).",
    "fire_verified": "n/a",
@@ -1270,6 +1501,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx bundle / build-storybook",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution, distinct from the fluentui-39 build targets (R1: separate targets and workflow).",
    "fire_verified": "n/a",
@@ -1289,6 +1521,11 @@
   "microsoft-fluentui-va-ci-node-within-engines (cross_file subset, normalize semver-major, level info): every .github/workflows/*.yml setup-node major is one of the root engines.node majors (^22 || ^24). Nothing gates this. The unused composite action .github/actions/run-publish-vr-screenshot asks for Node 20 and is left out of the glob. Fired on a scratch workflow with node 20; passes on the clone.",
   "microsoft-fluentui-va-ts-minbar-floor-agrees (cross_file equals, level info): the TypeScript floor const tsVersion in both ts-minbar apps' src/index.ts agrees with each app's README ('compatible back to Typescript X.Y'). Passes on the clone (5.4 everywhere).",
   "Scope broadening inside a C unit, not a separate rule: microsoft-fluentui-peer-ranges-valid-semver checks every workspace manifest, not only the vNext publishable projects verify-peer-dependencies scopes to. All 32 distinct ranges pass."
+ ],
+ "value_add_rules": [
+  "microsoft-fluentui-va-react-components-unstable-api-report-digest",
+  "microsoft-fluentui-va-ci-node-within-engines",
+  "microsoft-fluentui-va-ts-minbar-floor-agrees"
  ],
  "absent_categories": [
   "locale family entirely: no translation catalogs under any gate",

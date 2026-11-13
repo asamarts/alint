@@ -3,16 +3,16 @@
  "sha": "8eff9ff0ddf4be4a682bf205fb66b00a26901075",
  "metrics": {
   "counts": {
-   "A": 10,
-   "B-config": 5,
-   "B-adapter": 15,
+   "A": 9,
+   "B-config": 6,
+   "B-adapter": 14,
    "B-kernel": 0,
    "B-delegate": 1,
-   "C": 5,
+   "C": 6,
    "D": 29
   },
   "addressable": 36,
-  "coverage_today": 28,
+  "coverage_today": 25,
   "coverage_with_tuning": 42,
   "gap": 58,
   "coverage_after_slice": 36,
@@ -38,20 +38,20 @@
   },
   "dep-version": {
    "counts": {
-    "A": 2,
+    "A": 1,
     "B-config": 2,
     "B-adapter": 3,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 1,
+    "C": 2,
     "D": 2
    },
    "addressable": 8,
-   "coverage_today": 25,
+   "coverage_today": 12,
    "coverage_with_tuning": 38,
    "gap": 62,
-   "coverage_after_slice": 38,
-   "coverage_after_slice_with_entry_values": 50
+   "coverage_after_slice": 25,
+   "coverage_after_slice_with_entry_values": 38
   },
   "toolchain-pin": {
    "counts": {
@@ -73,8 +73,8 @@
   "other": {
    "counts": {
     "A": 6,
-    "B-config": 3,
-    "B-adapter": 11,
+    "B-config": 4,
+    "B-adapter": 10,
     "B-kernel": 0,
     "B-delegate": 1,
     "C": 4,
@@ -84,8 +84,8 @@
    "coverage_today": 24,
    "coverage_with_tuning": 40,
    "gap": 60,
-   "coverage_after_slice": 32,
-   "coverage_after_slice_with_entry_values": 32
+   "coverage_after_slice": 36,
+   "coverage_after_slice_with_entry_values": 36
   }
  },
  "units": [
@@ -97,6 +97,10 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "file_exists + file_content_matches: trpc-nvmrc-present, trpc-nvmrc-version-spec",
+   "rules": [
+    "trpc-nvmrc-present",
+    "trpc-nvmrc-version-spec"
+   ],
    "assertion_family": "none",
    "reason": "Presence and a resolvable version spec are file-state assertions that native kinds express (R4: confirmed against the clone in both directions). The regex accepts what setup-node resolves (numeric x/x.y/x.y.z, x-ranges, lts/*, node/latest/current).",
    "fire_verified": "Scratch tree copying .nvmrc and the other read files: deleting .nvmrc fired trpc-nvmrc-present; writing 'twenty-four' and '>=24 <25' fired trpc-nvmrc-version-spec; 'lts/*' passed. Passes on the clone (24.22.2).",
@@ -111,6 +115,11 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches: trpc-package-manager-pnpm-pinned",
+   "rules": [
+    "trpc-package-manager-pnpm-pinned",
+    "trpc-pnpm-action-setup-no-version-workflows",
+    "trpc-pnpm-action-setup-no-version-composite"
+   ],
    "assertion_family": "none",
    "reason": "A JSONPath value check on package.json expresses it. A missing field is a zero-match violation. Verified on the clone and on broken copies (R4).",
    "fire_verified": "Scratch copy of package.json: removing packageManager, setting yarn@4.5.0, and setting pnpm@^12 each fired trpc-package-manager-pnpm-pinned. Passes on the clone.",
@@ -125,8 +134,11 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "cross_file relation equals + normalize: semver-major: trpc-package-manager-satisfies-engines-pnpm",
+   "rules": [
+    "trpc-package-manager-satisfies-engines-pnpm"
+   ],
    "assertion_family": "none",
-   "reason": "Range satisfaction is approximated by MAJOR equality via normalize. That is exact for a caret range from N.0.0, but it is not general semver satisfaction (a ^12.5.0 or >=11 range would need a semver-range operator). C per section 2.2 (a normalize:).",
+   "reason": "Range satisfaction needs a semver operator. normalize: semver-major is exact only for a caret range from N.0.0: Stage B showed a pass with engines ^12.5.0 and pnpm@12.4.1, which pnpm refuses, and a finding with >=11, which pnpm accepts. B-adapter version-compare; the rule stays at level info as an approximation.",
    "fire_verified": "Scratch package.json: engines.pnpm ^11.0.0 fired; packageManager pnpm@13.0.0 fired. Passes on the clone.",
    "origin": "A",
    "changes": [
@@ -144,6 +156,13 @@
      "fields": {
       "needs": "version-compare"
      }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ],
    "needs": "version-compare"
@@ -156,6 +175,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint unique-key over workspace manifests' dependency entries (selector: semver-valued specifiers, non-workspace names, non-peer fields)",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the range.",
    "fire_verified": "n/a",
@@ -181,6 +201,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "missing: semver range-satisfaction operator joined to the referenced workspace package's version",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs semver-range satisfaction (section 2.2 names a semver-range operator as B-adapter) plus a name-to-manifest join.",
    "fire_verified": "n/a",
@@ -203,6 +224,7 @@
    "family": "dep-version",
    "bucket": "B-config",
    "alint": "constraint set: keys($.peerDependencies) subset of keys($.devDependencies) per manifest",
+   "rules": [],
    "assertion_family": "set",
    "reason": "A within-manifest key-subset relation. JSONPath cannot select keys, and key_parity compares whole files. If manypkg also compares the ranges (not verifiable offline), that clause would further need a semver operator.",
    "fire_verified": "n/a",
@@ -217,6 +239,7 @@
    "family": "dep-version",
    "bucket": "B-config",
    "alint": "constraint set: pairwise-disjoint key sets of the dependency fields per manifest",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Key rows suffice: a dependency's key path carries its field. (manifest, name) determines the field, a functional dependency, so unique-key (batch 2 ruling aligns trpc-08, jest-24 and rushstack-51).",
    "fire_verified": "n/a",
@@ -239,6 +262,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "constraint reference: (dep name, catalog name) from manifests -> keys of pnpm-workspace.yaml catalog/catalogs.<name>",
+   "rules": [],
    "assertion_family": "reference",
    "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). The (dependency name, catalog name) pair comes from the manifest entry's key and its catalog: value.",
    "fire_verified": "n/a",
@@ -262,13 +286,26 @@
    "evidence": "tooling/subtree/src/standalone.ts:118-122 (throws '<name>@workspace: only resolves in the monorepo'), :105 (@trpc/* -> canary), :144 (@shared/ui dropped); .github/workflows/subtree.yml:41-53 matrix, :83-88; every package.json under each example is processed (standalone.ts writeStandalone)",
    "mechanism": "ci",
    "family": "dep-version",
-   "bucket": "A",
+   "bucket": "C",
    "alint": "for_each_match: trpc-subtree-examples-workspace-protocol",
+   "rules": [
+    "trpc-subtree-examples-workspace-protocol"
+   ],
    "assertion_family": "none",
-   "reason": "A per-line predicate over the example manifests (oxfmt keeps one dependency per line) expresses 'every workspace: entry names @shared/ui or @trpc/*'. Confirmed both ways, including the dot directory .experimental and nested client/server manifests.",
+   "reason": "A per-line predicate over the example manifests. It holds for the one-dependency-per-line layout oxfmt writes, not for every layout (batch 2 ruling).",
    "fire_verified": "Scratch copies of the examples' package.json files: next-minimal-starter next->workspace:*, minimal-react/server +@monotest/trpc workspace:*, .experimental/next-app-dir +@www/api-reference workspace:^, tanstack-start-sse-chat +@shared/uix workspace:* each fired; @trpc/client workspace:* and a non-subtree example (.test/monotest-app) did not. Passes on the clone.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "audit",
+     "from": [
+      "A",
+      "dep-version",
+      "none"
+     ],
+     "why": "Its rule reads the dependency key with a per-line regex and relies on oxfmt keeping one dependency per line: a disallowed workspace: entry on the same line as @shared/ui is missed."
+    }
+   ]
   },
   {
    "id": "trpc-12",
@@ -278,6 +315,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_matches if_present over a union path of the internal names: trpc-internal-deps-workspace-protocol",
+   "rules": [
+    "trpc-internal-deps-workspace-protocol"
+   ],
    "assertion_family": "none",
    "reason": "Expressible only by listing the internal @trpc/* names by hand. JSONPath cannot filter keys, and no selector yields 'workspace package names', so a new package needs a config edit. C (awkward). The release's own frozen-lockfile check is D (trpc-61).",
    "fire_verified": "Scratch packages/client/package.json devDependency @trpc/server workspace:* -> ^11.28.0 fired; the peerDependencies pin 11.28.0 does not. Passes on the clone.",
@@ -292,6 +332,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: workspace package-name -> manifest resolver and dependency-key extractor (file_graph acyclic exists but drops bare module names by design)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "file_graph's acyclic needs path-shaped edges, and package names are a declared non-goal of that kind. A package-graph adapter is needed.",
    "fire_verified": "n/a",
@@ -314,6 +355,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches x2: trpc-workspace-package-names-valid, trpc-workspace-package-names-length",
+   "rules": [
+    "trpc-workspace-package-names-valid",
+    "trpc-workspace-package-names-length"
+   ],
    "assertion_family": "none",
    "reason": "A name-shape regex plus a length bound over $.name in the 59 workspace manifests (globs mirrored from pnpm-workspace.yaml) expresses validForNewPackages for these names.",
    "fire_verified": "Also verified (not required for family other): an uppercase name, a leading '_' and a 215-character name each fired on scratch copies; passes on the clone.",
@@ -328,6 +373,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: key-order operator for JSON objects (ordered_block sorts lines between markers, not object keys)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Section 2.2 names an order operator as B-adapter.",
    "fire_verified": "n/a",
@@ -350,6 +396,9 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "for_each_dir + dir_exists: trpc-agent-skill-has-claude-link",
+   "rules": [
+    "trpc-agent-skill-has-claude-link"
+   ],
    "assertion_family": "none",
    "reason": "The convention's failure mode (a skill without its link) is expressed and verified. A copied directory in place of a symlink would pass; alint has no 'is a symlink' assertion. Noted.",
    "fire_verified": "Also verified: removing .claude/skills/tdd and adding .agents/skills/new-skill each fired; passes on the clone.",
@@ -381,6 +430,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint set: dir listing of .agents/skills/* == union(skills-lock skillPath names, .oxfmtrc negated entries)",
+   "rules": [],
    "assertion_family": "set",
    "reason": "Needs a union of two registries (cross_file targets are ANDed), or an either/or per directory. Not expressible today.",
    "fire_verified": "n/a",
@@ -395,6 +445,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "dir_absent: trpc-no-cursor-folder",
+   "rules": [
+    "trpc-no-cursor-folder"
+   ],
    "assertion_family": "none",
    "reason": "A native existence check.",
    "fire_verified": "Also verified: creating .cursor/rules/a.mdc fired; passes on the clone.",
@@ -409,6 +462,14 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_hash x6: trpc-pstack-skill-*-unchanged",
+   "rules": [
+    "trpc-pstack-skill-boundary-unchanged",
+    "trpc-pstack-skill-encode-lessons-unchanged",
+    "trpc-pstack-skill-type-system-unchanged",
+    "trpc-pstack-skill-tdd-unchanged",
+    "trpc-pstack-skill-ts-best-practices-unchanged",
+    "trpc-pstack-skill-ts-best-practices-patterns-unchanged"
+   ],
    "assertion_family": "none",
    "reason": "skills-lock.json's computedHash uses the skills CLI's own algorithm: it is not the sha256 of SKILL.md (checked, values differ). The files are therefore pinned by their own digests in the config, duplicating the lock and needing a hand update with it. C (awkward).",
    "fire_verified": "Also verified: appending to .agents/skills/tdd/SKILL.md fired; passes on the clone.",
@@ -423,6 +484,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file equals + cross_file set_equals: trpc-pstack-notice-commit-matches-lock, trpc-pstack-notice-lists-locked-skills",
+   "rules": [
+    "trpc-pstack-notice-commit-matches-lock",
+    "trpc-pstack-notice-lists-locked-skills"
+   ],
    "assertion_family": "none",
    "reason": "The commit and the skill-list coherence are value/set relations alint expresses with regex and JSONPath extracts.",
    "fire_verified": "Also verified: changing one skills-lock ref fired the commit rule; deleting the '- `tdd/`' line from the notice fired the list rule; passes on the clone.",
@@ -437,6 +502,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "filename_regex: trpc-regression-test-naming",
+   "rules": [
+    "trpc-regression-test-naming"
+   ],
    "assertion_family": "none",
    "reason": "A native naming check. One pre-convention file (serializable-inference.test.tsx) is not a per-issue regression test and is excluded by name.",
    "fire_verified": "Also verified: adding regression/myRegression.test.ts fired; passes on the clone.",
@@ -451,6 +519,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_matches: trpc-published-readmes-have-sponsor-markers",
+   "rules": [
+    "trpc-published-readmes-have-sponsor-markers"
+   ],
    "assertion_family": "none",
    "reason": "'Published' is decided by package.json private != true, which no path selector can read. The one private package (packages/tests) is excluded by name. C (needs a manifest-field selector).",
    "fire_verified": "Also verified: deleting the END marker from packages/upgrade/README.md and the START marker from README.md each fired; passes on the clone.",
@@ -465,6 +536,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent: trpc-www-no-public-robots-txt",
+   "rules": [
+    "trpc-www-no-public-robots-txt"
+   ],
    "assertion_family": "none",
    "reason": "A native existence check over a path that test asserts on.",
    "fire_verified": "Also verified: creating www/public/robots.txt fired; passes on the clone.",
@@ -479,6 +553,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over array elements of www/sponsors.json (the source enum part is json_schema_passes today)",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Uniqueness of a derived key across array elements inside one JSON file. unique_by is path-keyed only.",
    "fire_verified": "n/a",
@@ -493,6 +568,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: docs-route resolver (Docusaurus slug frontmatter, firstDoc root, {#id} heading anchors) for URLs extracted from TS sources",
+   "rules": [],
    "assertion_family": "none",
    "reason": "URL extraction is a regex, but mapping a route to a page (slug: overrides) and to its Docusaurus anchors needs an adapter. markdown_fragments_resolve covers Markdown sources with GitHub-style anchors only.",
    "fire_verified": "n/a",
@@ -515,6 +591,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: Markdown frontmatter adapter (so json_schema_passes / yaml_path_* could read it)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "alint's structured formats do not include Markdown frontmatter. A regex can only approximate 'has a title', not the schema.",
    "fire_verified": "n/a",
@@ -535,10 +612,11 @@
    "evidence": "www/build/skills.ts:380-381 ('another page has skill <name>'); main.yml:72",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-adapter",
-   "alint": "missing: frontmatter adapter (then unique-key)",
-   "assertion_family": "none",
-   "reason": "The unique-key family would apply once frontmatter is readable. The missing piece is the adapter.",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the skill names extracted by regex from the docs frontmatter",
+   "rules": [],
+   "assertion_family": "unique-key",
+   "reason": "A regex reads each skill name from the frontmatter, as for the C frontmatter units; uniqueness of the extracted values across pages has no kind today, so B-config unique-key (batch 2 ruling).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -547,9 +625,17 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "By the frontmatter regex precedent (strapi-46, backstage-40, -42, -34), the values can be extracted: `^skill:\\n  name:` holds in all 24 skill pages. What is missing is value uniqueness across files, which is a slice family."
     }
-   ],
-   "needs": "format-reader"
+   ]
   },
   {
    "id": "trpc-28",
@@ -559,6 +645,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: frontmatter adapter (then a reference into manifests filtered by keyword)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The source values live in Markdown frontmatter, which alint cannot read.",
    "fire_verified": "n/a",
@@ -581,6 +668,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: frontmatter adapter plus a docs-slug/heading resolver",
+   "rules": [],
    "assertion_family": "none",
    "reason": "References come from frontmatter and resolve against docs slugs and headings.",
    "fire_verified": "n/a",
@@ -603,6 +691,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "filename_case camel: trpc-ts-filenames-camel-case",
+   "rules": [
+    "trpc-ts-filenames-camel-case"
+   ],
    "assertion_family": "none",
    "reason": "R7: a check over file names (not code analysis) is classified by its logic, even though oxlint runs it (R2 tension noted). The lint scope and ignore regexes are mirrored as globs. alint's camel does not strip leading underscores as the lint rule does, so underscore-prefixed files (___testHelpers.ts) are excluded. C (needs a leading-underscore relaxation).",
    "fire_verified": "Also verified: packages/server/src/my_new_file.ts and tooling/release/src/Bad-Name.ts fired; passes on the clone.",
@@ -617,6 +708,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: frontmatter adapter (then a set_equals of package#name pairs)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "One side of the set comes from frontmatter (name + package combined), which alint cannot extract.",
    "fire_verified": "n/a",
@@ -639,6 +731,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: frontmatter adapter (then a reverse reference / cardinality >= 1)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The target side lives in frontmatter.",
    "fire_verified": "n/a",
@@ -661,6 +754,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Linting source (R2, R7).",
    "fire_verified": "n/a",
@@ -675,6 +769,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7 keeps import extraction in D; v0.12 treated the vite eslint firewall the same way.",
    "fire_verified": "n/a",
@@ -689,6 +784,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxfmt",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Formatting (R2).",
    "fire_verified": "n/a",
@@ -703,6 +799,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "ts-prune",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis.",
    "fire_verified": "n/a",
@@ -717,6 +814,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsdown/turbo",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution.",
    "fire_verified": "n/a",
@@ -731,6 +829,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checking.",
    "fire_verified": "n/a",
@@ -745,6 +844,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checking.",
    "fire_verified": "n/a",
@@ -759,6 +859,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "twoslash",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Compiling code.",
    "fire_verified": "n/a",
@@ -773,6 +874,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Running tests (R1 collapses them).",
    "fire_verified": "n/a",
@@ -787,6 +889,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest codegen",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness requires running the project's code.",
    "fire_verified": "n/a",
@@ -801,6 +904,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "codecov",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service and runtime coverage.",
    "fire_verified": "n/a",
@@ -815,6 +919,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "verify-packed",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the build and pnpm pack output, not committed files.",
    "fire_verified": "n/a",
@@ -829,6 +934,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc in scratch consumers",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Type checking of built output.",
    "fire_verified": "n/a",
@@ -843,6 +949,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "turbo build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution.",
    "fire_verified": "n/a",
@@ -857,6 +964,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "codeql",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis.",
    "fire_verified": "n/a",
@@ -871,6 +979,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "shell",
+   "rules": [],
    "assertion_family": "none",
    "reason": "PR metadata, not repo state (as in the v0.12 vite config).",
    "fire_verified": "n/a",
@@ -885,6 +994,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Lockfile freshness and package-manager resolution semantics (R7).",
    "fire_verified": "n/a",
@@ -899,6 +1009,7 @@
    "family": "other",
    "bucket": "B-delegate",
    "alint": "skills.ts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A custom content parser and transformer run as project code.",
    "fire_verified": "n/a",
@@ -923,6 +1034,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "@tanstack/intent",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Validates generated, uncommitted output.",
    "fire_verified": "n/a",
@@ -937,6 +1049,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "standalone.ts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Import extraction and resolution (R7).",
    "fire_verified": "n/a",
@@ -951,6 +1064,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "npm/pnpm build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution.",
    "fire_verified": "n/a",
@@ -965,6 +1079,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "tooling/release",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Lockfile acceptance and git tree state (R7). The manifest-shape precondition is trpc-12.",
    "fire_verified": "n/a",
@@ -979,6 +1094,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tooling/release",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness by running the build.",
    "fire_verified": "n/a",
@@ -993,6 +1109,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tooling/release",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network and GitHub state.",
    "fire_verified": "n/a",
@@ -1007,6 +1124,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "legacy-urls-check.ts",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs the built route table.",
    "fire_verified": "n/a",
@@ -1021,6 +1139,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Exercises the project's redirect-routing code.",
    "fire_verified": "n/a",
@@ -1035,6 +1154,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Test semantics and PR metadata.",
    "fire_verified": "n/a",
@@ -1049,6 +1169,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Semantic review.",
    "fire_verified": "n/a",
@@ -1063,6 +1184,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code and type analysis.",
    "fire_verified": "n/a",
@@ -1077,6 +1199,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "PR metadata, not repo state.",
    "fire_verified": "n/a",
@@ -1091,6 +1214,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "cross_file relation: superset. source.files = the 12 pnpm-workspace member globs, extract json $.name (unioned). targets.files = the same globs, extract regex '\"([^\"]+)\"\\s*:\\s*\"workspace:'. allow_missing_target: true. Scratch rule id workspace-refs-resolve; it is not in Stage A's config.",
+   "rules": [
+    "trpc-workspace-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "R7: a name lookup over files alint reads. Stage A applied the same ruling to catalog: lookups (trpc-10). Unlike trpc-10, the key side is reachable today: a regex over the manifest text yields the dependency key of each workspace: value, and superset with a unioned source gives the set of workspace names. The rule is exact for this repo's workspace:* usage. A workspace:^x range would also need semver satisfaction.",
    "fire_verified": "On a scratch copy of all 59 workspace manifests the rule passes. Changing @monotest/api to @monotest/apix workspace:* in examples/.test/monotest-app fired, which shows hidden-directory members are covered. Renaming tooling/ui to @shared/uikit fired for every @shared/ui dependent. The rule also passes on the clone.",
@@ -1105,6 +1231,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_file (select www/v11/docs/**/*.md, www/v11/home/**/*.md, www/blog/**/*.md) with a nested cross_file relation: subset. Source {file: '{path}', regex '(?m)^[ \\t>]*// @include: (\\S+)[ \\t]*$'}; target {file: '{path}', regex '(?m)^[ \\t>]*`{3,}twoslash include (\\S+)'}. Scratch rule id twoslash-includes-resolve; it is not in Stage A's config.",
+   "rules": [
+    "trpc-twoslash-includes-resolve"
+   ],
    "assertion_family": "none",
    "reason": "R7: twoslash-check and fromDocusaurus run this check over Markdown files alint reads. It holds independently of whether the block compiles (D, trpc-47), which Stage A folded it into. It is an intra-file reference, and today's kinds express it. Caveat: the tools strip HTML comments before checking and the regex does not; the clone has no commented-out includes.",
    "fire_verified": "Also verified, though family other does not require it. The rule passes on the clone. On a scratch copy of quickstart.md, renaming one reference to trpcx fired, and so did renaming the `server` include block.",
@@ -1119,6 +1248,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: brace expansion of an extracted path reference, with existence checked per alternative",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Checked on the clone and on a scratch copy. registry_paths_resolve with entries_are_globs passed a brace list with a nonexistent alternative, and passed a * wildcard. Without entries_are_globs, the literal brace path never resolves and every line fires. The wildcard ban alone would be a file_content_forbidden regex. Not D: @source is a Tailwind path list, not an import the program uses (R7). If the study rules it an import, it joins trpc-59 in D.",
    "fire_verified": "n/a",
@@ -1141,6 +1271,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "dir_absent over the hand-listed dependents' src/shared-ui; not in Stage A's config",
+   "rules": [
+    "trpc-subtree-shared-ui-dir-reserved"
+   ],
    "assertion_family": "none",
    "reason": "dir_absent expresses it, but 'depends on @shared/ui' is a manifest field that no path selector can read, so the dependents must be listed by hand. Stage A used the same C reasoning for trpc-22. The guard has its own condition and failure message, so it is not folded into trpc-11. It is a low-weight unit.",
    "fire_verified": "n/a",
@@ -1155,6 +1288,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over the workspace manifests ($.name -> manifest path); unique_by is keyed on paths only",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "R7: turbo's package-graph check over files alint reads, classified by its logic as one manifest per name. Not verified offline: turbo refusing a workspace with two packages of the same name ('Failed to add workspace ... it already exists at ...') comes from tool knowledge, and turbo's source is not in the clone.",
    "fire_verified": "n/a",
@@ -1179,7 +1313,17 @@
   "trpc-va-internal-peers-pinned: peerDependencies on @trpc/server/client/react-query equal the released version.",
   "trpc-va-engines-node-major-matches-nvmrc: root and www engines.node share .nvmrc's major. pnpm only warns on an engines.node mismatch because no engine-strict is set, so it is not enforced.",
   "trpc-va-workflow-node-major-matches-nvmrc: subtree.yml's literal `node-version: 24.x` shares .nvmrc's major.",
-  "trpc-va-server-license-matches-root: packages/server/LICENSE is identical to the root LICENSE."
+  "trpc-va-server-license-matches-root: packages/server/LICENSE is identical to the root LICENSE.",
+  "trpc-root-no-prod-dependencies (info): kept as value-add after trpc-09 was removed; see `removed`"
+ ],
+ "value_add_rules": [
+  "trpc-root-no-prod-dependencies",
+  "trpc-va-lockstep-versions",
+  "trpc-va-openapi-prerelease-version",
+  "trpc-va-internal-peers-pinned",
+  "trpc-va-engines-node-major-matches-nvmrc",
+  "trpc-va-workflow-node-major-matches-nvmrc",
+  "trpc-va-server-license-matches-root"
  ],
  "absent_categories": [
   "locale / i18n: no locale catalogs, translation files or i18n gate; the docs are English-only",

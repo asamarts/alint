@@ -4,19 +4,19 @@
  "metrics": {
   "counts": {
    "A": 16,
-   "B-config": 4,
-   "B-adapter": 10,
+   "B-config": 5,
+   "B-adapter": 7,
    "B-kernel": 0,
    "B-delegate": 0,
-   "C": 22,
+   "C": 24,
    "D": 26
   },
   "addressable": 52,
   "coverage_today": 31,
-  "coverage_with_tuning": 73,
-  "gap": 27,
-  "coverage_after_slice": 37,
-  "coverage_after_slice_with_entry_values": 38
+  "coverage_with_tuning": 77,
+  "gap": 23,
+  "coverage_after_slice": 38,
+  "coverage_after_slice_with_entry_values": 40
  },
  "by_family": {
   "locale": {
@@ -73,19 +73,19 @@
   "other": {
    "counts": {
     "A": 10,
-    "B-config": 3,
-    "B-adapter": 9,
+    "B-config": 4,
+    "B-adapter": 6,
     "B-kernel": 0,
     "B-delegate": 0,
-    "C": 16,
+    "C": 18,
     "D": 25
    },
    "addressable": 38,
    "coverage_today": 26,
-   "coverage_with_tuning": 68,
-   "gap": 32,
-   "coverage_after_slice": 32,
-   "coverage_after_slice_with_entry_values": 32
+   "coverage_with_tuning": 74,
+   "gap": 26,
+   "coverage_after_slice": 34,
+   "coverage_after_slice_with_entry_values": 34
   }
  },
  "units": [
@@ -97,6 +97,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file relation: equals, source packages/core/strapi/package.json $.version, targets {package.json,[!.]*/**/package.json} with matches '^5\\.' and allow_missing_target -> strapi-package-versions-aligned",
+   "rules": [
+    "strapi-package-versions-aligned"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but the canonical major is hand-kept in the target `matches: '^5\\.'` because alint cannot derive the source's major at run time; it goes stale at the next major. The dot-dir exclusion also needs a hand-built glob. Awkward-but-expressible = C.",
    "fire_verified": "Not required (C), done anyway: on a scratch copy, setting packages/core/utils version to 5.61.0 fired strapi-package-versions-aligned; setting it to 6.0.0 (other major) passed, matching the script; passes on the clone.",
@@ -110,7 +113,8 @@
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "needs (manifest, dependency, version) rows for exact versions; then unique-key: the dependency determines the version",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the version.",
    "fire_verified": "n/a",
@@ -124,6 +128,13 @@
       "assertion_family": "unique-key",
       "reason": "Needs (key path, value) rows: the relation layer's structured adapters (entry, TOML, XML) are key-only and the extract adapter's values carry no pointer, so no adapter today pairs a dependency or entry name with its value (batch 2 ruling). Once it exists, the assertion is unique-key: dependency name determines the version."
      }
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint field was empty."
     }
    ],
    "needs": "entry-values"
@@ -136,6 +147,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_matches $.devDependencies['@playwright/test'] matches ^[0-9]+\\.[0-9]+\\.[0-9]+$ -> strapi-playwright-exact-pin",
+   "rules": [
+    "strapi-playwright-exact-pin"
+   ],
    "assertion_family": "none",
    "reason": "A structured-query kind expresses it exactly; alint check confirms (R4).",
    "fire_verified": "Scratch copy: '^1.64.1' fired strapi-playwright-exact-pin; clone (1.64.1) passes.",
@@ -150,6 +164,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "yaml_path_matches over yarn.lock $.*.resolution matches '^(?:@[^/@]+/)?[^@/]+@(?:(?:npm|workspace|patch):|https://registry\\.yarnpkg\\.com/)' -> strapi-lockfile-resolution-protocols",
+   "rules": [
+    "strapi-lockfile-resolution-protocols"
+   ],
    "assertion_family": "none",
    "reason": "R7: a tool-run over a file alint reads, classified by its assertion. The Berry lockfile parses as YAML and the allowlist is a regex over each resolution. Host and scheme validators collapse into one allowlist unit (one CI step, one policy).",
    "fire_verified": "Scratch copy: a git+https resolution and a https://evil.example.com resolution each fired strapi-lockfile-resolution-protocols; a https://registry.yarnpkg.com/ resolution passed; clone passes (2935 resolutions: npm, workspace, patch only).",
@@ -164,6 +181,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "cross_file relation: superset, source = union of $.name over the workspace-glob manifests, targets regex '\"([^\"]+)\"\\s*:\\s*\"workspace:' over the same manifests, allow_missing_target -> strapi-workspace-refs-resolve",
+   "rules": [
+    "strapi-workspace-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "A reference lookup, not resolution semantics; same shape as batch-1 trpc-B01 (A). Confirmed by alint check.",
    "fire_verified": "Scratch copy: renaming a workspace:* dependency in examples/getstarted/package.json to @strapi/plugin-colour-picker fired strapi-workspace-refs-resolve; clone passes.",
@@ -178,6 +198,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file relation: superset, source .yarnrc.yml regex \"(?m)^[ ]{2}'?([^'\\s:#][^':\\s]*)'?\\s*:\", targets regex '\"([^\"]+)\"\\s*:\\s*\"catalog:\"' over workspace manifests -> strapi-catalog-refs-resolve",
+   "rules": [
+    "strapi-catalog-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "The catalog entries are YAML mapping keys, which the yaml extract cannot return. They are read with a line regex that relies on the catalog being the only indented mapping in .yarnrc.yml, and named catalogs (catalog:<name>) would go unchecked. This is the berry unit-18 precedent (YAML keys read by a line regex = C).",
    "fire_verified": "Not required (C), done anyway: adding \"jest-nope\": \"catalog:\" to tests-next/cli/package.json fired strapi-catalog-refs-resolve; clone passes.",
@@ -192,6 +215,10 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "json_path_absent over packages/*/package.json, packages/*/*/package.json: $['dependencies','devDependencies','peerDependencies','optionalDependencies'][?search(@, '^workspace:')] -> strapi-packages-no-workspace-protocol",
+   "rules": [
+    "strapi-packages-no-workspace-protocol",
+    "strapi-packages-internal-deps-pinned-exact"
+   ],
    "assertion_family": "none",
    "reason": "The workspace: half is A; the pinned-exact half needs a hand-kept list of the 43 workspace names, because JSONPath cannot select dependency keys by a name set read from other files (Stage C). Hand-listing is C.",
    "fire_verified": "Scratch copy: changing @strapi/utils to workspace:* in packages/core/admin/package.json fired strapi-packages-no-workspace-protocol; clone passes.",
@@ -214,6 +241,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "yarn",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Lockfile freshness needs package-manager resolution semantics (R7 keeps it D). The docs lockfile is a matrix instance (R1).",
    "fire_verified": "n/a",
@@ -228,6 +256,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "registry_paths_resolve source .yarnrc.yml extract yaml $.yarnPath expect file -> strapi-yarnpath-exists",
+   "rules": [
+    "strapi-yarnpath-exists"
+   ],
    "assertion_family": "none",
    "reason": "A registry-to-path existence check that alint check confirms.",
    "fire_verified": "Scratch copy: deleting .yarn/releases/yarn-4.12.0.cjs and renaming yarnPath to yarn-4.13.0.cjs each fired strapi-yarnpath-exists; clone passes. (The first draft listed .yarn/releases/** in ignore, which made the rule fire on the clone; the ignore entry was removed.)",
@@ -242,6 +273,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code-level review judgment.",
    "fire_verified": "n/a",
@@ -256,6 +288,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Semantic review judgment.",
    "fire_verified": "n/a",
@@ -270,6 +303,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "review",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Prose judgment.",
    "fire_verified": "n/a",
@@ -284,6 +318,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches $.packageManager matches ^yarn@[0-9]+\\.[0-9]+\\.[0-9]+(prerelease)?(+shaN.hex)?$ if_present -> strapi-package-manager-yarn-pinned",
+   "rules": [
+    "strapi-package-manager-yarn-pinned"
+   ],
    "assertion_family": "none",
    "reason": "Corepack rejects a malformed or non-yarn spec, so the yarn shim fails. Expressed and confirmed.",
    "fire_verified": "Scratch copy: 'yarn@4' and 'pnpm@9.0.0' each fired strapi-package-manager-yarn-pinned; 'yarn@4.12.0+sha512.abc123' passed; clone passes.",
@@ -297,9 +334,12 @@
    "mechanism": "test",
    "family": "locale",
    "bucket": "C",
-   "alint": "cross_file relation: registered, register_as '{stem}', source files translations/*.json, target languageNativeNames.ts regex \"(?m)^\\s*'?([A-Za-z][A-Za-z-]*)'?\\s*:\\s*'[^']+'\" -> strapi-admin-locales-have-native-names",
+   "alint": "cross_file registered, register_as '{stem}', source translations/*.json, target languageNativeNames.ts read by a regex that takes an entry at a line start or after '{' or ',' with a single- or double-quoted value: strapi-admin-locales-have-native-names",
+   "rules": [
+    "strapi-admin-locales-have-native-names"
+   ],
    "assertion_family": "none",
-   "reason": "R7: a test over files alint reads, classified by its assertion: locale-file coverage in a registry. The registered relation with a regex-extract target expresses it (confirmed; this was an untested shape).",
+   "reason": "R7: a test over files alint reads, classified by its assertion. The TS object literal is read by a regex, not a parser; Stage C widened it for double quotes and two entries on one line, but a template literal, computed value or spread would still be misread, so C (Stage B).",
    "fire_verified": "Scratch copy: four breaks each fired strapi-admin-locales-have-native-names: a new xx.json, removing the unquoted ca entry, emptying ca to '', and removing the quoted 'pt-BR' entry. Removing 'en-GB' (no en-GB.json) correctly passed. Clone passes (35 locale files).",
    "origin": "A",
    "changes": [
@@ -311,6 +351,14 @@
       "none"
      ],
      "why": "The rule reads languageNativeNames.ts with the line regex `(?m)^\\s*'?([A-Za-z][A-Za-z-]*)'?\\s*:\\s*'[^']+'`, which depends on prettier's single-quoted, one-entry-per-line layout. On a scratch copy, a valid double-quoted value produced a false positive, and prettier itself emits double quotes for a native name that contains an apostrophe. Two entries on one line also misfire. A TS object read by line regex is C (berry-18, strapi-06); R4 confirms only the current layout."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The record text still described the bucket or rule from before Stage B or the integrator changed it."
     }
    ]
   },
@@ -322,6 +370,7 @@
    "family": "locale",
    "bucket": "B-config",
    "alint": "",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Per key prefix (key minus its last segment, among keys ending .singular/.plural) at most one row: a unique-key over a key-derived projection. JSONPath cannot build a sibling key name, so no kind expresses it today. R1 collapses the five packages into one unit.",
    "fire_verified": "n/a",
@@ -336,6 +385,9 @@
    "family": "locale",
    "bucket": "A",
    "alint": "json_path_absent over content-manager translations/*.json with a root-filter $[?($['...saveHint'] && (!$['...publishHint'] || $['...publishHint'] == '' || search($['...saveHint'], '[{]action[}]')))] -> strapi-cm-edit-view-hints",
+   "rules": [
+    "strapi-cm-edit-view-hints"
+   ],
    "assertion_family": "none",
    "reason": "A conditional key-presence assertion within one file. The RFC 9535 root-filter trick expresses it with absolute queries; confirmed.",
    "fire_verified": "Scratch copy (en.json): removing publishHint, emptying it, and putting {action} into saveHint each fired strapi-cm-edit-view-hints; removing both keys passed (the condition is gated on saveHint); clone passes (10 of 31 locales define saveHint).",
@@ -350,6 +402,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Uniqueness of a field across the elements of a JSON array is unique-key; no kind asserts value uniqueness today. Tagged other: a content-locale registry, not a translation catalog.",
    "fire_verified": "n/a",
@@ -364,6 +417,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve source packages/core/{upload,admin}/package.json extract json $.exports.*.source expect file -> strapi-exports-source-exists",
+   "rules": [
+    "strapi-exports-source-exists"
+   ],
    "assertion_family": "none",
    "reason": "Manifest-to-path existence; resolves relative to each package dir. Confirmed.",
    "fire_verified": "n/a (other); fired on scratch when upload's ./server/src/index.ts source became ./server/src/main.ts.",
@@ -378,6 +434,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "The targets are build outputs (dist/), so asserting them requires running the build (R2/R7 D).",
    "fire_verified": "n/a",
@@ -392,6 +449,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent include packages/core/{admin,upload,content-manager,review-workflows}/admin/**/*.test.{js,jsx,ts,tsx} exclude **/__tests__/**, **/tests/** -> strapi-admin-tests-in-test-folders",
+   "rules": [
+    "strapi-admin-tests-in-test-folders"
+   ],
    "assertion_family": "none",
    "reason": "A path-level lint rule is a structure invariant (element-web-18 precedent). Confirmed over 449 test files.",
    "fire_verified": "n/a (other); fired on scratch for packages/core/upload/admin/src/components/Foo.test.tsx.",
@@ -406,6 +466,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_matches + file_content_forbidden over tests/e2e/tests/media-library/**/*.spec.ts -> strapi-e2e-media-library-specs-gated, strapi-e2e-media-library-specs-no-ungated-block",
+   "rules": [
+    "strapi-e2e-media-library-specs-gated",
+    "strapi-e2e-media-library-specs-no-ungated-block"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but the domain folder is mirrored by hand from MEDIA_LIBRARY_DOMAIN in e2e-domains.js (the berry hand-enumerated-list precedent = C).",
    "fire_verified": "n/a (C, other); scratch: a changed gate fired -gated, an appended top-level test() fired -no-ungated-block.",
@@ -420,6 +484,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_matches + file_content_forbidden over tests/e2e/tests/{content-releases,review-workflows}/**/*.spec.ts -> strapi-e2e-ee-only-specs-gated, strapi-e2e-ee-only-specs-no-ungated-block",
+   "rules": [
+    "strapi-e2e-ee-only-specs-gated",
+    "strapi-e2e-ee-only-specs-no-ungated-block"
+   ],
    "assertion_family": "none",
    "reason": "The EE_ONLY_DOMAINS list is hand-mirrored into the glob = C.",
    "fire_verified": "n/a (C, other); scratch: a new ungated review-workflows spec fired both rules.",
@@ -434,6 +502,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "eslint (external config)",
+   "rules": [
+    "strapi-admin-tsx-filenames-pascal-case",
+    "strapi-admin-ts-filenames-camel-case"
+   ],
    "assertion_family": "none",
    "reason": "The rule globs and options live in an unvendored external package and cannot be read offline, so the path-level assertion cannot be stated. Kept with the lint job (R2) and flagged as unverifiable in notes rather than guessed.",
    "fire_verified": "n/a",
@@ -458,6 +530,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_absent include packages/*/*/package.json exclude packages/{core,plugins,providers,utils,cli,generators}/*/package.json -> strapi-docs-package-groups-known",
+   "rules": [
+    "strapi-docs-package-groups-known"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but the six group ids are hand-mirrored from groups.mjs = C.",
    "fire_verified": "n/a (C, other); scratch: packages/weird/thing/package.json fired it.",
@@ -472,6 +547,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches package.json $.workspaces[?search(@, '^packages/')] matches '^packages(/(\\*|[^*?\\[\\]{}!/]+))+$' -> strapi-docs-packages-workspace-patterns-simple",
+   "rules": [
+    "strapi-docs-packages-workspace-patterns-simple"
+   ],
    "assertion_family": "none",
    "reason": "A structured-query value check, confirmed.",
    "fire_verified": "n/a (other); scratch: adding 'packages/**/x' fired it.",
@@ -486,6 +564,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches $.name matches '.' over packages/*/package.json, packages/*/*/package.json -> strapi-docs-packages-workspaces-named",
+   "rules": [
+    "strapi-docs-packages-workspaces-named"
+   ],
    "assertion_family": "none",
    "reason": "Required non-empty field; confirmed.",
    "fire_verified": "n/a (other); scratch: renaming the name key fired it.",
@@ -500,6 +581,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden over docs/docs/**/*.{md,mdx} minus index.md/index.mdx, frontmatter-block regex ending in package: -> strapi-docs-package-frontmatter-only-on-index",
+   "rules": [
+    "strapi-docs-package-frontmatter-only-on-index"
+   ],
    "assertion_family": "none",
    "reason": "Key presence in frontmatter, read by a regex that walks the --- block (no frontmatter reader). This is a key check, not a value check, so it is C. Value validation of frontmatter is B-adapter (trpc-26..32).",
    "fire_verified": "n/a (C, other); scratch: package: on a non-index page fired; 'package:' in the body passed.",
@@ -514,6 +598,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_matches frontmatter-block regex ending in title: -> strapi-docs-frontmatter-title",
+   "rules": [
+    "strapi-docs-frontmatter-title"
+   ],
    "assertion_family": "none",
    "reason": "Frontmatter key presence via regex = C.",
    "fire_verified": "n/a (C, other); scratch: a page without title fired.",
@@ -528,6 +615,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden frontmatter regex ending in slug:, excluding docs/docs/api/** -> strapi-docs-no-slug-outside-api",
+   "rules": [
+    "strapi-docs-no-slug-outside-api"
+   ],
    "assertion_family": "none",
    "reason": "Frontmatter key absence via regex = C.",
    "fire_verified": "n/a (C, other); scratch: slug on a contributing page fired.",
@@ -542,6 +632,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden frontmatter regex 'description:[ \\t]*[^\\r\\n]{153,}' -> strapi-docs-description-short",
+   "rules": [
+    "strapi-docs-description-short"
+   ],
    "assertion_family": "none",
    "reason": "A length bound on a frontmatter value via regex (quotes counted) = C.",
    "fire_verified": "n/a (C, other); scratch: a 160-char description fired.",
@@ -556,6 +649,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches '(?m)^import ' over docs/docs/**/*.mdx -> strapi-docs-mdx-imports-a-component",
+   "rules": [
+    "strapi-docs-mdx-imports-a-component"
+   ],
    "assertion_family": "none",
    "reason": "A plain content-presence rule, confirmed.",
    "fire_verified": "n/a (other); scratch: an .mdx without import fired.",
@@ -570,6 +666,10 @@
    "family": "other",
    "bucket": "C",
    "alint": "markdown_images_have_alt over docs/docs/**/*.md -> strapi-docs-images-have-alt",
+   "rules": [
+    "strapi-docs-images-have-alt",
+    "strapi-docs-html-images-have-alt"
+   ],
    "assertion_family": "none",
    "reason": "A dedicated kind; confirmed.",
    "fire_verified": "n/a (other); scratch: ![](/img/x.png) fired.",
@@ -594,6 +694,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden frontmatter regex ending in package: over docs/docs/**/*.mdx -> strapi-docs-package-pages-are-md",
+   "rules": [
+    "strapi-docs-package-pages-are-md"
+   ],
    "assertion_family": "none",
    "reason": "Frontmatter key via regex = C. The build plugin accepts index.mdx; this is the guide's narrower convention.",
    "fire_verified": "n/a (C, other); scratch: an index.mdx with package: fired.",
@@ -608,6 +711,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "git_no_denied_paths denied [.agents/**, .claude/**, .cursor/skills/**] -> strapi-ai-tool-link-dirs-not-committed",
+   "rules": [
+    "strapi-ai-tool-link-dirs-not-committed"
+   ],
    "assertion_family": "none",
    "reason": "Index-based; works at depth 1. Confirmed on the clone.",
    "fire_verified": "n/a (other); scratch git repo: a force-added .claude/skills/x/SKILL.md fired.",
@@ -622,6 +728,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "pair primary packages/{*,*/*}/package.json partner docs/docs/{dir}/index.md -> strapi-docs-every-package-has-a-page",
+   "rules": [
+    "strapi-docs-every-package-has-a-page",
+    "strapi-docs-every-package-is-declared"
+   ],
    "assertion_family": "none",
    "reason": "A review convention that holds at the pin (R5); the pair kind expresses it exactly.",
    "fire_verified": "n/a (other); scratch: deleting docs/docs/packages/core/utils/index.md fired.",
@@ -636,6 +746,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "markdown_required_headings over docs/docs/packages/{*,*/*}/index.md, headings [*, ## Purpose, *, ## Key concepts, *, ## Related, *] -> strapi-docs-package-page-headings",
+   "rules": [
+    "strapi-docs-package-page-headings"
+   ],
    "assertion_family": "none",
    "reason": "The depth-limited glob selects exactly the package index pages; the dedicated kind confirms.",
    "fire_verified": "n/a (other); scratch: renaming ## Related fired.",
@@ -650,6 +763,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "registry_paths_resolve source docs/docs/**/*.{md,mdx} regex extract of ](...md|mdx) links, expect file -> strapi-docs-markdown-file-links-resolve",
+   "rules": [
+    "strapi-docs-markdown-file-links-resolve"
+   ],
    "assertion_family": "none",
    "reason": "markdown_links_resolve also checks extensionless route links (13 false findings at the pin: slug and route links) and has no extension filter, so the file links are read by a regex that is not CommonMark-aware. That is C (wants a link-class filter). 463 file links pass.",
    "fire_verified": "n/a (C, other); scratch: a ./nope.md link fired.",
@@ -664,6 +780,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden with a prefix-alternation regex over Markdown images and <img src> -> strapi-docs-images-absolute-img-path",
+   "rules": [
+    "strapi-docs-images-absolute-img-path"
+   ],
    "assertion_family": "none",
    "reason": "Rust regex has no lookahead, so 'not /img/' is spelled as an alternation of prefixes = C.",
    "fire_verified": "n/a (C, other); scratch: relative Markdown and <img> paths fired; /img/ paths passed.",
@@ -678,6 +797,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs a Docusaurus route model (number-prefix stripping, folder-page folding, slug frontmatter, generated tag routes). markdown_links_resolve's root map only maps directories to routes.",
    "fire_verified": "n/a",
@@ -698,10 +818,11 @@
    "evidence": "docs/plugins/workspace-packages/index.ts (throws on an unknown status); docs/AGENTS.md:24",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "C",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "A value check on Markdown frontmatter needs a frontmatter adapter (trpc-26..32 precedent).",
+   "reason": "A for_each_match over the frontmatter status: lines requires one of the three values. A regex read of frontmatter is C (strapi-46 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -710,9 +831,17 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "strapi-46, backstage-40 and backstage-42 check frontmatter values by regex and are C."
     }
-   ],
-   "needs": "format-reader"
+   ]
   },
   {
    "id": "strapi-57",
@@ -722,6 +851,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "A typed frontmatter value check needs a frontmatter adapter.",
    "fire_verified": "n/a",
@@ -742,10 +872,11 @@
    "evidence": "docs/plugins/workspace-packages/index.ts (throws on an unknown package); docs/AGENTS.md:24",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-adapter",
+   "bucket": "C",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
-   "reason": "A frontmatter value referencing manifest names needs a frontmatter adapter (the relation itself is a reference).",
+   "reason": "A cross_file superset from the workspace manifests' $.name to the docs pages' package: frontmatter, read by regex. C (backstage-34 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -754,9 +885,17 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "backstage-34 checks frontmatter references to workspace names by regex and is C."
     }
-   ],
-   "needs": "format-reader"
+   ]
   },
   {
    "id": "strapi-59",
@@ -764,10 +903,13 @@
    "evidence": "docs/plugins/workspace-packages/index.ts (throws on a duplicate package)",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "B-adapter",
-   "alint": "",
-   "assertion_family": "none",
-   "reason": "Uniqueness of a frontmatter value across pages; blocked on a frontmatter adapter before any unique-key family applies.",
+   "bucket": "B-config",
+   "alint": "constraint unique-key over the package values, extracted with the frontmatter regex strapi-51's rule uses",
+   "rules": [
+    "strapi-docs-every-package-is-declared"
+   ],
+   "assertion_family": "unique-key",
+   "reason": "A regex reads each page's package value, as strapi-51's rule already does; uniqueness of the extracted values across pages has no kind today, so B-config unique-key (batch 2 ruling).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -776,9 +918,24 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "audit",
+     "from": [
+      "B-adapter",
+      "other",
+      "none"
+     ],
+     "why": "By the frontmatter regex precedent, the 44 `package:` lines can be extracted (strapi-51's strapi-docs-every-package-is-declared already does). Only value uniqueness across files is missing."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text named strapi-51's rule as a comparison, which read as a rule of this unit."
     }
-   ],
-   "needs": "format-reader"
+   ]
   },
   {
    "id": "strapi-60",
@@ -788,6 +945,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Frontmatter tags list values vs tags.yml keys: needs a frontmatter adapter (and a YAML key extract).",
    "fire_verified": "n/a",
@@ -810,6 +968,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "",
+   "rules": [
+    "strapi-docs-tags-at-most-35"
+   ],
    "assertion_family": "none",
    "reason": "A count bound on the top-level keys of one YAML file; no counting kind exists.",
    "fire_verified": "n/a",
@@ -834,6 +995,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "",
+   "rules": [],
    "assertion_family": "set",
    "reason": "Disjointness between the tags.yml key set and the package-leaf-folder and status sets; tags.yml keys are not extractable as values today.",
    "fire_verified": "n/a",
@@ -848,6 +1010,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Needs a TypeScript-array reader and the Docusaurus route model.",
    "fire_verified": "n/a",
@@ -870,6 +1033,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_message pattern (sketched in comments, not written: depth-1 clone)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: a commit-message check a git kind expresses is C (R4 cannot confirm on depth 1).",
    "fire_verified": "n/a",
@@ -884,6 +1048,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_message subject_max_length: 100 (sketched)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling (git kind, depth 1) = C.",
    "fire_verified": "n/a",
@@ -898,6 +1063,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_message pattern (approximation sketched)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling = C. The regex only approximates commitlint's case classes.",
    "fire_verified": "n/a",
@@ -912,6 +1078,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "git_commit_message pattern (sketched)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling = C.",
    "fire_verified": "n/a",
@@ -926,6 +1093,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "git_commit_message reads only subject, body and whole-message patterns. Telling footer trailers from body lines needs a conventional-commit message parser.",
    "fire_verified": "n/a",
@@ -948,6 +1116,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "prettier",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a formatter.",
    "fire_verified": "n/a",
@@ -962,6 +1131,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "eslint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a source linter; the path-level check-file rules are split out as strapi-32/35.",
    "fire_verified": "n/a",
@@ -976,6 +1146,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a source linter.",
    "fire_verified": "n/a",
@@ -990,6 +1161,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a type checker.",
    "fire_verified": "n/a",
@@ -1004,6 +1176,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "nx build",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the build.",
    "fire_verified": "n/a",
@@ -1018,6 +1191,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node script",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Asserts build outputs, so it needs the build.",
    "fire_verified": "n/a",
@@ -1032,6 +1206,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "docusaurus",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the site build; the file-level assertions it carries are split out as strapi-40..63.",
    "fire_verified": "n/a",
@@ -1046,6 +1221,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a test runner. File-asserting tests are split out (R7).",
    "fire_verified": "n/a",
@@ -1060,6 +1236,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a test runner (e2e-domains and exports tests split out).",
    "fire_verified": "n/a",
@@ -1074,6 +1251,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2: a test runner (translation-data tests split out).",
    "fire_verified": "n/a",
@@ -1088,6 +1266,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "playwright",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the application; the jobs are matrix instances (R1).",
    "fire_verified": "n/a",
@@ -1102,6 +1281,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the application against databases (R1 collapses the matrix).",
    "fire_verified": "n/a",
@@ -1116,6 +1296,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "jest",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code.",
    "fire_verified": "n/a",
@@ -1130,6 +1311,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "vitest/playwright",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs code.",
    "fire_verified": "n/a",
@@ -1144,6 +1326,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "node",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the migration against a database.",
    "fire_verified": "n/a",
@@ -1158,6 +1341,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "sonarqube",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service and code analysis.",
    "fire_verified": "n/a",
@@ -1172,6 +1356,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "github action",
+   "rules": [],
    "assertion_family": "none",
    "reason": "PR metadata, external state (batch-1 PR title/body precedent).",
    "fire_verified": "n/a",
@@ -1186,6 +1371,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "github action",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Validates issue bodies, external state.",
    "fire_verified": "n/a",
@@ -1200,6 +1386,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "github",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External service.",
    "fire_verified": "n/a",
@@ -1214,6 +1401,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "cla bot",
+   "rules": [],
    "assertion_family": "none",
    "reason": "External state.",
    "fire_verified": "n/a",
@@ -1228,6 +1416,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "json_path_absent `$.__never_present_key__` over `packages/**/admin/src/translations/*.json` (a parse-only probe; resource_parse fires on a syntax error)",
+   "rules": [
+    "strapi-admin-translations-parse-as-json"
+   ],
    "assertion_family": "none",
    "reason": "Expressible, but alint's JSON reader is JSONC-tolerant: on a scratch copy of content-manager fr.json a real syntax error fired, while a trailing comma and a // comment passed, though JSON.parse and rollup json() reject both. Same relaxation as the element-web-08 and zulip-04 precedents, so C, not A.",
    "fire_verified": "Scratch copy: a broken brace fired (resource_parse); a trailing comma and a // comment did NOT fire (the relaxation); passes on the clone.",
@@ -1242,6 +1433,9 @@
    "family": "locale",
    "bucket": "C",
    "alint": "cross_file relation equals: json `$['form.attribute.item.privateField.description']` from en.json vs a regex extract `privateField\\.description'\\),\\s*defaultMessage:\\s*'([^']*)'` over attributeOptions.ts (rule b-ctb-private-field-description-aligned)",
+   "rules": [
+    "strapi-ctb-private-field-description-aligned"
+   ],
    "assertion_family": "none",
    "reason": "cross_file equals expresses it and passes on the clone, but the TS side is read with a layout-dependent regex (single quotes, a fixed key order), the berry-18 and strapi-06 precedent for TS or YAML read by line regex. So C.",
    "fire_verified": "Scratch copy: changing the defaultMessage in attributeOptions.ts fired; passes on the clone.",
@@ -1256,6 +1450,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "yaml_path_absent `$[?(!@.label || !@.description)]` on docs/docs/tags.yml (rule b-docs-tags-have-label-and-description)",
+   "rules": [
+    "strapi-docs-tags-have-label-and-description"
+   ],
    "assertion_family": "none",
    "reason": "A kind expresses it, and alint check confirms it on the clone (R4). The convention holds at the pin, so R5 does not exclude it.",
    "fire_verified": "n/a (family other). Still shown: removing the rbac tag's label in a scratch copy fired; passes on the clone.",
@@ -1270,6 +1467,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint with a unique-key assertion over the `name` of every workspace manifest",
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "Same shape as the trpc-B05 precedent. No current kind asserts that a JSON value is unique across a file set, so it is B-config unique-key. R7: Yarn's install-time workspace check reads manifests that alint reads, and it is not resolution semantics.",
    "fire_verified": "n/a",
@@ -1284,6 +1482,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "needs a frontmatter adapter so frontmatter can be checked against a schema; json_schema_passes cannot read Markdown frontmatter today",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Follows the trpc-26..32 precedent: frontmatter schema is B-adapter. _category_.json and the tags.yml schema may be further units of the same kind; not counted separately.",
    "fire_verified": "n/a",
@@ -1306,6 +1505,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen freshness needs the build to run (R2). It is a documented convention, recorded so it is accounted for; as D it stays out of the ratio either way.",
    "fire_verified": "n/a",
@@ -1319,6 +1519,11 @@
   "strapi-va-packagemanager-matches-yarnpath (info): package.json packageManager yarn version equals the version in .yarnrc.yml yarnPath (yarn-<v>.cjs); cross_file equals, regex extracts. Fire-tested: yarn@4.13.0 fired it.",
   "strapi-va-nvmrc-matches-engines-floor (info): .nvmrc major (22) equals the root engines.node floor (>=22); cross_file equals with regex extracts. Fire-tested: .nvmrc=20 fired it. CI does not read .nvmrc.",
   "strapi-va-engines-node-uniform (info): every workspace that declares engines.node uses the root range '>=22.0.0 <=26.x.x' (46 manifests agree, 8 declare none); cross_file equals with allow_missing_target. Fire-tested: '>=20.0.0' in packages/core/utils fired it."
+ ],
+ "value_add_rules": [
+  "strapi-va-packagemanager-matches-yarnpath",
+  "strapi-va-nvmrc-matches-engines-floor",
+  "strapi-va-engines-node-uniform"
  ],
  "absent_categories": [
   "License / header / SPDX checks (LICENSE present, no header rule)",

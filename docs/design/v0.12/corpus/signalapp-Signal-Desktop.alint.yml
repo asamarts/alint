@@ -103,6 +103,30 @@ rules:
     level: error
     message: "{plural} requires multiple options for Smartling (build/intl-linter noOneChoice)."
 
+  # Unit 07 (C, audit): noNestedChoice reports a plural, selectordinal or
+  # select argument inside an option of another. The regex finds a choice
+  # argument whose option body (one or two brace levels deep) opens another
+  # choice argument. Like unit 08's rule it ignores ICU apostrophe quoting.
+  - id: signal-desktop-intl-no-nested-choice
+    kind: json_path_absent
+    paths: _locales/en/messages.json
+    path: '$[?search(@.messageformat, "\\{\\s*[^{}\\s,]+\\s*,\\s*(?:plural|selectordinal|select)\\s*,(?:[^{}]|\\{(?:[^{}]|\\{[^{}]*\\})*\\})*?\\{(?:[^{}]|\\{[^{}]*\\})*?\\{\\s*[^{}\\s,]+\\s*,\\s*(?:plural|selectordinal|select)\\s*,")]'
+    level: error
+    message: "Nested {select}/{plural} is not supported by Smartling (build/intl-linter noNestedChoice)."
+
+  # Unit 09 (C, audit): pluralPound reports an explicit number in literal
+  # text directly inside a plural option ("Use # instead of an explicit
+  # number"), with get-numbers' rule that the number stands alone. The regex
+  # walks the options of one plural argument and looks for such a number in
+  # the literal text of an option body. It ignores ICU quoting, and a number
+  # that ends at a tag is caught only before `<`.
+  - id: signal-desktop-intl-plural-pound
+    kind: json_path_absent
+    paths: _locales/en/messages.json
+    path: '$[?search(@.messageformat, "\\{\\s*[^{}\\s,]+\\s*,\\s*plural\\s*,\\s*(?:offset\\s*:\\s*[0-9]+\\s*)?(?:=?[A-Za-z0-9_]+\\s*\\{(?:[^{}]|\\{[^{}]*\\})*\\}\\s*)*=?[A-Za-z0-9_]+\\s*\\{(?:(?:[^{}]|\\{[^{}]*\\})*?[}# ])?-?[0-9]+(?:,[0-9]+)*(?:[.][0-9]+)*[ {}#<]")]'
+    level: error
+    message: "Use # instead of an explicit number in a plural option (build/intl-linter pluralPound)."
+
   # Unit 11 (A): scripts/generate-compact-locales.mjs (CI lint job,
   # `pnpm run generate`) runs readdir(_locales) and reads
   # <entry>/messages.json for every entry. A locale directory without one

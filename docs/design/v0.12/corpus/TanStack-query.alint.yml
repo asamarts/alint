@@ -106,10 +106,12 @@ rules:
   # dep-version
   # ════════════════════════════════════════════════════════════════
 
-  # tq-12 (A) — sherif empty-dependencies over the manifests sherif checks
+  # tq-12 (C) — sherif empty-dependencies over the manifests sherif checks
   # (the root and packages/*; `-p ./integrations/* -p ./examples/*` exclude
   # the rest): no empty dependency map. The regex is layout-independent (any
-  # whitespace, minified or formatted).
+  # whitespace, minified or formatted), but it also matches a nested empty
+  # map such as publishConfig.dependencies {}, which sherif ignores, so the
+  # audit moved the unit to C (none occurs at the pin).
   - id: tanstack-query-no-empty-dependency-maps
     kind: file_content_forbidden
     paths: ["package.json", "packages/*/package.json"]
@@ -417,6 +419,42 @@ rules:
     level: error
     message: "Third-party actions and reusable workflows must be pinned to a full commit SHA (zizmor unpinned-uses)."
 
+  # tq-a01 (C) and tq-a02 (A), split out of tq-40 by the audit -
+  #     .github/workflows/zizmor.yml:20-24 runs zizmor with advanced-security:
+  #     false, so any finding fails the job. Its dangerous-triggers and
+  #     secrets-inherit audits are structural and have no finding at the pin.
+  # tq-a01 dangerous-triggers, mapping form (`on:` with a pull_request_target or
+  # workflow_run key).
+  - id: tanstack-query-gha-no-dangerous-triggers
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.on['pull_request_target','workflow_run']"
+    level: error
+    message: "zizmor dangerous-triggers: no pull_request_target / workflow_run trigger."
+  # dangerous-triggers, list form (`on: [push, workflow_run]`).
+  - id: tanstack-query-gha-no-dangerous-triggers-list-form
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.on[?@ == 'pull_request_target' || @ == 'workflow_run']"
+    level: error
+    message: "zizmor dangerous-triggers: no pull_request_target / workflow_run trigger."
+  # tq-a02 secrets-inherit: a reusable-workflow call passes secrets explicitly.
+  - id: tanstack-query-gha-no-secrets-inherit
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$.jobs[?@.secrets == 'inherit']"
+    level: error
+    message: "zizmor secrets-inherit: pass secrets explicitly."
+  # tq-a01 dangerous-triggers, scalar form (`on: workflow_run`), which neither
+  # rule above sees. It matches any top-level value equal to the trigger name
+  # (a `name: workflow_run` would also fire; none at the pin), so tq-a01 is C.
+  - id: tanstack-query-gha-no-dangerous-triggers-scalar-form
+    kind: yaml_path_absent
+    paths: ".github/workflows/*.{yml,yaml}"
+    path: "$[?@ == 'pull_request_target' || @ == 'workflow_run']"
+    level: error
+    message: "zizmor dangerous-triggers: no pull_request_target / workflow_run trigger."
+
   # tq-41 (A) — `.gitattributes: * text=auto eol=lf` (git normalizes text
   # files to LF on check-in; .editorconfig end_of_line = lf).
   - id: tanstack-query-lf-line-endings
@@ -432,7 +470,7 @@ rules:
 
   # Not expressed (B): tq-33 a package sits in at most one changesets fixed
   # group (unique-key); tq-34 .changeset/config.json passes @changesets/config
-  # validation (B-delegate: the schema is remote); tq-35 workspace project
+  # validation (C since the audit: a schema outside the repository); tq-35 workspace project
   # names are unique for nx's project graph (unique-key); tq-36 test:docs
   # (scripts/verify-links.ts) — markdown_links_resolve reports 41 findings at
   # the pin because the script appends .md to extensionless links and maps

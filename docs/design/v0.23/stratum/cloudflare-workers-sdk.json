@@ -97,6 +97,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_equals: wsdk-fixture-is-private",
+   "rules": [
+    "wsdk-fixture-is-private"
+   ],
    "assertion_family": "none",
    "reason": "Per-file JSON field assertion; check passes on the clone",
    "fire_verified": "n/a (also fired in scratch with private=false)",
@@ -111,6 +114,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent: wsdk-fixture-has-no-version",
+   "rules": [
+    "wsdk-fixture-has-no-version"
+   ],
    "assertion_family": "none",
    "reason": "Per-file JSON absence",
    "fire_verified": "n/a (also fired in scratch)",
@@ -125,6 +131,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_matches: wsdk-fixture-name-scope",
+   "rules": [
+    "wsdk-fixture-name-scope"
+   ],
    "assertion_family": "none",
    "reason": "Per-file JSON regex",
    "fire_verified": "n/a (also fired in scratch)",
@@ -139,6 +148,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent with filter `$[?$.private == true && !match($.name, '@cloudflare/.*')]`: wsdk-private-packages-cloudflare-scope",
+   "rules": [
+    "wsdk-private-packages-cloudflare-scope"
+   ],
    "assertion_family": "none",
    "reason": "Conditional per-file JSON assertion via RFC 9535 filter; same glob scope incl. dot-path skip",
    "fire_verified": "n/a (also fired in scratch by renaming quick-edit)",
@@ -153,6 +165,10 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "for_each_dir(when_iter has package.json and not scripts/deps.ts) + json_path_absent `$.dependencies[?$.private != true && !match(@, 'workspace:.*')]`: wsdk-external-deps-need-deps-ts; file_content_matches: wsdk-deps-ts-exports-external-dependencies",
+   "rules": [
+    "wsdk-external-deps-need-deps-ts",
+    "wsdk-deps-ts-exports-external-dependencies"
+   ],
    "assertion_family": "none",
    "reason": "Contrapositive per package dir; check passes on the clone",
    "fire_verified": "Scratch copy (rsync of git ls-files + git init): deleting packages/wrangler/scripts/deps.ts fired wsdk-external-deps-need-deps-ts; renaming the export fired wsdk-deps-ts-exports-external-dependencies; both pass on the clone",
@@ -167,6 +183,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "missing: (key,value) rows of `dependencies` (keys whose value is not workspace:) and a block-scoped extractor for one TS array literal in scripts/deps.ts",
+   "rules": [],
    "assertion_family": "set",
    "reason": "Set inclusion, but batch-1 ruling: the entry adapter is key-only, so value-filtered keys need a new adapter; deps.ts also holds IGNORED_DIST_IMPORTS in the same shape so a line regex over-captures",
    "fire_verified": "n/a",
@@ -190,6 +207,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "missing: block-scoped TS-array-literal extractor (keys of dependencies/peerDependencies would come from the entry adapter)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Allowlist side needs extraction of only the EXTERNAL_DEPENDENCIES array elements; a regex would also capture IGNORED_DIST_IMPORTS (wrangler, create-cloudflare) and false-fire",
    "fire_verified": "n/a",
@@ -212,6 +230,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs a build and code analysis of bundled output",
    "fire_verified": "n/a",
@@ -226,6 +245,7 @@
    "family": "dep-version",
    "bucket": "B-adapter",
    "alint": "missing: value-filtered dependency key rows and a disjointness relation",
+   "rules": [],
    "assertion_family": "set",
    "reason": "Batch-1 ruling (entry adapter is key-only): selecting dependency keys by their value needs (key,value) rows; cross_file has no disjoint relation",
    "fire_verified": "n/a",
@@ -249,6 +269,10 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "yaml_path_absent `$.catalog[?@ != $.catalog['@cloudflare/workers-types'] && !match(@, <exact-semver>)]`: wsdk-catalog-entries-pinned",
+   "rules": [
+    "wsdk-catalog-entries-pinned",
+    "wsdk-catalog-pin-exception-not-shared"
+   ],
    "assertion_family": "none",
    "reason": "Exception expressed by value (no key selector) — identical unless another entry has the same range string",
    "fire_verified": "Scratch: workerd \"1.20261112.1\" -> \"^1.20261112.1\" fired wsdk-catalog-entries-pinned; passes on clone",
@@ -263,6 +287,10 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "json_path_absent (dependencies, optionalDependencies) with $.private filter: wsdk-published-dependencies-pinned, wsdk-published-optional-dependencies-pinned",
+   "rules": [
+    "wsdk-published-dependencies-pinned",
+    "wsdk-published-optional-dependencies-pinned"
+   ],
    "assertion_family": "none",
    "reason": "Per-file filter over values",
    "fire_verified": "Scratch: wrangler path-to-regexp ^6.3.0 fired the dependencies rule; fsevents ~2.3.3 fired the optionalDependencies rule; both pass on clone",
@@ -277,6 +305,11 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file equals x3 (year, month, day): wsdk-compat-date-{year,month,day}-matches-workerd",
+   "rules": [
+    "wsdk-compat-date-year-matches-workerd",
+    "wsdk-compat-date-month-matches-workerd",
+    "wsdk-compat-date-day-matches-workerd"
+   ],
    "assertion_family": "none",
    "reason": "Expressible but awkward: 1.YYYYMMDD.n vs YYYY-MM-DD needs a digits/date normalize, so one equality is split into three",
    "fire_verified": "n/a (C; fired anyway on year, month, day edits and on a workerd bump)",
@@ -291,6 +324,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: needs package-manager install state",
    "fire_verified": "n/a",
@@ -305,6 +339,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent `$[?@.deploy == true && !$.scripts.deploy]`: wsdk-deployable-package-has-deploy-script",
+   "rules": [
+    "wsdk-deployable-package-has-deploy-script"
+   ],
    "assertion_family": "none",
    "reason": "Conditional per-file JSON",
    "fire_verified": "n/a (also fired in scratch)",
@@ -319,6 +356,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match select USES_RE: wsdk-third-party-actions-pinned-to-sha",
+   "rules": [
+    "wsdk-third-party-actions-pinned-to-sha"
+   ],
    "assertion_family": "none",
    "reason": "Same line regex as the script",
    "fire_verified": "n/a (also fired on a dorny/paths-filter@v3 workflow)",
@@ -333,6 +373,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent $.scripts.build: wsdk-playground-no-build-script",
+   "rules": [
+    "wsdk-playground-no-build-script"
+   ],
    "assertion_family": "none",
    "reason": "Per-file JSON absence",
    "fire_verified": "n/a (also fired in scratch)",
@@ -347,6 +390,9 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint over package dirs (build-script rows -> turbo build-output rows); partial guard only: wsdk-build-script-has-turbo-json-partial (info, value-add)",
+   "rules": [
+    "wsdk-build-script-has-turbo-json-partial"
+   ],
    "assertion_family": "set",
    "reason": "Conditional on another file's JSON content; when_iter has no content predicates and 7 dirs have turbo.json without a build script, so a stronger decomposition false-fires",
    "fire_verified": "n/a",
@@ -371,6 +417,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir(when_iter has package.json and vitest config) + json_path_matches $.scripts['test:ci']: wsdk-vitest-package-has-test-ci",
+   "rules": [
+    "wsdk-vitest-package-has-test-ci"
+   ],
    "assertion_family": "none",
    "reason": "Existence-gated per-dir check",
    "fire_verified": "n/a (also fired removing autoconfig test:ci)",
@@ -385,6 +434,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file superset, source JSONPath `$[?@ == $.name && ($.private != true || $.scripts.deploy)]`: wsdk-changeset-packages-known",
+   "rules": [
+    "wsdk-changeset-packages-known"
+   ],
    "assertion_family": "none",
    "reason": "Filtered name extraction + set relation; README.md excluded by glob alternation",
    "fire_verified": "n/a (fired on unknown names incl. a capital-R file; README.md edit did not fire)",
@@ -399,6 +451,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file superset: wsdk-changeset-no-major-for-public-packages",
+   "rules": [
+    "wsdk-changeset-no-major-for-public-packages"
+   ],
    "assertion_family": "none",
    "reason": "Allowed-major set vs names with `: major`",
    "fire_verified": "n/a (also fired on \"wrangler\": major)",
@@ -413,6 +468,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches front-matter regex: wsdk-changeset-frontmatter-valid",
+   "rules": [
+    "wsdk-changeset-frontmatter-valid"
+   ],
    "assertion_family": "none",
    "reason": "Regex over the front matter (stricter: rejects blank or comment lines the YAML parser would allow)",
    "fire_verified": "n/a (also fired on type 'huge')",
@@ -427,6 +485,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent filter: wsdk-npm-prerelease-config-valid",
+   "rules": [
+    "wsdk-npm-prerelease-config-valid"
+   ],
    "assertion_family": "none",
    "reason": "Per-file JSON filter",
    "fire_verified": "n/a (fired for tag latest, tag 1beta, numbered \"no\")",
@@ -441,6 +502,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "GitHub PR state, not repository files",
    "fire_verified": "n/a",
@@ -455,6 +517,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "GitHub PR state",
    "fire_verified": "n/a",
@@ -469,6 +532,7 @@
    "family": "other",
    "bucket": "C",
    "alint": "changeset_requires_path (git kind; not written: depth-1 clone)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Batch-1 ruling: a check a git kind expresses is C since R4 cannot confirm it at depth 1; label bypass is GitHub state",
    "fire_verified": "n/a",
@@ -483,6 +547,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "pnpm -F miniflare check:generate-api",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Codegen run against a network spec",
    "fire_verified": "n/a",
@@ -497,6 +562,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runs the product",
    "fire_verified": "n/a",
@@ -511,6 +577,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests",
    "fire_verified": "n/a",
@@ -525,6 +592,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests",
    "fire_verified": "n/a",
@@ -539,6 +607,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests",
    "fire_verified": "n/a",
@@ -553,6 +622,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests (network)",
    "fire_verified": "n/a",
@@ -567,6 +637,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests",
    "fire_verified": "n/a",
@@ -581,6 +652,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests",
    "fire_verified": "n/a",
@@ -595,6 +667,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests",
    "fire_verified": "n/a",
@@ -609,6 +682,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 tests",
    "fire_verified": "n/a",
@@ -623,6 +697,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network/deploy",
    "fire_verified": "n/a",
@@ -637,6 +712,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 linter (code analysis)",
    "fire_verified": "n/a",
@@ -651,6 +727,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxlint",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Import analysis of source",
    "fire_verified": "n/a",
@@ -665,6 +742,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "oxfmt",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 formatter; editorconfig indentation folded here (editorconfig_conforms gives 13 false positives on template literals)",
    "fire_verified": "n/a",
@@ -679,6 +757,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2 type checker",
    "fire_verified": "n/a",
@@ -693,6 +772,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "tsc",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R2",
    "fire_verified": "n/a",
@@ -707,6 +787,7 @@
    "family": "dep-version",
    "bucket": "D",
    "alint": "pnpm",
+   "rules": [],
    "assertion_family": "none",
    "reason": "R7: package-manager resolution and registry state",
    "fire_verified": "n/a",
@@ -721,6 +802,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Build execution",
    "fire_verified": "n/a",
@@ -735,6 +817,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Executes the embedded bash",
    "fire_verified": "n/a",
@@ -749,6 +832,11 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_matches x3: wsdk-c3-frameworks-gate-needs-shards, -always, -runs-check",
+   "rules": [
+    "wsdk-c3-frameworks-gate-needs-shards",
+    "wsdk-c3-frameworks-gate-always",
+    "wsdk-c3-frameworks-gate-runs-check"
+   ],
    "assertion_family": "none",
    "reason": "Static text assertions over the workflow, same slice as the test (frameworks-e2e is the last job)",
    "fire_verified": "n/a (each fired in scratch)",
@@ -763,6 +851,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Uses turbo task graph (dry-run)",
    "fire_verified": "n/a",
@@ -777,6 +866,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Turbo semantics via test",
    "fire_verified": "n/a",
@@ -791,6 +881,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "GitHub actor state",
    "fire_verified": "n/a",
@@ -805,6 +896,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Review state on GitHub",
    "fire_verified": "n/a",
@@ -819,6 +911,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runtime tool version",
    "fire_verified": "n/a",
@@ -833,6 +926,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: package-name graph adapter (name->dir resolution) for cycle detection",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Edges are package names not paths; file_graph needs path edges (trpc-13 precedent)",
    "fire_verified": "n/a",
@@ -855,6 +949,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Network/registry",
    "fire_verified": "n/a",
@@ -869,6 +964,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Release-time computation over changeset version state",
    "fire_verified": "n/a",
@@ -883,6 +979,9 @@
    "family": "toolchain-pin",
    "bucket": "A",
    "alint": "json_path_matches: wsdk-package-manager-exact-pnpm",
+   "rules": [
+    "wsdk-package-manager-exact-pnpm"
+   ],
    "assertion_family": "none",
    "reason": "Per-file JSON regex",
    "fire_verified": "Scratch: packageManager \"pnpm@^10.33.0\" fired wsdk-package-manager-exact-pnpm; passes on clone",
@@ -897,6 +996,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "missing: semver-range satisfies operator",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Range satisfaction, not equality",
    "fire_verified": "n/a",
@@ -919,6 +1019,7 @@
    "family": "toolchain-pin",
    "bucket": "B-adapter",
    "alint": "missing: semver-range satisfies operator",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Range satisfaction",
    "fire_verified": "n/a",
@@ -941,6 +1042,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runtime check",
    "fire_verified": "n/a",
@@ -955,6 +1057,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match + file_content_matches: wsdk-codeowners-single-bot-rule, wsdk-codeowners-has-bot-rule",
+   "rules": [
+    "wsdk-codeowners-single-bot-rule",
+    "wsdk-codeowners-has-bot-rule"
+   ],
    "assertion_family": "none",
    "reason": "A documented content convention for the file, holds at pin (not the batch-1 'CODEOWNERS alone' case)",
    "fire_verified": "n/a (both fired in scratch)",
@@ -969,6 +1075,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: wsdk-codeowners-shared-packages-star-slash",
+   "rules": [
+    "wsdk-codeowners-shared-packages-star-slash"
+   ],
    "assertion_family": "none",
    "reason": "Line regex",
    "fire_verified": "n/a (fired in scratch)",
@@ -983,6 +1092,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: wsdk-privileged-triggers-documented",
+   "rules": [
+    "wsdk-privileged-triggers-documented"
+   ],
    "assertion_family": "none",
    "reason": "Line-level requirement",
    "fire_verified": "n/a (fired in scratch)",
@@ -997,6 +1109,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: wsdk-checkout-v6-or-newer",
+   "rules": [
+    "wsdk-checkout-v6-or-newer"
+   ],
    "assertion_family": "none",
    "reason": "Reads the version comment of SHA pins",
    "fire_verified": "n/a (fired on @v4 and SHA # v4)",
@@ -1011,6 +1126,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "ordered_block lexical-ci: wsdk-vouched-sorted",
+   "rules": [
+    "wsdk-vouched-sorted"
+   ],
    "assertion_family": "none",
    "reason": "Holds case-insensitively",
    "fire_verified": "n/a (fired in scratch)",
@@ -1025,6 +1143,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_match: wsdk-vouched-one-username-per-line",
+   "rules": [
+    "wsdk-vouched-one-username-per-line"
+   ],
    "assertion_family": "none",
    "reason": "Line regex",
    "fire_verified": "n/a (fired in scratch)",
@@ -1039,6 +1160,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden: wsdk-changeset-no-h1-h3",
+   "rules": [
+    "wsdk-changeset-no-h1-h3"
+   ],
    "assertion_family": "none",
    "reason": "Awkward: regex is fenced-code blind (a # comment in a shell block fires)",
    "fire_verified": "n/a",
@@ -1053,6 +1177,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden: wsdk-changeset-title-no-type-prefix",
+   "rules": [
+    "wsdk-changeset-title-no-type-prefix"
+   ],
    "assertion_family": "none",
    "reason": "Regex on first body line",
    "fire_verified": "n/a (fired in scratch)",
@@ -1067,6 +1194,9 @@
    "family": "other",
    "bucket": "C",
    "alint": "file_content_forbidden ```toml proxy: wsdk-changeset-no-toml-examples",
+   "rules": [
+    "wsdk-changeset-no-toml-examples"
+   ],
    "assertion_family": "none",
    "reason": "Proxy cannot tell Wrangler TOML from other TOML",
    "fire_verified": "n/a",
@@ -1081,6 +1211,13 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_absent x5: wsdk-miniflare-tests-are-spec, wsdk-vite-plugin-unit-tests-are-spec, wsdk-vite-plugin-e2e-tests-are-test, wsdk-wrangler-tests-are-test, wsdk-vitest-plugin-tests-are-test",
+   "rules": [
+    "wsdk-miniflare-tests-are-spec",
+    "wsdk-vite-plugin-unit-tests-are-spec",
+    "wsdk-vite-plugin-e2e-tests-are-test",
+    "wsdk-wrangler-tests-are-test",
+    "wsdk-vitest-plugin-tests-are-test"
+   ],
    "assertion_family": "none",
    "reason": "One naming rule collapsed per R1; holds at pin",
    "fire_verified": "n/a (each fired in scratch)",
@@ -1095,6 +1232,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "for_each_dir + file_exists: wsdk-vitest-plugin-examples-have-tsconfig",
+   "rules": [
+    "wsdk-vitest-plugin-examples-have-tsconfig"
+   ],
    "assertion_family": "none",
    "reason": "Structure invariant",
    "fire_verified": "n/a (fired in scratch)",
@@ -1109,6 +1249,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "line_endings lf: wsdk-text-files-lf",
+   "rules": [
+    "wsdk-text-files-lf"
+   ],
    "assertion_family": "none",
    "reason": "Byte-level check",
    "fire_verified": "n/a (fired on CRLF file)",
@@ -1123,6 +1266,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "registry_paths_resolve yaml $.patchedDependencies.*: wsdk-patched-dependencies-exist",
+   "rules": [
+    "wsdk-patched-dependencies-exist"
+   ],
    "assertion_family": "none",
    "reason": "Path resolution",
    "fire_verified": "n/a (fired on a deleted patch)",
@@ -1137,6 +1283,9 @@
    "family": "dep-version",
    "bucket": "A",
    "alint": "cross_file superset (names of members vs workspace: keys): wsdk-workspace-refs-resolve",
+   "rules": [
+    "wsdk-workspace-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "Static name existence, as trpc-B01",
    "fire_verified": "Scratch: adding \"@cloudflare/not-in-workspace\": \"workspace:*\" to wrangler fired wsdk-workspace-refs-resolve; passes on clone",
@@ -1151,6 +1300,9 @@
    "family": "dep-version",
    "bucket": "C",
    "alint": "cross_file superset with catalog keys from a line regex: wsdk-catalog-refs-resolve",
+   "rules": [
+    "wsdk-catalog-refs-resolve"
+   ],
    "assertion_family": "none",
    "reason": "Awkward: no key extractor, so catalog names come from a 2-space-indent regex that also catches override selectors (can only hide a miss)",
    "fire_verified": "n/a (C; fired anyway on a non-catalog catalog:default dep)",
@@ -1165,6 +1317,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: unit-conversion normalize (days -> minutes)",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Equality across units",
    "fire_verified": "n/a",
@@ -1196,6 +1349,7 @@
    "family": "toolchain-pin",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Runtime tool version",
    "fire_verified": "n/a",
@@ -1210,6 +1364,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "GitHub PR metadata",
    "fire_verified": "n/a",
@@ -1224,6 +1379,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Code analysis of source",
    "fire_verified": "n/a",
@@ -1238,6 +1394,7 @@
    "family": "other",
    "bucket": "D",
    "alint": "",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Human judgement / code analysis",
    "fire_verified": "n/a",
@@ -1252,6 +1409,9 @@
    "family": "other",
    "bucket": "A",
    "alint": "file_content_forbidden on packages/workers-utils/src/config/environment.ts, pattern '@default[^\\S\\n]+`' (suggested id wsdk-environment-default-not-escaped)",
+   "rules": [
+    "wsdk-environment-default-not-escaped"
+   ],
    "assertion_family": "none",
    "reason": "By R7 and the forem-23 precedent, a test that greps committed source text is classified by its logic. This one is a single per-file forbidden pattern.",
    "fire_verified": "Family other, so not required. Checked anyway: inserting a backtick after an @default on the scratch copy fired; the rule passes on the clone (exit 0).",
@@ -1266,6 +1426,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "cross_file set_equals. Source: packages/*/package.json with json `$[?@ == $.name && ($.private != true || $.scripts.deploy)]` (Stage A's wsdk-changeset-packages-known selector). Target: the test file with regex `(?m)^\\t{4}\"([^\"]+)\",$`.",
+   "rules": [
+    "wsdk-changeset-packages-known",
+    "wsdk-releasable-packages-match-test-list"
+   ],
    "assertion_family": "none",
    "reason": "Classified by its logic under R7, as in forem-b01/b05 (a spec that asserts committed state). It differs from wsdk-19, which checks that changeset names fall inside the releasable set; this test pins the set itself. Adding a public package or a deploy script fails CI until the list is updated. Same JSONPath-vs-JS-truthiness caveat as Stage A's rule.",
    "fire_verified": "Family other, so not required. Checked anyway: adding a public packages/* manifest on the scratch copy fired, and so did deleting the solarflare-theme line from the list; the rule passes on the clone.",
@@ -1280,6 +1444,10 @@
    "family": "other",
    "bucket": "A",
    "alint": "json_path_absent `$[?$.private == true]` on packages/{wrangler,miniflare,create-cloudflare,autoconfig}/package.json, plus json_path_equals $.private == true on packages/workers-shared/package.json",
+   "rules": [
+    "wsdk-known-packages-stay-public",
+    "wsdk-workers-shared-stays-private"
+   ],
    "assertion_family": "none",
    "reason": "Classified by its logic under R7. This is borderline under R1/R3: the test names five packages as fixtures for getPublicPackages(). It still fails CI if any of them changes visibility, so it counts as one enforced behavior. The integrator may drop it as instance-level.",
    "fire_verified": "Family other, so not required. Checked anyway: making wrangler private on the scratch copy fired; the rule passes on the clone.",
@@ -1294,6 +1462,7 @@
    "family": "other",
    "bucket": "B-kernel",
    "alint": "missing: a package-name dependency graph (name-to-dir resolution, the same gap as wsdk-51) plus a topological-layering (tier) kernel",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Under R7 the assertion is the layering of the internal dependency graph among publishable packages. Edges are package names (wsdk-51's adapter gap), and the tiers are a computed topological layering that no relation family or file_graph check produces. It differs from wsdk-51 (no cycles) and wsdk-52 (release-time order, D): this layering is compared on every PR. The test comment calls it 'the invariant the whole script exists to enforce'.",
    "fire_verified": "n/a",
@@ -1308,6 +1477,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a JSON key-order operator with a canonical (sort-package-json) order",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Split out of wsdk-39. R7 classifies a tool run over files alint reads by what it asserts. This sub-check orders the keys of a data file, which matches the stratum's own i18n-tasks normalized-key-order example (B-adapter, no order operator). Whitespace, quoting and import sorting stay in wsdk-39 as D under R2. If the integrator rules that R2 covers every oxfmt sub-check, this folds back into wsdk-39.",
    "fire_verified": "n/a",
@@ -1330,6 +1500,7 @@
    "family": "other",
    "bucket": "B-adapter",
    "alint": "missing: a JS/TS comment-token extractor, so that for_each_match can select comments rather than raw text",
+   "rules": [],
    "assertion_family": "none",
    "reason": "Split out of wsdk-37. The rule reads only comment text, so R7 and the element-web-18 precedent (an oxlint header-text rule classified by its logic) apply rather than D. A regex probe failed R4: for_each_match over **/*.{ts,tsx,mts,cts,jsx}, with generated and template paths excluded, gave about 30 false positives at the pin from directive-like text inside strings and from multi-line block comments. The count of about 30 was taken before a context compaction and was not re-run. So the unit is B-adapter, not A or C. The other custom rules (no-unsafe-command-execution, no-direct-recursive-rm, no-wrangler-named-imports) are AST checks and stay D.",
    "fire_verified": "n/a",
@@ -1363,6 +1534,16 @@
   "wsdk-va-only-pnpm-lockfile: no npm/yarn/bun lockfiles (dep-version)",
   "wsdk-va-codeowners-plus-settings: codeowners.toml enforcement.approval stays true",
   "wsdk-build-script-has-turbo-json-partial: partial guard for B-config unit wsdk-17 (build script implies a turbo.json)"
+ ],
+ "value_add_rules": [
+  "wsdk-va-volta-pnpm-matches-package-manager",
+  "wsdk-va-c3-default-pnpm-matches-package-manager",
+  "wsdk-va-wrangler-min-node-matches-engines",
+  "wsdk-va-quick-edit-node-major-coherent",
+  "wsdk-va-workerd-workers-types-same-date",
+  "wsdk-va-all-action-refs-pinned",
+  "wsdk-va-only-pnpm-lockfile",
+  "wsdk-va-codeowners-plus-settings"
  ],
  "absent_categories": [
   "locale family entirely (no gated locale catalogs)",
