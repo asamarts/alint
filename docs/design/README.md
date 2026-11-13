@@ -47,3 +47,4 @@ in `docs/adr/` is missing from this table.
 | [0030](../adr/0030-v022-owner-decisions.md) | v0.22 owner decisions: hidden-path fingerprints, sealed structs, and order of work | accepted |
 | [0031](../adr/0031-v0221-owner-decisions.md) | v0.22.1 owner decisions: release shape, npm packaging, and filing dependency gaps | accepted |
 | [0032](../adr/0032-v023-owner-decisions.md) | v0.23 owner decisions: a first Phase 3 slice, the YAML groundwork, one API break, and plugins after | accepted |
+| [0033](../adr/0033-v023-slice-after-the-corpus-stratum.md) | v0.23 slice after the corpus stratum: set instead of cardinality, entry values, and the #503 fix | accepted |

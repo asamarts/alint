@@ -96,7 +96,8 @@ Rulings from batch 1, applied to every later batch:
 - **Key parity across a group counts as `cardinality`.** "Every key exists in every locale" is,
   per key, a count of distinct locales equal to the number of locales (forem-01). `set` is for
   relations between two named sets: inclusion, equality and disjointness (trpc-07, immich-20,
-  strapi-62).
+  strapi-62). The ruling decides only the tag: ADR-0033 later expresses key parity as set
+  equality per locale, which covers forem-01 too.
 - **The relation layer's `entry` adapter is key-only.** An assertion over a locale entry's value
   (a value that equals its key, a banned word in values, placeholders kept per key) needs
   (key path, value) rows, which no adapter emits. It is B-adapter, not B-config.
@@ -207,6 +208,8 @@ slice's dependency version policy needs it.
 **Before and after the slice.** v0.23 ships `constraint` with the `equality`, `unique-key` and
 `cardinality` families (ADR-0032 decision 1). The "after" figure moves each B-config unit tagged
 with one of those three families to A, once phase 8 confirms that the slice expresses it.
+ADR-0033 then swapped `cardinality` for `set`. The records keep ADR-0032's definition, and
+ADR-0033 gives the same units' figures under its slice.
 
 ### 2.3 Families
 

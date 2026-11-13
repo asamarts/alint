@@ -1764,18 +1764,23 @@ Starts Phase 3 of
 (section 11.6) with its design and a first slice. The plan is
 [`v0.23/README.md`](https://github.com/asamarts/alint/blob/main/docs/design/v0.23/README.md) and
 the owner decisions are
-[ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md).
+[ADR-0032](https://github.com/asamarts/alint/blob/main/docs/adr/0032-v023-owner-decisions.md) and
+[ADR-0033](https://github.com/asamarts/alint/blob/main/docs/adr/0033-v023-slice-after-the-corpus-stratum.md).
 
 - **Measured demand first.** An i18n stratum and a JavaScript-monorepo stratum join the pinned
   corpus and are scored before the design commits to operators.
 - **Design and version boundary.** A design document for selectors and constraints and an ADR
   for the `version: 2` boundary, approved before implementation starts.
-- **Named selectors and relations** and a report-only **`constraint`** rule with equality,
-  unique/key and cardinality assertions, in `version: 2` only.
+- **Named selectors and relations,** with (key path, value) rows from JSON, YAML and TOML, and a
+  report-only **`constraint`** rule with equality, unique/key and set assertions, in `version: 2`
+  only.
 - **Three conformance policies** expressed as `version: 2` configuration with `alint test` cases:
   locale key parity, dependency version consistency, and toolchain-pin consistency.
 - **`version: 2` is experimental** in v0.23: opt-in, with a draft schema, and it may change before
-  it is declared stable. `version: 1` configurations are unchanged.
+  it is declared stable. `version: 1` configurations are unchanged apart from the fix below.
+- **A `git_tracked_only` fix (#503).** A rule with `git_tracked_only: true` sees a file that git
+  tracks but an ignore file excludes, as documented, so a configuration that uses it can gain
+  findings.
 - **One library API break.** YAML parser types leave the public API of `alint-core`,
   `alint-dsl` and `alint-testkit` (#484), and `Violation`, `Context`, `RuleSpec`,
   `NestedRuleSpec` and `WalkOptions` become `#[non_exhaustive]` with constructors.
