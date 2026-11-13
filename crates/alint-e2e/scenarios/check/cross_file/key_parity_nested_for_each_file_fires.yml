@@ -1,0 +1,28 @@
+test_version: 1
+name: key_parity nested under for_each_file compares the files it names
+tags: [check, key_parity, for_each_file, cross_file, nested]
+
+given:
+  tree:
+    locales:
+      en.json: '{"a": 1, "b": 2}'
+      fr.json: '{"a": 1}'
+  config: |
+    version: 1
+    rules:
+      - id: locale-parity
+        kind: for_each_file
+        select: "locales/en.json"
+        level: error
+        require:
+          - kind: key_parity
+            reference: "locales/en.json"
+            peers: "locales/fr.json"
+
+when: [check]
+
+expect:
+  - exit: policy_failure
+    violations:
+      - {rule: locale-parity, level: error, path: locales/fr.json}
+    analysis_failures: []

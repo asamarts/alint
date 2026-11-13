@@ -636,6 +636,30 @@
     "fingerprint": "958a03f11bb8838ef5dd43d35316d1872f188435d5a2fd6127f75fad92ce571c"
   },
   {
+    "scenario": "check/cross_file/key_parity_nested_every_matching_has_fires.yml",
+    "rule_id": "package-locale-parity",
+    "path": "packages/ui/locales/de.json",
+    "fingerprint": "3fd6f06b0b02c6e496af2097b9b591284709906a3efffb5550391a6a7adb3922"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_nested_for_each_dir_fires.yml",
+    "rule_id": "app-locale-parity",
+    "path": "apps/web/fr.json",
+    "fingerprint": "5986ec2b43bd026387a68199f07638bd1f5b21151c07bc916c6ada36ace42739"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_nested_for_each_file_fires.yml",
+    "rule_id": "locale-parity",
+    "path": "locales/fr.json",
+    "fingerprint": "fa8c0e9a3ffca8a371b3e9bcab889ee6ec7679ecce90575c64fa09ac392b4dab"
+  },
+  {
+    "scenario": "check/cross_file/key_parity_nested_twice_fires.yml",
+    "rule_id": "package-locale-parity",
+    "path": "packages/ui/locales/fr.json",
+    "fingerprint": "864ba062abb810c8e8d967484af9f230ae5a6ed82a9f29856637afa3f004075f"
+  },
+  {
     "scenario": "check/cross_file/key_parity_properties_dotted_fires.yml",
     "rule_id": "messages-match",
     "path": "i18n/messages_fr.properties",

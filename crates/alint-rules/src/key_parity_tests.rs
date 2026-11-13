@@ -14,6 +14,26 @@ fn messages(violations: &[Violation]) -> Vec<String> {
     violations.iter().map(|v| v.message.to_string()).collect()
 }
 
+/// Evaluated without the engine's run caches (directly, as here), the rule
+/// reads through local ones instead of stopping with an internal error (#502).
+#[test]
+fn evaluates_without_the_run_caches() {
+    let (tmp, index) =
+        tempdir_with_files(&[("en.json", br#"{"a":1,"b":2}"#), ("fr.json", br#"{"a":1}"#)]);
+    let rule = build(&spec_yaml(
+        "id: t\nkind: key_parity\nreference: en.json\npeers: fr.json\nlevel: error\n",
+    ))
+    .unwrap();
+    let findings = rule
+        .evaluate(&ctx(tmp.path(), &index))
+        .expect("rule evaluates");
+    assert_eq!(
+        messages(&findings),
+        ["fr.json: missing key `b` (present in en.json)"]
+    );
+    assert!(index.read_cache().is_none(), "the run caches stay off");
+}
+
 #[test]
 fn format_inference_and_models() {
     assert_eq!(infer_format(Path::new("a.json")), Some(KeyFormat::Json));

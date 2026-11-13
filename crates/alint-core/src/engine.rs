@@ -605,10 +605,6 @@ impl RuleEntry {
         self.spec.as_ref().map(|s| &s.extra)
     }
 
-    /// Whether this configured rule tree consumes deterministic analysis time.
-    ///
-    /// Nested iterator rules are instantiated with stable placeholder path
-    /// tokens, matching the engine's preparation traversal.
     /// Pattern hints ([`crate::pattern_hints`]) for this rule and every
     /// nested rule it instantiates.
     #[must_use]
@@ -616,6 +612,10 @@ impl RuleEntry {
         crate::pattern_hints::rule_tree_hints(registry, self.rule.as_ref(), self.spec.as_deref())
     }
 
+    /// Whether this configured rule tree consumes deterministic analysis time.
+    ///
+    /// Nested iterator rules are instantiated with stable placeholder path
+    /// tokens, matching the engine's preparation traversal.
     pub fn wants_analysis_time(&self, registry: &RuleRegistry) -> Result<bool> {
         let mut wants = false;
         visit_rule_tree_with_registry(
@@ -939,6 +939,9 @@ pub struct Engine {
     analysis_time: Option<crate::AnalysisTimeResolution>,
     process_environment: Option<BTreeMap<String, String>>,
     analysis_time_required: OnceLock<bool>,
+    /// Whether an active rule tree reads through the relation layer
+    /// ([`Self::enable_relation_caches`]).
+    relations_required: OnceLock<bool>,
     analysis_time_cache: Mutex<Option<AnalysisTimeCache>>,
     /// In `--changed` mode, the set of paths (relative to root)
     /// that the user wants linted. `None` means "full check"; the

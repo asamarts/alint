@@ -22,9 +22,9 @@ use std::sync::Arc;
 
 use alint_core::plugin_api::{Analyzer, AnalyzerError, AnalyzerInput, Finding, PointerSegment};
 use alint_core::relation::{
-    Adapter, AndroidStringsAdapter, ContractAnalyzer, EntryRowsAdapter, Limits, Origin, Pointer,
-    RelPath, Resource, ResourceRead, ResxAdapter, Row, RowState, Segment, Selector,
-    TomlRowsAdapter,
+    Adapter, AndroidStringsAdapter, ContractAnalyzer, DecodeCache, EntryRowsAdapter, Limits,
+    Origin, Pointer, ReadCache, RelPath, Resource, ResourceRead, ResxAdapter, Row, RowState,
+    Segment, Selector, TomlRowsAdapter,
 };
 use alint_core::{
     AnalysisFailureKind, ByteSpan, Context, Error, Level, RelatedLocation, Result, Rule, RuleSpec,
@@ -382,15 +382,16 @@ impl Rule for KeyParityRule {
 
     #[allow(clippy::too_many_lines)]
     fn evaluate(&self, ctx: &Context<'_>) -> Result<Vec<Violation>> {
-        let Some(read_cache) = ctx.index.read_cache() else {
-            return Err(Error::internal(
-                "key_parity requires the relation read cache",
-            ));
-        };
-        let Some(decode_cache) = ctx.index.decode_cache() else {
-            return Err(Error::internal(
-                "key_parity requires the relation decode cache",
-            ));
+        // The run's caches, or fresh ones when the engine did not enable them
+        // (a rule evaluated directly, as the unit tests do).
+        let mut local = None;
+        let (read_cache, decode_cache) = if let (Some(reads), Some(decodes)) =
+            (ctx.index.read_cache(), ctx.index.decode_cache())
+        {
+            (reads, decodes)
+        } else {
+            let (reads, decodes) = local.insert((ReadCache::new(), DecodeCache::new()));
+            (&*reads, &*decodes)
         };
         let limits = Limits::default();
         let mut findings = Vec::new();

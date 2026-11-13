@@ -21,6 +21,11 @@ to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **A `key_parity` rule nested in the `require:` of `for_each_file`, `for_each_dir` or
+  `every_matching_has` compares its files.** It used to stop on every iteration with
+  "internal error ... key_parity requires the relation read cache", unless another rule in the
+  configuration happened to enable the run's relation caches. `--only <parent>` and
+  `explain --trace <parent>` failed even then (#502).
 - `alint test` redacts a runner error's paths correctly when the test package and the temporary
   directory overlap. It replaced the temporary directory first, so a package under `TMPDIR`
   reported `<temporary-directory>` with the rest of its path instead of `<policy-test-package>`,
