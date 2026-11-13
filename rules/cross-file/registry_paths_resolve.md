@@ -1,12 +1,12 @@
 ---
 title: 'registry_paths_resolve'
-description: 'alint registry_paths_resolve rule (cross-file): A manifest file enumerates path entries; each must resolve to an on-disk artefact.'
+description: 'alint registry_paths_resolve rule (cross-file): A manifest file enumerates path entries; each must resolve to a path in the walked tree, so an entry...'
 sidebar:
   order: 5
 categories: ['cross-file']
 ---
 
-A manifest file enumerates path entries; each must resolve to an on-disk artefact. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` RFC 9535 JSONPath), a physical-line list (`lines`, optional `comment` prefix; LF, CRLF, and lone CR are recognized), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. A structured query that selects non-string JSON values fails with a type/count diagnostic rather than silently dropping them.
+A manifest file enumerates path entries; each must resolve to a path in the walked tree, so an entry that an ignore file or `ignore:` excludes does not resolve. `extract` pulls the entry list via a structured query (`toml` / `json` / `yaml` / `xml` / `dotenv` / `properties` / `ini` / `hcl` RFC 9535 JSONPath), a physical-line list (`lines`, optional `comment` prefix; LF, CRLF, and lone CR are recognized), or a regex capture (`regex`, group 1). `expect` (`any` / `file` / `dir`) and `must_contain` constrain the resolved kind; `exclude_query` subtracts entries; `entries_are_globs` expands each entry as a glob. A structured query that selects non-string JSON values fails with a type/count diagnostic rather than silently dropping them.
 
 ## Options
 
@@ -15,7 +15,7 @@ A manifest file enumerates path entries; each must resolve to an on-disk artefac
 | `base` | string |  | `null` | Resolve entries relative to: `registry_dir` (default), `lint_root`, or an explicit path. |
 | `entries_are_globs` | boolean |  | `false` | Expand each extracted entry as a glob rather than treating it as a single literal path; a glob that matches nothing is a violation. |
 | `exclude_query` | string |  | `null` | A structured query selecting entries to subtract from the extracted list before resolution is checked. |
-| `expect` | one of `any` \| `file` \| `dir` |  |  | Constrain the kind each entry must resolve to on disk: `any` (default), `file`, or `dir`. |
+| `expect` | one of `any` \| `file` \| `dir` |  |  | Constrain the kind each entry must resolve to: `any` (default), `file`, or `dir`. Entries resolve against the walked tree, so a path an ignore file or `ignore:` excludes does not resolve. |
 | `extract` | extract spec | yes |  | Exactly one of: toml/json/yaml/xml/dotenv/properties/ini/hcl (RFC 9535 JSONPath string), lines (object; optional `comment` prefix, default `#`), regex (string; capture group 1 is the path). |
 | `must_contain` | string |  | `null` | When an entry resolves to a directory, that directory must contain this named child (e.g. `Cargo.toml`), else the entry is a violation. |
 | `orphans` | object { `space` } |  |  | Enable the reverse-completeness check. Findings use the rule's top-level `level`; omit this option to disable the check. |
@@ -65,8 +65,8 @@ rules:
 ```ansi
 [2m--- Cargo.toml -----------------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mworkspace-members-resolve[0m
-              Cargo.toml: entry "crates/cli" does not resolve to a directory on
-              disk
+              Cargo.toml: entry "crates/cli" does not resolve to a directory
+              (missing or ignored)
               [2mrelated:[0m declared target: crates/cli
 
 [2mSummary (1 violation):[0m

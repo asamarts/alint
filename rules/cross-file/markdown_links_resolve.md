@@ -6,7 +6,7 @@ sidebar:
 categories: ['cross-file', 'content']
 ---
 
-Validate live Markdown link, image, and reference-definition destinations against the repository tree. Relative destinations resolve from the source file's directory after URL percent-decoding; query strings and fragments do not affect the filesystem lookup. Both files and directories are valid targets. External URLs and other URI schemes, protocol-relative URLs, and same-page `#fragment` links are intentionally offline/out of scope. Explicit reference uses such as `[guide][install]` and `[guide][]` also report undefined labels.
+Validate live Markdown link, image, and reference-definition destinations against the repository tree. Relative destinations resolve from the source file's directory after URL percent-decoding; query strings and fragments do not affect the lookup. Both files and directories are valid targets. Destinations resolve against the walked tree, so a path that an ignore file or `ignore:` excludes counts as missing. External URLs and other URI schemes, protocol-relative URLs, and same-page `#fragment` links are intentionally offline/out of scope. Explicit reference uses such as `[guide][install]` and `[guide][]` also report undefined labels.
 
 The CommonMark-aware scanner skips YAML (`---`) and TOML (`+++`) front matter, fenced and indented code blocks (including nested blocks), inline code spans, and HTML comments, so documentation examples and prose are not mistaken for live links. It recognizes footnote definitions instead of misclassifying their prose as link destinations, while still checking real links inside footnotes. It handles escaped, nested, and multiline link syntax; a real link whose visible text contains inline code, such as ``[`Rule`](../rule.md)``, is still checked. Each bad link is a separate violation at the destination's line and Unicode-scalar column.
 
@@ -67,8 +67,8 @@ rules:
 [2m--- CHANGELOG.md ---------------------------------------------------------------[0m
   [1m[31mx  error  [0m  [2mrepo-links[0m
               [2m3:22[0m  Markdown link `docs/benchmarks/macro/results/linux-x86_64/v0.9.4/`
-              resolves to `docs/benchmarks/macro/results/linux-x86_64/v0.9.4`
-              but no file or directory exists
+              resolves to `docs/benchmarks/macro/results/linux-x86_64/v0.9.4`,
+              which is missing or ignored
 
 [2mSummary (1 violation):[0m
   [1m[31mx 1 error[0m
