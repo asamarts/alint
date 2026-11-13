@@ -407,7 +407,7 @@
     "yarnpkg-berry-version-file-idents-exist"
    ],
    "assertion_family": "none",
-   "reason": "It is enforced in two places: the PR check for that PR's file, and `version apply --all` over every file at release. Mapping keys are read with a line regex because JSONPath cannot select keys. Yarn always writes this layout (stringifySyml).",
+   "reason": "It is enforced in two places: the PR check for that PR's file, and `version apply --all` over every file at release. The ident half reads mapping keys and list items with a line regex, because JSONPath cannot select keys, so it misses flow-style version files that yarn accepts (Stage B reproduced it): C, as units 02 and 19.",
    "fire_verified": "n/a (family other). Fired anyway: strategy 'patchy' gave 1 finding and '4.10.0-rc.1' gave 0. An unknown declined ident gave 1, an unknown release key gave 1, and an unversioned @yarnpkg/docusaurus release gave 1. The clone gives 0.",
    "origin": "A",
    "changes": [
@@ -419,6 +419,13 @@
       "none"
      ],
      "why": "The ident-existence half reads YAML mapping keys with a line regex over the text, because JSONPath cannot select keys. Stage A's own 'unusual' note names this as the same gap that made units 02 and 19 C, so treat it consistently. The regex also does not express the check faithfully (R4). Yarn parses version files with js-yaml (parseSyml -> parseViaJsYaml), so flow style is valid. In scratch, `releases: {\"@yarnpkg/nope\": patch}` and `declined: [\"@yarnpkg/nope\"]` gave 0 findings, though yarn rejects both (getWorkspaceByIdent at PR time; resolveVersionFiles at release for releases). The rule also over-flags: `declined: - \"@yarnpkg/docusaurus\"` gave 1 finding, but yarn's openVersionFile only requires that a declined ident exists, not that it is versioned. The strategies half (yaml_path_matches) is A-quality, apart from a leading-zero prerelease edge case (see config_issues)."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -497,10 +504,10 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "missing: a meta-schema mode for json_schema_passes that validates a document as a JSON Schema of its declared draft using bundled metaschemas",
+   "alint": "json_schema_passes over static/configuration/manifest.json and yarnrc.json with a shim schema outside the repository that names the draft 2019-09 meta-schema as both `$schema` and `$ref` (allow_out_of_root); no rule, since a corpus config cannot ship the shim",
    "rules": [],
    "assertion_family": "none",
-   "reason": "R7: a data-file assertion. json_schema_passes needs the 2019-09 meta-schema and its vocabulary files inside the repository. Probed in scratch: a $ref to the draft URI fails offline with 'Retrieving external resources is not supported', and the repository has no unzipped meta-schema.",
+   "reason": "R7: a data-file assertion. json_schema_passes resolves the bundled draft 2019-09 meta-schema offline through a shim schema, and on the clone both files pass while mutations fire (Stage B). The repository has no shim file, so a configuration needs one outside the root: tuning, so C with no rule (ghost-b09 precedent).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -512,6 +519,14 @@
       "none"
      ],
      "why": "Stage A's probe was wrong. json_schema_passes resolves the bundled draft 2019-09 meta-schema offline when the shim schema declares it as both `$schema` and `$ref`: {\"$schema\":\"https://json-schema.org/draft/2019-09/schema\",\"$ref\":\"https://json-schema.org/draft/2019-09/schema\"}. I tested this on the clone, with the shim outside the root and `allow_out_of_root: true`. Both manifest.json and yarnrc.json pass. Mutations fire: type=42 gave 1, required as a string gave 1, minLength -1 gave 1. The error Stage A saw appears only when the shim has no `$schema` (default-draft registry) or uses the `#`-suffixed URI. No new adapter is needed. What makes it awkward is that the repo has no shim file, so the config needs an out-of-root shim plus allow_out_of_root, or an inline-schema or meta-schema preset. That is tuning, so C."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The alint text and reason still gave Stage A's probe, which Stage B's own change disproved when it moved the unit to C."
     }
    ]
   },
@@ -825,7 +840,7 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "A",
-   "alint": "cross_file equals x2 with regex extraction: 'const MOUNT_MASK\\s*=\\s*(0x[0-9a-fA-F]+);' vs 'const ZIP_MASK\\s*=\\s*(0x[0-9a-fA-F]+);', and 'magicByte = 0x([0-9a-fA-F]{2}),' vs 'const ZIP_MAGIC\\s*=\\s*0x([0-9a-fA-F]{2})000000;'. Proposed ids yarnpkg-berry-fd-mask-synced and yarnpkg-berry-fd-magic-synced. They are not in Stage A's config; I verified them in scratch.",
+   "alint": "cross_file equals x2 with regex extraction: 'const MOUNT_MASK\\s*=\\s*(0x[0-9a-fA-F]+);' vs 'const ZIP_MASK\\s*=\\s*(0x[0-9a-fA-F]+);', and 'magicByte = 0x([0-9a-fA-F]{2}),' vs 'const ZIP_MAGIC\\s*=\\s*0x([0-9a-fA-F]{2})000000;'. Rules yarnpkg-berry-fd-mask-synced and yarnpkg-berry-fd-magic-synced.",
    "rules": [
     "yarnpkg-berry-fd-mask-synced",
     "yarnpkg-berry-fd-magic-synced"
@@ -834,7 +849,15 @@
    "reason": "This is a load-bearing sync comment under R5, the same treatment Stage A gave sortMap (unit 21). Stage A's search missed it. The two constants are one convention under R1. Both ends are literal values that alint extracts with a regex, so it is A.",
    "fire_verified": "n/a (family other). Fired anyway in a scratch git repo holding only the two files at their real paths: ZIP_MASK set to 0x7f000000 gave 1 finding (fd-mask-synced), and magicByte set to 0x2b gave 1 finding (fd-magic-synced). The clone and the unmodified scratch copy give 0. validate-config passes.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   }
  ],
  "removed": [

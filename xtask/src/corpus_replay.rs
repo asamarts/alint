@@ -1226,9 +1226,38 @@ mod tests {
         "C",
         "D",
     ];
+    /// The assertion families of ADR-0032 decision 1, which the records'
+    /// "after slice" figures use.
     const STRATUM_SLICE: [&str; 3] = ["equality", "unique-key", "cardinality"];
 
     const STRATUM_FAMILIES: [&str; 4] = ["locale", "dep-version", "toolchain-pin", "other"];
+
+    /// Checks that each of a stratum unit's recorded changes names who made it,
+    /// and that a change of bucket, family or assertion family records either
+    /// the classification it replaced (`from`) or its new values (`fields` as
+    /// an object), never only the names of the fields it changed.
+    fn check_stratum_unit_changes(unit: &Json) {
+        const CHANGERS: [&str; 4] = ["B", "integrator", "audit", "review"];
+        let id = unit["id"].as_str().unwrap();
+        for change in unit["changes"].as_array().unwrap() {
+            assert!(
+                CHANGERS.contains(&change["by"].as_str().unwrap_or_default()),
+                "{id}: a change by {}",
+                change["by"]
+            );
+            if let Some(from) = change.get("from") {
+                assert_eq!(from.as_array().map(Vec::len), Some(3), "{id}: `from`");
+            }
+            if let Some(fields) = change["fields"].as_array() {
+                for field in ["bucket", "family", "assertion_family"] {
+                    assert!(
+                        !fields.iter().any(|named| named == field),
+                        "{id}: a change of {field} records `from`"
+                    );
+                }
+            }
+        }
+    }
 
     /// Checks that a stratum unit's classification takes only the frame's
     /// values (its section 2.2) and that its fields agree with its bucket.
@@ -1340,6 +1369,7 @@ mod tests {
                 let id = unit["id"].as_str().unwrap();
                 assert!(ids.insert(id), "{repo}: {id} is listed twice");
                 check_stratum_unit_classification(unit);
+                check_stratum_unit_changes(unit);
                 let rules = unit["rules"].as_array().unwrap();
                 for rule in rules {
                     let rule = rule.as_str().unwrap();
@@ -1378,6 +1408,58 @@ mod tests {
             records += 1;
         }
         assert_eq!(records, 20);
+    }
+
+    /// A config comment that labels a stratum unit with a bucket, and maybe a
+    /// family, agrees with the unit's record. The configs use three forms:
+    /// `# A [other] strapi-52`, `# element-web-08, C` and `# zulip-04 (A)`.
+    #[test]
+    fn stratum_config_comment_labels_match_records() {
+        let root = crate::workspace_root().unwrap();
+        let bucket = STRATUM_BUCKETS.join("|");
+        let family = STRATUM_FAMILIES.join("|");
+        let id = r"[A-Za-z0-9]+(?:-[A-Za-z0-9]+)+";
+        let forms = [
+            format!(r"^\s*#\s*(?P<bucket>{bucket})\s+\[(?P<family>{family})\]\s+\(?(?P<id>{id})"),
+            format!(r"^\s*#\s*(?P<id>{id})(?:\s+\([^)]*\))?,\s*(?P<bucket>{bucket})(?:[^\w-]|$)"),
+            format!(r"^\s*#\s*(?P<id>{id})\s+\((?P<bucket>{bucket})[;,)\s]"),
+        ]
+        .map(|form| regex::Regex::new(&form).unwrap());
+        let mut labels = 0;
+        for entry in std::fs::read_dir(root.join("docs/design/v0.23/stratum")).unwrap() {
+            let path = entry.unwrap().path();
+            let record: Json =
+                serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+            let units: std::collections::BTreeMap<&str, &Json> = record["units"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|unit| (unit["id"].as_str().unwrap(), unit))
+                .collect();
+            let config = path
+                .file_name()
+                .unwrap()
+                .to_string_lossy()
+                .replace(".json", ".alint.yml");
+            let text = std::fs::read_to_string(root.join("docs/design/v0.12/corpus").join(&config))
+                .unwrap();
+            for (number, line) in text.lines().enumerate() {
+                let Some(label) = forms.iter().find_map(|form| form.captures(line)) else {
+                    continue;
+                };
+                let Some(unit) = units.get(&label["id"]) else {
+                    continue;
+                };
+                let at = format!("{config}:{}", number + 1);
+                assert_eq!(unit["bucket"], &label["bucket"], "{at}: {}", &label["id"]);
+                if let Some(family) = label.name("family") {
+                    assert_eq!(unit["family"], family.as_str(), "{at}: {}", &label["id"]);
+                }
+                labels += 1;
+            }
+        }
+        // The configs label about 600 units this way.
+        assert!(labels > 500, "only {labels} labels matched");
     }
 
     /// Whether `text` names the rule `id` as a whole token, so that

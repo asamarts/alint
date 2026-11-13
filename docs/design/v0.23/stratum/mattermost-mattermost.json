@@ -208,8 +208,10 @@
     },
     {
      "by": "audit",
-     "fields": [
-      "assertion_family"
+     "from": [
+      "B-adapter",
+      "locale",
+      "none"
      ],
      "why": "The alint field named the family the unit will need (equality) while the record said none."
     }
@@ -1956,7 +1958,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: the migration file sets at the base branch and at master (base-revision)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Stage B: check-backport-migrations (server/scripts/check_backport_migrations.sh) compares the migration file sets at HEAD, origin/<base> and origin/master. That is content at other revisions (needs: base-revision), the rocketchat-42/-45 and immich-21 precedent, not D. The depth-1 clone limits R4 confirmation, not the bucket.",
@@ -1978,6 +1980,13 @@
       "needs": "base-revision",
       "reason": "Stage B: check-backport-migrations (server/scripts/check_backport_migrations.sh) compares the migration file sets at HEAD, origin/<base> and origin/master. That is content at other revisions (needs: base-revision), the rocketchat-42/-45 and immich-21 precedent, not D. The depth-1 clone limits R4 confirmation, not the bucket."
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "base-revision"
@@ -2139,7 +2148,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "D",
-   "alint": "needs an OpenAPI validator",
+   "alint": "none: the validated spec is built by the repository's scripts",
    "rules": [],
    "assertion_family": "none",
    "reason": "The spec that swagger-cli validates is built by running the repository's scripts, which fetch remote content. Running project code and network access are D under R7.",
@@ -2154,6 +2163,13 @@
       "none"
      ],
      "why": "The validated spec is assembled by project scripts that fetch remote content (api/Makefile:12,96-100 runs node extract.js; api/playbooks/extract.js:31 fetches from raw.githubusercontent.com). R7 keeps running project code and network access in D."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text named a capability for a D unit."
     }
    ]
   },
@@ -2179,7 +2195,7 @@
    "mechanism": "test",
    "family": "locale",
    "bucket": "C",
-   "alint": "cross_file relation set_equals, source server/public/shared/i18n/i18n.go regex (?m)^\\t\"([^\"]+)\",$, target webapp/channels/src/i18n/i18n.ts regex value: '([^']+)'. Rule mmb-supported-locales-match-languages-map (Stage B scratch config, removed after verification).",
+   "alint": "cross_file relation set_equals, source server/public/shared/i18n/i18n.go regex (?m)^\\t\"([^\"]+)\",$, target webapp/channels/src/i18n/i18n.ts regex value: '([^']+)'. Rule mattermost-supported-locales-match-languages-map.",
    "rules": [
     "mattermost-supported-locales-match-languages-map"
    ],
@@ -2187,7 +2203,15 @@
    "reason": "This can be expressed today only through regex reads. The i18n.go side is a one-layout regex over a gofmt'd Go string slice (batch-2 ruling: C), and set_equals ignores duplicates that assert.ElementsMatch counts. On scratch, a duplicated \"de\" line in i18n.go passed alint but would fail the test. The TS side mirrors the test's own regex. The rule passed on the clone. On scratch, deleting the \"de\" line from i18n.go fired, and so did changing value 'de' to 'xx' in i18n.ts.",
    "fire_verified": "n/a (C). Scratch fire and pass results are given in reason.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "mattermost-b03",

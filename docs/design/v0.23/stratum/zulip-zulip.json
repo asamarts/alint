@@ -96,13 +96,21 @@
    "mechanism": "script",
    "family": "locale",
    "bucket": "B-delegate",
-   "alint": "",
+   "alint": "a delegated gettext .po syntax check (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Checking a message format's own syntax is the section 2.2 B-delegate example; alint has no gettext .po reader",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "zulip-02",
@@ -151,7 +159,7 @@
    "mechanism": "script",
    "family": "locale",
    "bucket": "C",
-   "alint": "json_path_absent (never-matching probe): zulip-locale-translations-json-parses",
+   "alint": "json_path_absent (never-matching probe): zulip-locale-translations-json-parses; file_content_matches: zulip-locale-translations-json-object-root",
    "rules": [
     "zulip-locale-translations-json-parses",
     "zulip-locale-translations-json-object-root"
@@ -167,6 +175,13 @@
       "bucket": "C",
       "reason": "The object-root half is expressed (Stage C). alint's JSON parse tolerates trailing commas and comments, which orjson rejects, so the parse half is relaxed; the same gap keeps element-web-08 in C (integrator)."
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
     }
    ]
   },
@@ -722,13 +737,21 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "",
+   "alint": "a delegated OpenAPI validator (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Spec-format validation including $ref resolution; json_schema_passes would need an OpenAPI meta-schema inside the read-only lint root and still not cover the validator's semantics",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "zulip-34",
@@ -737,13 +760,21 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "",
+   "alint": "a delegated per-example schema validation with in-document $ref resolution (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Per-example schema validation with ref resolution inside one document; plugin territory",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "zulip-35",
@@ -1056,7 +1087,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "tool: tools/check-templates",
+   "alint": "a delegated HTML and Handlebars template parser for balanced tags (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Balanced-tag validity of HTML and Handlebars templates needs a template parser; that is a delegated validator for a format alint does not read (zulip-33 precedent).",
@@ -1071,6 +1102,13 @@
       "none"
      ],
      "why": "Template syntax validity is a parser for a format alint does not read, as OpenAPI validity is for zulip-33."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what is delegated."
     }
    ]
   },
@@ -1099,7 +1137,7 @@
    "alint": "(git_commit_subject_matches would express it; not used, depth-1 clone)",
    "rules": [],
    "assertion_family": "none",
-   "reason": "Commit history is external state on a depth-1 clone and section 2.4 bars git-history kinds; gitlint is skipped in CI (zulip-ci.yml:152,188) and hooks are local",
+   "reason": "Expressible with git_commit_subject_matches (RE2-compatible), as the v0.12 corpus counted the same shape. Section 2.4 bars git-history kinds on depth-1 clones, so R4 cannot be confirmed: C. tools/commit-msg only warns and gitlint is skipped in CI (zulip-ci.yml:152,188).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -1111,6 +1149,13 @@
       "none"
      ],
      "why": "Expressible today with git_commit_subject_matches, matches '^(.+: )?[A-Z].+\\.$' (RE2-compatible). The v0.12 corpus counted the same shape as A (pnpm-conventional-commits via git_commit_message), so D ('deliberate non-goal') is wrong. R4 cannot be confirmed because section 2.4 bars git kinds on depth-1 clones, so C is the honest bucket. The mechanism is really convention: tools/commit-msg always exits 0 (it only warns), and gitlint is skipped in CI."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from D to C but left the reason arguing for D; zulip-56, -57 and -59 refer to it."
     }
    ]
   },
@@ -1753,7 +1798,7 @@
    "mechanism": "script",
    "family": "locale",
    "bucket": "A",
-   "alint": "no_bom over locale/*/LC_MESSAGES/django.po (rule id zulip-locale-po-no-bom in my scratch config; not in Stage A's config)",
+   "alint": "no_bom over locale/*/LC_MESSAGES/django.po: zulip-locale-po-no-bom",
    "rules": [
     "zulip-locale-po-no-bom"
    ],
@@ -1761,7 +1806,15 @@
    "reason": "An encoding check on the locale files, with its own error message in Django and separate from zulip-01's gettext-syntax delegate (R1: a separate behavior). The no_bom kind expresses it exactly.",
    "fire_verified": "Prefixing a scratch copy of locale/de/LC_MESSAGES/django.po with EF BB BF made no_bom fire. The clean scratch copy and the clone both pass (rc=0).",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "zulip-b03",

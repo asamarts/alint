@@ -39,9 +39,10 @@
 # Stage B missed units b01-b04 and b06, plus clearly marked VALUE-ADD rules
 # (level info). Units with no rule here: B-adapter 20 (typesVersions from
 # exports), 30 (catalog name slug), 32 (CODEOWNERS owner), 35 (0.x no major
-# bump), 50 (doc-ID routes), 54 (links to directories), 70 (package.json
-# key order), 74 (CI Node satisfies the engines floor), b05 (Docusaurus
-# sidebar doc ids) and b07 (issue-form common fields); B-config 25
+# bump), 50 (doc-ID routes), 64 (openapi.yaml vs the generated router), 70
+# (package.json key order), 74 (CI Node satisfies the engines floor), 89
+# (no patch bump from master), a01 (one source descriptor per patch file),
+# b05 (Docusaurus sidebar doc ids) and b07 (issue-form common fields); B-config 25
 # (pluginPackages group), 26 (pluginPackage reference) and 69 (unique
 # workspace names); C 36 (changeset coverage) and 71 (DCO), git kinds left
 # out because the clone is depth 1; and the D units (tool runs, builds,
@@ -934,7 +935,7 @@ rules:
   # other — ESLint notice/notice (copyright header)
   # ════════════════════════════════════════════════════════════════
 
-  # backstage-65 (A) — every linted JS/TS source carries the Apache
+  # backstage-65 (C) — every linted JS/TS source carries the Apache
   # "Copyright <year> The Backstage Authors" header in its first lines.
   # Stage C (Stage B config issue): the pattern is now the whole of
   # scripts/templates/copyright-header.txt, all 15 lines, with <%= YEAR %>

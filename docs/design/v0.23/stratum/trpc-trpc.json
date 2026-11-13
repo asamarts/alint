@@ -114,7 +114,7 @@
    "mechanism": "ci",
    "family": "toolchain-pin",
    "bucket": "A",
-   "alint": "json_path_matches: trpc-package-manager-pnpm-pinned",
+   "alint": "json_path_matches: trpc-package-manager-pnpm-pinned; yaml_path_absent x2: trpc-pnpm-action-setup-no-version-workflows, trpc-pnpm-action-setup-no-version-composite",
    "rules": [
     "trpc-package-manager-pnpm-pinned",
     "trpc-pnpm-action-setup-no-version-workflows",
@@ -124,7 +124,15 @@
    "reason": "A JSONPath value check on package.json expresses it. A missing field is a zero-match violation. Verified on the clone and on broken copies (R4).",
    "fire_verified": "Scratch copy of package.json: removing packageManager, setting yarn@4.5.0, and setting pnpm@^12 each fired trpc-package-manager-pnpm-pinned. Passes on the clone.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "trpc-03",
@@ -1008,10 +1016,10 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "skills.ts",
+   "alint": "a delegated Docusaurus admonition-syntax check (a plugin or command)",
    "rules": [],
    "assertion_family": "none",
-   "reason": "A custom content parser and transformer run as project code.",
+   "reason": "R7: fromDocusaurus's admonition checks (a known type, not reopened, closed) validate a Markdown dialect's own syntax over files alint reads, which section 2.2 names as B-delegate. CI runs them over every v11 docs page. The include-resolution half is trpc-B02 (A).",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -1023,6 +1031,14 @@
       "none"
      ],
      "why": "R7: fromDocusaurus's admonition checks (a known type, not reopened, closed; docusaurus-syntax.ts:303-361) run over Markdown files alint reads. CI runs them over every v11 docs page through content.ts parseSource in the www tests (package-links.test.ts:41, search-ranking.test.ts:21, main.yml:131), not only over skill pages. Validating a Markdown dialect's own syntax is the B-delegate example in section 2.2. Stage A's D reason ('project code') was not applied to tooling/subtree (trpc-11) or to skills.ts (trpc-26..32). The include-resolution half is split out as trpc-B02 (A). The sample-fence half is dormant: the clone has no ```sample fences."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "Stage B moved the unit from D to B-delegate but left Stage A's alint text and a reason arguing for D."
     }
    ]
   },
@@ -1213,7 +1229,7 @@
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "cross_file relation: superset. source.files = the 12 pnpm-workspace member globs, extract json $.name (unioned). targets.files = the same globs, extract regex '\"([^\"]+)\"\\s*:\\s*\"workspace:'. allow_missing_target: true. Scratch rule id workspace-refs-resolve; it is not in Stage A's config.",
+   "alint": "cross_file relation: superset. source.files = the 12 pnpm-workspace member globs, extract json $.name (unioned). targets.files = the same globs, extract regex '\"([^\"]+)\"\\s*:\\s*\"workspace:'. allow_missing_target: true. Rule trpc-workspace-refs-resolve.",
    "rules": [
     "trpc-workspace-refs-resolve"
    ],
@@ -1221,7 +1237,15 @@
    "reason": "R7: a name lookup over files alint reads. Stage A applied the same ruling to catalog: lookups (trpc-10). Unlike trpc-10, the key side is reachable today: a regex over the manifest text yields the dependency key of each workspace: value, and superset with a unioned source gives the set of workspace names. The rule is exact for this repo's workspace:* usage. A workspace:^x range would also need semver satisfaction.",
    "fire_verified": "On a scratch copy of all 59 workspace manifests the rule passes. Changing @monotest/api to @monotest/apix workspace:* in examples/.test/monotest-app fired, which shows hidden-directory members are covered. Renaming tooling/ui to @shared/uikit fired for every @shared/ui dependent. The rule also passes on the clone.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "trpc-B02",
@@ -1230,7 +1254,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "for_each_file (select www/v11/docs/**/*.md, www/v11/home/**/*.md, www/blog/**/*.md) with a nested cross_file relation: subset. Source {file: '{path}', regex '(?m)^[ \\t>]*// @include: (\\S+)[ \\t]*$'}; target {file: '{path}', regex '(?m)^[ \\t>]*`{3,}twoslash include (\\S+)'}. Scratch rule id twoslash-includes-resolve; it is not in Stage A's config.",
+   "alint": "for_each_file (select www/v11/docs/**/*.md, www/v11/home/**/*.md, www/blog/**/*.md) with a nested cross_file relation: subset. Source {file: '{path}', regex '(?m)^[ \\t>]*// @include: (\\S+)[ \\t]*$'}; target {file: '{path}', regex '(?m)^[ \\t>]*`{3,}twoslash include (\\S+)'}. Rule trpc-twoslash-includes-resolve.",
    "rules": [
     "trpc-twoslash-includes-resolve"
    ],
@@ -1238,7 +1262,15 @@
    "reason": "R7: twoslash-check and fromDocusaurus run this check over Markdown files alint reads. It holds independently of whether the block compiles (D, trpc-47), which Stage A folded it into. It is an intra-file reference, and today's kinds express it. Caveat: the tools strip HTML comments before checking and the regex does not; the clone has no commented-out includes.",
    "fire_verified": "Also verified, though family other does not require it. The rule passes on the clone. On a scratch copy of quickstart.md, renaming one reference to trpcx fired, and so did renaming the `server` include block.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "trpc-B03",
@@ -1270,7 +1302,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "dir_absent over the hand-listed dependents' src/shared-ui; not in Stage A's config",
+   "alint": "dir_absent over the hand-listed dependents' src/shared-ui: trpc-subtree-shared-ui-dir-reserved",
    "rules": [
     "trpc-subtree-shared-ui-dir-reserved"
    ],
@@ -1278,7 +1310,15 @@
    "reason": "dir_absent expresses it, but 'depends on @shared/ui' is a manifest field that no path selector can read, so the dependents must be listed by hand. Stage A used the same C reasoning for trpc-22. The guard has its own condition and failure message, so it is not folded into trpc-11. It is a low-weight unit.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "trpc-B05",

@@ -39,9 +39,10 @@
 #     (B-config; assertion family cardinality in the reconciled record).
 #   - i18n-tasks missing_plural (per-locale CLDR categories) and
 #     inconsistent_interpolations (%{var} sets per key): B-adapter.
-#   - config/field_test.yml: <=1 active feed_strategy experiment (bounded
-#     count over map entries filtered by key prefix) and variant JSON
-#     references (key-prefix selector + path template): B-config.
+#   - config/field_test.yml variant JSON references (key-prefix selector +
+#     path template): B-adapter, entry values (forem-29). The <=1 and >=1
+#     active feed_strategy experiment bounds are C, by a layout-dependent
+#     regex (forem-22, forem-b03; rules below).
 #   - Rails-8 gem floors read from Gemfile.lock (flipper >= 1.4.0,
 #     redis-actionpack >= 5.5.0): B-adapter (semver-range operator).
 #   - spec/liquid_tags/feature_tag_spec.rb: every FeatureTag::ICONS entry

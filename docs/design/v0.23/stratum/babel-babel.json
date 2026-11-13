@@ -443,7 +443,7 @@
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "registry_paths_resolve (regex '#~/(.yarn/patches/...patch)') babel-patch-references-resolve",
+   "alint": "registry_paths_resolve x2 (regex '#~/(.yarn/patches/...patch)' from the root, and manifest-relative patch paths): babel-patch-references-resolve, babel-patch-references-resolve-manifest-relative",
    "rules": [
     "babel-patch-references-resolve",
     "babel-patch-references-resolve-manifest-relative"
@@ -452,7 +452,15 @@
    "reason": "R7: a path reference over files alint reads. The ~/ prefix is the project root.",
    "fire_verified": "Scratch copy: renaming the interpret patch reference to a missing file fired 1, and deleting rollup-plugin-dts's patch file fired 1. The clean copy and the clone give 0.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "babel-19",
@@ -1260,13 +1268,21 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint unique-key over $.name across the workspace manifests",
    "rules": [],
    "assertion_family": "unique-key",
    "reason": "Same unit as jest-B02 and trpc-B05 (workspace names unique, B-config unique-key, other). It asserts uniqueness over one extracted value (manifest name) across a group, with no name-to-value join, so it stays B-config under the batch-2 ruling. Stage A catalogued the duplicate check for neither Yarn nor the release-tool.",
    "fire_verified": "n/a",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "babel-B02",
@@ -1275,7 +1291,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "file_content_matches; paths packages/babel-helpers/src/helpers/*.{js,ts}; pattern (?m)^\\s*/\\*\\s*@minVersion\\s+\\S+\\s*\\*/\\s*$. This rule is NOT in Stage A's config and should be added as e.g. babel-helpers-min-version-annotation.",
+   "alint": "file_content_matches; paths packages/babel-helpers/src/helpers/*.{js,ts}; pattern (?m)^\\s*/\\*\\s*@minVersion\\s+\\S+\\s*\\*/\\s*$: babel-helpers-min-version-annotation (added by the integrator; Stage A's config lacked it)",
    "rules": [
     "babel-helpers-min-version-annotation"
    ],
@@ -1283,7 +1299,15 @@
    "reason": "A file-content property that the build script checks before it generates anything. It is not code analysis: the script only applies a regex to the file text. file_content_matches expresses it exactly. R4: my probe rule passed on the clone and on a clean scratch copy, and fired 1 when the annotation was stripped from typeof.ts.",
    "fire_verified": "n/a (family other). Still verified: the probe passed on the clone and a clean copy, and fired 1 on a copy with the @minVersion line removed from src/helpers/typeof.ts.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "babel-B03",

@@ -230,8 +230,8 @@ rules:
     level: error
     message: "A published package must not depend on a file: or link: specifier in dependencies (publint --strict LOCAL_DEPENDENCY)."
 
-  # Not expressed (B): tq-10 sherif multiple-dependency-versions (B-config,
-  # unique-key); tq-11 sherif unsync-similar-dependencies (B-adapter per Stage
+  # Not expressed (B): tq-10 sherif multiple-dependency-versions (B-adapter,
+  # entry values; unique-key); tq-11 sherif unsync-similar-dependencies (B-adapter per Stage
   # B: needs a name -> similar-family transform from sherif's built-in table,
   # which no adapter emits; vacuous at the pin).
 
@@ -337,7 +337,7 @@ rules:
     level: error
     message: "Preact package sources must not start with a byte-order mark (oxlint unicode-bom, preactConfig)."
 
-  # tq-B04 (A; Stage B missed unit) — eslint `svelte/block-lang` with
+  # tq-B04 (C; Stage B missed unit) — eslint `svelte/block-lang` with
   # { script: ['ts'] } in the three svelte packages' eslint.config.js;
   # test:eslint lints ./src ./tests (svelte-query-devtools: ./src only).
   # Every <script> block in a .svelte file declares lang="ts" (block-lang

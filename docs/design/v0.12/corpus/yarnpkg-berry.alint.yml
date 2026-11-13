@@ -29,8 +29,8 @@
 # sites they drive, the README e2e list freshness, the sortMap and
 # MountFS/fspatch fd-constant sync comments, and the .editorconfig /
 # .gitattributes / .gitignore conventions.
-# Not expressed (B/C/D, see the stratum log): one-range-per-dependency (B-config
-# unique-key), peer-dependency presence (resolution), version check's
+# Not expressed (B/C/D, see the stratum log): one-range-per-dependency
+# (B-adapter, entry values; unique-key), peer-dependency presence (resolution), version check's
 # changed-workspace and dependent decisions, the docs JSON-Schema meta-validation
 # test (C: needs an out-of-root shim schema, see the unit 23 note below),
 # installs, builds, tests, lint, tsc.

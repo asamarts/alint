@@ -37,9 +37,9 @@
 # conventions, the icon-mapping sync comment, the typecheck:tests tsconfig
 # layout, the website sidebar / navbar / blog-author integrity the Netlify
 # site build enforces, and the editor/git text conventions. Not expressed
-# (B/D, see the stratum log): one range per dependency, no dependency in both
-# dependencies and devDependencies and unique workspace names (B-config
-# unique-key), the derived `exports` shape and the sorted tsconfig
+# (B/D, see the stratum log): one range per dependency (B-adapter, entry
+# values; unique-key), no dependency in both dependencies and devDependencies
+# and unique workspace names (B-config unique-key), the derived `exports` shape and the sorted tsconfig
 # `references` (B-adapter), versions.json -> versioned_docs (B-config
 # reference), installs, dedupe, builds, type checks, lint, prettier, tests.
 # Nothing here spawns a process; no custom facts; no git-history kinds.
@@ -51,8 +51,9 @@ rules:
   # yarn.config.cjs constraints (nodejs.yml static-checks: "Check for unmet
   # constraints"). Yarn workspaces = the root package.json, packages/*,
   # website and examples/* (root `workspaces`). Each constraint rule is one
-  # unit (R7). Rule 1 (one range per dependency) and rule 2 (no dependency in
-  # both dependencies and devDependencies) are B-config unique-key: no rule.
+  # unit (R7). Rule 1 (one range per dependency, jest-23) is B-adapter with
+  # entry values and rule 2 (no dependency in both dependencies and
+  # devDependencies, jest-24) is B-config unique-key: no rule.
   # ══════════════════════════════════════════════════════════════════════════
 
   # A [other] constraint 3: a public workspace has license MIT; a private one
@@ -243,8 +244,8 @@ rules:
     level: error
     message: "@jest/test-utils may only be a devDependency (scripts/buildTs.mjs)."
 
-  # A [dep-version] (jest-27; Stage A had B-config set, Stage B showed today's
-  #   kinds express it) buildTs.mjs:111-153: a package declares
+  # C [dep-version] (jest-27; Stage A had B-config set, Stage B showed today's
+  #   kinds express it, by a layout-dependent regex) buildTs.mjs:111-153: a package declares
   #   @jest/test-utils as a devDependency if and only if some
   #   **/__tests__/tsconfig.json in it has a reference whose path ends with
   #   test-utils ("declares ... but it is not referenced" / "does not
@@ -456,12 +457,12 @@ rules:
     level: warning
     message: "verifyOldTs.mjs's npmMinimalAgeGate must match .yarnrc.yml (comment in scripts/verifyOldTs.mjs)."
 
-  # C [other] copilot-instructions.md: "Each __tests__/ directory under
+  # A [other] jest-20. copilot-instructions.md: "Each __tests__/ directory under
   #   packages covered by `yarn typecheck:tests` has its own tsconfig.json
   #   extending tsconfig.test.json" (tsc -b over the script's glob fails on a
-  #   directory without one). C: the 19 packages are copied by hand from the
-  #   typecheck:tests brace list in package.json; a package added to that
-  #   script and not here goes unchecked silently.
+  #   directory without one). The 19 packages are the script's own literal,
+  #   the typecheck:tests brace list in package.json, restated here; a package
+  #   added to that script must be added here too.
   - id: jestjs-jest-typechecked-tests-have-tsconfig
     kind: for_each_dir
     select: "packages/{babel-jest,babel-plugin-jest-hoist,create-jest,diff-sequences,expect,expect-utils,jest-circus,jest-cli,jest-config,jest-console,jest-haste-map,jest-runtime,jest-snapshot,jest-source-map,jest-util,jest-validate,jest-watcher,jest-worker,pretty-format}/**/__tests__"

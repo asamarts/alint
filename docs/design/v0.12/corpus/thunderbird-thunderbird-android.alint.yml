@@ -577,7 +577,7 @@ rules:
       Hardcoded user-visible text in a resource layout. Move it to res/values/strings.xml
       and reference it as @string/... (lint HardcodedText is severity error).
 
-  # thunderbird-android-61 (A): Android lint ByteOrderMark (i18n category; not overridden
+  # thunderbird-android-61 (A, family other): Android lint ByteOrderMark (i18n category; not overridden
   # in config/lint/lint.xml), run by build-android.yml `./gradlew lint` with
   # abortOnError=true: no U+FEFF in the MIDDLE of a resource or source file (lint flags
   # BOM characters inside the file, not a leading BOM). Severity: Stage B's offline
@@ -595,7 +595,7 @@ rules:
       A byte-order mark (U+FEFF) inside a resource or source file (lint ByteOrderMark).
       Remove the stray U+FEFF character.
 
-  # thunderbird-android-62 (A, Stage B reclassified from C): Android lint EnforceUTF8
+  # thunderbird-android-62 (A, family other; Stage B reclassified from C): Android lint EnforceUTF8
   # (i18n category, Fatal per Stage B's offline `lint --show`): an XML resource that
   # declares an encoding declares UTF-8 (case-insensitive). for_each_match states it
   # directly: every XML prolog line that declares an encoding must declare utf-8.

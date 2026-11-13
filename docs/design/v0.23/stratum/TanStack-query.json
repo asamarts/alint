@@ -406,7 +406,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "cross_file superset (workspace names ⊇ the frontmatter keys of each changeset) + for_each_match (bump word): tanstack-query-changesets-name-workspace-packages, tanstack-query-changesets-valid-bump",
+   "alint": "cross_file superset (workspace names ⊇ the frontmatter keys of each changeset) plus file_content_matches (frontmatter entries with a bump word): tanstack-query-changesets-name-workspace-packages, tanstack-query-changesets-frontmatter-valid",
    "rules": [
     "tanstack-query-changesets-name-workspace-packages",
     "tanstack-query-changesets-frontmatter-valid"
@@ -415,7 +415,15 @@
    "reason": "A reference plus an enum check over files alint reads. Scoped names are always quoted YAML keys, so the regex extraction is exact here.",
    "fire_verified": "n/a (family other). Fired anyway on scratch: '@tanstack/query-cor' gave 1 error and bump 'bugfix' gave 1 error; the clone passes.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text named a rule id that does not exist (tanstack-query-changesets-valid-bump)."
+    }
+   ]
   },
   {
    "id": "tq-32",
@@ -941,7 +949,7 @@
    "mechanism": "ci",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "json_path_absent, paths packages/*/package.json excluding query-codemods and query-test-utils (neither runs publint), path \"$.dependencies[?match(@, '(file|link):.*')]\" (proposed id tanstack-query-publint-no-local-dependencies)",
+   "alint": "json_path_absent, paths packages/*/package.json excluding query-codemods and query-test-utils (neither runs publint), path \"$.dependencies[?match(@, '(file|link):.*')]\": tanstack-query-publint-no-local-dependencies",
    "rules": [
     "tanstack-query-publint-no-local-dependencies"
    ],
@@ -949,7 +957,15 @@
    "reason": "R7: publint reads package.json, and this assertion bans dependency specifiers, which is the stratum's 'banned ranges and dependency fields' dep-version shape. Stage A split sherif into one unit per rule, but grouped publint into only tq-43 (B-adapter) and tq-44 (D), so this manifest-only error rule went uncounted. One JSONPath filter expresses it exactly (R4).",
    "fire_verified": "On my scratch copy: 'foo': 'file:../foo' in packages/react-query dependencies gave 1 error, and so did 'link:../foo' in angular-query-experimental dependencies. 'link:../foo' in react-query devDependencies gave none. Passes on the clone.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "tq-B02",
@@ -958,7 +974,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "json_path_absent over the same manifests, path \"$.exports..[?match(@, '[^.].*') || match(@, '[.][^/].*')]\" (proposed id tanstack-query-publint-exports-values-relative)",
+   "alint": "json_path_absent over the same manifests, path \"$.exports..[?match(@, '[^.].*') || match(@, '[.][^/].*')]\": tanstack-query-publint-exports-values-relative",
    "rules": [
     "tanstack-query-publint-exports-values-relative"
    ],
@@ -966,7 +982,15 @@
    "reason": "R7: a manifest-only publint error-level assertion that a JSONPath filter expresses. Same per-rule grain Stage A used for sherif. It does not cover a bare-string `exports` (none at the pin).",
    "fire_verified": "n/a (family other). Fired anyway on scratch: query-core exports default 'build/modern/index.js' gave 1 error, './package.json' -> '../package.json' gave 1 error, and an angular devtools target without ./ gave 1 error. Passes on the clone.",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "tq-B03",
@@ -1022,7 +1046,7 @@
     "tanstack-query-repository-url-matches-repo"
    ],
    "assertion_family": "none",
-   "reason": "The npm registry enforces it at publish time against the workflow's OIDC identity: external state (R7). publint --strict checks only the URL's shape. The rule stays as value-add.",
+   "reason": "The npm registry enforces it at publish time against the workflow's OIDC identity: external state (R7). publint --strict checks only the URL's shape. The rule stays as a partial rule at level info.",
    "fire_verified": "n/a (family other). Fired anyway: query-core repository.url '.../TanStack/querry.git' gave 1 error. Passes on the clone.",
    "origin": "B",
    "changes": [
@@ -1032,6 +1056,13 @@
       "bucket": "D",
       "reason": "The npm registry enforces it at publish time against the workflow's OIDC identity: external state (R7). publint --strict checks only the URL's shape. The rule stays as value-add."
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "The rule is listed in `rules`, as a partial rule, not among the value-add rules."
     }
    ]
   },

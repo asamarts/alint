@@ -44,12 +44,12 @@
 # build/rebuild kind, built-in names, autoinstallers); Heft's rig.json and
 # heft-plugin.json load validation; the release pipeline's .npmrc-publish
 # registry line; and the .gitattributes LF convention for npm bin scripts.
-# Not expressed (B/D, see the stratum log): ensureConsistentVersions
-# (B-config unique-key), the approved-packages policy (B-config reference),
-# duplicate project, phase and command names (B-config unique-key), the phase
-# self-dependency cycle check (B-kernel), CI Node versions inside
-# nodeSupportedVersionRange, the range's own validity and lockstep versions
-# not above the policy version (B-adapter, semver operators), the README
+# Not expressed (B/D, see the stratum log): ensureConsistentVersions and the
+# approved-packages policy (B-adapter, entry values), duplicate project, phase
+# and command names (B-config unique-key), the phase self-dependency cycle
+# check (B-adapter), CI Node versions inside nodeSupportedVersionRange and
+# lockstep versions not above the policy version (B-adapter, semver
+# operators); the range's own validity is C, by regex (rushstack-b11), the README
 # project tables and the shrinkwrap hash (B-delegate), and every
 # build/test/lint/lockfile/package-manager check (D).
 # Stage C (2026-11-12) applied the Stage B review: fixes to rules 03, 07, 23
@@ -980,14 +980,15 @@ rules:
     level: error
     message: "Subspace names must consist of lowercase letters and numbers separated by hyphens."
 
-  # A [other] rushstack-57: with subspaces enabled, each declared subspace needs
+  # C [other] rushstack-57: with subspaces enabled, each declared subspace needs
   #   its configuration folder common/config/subspaces/<name> (Subspace.ts
   #   ~152). Rush always adds the implicit "default" subspace
   #   (SubspacesConfiguration.ts ~75), whose folder is covered by the second
   #   rule: its regex captures an empty entry only when subspacesEnabled is
   #   true, and the empty entry resolves to the base folder itself
   #   (common/config/subspaces/default). The regex reads the raw text, so a
-  #   one-line (minified) subspaces.json would not trigger it.
+  #   one-line (minified) subspaces.json would not trigger it: C (a regex that
+  #   holds for one layout).
   - id: rushstack-subspace-config-folders-exist
     kind: registry_paths_resolve
     source: common/config/rush/subspaces.json
@@ -1275,7 +1276,7 @@ rules:
     level: error
     message: "rigProfile must be lowercase words separated by hyphens."
 
-  # A [other] rushstack-b14: Heft loads every plugin package's heft-plugin.json
+  # B-config [other] rushstack-b14 (partial rule): Heft loads every plugin package's heft-plugin.json
   #   with JsonFile.loadAndValidateAsync against heft-plugin.schema.json
   #   (apps/heft/src/configuration/HeftPluginConfiguration.ts ~69). The same
   #   loader's duplicate-pluginName check (~200-232) is a unique-key relation
@@ -1311,7 +1312,7 @@ rules:
   # B-config [other] rushstack-60 (no rule): a name may appear only once in
   #   each approved-packages file (ApprovedPackagesConfiguration.ts ~190):
   #   unique-key within one array.
-  # B-config [dep-version] rushstack-01 (no rule): ensureConsistentVersions
+  # B-adapter [dep-version] rushstack-01 (no rule): ensureConsistentVersions
   #   per subspace; rush install runs it per selected subspace from
   #   cli/actions/BaseInstallAction.ts ~175-187 (doBasicInstallAsync.ts ~39
   #   calls it too).

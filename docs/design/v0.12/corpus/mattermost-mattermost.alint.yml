@@ -52,7 +52,8 @@
 # keys absent from en.json), moves 88 D -> B-adapter (base-revision), and
 # removes 15 as an R1 duplicate of 16 (its rule is kept as value-add, info).
 # Proposed after Stage B: 122 units — A 33, C 19, B-config 7, B-adapter 20,
-# B-delegate 3, D 40 (the integrator decides buckets). Rules below carry their
+# B-delegate 3, D 40 (the integrator decides buckets; the stratum record has
+# the current buckets after the integration and the audit). Rules below carry their
 # unit id; units with no rule are B or D (see the stratum record). Not
 # expressed, notably:
 # go-i18n loading + ICU parsing (B-delegate), {{.Field}}/ICU argument parity,

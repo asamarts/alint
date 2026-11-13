@@ -1,8 +1,9 @@
 # v0.23 corpus stratum: i18n and JavaScript monorepos
 
-Status: complete (2026-11-12). Frame approved 2026-11-12; all four batches done. Phase 2 of
-[`README.md`](README.md); the synthesis is in [`general-linter.md`](../general-linter.md) section
-12.4.
+Status: complete (2026-11-12; reviewed 2026-11-13). Frame approved 2026-11-12; all four batches
+done. Phase 2 of
+[`README.md`](README.md); the synthesis is in [`general-linter.md`](../general-linter.md)
+section 12.4.
 
 Results: [`corpus-stratum-log.md`](corpus-stratum-log.md).
 
@@ -18,7 +19,8 @@ commits to assertion families. It adds two kinds of repository the 110-repositor
 
 ## 2. Method
 
-The study runs under the v0.12 protocol ([`case_study_100_repos.md`](../v0.12/case_study_100_repos.md)):
+The study runs under the v0.12 protocol
+([`case_study_100_repos.md`](../v0.12/case_study_100_repos.md)):
 - **The unit:** one enforced validation behavior.
 - **The where-to-look superset** and the open "what is unusual here?" scan.
 - **Stage A:** a deep read that catalogues, classifies and drafts a configuration.
@@ -28,6 +30,8 @@ The study runs under the v0.12 protocol ([`case_study_100_repos.md`](../v0.12/ca
 - **Integration:** `alint validate-config` and `alint check` against the pinned clone.
 - **Audit:** after the four batches, a review of every classification against the rulings below
   and the clones (log, "Audit").
+- **Review:** after the audit, a check of the records against this frame's rulings, the
+  configurations' comments and the published figures (log, "Review").
 
 Calibration rulings R1 to R6 ([`case_study_calibration.md`](../v0.12/case_study_calibration.md))
 apply unchanged, except where R7 below narrows R2. The configurations join the pinned corpus in
@@ -57,10 +61,12 @@ stratum would then show no demand for the flagship policies, by construction. R7
 
 Examples:
 - **i18n-tasks:** missing keys is A when each locale is one file (`key_parity`, YAML). forem
-  merges each locale from many files, so there it is B-config `cardinality` (forem-01). Unused
-  keys is D (source extraction); normalized key order is B-adapter (no order operator).
+  merges each locale from many files, so there it is B-config `cardinality` (forem-01). Where a
+  repository enables them, unused keys is D (source extraction) and normalized key order is
+  B-adapter (no order operator); forem disables both (`xit`).
 - **`syncpack list-mismatches`:** "one version per dependency across every `package.json`" is
-  B-adapter with `needs: entry-values` and family `unique-key` (the batch 2 ruling below).
+  B-adapter with `needs: entry-values` and assertion family `unique-key` (the batch 2 ruling
+  below).
 - **`yarn constraints`:** each rule in `yarn.config.cjs` is its own unit.
 
 The stratum's coverage figures are therefore not directly comparable to v0.12's 61%. The log
@@ -88,9 +94,9 @@ Value-add assertions that the repository does not enforce stay outside the ratio
 
 Rulings from batch 1, applied to every later batch:
 - **Key parity across a group counts as `cardinality`.** "Every key exists in every locale" is,
-  per key, a count of distinct locales equal to the number of locales. That is how the slice
-  expresses locale key parity (README item 5). `set` stays for one-way inclusion between two named
-  sets.
+  per key, a count of distinct locales equal to the number of locales (forem-01). `set` is for
+  relations between two named sets: inclusion, equality and disjointness (trpc-07, immich-20,
+  strapi-62).
 - **The relation layer's `entry` adapter is key-only.** An assertion over a locale entry's value
   (a value that equals its key, a banned word in values, placeholders kept per key) needs
   (key path, value) rows, which no adapter emits. It is B-adapter, not B-config.
@@ -150,8 +156,29 @@ Rulings from the audit, applied to every batch (the log lists each unit they mov
 - **Inline suppressions** that a path exclude approximates make a unit C, as a hand-kept list.
 - **A B or D unit may list a partial rule**, one that checks the half alint can express. A rule
   demoted from an A or C unit stays in the configuration at level `info`.
-- **A B-adapter unit with `needs: entry-values` names the family it will need.** Other B-adapter
-  units may name one; the figures use only the first.
+- **A B-adapter unit with `needs: entry-values` names the assertion family it will need.** Other
+  B-adapter units may name one; the figures use only the first.
+
+Rulings from the review (2026-11-13). Each states where an earlier ruling already drew the line,
+and the log lists the units that did not follow it:
+- **A hand-kept list is one derived from repository state,** such as the workspace names
+  (strapi-07) or the files that carry an inline suppression. A rule that needs one is C.
+  Restating a list the checker itself states (an allowlist or an exemption list) is ordinary
+  configuration: yarnpkg-berry-13, rushstack-23, zulip-43, nextcloud-12, jest-11 and jest-20.
+- **`locale` covers locale files and the registries that list locales** (forem-b01,
+  mattermost-b02). An encoding check over every source or resource file is `other`
+  (thunderbird-android-61, -62).
+- **`toolchain-pin` covers a toolchain pin's presence, form, integrity and agreement:** a pin that
+  must exist (tq-01, wsdk-54), a `yarnPath` that resolves (rocketchat-18, babel-24), a wrapper
+  checksum (thunderbird-android-31, -32), and a guard on the pinned package manager (fluentui-56,
+  -b01). The audit's "versions agreeing" names the commonest case.
+- **`base-revision` covers what a check needs from the pull request's base:** that revision's
+  content, or the change set beyond the paths a git kind sees. A check that a change adds some
+  file is path-level and C (backstage-36, tq-57, wsdk-25, rushstack-27). A check that the added
+  file names each changed package joins the change set to content and is B-adapter (ghost-39,
+  yarnpkg-berry-16). A merge-window gate keyed on another branch's state is D (nextcloud-50).
+- **A folded sub-check decides the unit's bucket** (the tokio ruling of the v0.12 study), and the
+  half alint expresses stays as a partial rule (rushstack-b14).
 
 **Every B-adapter unit records what it needs** (`needs`), so the synthesis can rank capabilities
 as well as assertion families. Each unit gets the one capability it lacks most directly:
@@ -163,11 +190,13 @@ as well as assertion families. Each unit gets the one capability it lacks most d
 - `icu`: the ICU message syntax tree;
 - `format-reader`: a format alint cannot read (Markdown frontmatter, CSV, JSON5, a lockfile, data
   in a TypeScript module);
-- `base-revision`: content at the pull request's base or another revision;
+- `base-revision`: the pull request's base or another revision: its content, or the change set
+  beyond the paths a git kind sees (added files' content, renames, the workspaces a change
+  touches);
 - `route-model`: a documentation site's routes;
 - `package-graph`: a graph whose edges are package names;
 - `link-type`: whether a path is a symbolic link;
-- `derived-value`: an expected value computed from other fields;
+- `derived-value`: an expected value computed from other fields, files or paths;
 - `normalization`: Unicode or unit normalization;
 - `key-predicate`: a predicate over key names;
 - `other`: anything else, named in the unit's reason.
@@ -193,6 +222,8 @@ Each unit also carries one family tag:
   - allowed and banned ranges and dependency fields;
   - internal packages pinned to the workspace version.
 - **`toolchain-pin`:**
+  - a toolchain pin's presence, form and integrity (a `yarnPath` that resolves, a wrapper
+    checksum);
   - Node, package-manager and language-toolchain versions agreeing across `.nvmrc`,
     `.node-version`, `.tool-versions`, `engines`, `packageManager`, Volta and CI.
 - **`other`:** everything else.

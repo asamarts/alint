@@ -109,7 +109,7 @@ rules:
   # OTHER family
   # ════════════════════════════════════════════════════════════════
 
-  # element-web-18, A — oxlint `element-call/copyright-header` (error,
+  # element-web-18, C — oxlint `element-call/copyright-header` (error,
   #     maxWarnings 0; CI lint:js + lint-staged): every linted JS/TS file starts
   #     with a copyright header comment (`/* ... */` or `//` lines, optionally
   #     after a shebang; "Copyright [(c)] YYYY ..." — the tree carries several

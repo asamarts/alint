@@ -369,13 +369,21 @@
    "mechanism": "test",
    "family": "locale",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint unique-key over a key-derived projection: each key minus its last segment, among keys ending .singular or .plural",
    "rules": [],
    "assertion_family": "unique-key",
    "reason": "Per key prefix (key minus its last segment, among keys ending .singular/.plural) at most one row: a unique-key over a key-derived projection. JSONPath cannot build a sibling key name, so no kind expresses it today. R1 collapses the five packages into one unit.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "strapi-22",
@@ -401,13 +409,21 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint unique-key over the code values of iso-locales.json",
    "rules": [],
    "assertion_family": "unique-key",
    "reason": "Uniqueness of a field across the elements of a JSON array is unique-key; no kind asserts value uniqueness today. Tagged other: a content-locale registry, not a translation catalog.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "strapi-30",
@@ -501,13 +517,13 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "eslint (external config)",
+   "alint": "filename_regex over the admin .tsx and .ts sources, with the files that carry an inline `eslint-disable check-file/filename-naming-convention` excluded by hand: strapi-admin-tsx-filenames-pascal-case, strapi-admin-ts-filenames-camel-case; the no-index half has no rule",
    "rules": [
     "strapi-admin-tsx-filenames-pascal-case",
     "strapi-admin-ts-filenames-camel-case"
    ],
    "assertion_family": "none",
-   "reason": "The rule globs and options live in an unvendored external package and cannot be read offline, so the path-level assertion cannot be stated. Kept with the lint job (R2) and flagged as unverifiable in notes rather than guessed.",
+   "reason": "R7: the check-file filename rules assert path names, a structure invariant alint reads. The inferred convention fails exactly 40 files, and every one carries an inline eslint-disable for the rule, so the rules need a hand-kept exemption list: C (trpc-30, element-web-28). The no-index half and the .js/.jsx files' convention cannot be inferred offline.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -519,6 +535,14 @@
       "none"
      ],
      "why": "R7 was misapplied. The check-file filename-naming-convention rule in the admin .eslintrc.cjs files asserts a path name, not source code, so it is a structure invariant alint reads; classifying it D under R2 is wrong. The inferred rule is .tsx PascalCase and .ts camelCase, with middle extensions ignored, in the 14 admin dirs, and review-workflows turns it off. filename_regex fires on exactly 40 files on the clone. All 40 carry `eslint-disable check-file/filename-naming-convention` (50 files carry the disable in total), so the rule needs a hand-kept exemption list. That is C (trpc-30, element-web-28). The folder/no-index half cannot be inferred offline: 18 index files carry no disable. Split it out or leave it unverified."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "Stage B moved the unit from D to C but left Stage A's alint text and reason (R2)."
     }
    ]
   },
@@ -671,7 +695,7 @@
     "strapi-docs-html-images-have-alt"
    ],
    "assertion_family": "none",
-   "reason": "A dedicated kind; confirmed.",
+   "reason": "markdown_images_have_alt covers the CommonMark images. The docs also embed 13 raw <img> tags, 7 of them multi-line, which the kind does not read; a second rule reads them with a prefix-alternation regex, since Rust regex has no lookahead, and it counts tags inside code fences: C.",
    "fire_verified": "n/a (other); scratch: ![](/img/x.png) fired.",
    "origin": "A",
    "changes": [
@@ -683,6 +707,13 @@
       "none"
      ],
      "why": "markdown_images_have_alt covers only CommonMark images in docs/docs/**/*.md. The docs contain 13 HTML `<img>` tags (7 of them multi-line) plus 3 Markdown images; Stage A's count of 6 `<img>` is wrong. On a scratch copy, an `<img>` without alt and an .mdx image without alt both passed. A per-line for_each_match cannot handle multi-line tags, and Rust regex has no lookahead, so covering HTML images needs an awkward workaround. That makes it C, not A."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -796,7 +827,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a Docusaurus route model for markdown_links_resolve (route-model)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Needs a Docusaurus route model (number-prefix stripping, folder-page folding, slug frontmatter, generated tag routes). markdown_links_resolve's root map only maps directories to routes.",
@@ -808,6 +839,13 @@
      "fields": {
       "needs": "route-model"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "route-model"
@@ -860,7 +898,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a frontmatter adapter for the typed review_notes and status values (format-reader)",
    "rules": [],
    "assertion_family": "none",
    "reason": "A typed frontmatter value check needs a frontmatter adapter.",
@@ -872,6 +910,13 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "format-reader"
@@ -962,7 +1007,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a frontmatter adapter for the tags lists (format-reader), then a reference into the tags.yml keys",
    "rules": [],
    "assertion_family": "none",
    "reason": "Frontmatter tags list values vs tags.yml keys: needs a frontmatter adapter (and a YAML key extract).",
@@ -974,6 +1019,13 @@
      "fields": {
       "needs": "format-reader"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "format-reader"
@@ -985,12 +1037,12 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "A",
-   "alint": "",
+   "alint": "yaml_path_absent on docs/docs/tags.yml with the root filter `$[?length($) > 35]`: strapi-docs-tags-at-most-35",
    "rules": [
     "strapi-docs-tags-at-most-35"
    ],
    "assertion_family": "none",
-   "reason": "A count bound on the top-level keys of one YAML file; no counting kind exists.",
+   "reason": "Stage B: an RFC 9535 root filter with length() bounds the top-level key count, so no bounded-count family is needed.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -1002,6 +1054,14 @@
       "bounded-count"
      ],
      "why": "It is expressible today: yaml_path_absent `$[?length($) > 35]` on docs/docs/tags.yml uses an RFC 9535 root filter with length(). It passes on the clone (17 tags), does not fire at 35 entries, and fires at 36 on a scratch copy. No new bounded-count family is needed."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The reason was Stage A's ('no counting kind exists'); Stage B moved the unit to A."
     }
    ]
   },
@@ -1012,13 +1072,21 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "B-config",
-   "alint": "",
+   "alint": "constraint set: the tags.yml keys are disjoint from the package-leaf-folder and status sets",
    "rules": [],
    "assertion_family": "set",
    "reason": "Disjointness between the tags.yml key set and the package-leaf-folder and status sets; tags.yml keys are not extractable as values today.",
    "fire_verified": "n/a",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
+    }
+   ]
   },
   {
    "id": "strapi-63",
@@ -1027,7 +1095,7 @@
    "mechanism": "convention",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a TypeScript-array reader and the Docusaurus route model (route-model)",
    "rules": [],
    "assertion_family": "none",
    "reason": "Needs a TypeScript-array reader and the Docusaurus route model.",
@@ -1039,6 +1107,13 @@
      "fields": {
       "needs": "route-model"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "route-model"
@@ -1110,7 +1185,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "",
+   "alint": "missing: a conventional-commit parser that tells footer trailers from body lines; git_commit_message reads only the subject, body and whole message",
    "rules": [],
    "assertion_family": "none",
    "reason": "git_commit_message reads only subject, body and whole-message patterns. Telling footer trailers from body lines needs a conventional-commit message parser.",
@@ -1122,6 +1197,13 @@
      "fields": {
       "needs": "other"
      }
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text was empty."
     }
    ],
    "needs": "other"

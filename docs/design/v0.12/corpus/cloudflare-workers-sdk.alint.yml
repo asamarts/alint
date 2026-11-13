@@ -577,7 +577,7 @@ rules:
     level: error
     message: "@default values in src/config/environment.ts must not be escaped with backticks, or the config schema does not generate (configSchema.test.ts)."
 
-  # wsdk-b02 (A): the releasable set findPackages() computes (packages/*
+  # wsdk-b02 (C): the releasable set findPackages() computes (packages/*
   # that are public or have a deploy script) equals the names hard-coded in
   # tools/deployments/__tests__/validate-changesets.test.ts:23-58. Source is
   # wsdk-19's selector; target is the test's 4-tab-indented string lines

@@ -3,20 +3,20 @@
  "sha": "bc73976a6de26df49b2bc2eefe689ee5b3ed0af1",
  "metrics": {
   "counts": {
-   "A": 30,
+   "A": 29,
    "B-config": 3,
    "B-adapter": 12,
    "B-kernel": 0,
    "B-delegate": 2,
-   "C": 29,
+   "C": 30,
    "D": 25
   },
   "addressable": 76,
-  "coverage_today": 39,
+  "coverage_today": 38,
   "coverage_with_tuning": 78,
   "gap": 22,
-  "coverage_after_slice": 41,
-  "coverage_after_slice_with_entry_values": 43
+  "coverage_after_slice": 39,
+  "coverage_after_slice_with_entry_values": 42
  },
  "by_family": {
   "locale": {
@@ -72,20 +72,20 @@
   },
   "other": {
    "counts": {
-    "A": 20,
+    "A": 19,
     "B-config": 3,
     "B-adapter": 10,
     "B-kernel": 0,
     "B-delegate": 2,
-    "C": 20,
+    "C": 21,
     "D": 19
    },
    "addressable": 55,
-   "coverage_today": 36,
+   "coverage_today": 35,
    "coverage_with_tuning": 73,
    "gap": 27,
-   "coverage_after_slice": 38,
-   "coverage_after_slice_with_entry_values": 42
+   "coverage_after_slice": 36,
+   "coverage_after_slice_with_entry_values": 40
   }
  },
  "units": [
@@ -357,7 +357,7 @@
    "mechanism": "ci",
    "family": "toolchain-pin",
    "bucket": "A",
-   "alint": "registry_paths_resolve (yaml $.yarnPath, base lint_root, expect file): backstage-yarnpath-resolves",
+   "alint": "registry_paths_resolve (yaml $.yarnPath, base lint_root, expect file): backstage-yarnpath-resolves; for_each_dir over the create-app templates: backstage-create-app-template-yarnpath-resolves",
    "rules": [
     "backstage-yarnpath-resolves",
     "backstage-create-app-template-yarnpath-resolves"
@@ -366,7 +366,15 @@
    "reason": "Path resolution of a pinned package-manager binary.",
    "fire_verified": "Two cases each gave +1: yarnPath renamed to yarn-4.18.2.cjs (the value-add packageManager rule also fired), and the release file deleted. The clone and the scratch base pass.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text left out rules the unit lists."
+    }
+   ]
   },
   {
    "id": "backstage-15",
@@ -380,7 +388,7 @@
     "backstage-types-node-major-matches-engines"
    ],
    "assertion_family": "none",
-   "reason": "R5 load-bearing comment. The semver-major of '^24.15.0 || ^26.13.0' is 24, which matches ^24.0.0.",
+   "reason": "R5 load-bearing comment. The rule reads the first major in engines.node as the lowest supported one, so it depends on how the range is written: reordering it gives a false positive, and an equivalent >= form gives no finding (Stage B reproduced both). The minimum major of a range needs version comparison, so C.",
    "fire_verified": "Three cases each fired: root @types/node ^26 (+1), packages/cli ^22 (+1), engines changed to '^26.13.0 || ^28.0.0' (+9, all 9 users). The clone passes.",
    "origin": "A",
    "changes": [
@@ -392,6 +400,13 @@
       "none"
      ],
      "why": "R4 fails: the rule reads the first major in engines.node as the 'lowest supported major', so it depends on the order of the range. Reproduced on a scratch copy: reordering engines.node to '^26.13.0 || ^24.15.0' (the same supported set) gives a +9 false positive, and the equivalent form '>=24.15.0 <25 || >=26.13.0' gives no finding at all. The semantics (minimum major of a semver range) need a version-compare step. alint gets the answer for one spelling only, which the batch ruling makes C."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -942,7 +957,7 @@
     "backstage-md-fragments-resolve"
    ],
    "assertion_family": "none",
-   "reason": "Native kind with GitHub-style slugs and -N suffixes. It passes on all .md files at the pin.",
+   "reason": "markdown_fragments_resolve uses GitHub's slugger, and verify-links.js's headingToSlug differs from it, so the rule gives both false positives and false negatives (Stage B reproduced both). It needs a slug-style option: C.",
    "fire_verified": "n/a (other). Fired on scratch: a bad sibling fragment and a bad same-file fragment each gave +1.",
    "origin": "A",
    "changes": [
@@ -954,6 +969,13 @@
       "none"
      ],
      "why": "R4 fails both ways. verify-links.js headingToSlug strips [*_] and [^\\w\\s-], which differs from the GitHub slugger that markdown_fragments_resolve uses. Reproduced: a link '#myheading' to '## my_heading' fires in alint but passes the script (false positive), and './a.md#my_heading' passes alint but fails the script (false negative). The rule covers the unit only after tuning, for example a slug-style option."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -1003,7 +1025,7 @@
     "backstage-docs-links-not-root-absolute"
    ],
    "assertion_family": "none",
-   "reason": "The script's own check is a regex test over the link text. The same regex is expressed directly.",
+   "reason": "The script's regex, applied to raw text. verify-links.js strips fenced code blocks first, so a /docs/ link inside a code block fires the rule but not the script (Stage B reproduced it): C.",
    "fire_verified": "n/a (other). Fired on scratch: a /docs/ link in docs gave +1.",
    "origin": "A",
    "changes": [
@@ -1015,6 +1037,13 @@
       "none"
      ],
      "why": "R4 fails. verify-links.js runs stripCodeBlocks before matching, but file_content_forbidden reads raw text. Reproduced: a fenced code block containing ](/docs/x) fires the rule while the script passes it. The rule needs a code-block-aware markdown scope."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -1070,7 +1099,7 @@
     "backstage-md-no-multiline-link-text"
    ],
    "assertion_family": "none",
-   "reason": "Regex check reproduced exactly.",
+   "reason": "The script's regex, applied to raw text. verify-links.js strips fenced code blocks first, so multi-line link text inside a code block fires the rule but not the script (Stage B reproduced it): C, as backstage-49.",
    "fire_verified": "n/a (other). Fired on scratch: multi-line link text gave +1.",
    "origin": "A",
    "changes": [
@@ -1082,6 +1111,13 @@
       "none"
      ],
      "why": "Same defect as 49: the multi-line link regex is applied to raw text, but the script strips code blocks first. Reproduced: a multi-line [text\\n](x) inside a fenced block fires the rule but not the script."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason"
+     ],
+     "why": "Stage B moved the unit from A to C but left the reason arguing for A."
     }
    ]
   },
@@ -1138,8 +1174,8 @@
     "backstage-md-no-invisible-chars-in-links"
    ],
    "assertion_family": "none",
-   "reason": "Character-class check on the link destination.",
-   "fire_verified": "n/a (other). Fired on scratch: a U+200B in a URL gave +1.",
+   "reason": "A character-class check on the link destination, applied to raw text. verify-links.js checks only links outside fenced code blocks (stripCodeBlocks), so a link with an invisible character inside a code block fires the rule but not the script: C, as backstage-49.",
+   "fire_verified": "n/a (other). Fired on scratch: a U+200B in a URL gave +1. Review: a link with U+200B inside a fenced code block also fires, which the script skips.",
    "origin": "A",
    "changes": [
     {
@@ -1150,6 +1186,14 @@
       "none"
      ],
      "why": "NOT reproduced; inferred by analogy. It is the same raw-text file_content_forbidden pattern over a check the script runs after stripCodeBlocks, so an invisible character in a link inside a code block would be a false positive. Verify before applying."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "reason",
+      "fire_verified"
+     ],
+     "why": "Stage B moved the unit from A to C by analogy with backstage-49, without reproducing it. The reason now gives the cause, and the review reproduced the false positive."
     }
    ]
   },
@@ -1299,7 +1343,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "spectral",
+   "alint": "a delegated OpenAPI validator with Spectral's oas ruleset (a plugin or command); the style-guide rules stay collapsed here",
    "rules": [],
    "assertion_family": "none",
    "reason": "Spectral's oas ruleset validates OpenAPI semantics (a delegated validator, as zulip-33). The @apisyouwonthate/style-guide rules are data assertions over the YAML that this audit did not split one by one, so they stay collapsed here.",
@@ -1314,6 +1358,13 @@
       "none"
      ],
      "why": "Spectral's oas ruleset is OpenAPI validation, B-delegate as for zulip-33 and backstage-b06; backstage-62 already split out the custom rule."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what is delegated."
     }
    ]
   },
@@ -1324,7 +1375,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "backstage-repo-tools repo schema openapi validate",
+   "alint": "missing: a reader for the spec embedded as an object literal in each generated router.ts (format-reader), deep-equal to its src/schema/openapi.yaml",
    "rules": [],
    "assertion_family": "none",
    "reason": "Deep equality between openapi.yaml and the spec embedded as an object literal in the generated router.ts. Reading data in a TypeScript module is the format-reader capability.",
@@ -1339,6 +1390,13 @@
       "none"
      ],
      "why": "validate.ts checks isEqual(schema.spec, yaml); the spec is an object literal in the generated router.ts, and the format-reader capability covers data in a TypeScript module."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what alint lacks."
     }
    ],
    "needs": "format-reader"
@@ -1349,16 +1407,26 @@
    "evidence": ".eslintrc.js:43-53 notice/notice with scripts/templates/copyright-header.txt; ci.yml:310-311 repo lint; lint-staged eslint --fix",
    "mechanism": "ci",
    "family": "other",
-   "bucket": "A",
+   "bucket": "C",
    "alint": "file_header (20 lines, (?m) pattern), excludes mirror .eslintignore, the eslint-factory ignores and one inline eslint-disable: backstage-copyright-header",
    "rules": [
     "backstage-copyright-header"
    ],
    "assertion_family": "none",
-   "reason": "Batch-2 ruling: a linter rule that asserts a header is classified by its logic.",
+   "reason": "Batch-2 ruling: a linter rule that asserts a header is classified by its logic. C, because one file is excluded by path for its inline eslint-disable (audit ruling on inline suppressions).",
    "fire_verified": "n/a (other). Fired on scratch: a new .ts file without the header gave +1.",
    "origin": "A",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "from": [
+      "A",
+      "other",
+      "none"
+     ],
+     "why": "Its excludes include one file with an inline eslint-disable; the audit's inline-suppression ruling makes a path exclude that stands in for an inline suppression C, as for thunderbird-android-b07, -40, strapi-35, ghost-60 and trpc-30."
+    }
+   ]
   },
   {
    "id": "backstage-66",
@@ -1741,7 +1809,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-adapter",
-   "alint": "node scripts/verify-release.js",
+   "alint": "missing: package.json at the base branch (base-revision), with a semver comparison; no patch bump is released from master",
    "rules": [],
    "assertion_family": "none",
    "reason": "Compares committed content with another revision's (the merge-base, a tag or another branch). The files are ones alint reads, so R7 classifies it by its logic; what is missing is content at the base revision.",
@@ -1756,6 +1824,13 @@
       "none"
      ],
      "why": "scripts/verify-release.js:50-68 compares package.json with git show origin/${baseRef}:package.json (plus a semver comparison)."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text still named the tool the repository runs, from before the audit moved the unit out of D; it now names what alint lacks."
     }
    ],
    "needs": "base-revision"
@@ -1863,7 +1938,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "for_each_file over **/src/schema/openapi.yaml with a file_exists any-of [\"{dir}/openapi/generated/router.ts\", \"{dir}/openapi.generated.ts\"]. Proposed id backstage-openapi-generated-router-exists, replacing value-add backstage-valueadd-openapi-generated-router",
+   "alint": "for_each_file over **/src/schema/openapi.yaml with a file_exists any-of [\"{dir}/openapi/generated/router.ts\", \"{dir}/openapi.generated.ts\"]: backstage-openapi-generated-router-exists, which replaced a value-add rule",
    "rules": [
     "backstage-openapi-generated-router-exists"
    ],
@@ -1871,7 +1946,15 @@
    "reason": "This is a separate assertion in validate.ts from the deep-equality check (unit 64, D). It is an existence check alint expresses directly. Stage A put it in value_add, but the script throws on it in CI, so it is enforced and belongs in the ratio. Probe: passes on the clone; fires on a scratch spec with no generated file; passes for both the current and the legacy layout.",
    "fire_verified": "n/a (family other); fired anyway on a scratch copy (spec without a router fires, legacy and current layouts pass), passes on the clone",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "backstage-b02",
@@ -1880,7 +1963,7 @@
    "mechanism": "test",
    "family": "dep-version",
    "bucket": "A",
-   "alint": "json_path_equals over packages/create-app/templates/*/package.json.hbs (parsed as JSON; both files are valid JSON), $.resolutions['@yarnpkg/core'] == \"4.9.1\". Proposed id backstage-create-app-template-yarnpkg-core-pin",
+   "alint": "json_path_equals over packages/create-app/templates/*/package.json.hbs (parsed as JSON; both files are valid JSON), $.resolutions['@yarnpkg/core'] == \"4.9.1\": backstage-create-app-template-yarnpkg-core-pin",
    "rules": [
     "backstage-create-app-template-yarnpkg-core-pin"
    ],
@@ -1888,7 +1971,15 @@
    "reason": "Per R7, a test that only reads committed manifests is classified by what it asserts: here, an exact pinned value in two files. That is a single json_path_equals, so A.",
    "fire_verified": "On a scratch copy of both templates: bumping the value to 4.9.2 fired (+1), and deleting the resolutions key fired (+1). Passes on the clone (0 findings).",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "backstage-b03",
@@ -1897,7 +1988,7 @@
    "mechanism": "test",
    "family": "dep-version",
    "bucket": "C",
-   "alint": "cross_file superset: source = regex-extracted keys of packageVersions in packages/cli-module-new/src/lib/version.ts; target = regex captures of versionQuery '(@backstage/[^']+)' over templates/**/*.hbs. Proposed id backstage-cli-new-versionquery-registered",
+   "alint": "cross_file superset: source = regex-extracted keys of packageVersions in packages/cli-module-new/src/lib/version.ts; target = regex captures of versionQuery '(@backstage/[^']+)' over templates/**/*.hbs: backstage-cli-new-versionquery-registered",
    "rules": [
     "backstage-cli-new-versionquery-registered"
    ],
@@ -1905,7 +1996,15 @@
    "reason": "The relation (template references are a subset of the registry) is expressible, but the registry is a TypeScript object literal read by regex. Per the batch ruling, a regex that holds for one layout only is C. The probe passes on the clone and fires when a template adds an unregistered package.",
    "fire_verified": "Fired on a scratch copy (a template with versionQuery '@backstage/does-not-exist' gave +1); passes on the clone",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "backstage-b04",
@@ -1914,7 +2013,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "A",
-   "alint": "registry_paths_resolve with source mkdocs-ci.yml, extracting the nav leaf string values, base: docs, expect file. Proposed id backstage-mkdocs-ci-nav-resolves",
+   "alint": "registry_paths_resolve with source mkdocs-ci.yml, extracting the nav leaf string values, base: docs, expect file: backstage-mkdocs-ci-nav-resolves",
    "rules": [
     "backstage-mkdocs-ci-nav-resolves"
    ],
@@ -1922,7 +2021,15 @@
    "reason": "This is a docs-build integrity check split out of the mkdocs build (unit 88, D), following the jest-18 precedent for Docusaurus build checks. The nav paths are plain YAML strings resolved against docs/, which alint expresses directly.",
    "fire_verified": "n/a (family other); fired anyway: deleting docs/overview/roadmap.md in a scratch copy gave +1, and it passes on the clone",
    "origin": "B",
-   "changes": []
+   "changes": [
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
+    }
+   ]
   },
   {
    "id": "backstage-b05",
@@ -1954,7 +2061,7 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "B-delegate",
-   "alint": "json_schema / yaml schema validation against the OpenAPI 3 meta-schema, which the repo does not ship. Proposed id backstage-openapi-spec-valid",
+   "alint": "json_schema / yaml schema validation against the OpenAPI 3 meta-schema, which the repo does not ship; the partial rule backstage-openapi-spec-valid checks the meta-schema's top level",
    "rules": [
     "backstage-openapi-spec-valid"
    ],
@@ -1971,6 +2078,13 @@
       "none"
      ],
      "why": "zulip-33 checks the same thing (SwaggerParser.validate) and is B-delegate. OpenAPI validation adds $ref resolution and OpenAPI semantics to a meta-schema, which a validator delegates; the existing rule checks only the top-level fields and stays as a partial."
+    },
+    {
+     "by": "review",
+     "fields": [
+      "alint"
+     ],
+     "why": "The alint text gave a proposed or scratch rule id; the rule is in the configuration."
     }
    ]
   },

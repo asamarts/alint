@@ -1,11 +1,12 @@
 # v0.23 corpus stratum: log
 
-Status: complete (2026-11-12): 20 repositories in four batches, then an audit of every
-classification. Frame and method: [`corpus-stratum.md`](corpus-stratum.md).
+Status: complete (2026-11-12; reviewed 2026-11-13): 20 repositories in four batches, then an
+audit of every classification and a review of the records. Frame and method:
+[`corpus-stratum.md`](corpus-stratum.md).
 
 Each repository has a record in [`stratum/`](stratum/), named by its slug. A record holds:
 - every unit, with its evidence, mechanism, family, bucket, assertion family, the rules that check
-  it, its reason, and the changes Stage B, the integrator or the audit made to it;
+  it, its reason, and the changes Stage B, the integrator, the audit or the review made to it;
 - the units removed and the Stage B suggestions rejected, each with the reason;
 - the value-add rules and their ids, absent categories and the "unusual" scan;
 - Stage B's configuration issues and summary;
@@ -32,32 +33,32 @@ All 20 repositories, 1,558 units. The percentages exclude D: Today is A / (A + B
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
 | forem/forem | 58 | 20 | 3 | 6 | 0 | 0 | 7 | 22 | 56% | 75% | 25% | 61% | 64% |
 | zulip/zulip | 190 | 111 | 2 | 3 | 0 | 4 | 12 | 58 | 84% | 93% | 7% | 86% | 86% |
-| element-hq/element-web | 49 | 5 | 0 | 4 | 0 | 0 | 6 | 34 | 33% | 73% | 27% | 33% | 40% |
+| element-hq/element-web | 49 | 4 | 0 | 4 | 0 | 0 | 7 | 34 | 27% | 73% | 27% | 27% | 33% |
 | yarnpkg/berry | 43 | 13 | 1 | 2 | 0 | 0 | 6 | 21 | 59% | 86% | 14% | 59% | 64% |
 | trpc/trpc | 65 | 9 | 6 | 14 | 0 | 1 | 6 | 29 | 25% | 42% | 58% | 36% | 39% |
 | signalapp/Signal-Desktop | 74 | 12 | 0 | 2 | 0 | 1 | 13 | 46 | 43% | 89% | 11% | 43% | 43% |
 | immich-app/immich | 55 | 10 | 1 | 10 | 0 | 0 | 5 | 29 | 38% | 58% | 42% | 38% | 38% |
 | TanStack/query | 54 | 14 | 2 | 6 | 0 | 0 | 9 | 23 | 45% | 74% | 26% | 52% | 58% |
-| jestjs/jest | 55 | 21 | 3 | 3 | 0 | 0 | 5 | 23 | 66% | 81% | 19% | 72% | 75% |
-| microsoft/rushstack | 78 | 32 | 5 | 7 | 0 | 2 | 16 | 16 | 52% | 77% | 23% | 60% | 61% |
+| jestjs/jest | 55 | 22 | 3 | 3 | 0 | 0 | 4 | 23 | 69% | 81% | 19% | 75% | 78% |
+| microsoft/rushstack | 78 | 30 | 6 | 7 | 0 | 2 | 17 | 16 | 48% | 76% | 24% | 58% | 60% |
 | TryGhost/Ghost | 101 | 36 | 2 | 18 | 0 | 0 | 27 | 18 | 43% | 76% | 24% | 45% | 45% |
 | RocketChat/Rocket.Chat | 86 | 22 | 1 | 19 | 0 | 0 | 7 | 37 | 45% | 59% | 41% | 47% | 47% |
 | babel/babel | 68 | 27 | 2 | 5 | 0 | 3 | 6 | 25 | 63% | 77% | 23% | 65% | 70% |
 | strapi/strapi | 78 | 16 | 5 | 7 | 0 | 0 | 24 | 26 | 31% | 77% | 23% | 38% | 40% |
-| cloudflare/workers-sdk | 83 | 32 | 1 | 9 | 1 | 0 | 5 | 35 | 67% | 77% | 23% | 67% | 67% |
+| cloudflare/workers-sdk | 83 | 31 | 1 | 9 | 1 | 0 | 6 | 35 | 65% | 77% | 23% | 65% | 65% |
 | mattermost/mattermost | 122 | 33 | 7 | 21 | 0 | 2 | 19 | 40 | 40% | 63% | 37% | 44% | 48% |
 | nextcloud/server | 53 | 11 | 0 | 4 | 0 | 0 | 8 | 30 | 48% | 83% | 17% | 48% | 52% |
 | thunderbird/thunderbird-android | 68 | 17 | 0 | 8 | 0 | 1 | 16 | 26 | 40% | 79% | 21% | 40% | 43% |
 | microsoft/fluentui | 77 | 20 | 4 | 8 | 0 | 0 | 10 | 35 | 48% | 71% | 29% | 55% | 60% |
-| backstage/backstage | 101 | 30 | 3 | 12 | 0 | 2 | 29 | 25 | 39% | 78% | 22% | 41% | 43% |
-| **Pooled** | 1,558 | 491 | 48 | 168 | 1 | 16 | 236 | 598 | 51% | 76% | 24% | 54% | 56% |
+| backstage/backstage | 101 | 29 | 3 | 12 | 0 | 2 | 30 | 25 | 38% | 78% | 22% | 39% | 42% |
+| **Pooled** | 1,558 | 487 | 49 | 168 | 1 | 16 | 239 | 598 | 51% | 76% | 24% | 54% | 56% |
 
 | Family | Units | A | B-config | B-adapter | B-kernel | B-delegate | C | D | Today | Tuning | Gap | After slice | With values |
 |---|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|--:|
-| `locale` | 136 | 27 | 9 | 36 | 0 | 5 | 39 | 20 | 23% | 57% | 43% | 28% | 30% |
+| `locale` | 134 | 25 | 9 | 36 | 0 | 5 | 39 | 20 | 22% | 56% | 44% | 26% | 29% |
 | `dep-version` | 170 | 45 | 5 | 23 | 0 | 0 | 31 | 66 | 43% | 73% | 27% | 46% | 57% |
 | `toolchain-pin` | 81 | 41 | 0 | 13 | 0 | 0 | 11 | 16 | 63% | 80% | 20% | 63% | 63% |
-| `other` | 1,171 | 378 | 34 | 96 | 1 | 11 | 155 | 496 | 56% | 79% | 21% | 59% | 60% |
+| `other` | 1,173 | 376 | 35 | 96 | 1 | 11 | 158 | 496 | 56% | 79% | 21% | 59% | 60% |
 
 The per-repository median `coverage_today` is 45% (range 25% to 84%). zulip contributes 190 units;
 87 of its 111 A units are rules in its own regex linter (`tools/linter_lib/custom_check.py`), each
@@ -67,19 +68,19 @@ a unit under R1. The family tables are the stratum's measure; the pooled figure 
 
 | Stratum | Family | Units | Today | After slice | With values |
 |---|---|--:|--:|--:|--:|
-| i18n | `locale` | 131 | 23% | 27% | 30% |
+| i18n | `locale` | 129 | 22% | 26% | 28% |
 | i18n | `dep-version` | 57 | 50% | 50% | 55% |
 | i18n | `toolchain-pin` | 40 | 65% | 65% | 65% |
-| i18n | `other` | 628 | 62% | 64% | 65% |
-| i18n | **all** | 856 | 54% | 55% | 57% |
+| i18n | `other` | 630 | 62% | 64% | 65% |
+| i18n | **all** | 856 | 53% | 55% | 57% |
 | JavaScript monorepo | `locale` | 5 | 20% | 40% | 40% |
 | JavaScript monorepo | `dep-version` | 113 | 41% | 45% | 57% |
 | JavaScript monorepo | `toolchain-pin` | 41 | 62% | 62% | 62% |
-| JavaScript monorepo | `other` | 543 | 49% | 54% | 55% |
+| JavaScript monorepo | `other` | 543 | 48% | 54% | 55% |
 | JavaScript monorepo | **all** | 702 | 48% | 53% | 56% |
 
 The JavaScript monorepos' 5 `locale` units are incidental; the stratum's locale evidence is the
-i18n half's 131.
+i18n half's 129.
 
 ### What each capability would add
 
@@ -88,12 +89,12 @@ first two steps are the "after slice" and "with values" columns.
 
 | Step | `locale` | `dep-version` | `toolchain-pin` | `other` | Pooled |
 |---|--:|--:|--:|--:|--:|
-| Today | 23% | 43% | 63% | 56% | 51% |
-| + slice | 28% | 46% | 63% | 59% | 54% |
-| + entry values | 30% | 57% | 63% | 60% | 56% |
-| + version comparison | 30% | 60% | 83% | 61% | 59% |
-| + `set` and `reference` | 36% | 67% | 83% | 63% | 62% |
-| + locale format adapters | 53% | 67% | 83% | 63% | 64% |
+| Today | 22% | 43% | 63% | 56% | 51% |
+| + slice | 26% | 46% | 63% | 59% | 54% |
+| + entry values | 29% | 57% | 63% | 60% | 56% |
+| + version comparison | 29% | 60% | 83% | 61% | 58% |
+| + `set` and `reference` | 35% | 67% | 83% | 63% | 61% |
+| + locale format adapters | 53% | 67% | 83% | 63% | 63% |
 
 - **+ slice:** B-config units in `equality`, `unique-key` or `cardinality`.
 - **+ entry values:** B-adapter units with `needs: entry-values` in one of those families.
@@ -110,7 +111,7 @@ values. The four family columns split the sum of the first two.
 
 | Assertion family | B-config | B-adapter, entry values | locale | dep-version | toolchain-pin | other |
 |---|--:|--:|--:|--:|--:|--:|
-| `unique-key` | 30 | 11 | 4 | 13 | 0 | 24 |
+| `unique-key` | 31 | 11 | 4 | 13 | 0 | 25 |
 | `set` | 11 | 6 | 7 | 4 | 0 | 6 |
 | `reference` | 5 | 6 | 0 | 4 | 0 | 7 |
 | `equality` | 0 | 9 | 3 | 1 | 0 | 5 |
@@ -146,10 +147,10 @@ No unit needs `key-predicate` since the audit moved rushstack-b12 to C.
 ## Findings
 
 1. **`unique-key` is the assertion family with the most demand; `cardinality` has little.**
-   - `unique-key` has 30 B-config units and 11 more once entry values exist. The common cases:
+   - `unique-key` has 31 B-config units and 11 more once entry values exist. The common cases:
      - unique workspace names (trpc-B05, jest-B02, tq-35, babel-B01);
-     - duplicate keys or ids in one file: a locale file (rocketchat-10, mattermost-03) or any
-       linted YAML file (zulip-28);
+     - duplicate keys or ids in one file: a locale file (rocketchat-10, mattermost-03), a plugin
+       manifest (rushstack-b14) or any linted YAML file (zulip-28);
      - disjoint dependency fields (trpc-08, jest-24, rushstack-51, and babel-12 once entry values
        exist).
    - `cardinality` has 1. Locale key parity is mostly A already, through `key_parity`. The one
@@ -158,7 +159,7 @@ No unit needs `key-predicate` since the audit moved rushstack-b12 to C.
      layout-dependent regex expresses them.
    - `equality` has no B-config unit. Its 9 units all need entry values first.
    - `set` (11 B-config, 6 entry values) and `reference` (5 and 6) come next. Neither is in the
-     slice. Together they would move 7 `locale` units (6.0 points), 8 `dep-version` units (7.7
+     slice. Together they would move 7 `locale` units (6.1 points), 8 `dep-version` units (7.7
      points) and 28 units pooled (2.9 points).
 2. **The slice's dependency version policy needs a value-bearing entry adapter.**
    - One range per dependency across workspaces is enforced in 6 of the 10 JavaScript monorepos:
@@ -184,7 +185,7 @@ No unit needs `key-predicate` since the audit moved rushstack-b12 to C.
      range validity (rushstack-07, -b11), fluentui-07, rocketchat-17, thunderbird-android-b04
      and backstage-15.
 4. **The locale family needs format knowledge, not new assertion families.**
-   - It goes from 23% to 28% with the slice, and 30% with entry values.
+   - It goes from 22% to 26% with the slice, and 29% with entry values.
    - Its 41 B-adapter and B-delegate units, by need:
 
      | Need | Units | Repositories |
@@ -198,7 +199,7 @@ No unit needs `key-predicate` since the audit moved rushstack-b12 to C.
      | Unicode normalization | 1 | 1 |
      | Every resource name in a folder | 1 | 1 |
 
-   - Adapters for placeholders, plural categories and ICU would take `locale` from 36% to 53%,
+   - Adapters for placeholders, plural categories and ICU would take `locale` from 35% to 53%,
      after the steps before them in the capability table.
    - A regex over each message stands in for the ICU syntax tree in three Signal rules
      (signal-desktop-07, -08, -09, all C).
@@ -386,8 +387,8 @@ forem-b08 and forem-29 to B-adapter (`needs: entry-values`), and trpc-08 from `s
     rushstack-01), with the same change applied to batch 1.
   - **Disjoint dependency fields** aligned on `unique-key` (jest-24, rushstack-51, and batch 1's
     trpc-08).
-  - **tq-B05 to D:** the npm registry checks the repository URL at publish time. Its rule is now
-    value-add.
+  - **tq-B05 to D:** the npm registry checks the repository URL at publish time. Its rule stays
+    as a partial rule at level `info`.
   - **tq-B04 and jest-27 to C:** both are regex reads that hold for one layout.
   - **rushstack:**
     - rushstack-b09 to A, which Stage C expressed;
@@ -513,7 +514,7 @@ forem-b08 and forem-29 to B-adapter (`needs: entry-values`), and trpc-08 from `s
 
 ### The three families
 
-- **`locale`** (58 units): 11 A, 6 B-config, 15 B-adapter, 3 B-delegate, 16 C, 7 D.
+- **`locale`** (56 units): 9 A, 6 B-config, 15 B-adapter, 3 B-delegate, 16 C, 7 D.
   - **mattermost alone has 37 locale units.** It has two catalogs, server go-i18n and webapp
     react-intl, plus a glossary and a style guide with their own checker:
     - B-config: duplicate ids and glossary forms (mattermost-03, -27, `unique-key`), and locale
@@ -524,10 +525,12 @@ forem-b08 and forem-29 to B-adapter (`needs: entry-values`), and trpc-08 from `s
       the formatting half alone would be D. It moved -21 (no new unescaped apostrophe) from
       `icu` to entry values with `set`, since it compares each translation with its source
       text;
-    - C: JSON parse checks (mattermost-01, -13, -23). Also blank-value checks that cannot skip
-      keys absent from en.json, which both checkers only warn about (mattermost-05, -14, -17).
+    - C: JSON parse checks (mattermost-01, -13, -23). Also blank-value and string-type checks
+      that cannot skip keys absent from en.json, which both checkers only warn about
+      (mattermost-05 and -17 for blank values, -14 for the type).
   - **thunderbird-android runs Android lint over `strings.xml`.**
-    - `key_parity` across 34 modules is A (thunderbird-android-01, -02). So are the cs, lt and
+    - 34 rules over the modules' string files (32 `key_parity`, 2 `cross_file`) are A
+      (thunderbird-android-01, -02). So are the cs, lt and
       sk plural subset (-09) and the legacy locale folder names (-06).
     - Duplicate resource names across a folder's files are B-adapter (-b01). The audit moved it
       from B-config: the XML adapter emits only `string`, `string-array` and `plurals`, so it
@@ -585,8 +588,8 @@ forem-b08 and forem-29 to B-adapter (`needs: entry-values`), and trpc-08 from `s
   - nextcloud-01 and -14 now also cover a missing `.tx/config` and `psalm.xml`;
   - fluentui-02 now has a rule that `yarnPath` is present.
 - **The integrator's changes:**
-  - **`needs` tags for all 51 B-adapter units.** Eleven need entry values, with the assertion
-    family each will need.
+  - **`needs` tags for every B-adapter unit,** 51 at the time (53 after the audit, 12 of them
+    needing entry values), each entry-values unit with the assertion family it will need.
   - **fluentui-16 to C:** `*.api.md text=auto` keeps the committed blob LF, but alint reads the
     working tree, which is CRLF on a Windows checkout with `core.autocrlf`.
   - **mattermost-88 and fluentui-31 reasons rewritten** to match Stage B's B-adapter
@@ -616,7 +619,7 @@ forem-b08 and forem-29 to B-adapter (`needs: entry-values`), and trpc-08 from `s
 ## Audit (2026-11-12)
 
 After batch 4, the whole stratum was reviewed again before it was scored. Every figure above is
-after the audit.
+after the audit and the review (section "Review (2026-11-13)").
 
 ### What was reviewed
 
@@ -635,7 +638,8 @@ after the audit.
 - **Vacuity.** `alint explain --trace` over the 1,191 rules at the start of the audit: 19 select
   no file. 17 are absence rules, which pass vacuously by design. The other two are
   zulip-unmerged-changelog-no-feature-level-heading, whose record already says it is vacuous at
-  the pin, and zulip-cc-scripts-no-sudo-bash (no `scripts/**/*.bash` file exists at the pin).
+  the pin, and zulip-cc-scripts-no-sudo-bash (no file matches its `**/scripts/**/*.bash` glob at
+  the pin).
 - **The prose** of the frame, this log and general-linter section 12, against the records.
 
 ### Rulings
@@ -703,8 +707,8 @@ fluentui-b09, mattermost-76 and rocketchat-44 need `derived-value`; ghost-b14 ne
 | zulip-a02 | A | third-party actions pinned by hash | zulip-82 |
 | immich-a01 | A | CLI file names in kebab case | immich-38 |
 | immich-a02 | B-adapter (`route-model`) | docs links resolve to a site route | immich-43 |
-| ghost-a01 | A | markdownlint MD052: reference labels defined | ghost-77 |
-| ghost-a02 | B-adapter (`format-reader`) | markdownlint MD056: table column counts | ghost-77 |
+| ghost-a01 | A | markdownlint MD052: reference labels defined | ghost-79 |
+| ghost-a02 | B-adapter (`format-reader`) | markdownlint MD056: table column counts | ghost-79 |
 | ghost-a03 | C | a line cap on the i18n index | ghost-77 |
 | element-web-a01 | C | new source files are TypeScript | element-web-46 |
 | rushstack-a01 | C | a copyright header in every source file | rushstack-39 |
@@ -722,9 +726,10 @@ contradicted the unit's own classification or its rules.
 - **26 rules added** for the new and moved units, each confirmed by R4 (passes on the clone,
   fires on a mutation): Ghost 7, TanStack/query 4, zulip 3, rushstack 3, Signal-Desktop 2,
   strapi 2, forem 2, backstage 1, element-web 1, immich 1.
-  - 11 of them express the eight units the audit moved from B to C (rushstack-b12, ghost-62,
-    ghost-70, backstage-54, strapi-56, strapi-58, forem-22, forem-b03). Each was fire-tested
-    twice: by the reviewer who wrote it, and again with different mutations.
+  - 14 of them express 11 of the 19 units the audit moved from B to C: 11 rules for rushstack-b12,
+    ghost-62, ghost-70, backstage-54, strapi-56, strapi-58, forem-22 and forem-b03, and one
+    each for rushstack-b11, signal-desktop-07 and -09. Each was fire-tested twice: by the
+    reviewer who wrote it, and again with different mutations.
   - nextcloud-25's commit-trailer ban needs a generated complement pattern of about 9,600
     characters. It matched the workflow's grep patterns on 4,560 generated commits, but stays
     out of the configuration, because the clone is depth 1.
@@ -741,8 +746,9 @@ The reviewers raised these and the audit kept them:
 - **babel-50 and strapi-62** look alike but are not: one is a negated reference, the other
   set disjointness.
 - **thunderbird-android-55** is a negated equality, consistent with its family.
-- **A B-adapter unit without entry values may still name an assertion family** (fluentui-20,
-  -31, -b09, nextcloud-18, -19, mattermost-06). The figures count only entry-values units.
+- **A B-adapter unit without entry values may still name an assertion family** (backstage-a01,
+  fluentui-20, -31, -b09, mattermost-06, nextcloud-18, -19, thunderbird-android-b01; the audit
+  gave mattermost-06 its family). The figures count only entry-values units.
 - **strapi-21, zulip-02 and thunderbird-android-09** are low-confidence calls that the evidence
   supports as recorded.
 - **signal-desktop-51 and -52** mix knip checks and stay `other`.
@@ -767,3 +773,90 @@ The reviewers raised these and the audit kept them:
   one, and every configuration rule belongs to a unit or is value-add;
 - every rule a unit's `alint` text names is one of its rules or a value-add rule;
 - `metrics` and `by_family` recompute from the units.
+
+## Review (2026-11-13)
+
+After the audit was merged (#501), a review checked the records against the frame's rulings, the
+configurations' comments and the published figures, and recomputed every table. The review's
+own rulings are in [`corpus-stratum.md`](corpus-stratum.md) under "Rulings from the review"; each
+says where an earlier ruling already drew the line.
+
+### Units moved
+
+Eight units moved, each recorded in its `changes` list with `by: review`:
+
+| Unit | From | To | Why |
+|---|---|---|---|
+| backstage-65 | A | C | one file is excluded for its inline eslint-disable |
+| element-web-18 | A | C | one generated file is excluded for its eslint-disable |
+| wsdk-b02 | A | C | the target regex reads the test's list in one layout |
+| rushstack-57 | A | C | the default subspace's half needs a line-anchored regex |
+| jest-20 | C | A | its package list is the checker's own literal, not a hand-kept list |
+| rushstack-b14 | A | B-config `unique-key` | it folds in the duplicate plugin-name check |
+| thunderbird-android-61 | `locale` | `other` | a BOM check over every source and resource file |
+| thunderbird-android-62 | `locale` | `other` | an encoding check over every XML resource |
+
+The moves change `locale` to 22% today, 26% after the slice and 29% with entry values (from
+23%, 28% and 30%). The pooled figures stay at 51%, 54% and 56%, and `unique-key` gains one
+B-config unit (rushstack-b14).
+
+### Text and records
+
+- **Text from before Stage B or the audit** that contradicted the unit's bucket or rules:
+  thunderbird-android-53, ghost-44, ghost-b09, jest-27, strapi-61 and rushstack-47 (their
+  reasons or `alint` texts were still B-config or D text), fluentui-06's `fire_verified`, and
+  thunderbird-android-50, whose texts left out its strict-JSON rule.
+- **Rules a unit listed wrongly:** rushstack-09b listed rushstack-c01's rule, wsdk-b02 listed
+  wsdk-19's, and thunderbird-android-02 listed one of the 34 rules it shares with -01.
+- **`alint` texts** that left out listed rules (14 units), named a rule id that does not exist
+  (tq-31), gave a proposed or scratch id for a rule now in the configuration (26 units), or were
+  empty (14 units).
+- **mattermost-06's audit change** now records the classification it replaced (`from`), as the
+  other 81 audit moves do.
+- **Partial rules** on tq-B05 and wsdk-17 were called value-add; they are partial rules at level
+  `info`. element-web-48's `alint` text still called its rule value-add at level `info`; the rule
+  runs at level `error`.
+- **Texts a move left behind:** 34 units whose `alint`, `reason` or `fire_verified` text still
+  described the bucket that Stage B or the audit had moved them out of:
+  - 12 moved from A to C: 11 by Stage B, and backstage-55, which Stage B moved by analogy with
+    backstage-49 and the review reproduced on a scratch file;
+  - 14 moved out of D, whose `alint` text named the repository's tool (ghost-39, backstage-64,
+    fluentui-31, trpc-57 and others) or whose reason still argued for D (ghost-80, strapi-35,
+    zulip-55);
+  - 4 moved from B-adapter to C (ghost-61, fluentui-23, -b17, yarnpkg-berry-23), whose `alint`
+    text still gave the old need;
+  - nextcloud-18 and -19, moved from B-config to B-adapter, whose reasons did not name the missing
+    SPDX expression extractor;
+  - signal-desktop-38 and -46, whose `fire_verified` still said C.
+
+### Configurations and prose
+
+- **Comments relabelled:** seven unit labels that disagreed with the record (tq-B04, jest-27,
+  rushstack-01, strapi-07, zulip-04, zulip-39, and tq-10 in prose), the eight moved units, and
+  the header summaries of nine configurations, which still gave pre-audit buckets.
+- **This log:** the parent of ghost-a01 and -a02 (ghost-79, not ghost-77), the count of rules
+  written for units moved from B to C, batch 4's `locale` and `needs` counts, the units the
+  "Not changed" list names, the vacuity note's glob, and three batch-section wordings.
+- **general-linter.md section 12.4:** the families and capability figures above, and
+  "normalization (3)", which covers one Unicode and two unit normalizations.
+
+### Gates added
+
+`cargo test -p xtask` now also checks:
+- that every recorded change names who made it (`B`, `integrator`, `audit` or `review`), and
+  that a change of bucket, family or assertion family records the classification it replaced or
+  its new values (`check_stratum_unit_changes`);
+- that every configuration comment labelling a unit with its bucket, in the three forms the
+  configurations use, matches the record (`stratum_config_comment_labels_match_records`, about
+  600 labels).
+
+### Not changed
+
+- **thunderbird-android-50** stays A: its unit is the schema check, which `json_schema_passes`
+  expresses. Its strict-JSON rule approximates the build's parser, the gap section 12.4's
+  strict-JSON option would close.
+- **forem-b01 and mattermost-b02** stay `locale`: they check the registries that list the
+  supported locales.
+- **immich-36** stays D: it runs project code, besides needing the base revision's spec.
+- **nextcloud-50** stays D, with its reason rewritten: it gates when merges may happen, keyed on
+  another branch's state, rather than checking content.

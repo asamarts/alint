@@ -61,8 +61,8 @@
 # orphaned peerDependenciesMeta and unique workspace / Nx project names
 # (B-config), the tsconfig.base.all.json merge and the export map derivation
 # (B-adapter), @fluentui/max-len and @typescript-eslint/ban-ts-comment
-# (B-adapter: eslint-disable comments, which alint cannot read, exempt most of
-# their matches), beachball's change-file requirement and one change file per
+# (C: eslint-disable comments, which alint cannot read, exempt most of their
+# matches, so a rule needs a hand-kept exclude list), beachball's change-file requirement and one change file per
 # package per PR (B-adapter, change relation), incompatible-peer-range
 # (B-adapter: semver subset plus entry values), unique migration-guide routes
 # (B-config) and the ComponentMapping links (B-adapter: slug normalize),

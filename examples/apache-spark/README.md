@@ -298,8 +298,8 @@ warning-level restatement.
 |---|---|---|
 | `**/derby.log` (Derby DB runtime artefact) | alint-today | `spark-no-tracked-derby-log` (`file_absent` with `git_tracked_only: true`) |
 | `**/pyspark-coverage-site` (generated coverage report) | alint-today | `spark-no-tracked-pyspark-coverage` (`dir_absent` with `git_tracked_only: true`) |
-| `target/rat-results.txt` (RAT runtime output) | alint-today | `spark-no-tracked-target-rat-results` |
-| `**/target/`, `**/*.class` (Maven build outputs) | alint-today | bundled `java@v1` ruleset (`java-no-tracked-target` with `git_tracked_only: true`, `java-no-tracked-class`) |
+| `target/rat-results.txt` (RAT runtime output) | alint-today | `java-no-tracked-target` (the whole `target/` tree) |
+| `**/target/`, `**/*.class` (Maven build outputs) | alint-today | bundled `java@v1` ruleset (`java-no-tracked-target` with `git_tracked_only: true`, `java-no-class-files`) |
 | Cross-language hygiene (`__pycache__`, `node_modules`, `.DS_Store`, etc.) | alint-today | bundled `hygiene/no-tracked-artifacts@v1` (11 rules) |
 
 ---
