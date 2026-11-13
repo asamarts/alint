@@ -34,6 +34,83 @@ fn evaluates_without_the_run_caches() {
     assert!(index.read_cache().is_none(), "the run caches stay off");
 }
 
+/// Build a `for_each_file` around one nested `key_parity` as loading a
+/// configuration does: the parent, then its `require:` block from the
+/// placeholder tokens. `options` are the nested rule's lines.
+fn load_nested(options: &str) -> Result<()> {
+    let registry = crate::builtin_registry();
+    let options = options.replace('\n', "\n    ");
+    let spec = spec_yaml(&format!(
+        "id: p\nkind: for_each_file\nselect: '*/en.*'\nlevel: error\n\
+         require:\n  - kind: key_parity\n    {options}\n"
+    ));
+    let rule = registry.build(&spec)?;
+    registry.validate_nested(&spec, rule.as_ref())
+}
+
+/// A file name a token renders has its format inferred per iteration, so the
+/// configuration loads (#504). What holds for every iteration is still
+/// checked at load.
+#[test]
+fn a_nested_rule_infers_a_templated_name_s_format_per_iteration() {
+    for options in [
+        "reference: '{path}'\npeers: '{dir}/fr.{ext}'",
+        "reference: '{dir}/en.{ext}'\npeers: '{dir}/*.{ext}'",
+        "reference: '{dir}/{basename}'\npeers: '{dir}/fr.json'",
+        "reference: '{path}'\npeers: '{dir}/*'\nstrip_root: true\nignore_keys: ['a.b']",
+        // These rendered empty from the old `_` placeholder.
+        "reference: 'i18n/{parent_name}.json'\npeers: 'i18n/*.json'",
+        "reference: '{dir}/en.json'\npeers: '{parent_name}/en.json'",
+    ] {
+        load_nested(options).unwrap_or_else(|error| panic!("{options}: {error}"));
+    }
+    for (options, error) in [
+        (
+            "reference: '{dir}/README'\npeers: '{dir}/*'",
+            NO_REFERENCE_FORMAT,
+        ),
+        (
+            "reference: '{dir}/en.json'\npeers: '{dir}/fr'",
+            "cannot infer the key format of the literal `peers` path",
+        ),
+        (
+            "reference: '{path}'\npeers: '{path}'",
+            "must select at least one file other than the reference",
+        ),
+        (
+            "reference: '{path}'\npeers: '{dir}/*'\nignore_keys: [\"['a\"]",
+            "`ignore_keys` pattern",
+        ),
+        (
+            "reference: '{dir}/en.json'\npeers: '{dir}/*'\nstrip_root: true\nformat: properties",
+            "has a different key model",
+        ),
+    ] {
+        let message = load_nested(options).expect_err(options).to_string();
+        assert!(message.contains(error), "{options}: {message}");
+    }
+}
+
+/// A rule built with its format pending is never evaluated: the iteration
+/// builds its own. If one were, it reports the load-time message.
+#[test]
+fn a_rule_with_a_pending_format_does_not_evaluate() {
+    let nested: alint_core::NestedRuleSpec =
+        yaml_serde::from_str("kind: key_parity\nreference: '{path}'\npeers: '{dir}/*'\n").unwrap();
+    let spec = nested.instantiate(
+        "p",
+        0,
+        Level::Error,
+        &alint_core::template::PathTokens::placeholder(),
+    );
+    let rule = build(&spec).expect("a templated name waits for the iteration");
+    let (tmp, index) = tempdir_with_files(&[("en.json", b"{}")]);
+    let error = rule
+        .evaluate(&ctx(tmp.path(), &index))
+        .expect_err("no format to read the reference with");
+    assert!(error.to_string().contains(NO_REFERENCE_FORMAT), "{error}");
+}
+
 #[test]
 fn format_inference_and_models() {
     assert_eq!(infer_format(Path::new("a.json")), Some(KeyFormat::Json));
