@@ -1508,11 +1508,13 @@
    "mechanism": "tool-config",
    "family": "other",
    "bucket": "C",
-   "alint": "json_schema_passes with a shim schema adding propertyNames {pattern: package-name regex} to preferredVersions/allowedAlternativeVersions",
-   "rules": [],
+   "alint": "for_each_match over the 4-space-indented key lines of common-versions.json, requiring a package-name regex: rushstack-common-versions-keys-are-package-names",
+   "rules": [
+    "rushstack-common-versions-keys-are-package-names"
+   ],
    "assertion_family": "none",
    "reason": "A for_each_match over the 4-space-indented key lines, requiring a package-name regex, expresses it. It depends on the one-key-per-line layout, so C (element-web-04 precedent).",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: passes on the clone (48 key lines); a space, an unscoped slash, a leading underscore and a bad scope each fired.",
    "origin": "B",
    "changes": [
     {
@@ -1531,6 +1533,14 @@
       "none"
      ],
      "why": "element-web-04, signal-desktop-01 and immich-49 check key names with a line regex and are C. The keys sit one per line at 4-space indent in common/config/subspaces/*/common-versions.json."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },

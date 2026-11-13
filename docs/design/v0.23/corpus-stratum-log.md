@@ -719,9 +719,15 @@ contradicted the unit's own classification or its rules.
 
 ### Configuration changes
 
-- **15 rules added** for the new and moved units, each confirmed by R4 (passes on the clone,
-  fires on a mutation): TanStack/query 4, zulip 3, Ghost 2, rushstack 2, Signal-Desktop 2,
-  element-web 1, immich 1.
+- **26 rules added** for the new and moved units, each confirmed by R4 (passes on the clone,
+  fires on a mutation): Ghost 7, TanStack/query 4, zulip 3, rushstack 3, Signal-Desktop 2,
+  strapi 2, forem 2, backstage 1, element-web 1, immich 1.
+  - 11 of them express the eight units the audit moved from B to C (rushstack-b12, ghost-62,
+    ghost-70, backstage-54, strapi-56, strapi-58, forem-22, forem-b03). Each was fire-tested
+    twice: by the reviewer who wrote it, and again with different mutations.
+  - nextcloud-25's commit-trailer ban needs a generated complement pattern of about 9,600
+    characters. It matched the workflow's grep patterns on 4,560 generated commits, but stays
+    out of the configuration, because the clone is depth 1.
 - **Comments relabelled** where a unit's bucket changed.
 - **rocketchat-25's name regex** now accepts any whitespace around the colon, so it holds in any
   layout (the regex ruling).

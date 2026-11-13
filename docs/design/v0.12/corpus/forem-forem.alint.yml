@@ -421,6 +421,33 @@ rules:
     pattern: 'if \(document\.body && document\.body\.dataset && document\.body\.dataset\.honeybadgerKey\)'
     level: error
 
+  # forem-b03 (C) spec/models/ab_experiment_spec.rb:7-15,
+  #   app/models/ab_experiment.rb:18-20: CURRENT_FEED_STRATEGY_EXPERIMENT is
+  #   the first experiments key that starts with feed_strategy and has no
+  #   winner, and the spec needs it to exist.
+  #   C: layout-dependent (forem-19 precedent):
+  #   - A winner is an entry-level `    winner:` line, whatever its value, so
+  #     `winner: ~` / `null` / `false` count as a winner here but not in Ruby.
+  #   - Flow-style entries are not recognised.
+  - id: forem-feed-strategy-experiment-active
+    kind: file_content_matches
+    paths: config/field_test.yml
+    pattern: '(?m:^)  feed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?(?:\n(?:    (?:[^w\n]|w[^i\n]|wi[^n\n]|win[^n\n]|winn[^e\n]|winne[^r\n]|winner[^:\n])[^\n]*|    (?:w|wi|win|winn|winne|winner)|[ \t]*|[ \t]*#[^\n]*))*(?:\n  [^ \n#]|\n[^ \n#]|\n?\z)'
+    level: error
+    message: "config/field_test.yml needs an active feed_strategy* experiment (one without a winner): AbExperiment::CURRENT_FEED_STRATEGY_EXPERIMENT is the first such key (ab_experiment_spec.rb)."
+
+  # forem-22 (C) spec/models/ab_experiment_spec.rb:18-26: at most one
+  #   feed_strategy* experiment has no winner. Forbids two active entries
+  #   (same entry regex as forem-b03, twice). The first alternative after
+  #   the first entry covers the case where its terminator already used the
+  #   "f" of the next key. C: same layout limits as forem-b03.
+  - id: forem-feed-strategy-experiment-at-most-one-active
+    kind: file_content_forbidden
+    paths: config/field_test.yml
+    pattern: '(?m:^)  feed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?(?:\n(?:    (?:[^w\n]|w[^i\n]|wi[^n\n]|win[^n\n]|winn[^e\n]|winne[^r\n]|winner[^:\n])[^\n]*|    (?:w|wi|win|winn|winne|winner)|[ \t]*|[ \t]*#[^\n]*))*(?:\n  [^ \n#]|\n[^ \n#]|\n?\z)(?:eed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?|(?s:.*?)\n  feed_strategy[^\s:#]*:[ \t]*(?:#[^\n]*)?)(?:\n(?:    (?:[^w\n]|w[^i\n]|wi[^n\n]|win[^n\n]|winn[^e\n]|winne[^r\n]|winner[^:\n])[^\n]*|    (?:w|wi|win|winn|winne|winner)|[ \t]*|[ \t]*#[^\n]*))*(?:\n  [^ \n#]|\n[^ \n#]|\n?\z)'
+    level: error
+    message: "config/field_test.yml allows at most one active feed_strategy* experiment; give the previous one a winner (ab_experiment_spec.rb)."
+
   # forem-20 (A) framework_defaults_spec.rb:127,158: the obsolete
   # new_framework_defaults_7_2.rb / _8_0.rb initializers stay removed.
   - id: forem-no-obsolete-framework-defaults

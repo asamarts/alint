@@ -531,10 +531,10 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "needs a forbidden-pattern (negative match) operator over commit trailers/bodies",
+   "alint": "git_commit_message with a generated RE2 complement of the workflow's two grep patterns (about 9,600 characters), since: the PR base; not in the config, because the clone is depth 1",
    "rules": [],
    "assertion_family": "none",
-   "reason": "git_commit_message with an RE2 complement pattern that rejects the trailer (thunderbird-android-63 precedent). Awkward, since the kind asserts a match, so C. The clone is depth 1, so the corpus config has no rule.",
+   "reason": "git_commit_message can only assert a match, so the ban needs an RE2 complement of the trailer patterns. The audit generated one and compared it with the workflow's grep patterns over 4,560 generated commits, with no mismatch. Expressible but awkward, so C (thunderbird-android-63 precedent); the clone is depth 1, so the corpus config has no rule.",
    "fire_verified": "n/a",
    "origin": "A",
    "changes": [
@@ -552,6 +552,14 @@
       "none"
      ],
      "why": "thunderbird-android-63 bans a trailer the same way and is C: the commit kinds assert a match, so the ban is an RE2 complement pattern. The two reasons contradicted each other."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "reason"
+     ],
+     "why": "The audit generated the complement pattern and tested it, but left it out of the config."
     }
    ]
   },

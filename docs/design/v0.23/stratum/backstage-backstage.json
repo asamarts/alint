@@ -1092,11 +1092,13 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "missing: a target-kind option on markdown_links_resolve or file_graph (both accept directories)",
-   "rules": [],
+   "alint": "registry_paths_resolve over docs/**/*.md with a relative-link regex and expect: file: backstage-docs-relative-links-not-directories",
+   "rules": [
+    "backstage-docs-relative-links-not-directories"
+   ],
    "assertion_family": "none",
    "reason": "registry_paths_resolve over docs/**/*.md with a link regex and expect: file rejects a link that names a directory. A regex approximates Markdown link parsing, so C (strapi-53 precedent).",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: passes on the clone (1,578 links); links to ../plugins and ../features/ fired, a link to a file passed.",
    "origin": "A",
    "changes": [
     {
@@ -1113,6 +1115,14 @@
       "none"
      ],
      "why": "registry_paths_resolve with expect: file over the docs' relative links expresses it, as strapi-53 (C) does."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },

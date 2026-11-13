@@ -546,6 +546,24 @@ rules:
     level: error
     message: "Every packages/ workspace must be named by the `package` frontmatter of its docs page (07-writing-docs.md)."
 
+  # C [other] strapi-58. docs/plugins/workspace-packages/index.ts:85-88: a docs
+  #   page's `package` frontmatter names a workspace under packages/ (the
+  #   workspace names are a superset of the docs package values). C: the
+  #   frontmatter is read by regex (backstage-34 precedent). Pages without
+  #   `package` are skipped.
+  - id: strapi-docs-package-frontmatter-is-workspace
+    kind: cross_file
+    relation: superset
+    source:
+      files: "{packages/*/package.json,packages/*/*/package.json}"
+      extract: { json: "$.name" }
+    targets:
+      files: "docs/docs/**/*.{md,mdx}"
+      extract: { regex: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*package:[ \t]*[\x22\x27]?([^\x22\x27\r\n]*[^\x22\x27\s])[\x22\x27]?[ \t]*\r?\n' }
+    allow_missing_target: true
+    level: error
+    message: "Docs `package` frontmatter must name a workspace package under packages/ (docs/plugins/workspace-packages)."
+
   # A [other] strapi-52. 07-writing-docs.md "Package pages": keep the three
   #   headings Purpose, Key concepts and Related on every package page. The
   #   depth-limited glob selects exactly the package index pages (a deeper
@@ -605,6 +623,23 @@ rules:
     pattern: '\A---\r?\n(?:(?:[^-\r\n][^\r\n]*|-[^-\r\n][^\r\n]*|--[^-\r\n][^\r\n]*)?\r?\n)*description:[ \t]*(?:[^\x22\x27\s][^\r\n]{149,}|\x27[^\r\n]{150,}\x27|\x22[^\r\n]{150,}\x22)[ \t]*(?:\r?\n|\z)'
     level: error
     message: "Keep a docs page description under 150 characters (07-writing-docs.md)."
+
+  # C [other] strapi-56. docs/plugins/workspace-packages/index.ts:64-66: a docs
+  #   page's `status` frontmatter, if set, is stub, draft or needs-review.
+  #   C: a regex read of frontmatter (strapi-46 precedent). Every ^status:
+  #   line is checked, including ones in the body: the two in
+  #   contributing/07-writing-docs.md (lines 68 and 110) are code-block
+  #   examples with valid values. At the pin there are 88 lines: 55 draft,
+  #   24 needs-review and 9 stub.
+  - id: strapi-docs-status-known
+    kind: for_each_match
+    paths: ["docs/docs/**/*.{md,mdx}"]
+    select: '^status:'
+    require:
+      matches:
+        - '^status:[ \t]*(?:stub|draft|needs-review|"(?:stub|draft|needs-review)"|''(?:stub|draft|needs-review)'')[ \t]*\r?$'
+    level: error
+    message: "Docs `status` frontmatter must be stub, draft or needs-review (docs/plugins/workspace-packages)."
 
   # A [other] strapi-47. 07-writing-docs.md "Markdown or MDX": use .mdx only
   #   when the page imports a component.

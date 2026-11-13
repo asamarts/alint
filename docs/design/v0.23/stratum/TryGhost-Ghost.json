@@ -1183,11 +1183,16 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "constraint: inventory map keys vs directory entries",
-   "rules": [],
+   "alint": "registry_paths_resolve over the inventory's kind: directory and kind: file entries (ghost-inventory-legacy-dirs-exist, ghost-inventory-legacy-files-exist), and for_each_file / for_each_dir with cross_file registered for entries outside the inventory (ghost-services-files-are-legacy, ghost-services-nonstandard-dirs-are-legacy)",
+   "rules": [
+    "ghost-inventory-legacy-dirs-exist",
+    "ghost-inventory-legacy-files-exist",
+    "ghost-services-files-are-legacy",
+    "ghost-services-nonstandard-dirs-are-legacy"
+   ],
    "assertion_family": "none",
    "reason": "registry_paths_resolve over the inventory's kind: directory and kind: file entries, plus a for_each_dir that requires index.ts or registration in the inventory. The keys are read by line regex, so C.",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: all four pass on the clone; a deleted legacy directory, a deleted limits.ts, a kind changed to file, a new top-level file and a new directory without index.ts each fired their rule; a new directory with index.ts passed.",
    "origin": "A",
    "changes": [
     {
@@ -1198,6 +1203,14 @@
       "reference"
      ],
      "why": "Three existing kinds express it over the inventory file (registry_paths_resolve by kind line, for_each_dir with cross_file registered), with layout-dependent key reads."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },
@@ -1344,11 +1357,13 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "constraint: keys of entries with dependencyChecks: deferred are within an allowed set",
-   "rules": [],
+   "alint": "cross_file subset from the inventory entries with dependencyChecks: deferred (indentation regex) to the test's allowed list (regex): ghost-dependency-check-deferral-allowed",
+   "rules": [
+    "ghost-dependency-check-deferral-allowed"
+   ],
    "assertion_family": "none",
    "reason": "A cross_file subset with a source regex that finds each entry with dependencyChecks: deferred by indentation, against the allowed list in service-dependencies.test.ts. Layout-dependent, so C (ghost-b08 precedent).",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: passes on the clone (4 deferred services); deferring activitypub fired, and so did dropping stripe from the allowed list.",
    "origin": "A",
    "changes": [
     {
@@ -1359,6 +1374,14 @@
       "set"
      ],
      "why": "ghost-b08 reads the same file with an indentation regex and is C."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },

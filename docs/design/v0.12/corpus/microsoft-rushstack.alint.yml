@@ -1321,12 +1321,24 @@ rules:
   # B-adapter [other] rushstack-b07 (no rule): no cycle through phases' self
   #   dependencies (CommandLineConfiguration.ts ~336, ~602-633): graph-cycle
   #   detection over a JSON-internal edge list.
-  # [other] rushstack-b12 (no rule): the keys of preferredVersions and
-  #   allowedAlternativeVersions in common-versions.json must be valid package
-  #   names (CommonVersionsConfiguration.ts ~283, ~295). Stage B proposed a
-  #   shim schema with propertyNames; json_schema_passes takes only a schema
-  #   file, and a shim outside the repository cannot replay standalone, while
-  #   JSONPath cannot read member names. Not expressed here.
+  # C [other] rushstack-b12. CommonVersionsConfiguration.ts:283,295: every key of
+  #   preferredVersions and allowedAlternativeVersions passes
+  #   PackageNameParsers.permissive.validate (PackageName.ts: optional
+  #   @scope/, a name that does not start with . or _, characters
+  #   [A-Za-z0-9._-], upper case allowed). C: the keys are read as the
+  #   4-space-indented "key": lines, so it holds for one layout only
+  #   (element-web-04 precedent). The 214-character limit is not encoded.
+  - id: rushstack-common-versions-keys-are-package-names
+    kind: for_each_match
+    paths:
+      - "common/config/subspaces/*/common-versions.json"
+      - "common/config/rush/common-versions.json"
+    select: '^    "[^"]*"\s*:'
+    require:
+      matches:
+        - '^    "(?:@[A-Za-z0-9._-]+/)?[A-Za-z0-9-][A-Za-z0-9._-]*"\s*:'
+    level: error
+    message: "preferredVersions / allowedAlternativeVersions keys in common-versions.json must be valid package names (PackageName.ts: [A-Za-z0-9._-], optional @scope/)."
   # D [other] rushstack-46 (narrowed by the Stage B review): only the merged
   #   extends/rig validation of heft.json and the other Heft config files
   #   remains (heft-config-file merge semantics); the rig.json load checks

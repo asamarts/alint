@@ -819,11 +819,13 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "",
-   "rules": [],
+   "alint": "for_each_match over the ^status: lines of docs/docs pages, requiring stub, draft or needs-review: strapi-docs-status-known",
+   "rules": [
+    "strapi-docs-status-known"
+   ],
    "assertion_family": "none",
    "reason": "A for_each_match over the frontmatter status: lines requires one of the three values. A regex read of frontmatter is C (strapi-46 precedent).",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: passes on the clone (88 status lines); drafty and review fired; a quoted \"stub\" passed.",
    "origin": "A",
    "changes": [
     {
@@ -840,6 +842,14 @@
       "none"
      ],
      "why": "strapi-46, backstage-40 and backstage-42 check frontmatter values by regex and are C."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },
@@ -873,11 +883,13 @@
    "mechanism": "ci",
    "family": "other",
    "bucket": "C",
-   "alint": "",
-   "rules": [],
+   "alint": "cross_file superset from the workspace manifests' $.name to the pages' package: frontmatter (regex): strapi-docs-package-frontmatter-is-workspace",
+   "rules": [
+    "strapi-docs-package-frontmatter-is-workspace"
+   ],
    "assertion_family": "none",
    "reason": "A cross_file superset from the workspace manifests' $.name to the docs pages' package: frontmatter, read by regex. C (backstage-34 precedent).",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: passes on the clone (43 package values); an unknown package in a page's frontmatter fired; the same change in a body example passed.",
    "origin": "A",
    "changes": [
     {
@@ -894,6 +906,14 @@
       "none"
      ],
      "why": "backstage-34 checks frontmatter references to workspace names by regex and is C."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },
@@ -905,9 +925,7 @@
    "family": "other",
    "bucket": "B-config",
    "alint": "constraint unique-key over the package values, extracted with the frontmatter regex strapi-51's rule uses",
-   "rules": [
-    "strapi-docs-every-package-is-declared"
-   ],
+   "rules": [],
    "assertion_family": "unique-key",
    "reason": "A regex reads each page's package value, as strapi-51's rule already does; uniqueness of the extracted values across pages has no kind today, so B-config unique-key (batch 2 ruling).",
    "fire_verified": "n/a",

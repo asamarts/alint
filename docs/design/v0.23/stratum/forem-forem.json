@@ -534,11 +534,13 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "Missing: a bounded count over YAML map entries selected by key prefix (feed_strategy*) and filtered on a missing field (winner).",
-   "rules": [],
+   "alint": "file_content_forbidden on two active feed_strategy* entries: forem-feed-strategy-experiment-at-most-one-active",
+   "rules": [
+    "forem-feed-strategy-experiment-at-most-one-active"
+   ],
    "assertion_family": "none",
    "reason": "file_content_forbidden on two active entries (a feed_strategy* entry with no winner: line at its indent) bounds the count at one. Layout-dependent, so C (forem-19 precedent).",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: passes on the clone; removing the older entry's winner fired, with the two entries apart, adjacent, or the second ending the map.",
    "origin": "A",
    "changes": [
     {
@@ -549,6 +551,14 @@
       "bounded-count"
      ],
      "why": "forem-19 bounds a count by regex and is C. A regex matches a feed_strategy* entry with no 4-space winner: line."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },
@@ -1034,11 +1044,13 @@
    "mechanism": "test",
    "family": "other",
    "bucket": "C",
-   "alint": "Missing: a nonempty/exists assertion over YAML map entries selected by key prefix (feed_strategy*) and filtered on a missing field (winner). JSONPath cannot filter on key names, and `$.experiments[?!@.winner]` also matches non-feed experiments such as personalized_email_digests_ab_test.",
-   "rules": [],
+   "alint": "file_content_matches on an active feed_strategy* entry (no entry-level winner: line): forem-feed-strategy-experiment-active",
+   "rules": [
+    "forem-feed-strategy-experiment-active"
+   ],
    "assertion_family": "none",
    "reason": "file_content_matches on an active feed_strategy* entry (no winner: line at its indent) requires at least one. Layout-dependent, so C (forem-19 precedent).",
-   "fire_verified": "n/a",
+   "fire_verified": "Audit: passes on the clone; giving the active entry a winner fired, and so did renaming it; a nested winner did not count.",
    "origin": "B",
    "changes": [
     {
@@ -1049,6 +1061,14 @@
       "cardinality"
      ],
      "why": "The same regex as forem-22, used with file_content_matches, requires at least one active entry; forem-19 is the C precedent."
+    },
+    {
+     "by": "audit",
+     "fields": [
+      "alint",
+      "fire_verified"
+     ],
+     "why": "The audit added this rule for the unit's move to C."
     }
    ]
   },

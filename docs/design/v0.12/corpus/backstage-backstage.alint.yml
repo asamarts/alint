@@ -737,6 +737,21 @@ rules:
     level: error
     message: "Links within docs/ must be relative (scripts/verify-links.js)."
 
+  # backstage-54 (C) scripts/verify-links.js:308-320 'directory-link': a
+  #   relative link from docs/*.md never names a directory. C: the links come
+  #   from a regex, not a CommonMark scan, and fenced code blocks are not
+  #   skipped (verify-links strips them first). A link to a missing path is
+  #   also reported here, which overlaps backstage-45. At the pin, 1578
+  #   links are checked.
+  - id: backstage-docs-relative-links-not-directories
+    kind: registry_paths_resolve
+    source: "docs/**/*.md"
+    extract:
+      regex: '\]\(((?:\.\.?/|[A-Za-z0-9_])[^)\s#:]*)(?:#[^)\s]*)?\)'
+    expect: file
+    level: error
+    message: "A relative link in docs/ must name a file, not a directory (scripts/verify-links.js 'directory-link')."
+
   # backstage-51 (C) — 'github': docs/ and microsite/ never link to
   # github.com/backstage/backstage/(tree|blob)/master/docs/, except to a
   # release changelog. Line-level approximation of the per-link check; the

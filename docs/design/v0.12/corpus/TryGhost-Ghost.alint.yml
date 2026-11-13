@@ -1359,6 +1359,93 @@ rules:
     level: error
     message: "Services with dependencyChecks: deferred (automations, members, members-metafields, stripe) must have no known-violation entries."
 
+  # ghost-70 (C) tools/scripts/test/service-dependencies.test.ts:275-286:
+  #   only the services in the test's `allowed` list may set
+  #   `dependencyChecks: deferred` in legacy-service-inventory.yaml
+  #   (deferred is a subset of allowed). C:
+  #   - The inventory keys come from an indentation-dependent regex, because
+  #     JSONPath cannot read map keys.
+  #   - The allowed list is read with a regex. RE2 has no lookbehind, so the
+  #     regex also takes the items that follow ", " elsewhere in the test.
+  #     That adds 10 strings to the target set, none of them an inventory
+  #     key: debug, ghost-service-boundaries-, helpers.ts, index.js,
+  #     index.ts, mime-types-extra, native-baseline.json, package.json,
+  #     primitives.ts, utf8.
+  - id: ghost-dependency-check-deferral-allowed
+    kind: cross_file
+    source:
+      file: ghost/core/server/services/legacy-service-inventory.yaml
+      extract:
+        regex: '(?m)^  ([a-z0-9][a-z0-9._-]*):[ \t]*\r?\n(?:(?:    [^\n]*|[ \t]*)\n)*?    dependencyChecks:[ \t]*["'']?deferred["'']?[ \t]*\r?$'
+    targets:
+      - file: tools/scripts/test/service-dependencies.test.ts
+        extract:
+          regex: "(?:const allowed = \\[|, )'([a-z0-9][a-z0-9._-]*)'"
+    relation: subset
+    level: error
+    message: "Only the services in service-dependencies.test.ts's `allowed` list may set dependencyChecks: deferred; deferral may only shrink."
+
+  # ghost-62 (C) ghost/test/unit/server/services/legacy-service-inventory.test.ts:185-220:
+  #   (a) Every entry of ghost/core/server/services, other than README.md and
+  #       the inventory, is a legacy inventory entry or a directory with
+  #       index.ts.
+  #   (b) Every legacy entry exists, with the kind it declares.
+  #   C: the inventory keys come from indentation-dependent regexes, because
+  #   JSONPath cannot read map keys. A legacy entry is a 2-space key under
+  #   `services:` whose entry has a 4-space `kind:` line (zod requires kind).
+  #   The followUps keys have no such line, so they are not counted.
+  - id: ghost-inventory-legacy-dirs-exist
+    kind: registry_paths_resolve
+    source: ghost/core/server/services/legacy-service-inventory.yaml
+    extract:
+      regex: '(?m)^  ([a-z0-9][a-z0-9._-]*):[ \t]*\r?\n(?:(?:    [^\n]*|[ \t]*)\n)*?    kind:[ \t]*["'']?directory["'']?[ \t]*\r?$'
+    expect: dir
+    level: error
+    message: "A legacy entry with kind: directory must be a directory in ghost/core/server/services (remove the entry or correct its kind)."
+
+  - id: ghost-inventory-legacy-files-exist
+    kind: registry_paths_resolve
+    source: ghost/core/server/services/legacy-service-inventory.yaml
+    extract:
+      regex: '(?m)^  ([a-z0-9][a-z0-9._-]*):[ \t]*\r?\n(?:(?:    [^\n]*|[ \t]*)\n)*?    kind:[ \t]*["'']?file["'']?[ \t]*\r?$'
+    expect: file
+    level: error
+    message: "A legacy entry with kind: file must be a file in ghost/core/server/services (remove the entry or correct its kind)."
+
+  - id: ghost-services-files-are-legacy
+    kind: for_each_file
+    select:
+      - "ghost/core/server/services/*"
+      - "!ghost/core/server/services/README.md"
+      - "!ghost/core/server/services/legacy-service-inventory.yaml"
+    require:
+      - kind: cross_file
+        source: { file: "{path}" }
+        relation: registered
+        register_as: "{basename}"
+        targets:
+          - file: ghost/core/server/services/legacy-service-inventory.yaml
+            extract:
+              regex: '(?m)^  ([a-z0-9][a-z0-9._-]*):[ \t]*\r?\n(?:(?:    [^\n]*|[ \t]*)\n)*?    kind:'
+    level: error
+    message: "A file directly under ghost/core/server/services must be a legacy inventory entry; new services are directories with an index.ts."
+
+  - id: ghost-services-nonstandard-dirs-are-legacy
+    kind: for_each_dir
+    select: "ghost/core/server/services/*"
+    when_iter: 'not iter.has_file("index.ts")'
+    require:
+      - kind: cross_file
+        source: { file: "{path}" }
+        relation: registered
+        register_as: "{basename}"
+        targets:
+          - file: ghost/core/server/services/legacy-service-inventory.yaml
+            extract:
+              regex: '(?m)^  ([a-z0-9][a-z0-9._-]*):[ \t]*\r?\n(?:(?:    [^\n]*|[ \t]*)\n)*?    kind:'
+    level: error
+    message: "A ghost/core/server/services directory without index.ts must be a legacy inventory entry."
+
   # ghost-b11, A - docs/contributing/documentation.md:35 "Add each bounded
   #     context and its relationships to the root CONTEXT-MAP.md": every
   #     CONTEXT.md is listed as a `Path: ` line in CONTEXT-MAP.md.
